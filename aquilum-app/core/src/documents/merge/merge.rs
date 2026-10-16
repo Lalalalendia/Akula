@@ -96,7 +96,9 @@ pub fn merge_external_change(base: &str, disk: &str, current: &str) -> MergeResu
 
     MergeResult {
         edits: to_char_edits(&current_lines, &line_diff(&current_lines, &merged).hunks),
-        displaced: displaced.into_iter().filter(|line| !line.trim().is_empty()).collect(),
+        // Even whitespace-only local lines are user bytes. Preservation decides
+        // whether content is actually empty; never discard lines here.
+        displaced,
         coarse: disk_diff.coarse || local_diff.coarse,
     }
 }
