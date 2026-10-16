@@ -5,6 +5,7 @@
 
 mod core_scan;
 mod dag;
+mod download;
 mod dag_store;
 pub mod fake;
 mod fake_vault;
@@ -20,6 +21,7 @@ mod vault;
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
+pub use download::{stage_remote_download, StageDownloadError, StagedDownload};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
 pub use journal::{
     ConfirmedBaseline, JournalAction, JournalError, JournalPhase, JournalRecord, JournalResult,
