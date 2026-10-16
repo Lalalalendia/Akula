@@ -17,7 +17,9 @@ pub struct SyncRelativePath(String);
 impl SyncRelativePath {
     pub fn parse(input: &str) -> Result<Self, SyncPathError> {
         if input.is_empty() || input.starts_with('/') || input.contains('\\')
-            || input.contains(':') || input.chars().any(char::is_control)
+            || input.contains(':') || input.chars().any(|ch| {
+                ch.is_control() || matches!(ch, '*' | '?' | '"' | '<' | '>' | '|')
+            })
         {
             return Err(SyncPathError::InvalidPath);
         }
