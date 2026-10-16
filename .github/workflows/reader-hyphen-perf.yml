@@ -69,8 +69,8 @@ jobs:
             if [ "$name" = base ]; then dir="$RUNNER_TEMP/reader-base"; else dir="$GITHUB_WORKSPACE"; fi
             cp "$RUNNER_TEMP/reader-bench.rs" "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs"
             rustc -O --edition=2024 "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs" -o "$RUNNER_TEMP/bench-$name" -Awarnings
-            rm "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs"
             rustc --test -O --edition=2024 "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs" -o "$RUNNER_TEMP/tests-$name"
+            rm "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs"
           done
 
       - name: Check correctness and benchmark ABBA on same runner
