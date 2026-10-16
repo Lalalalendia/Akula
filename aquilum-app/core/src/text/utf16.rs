@@ -1,5 +1,10 @@
 pub fn utf16_len(text: &str) -> usize {
-    text.chars().count() + text.bytes().filter(|&b| b >= 0xF0).count()
+    // Each UTF-8 leading byte represents one scalar, and each four-byte
+    // scalar contributes one additional UTF-16 code unit (surrogate pair).
+    // &str guarantees valid UTF-8: continuation bytes never count.
+    text.bytes()
+        .map(|b| usize::from((b as i8) >= -0x40) + usize::from(b >= 0xF0))
+        .sum()
 }
 
 pub fn utf16_seek(text: &str, (mut byte, mut seen): (usize, usize), units: usize) -> (usize, usize) {
@@ -41,6 +46,24 @@ mod tests {
         let text = "abc кириллица 中文字 😀🎉 𝄞 ё\n".repeat(37);
         for end in (0..=text.len()).filter(|&i| text.is_char_boundary(i)) {
             assert_eq!(utf16_len(&text[..end]), text[..end].encode_utf16().count());
+        }
+    }
+
+    #[test]
+    fn utf16_length_matches_encoder_for_boundary_and_mixed_scripts() {
+        let cases = [
+            "", "a", "é", "Ё", "漢", "😀", "\u{10ffff}",
+            "e\u{301}", "A😀Б漢Z", "👩\u{200d}💻", "\0\r\n",
+        ];
+        for text in cases {
+            assert_eq!(utf16_len(text), text.encode_utf16().count(), "{text:?}");
+        }
+        let corpus = "AéБ漢😀\u{10ffff}e\u{301}".repeat(1000);
+        let mut boundaries = corpus.char_indices().map(|(i, _)| i).collect::<Vec<_>>();
+        boundaries.push(corpus.len());
+        for &at in &boundaries {
+            let prefix = &corpus[..at];
+            assert_eq!(utf16_len(prefix), prefix.encode_utf16().count(), "prefix bytes={at}");
         }
     }
 
