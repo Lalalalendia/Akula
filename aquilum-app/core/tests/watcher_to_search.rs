@@ -28,9 +28,9 @@ fn wait_for(
 }
 
 fn search_contains(search: &SearchService, workspace: &str, term: &str, path: &Path) -> bool {
-    let Ok(response) = search.search(workspace, &Request::new(term)) else {
-        return false;
-    };
+    let response = search
+        .search(workspace, &Request::new(term))
+        .expect("prepared search index must remain queryable");
     response.results.iter().any(|result| {
         Path::new(&result.path).file_name() == path.file_name()
     })
