@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn a_wire_path_is_validated_and_normalized_on_decode() {
         let canonical: SyncRelativePath =
-            serde_json::from_str(r#""notes/caf\\u00e9.md""#).unwrap();
+            serde_json::from_str(r#""notes/caf\u00e9.md""#).unwrap();
         assert_eq!(canonical.as_str(), "notes/caf\u{e9}.md");
         for invalid in [r#""../outside.md""#, r#""CON.md""#, r#""C:/folder.md""#] {
             assert!(serde_json::from_str::<SyncRelativePath>(invalid).is_err());
