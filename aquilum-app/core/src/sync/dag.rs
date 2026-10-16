@@ -6,8 +6,10 @@
 
 use super::{DocumentId, RevisionId, SyncRelativePath};
 use std::collections::{BTreeMap, BTreeSet};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RevisionOperation {
     /// A new immutable content blob, addressed by its BLAKE3 lowercase hex.
     Content { path: SyncRelativePath, blob_hash: String },
@@ -36,7 +38,8 @@ impl RevisionOperation {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RevisionRecord {
     pub id: RevisionId,
     pub document_id: DocumentId,
@@ -352,6 +355,19 @@ mod tests {
         dag.ingest(record(root, doc, vec![], b"real")).unwrap();
         assert_eq!(dag.ingest(record(RevisionId::new(), doc, vec![root, root], b"dup")),
             Err(DagError::DuplicateParent));
+    }
+
+    #[test]
+    fn revision_wire_round_trip_and_unknown_authority_fields_are_rejected() {
+        let doc = DocumentId::new();
+        let original = record(RevisionId::new(), doc, vec![], b"content");
+        let json = serde_json::to_value(&original).unwrap();
+        let decoded: RevisionRecord = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(decoded, original);
+        let mut malicious = json;
+        malicious.as_object_mut().unwrap()
+            .insert("remote_wipe_allowed".into(), serde_json::Value::Bool(true));
+        assert!(serde_json::from_value::<RevisionRecord>(malicious).is_err());
     }
 
     #[test]
