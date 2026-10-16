@@ -33,7 +33,7 @@ pub fn index_document(
         return Ok(());
     }
     let path_text = path.to_string_lossy();
-    let mut statement = transaction.prepare(
+    let mut statement = transaction.prepare_cached(
         "INSERT INTO note_fields(path, ordinal, key, key_lower, kind, text, text_lower, items)
          VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
