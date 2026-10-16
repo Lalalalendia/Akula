@@ -33,7 +33,7 @@ pub trait SessionIo {
     fn preserve(&self, body: &str, report: ConflictReport) -> Result<(), DiskError>;
     fn append(&self, update: &[u8]) -> Result<(), DiskError>;
     fn sync_point(&self) -> SyncPointLookup;
-    fn remember(&self, point: SyncPoint);
+    fn remember(&self, point: SyncPoint) -> Result<(), DiskError>;
 }
 
 #[derive(Debug)]
@@ -125,7 +125,7 @@ impl DocumentSession {
             || (io.sync_point(), io.text_hash(&doc_text)),
         );
         match verdict {
-            SyncVerdict::InSync => session.remember_snapshot(&snapshot, io),
+            SyncVerdict::InSync => session.remember_snapshot(&snapshot, io)?,
             SyncVerdict::PublishDocument => session.dirty = true,
             SyncVerdict::TakeFile => session.take_file(&snapshot, &doc_text, io)?,
             SyncVerdict::Conflict(cause) => {
@@ -244,7 +244,14 @@ impl DocumentSession {
         let snapshot = io.read().map_err(disk_failure)?;
         let doc_text = self.replica.text();
         if snapshot.content == doc_text {
-            self.remember_snapshot(&snapshot, io);
+            if let Err(error) = self.remember_snapshot(&snapshot, io) {
+                // The file and live replica agree, but SQLite did not confirm
+                // their sync point. Keep a retry pending rather than silently
+                // claiming the metadata is durable.
+                self.dirty = true;
+                return Err(error);
+            }
+            self.dirty = false;
             return Ok(());
         }
         let base = self.synced_content.clone();
@@ -264,10 +271,15 @@ impl DocumentSession {
             match io.write(&content, &self.synced_hash) {
                 Ok(hash) => {
                     let text_hash = io.text_hash(&content);
+                    // Disk bytes may be safely written while SQLite is still
+                    // unavailable. Leave the previously confirmed baseline and
+                    // dirty retry state untouched until remember() succeeds.
+                    // On retry, a changed disk hash triggers reconcile first.
+                    io.remember(SyncPoint { file_hash: hash.clone(), text_hash })
+                        .map_err(disk_failure)?;
                     self.synced_content = content;
-                    self.synced_hash = hash.clone();
+                    self.synced_hash = hash;
                     self.dirty = false;
-                    io.remember(SyncPoint { file_hash: hash, text_hash });
                     return Ok(());
                 }
                 Err(DiskError::Conflict) => self.reconcile(io)?,
@@ -285,7 +297,7 @@ impl DocumentSession {
     {
         let edits = merge_external_change(doc_text, &snapshot.content, doc_text).edits;
         self.apply(&edits, DISK_CLIENT, io)?;
-        self.remember_snapshot(snapshot, io);
+        self.remember_snapshot(snapshot, io)?;
         Ok(())
     }
 
@@ -307,11 +319,16 @@ impl DocumentSession {
                 .map_err(disk_failure)?;
         }
         self.apply(&merged.edits, DISK_CLIENT, io)?;
-        self.synced_content = snapshot.content.clone();
-        self.synced_hash = snapshot.hash.clone();
         if self.replica.text() == snapshot.content {
-            self.remember_snapshot(snapshot, io);
+            if let Err(error) = self.remember_snapshot(snapshot, io) {
+                // CRDT delta is in the journal, but the metadata isn't.
+                self.dirty = true;
+                return Err(error);
+            }
+            self.dirty = false;
         } else {
+            self.synced_content = snapshot.content.clone();
+            self.synced_hash = snapshot.hash.clone();
             self.dirty = true;
         }
         Ok(())
@@ -341,10 +358,18 @@ impl DocumentSession {
         }
     }
 
-    fn remember_snapshot(&mut self, snapshot: &DiskSnapshot, io: &impl SessionIo) {
+    fn remember_snapshot(&mut self, snapshot: &DiskSnapshot, io: &impl SessionIo)
+        -> Result<(), SessionError>
+    {
+        // Never advertise a new confirmed baseline before the store has
+        // accepted it. A failure must be visible to open/reconcile/write.
+        io.remember(SyncPoint {
+            file_hash: snapshot.hash.clone(),
+            text_hash: snapshot.text_hash.clone(),
+        }).map_err(disk_failure)?;
         self.synced_content = snapshot.content.clone();
         self.synced_hash = snapshot.hash.clone();
-        io.remember(SyncPoint { file_hash: snapshot.hash.clone(), text_hash: snapshot.text_hash.clone() });
+        Ok(())
     }
 
     fn report(&self, cause: ConflictCause, snapshot: &DiskSnapshot) -> ConflictReport {
