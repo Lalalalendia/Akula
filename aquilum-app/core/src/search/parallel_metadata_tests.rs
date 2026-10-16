@@ -64,6 +64,11 @@ fn store(
         assert_eq!(parsed.wiki_links, wiki::parser::extract(body));
         assert_eq!(parsed.fields, fields::inline::indexed_fields(body));
         assert_eq!(parsed.tasks, tasks::parse::note_tasks(body));
+        if body.contains("Hidden:: value") {
+            assert_eq!(parsed.wiki_links.len(), 2, "links inside code fences must be ignored");
+            assert_eq!(parsed.tasks.len(), 2, "checkboxes inside code fences are not tasks");
+            assert!(parsed.fields.iter().all(|field| field.key != "Hidden"));
+        }
         wiki::repository::index_prepared_links(
             &transaction, root, path, &parsed.wiki_links,
         )
@@ -95,11 +100,11 @@ Score:: 8
 - [ ] Купить книгу
 - [x] Проверить результат
 [[Target]] и [[Second]]
-\`[Hidden:: value]\`
-\`\`\`md
+`[Hidden:: value]`
+```md
 - [ ] not a task
 [[NotALink]]
-\`\`\`
+```
 "#;
     let secondary = "Title:: Beta\n- [ ] Next step\n[[Target]]\n[[Alpha|alias]]\n";
     let replacement = "Owner:: Changed\n- [x] replaced task\n[[Alternative]]\n";
