@@ -104,11 +104,17 @@ impl SessionIo for HubIo<'_> {
         preserve_copy(self.core, self.path, body, report, self.offset_seconds).map(|_| ())
     }
 
-    fn append(&self, update: &[u8]) {
+    fn append(&self, update: &[u8]) -> Result<(), DiskError> {
         match self.with_store(|store| store.append(self.key, update)) {
-            Some(Err(error)) => eprintln!("[aquilum:documents] правка не сохранена в локальную копию: {error}"),
-            None => eprintln!("[aquilum:documents] локальная копия документов недоступна"),
-            Some(Ok(())) => {}
+            Some(Ok(())) => Ok(()),
+            Some(Err(error)) => Err(DiskError::Other {
+                code: "append_failed",
+                message: format!("document update not persisted: {error}"),
+            }),
+            None => Err(DiskError::Other {
+                code: "append_failed",
+                message: "document store unavailable; refusing unjournaled edit".into(),
+            }),
         }
     }
 

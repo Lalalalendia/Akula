@@ -196,7 +196,7 @@ impl DocumentHub {
             }
             let entry_path = entry.path.clone();
             let before = entry.session.version();
-            entry.session.replace_text(text, client, &self.io(core, &entry_path, key));
+            entry.session.replace_text(text, client, &self.io(core, &entry_path, key))?;
             if entry.session.version() != before {
                 announce_change(core, &entry_path, entry.session.version());
             }
