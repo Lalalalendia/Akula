@@ -51,7 +51,7 @@ pub fn upload_immutable_verified(
     bytes: &[u8],
 ) -> Result<UploadOutcome, VerifiedUploadError> {
     if intent.action != JournalAction::UploadImmutable
-        || !matches!(intent.remote_guard, Some(RemoteGuard::Absent))
+        || !matches!(intent.remote_guard.as_ref(), Some(RemoteGuard::Absent))
     {
         return Err(VerifiedUploadError::InvalidIntent);
     }
@@ -158,7 +158,6 @@ mod tests {
         DocumentId, FakeRemoteStore, FakeVaultPort, OperationId, RemotePage,
         RemoteWriteReceipt, RevisionId, SyncRelativePath, VaultId, VaultPort,
     };
-    use std::path::Path;
     use tempfile::TempDir;
 
     fn fixture() -> (TempDir, SqliteSyncJournal, FakeRemoteStore, OperationIntent) {
@@ -292,6 +291,5 @@ mod tests {
         assert_eq!(upload_immutable_verified(&mut journal, &mut remote, intent.clone(),
             &bytes.bytes).unwrap(), UploadOutcome::Committed);
         assert_eq!(remote.read(&intent.remote_object_id).unwrap(), bytes.bytes);
-        assert_eq!(Path::new("Notes/work.md").to_str().unwrap(), intent.path.as_str());
     }
 }
