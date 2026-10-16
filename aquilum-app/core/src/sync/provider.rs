@@ -86,6 +86,8 @@ pub enum RemoteStoreError {
     /// Write may have happened despite a lost/failed response: MUST read back.
     CommitUncertain,
     IntegrityMismatch,
+    /// Remote bytes exceed an explicit caller-provided read bound.
+    ObjectTooLarge,
 }
 
 /// A fully collected, internally consistent remote object listing. Its presence
@@ -169,6 +171,14 @@ pub trait RemoteStore {
         page_limit: usize,
     ) -> Result<RemotePage, RemoteStoreError>;
     fn read(&self, object_id: &str) -> Result<Vec<u8>, RemoteStoreError>;
+    /// Implementations must enforce max_bytes BEFORE allocating the object.
+    /// The default denies this stronger capability; a future streaming
+    /// S3/Drive provider must explicitly supply a bounded reader.
+    fn read_bounded(&self, _object_id: &str, _max_bytes: u64)
+        -> Result<Vec<u8>, RemoteStoreError>
+    {
+        Err(RemoteStoreError::PreconditionUnsupported)
+    }
     fn head(&self, object_id: &str) -> Result<RemoteObject, RemoteStoreError>;
     fn put(
         &mut self,
