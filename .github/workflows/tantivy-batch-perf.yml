@@ -1,0 +1,48 @@
+name: Tantivy commit batch scaling
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/benches/indexing.rs"
+      - ".github/workflows/tantivy-batch-perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: tantivy-batch-scaling
+      - name: Record runner environment
+        shell: bash
+        run: |
+          {
+            echo "COMMIT=$GITHUB_SHA"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            echo "VCPUS=$(nproc)"
+            rustc --version
+            cargo --version
+          } | tee tantivy-batch-environment.txt
+      - name: Profile 1, 8 and 64 note commits with instant search checks
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-core benchmark_commit_batch_scaling -- --ignored --nocapture --test-threads=1 2>&1 | tee ../tantivy-batch.txt
+          grep 'TANTIVY_BATCH ' ../tantivy-batch.txt | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Save raw samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tantivy-batch-${{ github.sha }}
+          path: |
+            tantivy-batch-environment.txt
+            tantivy-batch.txt
+          retention-days: 30
