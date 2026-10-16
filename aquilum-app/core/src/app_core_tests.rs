@@ -135,3 +135,70 @@ fn watch_batches_reach_the_host_as_the_event_it_can_act_on() {
 
     assert_eq!(events.names(), ["content-changed", "workspace-changed", "workspace-changed", "workspace-changed", "workspace-rescanned"]);
 }
+
+
+#[test]
+fn a_reserved_closed_document_cannot_open_in_the_editor_until_released() {
+    use crate::documents::hub::{HubError, SyncAdmissionError};
+    let dir = tempfile::tempdir().unwrap();
+    let app_data = dir.path().join("app-data");
+    fs::create_dir_all(&app_data).unwrap();
+    let core = Core::open(&app_data, Arc::new(Recording::default()));
+    let note = dir.path().join("notes.md");
+    fs::write(&note, "unmodified note\n").unwrap();
+
+    let reservation = core.documents.reserve_sync_closed_document(&note).unwrap();
+    assert!(matches!(
+        core.documents.reserve_sync_closed_document(&note),
+        Err(SyncAdmissionError::AlreadyReserved)
+    ));
+    assert!(matches!(
+        core.documents.open(&core, &note, 0),
+        Err(HubError::SyncReserved)
+    ));
+    assert_eq!(fs::read_to_string(&note).unwrap(), "unmodified note\n");
+
+    drop(reservation);
+    let opened = core.documents.open(&core, &note, 0).unwrap();
+    assert_eq!(opened.text, "unmodified note\n");
+    core.documents.release(&core, &note);
+}
+
+#[test]
+fn even_a_clean_open_editor_session_refuses_sync_reservation() {
+    use crate::documents::hub::SyncAdmissionError;
+    let dir = tempfile::tempdir().unwrap();
+    let app_data = dir.path().join("app-data");
+    fs::create_dir_all(&app_data).unwrap();
+    let core = Core::open(&app_data, Arc::new(Recording::default()));
+    let note = dir.path().join("document.md");
+    fs::write(&note, "user text").unwrap();
+
+    core.documents.open(&core, &note, 0).unwrap();
+    assert!(matches!(
+        core.documents.reserve_sync_closed_document(&note),
+        Err(SyncAdmissionError::DocumentOpen)
+    ));
+    core.documents.release(&core, &note);
+    let admission = core.documents.reserve_sync_closed_document(&note).unwrap();
+    assert_eq!(fs::read_to_string(&note).unwrap(), "user text");
+    drop(admission);
+}
+
+#[test]
+fn sync_reservation_only_blocks_its_own_document_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let app_data = dir.path().join("app-data");
+    fs::create_dir_all(&app_data).unwrap();
+    let core = Core::open(&app_data, Arc::new(Recording::default()));
+    let a = dir.path().join("a.md");
+    let b = dir.path().join("b.md");
+    fs::write(&a, "alpha").unwrap();
+    fs::write(&b, "beta").unwrap();
+
+    let _reservation = core.documents.reserve_sync_closed_document(&a).unwrap();
+    let opened = core.documents.open(&core, &b, 0).unwrap();
+    assert_eq!(opened.text, "beta");
+    core.documents.release(&core, &b);
+    assert_eq!(fs::read_to_string(&a).unwrap(), "alpha");
+}
