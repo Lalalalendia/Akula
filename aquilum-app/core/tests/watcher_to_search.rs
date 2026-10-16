@@ -108,7 +108,10 @@ fn native_workspace_watcher_to_search_roundtrip() {
     );
 
     watcher.stop();
-    if let Some(index) = search.active.write().unwrap().take() {
+    // Release the write guard before stopping the worker; otherwise its
+    // temporary borrow can outlive the search service at function exit.
+    let opened = search.active.write().unwrap().take();
+    if let Some(index) = opened {
         index.stop();
     }
 }
