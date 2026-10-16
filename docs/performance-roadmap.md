@@ -90,6 +90,15 @@ Future Tantivy work should focus on measuring the **segment preparation/flush ph
 
 **Current strategy:** preserve immediate search visibility *after completed batches* and crash durability; improve naturally coalesced bursts rather than postponing single-note saves. Do not claim the 14× number for typical real-world editing without event-distribution evidence.
 
+## Argon reader and UTF-16 follow-up (2026-10-17)
+
+The second Argon audit covered text hyphenation, reader page layout, graph rasterization, UTF-16, rope/lines, and reader session visibility. **Do not merge proposed speedups without same-runner measurements and behavior-preserving tests.**
+
+- [PR #38](https://github.com/Lalalalendia/Akula/pull/38), **merged** (`d289c85fe9858bbc1e02f99b00d03f398e67a94c`): reuse lowercase/trie/weight buffers in reader hyphenation and replace repeated break-to-layout + line-end searches with a sorted O(B + L) merge. Tests compare the prior algorithm against 1,500 mixed Russian/English/Unicode tokens, offsets and marked line ends; the existing reader page-layout and selection suite passed in full application CI. [Paired ABBA benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38979407499), AMD EPYC 7763, Rust 1.99.1: 500 words **0.61564 → 0.55742 ms** per call, 5,000 words **6.16366 → 5.57612 ms** (**9.5% less isolated hyphenation time**). [Full workspace and sync-feature checks](https://github.com/Lalalalendia/Akula/actions/runs/38979407516) succeeded at the final PR head. This is **not** a measured whole-chapter layout or redraw speedup; the line-end mapping speedup was proven by complexity and correctness tests, not separately benchmarked.
+- [PR #41](https://github.com/Lalalalendia/Akula/pull/41), **closed without merge**: Argon's single-pass UTF-8 byte classifier for `utf16_len` passed all UTF-16 correctness tests but was **31.7–35.0% slower** in eight short/long ASCII, Russian, emoji, and mixed-codepoint cases on the same runner. [Paired ABBA benchmark and raw logs](https://github.com/Lalalalendia/Akula/actions/runs/38979786140). The existing two-pass implementation remains in `main`. Avoid unverified claims about automatic SIMD vectorization.
+
+Potential next experiments from the audit, **not yet accepted**: graph `Band::disc` solid-interior fast path, separable 3×3 dilation, chunked rope common-prefix matching, and no-allocation reader session visibility. Require visual pixel-level equality or bounded explained diffs for raster changes, unchanged text position/selection for reader changes, and same-runner paired timings. Avoid adding extra buffers to dilation unless the total memory and latency trade-off wins.
+
 ## Benchmark commands
 
 From `aquilum-app`:
