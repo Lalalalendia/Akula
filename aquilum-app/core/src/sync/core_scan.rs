@@ -213,7 +213,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
         fs::create_dir_all(&root).unwrap();
-        let core = Core::open(&temp.path().join("appdata"), Arc::new(Sink::default()));
+        let appdata = temp.path().join("appdata");
+        fs::create_dir_all(&appdata).unwrap();
+        let core = Core::open(&appdata, Arc::new(Sink::default()));
         core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
         (temp, core, root)
     }
