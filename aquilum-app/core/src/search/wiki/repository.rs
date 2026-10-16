@@ -1,5 +1,5 @@
 use super::super::error::SearchError;
-use super::parser::extract;
+use super::parser::{extract, WikiLink};
 use super::target::{relative_key, target_key, title_key};
 use rusqlite::{params, Connection, Transaction};
 use std::path::Path;
@@ -33,6 +33,16 @@ pub fn index_document(
     path: &Path,
     body: &str,
 ) -> Result<(), SearchError> {
+    let found = extract(body);
+    index_prepared_links(transaction, root, path, &found)
+}
+
+pub fn index_prepared_links(
+    transaction: &Transaction<'_>,
+    root: &Path,
+    path: &Path,
+    found: &[WikiLink],
+) -> Result<(), SearchError> {
     let path_text = path.to_string_lossy();
     transaction.execute(
         "INSERT INTO wiki_documents(path, relative_key, title_key) VALUES(?1, ?2, ?3)
@@ -47,7 +57,7 @@ pub fn index_document(
         "INSERT INTO wiki_links(source_path, target_key, target_kind, byte_offset, offset_utf16)
          VALUES(?1, ?2, ?3, ?4, ?5)",
     )?;
-    for link in extract(body) {
+    for link in found {
         let (target_key, target_kind) = target_key(&link.target);
         statement.execute(params![
             path_text,

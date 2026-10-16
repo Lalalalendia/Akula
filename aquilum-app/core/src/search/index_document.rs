@@ -17,6 +17,13 @@ pub struct PreparedFile {
     pub fingerprint: Fingerprint,
     pub content_hash: [u8; 32],
     pub body: String,
+    pub parsed: Option<PreparedMetadata>,
+}
+
+pub struct PreparedMetadata {
+    pub wiki_links: Vec<wiki::parser::WikiLink>,
+    pub fields: Vec<fields::value::Field>,
+    pub tasks: Vec<tasks::parse::Task>,
 }
 
 #[derive(Clone, Copy)]
@@ -54,7 +61,23 @@ pub fn prepare_file(path: PathBuf, fingerprint: Fingerprint) -> Option<PreparedF
         fingerprint,
         content_hash,
         body,
+        parsed: None,
     })
+}
+
+/// Prepare CPU-intensive Markdown metadata while the file is still on a
+/// bounded indexing worker. SQLite and Tantivy writes remain sequential.
+pub fn prepare_file_with_probe(path: PathBuf, probe: Probe) -> Option<PreparedFile> {
+    let mut prepared = prepare_file(path, probe.fingerprint)?;
+    let unchanged = probe.up_to_date && probe.previous_hash == Some(prepared.content_hash);
+    if !unchanged {
+        prepared.parsed = Some(PreparedMetadata {
+            wiki_links: wiki::parser::extract(&prepared.body),
+            fields: fields::inline::indexed_fields(&prepared.body),
+            tasks: tasks::parse::note_tasks(&prepared.body),
+        });
+    }
+    Some(prepared)
 }
 
 pub fn apply_prepared(
@@ -76,9 +99,15 @@ pub fn apply_prepared(
         return Ok(false);
     }
     update_document(root, index, writer, &prepared.path, &prepared.body)?;
-    wiki::index_document(transaction, root, &prepared.path, &prepared.body)?;
-    fields::index_document(transaction, &prepared.path, &prepared.body)?;
-    tasks::index_document(transaction, &prepared.path, &prepared.body)?;
+    if let Some(parsed) = &prepared.parsed {
+        wiki::repository::index_prepared_links(transaction, root, &prepared.path, &parsed.wiki_links)?;
+        fields::repository::index_prepared_fields(transaction, &prepared.path, &parsed.fields)?;
+        tasks::repository::index_prepared_tasks(transaction, &prepared.path, &parsed.tasks)?;
+    } else {
+        wiki::index_document(transaction, root, &prepared.path, &prepared.body)?;
+        fields::index_document(transaction, &prepared.path, &prepared.body)?;
+        tasks::index_document(transaction, &prepared.path, &prepared.body)?;
+    }
     upsert(transaction, key, &prepared, created)?;
     Ok(true)
 }
@@ -110,7 +139,7 @@ pub fn apply_path(
     ) else {
         return Ok(false);
     };
-    let Some(prepared) = prepare_file(path.to_path_buf(), fingerprint) else {
+    let Some(prepared) = prepare_file_with_probe(path.to_path_buf(), probe) else {
         return Ok(false);
     };
     apply_prepared(root, index, writer, transaction, &key, probe, prepared)

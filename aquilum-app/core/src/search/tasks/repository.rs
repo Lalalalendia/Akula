@@ -24,8 +24,16 @@ pub fn index_document(
     path: &Path,
     body: &str,
 ) -> Result<(), SearchError> {
-    remove_document(transaction, path)?;
     let found = note_tasks(body);
+    index_prepared_tasks(transaction, path, &found)
+}
+
+pub fn index_prepared_tasks(
+    transaction: &Transaction<'_>,
+    path: &Path,
+    found: &[Task],
+) -> Result<(), SearchError> {
+    remove_document(transaction, path)?;
     if found.is_empty() {
         return Ok(());
     }
