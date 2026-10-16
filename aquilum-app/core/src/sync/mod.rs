@@ -6,6 +6,7 @@
 mod dag;
 mod dag_store;
 pub mod fake;
+mod fake_vault;
 mod identity;
 mod journal;
 mod planner;
@@ -31,6 +32,7 @@ pub use protocol::{
 };
 
 pub use fake::FakeRemoteStore;
+pub use fake_vault::FakeVaultPort;
 pub use provider::{
     collect_verified_listing, ProviderCapabilities, RemoteObject, RemotePage, RemotePrecondition,
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
