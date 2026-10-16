@@ -91,7 +91,8 @@ impl Replica {
         for edits in batches {
             candidate.apply_edits(edits, "stage");
         }
-        Ok(candidate.doc.transact().encode_state_as_update_v1(&baseline))
+        let update = candidate.doc.transact().encode_state_as_update_v1(&baseline);
+        Ok(update)
     }
 
     pub fn encode_position(&self, index: usize) -> Option<Vec<u8>> {
