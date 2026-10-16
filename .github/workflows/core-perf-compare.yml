@@ -1,0 +1,117 @@
+name: Paired core performance comparison
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/**"
+      - ".github/workflows/core-perf-compare.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-perf-paired-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: paired-perf
+      - name: Check out original base revision on the same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}"
+          git worktree add --detach "$RUNNER_TEMP/akula-perf-base" "origin/${{ github.base_ref }}"
+          {
+            echo "BASE=$(git -C "$RUNNER_TEMP/akula-perf-base" rev-parse HEAD)"
+            echo "PR_MERGE=$(git rev-parse HEAD)"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+            cargo --version
+          } | tee environment.txt
+      - name: Measure in ABBA order (compilation excluded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          measure() {
+            local name="$1"
+            local dir="$2"
+            local sample="$3"
+            (
+              cd "$dir/aquilum-app"
+              cargo test --release --locked -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1
+            ) 2>&1 | tee "sqlite-${name}-${sample}.txt"
+            (
+              cd "$dir/aquilum-app"
+              AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
+            ) 2>&1 | tee "index-${name}-${sample}.txt"
+          }
+          measure base "$RUNNER_TEMP/akula-perf-base" 1
+          measure head "$GITHUB_WORKSPACE" 1
+          measure head "$GITHUB_WORKSPACE" 2
+          measure base "$RUNNER_TEMP/akula-perf-base" 2
+      - name: Summarize paired medians
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import statistics
+          import os
+
+          output = [
+              "## Paired performance on the same runner",
+              "",
+              "| Metric | Base median | PR median | PR vs base |",
+              "|---|---:|---:|---:|",
+          ]
+          for metric, pattern in [
+              ("SQLite 512-note metadata (ms)", r"BENCH-SQLITE.*?median_ms=([0-9.]+)"),
+              ("Cold indexing 1,000 notes (ms)", r"BENCH-INDEX.*?cold_ms=([0-9.]+)"),
+          ]:
+              prefix = "sqlite" if metric.startswith("SQLite") else "index"
+              samples = {}
+              for name in ("base", "head"):
+                  values = []
+                  for sample in (1, 2):
+                      log = pathlib.Path(f"{prefix}-{name}-{sample}.txt").read_text()
+                      match = re.search(pattern, log)
+                      if not match:
+                          raise RuntimeError(f"Missing {metric} from {name} sample {sample}")
+                      values.append(float(match.group(1)))
+                  samples[name] = statistics.median(values)
+              base, head = samples["base"], samples["head"]
+              change = 100.0 * (head / base - 1.0)
+              output.append(f"| {metric} | {base:.3f} | {head:.3f} | {change:+.1f}% |")
+          output.extend([
+              "",
+              "Negative percentages mean less elapsed time. Results are diagnostic; no automatic merge decision.",
+              "ABBA order limits machine differences and partially controls warmup effects.",
+          ])
+          summary = "\n".join(output) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+      - name: Upload paired raw logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paired-core-perf-${{ github.sha }}
+          path: |
+            environment.txt
+            sqlite-*.txt
+            index-*.txt
+          retention-days: 30
