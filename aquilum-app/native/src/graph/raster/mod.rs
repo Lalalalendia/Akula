@@ -88,19 +88,33 @@ pub fn bands(width: usize, height: usize, pixels: &mut [u8], draw: impl Fn(&mut 
 }
 
 pub fn dilate(mask: &[u8], width: usize, height: usize) -> Vec<u8> {
+    // Preserve the original zero-dimension contract: output length is mask.len().
+    if width == 0 || height == 0 {
+        return vec![0u8; mask.len()];
+    }
+    // A 3x3 maximum filter is separable: 1x3 horizontal then 3x1 vertical.
+    // The extra temporary buffer trades one linear scan for fewer comparisons.
+    let mut horizontal = vec![0u8; mask.len()];
+    for y in 0..height {
+        let row_start = y * width;
+        let src = &mask[row_start..row_start + width];
+        let dst = &mut horizontal[row_start..row_start + width];
+        for x in 0..width {
+            dst[x] = src[x]
+                .max(src[x.saturating_sub(1)])
+                .max(src[(x + 1).min(width - 1)]);
+        }
+    }
+
     let mut out = vec![0u8; mask.len()];
     for y in 0..height {
+        let prev = y.saturating_sub(1) * width;
+        let current = y * width;
+        let next = (y + 1).min(height - 1) * width;
         for x in 0..width {
-            let mut best = 0u8;
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                    if nx >= 0 && ny >= 0 && (nx as usize) < width && (ny as usize) < height {
-                        best = best.max(mask[ny as usize * width + nx as usize]);
-                    }
-                }
-            }
-            out[y * width + x] = best;
+            out[current + x] = horizontal[prev + x]
+                .max(horizontal[current + x])
+                .max(horizontal[next + x]);
         }
     }
     out
