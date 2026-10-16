@@ -1,0 +1,44 @@
+name: Image decoding performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/images/**"
+      - ".github/workflows/image-decode-perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  jpeg:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: image-perf
+
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Compare direct and legacy fallback JPEG decoders
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --release --locked -p aquilum-native benchmark_unscaled_jpeg_direct_vs_fallback -- --ignored --nocapture --test-threads=1 2>&1 | tee ../jpeg-perf.txt
+          grep 'IMAGE_PERF ' ../jpeg-perf.txt
+
+      - name: Preserve raw measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-perf-${{ github.sha }}
+          path: jpeg-perf.txt
+          retention-days: 30

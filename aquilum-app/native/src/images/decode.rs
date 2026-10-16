@@ -222,6 +222,60 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "run in image performance workflow"]
+    fn benchmark_unscaled_jpeg_direct_vs_fallback() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let image = image::RgbaImage::from_fn(1024, 768, |x, y| {
+            image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255])
+        });
+        let bytes = encode(&image, image::ImageFormat::Jpeg);
+        let native = super::jpeg(&bytes, |size| size).unwrap();
+        let reference = super::any(&bytes, |size| size).unwrap();
+        assert_eq!((native.width, native.height, native.natural), (1024, 768, (1024, 768)));
+        assert_eq!((native.width, native.height), (reference.width, reference.height));
+        assert_eq!(native.pixels.len(), reference.pixels.len());
+
+        let direct = || {
+            let started = Instant::now();
+            for _ in 0..5 {
+                black_box(super::jpeg(black_box(&bytes), |size| size).unwrap());
+            }
+            started.elapsed().as_secs_f64() * 200.0
+        };
+        let fallback = || {
+            let started = Instant::now();
+            for _ in 0..5 {
+                black_box(super::any(black_box(&bytes), |size| size).unwrap());
+            }
+            started.elapsed().as_secs_f64() * 200.0
+        };
+
+        direct();
+        fallback();
+        let mut direct_samples = Vec::new();
+        let mut fallback_samples = Vec::new();
+        for round in 0..8 {
+            if round % 2 == 0 {
+                fallback_samples.push(fallback());
+                direct_samples.push(direct());
+            } else {
+                direct_samples.push(direct());
+                fallback_samples.push(fallback());
+            }
+        }
+        direct_samples.sort_by(f64::total_cmp);
+        fallback_samples.sort_by(f64::total_cmp);
+        let fast_ms = direct_samples[direct_samples.len() / 2];
+        let original_ms = fallback_samples[fallback_samples.len() / 2];
+        println!(
+            "IMAGE_PERF format=jpeg pixels=786432 fallback_median_ms={original_ms:.3} native_median_ms={fast_ms:.3} ratio={:.3}",
+            original_ms / fast_ms,
+        );
+    }
+
+    #[test]
     fn tall_images_respect_the_pixel_budget() {
         assert_eq!(fit((1000, 5000), 1600, 1600.0 * 1600.0), (716, 3578));
         assert_eq!(fit((800, 600), 1600, 1600.0 * 1600.0), (800, 600));
