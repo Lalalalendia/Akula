@@ -8,6 +8,8 @@ mod dag;
 mod dag_store;
 pub mod fake;
 mod fake_vault;
+#[cfg(test)]
+mod fault_matrix;
 mod identity;
 mod journal;
 mod planner;
