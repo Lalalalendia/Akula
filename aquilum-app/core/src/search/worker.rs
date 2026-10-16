@@ -132,14 +132,23 @@ fn run(
                 // 80 ms window to avoid a stream of individual commits.
                 let quiet_window = quiet_window_for(last_batch_completed);
                 let (paths, rescan) = collect_batch_with_quiet_window(message, &receiver, quiet_window);
-                if rescan {
+                let committed = if rescan {
                     synchronizer.full_scan(&context.cancelled)?;
                     notify_index(context);
-                } else if synchronizer.apply_paths(paths)? {
-                    notify_index(context);
-                }
+                    true
+                } else {
+                    let changed = synchronizer.apply_paths(paths)?;
+                    if changed {
+                        notify_index(context);
+                    }
+                    changed
+                };
                 last_write = Instant::now();
-                last_batch_completed = Some(last_write);
+                // No-op file events cannot amplify Tantivy commits, so they
+                // must not slow down the next genuine edit.
+                if committed {
+                    last_batch_completed = Some(last_write);
+                }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if synchronizer.holds_writer() && last_write.elapsed() >= WRITER_IDLE {
