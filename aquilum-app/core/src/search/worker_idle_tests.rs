@@ -61,6 +61,19 @@ fn quiet_window_is_strictly_smaller_than_batch_maximum() {
     assert_eq!(EVENT_BATCH_WINDOW, Duration::from_millis(80));
 }
 
+#[test]
+fn recently_completed_batch_uses_full_window_but_idle_watcher_uses_short_window() {
+    assert_eq!(super::quiet_window_for(None), EVENT_QUIET_WINDOW);
+    assert_eq!(
+        super::quiet_window_for(Some(Instant::now())),
+        EVENT_BATCH_WINDOW,
+    );
+    assert_eq!(
+        super::quiet_window_for(Some(Instant::now() - Duration::from_millis(200))),
+        EVENT_QUIET_WINDOW,
+    );
+}
+
 fn measure_queue(
     algorithm: fn(WorkerMessage, &mpsc::Receiver<WorkerMessage>) -> (HashSet<PathBuf>, bool),
     first: usize,
@@ -154,17 +167,21 @@ fn benchmark_quiet_window_until_search_visible() {
 }
 
 
-/// A synthetic event stream, not field telemetry: show how often 20 ms
-/// quiet gaps cause additional commits relative to the fixed 80 ms window.
+/// A synthetic event stream, not field telemetry: compare commit-count
+/// tradeoffs of the fixed, quiet-only and adaptive batching policies.
 #[test]
 #[ignore = "same-runner event-spacing tradeoff comparison"]
 fn benchmark_quiet_window_stream_patterns() {
     use std::thread;
 
-    fn profile(
-        algorithm: fn(WorkerMessage, &mpsc::Receiver<WorkerMessage>) -> (HashSet<PathBuf>, bool),
-        gap: Duration,
-    ) -> (usize, f64, Vec<usize>) {
+    #[derive(Clone, Copy)]
+    enum Mode {
+        Fixed,
+        Quiet,
+        Adaptive,
+    }
+
+    fn profile(mode: Mode, gap: Duration) -> (usize, f64, Vec<usize>) {
         const EVENTS: usize = 8;
         let (sender, receiver) = mpsc::channel();
         // Keep the channel alive after the producer finishes: both batching
@@ -183,13 +200,23 @@ fn benchmark_quiet_window_stream_patterns() {
         let mut commits = 0;
         let mut received = HashSet::new();
         let mut sizes = Vec::new();
+        let mut last_batch_completed: Option<Instant> = None;
         while received.len() < EVENTS {
             let first = receiver.recv().unwrap();
-            let (batch, rescan) = algorithm(first, &receiver);
+            let (batch, rescan) = match mode {
+                Mode::Fixed => baseline_collect_batch(first, &receiver),
+                Mode::Quiet => collect_batch(first, &receiver),
+                Mode::Adaptive => super::collect_batch_with_quiet_window(
+                    first, &receiver, super::quiet_window_for(last_batch_completed),
+                ),
+            };
             assert!(!rescan);
             sizes.push(batch.len());
             received.extend(batch);
             commits += 1;
+            // The stream test models negligible processing. Production records
+            // the timestamp after the real index commit and notifications.
+            last_batch_completed = Some(Instant::now());
         }
         producer.join().unwrap();
         drop(kept_alive);
@@ -204,10 +231,11 @@ fn benchmark_quiet_window_stream_patterns() {
         ("spaced_45ms", Duration::from_millis(45)),
         ("spaced_60ms", Duration::from_millis(60)),
     ] {
-        let (old_commits, old_ms, old_sizes) = profile(baseline_collect_batch, gap);
-        let (new_commits, new_ms, new_sizes) = profile(collect_batch, gap);
+        let (old_commits, old_ms, old_sizes) = profile(Mode::Fixed, gap);
+        let (new_commits, new_ms, new_sizes) = profile(Mode::Quiet, gap);
+        let (adaptive_commits, adaptive_ms, adaptive_sizes) = profile(Mode::Adaptive, gap);
         println!(
-            "QUIET_STREAM profile={name} gap_ms={} events=8 fixed_commits={old_commits} quiet_commits={new_commits} fixed_total_ms={old_ms:.3} quiet_total_ms={new_ms:.3} fixed_groups={old_sizes:?} quiet_groups={new_sizes:?}",
+            "QUIET_STREAM profile={name} gap_ms={} events=8 fixed_commits={old_commits} quiet_commits={new_commits} adaptive_commits={adaptive_commits} fixed_total_ms={old_ms:.3} quiet_total_ms={new_ms:.3} adaptive_total_ms={adaptive_ms:.3} fixed_groups={old_sizes:?} quiet_groups={new_sizes:?} adaptive_groups={adaptive_sizes:?}",
             gap.as_millis()
         );
     }
