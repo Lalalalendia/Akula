@@ -1,5 +1,5 @@
 use super::inline::indexed_fields;
-use super::value::{key_lower, value_lower, FieldKind};
+use super::value::{key_lower, value_lower, Field, FieldKind};
 use crate::search::error::SearchError;
 use rusqlite::{params, Connection, Transaction};
 use std::path::Path;
@@ -27,8 +27,16 @@ pub fn index_document(
     path: &Path,
     body: &str,
 ) -> Result<(), SearchError> {
-    remove_document(transaction, path)?;
     let found = indexed_fields(body);
+    index_prepared_fields(transaction, path, &found)
+}
+
+pub fn index_prepared_fields(
+    transaction: &Transaction<'_>,
+    path: &Path,
+    found: &[Field],
+) -> Result<(), SearchError> {
+    remove_document(transaction, path)?;
     if found.is_empty() {
         return Ok(());
     }
