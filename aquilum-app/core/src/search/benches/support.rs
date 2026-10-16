@@ -23,6 +23,17 @@ pub fn write_note(vault: &Path, index: usize, paragraphs: usize) {
             content.push_str(&format!("- [[Note {target}]]\n"));
         }
     }
+    // An opt-in, deterministic metadata-heavy case to reveal parsing
+    // bottlenecks hidden by mostly prose-only synthetic vaults.
+    if std::env::var_os("AQUILUM_BENCH_RICH").is_some() {
+        content.push_str("\n## Structured notes\n");
+        for number in 0..32 {
+            content.push_str(&format!(
+                "Property{number}:: value-{index}-{number}\n- [ ] Task {number} for note {index}\n- [[Note {}]]\n",
+                index.saturating_sub(number + 1),
+            ));
+        }
+    }
     fs::write(vault.join(format!("Note {index}.md")), content).unwrap();
 }
 
