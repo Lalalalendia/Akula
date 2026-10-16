@@ -11,7 +11,7 @@ pub mod target;
 
 const LINK_LIST_LIMIT: usize = 200;
 
-pub use backlinks::backlinks;
+pub use backlinks::{backlinks, count_sources as backlink_source_count};
 pub use edges::{for_each_link, read_documents};
 pub use outgoing::outgoing_links;
 pub use rename::{plan_for_rename, LinkRewrite};
