@@ -1,0 +1,66 @@
+name: Branch hygiene
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/branch-hygiene.yml'
+      - '.github/scripts/branch-hygiene.cjs'
+      - '.github/scripts/branch-hygiene.test.cjs'
+  pull_request_target:
+    types: [closed]
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/branch-hygiene.yml'
+      - '.github/scripts/branch-hygiene.cjs'
+      - '.github/scripts/branch-hygiene.test.cjs'
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Audit only or prune safely merged branches'
+        type: choice
+        required: true
+        default: audit
+        options: [audit, prune]
+
+jobs:
+  tests:
+    name: Branch-hygiene unit tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run safety tests
+        run: node --test .github/scripts/branch-hygiene.test.cjs
+
+  audit-or-prune:
+    name: Audit branches / safely prune merged ones
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: read
+    concurrency:
+      group: akula-branch-hygiene
+      cancel-in-progress: false
+    env:
+      MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || github.event_name == 'schedule' && 'audit' || 'prune' }}
+    steps:
+      # On pull_request_target, NEVER checkout untrusted PR code.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const { run } = require('./.github/scripts/branch-hygiene.cjs');
+            await run({ github, context, core, mode: process.env.MODE });
