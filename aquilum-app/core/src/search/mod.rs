@@ -14,6 +14,8 @@ pub mod index_document;
 mod index_tests;
 #[cfg(test)]
 mod benches;
+#[cfg(test)]
+mod perf_benchmarks;
 pub mod metadata;
 pub mod models;
 pub mod note_date;
