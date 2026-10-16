@@ -21,7 +21,7 @@ jobs:
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: index-worker-idle
-      - name: Compare fixed batch window and 20ms quiet period
+      - name: Compare fixed, quiet-only and adaptive batch windows
         working-directory: aquilum-app
         shell: bash
         run: |
