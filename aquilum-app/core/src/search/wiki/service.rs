@@ -1,7 +1,7 @@
 use super::repository::candidate_sources;
 use super::target::title_key;
 use super::{
-    backlinks, outgoing_links, plan_for_rename, resolve_many, LinkRewrite,
+    backlinks, backlink_source_count, outgoing_links, plan_for_rename, resolve_many, LinkRewrite,
 };
 use crate::search::error::SearchError;
 use crate::search::paths::markdown_files;
@@ -9,7 +9,6 @@ use crate::search::models::{Backlink, OutgoingLink, WikiLinkResolution};
 use crate::search::paths::canonical_path;
 use crate::search::service::SearchService;
 use rusqlite::Connection;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 impl SearchService {
@@ -33,14 +32,7 @@ impl SearchService {
             .iter()
             .map(|document| {
                 let document = canonical_path(Path::new(document));
-                let own = document.to_string_lossy();
-                let links = backlinks(&connection, &root, &document)?;
-                Ok(links
-                    .iter()
-                    .map(|link| link.path.as_str())
-                    .filter(|path| *path != own)
-                    .collect::<HashSet<_>>()
-                    .len())
+                backlink_source_count(&connection, &root, &document)
             })
             .collect()
     }
