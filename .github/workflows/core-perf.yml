@@ -36,6 +36,7 @@ jobs:
           echo "REF=${{ github.sha }}" | tee environment.txt
           echo "RUNNER_OS=$RUNNER_OS" | tee -a environment.txt
           echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)" | tee -a environment.txt
+          echo "VCPUS=$(nproc)" | tee -a environment.txt
           rustc --version | tee -a environment.txt
           cargo --version | tee -a environment.txt
 
@@ -73,6 +74,13 @@ jobs:
           set -o pipefail
           cargo test --locked --release -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1 2>&1 | tee ../sqlite.txt
 
+      - name: Benchmark per-save critical path
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --release -p aquilum-core benchmark_save_breakdown -- --ignored --nocapture --test-threads=1 2>&1 | tee ../save.txt
+
       - name: Summarize machine-readable benchmark lines
         if: always()
         shell: bash
@@ -83,9 +91,9 @@ jobs:
             echo "Corpus: ${{ inputs.documents || '1000' }} notes"
             echo ""
             echo "\`\`\`text"
-            for file in indexing.txt search.txt links.txt sqlite.txt; do
+            for file in indexing.txt search.txt links.txt sqlite.txt save.txt; do
               if [ -f "$file" ]; then
-                grep -E 'BENCH-(INDEX|SEARCH|LINKS|SQLITE) ' "$file" || true
+                grep -E 'BENCH-(INDEX|SEARCH|LINKS|SQLITE|SAVE) ' "$file" || true
               fi
             done
             echo "\`\`\`"
@@ -102,4 +110,5 @@ jobs:
             search.txt
             links.txt
             sqlite.txt
+            save.txt
           retention-days: 30
