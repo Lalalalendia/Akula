@@ -17,7 +17,7 @@ use tantivy::{IndexWriter, Term};
 use walkdir::WalkDir;
 
 pub const INDEX_MEMORY_BUDGET: usize = 40_000_000;
-const INDEX_THREADS: usize = 2;
+pub(crate) const INDEX_THREADS: usize = 2;
 const COMMIT_BATCH_SIZE: usize = 10_000;
 const PREPARE_BATCH_SIZE: usize = 64;
 

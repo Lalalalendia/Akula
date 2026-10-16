@@ -79,7 +79,10 @@ fn benchmark_save_breakdown() {
     let mut writer = bench
         .search_index
         .index
-        .writer::<tantivy::TantivyDocument>(crate::search::sync::INDEX_MEMORY_BUDGET)
+        .writer_with_num_threads(
+            crate::search::sync::INDEX_THREADS,
+            crate::search::sync::INDEX_MEMORY_BUDGET,
+        )
         .unwrap();
     let mut connection = crate::search::metadata::open(&bench.metadata).unwrap();
     let saved = bench.vault.join("Note 7.md");
