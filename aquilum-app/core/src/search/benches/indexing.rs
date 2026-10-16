@@ -146,3 +146,81 @@ fn benchmark_save_breakdown() {
     record("save_breakdown", &line);
 }
 
+
+
+/// Measure the cost of Tantivy commits when independent file notifications
+/// are already grouped into one apply_paths call. This does NOT change the
+/// production 80 ms watcher window or defer search index freshness.
+#[test]
+#[ignore = "run via tantivy commit batch performance workflow"]
+fn benchmark_commit_batch_scaling() {
+    use crate::search::index::SearchIndex;
+    use crate::search::query::Request;
+    use std::collections::HashSet;
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    const UPDATED: usize = 64;
+    const DOCUMENTS: usize = 512;
+
+    fn measure(group_size: usize, order: usize) -> (f64, f64, f64) {
+        let mut bench = open_bench_index(DOCUMENTS);
+        bench.synchronizer.full_scan(&bench.cancelled).unwrap();
+        bench.synchronizer.release_writer().unwrap();
+        assert_eq!(bench.search_index.document_count(), DOCUMENTS as u64);
+
+        let mut total_ms = 0.0;
+        let mut commit_times = Vec::new();
+        for start in (0..UPDATED).step_by(group_size) {
+            let mut paths = HashSet::new();
+            for note in start..(start + group_size).min(UPDATED) {
+                write_note(&bench.vault, note, 55);
+                let path = bench.vault.join(format!("Note {note}.md"));
+                let marker = format!("freshnesscode{order}note{note}");
+                writeln!(OpenOptions::new().append(true).open(&path).unwrap(), "{marker}").unwrap();
+                paths.insert(path);
+            }
+            let started = Instant::now();
+            assert!(bench.synchronizer.apply_paths(paths).unwrap());
+            let millis = started.elapsed().as_secs_f64() * 1_000.0;
+            total_ms += millis;
+            commit_times.push(millis);
+
+            // The latest saved note MUST be findable directly after the
+            // synchronizer returns, without waiting for a later event.
+            let last_note = (start + group_size).min(UPDATED) - 1;
+            let marker = format!("freshnesscode{order}note{last_note}");
+            let result = bench.search_index.search(&Request::new(&marker)).unwrap();
+            assert!(
+                result.results.iter().any(|r| r.path.ends_with(&format!("Note {last_note}.md"))),
+                "saved note {last_note} must be visible after commit"
+            );
+            assert_eq!(bench.search_index.document_count(), DOCUMENTS as u64);
+        }
+        bench.synchronizer.release_writer().unwrap();
+        let reopened = SearchIndex::open(&bench.directory.path().join("index")).unwrap();
+        assert_eq!(reopened.document_count(), DOCUMENTS as u64);
+        for note in 0..UPDATED {
+            let marker = format!("freshnesscode{order}note{note}");
+            let result = reopened.search(&Request::new(&marker)).unwrap();
+            assert!(
+                result.results.iter().any(|r| r.path.ends_with(&format!("Note {note}.md"))),
+                "saved note {note} must survive reopening the persisted index"
+            );
+        }
+        commit_times.sort_by(f64::total_cmp);
+        let middle = commit_times[commit_times.len() / 2];
+        let highest = *commit_times.last().unwrap();
+        println!(
+            "TANTIVY_BATCH group_size={group_size} order={order} notes={UPDATED} commits={} total_ms={total_ms:.3} per_note_ms={:.3} median_call_ms={middle:.3} worst_call_ms={highest:.3} durable=true immediate_search=true",
+            commit_times.len(), total_ms / UPDATED as f64
+        );
+        (total_ms, middle, highest)
+    }
+
+    // ABCCBA order on one runner, using the exact production indexing path.
+    // Each test starts from the same deterministic 512-note vault.
+    for (order, group) in [1, 8, 64, 64, 8, 1].into_iter().enumerate() {
+        measure(group, order);
+    }
+}
