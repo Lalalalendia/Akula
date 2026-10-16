@@ -70,7 +70,7 @@ jobs:
             if [ "$name" = base ]; then root="$RUNNER_TEMP/utf16-base"; else root="$GITHUB_WORKSPACE"; fi
             module="$root/aquilum-app/core/src/text"
             cp "$RUNNER_TEMP/utf16-probe.rs" "$module/utf16_perf_probe.rs"
-            rustc -O --edition=2024 "$module/utf16_perf_probe.rs" -o "$RUNNER_TEMP/utf16-$name" -Awarnings
+            rustc -O --edition=2024 "$module/utf16_perf_probe.rs" -o "$RUNNER_TEMP/utf16-bin-$name" -Awarnings
             rustc --test -O --edition=2024 "$module/utf16.rs" -o "$RUNNER_TEMP/utf16-tests-$name"
             rm "$module/utf16_perf_probe.rs"
           done
@@ -81,10 +81,10 @@ jobs:
           set -euo pipefail
           "$RUNNER_TEMP/utf16-tests-base"
           "$RUNNER_TEMP/utf16-tests-head"
-          "$RUNNER_TEMP/utf16-base" | tee base-1.txt
-          "$RUNNER_TEMP/utf16-head" | tee head-1.txt
-          "$RUNNER_TEMP/utf16-head" | tee head-2.txt
-          "$RUNNER_TEMP/utf16-base" | tee base-2.txt
+          "$RUNNER_TEMP/utf16-bin-base" | tee base-1.txt
+          "$RUNNER_TEMP/utf16-bin-head" | tee head-1.txt
+          "$RUNNER_TEMP/utf16-bin-head" | tee head-2.txt
+          "$RUNNER_TEMP/utf16-bin-base" | tee base-2.txt
 
       - name: Summarize paired comparison
         if: always()
