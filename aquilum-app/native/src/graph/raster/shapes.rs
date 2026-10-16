@@ -65,9 +65,8 @@ impl Band<'_> {
         let first = ((cy - r - 1.0).floor() as i64).max(self.rows.start as i64);
         let last = ((cy + r + 1.0).ceil() as i64).min(self.rows.end as i64 - 1);
         let outer = r + 0.5;
-        // Only optimize pixels safely inside both fully opaque coverage and body.
-        // The extra half-pixel retreat keeps all antialias/rounding boundaries on
-        // the original per-pixel path, preserving the exact blend sequence.
+        // Retreat into the guaranteed-solid region by an extra half-pixel:
+        // antialias and floating-point boundary cases stay in the old path.
         let solid_radius = (d.inner.min(r) - 1.0).max(0.0);
         let solid_sq = solid_radius * solid_radius;
         for y in first..=last {
@@ -79,31 +78,19 @@ impl Band<'_> {
             let x_from = ((cx - span).floor() as i64).max(0);
             let x_to = ((cx + span).ceil() as i64).min(self.width as i64 - 1);
             let row = (y as usize - self.rows.start) * self.width;
-            // Determine the guaranteed-solid horizontal run just once per row.
-            // All pixels outside this interval retain the old rasterization path.
-            let (solid_from, solid_to) = if dy.abs() < solid_radius {
-                let solid_span = (solid_sq - dy * dy).sqrt();
-                (
-                    ((cx - solid_span - 0.5).ceil() as i64).max(x_from),
-                    ((cx + solid_span - 0.5).floor() as i64).min(x_to),
-                )
-            } else {
-                (1, 0)
-            };
-            for x in x_from..=x_to {
-                if (solid_from..=solid_to).contains(&x) {
-                    let at = (row + x as usize) * 4;
-                    blend(&mut self.pixels[at..at + 4], d.body, d.alpha);
-                    continue;
-                }
+
+            // The scalar edge path is exactly the original shader.
+            // Segmenting the scanline avoids a per-pixel branch when the
+            // solid interior is small or empty (thin-body nodes).
+            let paint_edge = |pixels: &mut [u8], x: i64| {
                 let dx = x as f32 + 0.5 - cx;
                 let distance = (dx * dx + dy * dy).sqrt();
                 let coverage = (outer - distance).clamp(0.0, 1.0);
                 if coverage <= 0.0 {
-                    continue;
+                    return;
                 }
                 let at = (row + x as usize) * 4;
-                let px = &mut self.pixels[at..at + 4];
+                let px = &mut pixels[at..at + 4];
                 if d.inner < r {
                     let body = (d.inner + 0.5 - distance).clamp(0.0, 1.0);
                     if body < 1.0 {
@@ -113,6 +100,32 @@ impl Band<'_> {
                 } else {
                     blend(px, d.body, coverage * d.alpha);
                 }
+            };
+
+            let (solid_from, solid_to) = if dy.abs() < solid_radius {
+                let solid_span = (solid_sq - dy * dy).sqrt();
+                (
+                    ((cx - solid_span - 0.5).ceil() as i64).max(x_from),
+                    ((cx + solid_span - 0.5).floor() as i64).min(x_to),
+                )
+            } else {
+                (1, 0)
+            };
+            if solid_from > solid_to {
+                for x in x_from..=x_to {
+                    paint_edge(&mut *self.pixels, x);
+                }
+                continue;
+            }
+            for x in x_from..solid_from {
+                paint_edge(&mut *self.pixels, x);
+            }
+            for x in solid_from..=solid_to {
+                let at = (row + x as usize) * 4;
+                blend(&mut self.pixels[at..at + 4], d.body, d.alpha);
+            }
+            for x in solid_to.saturating_add(1)..=x_to {
+                paint_edge(&mut *self.pixels, x);
             }
         }
     }
