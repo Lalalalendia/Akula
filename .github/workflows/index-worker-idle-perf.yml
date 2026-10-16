@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --release --locked -p aquilum-core benchmark_quiet_window -- --ignored --nocapture --test-threads=1 2>&1 | tee ../quiet-window.txt
-          grep -E 'QUIET_(WINDOW|SEARCH) ' ../quiet-window.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -E 'QUIET_(WINDOW|SEARCH|STREAM) ' ../quiet-window.txt | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Preserve measurements
         if: always()
         uses: actions/upload-artifact@v4
