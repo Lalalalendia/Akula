@@ -87,15 +87,25 @@ fn benchmark_save_breakdown() {
     let mut connection = crate::search::metadata::open(&bench.metadata).unwrap();
     let saved = bench.vault.join("Note 7.md");
     let mut steps = [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut prepare_steps = Vec::new();
+    let mut finalize_steps = Vec::new();
     for round in 0..7 {
         write_note(&bench.vault, 7, 60 + round);
         let transaction = connection.transaction().unwrap();
         let started = Instant::now();
         crate::search::index_document::apply_path(&bench.vault, &bench.search_index, &writer, &transaction, &saved).unwrap();
         steps[0].push(started.elapsed());
+        // Equivalent to IndexWriter::commit(), split into the two API
+        // phases to identify segment flush vs durable commit publication.
         let started = Instant::now();
-        writer.commit().unwrap();
-        steps[1].push(started.elapsed());
+        let prepared = writer.prepare_commit().unwrap();
+        let prepare_elapsed = started.elapsed();
+        let started = Instant::now();
+        prepared.commit().unwrap();
+        let finalize_elapsed = started.elapsed();
+        steps[1].push(prepare_elapsed + finalize_elapsed);
+        prepare_steps.push(prepare_elapsed);
+        finalize_steps.push(finalize_elapsed);
         let started = Instant::now();
         bench.search_index.reload().unwrap();
         steps[2].push(started.elapsed());
@@ -122,9 +132,11 @@ fn benchmark_save_breakdown() {
         sorted[sorted.len() / 2].as_secs_f64() * 1000.0
     };
     let line = format!(
-        "apply_ms={:.2} tantivy_commit_ms={:.2} reload_ms={:.2} sqlite_commit_ms={:.2} maintain_ms={:.2} fsync_4k_ms={:.2}",
+        "apply_ms={:.2} tantivy_commit_ms={:.2} tantivy_prepare_ms={:.2} tantivy_finalize_ms={:.2} reload_ms={:.2} sqlite_commit_ms={:.2} maintain_ms={:.2} fsync_4k_ms={:.2}",
         median(&steps[0]),
         median(&steps[1]),
+        median(&prepare_steps),
+        median(&finalize_steps),
         median(&steps[2]),
         median(&steps[3]),
         median(&steps[4]),
