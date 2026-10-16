@@ -88,7 +88,8 @@ pub fn copy_content(
     moment: &LocalMinute,
     body: &str,
 ) -> Option<String> {
-    if body.trim().is_empty() {
+    // Whitespace is user data too; only an actually empty body can be omitted.
+    if body.is_empty() {
         return None;
     }
     let explanation = explanation(report.cause);

@@ -9,6 +9,7 @@ struct FakeIo {
     copies: RefCell<Vec<(ConflictCause, String)>>,
     appended: Cell<usize>,
     writes: Cell<usize>,
+    fail_preserve: Cell<bool>,
     changed_on_next_write: RefCell<Option<String>>,
 }
 
@@ -57,8 +58,15 @@ impl SessionIo for FakeIo {
         hash_of(text)
     }
 
-    fn preserve(&self, body: &str, report: ConflictReport) {
+    fn preserve(&self, body: &str, report: ConflictReport) -> Result<(), DiskError> {
+        if self.fail_preserve.get() {
+            return Err(DiskError::Other {
+                code: "preservation_failed",
+                message: "simulated full disk or permissions error".into(),
+            });
+        }
         self.copies.borrow_mut().push((report.cause, body.to_owned()));
+        Ok(())
     }
 
     fn append(&self, _update: &[u8]) {
@@ -252,7 +260,7 @@ fn every_document_change_is_persisted() {
 fn reverting_a_version_undoes_its_lines_and_keeps_later_ones_as_a_copy() {
     let io = FakeIo::with_file("один\nдва правка версии\nтри позже\n");
     let mut session = DocumentSession::open(&[], &io).expect("open");
-    let changed = session.revert("один\nдва правка версии\nтри\n", "один\nдва\nтри\n", SYSTEM_CLIENT, &io);
+    let changed = session.revert("один\nдва правка версии\nтри\n", "один\nдва\nтри\n", SYSTEM_CLIENT, &io).unwrap();
     assert!(changed);
     assert_eq!(session.text(), "один\nдва\nтри позже\n");
     assert!(session.dirty());
@@ -262,7 +270,95 @@ fn reverting_a_version_undoes_its_lines_and_keeps_later_ones_as_a_copy() {
 fn reverting_lines_changed_later_preserves_the_later_text() {
     let io = FakeIo::with_file("один\nдва ещё позже\n");
     let mut session = DocumentSession::open(&[], &io).expect("open");
-    session.revert("один\nдва правка версии\n", "один\nдва\n", SYSTEM_CLIENT, &io);
+    session.revert("один\nдва правка версии\n", "один\nдва\n", SYSTEM_CLIENT, &io).unwrap();
     assert_eq!(session.text(), "один\nдва\n");
     assert_eq!(*io.copies.borrow(), vec![(ConflictCause::Reverted, "два ещё позже".to_owned())]);
+}
+
+
+#[test]
+fn a_failed_conflict_copy_blocks_open_without_publishing_over_the_document() {
+    let io = FakeIo::with_file("edited outside\n");
+    *io.point.borrow_mut() = Some(SyncPoint {
+        file_hash: hash_of("original\n"),
+        text_hash: hash_of("original\n"),
+    });
+    io.fail_preserve.set(true);
+    let result = DocumentSession::open(&[replica_with("unsaved editor edit\n")], &io);
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "preservation_failed", .. })
+    ));
+    assert_eq!(io.file(), "edited outside\n");
+    assert!(io.copies.borrow().is_empty());
+    assert_eq!(io.writes.get(), 0);
+}
+
+#[test]
+fn failed_preservation_prevents_destructive_truncation_and_keeps_retry_possible() {
+    let io = FakeIo::with_file("important text\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    session.replace_text("", "editor", &io);
+    io.fail_preserve.set(true);
+    let result = session.write(&io);
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "preservation_failed", .. })
+    ));
+    assert_eq!(io.file(), "important text\n");
+    assert!(session.dirty());
+    assert_eq!(io.writes.get(), 0);
+    assert!(io.copies.borrow().is_empty());
+
+    io.fail_preserve.set(false);
+    session.write(&io).unwrap();
+    assert_eq!(io.file(), "");
+    assert_eq!(
+        *io.copies.borrow(),
+        vec![(ConflictCause::Truncated, "important text\n".into())]
+    );
+}
+
+#[test]
+fn failed_preservation_cancels_revert_before_changing_the_replica() {
+    let io = FakeIo::with_file("one\nlater independent edit\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let original = session.text();
+    let version = session.version();
+    io.fail_preserve.set(true);
+    let result = session.revert(
+        "one\nversion edit\n",
+        "one\nbase\n",
+        SYSTEM_CLIENT,
+        &io,
+    );
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "preservation_failed", .. })
+    ));
+    assert_eq!(session.text(), original);
+    assert_eq!(session.version(), version);
+    assert_eq!(io.writes.get(), 0);
+}
+
+
+#[test]
+fn failed_preservation_blocks_an_overlapping_external_merge() {
+    let io = FakeIo::with_file("one\ntwo\nthree\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    session.replace_text("one\ntwo typed locally\nthree\n", "editor", &io);
+    let original = session.text();
+    let version = session.version();
+
+    io.edit_file("one\ntwo updated externally\nthree\n");
+    io.fail_preserve.set(true);
+    assert!(matches!(
+        session.reconcile(&io),
+        Err(SessionError::Disk { code: "preservation_failed", .. })
+    ));
+    assert_eq!(session.text(), original);
+    assert_eq!(session.version(), version);
+    assert!(session.dirty());
+    assert_eq!(io.file(), "one\ntwo updated externally\nthree\n");
+    assert!(io.copies.borrow().is_empty());
 }

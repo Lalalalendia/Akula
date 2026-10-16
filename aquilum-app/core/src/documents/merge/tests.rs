@@ -141,3 +141,11 @@ fn marks_an_ordinary_merge_as_precise() {
 fn survives_a_document_that_lost_everything_locally() {
     assert!(merge("a\nb\nc\n", "a\nb\nc\nd\n", "").text.contains('d'));
 }
+
+
+#[test]
+fn concurrent_external_edits_do_not_drop_whitespace_only_local_lines() {
+    let merged = merge("a\nb\nc\n", "a\nB\nc\n", "a\n   \nc\n");
+    assert_eq!(merged.text, "a\nB\nc\n");
+    assert!(merged.result.displaced.contains(&"   ".to_owned()));
+}
