@@ -33,4 +33,6 @@ jobs:
 
       - name: Run Rust tests
         working-directory: aquilum-app
-        run: cargo test --workspace --locked
+        run: |
+          cargo test --workspace --locked
+          cargo test -p aquilum-core --features sync-engine --locked
