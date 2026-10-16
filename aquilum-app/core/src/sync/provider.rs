@@ -88,9 +88,6 @@ pub enum RemoteStoreError {
     IntegrityMismatch,
 }
 
-/// The provider is an exchange service, not a deletion authority. In particular,
-/// all mutations require explicit preconditions; backends that cannot provide an
-/// atomic guard must reject them, not silently degrade to last-write-wins.
 /// A fully collected, internally consistent remote object listing. Its presence
 /// is not proof that a deletion is authorized: the planner still checks the
 /// confirmed baseline, explicit tombstones and device policies.
@@ -161,6 +158,9 @@ pub fn collect_verified_listing(
     Err(RemoteStoreError::PageLimitExceeded)
 }
 
+/// The provider is an exchange service, not a deletion authority.
+/// All mutations require explicit preconditions; backends that cannot provide an
+/// atomic guard must reject them, not silently degrade to last-write-wins.
 pub trait RemoteStore {
     fn capabilities(&self) -> ProviderCapabilities;
     fn list_page(
@@ -197,6 +197,109 @@ mod tests {
         };
         assert!(!page.is_final_verified_page());
         assert!(RemotePage { complete: true, ..page }.is_final_verified_page());
+    }
+
+    #[test]
+    fn listing_collection_requires_all_pages_and_enforces_bounds() {
+        use crate::sync::FakeRemoteStore;
+
+        let mut remote = FakeRemoteStore::new();
+        for n in 0..5 {
+            remote.put(&format!("object-{n}"), b"data", &RemotePrecondition::Absent).unwrap();
+        }
+        let snapshot = collect_verified_listing(&remote, 2, 3).unwrap();
+        assert_eq!(snapshot.objects.len(), 5);
+        assert_eq!(snapshot.snapshot_id, "5");
+        assert_eq!(
+            collect_verified_listing(&remote, 2, 2),
+            Err(RemoteStoreError::PageLimitExceeded)
+        );
+        remote.set_incomplete_listing(true);
+        assert_eq!(
+            collect_verified_listing(&remote, 2, 3),
+            Err(RemoteStoreError::IncompleteListing)
+        );
+    }
+
+    struct BrokenProvider {
+        real: crate::sync::FakeRemoteStore,
+        invalid: &'static str,
+    }
+
+    impl RemoteStore for BrokenProvider {
+        fn capabilities(&self) -> ProviderCapabilities {
+            let mut capabilities = self.real.capabilities();
+            if self.invalid == "no_consistency" {
+                capabilities.snapshot_consistency = false;
+            }
+            capabilities
+        }
+
+        fn list_page(&self, cursor: Option<&str>, max: usize) -> Result<RemotePage, RemoteStoreError> {
+            let mut page = self.real.list_page(cursor, max)?;
+            match self.invalid {
+                "duplicate" => {
+                    if let Some(first) = page.objects.first().cloned() {
+                        page.objects.push(first);
+                    }
+                }
+                "missing_last" if page.complete => {
+                    page.complete = false;
+                }
+                "stale_generation" if cursor.is_some() => {
+                    page.snapshot_id = "changed-generation".into();
+                }
+                "tail_after_last" if page.complete => {
+                    page.next_cursor = Some("extra".into());
+                }
+                _ => {}
+            }
+            Ok(page)
+        }
+
+        fn read(&self, id: &str) -> Result<Vec<u8>, RemoteStoreError> {
+            self.real.read(id)
+        }
+
+        fn head(&self, id: &str) -> Result<RemoteObject, RemoteStoreError> {
+            self.real.head(id)
+        }
+
+        fn put(&mut self, id: &str, bytes: &[u8], precondition: &RemotePrecondition)
+            -> Result<RemoteWriteReceipt, RemoteStoreError> {
+            self.real.put(id, bytes, precondition)
+        }
+
+        fn delete(&mut self, id: &str, precondition: &RemotePrecondition)
+            -> Result<(), RemoteStoreError> {
+            self.real.delete(id, precondition)
+        }
+    }
+
+    #[test]
+    fn refuses_inconsistent_or_ambiguous_provider_listings() {
+        for (kind, expected) in [
+            ("duplicate", RemoteStoreError::DuplicateRemoteObject),
+            ("missing_last", RemoteStoreError::IncompleteListing),
+            ("stale_generation", RemoteStoreError::ListingChanged),
+            ("tail_after_last", RemoteStoreError::InvalidListing),
+            ("no_consistency", RemoteStoreError::UnverifiableListing),
+        ] {
+            let mut provider = BrokenProvider {
+                real: crate::sync::FakeRemoteStore::new(),
+                invalid: kind,
+            };
+            for n in 0..3 {
+                provider.put(&format!("file-{n}"), b"data", &RemotePrecondition::Absent).unwrap();
+            }
+            let result = collect_verified_listing(&provider, 5, 5);
+            if kind == "stale_generation" {
+                // Force at least two listing pages for the skew simulation.
+                assert_eq!(collect_verified_listing(&provider, 2, 5), Err(expected));
+            } else {
+                assert_eq!(result, Err(expected), "fault: {kind}");
+            }
+        }
     }
 
     #[test]
