@@ -1,0 +1,37 @@
+name: Index watcher quiet flush experiment
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/worker.rs"
+      - "aquilum-app/core/src/search/worker_idle_tests.rs"
+      - ".github/workflows/index-worker-idle-perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: index-worker-idle
+      - name: Compare fixed batch window and 20ms quiet period
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-core benchmark_quiet_window -- --ignored --nocapture --test-threads=1 2>&1 | tee ../quiet-window.txt
+          grep -E 'QUIET_(WINDOW|SEARCH) ' ../quiet-window.txt | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Preserve measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiet-window-${{ github.sha }}
+          path: quiet-window.txt
+          retention-days: 30

@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 const EVENT_QUEUE_CAPACITY: usize = 2_048;
 const EVENT_BATCH_WINDOW: Duration = Duration::from_millis(80);
+const EVENT_QUIET_WINDOW: Duration = Duration::from_millis(20);
 const WRITER_IDLE: Duration = Duration::from_secs(5);
 
 pub struct WorkerHandle {
@@ -159,20 +160,27 @@ fn collect_batch(
     receiver: &mpsc::Receiver<WorkerMessage>,
 ) -> (HashSet<PathBuf>, bool) {
     let deadline = Instant::now() + EVENT_BATCH_WINDOW;
+    let mut quiet_deadline = Instant::now() + EVENT_QUIET_WINDOW;
     let (initial, mut rescan) = match initial {
         WorkerMessage::Paths(paths) => (paths, false),
         WorkerMessage::Rescan(paths) => (paths, true),
     };
     let mut paths = initial.into_iter().collect::<HashSet<_>>();
     loop {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        // Finish early after a quiet gap, but retain the hard 80 ms cap
+        // during a continuous stream of filesystem notifications.
+        let Some(remaining) = deadline.min(quiet_deadline).checked_duration_since(Instant::now()) else {
             return (paths, rescan);
         };
         match receiver.recv_timeout(remaining) {
-            Ok(WorkerMessage::Paths(next)) => paths.extend(next),
+            Ok(WorkerMessage::Paths(next)) => {
+                paths.extend(next);
+                quiet_deadline = Instant::now() + EVENT_QUIET_WINDOW;
+            }
             Ok(WorkerMessage::Rescan(next)) => {
                 paths.extend(next);
                 rescan = true;
+                quiet_deadline = Instant::now() + EVENT_QUIET_WINDOW;
             }
             Err(_) => return (paths, rescan),
         }
@@ -184,6 +192,11 @@ fn enqueue(sender: &mpsc::SyncSender<WorkerMessage>, dirty: &AtomicBool, message
         dirty.store(true, Ordering::Relaxed);
     }
 }
+
+
+#[cfg(test)]
+#[path = "worker_idle_tests.rs"]
+mod idle_tests;
 
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
