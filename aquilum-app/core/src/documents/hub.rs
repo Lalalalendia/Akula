@@ -216,7 +216,7 @@ impl DocumentHub {
         self.with_document(core, path, |key, entry| {
             let entry_path = entry.path.clone();
             let changed =
-                entry.session.revert(version_text, previous_text, SYSTEM_CLIENT, &self.io(core, &entry_path, key));
+                entry.session.revert(version_text, previous_text, SYSTEM_CLIENT, &self.io(core, &entry_path, key))?;
             if changed {
                 announce_change(core, &entry_path, entry.session.version());
                 self.write_entry_as(core, key, entry, source);
