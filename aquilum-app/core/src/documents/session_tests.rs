@@ -10,6 +10,8 @@ struct FakeIo {
     appended: Cell<usize>,
     updates: RefCell<Vec<Vec<u8>>>,
     fail_append: Cell<bool>,
+    fail_remember: Cell<bool>,
+    remembered: Cell<usize>,
     writes: Cell<usize>,
     fail_preserve: Cell<bool>,
     changed_on_next_write: RefCell<Option<String>>,
@@ -87,8 +89,16 @@ impl SessionIo for FakeIo {
         self.point.borrow().clone().map_or(SyncPointLookup::Absent, SyncPointLookup::Found)
     }
 
-    fn remember(&self, point: SyncPoint) {
+    fn remember(&self, point: SyncPoint) -> Result<(), DiskError> {
+        if self.fail_remember.get() {
+            return Err(DiskError::Other {
+                code: "remember_failed",
+                message: "simulated SQLite metadata failure".into(),
+            });
+        }
         *self.point.borrow_mut() = Some(point);
+        self.remembered.set(self.remembered.get() + 1);
+        Ok(())
     }
 }
 
@@ -473,4 +483,106 @@ fn journal_failure_blocks_revert_and_preserves_original_bytes() {
     assert_eq!(session.text(), original);
     assert_eq!(session.version(), version);
     assert_eq!(io.file(), original);
+}
+
+
+#[test]
+fn missing_sync_point_commit_fails_open_without_mutating_the_document() {
+    let io = FakeIo::with_file("on-disk text\n");
+    let stored = replica_with("on-disk text\n");
+    io.fail_remember.set(true);
+    let result = DocumentSession::open(&[stored.clone()], &io);
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "remember_failed", .. })
+    ));
+    assert_eq!(io.file(), "on-disk text\n");
+    assert_eq!(io.appended.get(), 0);
+    assert!(io.point.borrow().is_none());
+    assert_eq!(io.writes.get(), 0);
+
+    io.fail_remember.set(false);
+    let opened = DocumentSession::open(&[stored], &io).unwrap();
+    assert_eq!(opened.text(), "on-disk text\n");
+    assert!(!opened.dirty());
+    assert_eq!(io.point.borrow().as_ref().unwrap().file_hash, hash_of("on-disk text\n"));
+}
+
+#[test]
+fn metadata_failure_after_successful_write_is_retryable_without_duplicate_file_write() {
+    let io = FakeIo::with_file("original\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let before = io.point.borrow().clone();
+    session.replace_text("updated\n", "editor", &io).unwrap();
+    let version = session.version();
+
+    io.fail_remember.set(true);
+    let error = session.write(&io);
+    assert!(matches!(
+        error,
+        Err(SessionError::Disk { code: "remember_failed", .. })
+    ));
+    // Bytes have reached disk but the sync point was NOT acknowledged.
+    assert_eq!(io.file(), "updated\n");
+    assert!(session.dirty());
+    assert_eq!(session.version(), version);
+    assert_eq!(*io.point.borrow(), before);
+    assert_eq!(io.writes.get(), 1);
+
+    // The expected old hash forces a readback/reconcile; the retry records
+    // metadata without another destructive write.
+    io.fail_remember.set(false);
+    session.write(&io).unwrap();
+    assert!(!session.dirty());
+    assert_eq!(io.writes.get(), 1);
+    assert_eq!(io.file(), "updated\n");
+    assert_eq!(io.point.borrow().as_ref().unwrap().file_hash, hash_of("updated\n"));
+}
+
+#[test]
+fn failed_metadata_commit_during_external_reconcile_retries_without_a_second_delta() {
+    let io = FakeIo::with_file("base\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let appended_before = io.appended.get();
+    io.edit_file("external\n");
+    io.fail_remember.set(true);
+
+    assert!(matches!(
+        session.reconcile(&io),
+        Err(SessionError::Disk { code: "remember_failed", .. })
+    ));
+    assert_eq!(io.file(), "external\n");
+    assert_eq!(session.text(), "external\n");
+    assert!(session.dirty());
+    assert_eq!(io.appended.get(), appended_before + 1);
+    assert_eq!(io.point.borrow().as_ref().unwrap().file_hash, hash_of("base\n"));
+
+    io.fail_remember.set(false);
+    session.reconcile(&io).unwrap();
+    assert_eq!(io.appended.get(), appended_before + 1);
+    assert_eq!(session.text(), "external\n");
+    assert!(!session.dirty());
+    assert_eq!(io.point.borrow().as_ref().unwrap().file_hash, hash_of("external\n"));
+}
+
+#[test]
+fn changed_file_after_metadata_failure_must_preserve_conflicting_local_bytes() {
+    let io = FakeIo::with_file("base\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    session.replace_text("local\n", "editor", &io).unwrap();
+    io.fail_remember.set(true);
+    assert!(matches!(
+        session.write(&io),
+        Err(SessionError::Disk { code: "remember_failed", .. })
+    ));
+    assert_eq!(io.file(), "local\n");
+    assert_eq!(io.writes.get(), 1);
+
+    // A different program now edits the disk after our successful file write.
+    io.edit_file("external\n");
+    io.fail_remember.set(false);
+    session.write(&io).unwrap();
+    assert_eq!(io.file(), "external\n");
+    assert_eq!(io.writes.get(), 1);
+    assert!(io.copies.borrow().iter().any(|(_, body)| body.contains("local")));
 }
