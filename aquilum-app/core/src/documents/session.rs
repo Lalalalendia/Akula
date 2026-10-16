@@ -31,7 +31,7 @@ pub trait SessionIo {
     fn write(&self, content: &str, expected_hash: &str) -> Result<String, DiskError>;
     fn text_hash(&self, text: &str) -> String;
     fn preserve(&self, body: &str, report: ConflictReport) -> Result<(), DiskError>;
-    fn append(&self, update: &[u8]);
+    fn append(&self, update: &[u8]) -> Result<(), DiskError>;
     fn sync_point(&self) -> SyncPointLookup;
     fn remember(&self, point: SyncPoint);
 }
@@ -127,10 +127,10 @@ impl DocumentSession {
         match verdict {
             SyncVerdict::InSync => session.remember_snapshot(&snapshot, io),
             SyncVerdict::PublishDocument => session.dirty = true,
-            SyncVerdict::TakeFile => session.take_file(&snapshot, &doc_text, io),
+            SyncVerdict::TakeFile => session.take_file(&snapshot, &doc_text, io)?,
             SyncVerdict::Conflict(cause) => {
                 io.preserve(&doc_text, session.report(cause, &snapshot)).map_err(disk_failure)?;
-                session.take_file(&snapshot, &doc_text, io);
+                session.take_file(&snapshot, &doc_text, io)?;
             }
             SyncVerdict::Merge { base } => session.merge(&snapshot, &base, &doc_text, io)?,
         }
@@ -178,9 +178,17 @@ impl DocumentSession {
             length = length_after(&edits, length);
             batches.push((edits, change.clone()));
         }
-        for (edits, change) in batches {
-            io.append(&self.replica.apply_edits(&edits, client));
-            self.record(client, change);
+        if !batches.is_empty() {
+            // Make ONE atomic journal append for this entire versioned batch.
+            // A failed append leaves the live replica, version and log unchanged.
+            let edits: Vec<Vec<TextEdit>> =
+                batches.iter().map(|(edits, _)| edits.clone()).collect();
+            let update = self.replica.stage_edits(&edits)?;
+            io.append(&update).map_err(disk_failure)?;
+            self.replica.apply_update(&update, client)?;
+            for (_, change) in batches {
+                self.record(client, change);
+            }
             self.dirty = true;
         }
         Ok(true)
@@ -194,12 +202,15 @@ impl DocumentSession {
         Pull::Changes(self.log.iter().skip(skip).cloned().collect())
     }
 
-    pub fn replace_text(&mut self, text: &str, client: &str, io: &impl SessionIo) {
+    pub fn replace_text(&mut self, text: &str, client: &str, io: &impl SessionIo)
+        -> Result<(), SessionError>
+    {
         let current = self.replica.text();
         let edits = merge_external_change(&current, text, &current).edits;
-        if self.apply(&edits, client, io) {
+        if self.apply(&edits, client, io)? {
             self.dirty = true;
         }
+        Ok(())
     }
 
     pub fn revert(
@@ -219,7 +230,7 @@ impl DocumentSession {
             };
             io.preserve(&merged.displaced.join("\n"), report).map_err(disk_failure)?;
         }
-        let changed = self.apply(&merged.edits, client, io);
+        let changed = self.apply(&merged.edits, client, io)?;
         if changed {
             self.dirty = true;
         }
@@ -269,10 +280,13 @@ impl DocumentSession {
         Ok(())
     }
 
-    fn take_file(&mut self, snapshot: &DiskSnapshot, doc_text: &str, io: &impl SessionIo) {
+    fn take_file(&mut self, snapshot: &DiskSnapshot, doc_text: &str, io: &impl SessionIo)
+        -> Result<(), SessionError>
+    {
         let edits = merge_external_change(doc_text, &snapshot.content, doc_text).edits;
-        self.apply(&edits, DISK_CLIENT, io);
+        self.apply(&edits, DISK_CLIENT, io)?;
         self.remember_snapshot(snapshot, io);
+        Ok(())
     }
 
     fn merge(
@@ -292,7 +306,7 @@ impl DocumentSession {
             io.preserve(&merged.displaced.join("\n"), self.report(ConflictCause::Displaced, snapshot))
                 .map_err(disk_failure)?;
         }
-        self.apply(&merged.edits, DISK_CLIENT, io);
+        self.apply(&merged.edits, DISK_CLIENT, io)?;
         self.synced_content = snapshot.content.clone();
         self.synced_hash = snapshot.hash.clone();
         if self.replica.text() == snapshot.content {
@@ -303,14 +317,19 @@ impl DocumentSession {
         Ok(())
     }
 
-    fn apply(&mut self, edits: &[TextEdit], client: &str, io: &impl SessionIo) -> bool {
+    fn apply(&mut self, edits: &[TextEdit], client: &str, io: &impl SessionIo)
+        -> Result<bool, SessionError>
+    {
         if edits.is_empty() {
-            return false;
+            return Ok(false);
         }
         let changes = edits_to_json(edits, self.replica.len());
-        io.append(&self.replica.apply_edits(edits, client));
+        let update = self.replica.stage_edits(&[edits.to_vec()])?;
+        // Store the delta before changing any in-memory user-visible state.
+        io.append(&update).map_err(disk_failure)?;
+        self.replica.apply_update(&update, client)?;
         self.record(client, changes);
-        true
+        Ok(true)
     }
 
     fn record(&mut self, client: &str, changes: Value) {
