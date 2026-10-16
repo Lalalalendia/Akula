@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 const EVENT_QUEUE_CAPACITY: usize = 2_048;
 const EVENT_BATCH_WINDOW: Duration = Duration::from_millis(80);
-const EVENT_QUIET_WINDOW: Duration = Duration::from_millis(20);
+const EVENT_QUIET_WINDOW: Duration = Duration::from_millis(40);
 const WRITER_IDLE: Duration = Duration::from_secs(5);
 
 pub struct WorkerHandle {
