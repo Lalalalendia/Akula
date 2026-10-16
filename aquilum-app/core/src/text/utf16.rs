@@ -1,5 +1,9 @@
 pub fn utf16_len(text: &str) -> usize {
-    text.chars().count() + text.bytes().filter(|&b| b >= 0xF0).count()
+    // Valid UTF-8: every non-continuation byte starts one scalar value;
+    // 4-byte sequences require one additional UTF-16 code unit.
+    text.bytes()
+        .map(|byte| usize::from(byte & 0b1100_0000 != 0b1000_0000) + usize::from(byte >= 0xF0))
+        .sum()
 }
 
 pub fn utf16_seek(text: &str, (mut byte, mut seen): (usize, usize), units: usize) -> (usize, usize) {
@@ -40,6 +44,20 @@ mod tests {
     fn utf16_length_matches_the_encoder_for_every_character_width() {
         let text = "abc кириллица 中文字 😀🎉 𝄞 ё\n".repeat(37);
         for end in (0..=text.len()).filter(|&i| text.is_char_boundary(i)) {
+            assert_eq!(utf16_len(&text[..end]), text[..end].encode_utf16().count());
+        }
+    }
+
+    #[test]
+    fn utf16_length_matches_encoder_across_unicode_planes() {
+        let mut text = String::new();
+        for scalar in (0..=0x10ffff).step_by(113) {
+            if let Some(ch) = char::from_u32(scalar) {
+                text.push(ch);
+            }
+        }
+        assert_eq!(utf16_len(&text), text.encode_utf16().count());
+        for (end, _) in text.char_indices().step_by(97) {
             assert_eq!(utf16_len(&text[..end]), text[..end].encode_utf16().count());
         }
     }
