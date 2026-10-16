@@ -30,7 +30,7 @@ pub fn index_document(
         return Ok(());
     }
     let path_text = path.to_string_lossy();
-    let mut statement = transaction.prepare(
+    let mut statement = transaction.prepare_cached(
         "INSERT INTO note_tasks(path, ordinal, line, done, text) VALUES(?1, ?2, ?3, ?4, ?5)",
     )?;
     for (ordinal, task) in found.iter().enumerate() {

@@ -13,6 +13,8 @@ pub mod index_document;
 #[cfg(test)]
 mod index_tests;
 #[cfg(test)]
+mod sqlite_cache_tests;
+#[cfg(test)]
 mod benches;
 pub mod metadata;
 pub mod models;

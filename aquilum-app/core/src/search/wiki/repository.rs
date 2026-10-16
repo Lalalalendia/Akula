@@ -43,7 +43,7 @@ pub fn index_document(
         "DELETE FROM wiki_links WHERE source_path=?1",
         [path_text.as_ref()],
     )?;
-    let mut statement = transaction.prepare(
+    let mut statement = transaction.prepare_cached(
         "INSERT INTO wiki_links(source_path, target_key, target_kind, byte_offset, offset_utf16)
          VALUES(?1, ?2, ?3, ?4, ?5)",
     )?;
