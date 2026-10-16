@@ -57,7 +57,7 @@ fn quiet_window_retains_rescan_and_unique_file_paths() {
 #[test]
 fn quiet_window_is_strictly_smaller_than_batch_maximum() {
     assert!(EVENT_QUIET_WINDOW < EVENT_BATCH_WINDOW);
-    assert_eq!(EVENT_QUIET_WINDOW, Duration::from_millis(20));
+    assert_eq!(EVENT_QUIET_WINDOW, Duration::from_millis(40));
     assert_eq!(EVENT_BATCH_WINDOW, Duration::from_millis(80));
 }
 
@@ -201,6 +201,8 @@ fn benchmark_quiet_window_stream_patterns() {
         ("dense_5ms", Duration::from_millis(5)),
         ("moderate_15ms", Duration::from_millis(15)),
         ("spaced_30ms", Duration::from_millis(30)),
+        ("spaced_45ms", Duration::from_millis(45)),
+        ("spaced_60ms", Duration::from_millis(60)),
     ] {
         let (old_commits, old_ms, old_sizes) = profile(baseline_collect_batch, gap);
         let (new_commits, new_ms, new_sizes) = profile(collect_batch, gap);
