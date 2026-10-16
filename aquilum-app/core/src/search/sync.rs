@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn orphaned_index_document_is_still_deleted_without_sqlite_metadata() {
-        use tantivy::{doc, Term};
+        use tantivy::doc;
         let directory = tempfile::tempdir().unwrap();
         let vault = directory.path().join("vault");
         fs::create_dir_all(&vault).unwrap();
