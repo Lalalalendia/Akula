@@ -188,7 +188,7 @@ fn flush_prepare_batch(
         return Ok(());
     }
     let writer = ensure_writer(writer, index)?;
-    for (key, probe, file) in prepare_parallel(std::mem::take(batch)) {
+    for (key, probe, file) in prepare_parallel(std::mem::take(batch))? {
         let Some(file) = file else {
             continue;
         };
@@ -198,14 +198,14 @@ fn flush_prepare_batch(
     Ok(())
 }
 
-fn prepare_parallel(batch: Vec<PendingPrepare>) -> Vec<(String, Probe, Option<PreparedFile>)> {
+fn prepare_parallel(batch: Vec<PendingPrepare>) -> Result<Vec<(String, Probe, Option<PreparedFile>)>, SearchError> {
     let workers = thread::available_parallelism()
         .map(|value| value.get())
         .unwrap_or(4)
         .clamp(1, 8)
         .min(batch.len().max(1));
     if batch.len() < 2 || workers == 1 {
-        return batch.into_iter().map(prepare_one).collect();
+        return Ok(batch.into_iter().map(prepare_one).collect());
     }
 
     let chunk_len = batch.len().div_ceil(workers);
@@ -221,11 +221,21 @@ fn prepare_parallel(batch: Vec<PendingPrepare>) -> Vec<(String, Probe, Option<Pr
             .into_iter()
             .map(|chunk| scope.spawn(move || chunk.into_iter().map(prepare_one).collect::<Vec<_>>()))
             .collect();
-        handles
-            .into_iter()
-            .flat_map(|handle| handle.join().unwrap_or_default())
-            .collect()
+        join_worker_results(handles)
     })
+}
+
+fn join_worker_results<T>(
+    handles: Vec<thread::ScopedJoinHandle<'_, Vec<T>>>,
+) -> Result<Vec<T>, SearchError> {
+    let mut output = Vec::new();
+    for handle in handles {
+        let prepared = handle
+            .join()
+            .map_err(|_| SearchError::task("index preparation worker panicked"))?;
+        output.extend(prepared);
+    }
+    Ok(output)
 }
 
 fn prepare_one(item: PendingPrepare) -> (String, Probe, Option<PreparedFile>) {
@@ -287,6 +297,21 @@ mod tests {
     use std::fs;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+
+    #[test]
+    fn a_failed_preparation_worker_is_an_error_not_missing_documents() {
+        let result: Result<Vec<i32>, crate::search::error::SearchError> =
+            std::thread::scope(|scope| {
+                super::join_worker_results(vec![
+                    scope.spawn(|| vec![1, 2]),
+                    scope.spawn(|| -> Vec<i32> { panic!("deliberate worker failure") }),
+                ])
+            });
+        assert!(matches!(
+            result,
+            Err(crate::search::error::SearchError::Task { .. })
+        ));
+    }
 
     #[test]
     fn the_writer_lives_only_while_there_is_something_to_write() {
