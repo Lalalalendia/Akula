@@ -231,7 +231,7 @@ mod tests {
     struct UnboundedOnly(FakeRemoteStore);
 
     impl RemoteStore for UnboundedOnly {
-        fn capabilities(&self) -> super::super::super::ProviderCapabilities {
+        fn capabilities(&self) -> super::super::ProviderCapabilities {
             self.0.capabilities()
         }
         fn list_page(&self, cursor: Option<&str>, limit: usize)
@@ -269,7 +269,7 @@ mod tests {
     struct ChangingRemote(RefCell<FakeRemoteStore>);
 
     impl RemoteStore for ChangingRemote {
-        fn capabilities(&self) -> super::super::super::ProviderCapabilities {
+        fn capabilities(&self) -> super::super::ProviderCapabilities {
             self.0.borrow().capabilities()
         }
         fn list_page(&self, cursor: Option<&str>, limit: usize)
