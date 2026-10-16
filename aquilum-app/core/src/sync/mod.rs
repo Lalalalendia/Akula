@@ -3,6 +3,7 @@
 //! The existing local note history is not the distributed revision graph.
 //! Later stages must use the File Gate for writes and protect dirty editor buffers.
 
+mod core_scan;
 mod dag;
 mod dag_store;
 pub mod fake;
@@ -15,6 +16,7 @@ mod protocol;
 mod provider;
 mod vault;
 
+pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
