@@ -152,3 +152,61 @@ fn benchmark_quiet_window_until_search_visible() {
         values[0].len(),
     );
 }
+
+
+/// A synthetic event stream, not field telemetry: show how often 20 ms
+/// quiet gaps cause additional commits relative to the fixed 80 ms window.
+#[test]
+#[ignore = "same-runner event-spacing tradeoff comparison"]
+fn benchmark_quiet_window_stream_patterns() {
+    use std::thread;
+
+    fn profile(
+        algorithm: fn(WorkerMessage, &mpsc::Receiver<WorkerMessage>) -> (HashSet<PathBuf>, bool),
+        gap: Duration,
+    ) -> (usize, f64, Vec<usize>) {
+        const EVENTS: usize = 8;
+        let (sender, receiver) = mpsc::channel();
+        // Keep the channel alive after the producer finishes: both batching
+        // algorithms must flush at their own deadline, not on disconnection.
+        let kept_alive = sender.clone();
+        let producer = thread::spawn(move || {
+            for n in 0..EVENTS {
+                if n != 0 {
+                    thread::sleep(gap);
+                }
+                sender.send(WorkerMessage::Paths(paths(n, 1))).unwrap();
+            }
+        });
+
+        let start = Instant::now();
+        let mut commits = 0;
+        let mut received = HashSet::new();
+        let mut sizes = Vec::new();
+        while received.len() < EVENTS {
+            let first = receiver.recv().unwrap();
+            let (batch, rescan) = algorithm(first, &receiver);
+            assert!(!rescan);
+            sizes.push(batch.len());
+            received.extend(batch);
+            commits += 1;
+        }
+        producer.join().unwrap();
+        drop(kept_alive);
+        assert_eq!(received.len(), EVENTS);
+        (commits, start.elapsed().as_secs_f64() * 1000.0, sizes)
+    }
+
+    for (name, gap) in [
+        ("dense_5ms", Duration::from_millis(5)),
+        ("moderate_15ms", Duration::from_millis(15)),
+        ("spaced_30ms", Duration::from_millis(30)),
+    ] {
+        let (old_commits, old_ms, old_sizes) = profile(baseline_collect_batch, gap);
+        let (new_commits, new_ms, new_sizes) = profile(collect_batch, gap);
+        println!(
+            "QUIET_STREAM profile={name} gap_ms={} events=8 fixed_commits={old_commits} quiet_commits={new_commits} fixed_total_ms={old_ms:.3} quiet_total_ms={new_ms:.3} fixed_groups={old_sizes:?} quiet_groups={new_sizes:?}",
+            gap.as_millis()
+        );
+    }
+}
