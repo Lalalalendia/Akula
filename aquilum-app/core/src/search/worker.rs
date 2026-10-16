@@ -116,17 +116,22 @@ fn run(
     synchronizer.full_scan(&context.cancelled)?;
     notify_index(context);
     let mut last_write = Instant::now();
+    let mut last_batch_completed: Option<Instant> = None;
 
     while !context.cancelled.load(Ordering::Relaxed) {
         if context.dirty.swap(false, Ordering::Relaxed) {
             synchronizer.full_scan(&context.cancelled)?;
             notify_index(context);
             last_write = Instant::now();
+            last_batch_completed = Some(last_write);
             continue;
         }
         match receiver.recv_timeout(Duration::from_millis(300)) {
             Ok(message) => {
-                let (paths, rescan) = collect_batch(message, &receiver);
+                // After a recently completed batch, use the original full
+                // 80 ms window to avoid a stream of individual commits.
+                let quiet_window = quiet_window_for(last_batch_completed);
+                let (paths, rescan) = collect_batch_with_quiet_window(message, &receiver, quiet_window);
                 if rescan {
                     synchronizer.full_scan(&context.cancelled)?;
                     notify_index(context);
@@ -134,6 +139,7 @@ fn run(
                     notify_index(context);
                 }
                 last_write = Instant::now();
+                last_batch_completed = Some(last_write);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if synchronizer.holds_writer() && last_write.elapsed() >= WRITER_IDLE {
@@ -155,12 +161,31 @@ fn notify_index(context: &WorkerContext) {
     });
 }
 
+/// A quiet isolated event can flush early, but events arriving soon after
+/// a completed batch use the full window to prevent commit amplification.
+fn quiet_window_for(last_batch_completed: Option<Instant>) -> Duration {
+    if last_batch_completed.is_some_and(|at| at.elapsed() < EVENT_BATCH_WINDOW) {
+        EVENT_BATCH_WINDOW
+    } else {
+        EVENT_QUIET_WINDOW
+    }
+}
+
+#[cfg(test)]
 fn collect_batch(
     initial: WorkerMessage,
     receiver: &mpsc::Receiver<WorkerMessage>,
 ) -> (HashSet<PathBuf>, bool) {
+    collect_batch_with_quiet_window(initial, receiver, EVENT_QUIET_WINDOW)
+}
+
+fn collect_batch_with_quiet_window(
+    initial: WorkerMessage,
+    receiver: &mpsc::Receiver<WorkerMessage>,
+    quiet_window: Duration,
+) -> (HashSet<PathBuf>, bool) {
     let deadline = Instant::now() + EVENT_BATCH_WINDOW;
-    let mut quiet_deadline = Instant::now() + EVENT_QUIET_WINDOW;
+    let mut quiet_deadline = Instant::now() + quiet_window;
     let (initial, mut rescan) = match initial {
         WorkerMessage::Paths(paths) => (paths, false),
         WorkerMessage::Rescan(paths) => (paths, true),
@@ -174,12 +199,12 @@ fn collect_batch(
         match receiver.recv_timeout(remaining) {
             Ok(WorkerMessage::Paths(next)) => {
                 paths.extend(next);
-                quiet_deadline = Instant::now() + EVENT_QUIET_WINDOW;
+                quiet_deadline = Instant::now() + quiet_window;
             }
             Ok(WorkerMessage::Rescan(next)) => {
                 paths.extend(next);
                 rescan = true;
-                quiet_deadline = Instant::now() + EVENT_QUIET_WINDOW;
+                quiet_deadline = Instant::now() + quiet_window;
             }
             Err(_) => return (paths, rescan),
         }
