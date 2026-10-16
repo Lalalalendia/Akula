@@ -38,7 +38,7 @@ Recommended layout: `aquilum-app/core/src/sync/{mod,model,identity,journal,revis
 
 The **canonical numbered backlog** is [Tela: Akula sync PR 00–11](https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11). Previous "11 PR (01–11)" and "00–09" are historical ordinals, **not separate implementation backlogs**. Stage labels are not GitHub pull request numbers.
 
-**Actual implementation:** [GitHub PR #22](https://github.com/Lalalalendia/Akula/pull/22), draft, contains a **partial stage 00** implementation (typed IDs, wire, paths, provider/vault traits, FakeRemoteStore and tests). It is not merged, and neither S3 sync nor journaling are implemented. The native application must not expose an unverified Sync UI.
+**Actual implementation:** **Stage 00 merged** via [GitHub PR #22](https://github.com/Lalalalendia/Akula/pull/22), squash commit `6bc25fb796734afc2402842a94ebe25328db1260`, with all configured Actions successful, including default and feature-enabled core tests. This lands only inert Rust contracts, not a working cloud sync engine. **Stage 01a in progress** as [draft PR #29](https://github.com/Lalalalendia/Akula/pull/29), guarding failed conflict preservation; its CI/merge is not yet verified. The native application must not expose an unverified Sync UI.
 
 | Stage | Deliverable | Acceptance gate | Prerequisite |
 | --- | --- | --- | --- |
@@ -83,4 +83,4 @@ The **canonical numbered backlog** is [Tela: Akula sync PR 00–11](https://tela
 
 **D: Cloud editor compatibility and production (10–11).** External plaintext edits, cross-platform release gate.
 
-**Next coding task:** finish **stage 00** in existing [GitHub PR #22](https://github.com/Lalalalendia/Akula/pull/22), verify new CI and review safety before merge; then stage 01 preservation and stage 02 planner/DAG. The roadmap is a design artifact and not evidence of working sync.
+**Next coding task:** validate [PR #29](https://github.com/Lalalalendia/Akula/pull/29) and finish stage 01 append/remember durability separately; stage 02 planner/DAG may proceed in parallel. The roadmap does not claim working cloud sync.
