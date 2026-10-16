@@ -100,3 +100,44 @@ fn garbage_positions_do_not_resolve() {
     replica.apply_edits(&[edit(0, 0, "текст")], "test");
     assert_eq!(replica.resolve_position(&[0xff, 0xff]), None);
 }
+
+
+/// Diagnostic only. Compare staging against an ordinary Yrs edit on the same
+/// document size. Do not use a brittle elapsed-time threshold on shared CI.
+#[test]
+#[ignore]
+fn benchmark_editor_staging() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    for size in [1_024, 16_384, 65_536] {
+        let text = "a".repeat(size);
+        let base = Replica::new();
+        base.apply_edits(&[edit(0, 0, &text)], "setup");
+        let batches = vec![vec![edit(size, size, "x")]];
+        let rounds = if size == 65_536 { 12 } else { 40 };
+        let mut staging_times = Vec::new();
+        for _ in 0..rounds {
+            let start = Instant::now();
+            black_box(base.stage_edits(&batches).expect("stage"));
+            staging_times.push(start.elapsed().as_micros() as u64);
+        }
+
+        let direct = Replica::new();
+        direct.apply_edits(&[edit(0, 0, &text)], "setup");
+        let mut direct_times = Vec::new();
+        for _ in 0..rounds {
+            let start = Instant::now();
+            black_box(direct.apply_edits(&[edit(direct.len(), direct.len(), "x")], "direct"));
+            direct_times.push(start.elapsed().as_micros() as u64);
+        }
+        staging_times.sort_unstable();
+        direct_times.sort_unstable();
+        let staged_us = staging_times[staging_times.len() / 2];
+        let direct_us = direct_times[direct_times.len() / 2];
+        println!(
+            "BENCH-EDITOR size_bytes={size} staging_median_us={staged_us} direct_median_us={direct_us} staging_overhead_x={:.2}",
+            staged_us as f64 / (direct_us.max(1) as f64)
+        );
+    }
+}
