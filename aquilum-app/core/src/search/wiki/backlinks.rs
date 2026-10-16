@@ -90,7 +90,7 @@ pub fn count_sources(
     let own = document.to_string_lossy();
     for row in rows {
         let (source, kind) = row?;
-        if source == own {
+        if source.as_str() == own.as_ref() {
             continue;
         }
         if kind == "name"
