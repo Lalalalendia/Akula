@@ -30,7 +30,13 @@ fn write(core: &Core, path: &PathBuf, text: &crop::Rope, hash: &Mutex<String>) -
         Err(FileCommandError::Conflict { .. }) => {
             let report = ConflictReport { cause: ConflictCause::Diverged, disk_hash: None, synced_hash: Some(expected) };
             let offset = i64::from(chrono::Local::now().offset().local_minus_utc());
-            let Some(copy) = preserve_copy(core, path, &body, report, offset) else { return Outcome::Unsaved };
+            let copy = match preserve_copy(core, path, &body, report, offset) {
+                Ok(Some(copy)) => copy,
+                Ok(None) => return Outcome::Unsaved,
+                Err(error) => {
+                    return Outcome::Failed(format!("conflict copy could not be saved: {error:?}"));
+                }
+            };
             let disk = read(path).ok().map(|loaded| {
                 *hash.lock().unwrap_or_else(PoisonError::into_inner) = loaded.hash;
                 loaded.text
