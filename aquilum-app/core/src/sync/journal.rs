@@ -29,17 +29,29 @@ pub enum JournalAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", content = "revision", rename_all = "snake_case")]
+pub enum RemoteGuard {
+    Absent,
+    Matches(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationIntent {
     pub operation_id: OperationId,
     pub vault_id: VaultId,
     pub document_id: DocumentId,
+    /// Stable profile binding: changing cloud roots/providers needs explicit migration.
+    pub profile_id: String,
     pub revision_id: RevisionId,
     pub action: JournalAction,
     /// Logical vault-relative path; no native absolute paths in the journal.
     pub path: SyncRelativePath,
     /// Opaque provider object ID; never interpreted as a filesystem path.
     pub remote_object_id: String,
+    /// Provider-native atomic compare-and-swap guard or create-if-absent.
+    /// No implicit overwrite without an explicit precondition.
+    pub remote_guard: Option<RemoteGuard>,
     /// BLAKE3 of expected readback bytes, not an S3 ETag.
     pub expected_content_hash: String,
     /// Caller-confirmed previous baseline; None means first sync.
@@ -51,10 +63,21 @@ impl OperationIntent {
         let hash = &self.expected_content_hash;
         if self.remote_object_id.is_empty()
             || self.remote_object_id.chars().any(char::is_control)
+            || self.profile_id.is_empty()
+            || self.profile_id.chars().any(char::is_control)
             || hash.len() != 64
             || !hash.bytes().all(|ch| ch.is_ascii_digit() || (b'a'..=b'f').contains(&ch))
         {
             return Err(JournalError::InvalidIntent);
+        }
+        match (&self.action, &self.remote_guard) {
+            (JournalAction::StageDownload, None) => {}
+            (JournalAction::UploadImmutable, Some(RemoteGuard::Absent)) => {}
+            (JournalAction::PublishHead | JournalAction::PublishTombstone,
+                Some(RemoteGuard::Absent)) => {}
+            (JournalAction::PublishHead | JournalAction::PublishTombstone,
+                Some(RemoteGuard::Matches(revision))) if !revision.is_empty() => {}
+            _ => return Err(JournalError::InvalidIntent),
         }
         Ok(())
     }
@@ -105,6 +128,7 @@ pub struct JournalRecord {
 pub struct ConfirmedBaseline {
     pub vault_id: VaultId,
     pub document_id: DocumentId,
+    pub profile_id: String,
     pub revision_id: RevisionId,
     pub content_hash: String,
     pub operation_id: OperationId,
@@ -137,6 +161,7 @@ pub enum JournalError {
     IntentCollision,
     BusyDocument,
     BaselineChanged,
+    ProfileChanged,
     MissingOperation,
     InvalidTransition,
     ReadbackMismatch,
@@ -231,9 +256,11 @@ impl SqliteSyncJournal {
             }
             return Ok(existing.phase);
         }
-        if load_baseline(&transaction, intent.vault_id, intent.document_id)?
-            .map(|b| b.revision_id) != intent.expected_baseline
-        {
+        let baseline = load_baseline(&transaction, intent.vault_id, intent.document_id)?;
+        if baseline.as_ref().is_some_and(|b| b.profile_id != intent.profile_id) {
+            return Err(JournalError::ProfileChanged);
+        }
+        if baseline.map(|b| b.revision_id) != intent.expected_baseline {
             return Err(JournalError::BaselineChanged);
         }
 
@@ -360,9 +387,11 @@ impl SqliteSyncJournal {
             return Err(JournalError::InvalidTransition);
         }
         let intent = &record.intent;
-        if load_baseline(&transaction, intent.vault_id, intent.document_id)?
-            .map(|b| b.revision_id) != intent.expected_baseline
-        {
+        let baseline = load_baseline(&transaction, intent.vault_id, intent.document_id)?;
+        if baseline.as_ref().is_some_and(|b| b.profile_id != intent.profile_id) {
+            return Err(JournalError::ProfileChanged);
+        }
+        if baseline.map(|b| b.revision_id) != intent.expected_baseline {
             return Err(JournalError::BaselineChanged);
         }
         transaction.execute(
@@ -478,6 +507,7 @@ fn load_baseline(connection: &Connection, vault: VaultId, document: DocumentId)
         return Err(JournalError::CorruptedRecord);
     }
     Ok(Some(ConfirmedBaseline { vault_id: vault, document_id: document,
+        profile_id: recorded.intent.profile_id,
         revision_id, content_hash, operation_id }))
 }
 
@@ -491,10 +521,12 @@ mod tests {
             operation_id: OperationId::new(),
             vault_id: vault,
             document_id: doc,
+            profile_id: "s3-profile-1".into(),
             revision_id: revision,
             action: JournalAction::UploadImmutable,
             path: SyncRelativePath::parse("notes/demo.md").unwrap(),
             remote_object_id: format!("immutable/{}", revision),
+            remote_guard: Some(RemoteGuard::Absent),
             expected_content_hash: blake3::hash(bytes).to_hex().to_string(),
             expected_baseline: parent,
         }
@@ -643,6 +675,30 @@ mod tests {
         assert!(matches!(j.mark_verified(op.operation_id, b"valid", "etag"),
             Err(JournalError::InvalidTransition)));
         assert_eq!(j.get(op.operation_id).unwrap().unwrap().phase, JournalPhase::Pending);
+    }
+
+    #[test]
+    fn implicit_remote_overwrite_and_profile_changes_fail_closed() {
+        let mut j = SqliteSyncJournal::memory().unwrap();
+        let vault = VaultId::new();
+        let document = DocumentId::new();
+        let mut bad = intent(vault, document, RevisionId::new(), None, b"data");
+        bad.remote_guard = None;
+        assert!(matches!(j.begin(bad.clone()), Err(JournalError::InvalidIntent)));
+        bad.remote_guard = Some(RemoteGuard::Matches("etag-1".into()));
+        assert!(matches!(j.begin(bad), Err(JournalError::InvalidIntent)));
+        let mut first = intent(vault, document, RevisionId::new(), None, b"one");
+        first.action = JournalAction::PublishHead;
+        first.remote_guard = Some(RemoteGuard::Matches("etag-1".into()));
+        j.begin(first.clone()).unwrap();
+        j.mark_staged(first.operation_id, b"one").unwrap();
+        j.mark_applied(first.operation_id).unwrap();
+        j.mark_verified(first.operation_id, b"one", "etag-2").unwrap();
+        j.commit(first.operation_id).unwrap();
+        let mut different_profile =
+            intent(vault, document, RevisionId::new(), Some(first.revision_id), b"two");
+        different_profile.profile_id = "google-drive-different-root".into();
+        assert!(matches!(j.begin(different_profile), Err(JournalError::ProfileChanged)));
     }
 
     #[test]
