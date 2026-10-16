@@ -134,7 +134,12 @@ impl RemoteStore for AdversarialRemote {
         }
         let mut bytes = self.inner.borrow().read(key)?;
         if self.fault_active.get() && self.scenario == Scenario::CorruptedRead {
-            bytes.push(0xff);
+            if let Some(first) = bytes.first_mut() {
+                *first ^= 0xff;
+            } else {
+                // Empty payload: a malicious extra byte also violates length.
+                bytes.push(0xff);
+            }
         }
         if self.fault_active.get() && self.scenario == Scenario::ChangedRevisionDuringRead {
             // Same bytes, different opaque revision, between the coordinator's
@@ -242,8 +247,16 @@ fn run_case(size: usize, scenario: Scenario) {
                     ))), "size={size} scenario={case:?} result={result:?}");
                 }
                 Scenario::CorruptedRead | Scenario::CorruptedHeadHash => {
-                    assert!(matches!(result, Err(VerifiedUploadError::ContentMismatch)),
-                        "size={size} scenario={case:?} result={result:?}");
+                    let wrong_length = case == Scenario::CorruptedRead && size == 0;
+                    if wrong_length {
+                        assert!(matches!(result,
+                            Err(VerifiedUploadError::RemoteChangedDuringReadback)),
+                            "size={size} scenario={case:?} result={result:?}");
+                    } else {
+                        assert!(matches!(result,
+                            Err(VerifiedUploadError::ContentMismatch)),
+                            "size={size} scenario={case:?} result={result:?}");
+                    }
                 }
                 Scenario::ChangedRevisionDuringRead => {
                     assert!(matches!(result,
