@@ -1,0 +1,105 @@
+name: Core performance baseline
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/**"
+      - ".github/workflows/core-perf.yml"
+  workflow_dispatch:
+    inputs:
+      documents:
+        description: "Comma-separated deterministic vault sizes (e.g. 1000,5000)"
+        required: false
+        default: "1000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-perf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: core-perf
+
+      - name: Record execution environment
+        run: |
+          echo "REF=${{ github.sha }}" | tee environment.txt
+          echo "RUNNER_OS=$RUNNER_OS" | tee -a environment.txt
+          echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)" | tee -a environment.txt
+          rustc --version | tee -a environment.txt
+          cargo --version | tee -a environment.txt
+
+      - name: Benchmark cold, warm, incremental and deletion indexing
+        working-directory: aquilum-app
+        env:
+          AQUILUM_BENCH_SIZES: ${{ inputs.documents || '1000' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --release -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1 2>&1 | tee ../indexing.txt
+
+      - name: Benchmark search pipeline
+        working-directory: aquilum-app
+        env:
+          AQUILUM_BENCH_SIZES: ${{ inputs.documents || '1000' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --release -p aquilum-core benchmark_search_pipeline -- --ignored --nocapture --test-threads=1 2>&1 | tee ../search.txt
+
+      - name: Benchmark link and metadata pipeline
+        working-directory: aquilum-app
+        env:
+          AQUILUM_BENCH_SIZES: ${{ inputs.documents || '1000' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --release -p aquilum-core benchmark_link_pipeline -- --ignored --nocapture --test-threads=1 2>&1 | tee ../links.txt
+
+      - name: Benchmark SQLite metadata indexing
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --release -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1 2>&1 | tee ../sqlite.txt
+
+      - name: Summarize machine-readable benchmark lines
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Core benchmarks"
+            echo "Commit: \`$GITHUB_SHA\`"
+            echo "Corpus: ${{ inputs.documents || '1000' }} notes"
+            echo ""
+            echo "\`\`\`text"
+            for file in indexing.txt search.txt links.txt sqlite.txt; do
+              if [ -f "$file" ]; then
+                grep -E 'BENCH-(INDEX|SEARCH|LINKS|SQLITE) ' "$file" || true
+              fi
+            done
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-perf-${{ github.sha }}
+          path: |
+            environment.txt
+            indexing.txt
+            search.txt
+            links.txt
+            sqlite.txt
+          retention-days: 30
