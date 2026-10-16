@@ -1,0 +1,126 @@
+name: Reader hyphenation paired benchmark
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/reader/hyphen.rs"
+      - "aquilum-app/native/src/reader/page/text.rs"
+      - ".github/workflows/reader-hyphen-perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare paired versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}"
+          git worktree add --detach "$RUNNER_TEMP/reader-base" "origin/${{ github.base_ref }}"
+          echo "BASE=$(git -C "$RUNNER_TEMP/reader-base" rev-parse HEAD)" | tee environment.txt
+          echo "HEAD=$(git rev-parse HEAD)" | tee -a environment.txt
+          echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)" | tee -a environment.txt
+          rustc --version | tee -a environment.txt
+
+      - name: Compile identical isolated harness for baseline and PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/reader-bench.rs" <<'RS'
+          #[path = "hyphen.rs"]
+          mod hyphen;
+          use std::hint::black_box;
+          use std::time::Instant;
+          fn main() {
+              let words = [
+                  "государство", "Справедливостью", "приветствие", "совершенствование",
+                  "hyphenation", "internationalization", "encyclopedia", "программирование",
+                  "acknowledgement", "самостоятельность",
+              ];
+              for count in [500usize, 5000usize] {
+                  let corpus = (0..count).map(|i| words[i % words.len()]).collect::<Vec<_>>().join(" ");
+                  let expected = hyphen::breaks(black_box(&corpus)).len();
+                  // Initialize lazy language tables outside the timed region.
+                  for _ in 0..3 { black_box(hyphen::breaks(&corpus)); }
+                  let reps = if count == 500 { 80 } else { 16 };
+                  let mut samples = Vec::new();
+                  for _ in 0..7 {
+                      let before = Instant::now();
+                      for _ in 0..reps {
+                          black_box(hyphen::breaks(black_box(&corpus)));
+                      }
+                      samples.push(before.elapsed().as_secs_f64() * 1000.0 / reps as f64);
+                  }
+                  samples.sort_by(|a, b| a.total_cmp(b));
+                  println!("BENCH-HYPHEN words={count} breaks={expected} median_ms={:.6}", samples[3]);
+              }
+          }
+          RS
+          for name in base head; do
+            if [ "$name" = base ]; then dir="$RUNNER_TEMP/reader-base"; else dir="$GITHUB_WORKSPACE"; fi
+            cp "$RUNNER_TEMP/reader-bench.rs" "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs"
+            rustc -O --edition=2024 "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs" -o "$RUNNER_TEMP/bench-$name" -Awarnings
+            rm "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs"
+            rustc --test -O --edition=2024 "$dir/aquilum-app/native/src/reader/hyphen.rs" -o "$RUNNER_TEMP/tests-$name"
+          done
+
+      - name: Check correctness and benchmark ABBA on same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/tests-base"
+          "$RUNNER_TEMP/tests-head"
+          "$RUNNER_TEMP/bench-base" | tee base-1.txt
+          "$RUNNER_TEMP/bench-head" | tee head-1.txt
+          "$RUNNER_TEMP/bench-head" | tee head-2.txt
+          "$RUNNER_TEMP/bench-base" | tee base-2.txt
+
+      - name: Summarize paired speed and keep raw evidence
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, statistics, os
+          rows = ["## Same-runner reader hyphenation benchmark", "", "| Words | Base median (ms) | PR median (ms) | Change |", "|---:|---:|---:|---:|"]
+          for count in [500, 5000]:
+              vals = {}
+              for name in ["base", "head"]:
+                  samples = []
+                  for trial in [1, 2]:
+                      p = Path(f"{name}-{trial}.txt")
+                      if not p.exists():
+                          continue
+                      match = re.search(rf"BENCH-HYPHEN words={count} breaks=\d+ median_ms=([0-9.]+)", p.read_text())
+                      if match:
+                          samples.append(float(match.group(1)))
+                  if samples:
+                      vals[name] = statistics.median(samples)
+              if set(vals) == {"base", "head"}:
+                  delta = (vals["head"] / vals["base"] - 1) * 100
+                  rows.append(f"| {count} | {vals['base']:.5f} | {vals['head']:.5f} | {delta:+.1f}% |")
+          rows.append("")
+          rows.append("Isolated hyphenation only; not a chapter-layout or whole-app latency claim.")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("\n".join(rows) + "\n")
+          print("\n".join(rows))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reader-hyphen-paired-${{ github.sha }}
+          path: |
+            environment.txt
+            base-*.txt
+            head-*.txt
+          retention-days: 30
