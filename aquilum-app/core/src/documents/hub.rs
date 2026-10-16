@@ -377,12 +377,22 @@ impl DocumentHub {
         if entry.session.version() != before {
             announce_change(core, &path, entry.session.version());
         }
+        // A failed sync-point persist can follow a successfully written file.
+        // Retry metadata confirmation later; do not report a confirmed save or
+        // blindly overwrite the file without a fresh content-hash check.
+        let retry_metadata = matches!(
+            &result,
+            Err(SessionError::Disk { code: "remember_failed", .. })
+        ) && entry.session.dirty();
         let path_text = path.to_string_lossy().into_owned();
         core.emit(match result {
             Ok(()) => CoreEvent::DocumentSaved(DocumentEvent { path: path_text, version: entry.session.version() }),
             Err(SessionError::Missing) => CoreEvent::DocumentMissing(DocumentEvent { path: path_text, version: 0 }),
             Err(error) => CoreEvent::DocumentSaveFailed(SaveFailed { path: path_text, reason: error.to_string() }),
         });
+        if retry_metadata {
+            self.schedule(key, Duration::from_secs(2));
+        }
     }
 
     fn load(&self, key: &str) -> Vec<Vec<u8>> {
