@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use crate::search::analyzer::frontmatter_body;
 use crate::markdown::{fence, list};
 use super::parse::{note_fields, scalar_or_list};
@@ -21,7 +22,13 @@ const SEPARATOR: &str = "::";
 fn inline_pairs(text: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
     for (_, line) in fence::outside(frontmatter_body(text)) {
+        if !line.contains(SEPARATOR) {
+            continue;
+        }
         let line = strip_code_spans(line);
+        if !line.contains(SEPARATOR) {
+            continue;
+        }
         let content = strip_markers(&line);
         if let Some(pair) = whole_line(content) {
             found.push(pair);
@@ -32,7 +39,10 @@ fn inline_pairs(text: &str) -> Vec<(String, String)> {
     found
 }
 
-fn strip_code_spans(line: &str) -> String {
+fn strip_code_spans(line: &str) -> Cow<'_, str> {
+    if !line.contains('`') {
+        return Cow::Borrowed(line);
+    }
     let mut kept = String::with_capacity(line.len());
     let mut inside = false;
     for symbol in line.chars() {
@@ -44,7 +54,7 @@ fn strip_code_spans(line: &str) -> String {
             kept.push(symbol);
         }
     }
-    kept
+    Cow::Owned(kept)
 }
 
 fn strip_markers(line: &str) -> &str {
