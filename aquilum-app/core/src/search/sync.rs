@@ -2,7 +2,7 @@ use super::error::SearchError;
 use super::fields;
 use super::tasks;
 use super::index::SearchIndex;
-use super::index_document::{apply_path, apply_prepared, prepare_file, probe, PreparedFile, Probe};
+use super::index_document::{apply_path, apply_prepared, prepare_file, probe, untracked_missing_path, PreparedFile, Probe};
 use super::metadata::{self, FileState, PathKey};
 use super::paths::{is_hidden, is_markdown, is_visible_entry};
 use super::progress::IndexProgress;
@@ -150,6 +150,12 @@ impl IndexSynchronizer {
         for path in paths {
             if !path.starts_with(&self.root) || !is_markdown(&path) || is_hidden(&self.root, &path)
             {
+                continue;
+            }
+            if untracked_missing_path(&self.index, &transaction, &path)? {
+                // A temporary/deleted note that was never indexed cannot
+                // change search results: avoid allocating a writer or doing
+                // a redundant 10+ ms durable Tantivy commit.
                 continue;
             }
             let writer = ensure_writer(&mut self.writer, &self.index)?;
@@ -311,6 +317,62 @@ mod tests {
             result,
             Err(crate::search::error::SearchError::Task { .. })
         ));
+    }
+
+    #[test]
+    fn deleting_an_untracked_note_does_not_acquire_writer_or_commit() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = directory.path().join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let deleted = vault.join("NeverCreated.md");
+        let index = Arc::new(SearchIndex::open(&directory.path().join("index")).unwrap());
+        let mut synchronizer = IndexSynchronizer::new(
+            vault,
+            Arc::clone(&index),
+            &directory.path().join("documents.sqlite3"),
+            Arc::new(IndexProgress::new(0, 1)),
+        )
+        .unwrap();
+        assert!(!synchronizer.apply_paths(HashSet::from([deleted])).unwrap());
+        assert!(!synchronizer.holds_writer(), "untracked deletion needs no writer");
+        assert_eq!(index.document_count(), 0);
+    }
+
+    #[test]
+    fn orphaned_index_document_is_still_deleted_without_sqlite_metadata() {
+        use tantivy::{doc, Term};
+        let directory = tempfile::tempdir().unwrap();
+        let vault = directory.path().join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let orphan = vault.join("Orphaned.md");
+        let index = Arc::new(SearchIndex::open(&directory.path().join("index")).unwrap());
+
+        // Reproduce a crash between a successful Tantivy commit and the
+        // separate SQLite transaction: the index has an ID not in metadata.
+        let mut writer = index.index.writer_with_num_threads(
+            super::INDEX_THREADS,
+            super::INDEX_MEMORY_BUDGET,
+        ).unwrap();
+        writer.add_document(doc!(
+            index.fields.id => orphan.to_string_lossy().as_ref(),
+            index.fields.path => "Orphaned.md",
+            index.fields.title => "Orphaned",
+            index.fields.body => "orphanedsearchterm",
+        )).unwrap();
+        writer.commit().unwrap();
+        writer.wait_merging_threads().unwrap();
+        index.reload().unwrap();
+        assert_eq!(index.document_count(), 1);
+
+        let mut synchronizer = IndexSynchronizer::new(
+            vault,
+            Arc::clone(&index),
+            &directory.path().join("documents.sqlite3"),
+            Arc::new(IndexProgress::new(0, 1)),
+        ).unwrap();
+        assert!(synchronizer.apply_paths(HashSet::from([orphan])).unwrap());
+        assert_eq!(index.document_count(), 0, "stale Tantivy doc must be deleted");
+        assert!(synchronizer.holds_writer());
     }
 
     #[test]
