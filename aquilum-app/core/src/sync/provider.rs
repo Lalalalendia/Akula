@@ -77,6 +77,10 @@ pub enum RemoteStoreError {
     InvalidCursor,
     ListingChanged,
     IncompleteListing,
+    UnverifiableListing,
+    DuplicateRemoteObject,
+    InvalidListing,
+    PageLimitExceeded,
     PreconditionFailed,
     PreconditionUnsupported,
     /// Write may have happened despite a lost/failed response: MUST read back.
@@ -87,6 +91,76 @@ pub enum RemoteStoreError {
 /// The provider is an exchange service, not a deletion authority. In particular,
 /// all mutations require explicit preconditions; backends that cannot provide an
 /// atomic guard must reject them, not silently degrade to last-write-wins.
+/// A fully collected, internally consistent remote object listing. Its presence
+/// is not proof that a deletion is authorized: the planner still checks the
+/// confirmed baseline, explicit tombstones and device policies.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteSnapshot {
+    pub snapshot_id: String,
+    pub objects: Vec<RemoteObject>,
+}
+
+/// Collect only a provider-verified, stable snapshot. A missing continuation
+/// token does NOT prove completion. Do not interpret any error here as a
+/// legitimate empty directory or as permission to delete local files.
+pub fn collect_verified_listing(
+    remote: &dyn RemoteStore,
+    page_limit: usize,
+    max_pages: usize,
+) -> Result<RemoteSnapshot, RemoteStoreError> {
+    use std::collections::BTreeSet;
+
+    if page_limit == 0 || max_pages == 0 {
+        return Err(RemoteStoreError::InvalidCursor);
+    }
+    if !remote.capabilities().snapshot_consistency {
+        return Err(RemoteStoreError::UnverifiableListing);
+    }
+
+    let mut snapshot_id: Option<String> = None;
+    let mut cursor: Option<String> = None;
+    let mut seen_cursors = BTreeSet::new();
+    let mut seen_objects = BTreeSet::new();
+    let mut objects = Vec::new();
+    for _ in 0..max_pages {
+        let page = remote.list_page(cursor.as_deref(), page_limit)?;
+        if page.snapshot_id.is_empty() || page.objects.len() > page_limit {
+            return Err(RemoteStoreError::InvalidListing);
+        }
+        if let Some(expected) = &snapshot_id {
+            if expected != &page.snapshot_id {
+                return Err(RemoteStoreError::ListingChanged);
+            }
+        } else {
+            snapshot_id = Some(page.snapshot_id.clone());
+        }
+        for object in page.objects {
+            if object.id.is_empty() || object.revision.is_empty() {
+                return Err(RemoteStoreError::InvalidListing);
+            }
+            if !seen_objects.insert(object.id.clone()) {
+                return Err(RemoteStoreError::DuplicateRemoteObject);
+            }
+            objects.push(object);
+        }
+        match (page.complete, page.next_cursor) {
+            (true, None) => return Ok(RemoteSnapshot {
+                snapshot_id: snapshot_id.unwrap_or_default(),
+                objects,
+            }),
+            (true, Some(_)) => return Err(RemoteStoreError::InvalidListing),
+            (false, None) => return Err(RemoteStoreError::IncompleteListing),
+            (false, Some(next)) => {
+                if next.is_empty() || !seen_cursors.insert(next.clone()) {
+                    return Err(RemoteStoreError::InvalidCursor);
+                }
+                cursor = Some(next);
+            }
+        }
+    }
+    Err(RemoteStoreError::PageLimitExceeded)
+}
+
 pub trait RemoteStore {
     fn capabilities(&self) -> ProviderCapabilities;
     fn list_page(
