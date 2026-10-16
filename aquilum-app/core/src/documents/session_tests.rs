@@ -340,3 +340,25 @@ fn failed_preservation_cancels_revert_before_changing_the_replica() {
     assert_eq!(session.version(), version);
     assert_eq!(io.writes.get(), 0);
 }
+
+
+#[test]
+fn failed_preservation_blocks_an_overlapping_external_merge() {
+    let io = FakeIo::with_file("one\ntwo\nthree\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    session.replace_text("one\ntwo typed locally\nthree\n", "editor", &io);
+    let original = session.text();
+    let version = session.version();
+
+    io.edit_file("one\ntwo updated externally\nthree\n");
+    io.fail_preserve.set(true);
+    assert!(matches!(
+        session.reconcile(&io),
+        Err(SessionError::Disk { code: "preservation_failed", .. })
+    ));
+    assert_eq!(session.text(), original);
+    assert_eq!(session.version(), version);
+    assert!(session.dirty());
+    assert_eq!(io.file(), "one\ntwo updated externally\nthree\n");
+    assert!(io.copies.borrow().is_empty());
+}
