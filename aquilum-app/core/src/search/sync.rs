@@ -376,6 +376,69 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "run in untracked deletion performance workflow"]
+    fn benchmark_untracked_missing_paths() {
+        use crate::search::benches::support::open_bench_index;
+        use crate::search::index_document::apply_path;
+        use crate::search::metadata;
+        use std::time::Instant;
+
+        let mut bench = open_bench_index(512);
+        bench.synchronizer.full_scan(&bench.cancelled).unwrap();
+        bench.synchronizer.release_writer().unwrap();
+        let mut samples = [Vec::<f64>::new(), Vec::<f64>::new()];
+
+        // Old operation (delete+commit) vs proven absent-path fast path,
+        // A-B-B-A on the same populated disk-backed index.
+        for (order, old_behavior) in [true, false, false, true].into_iter().enumerate() {
+            if old_behavior {
+                let mut writer = bench.search_index.index.writer_with_num_threads(
+                    super::INDEX_THREADS, super::INDEX_MEMORY_BUDGET,
+                ).unwrap();
+                let mut connection = metadata::open(&bench.metadata).unwrap();
+                for step in 0..9 {
+                    let path = bench.vault.join(format!("not-indexed-{order}-{step}.md"));
+                    let transaction = connection.transaction().unwrap();
+                    let started = Instant::now();
+                    assert!(apply_path(
+                        &bench.vault, &bench.search_index, &writer, &transaction, &path,
+                    ).unwrap());
+                    writer.commit().unwrap();
+                    bench.search_index.reload().unwrap();
+                    transaction.commit().unwrap();
+                    metadata::maintain(&connection).unwrap();
+                    assert_eq!(bench.search_index.document_count(), 512);
+                    if step >= 2 {
+                        samples[0].push(started.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
+                writer.wait_merging_threads().unwrap();
+            } else {
+                for step in 0..9 {
+                    let path = bench.vault.join(format!("not-indexed-{order}-{step}.md"));
+                    let started = Instant::now();
+                    assert!(!bench.synchronizer.apply_paths(HashSet::from([path])).unwrap());
+                    assert!(!bench.synchronizer.holds_writer());
+                    assert_eq!(bench.search_index.document_count(), 512);
+                    if step >= 2 {
+                        samples[1].push(started.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
+            }
+        }
+        for sample in &mut samples {
+            sample.sort_by(f64::total_cmp);
+        }
+        let old_ms = samples[0][samples[0].len() / 2];
+        let new_ms = samples[1][samples[1].len() / 2];
+        println!(
+            "UNTRACKED_DELETE_PERF documents=512 baseline_median_ms={old_ms:.3} patched_median_ms={new_ms:.3} ratio={:.2} samples_each={}",
+            old_ms / new_ms,
+            samples[0].len(),
+        );
+    }
+
+    #[test]
     fn the_writer_lives_only_while_there_is_something_to_write() {
         let directory = tempfile::tempdir().unwrap();
         let vault = crate::search::paths::canonical_path(directory.path()).join("vault");
