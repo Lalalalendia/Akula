@@ -29,7 +29,7 @@ fn names_the_copy_with_a_readable_stamp() {
 
 #[test]
 fn creates_nothing_for_text_that_carries_nothing() {
-    assert!(copy_content("D:/База/Идея.md", "Идея", &report(ConflictCause::Diverged), &moment(), "   \n\n").is_none());
+    assert!(copy_content("D:/База/Идея.md", "Идея", &report(ConflictCause::Diverged), &moment(), "").is_none());
 }
 
 #[test]
@@ -73,4 +73,18 @@ fn leaves_out_a_fingerprint_it_was_not_given() {
     let bare = ConflictReport { cause: ConflictCause::Diverged, disk_hash: None, synced_hash: None };
     let content = copy_content("p", "Идея", &bare, &moment(), "текст").expect("copy");
     assert!(!content.contains("Отпечаток"));
+}
+
+
+#[test]
+fn whitespace_only_user_input_is_preserved_byte_for_byte() {
+    let original = "   \n\n";
+    let content = copy_content(
+        "D:/База/Идея.md",
+        "Идея",
+        &report(ConflictCause::Diverged),
+        &moment(),
+        original,
+    ).expect("non-empty bytes require preservation");
+    assert_eq!(body(&content), original);
 }
