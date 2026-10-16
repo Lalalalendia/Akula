@@ -1,0 +1,37 @@
+name: Akula performance experiment
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/**"
+      - ".github/workflows/perf-bench.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Release-mode reproducible corpus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: argon-bench
+      - name: Measure benchmark paths (not cargo compilation)
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -o pipefail
+          cargo test --release --locked -p aquilum-core bench_ -- --ignored --nocapture --test-threads=1 2>&1 | tee ../perf-results.txt
+          grep '^PERF_RESULT ' ../perf-results.txt
+      - name: Upload measurements and runner details
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-perf-${{ github.sha }}
+          path: perf-results.txt
+          retention-days: 30
