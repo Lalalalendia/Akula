@@ -59,6 +59,16 @@ The original SQLite control (44.773 ms) and optimized (15.915 ms) were run on **
 
 These are separately timed median sub-operations, not an additive breakdown of a specific full user save. In `search/worker.rs`, filesystem events are already coalesced over **80 ms**, and the Tantivy writer is released after **5 seconds** idle. Do not add a second debounce or defer index freshness without first measuring user-visible behavior; investigate Tantivy commit cost and the trade-offs of repeated versus batched commits.
 
+## Tantivy commit follow-up (2026-10-17)
+
+The initial save benchmark used Tantivy's default writer while production uses `writer_with_num_threads(2, 40 MB)`. That discrepancy is corrected in [PR #21](https://github.com/Lalalalendia/Akula/pull/21), **merged** (no runtime behavior change).
+
+- [Production-writer benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38955964260), AMD EPYC 7763: `tantivy_commit_ms=11.91`, including `prepare_commit` segment flush **9.66 ms** and final durable `PreparedCommit::commit` **2.07 ms**; reload **0.64 ms**. These phase medians are measured individually and need not sum exactly.
+- [Thread-count ABBA experiment](https://github.com/Lalalalendia/Akula/actions/runs/38955409107), [PR #20](https://github.com/Lalalalendia/Akula/pull/20), **closed without merge**: two-thread commits 11.800/11.613 ms versus one-thread 11.472/12.267 ms, with search visibility checked after every commit. No consistent win from changing the production writer thread count.
+- [PR #23](https://github.com/Lalalalendia/Akula/pull/23), **under correctness review**: avoid a needless Tantivy commit only for deleted `.md` files absent from **both** metadata and the live index, while retaining orphan cleanup. [Same-runner benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38957006845) for never-indexed deletion events on a populated 512-note index: previous behavior **0.869 ms**, patched path **0.014 ms** per event (median, ABBA). This does **not** speed up real document commits; full workspace CI and compatibility with latest main remain merge gates.
+
+Future Tantivy work should focus on measuring the **segment preparation/flush phase**, since it dominates real replacement commits. Do not suppress or defer commits for indexed document edits merely to improve a benchmark: immediately searchable results and crash durability remain required.
+
 ## Benchmark commands
 
 From `aquilum-app`:
