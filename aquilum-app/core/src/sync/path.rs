@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SyncPathError {
@@ -13,6 +15,26 @@ pub enum SyncPathError {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SyncRelativePath(String);
+
+// Incoming wire paths must pass the same portability checks as local paths.
+impl Serialize for SyncRelativePath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for SyncRelativePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let source = String::deserialize(deserializer)?;
+        Self::parse(&source).map_err(|error| serde::de::Error::custom(format!("{error:?}")))
+    }
+}
 
 impl SyncRelativePath {
     pub fn parse(input: &str) -> Result<Self, SyncPathError> {
@@ -112,6 +134,20 @@ mod tests {
         for invalid in ["CON", "aux.txt", "com1.md", "LPT9", "NUL.tmp"] {
             assert_eq!(SyncRelativePath::parse(invalid), Err(SyncPathError::ReservedName));
         }
+    }
+
+    #[test]
+    fn a_wire_path_is_validated_and_normalized_on_decode() {
+        let canonical: SyncRelativePath =
+            serde_json::from_str(r#""notes/caf\\u00e9.md""#).unwrap();
+        assert_eq!(canonical.as_str(), "notes/caf\u{e9}.md");
+        for invalid in [r#""../outside.md""#, r#""CON.md""#, r#""C:/folder.md""#] {
+            assert!(serde_json::from_str::<SyncRelativePath>(invalid).is_err());
+        }
+        assert_eq!(
+            serde_json::to_string(&canonical).unwrap(),
+            "\"notes/caf\u{e9}.md\""
+        );
     }
 
     #[test]
