@@ -118,6 +118,15 @@ impl RevisionDag {
             };
         }
 
+        // A parent arriving AFTER a child must still match the logical
+        // document. Otherwise pending cross-document edges could remain
+        // permanently unvalidated after a restart.
+        if self.pending.values().any(|child| {
+            child.parents.contains(&record.id) && child.document_id != record.document_id
+        }) {
+            return Err(DagError::CrossDocumentParent);
+        }
+
         // Validate ancestry that is already known; unresolved records are
         // staged rather than treated as competing legitimate roots.
         for parent_id in &record.parents {
@@ -335,6 +344,27 @@ mod tests {
         dag.ingest(record(root, other, vec![], b"foreign")).unwrap();
         assert_eq!(dag.ingest(record(RevisionId::new(), doc, vec![root], b"wrong doc")),
             Err(DagError::CrossDocumentParent));
+    }
+
+    #[test]
+    fn a_parent_arriving_late_cannot_link_a_pending_child_from_another_document() {
+        let mut dag = RevisionDag::new();
+        let doc_a = DocumentId::new();
+        let doc_b = DocumentId::new();
+        let parent = RevisionId::new();
+        let child = RevisionId::new();
+        assert_eq!(
+            dag.ingest(record(child, doc_a, vec![parent], b"child")),
+            Ok(IngestOutcome::Pending)
+        );
+        assert_eq!(
+            dag.ingest(record(parent, doc_b, vec![], b"foreign parent")),
+            Err(DagError::CrossDocumentParent)
+        );
+        assert_eq!(dag.active_len(), 0);
+        assert_eq!(dag.pending_len(), 1);
+        assert_eq!(dag.ingest(record(parent, doc_a, vec![], b"valid parent")),
+            Ok(IngestOutcome::Activated(vec![parent, child])));
     }
 
     #[test]

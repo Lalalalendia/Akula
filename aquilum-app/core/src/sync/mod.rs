@@ -4,6 +4,7 @@
 //! Later stages must use the File Gate for writes and protect dirty editor buffers.
 
 mod dag;
+mod dag_store;
 pub mod fake;
 mod identity;
 mod planner;
@@ -13,6 +14,7 @@ mod provider;
 mod vault;
 
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
+pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
 pub use planner::{
     plan_snapshot, HoldReason, ObservedObject, PlannedAction, SafetyPolicy, SnapshotDiff,
