@@ -19,8 +19,8 @@ pub use protocol::{
 
 pub use fake::FakeRemoteStore;
 pub use provider::{
-    ProviderCapabilities, RemoteObject, RemotePage, RemotePrecondition, RemoteStore,
-    RemoteStoreError, RemoteWriteReceipt,
+    collect_verified_listing, ProviderCapabilities, RemoteObject, RemotePage, RemotePrecondition,
+    RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
