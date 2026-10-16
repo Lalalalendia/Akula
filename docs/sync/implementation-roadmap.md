@@ -1,6 +1,6 @@
 # Akula sync implementation roadmap
 
-**Status:** proposed plan, NOT implemented. **2026-10-16.** The feature must be built into Akula, NOT distributed through a plugin store.
+**Status (2026-10-17):** staged implementation. **Merged:** stage 00 ([PR #22](https://github.com/Lalalalendia/Akula/pull/22)), stage 01a ([PR #29](https://github.com/Lalalalendia/Akula/pull/29)), stage 02a ([PR #30](https://github.com/Lalalalendia/Akula/pull/30)). **Draft / CI:** stage 01b ([PR #31](https://github.com/Lalalalendia/Akula/pull/31)). No working cloud sync, no native Sync UI. Feature must remain built into Akula, NOT a plugin marketplace.
 
 **Full architecture + diagrams (Tela):** [Sync architecture](https://telawiki.com/spaces/456/pages/7463), [immutable per-document revision RFC](https://telawiki.com/spaces/456/pages/7465/git-rfc), [canonical PR 00–11 plan](https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11) and [historical product/crypto plan](https://telawiki.com/spaces/456/pages/7469/11-pr). [Notion research](https://app.notion.com/p/3fb32a84beec81c1b561db8ad0b19df6). [Source review](obsidian-plugin-research-and-architecture.md).
 
@@ -38,7 +38,7 @@ Recommended layout: `aquilum-app/core/src/sync/{mod,model,identity,journal,revis
 
 The **canonical numbered backlog** is [Tela: Akula sync PR 00–11](https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11). Previous "11 PR (01–11)" and "00–09" are historical ordinals, **not separate implementation backlogs**. Stage labels are not GitHub pull request numbers.
 
-**Actual implementation:** **Stage 00 merged** via [GitHub PR #22](https://github.com/Lalalalendia/Akula/pull/22), squash commit `6bc25fb796734afc2402842a94ebe25328db1260`, with all configured Actions successful, including default and feature-enabled core tests. This lands only inert Rust contracts, not a working cloud sync engine. **Stage 01a in progress** as [draft PR #29](https://github.com/Lalalalendia/Akula/pull/29), guarding failed conflict preservation; its CI/merge is not yet verified. The native application must not expose an unverified Sync UI.
+**Actual implementation:** **Stage 00 merged** — [PR #22](https://github.com/Lalalalendia/Akula/pull/22), `6bc25fb796734afc2402842a94ebe25328db1260`. **Stage 01a merged** — fail-closed conflict copies [PR #29](https://github.com/Lalalalendia/Akula/pull/29), `ab5bf72f3b837ded9597b2374e7d2a60b2b89ea9`. **Stage 02a merged** — in-memory DAG and conservative reconciliation planner [PR #30](https://github.com/Lalalalendia/Akula/pull/30), `96a15727628cf76df8c3d796e4ed69d05f690b1c`. **Stage 01b draft** — SQLite append-before-apply [PR #31](https://github.com/Lalalalendia/Akula/pull/31): prior E0597 compiler error fixed; new app/perf tests pending. These are safe kernel slices only: **no working cloud sync**; stages 01 and 02 remain incomplete until journal metadata failure/replay and adversarial DAG acceptance gates. Native app must not expose an unverified Sync UI.
 
 | Stage | Deliverable | Acceptance gate | Prerequisite |
 | --- | --- | --- | --- |
@@ -83,4 +83,4 @@ The **canonical numbered backlog** is [Tela: Akula sync PR 00–11](https://tela
 
 **D: Cloud editor compatibility and production (10–11).** External plaintext edits, cross-platform release gate.
 
-**Next coding task:** validate [PR #29](https://github.com/Lalalalendia/Akula/pull/29) and finish stage 01 append/remember durability separately; stage 02 planner/DAG may proceed in parallel. The roadmap does not claim working cloud sync.
+**Next coding task:** validate [stage 01b PR #31](https://github.com/Lalalalendia/Akula/pull/31) including typing latency, implement stage 01c failure-propagating `remember`, complete stage 02b storage/replay and only then start stage 03 SQLite WAL sync journal. No feature toggle should expose partial sync.
