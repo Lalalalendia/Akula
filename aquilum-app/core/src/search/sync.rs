@@ -2,7 +2,7 @@ use super::error::SearchError;
 use super::fields;
 use super::tasks;
 use super::index::SearchIndex;
-use super::index_document::{apply_path, apply_prepared, prepare_file, probe, PreparedFile, Probe};
+use super::index_document::{apply_path, apply_prepared, prepare_file, probe, untracked_missing_path, PreparedFile, Probe};
 use super::metadata::{self, FileState, PathKey};
 use super::paths::{is_hidden, is_markdown, is_visible_entry};
 use super::progress::IndexProgress;
@@ -150,6 +150,12 @@ impl IndexSynchronizer {
         for path in paths {
             if !path.starts_with(&self.root) || !is_markdown(&path) || is_hidden(&self.root, &path)
             {
+                continue;
+            }
+            if untracked_missing_path(&self.index, &transaction, &path)? {
+                // A temporary/deleted note that was never indexed cannot
+                // change search results: avoid allocating a writer or doing
+                // a redundant 10+ ms durable Tantivy commit.
                 continue;
             }
             let writer = ensure_writer(&mut self.writer, &self.index)?;
@@ -311,6 +317,125 @@ mod tests {
             result,
             Err(crate::search::error::SearchError::Task { .. })
         ));
+    }
+
+    #[test]
+    fn deleting_an_untracked_note_does_not_acquire_writer_or_commit() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = directory.path().join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let deleted = vault.join("NeverCreated.md");
+        let index = Arc::new(SearchIndex::open(&directory.path().join("index")).unwrap());
+        let mut synchronizer = IndexSynchronizer::new(
+            vault,
+            Arc::clone(&index),
+            &directory.path().join("documents.sqlite3"),
+            Arc::new(IndexProgress::new(0, 1)),
+        )
+        .unwrap();
+        assert!(!synchronizer.apply_paths(HashSet::from([deleted])).unwrap());
+        assert!(!synchronizer.holds_writer(), "untracked deletion needs no writer");
+        assert_eq!(index.document_count(), 0);
+    }
+
+    #[test]
+    fn orphaned_index_document_is_still_deleted_without_sqlite_metadata() {
+        use tantivy::doc;
+        let directory = tempfile::tempdir().unwrap();
+        let vault = directory.path().join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let orphan = vault.join("Orphaned.md");
+        let index = Arc::new(SearchIndex::open(&directory.path().join("index")).unwrap());
+
+        // Reproduce a crash between a successful Tantivy commit and the
+        // separate SQLite transaction: the index has an ID not in metadata.
+        let mut writer = index.index.writer_with_num_threads(
+            super::INDEX_THREADS,
+            super::INDEX_MEMORY_BUDGET,
+        ).unwrap();
+        writer.add_document(doc!(
+            index.fields.id => orphan.to_string_lossy().as_ref(),
+            index.fields.path => "Orphaned.md",
+            index.fields.title => "Orphaned",
+            index.fields.body => "orphanedsearchterm",
+        )).unwrap();
+        writer.commit().unwrap();
+        writer.wait_merging_threads().unwrap();
+        index.reload().unwrap();
+        assert_eq!(index.document_count(), 1);
+
+        let mut synchronizer = IndexSynchronizer::new(
+            vault,
+            Arc::clone(&index),
+            &directory.path().join("documents.sqlite3"),
+            Arc::new(IndexProgress::new(0, 1)),
+        ).unwrap();
+        assert!(synchronizer.apply_paths(HashSet::from([orphan])).unwrap());
+        assert_eq!(index.document_count(), 0, "stale Tantivy doc must be deleted");
+        assert!(synchronizer.holds_writer());
+    }
+
+    #[test]
+    #[ignore = "run in untracked deletion performance workflow"]
+    fn benchmark_untracked_missing_paths() {
+        use crate::search::benches::support::open_bench_index;
+        use crate::search::index_document::apply_path;
+        use crate::search::metadata;
+        use std::time::Instant;
+
+        let mut bench = open_bench_index(512);
+        bench.synchronizer.full_scan(&bench.cancelled).unwrap();
+        bench.synchronizer.release_writer().unwrap();
+        let mut samples = [Vec::<f64>::new(), Vec::<f64>::new()];
+
+        // Old operation (delete+commit) vs proven absent-path fast path,
+        // A-B-B-A on the same populated disk-backed index.
+        for (order, old_behavior) in [true, false, false, true].into_iter().enumerate() {
+            if old_behavior {
+                let mut writer = bench.search_index.index.writer_with_num_threads(
+                    super::INDEX_THREADS, super::INDEX_MEMORY_BUDGET,
+                ).unwrap();
+                let mut connection = metadata::open(&bench.metadata).unwrap();
+                for step in 0..9 {
+                    let path = bench.vault.join(format!("not-indexed-{order}-{step}.md"));
+                    let transaction = connection.transaction().unwrap();
+                    let started = Instant::now();
+                    assert!(apply_path(
+                        &bench.vault, &bench.search_index, &writer, &transaction, &path,
+                    ).unwrap());
+                    writer.commit().unwrap();
+                    bench.search_index.reload().unwrap();
+                    transaction.commit().unwrap();
+                    metadata::maintain(&connection).unwrap();
+                    assert_eq!(bench.search_index.document_count(), 512);
+                    if step >= 2 {
+                        samples[0].push(started.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
+                writer.wait_merging_threads().unwrap();
+            } else {
+                for step in 0..9 {
+                    let path = bench.vault.join(format!("not-indexed-{order}-{step}.md"));
+                    let started = Instant::now();
+                    assert!(!bench.synchronizer.apply_paths(HashSet::from([path])).unwrap());
+                    assert!(!bench.synchronizer.holds_writer());
+                    assert_eq!(bench.search_index.document_count(), 512);
+                    if step >= 2 {
+                        samples[1].push(started.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
+            }
+        }
+        for sample in &mut samples {
+            sample.sort_by(f64::total_cmp);
+        }
+        let old_ms = samples[0][samples[0].len() / 2];
+        let new_ms = samples[1][samples[1].len() / 2];
+        println!(
+            "UNTRACKED_DELETE_PERF documents=512 baseline_median_ms={old_ms:.3} patched_median_ms={new_ms:.3} ratio={:.2} samples_each={}",
+            old_ms / new_ms,
+            samples[0].len(),
+        );
     }
 
     #[test]

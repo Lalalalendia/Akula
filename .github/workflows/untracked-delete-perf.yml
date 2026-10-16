@@ -1,0 +1,37 @@
+name: Untracked deletion performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/sync.rs"
+      - "aquilum-app/core/src/search/index_document.rs"
+      - ".github/workflows/untracked-delete-perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: untracked-delete-perf
+      - name: Compare no-op deletion handling on populated index
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-core benchmark_untracked_missing_paths -- --ignored --nocapture --test-threads=1 2>&1 | tee ../untracked-delete.txt
+          grep 'UNTRACKED_DELETE_PERF ' ../untracked-delete.txt | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Preserve raw measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: untracked-delete-${{ github.sha }}
+          path: untracked-delete.txt
+          retention-days: 30

@@ -11,6 +11,9 @@ use rusqlite::{params, Transaction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tantivy::{doc, IndexWriter, Term};
+use tantivy::collector::Count;
+use tantivy::query::TermQuery;
+use tantivy::schema::IndexRecordOption;
 
 pub struct PreparedFile {
     pub path: PathBuf,
@@ -81,6 +84,29 @@ pub fn apply_prepared(
     tasks::index_document(transaction, &prepared.path, &prepared.body)?;
     upsert(transaction, key, &prepared, created)?;
     Ok(true)
+}
+
+/// Ignore a deletion notification only when neither metadata nor the
+/// committed search index contains that path. Checking both keeps recovery
+/// from a partially committed index/SQLite update possible.
+pub fn untracked_missing_path(
+    index: &SearchIndex,
+    transaction: &Transaction<'_>,
+    path: &Path,
+) -> Result<bool, SearchError> {
+    if path.is_file() {
+        return Ok(false);
+    }
+    let key = path.to_string_lossy();
+    if metadata::current(transaction, &key)?.is_some() {
+        return Ok(false);
+    }
+    let query = TermQuery::new(
+        Term::from_field_text(index.fields.id, &key),
+        IndexRecordOption::Basic,
+    );
+    let searcher = index.reader.searcher();
+    Ok(searcher.search(&query, &Count)? == 0)
 }
 
 pub fn apply_path(
