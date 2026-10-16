@@ -1,0 +1,49 @@
+name: Tantivy commit configuration experiment
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/benches/indexing.rs"
+      - ".github/workflows/tantivy-commit-perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Same-runner Tantivy writer comparison
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: tantivy-commit-experiment
+      - name: Capture runner environment
+        shell: bash
+        run: |
+          {
+            echo "COMMIT=$GITHUB_SHA"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            echo "VCPUS=$(nproc)"
+            rustc --version
+            cargo --version
+          } | tee tantivy-environment.txt
+      - name: Compare 1 and 2 Tantivy writer threads in ABBA order
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-core benchmark_tantivy_commit_threads -- --ignored --nocapture --test-threads=1 2>&1 | tee ../tantivy-commit.txt
+          grep 'TANTIVY_COMPARISON ' ../tantivy-commit.txt | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Preserve raw timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tantivy-commit-${{ github.sha }}
+          path: |
+            tantivy-environment.txt
+            tantivy-commit.txt
+          retention-days: 30

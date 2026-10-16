@@ -131,3 +131,99 @@ fn benchmark_save_breakdown() {
     record("save_breakdown", &line);
 }
 
+
+
+/// Compare exact production writer settings (1 vs 2 threads) with the same
+/// disk-backed 512-note index. Commit and reload remain mandatory: a saved
+/// edit must be immediately visible to a new searcher.
+#[test]
+#[ignore = "run in tantivy commit comparison workflow"]
+fn benchmark_tantivy_commit_threads() {
+    use crate::search::query::Request;
+    use crate::search::sync::INDEX_MEMORY_BUDGET;
+    use std::collections::BTreeMap;
+    use tantivy::{doc, Term};
+
+    fn median(mut values: Vec<f64>) -> f64 {
+        values.sort_by(f64::total_cmp);
+        values[values.len() / 2]
+    }
+
+    fn run_case(threads: usize, order: usize) -> (f64, f64) {
+        let mut bench = open_bench_index(512);
+        bench.synchronizer.full_scan(&bench.cancelled).unwrap();
+        bench.synchronizer.release_writer().unwrap();
+
+        let index = &bench.search_index;
+        let mut writer = index
+            .index
+            .writer_with_num_threads(threads, INDEX_MEMORY_BUDGET)
+            .unwrap();
+        let path = bench.vault.join("Note 7.md");
+        let id = path.to_string_lossy().into_owned();
+        let fields = index.fields;
+        let mut commit_times = Vec::new();
+        let mut reload_times = Vec::new();
+
+        // Two warm-up commits followed by ten measured repetitions.
+        // Keep document length constant across all runs.
+        for sample in 0..12 {
+            let marker = format!("uniquesavemarker{order:02}{sample:02}");
+            let body = format!(
+                "# Note 7\n\n{} {marker}\n",
+                "Aquilum performance search context. ".repeat(100)
+            );
+            writer.delete_term(Term::from_field_text(fields.id, &id));
+            writer
+                .add_document(doc!(
+                    fields.id => id.as_str(),
+                    fields.path => "Note 7.md",
+                    fields.title => "Note 7",
+                    fields.body => body.as_str(),
+                ))
+                .unwrap();
+            let started = Instant::now();
+            writer.commit().unwrap();
+            let commit_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let started = Instant::now();
+            index.reload().unwrap();
+            let reload_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+            assert_eq!(index.document_count(), 512, "no duplicate or lost documents");
+            let results = index.search(&Request::new(&marker)).unwrap();
+            assert_eq!(results.results.len(), 1, "latest commit must be searchable");
+            assert!(
+                results.results[0].path.ends_with("Note 7.md"),
+                "search must resolve the updated note"
+            );
+            if sample >= 2 {
+                commit_times.push(commit_ms);
+                reload_times.push(reload_ms);
+            }
+        }
+        let commit = median(commit_times);
+        let reload = median(reload_times);
+        println!(
+            "TANTIVY_THREADS threads={threads} order={order} commit_median_ms={commit:.3} reload_median_ms={reload:.3}"
+        );
+        (commit, reload)
+    }
+
+    let mut commit = BTreeMap::<usize, Vec<f64>>::new();
+    let mut reload = BTreeMap::<usize, Vec<f64>>::new();
+    // ABBA order reduces temporal CPU/noise bias; variants use identical
+    // fixture construction and size on the same runner and disk class.
+    for (order, threads) in [2, 1, 1, 2].into_iter().enumerate() {
+        let (commit_ms, reload_ms) = run_case(threads, order);
+        commit.entry(threads).or_default().push(commit_ms);
+        reload.entry(threads).or_default().push(reload_ms);
+    }
+    let two = median(commit.get(&2).unwrap().clone());
+    let one = median(commit.get(&1).unwrap().clone());
+    println!(
+        "TANTIVY_COMPARISON fixture=512_notes samples_per_variant=20 threads2_commit_ms={two:.3} threads1_commit_ms={one:.3} threads1_vs_2_pct={:.2} threads2_reload_ms={:.3} threads1_reload_ms={:.3}",
+        (one / two - 1.0) * 100.0,
+        median(reload.get(&2).unwrap().clone()),
+        median(reload.get(&1).unwrap().clone()),
+    );
+}
