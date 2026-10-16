@@ -7,6 +7,7 @@ mod dag;
 mod dag_store;
 pub mod fake;
 mod identity;
+mod journal;
 mod planner;
 mod path;
 mod protocol;
@@ -16,6 +17,10 @@ mod vault;
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
+pub use journal::{
+    ConfirmedBaseline, JournalAction, JournalError, JournalPhase, JournalRecord, JournalResult,
+    OperationIntent, RecoveryAction, RecoveryItem, RemoteGuard, SqliteSyncJournal,
+};
 pub use planner::{
     plan_snapshot, HoldReason, ObservedObject, PlannedAction, SafetyPolicy, SnapshotDiff,
 };
