@@ -93,13 +93,12 @@ fn with_tail_joined(mut edits: Vec<TextEdit>, text: &str) -> Vec<TextEdit> {
     edits
 }
 
-pub fn to_char_edits(lines: &[&str], hunks: &[LineHunk]) -> Vec<TextEdit> {
+pub fn to_char_edits(base_text: &str, lines: &[&str], hunks: &[LineHunk]) -> Vec<TextEdit> {
     if hunks.is_empty() {
         return Vec::new();
     }
-    let text = lines.join("\n");
     let mut edits = terminated_edits(&line_offsets(lines), hunks);
     let last = edits.pop().expect("hunks are not empty");
-    edits.push(without_terminator(last, utf16_len(&text)));
-    with_tail_joined(edits, &text)
+    edits.push(without_terminator(last, utf16_len(base_text)));
+    with_tail_joined(edits, base_text)
 }
