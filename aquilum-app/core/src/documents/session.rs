@@ -30,7 +30,7 @@ pub trait SessionIo {
     fn hash(&self) -> Result<String, DiskError>;
     fn write(&self, content: &str, expected_hash: &str) -> Result<String, DiskError>;
     fn text_hash(&self, text: &str) -> String;
-    fn preserve(&self, body: &str, report: ConflictReport);
+    fn preserve(&self, body: &str, report: ConflictReport) -> Result<(), DiskError>;
     fn append(&self, update: &[u8]);
     fn sync_point(&self) -> SyncPointLookup;
     fn remember(&self, point: SyncPoint);
@@ -129,10 +129,10 @@ impl DocumentSession {
             SyncVerdict::PublishDocument => session.dirty = true,
             SyncVerdict::TakeFile => session.take_file(&snapshot, &doc_text, io),
             SyncVerdict::Conflict(cause) => {
-                io.preserve(&doc_text, session.report(cause, &snapshot));
+                io.preserve(&doc_text, session.report(cause, &snapshot)).map_err(disk_failure)?;
                 session.take_file(&snapshot, &doc_text, io);
             }
-            SyncVerdict::Merge { base } => session.merge(&snapshot, &base, &doc_text, io),
+            SyncVerdict::Merge { base } => session.merge(&snapshot, &base, &doc_text, io)?,
         }
         Ok(session)
     }
@@ -202,19 +202,28 @@ impl DocumentSession {
         }
     }
 
-    pub fn revert(&mut self, version_text: &str, previous_text: &str, client: &str, io: &impl SessionIo) -> bool {
+    pub fn revert(
+        &mut self,
+        version_text: &str,
+        previous_text: &str,
+        client: &str,
+        io: &impl SessionIo,
+    ) -> Result<bool, SessionError> {
         let current = self.replica.text();
         let merged = merge_external_change(version_text, previous_text, &current);
         if !merged.displaced.is_empty() {
-            let report = ConflictReport { cause: ConflictCause::Reverted, disk_hash: None, synced_hash: None };
-            io.preserve(&merged.displaced.join("
-"), report);
+            let report = ConflictReport {
+                cause: ConflictCause::Reverted,
+                disk_hash: None,
+                synced_hash: None,
+            };
+            io.preserve(&merged.displaced.join("\n"), report).map_err(disk_failure)?;
         }
         let changed = self.apply(&merged.edits, client, io);
         if changed {
             self.dirty = true;
         }
-        changed
+        Ok(changed)
     }
 
     pub fn reconcile(&mut self, io: &impl SessionIo) -> Result<(), SessionError> {
@@ -228,7 +237,7 @@ impl DocumentSession {
             return Ok(());
         }
         let base = self.synced_content.clone();
-        self.merge(&snapshot, &base, &doc_text, io);
+        self.merge(&snapshot, &base, &doc_text, io)?;
         Ok(())
     }
 
@@ -239,7 +248,7 @@ impl DocumentSession {
             }
             let content = self.replica.text();
             if is_blank(&content) && !is_blank(&self.synced_content) {
-                io.preserve(&self.synced_content, self.truncation_report());
+                io.preserve(&self.synced_content, self.truncation_report()).map_err(disk_failure)?;
             }
             match io.write(&content, &self.synced_hash) {
                 Ok(hash) => {
@@ -266,15 +275,24 @@ impl DocumentSession {
         self.remember_snapshot(snapshot, io);
     }
 
-    fn merge(&mut self, snapshot: &DiskSnapshot, base: &str, doc_text: &str, io: &impl SessionIo) {
+    fn merge(
+        &mut self,
+        snapshot: &DiskSnapshot,
+        base: &str,
+        doc_text: &str,
+        io: &impl SessionIo,
+    ) -> Result<(), SessionError> {
         let merged = merge_external_change(base, &snapshot.content, doc_text);
         if merged.coarse {
             eprintln!("[aquilum:documents] грубое слияние: файл разошёлся с документом больше порога построчного сравнения");
         }
-        self.apply(&merged.edits, DISK_CLIENT, io);
+        // A displaced edit must have a durable protection copy BEFORE it is
+        // removed from the replica by the reconciliation edits.
         if !merged.displaced.is_empty() {
-            io.preserve(&merged.displaced.join("\n"), self.report(ConflictCause::Displaced, snapshot));
+            io.preserve(&merged.displaced.join("\n"), self.report(ConflictCause::Displaced, snapshot))
+                .map_err(disk_failure)?;
         }
+        self.apply(&merged.edits, DISK_CLIENT, io);
         self.synced_content = snapshot.content.clone();
         self.synced_hash = snapshot.hash.clone();
         if self.replica.text() == snapshot.content {
@@ -282,6 +300,7 @@ impl DocumentSession {
         } else {
             self.dirty = true;
         }
+        Ok(())
     }
 
     fn apply(&mut self, edits: &[TextEdit], client: &str, io: &impl SessionIo) -> bool {
