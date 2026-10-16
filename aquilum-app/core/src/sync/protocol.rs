@@ -48,13 +48,15 @@ impl WireEnvelope {
         if self.protocol.major != PROTOCOL_MAJOR {
             return Err(ProtocolError::UnsupportedMajor);
         }
-        let known = BTreeSet::new();
         let mut seen = BTreeSet::new();
         for feature in &self.required_features {
             if !seen.insert(feature.as_str()) {
                 return Err(ProtocolError::DuplicateCriticalFeature);
             }
-            if !known.contains(feature.as_str()) {
+            // v1.0 defines no mandatory protocol extensions.
+            if !feature.is_empty() {
+                return Err(ProtocolError::UnsupportedCriticalFeature(feature.clone()));
+            } else {
                 return Err(ProtocolError::UnsupportedCriticalFeature(feature.clone()));
             }
         }
