@@ -101,7 +101,7 @@ fn native_workspace_watcher_to_search_roundtrip() {
     println!("REAL_WATCHER os={} stage=delete elapsed_ms={:.3}", std::env::consts::OS, deleted.as_secs_f64() * 1_000.0);
     assert!(delivered.load(Ordering::Relaxed) >= 1, "native watcher must deliver at least one event");
     println!(
-        "REAL_WATCHER os={} stage=summary callbacks={} initial_to_cleanup_ms={:.3} durable_commits=true",
+        "REAL_WATCHER os={} stage=summary callbacks={} initial_to_cleanup_ms={:.3} native_notifications=true search_updates_verified=true",
         std::env::consts::OS,
         delivered.load(Ordering::Relaxed),
         started.elapsed().as_secs_f64() * 1_000.0,
