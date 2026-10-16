@@ -7,6 +7,11 @@ license = "AGPL-3.0-only"
 edition = "2021"
 workspace = ".."
 
+[features]
+default = []
+# Only protocol contracts compile in PR 00; no runtime/network/UI is started.
+sync-engine = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
