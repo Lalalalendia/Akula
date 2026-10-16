@@ -57,6 +57,10 @@ jobs:
               cd "$dir/aquilum-app"
               AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
             ) 2>&1 | tee "index-${name}-${sample}.txt"
+            (
+              cd "$dir/aquilum-app"
+              AQUILUM_BENCH_RICH=1 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
+            ) 2>&1 | tee "rich-index-${name}-${sample}.txt"
           }
           measure base "$RUNNER_TEMP/akula-perf-base" 1
           measure head "$GITHUB_WORKSPACE" 1
@@ -80,8 +84,13 @@ jobs:
           for metric, pattern in [
               ("SQLite 512-note metadata (ms)", r"BENCH-SQLITE.*?median_ms=([0-9.]+)"),
               ("Cold indexing 1,000 notes (ms)", r"BENCH-INDEX.*?cold_ms=([0-9.]+)"),
+              ("Rich metadata cold index 1,000 notes (ms)", r"BENCH-INDEX.*?cold_ms=([0-9.]+)"),
           ]:
-              prefix = "sqlite" if metric.startswith("SQLite") else "index"
+              prefix = (
+                  "sqlite" if metric.startswith("SQLite")
+                  else "rich-index" if metric.startswith("Rich metadata")
+                  else "index"
+              )
               samples = {}
               for name in ("base", "head"):
                   values = []
@@ -114,4 +123,5 @@ jobs:
             environment.txt
             sqlite-*.txt
             index-*.txt
+            rich-index-*.txt
           retention-days: 30
