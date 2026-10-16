@@ -95,7 +95,7 @@ pub fn merge_external_change(base: &str, disk: &str, current: &str) -> MergeResu
     let merged: Vec<&str> = merged.iter().map(String::as_str).collect();
 
     MergeResult {
-        edits: to_char_edits(&current_lines, &line_diff(&current_lines, &merged).hunks),
+        edits: to_char_edits(current, &current_lines, &line_diff(&current_lines, &merged).hunks),
         displaced: displaced.into_iter().filter(|line| !line.trim().is_empty()).collect(),
         coarse: disk_diff.coarse || local_diff.coarse,
     }
