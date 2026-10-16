@@ -175,3 +175,79 @@ fn separable_halo_dilation_is_byte_identical_to_scalar_baseline() {
         }
     }
 }
+
+#[test]
+fn assembled_graph_frame_matches_frozen_raster() {
+    // A complete graph-like composition catches blending-order, clipping and
+    // band-crossing differences not exercised by individual disc comparisons.
+    let (width, height) = (321usize, 193usize);
+    let nodes: Vec<Disc> = (0..96u32)
+        .map(|i| {
+            let radius = 1.0 + (i % 13) as f32 * 2.9;
+            // Match the real GraphView rim range: 0..=0.35 of the radius.
+            let rim_share = if radius < 2.5 { 0.0 } else { (1.8 / radius).min(0.35) };
+            Disc {
+                center: [
+                    ((i * 91 + 11) % 360) as f32 - 15.75,
+                    ((i * 57 + 31) % 224) as f32 - 12.25,
+                ],
+                radius,
+                inner: radius * (1.0 - rim_share),
+                body: [29, 185, 220],
+                rim: [210, 45, 80],
+                alpha: if i % 4 == 0 { 0.35 } else { 1.0 },
+            }
+        })
+        .collect();
+    let edges: Vec<Edge> = (0..150u32)
+        .map(|i| Edge {
+            from: [
+                ((i * 43 + 9) % 360) as f32 - 14.0,
+                ((i * 17 + 5) % 220) as f32 - 10.0,
+            ],
+            to: [
+                ((i * 71 + 55) % 360) as f32 - 12.0,
+                ((i * 53 + 40) % 220) as f32 - 11.0,
+            ],
+            color: [90, 105, 110],
+            alpha: 0.16,
+        })
+        .collect();
+    let fill: Vec<u8> = (0..27usize * 9)
+        .map(|i| if i % 3 == 0 || i % 11 == 0 { 255 } else { 0 })
+        .collect();
+    let halo = reference_dilate(&fill, 27, 9);
+    assert_eq!(dilate(&fill, 27, 9), halo);
+    let sprite = Sprite { width: 27, height: 9, fill, halo };
+    let stamps = [
+        Stamp { sprite: &sprite, x: -4, y: 59, fill: [240, 240, 240], halo: [15, 15, 15], alpha: 0.8 },
+        Stamp { sprite: &sprite, x: 125, y: 125, fill: [240, 240, 240], halo: [15, 15, 15], alpha: 0.45 },
+        Stamp { sprite: &sprite, x: 308, y: 185, fill: [240, 240, 240], halo: [15, 15, 15], alpha: 1.0 },
+    ];
+
+    let mut original = vec![0x29; width * height * 4];
+    let mut optimized = original.clone();
+    bands(width, height, &mut original, |band| {
+        for edge in &edges {
+            band.line(edge);
+        }
+        for disc in &nodes {
+            reference_disc(band, disc);
+        }
+        for stamp in &stamps {
+            band.stamp(stamp);
+        }
+    });
+    bands(width, height, &mut optimized, |band| {
+        for edge in &edges {
+            band.line(edge);
+        }
+        for disc in &nodes {
+            band.disc(disc);
+        }
+        for stamp in &stamps {
+            band.stamp(stamp);
+        }
+    });
+    assert_eq!(original, optimized, "graph scene RGBA pixels differ");
+}
