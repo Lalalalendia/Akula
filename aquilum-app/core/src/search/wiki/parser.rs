@@ -17,6 +17,15 @@ struct Found {
 }
 
 pub fn extract(source: &str) -> Vec<WikiLink> {
+    // Most prose-only notes contain no wiki links. Avoid allocating the
+    // Markdown parser's excluded ranges until a link opener is possible.
+    if !source.contains("[[") {
+        return Vec::new();
+    }
+    scan_candidates(source)
+}
+
+fn scan_candidates(source: &str) -> Vec<WikiLink> {
     let excluded = excluded_ranges(source);
     let bytes = source.as_bytes();
     let mut found = Vec::new();
@@ -117,6 +126,51 @@ fn overlaps(left: &Range<usize>, right: &Range<usize>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::extract;
+
+    #[test]
+    fn fast_path_is_identical_to_the_full_markdown_scanner() {
+        for source in [
+            "",
+            "Plain text and *emphasis* with no link opener",
+            "Title [single bracket] and escaped \\[ sequences",
+            "Текст 😀 с UTF-16 символами",
+            "[[Valid]] `[[Ignored]]`",
+            "```md\n[[Hidden]]\n```",
+            "[[unclosed and [[Valid]]",
+        ] {
+            assert_eq!(super::extract(source), super::scan_candidates(source));
+        }
+    }
+
+    #[test]
+    #[ignore = "run explicitly on the wiki parser benchmark workflow"]
+    fn benchmark_no_wikilinks_fast_path() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let prose = (0..2500)
+            .map(|i| format!("## Section {i}\nA prose paragraph with a [markdown label](https://example.invalid/{i}) and no wiki links.\n"))
+            .collect::<String>();
+        assert!(super::extract(&prose).is_empty());
+        let measure = |scanner: fn(&str) -> Vec<super::WikiLink>| {
+            let mut samples = Vec::new();
+            for _ in 0..9 {
+                let start = Instant::now();
+                for _ in 0..8 {
+                    black_box(scanner(black_box(prose.as_str())));
+                }
+                samples.push(start.elapsed().as_secs_f64() * 1_000.0 / 8.0);
+            }
+            samples.sort_by(f64::total_cmp);
+            samples[samples.len() / 2]
+        };
+        let slow = measure(super::scan_candidates);
+        let fast = measure(super::extract);
+        println!(
+            "WIKI_PERF case=no_openers paragraphs=2500 original_median_ms={slow:.4} optimized_median_ms={fast:.4} ratio={:.2}",
+            slow / fast
+        );
+    }
 
     fn targets(source: &str) -> Vec<String> {
         extract(source).into_iter().map(|link| link.target).collect()
