@@ -13,6 +13,7 @@ mod planner;
 mod path;
 mod protocol;
 mod provider;
+mod upload;
 mod vault;
 
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
@@ -37,6 +38,7 @@ pub use provider::{
     collect_verified_listing, ProviderCapabilities, RemoteObject, RemotePage, RemotePrecondition,
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
+pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
     VaultPortError,
