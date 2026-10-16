@@ -27,7 +27,7 @@ jobs:
         run: |
           set -o pipefail
           cargo test --release --locked -p aquilum-core bench_ -- --ignored --nocapture --test-threads=1 2>&1 | tee ../perf-results.txt
-          grep '^PERF_RESULT ' ../perf-results.txt
+          grep 'PERF_RESULT ' ../perf-results.txt
       - name: Upload measurements and runner details
         if: always()
         uses: actions/upload-artifact@v4
