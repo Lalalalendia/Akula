@@ -192,3 +192,79 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "без сообщения".to_owned())
 }
+
+
+#[cfg(test)]
+mod batch_tests {
+    use super::{collect_batch, WorkerMessage, EVENT_BATCH_WINDOW};
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    fn paths(first: usize, count: usize) -> Vec<PathBuf> {
+        (first..first + count)
+            .map(|n| PathBuf::from(format!("/vault/Note-{n:03}.md")))
+            .collect()
+    }
+
+    #[test]
+    fn watcher_batch_deduplicates_paths_and_retains_rescan_request() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(WorkerMessage::Paths(paths(1, 4))).unwrap();
+        sender.send(WorkerMessage::Rescan(paths(2, 4))).unwrap();
+        let (batched, rescan) = collect_batch(WorkerMessage::Paths(paths(0, 4)), &receiver);
+        assert!(rescan, "rescan notification must not be lost");
+        assert_eq!(batched.len(), 6, "deduplicate events by absolute path");
+        for path in paths(0, 6) {
+            assert!(batched.contains(&path));
+        }
+    }
+
+    #[test]
+    fn watcher_batch_without_rescan_deduplicates_repeated_notifications() {
+        let (sender, receiver) = mpsc::channel();
+        for _ in 0..8 {
+            sender.send(WorkerMessage::Paths(paths(0, 4))).unwrap();
+        }
+        let (batched, rescan) = collect_batch(WorkerMessage::Paths(paths(0, 4)), &receiver);
+        assert!(!rescan);
+        assert_eq!(batched.len(), 4);
+    }
+
+    /// Measures event-collection overhead only. Does not invoke Tantivy or
+    /// measure live desktop filesystem-event arrival distributions.
+    #[test]
+    #[ignore = "run via watcher event batch performance workflow"]
+    fn benchmark_event_batch_window() {
+        fn measure(profile: &str, initial: usize, extra_messages: usize, each: usize) {
+            let mut timings = Vec::new();
+            for _ in 0..3 {
+                let (sender, receiver) = mpsc::channel();
+                for i in 0..extra_messages {
+                    sender
+                        .send(WorkerMessage::Paths(paths(i * each, each)))
+                        .unwrap();
+                }
+                let started = Instant::now();
+                let (batched, rescan) =
+                    collect_batch(WorkerMessage::Paths(paths(0, initial)), &receiver);
+                let ms = started.elapsed().as_secs_f64() * 1000.0;
+                let expected = initial.max(extra_messages * each);
+                assert_eq!(batched.len(), expected);
+                assert!(!rescan);
+                timings.push(ms);
+            }
+            timings.sort_by(f64::total_cmp);
+            println!(
+                "EVENT_BATCH profile={profile} initial={initial} enqueued={extra_messages} unique={} configured_window_ms={} median_collect_ms={:.3}",
+                initial.max(extra_messages * each),
+                EVENT_BATCH_WINDOW.as_millis(),
+                timings[1]
+            );
+        }
+
+        measure("one_note", 1, 0, 0);
+        measure("single_message_64_notes", 64, 0, 0);
+        measure("queued_8_messages_of_8_notes", 8, 8, 8);
+    }
+}
