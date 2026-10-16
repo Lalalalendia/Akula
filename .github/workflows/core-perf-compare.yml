@@ -78,8 +78,8 @@ jobs:
               "|---|---:|---:|---:|",
           ]
           for metric, pattern in [
-              ("SQLite 512-note metadata (ms)", r"BENCH-SQLITE[^\\n]*median_ms=([0-9.]+)"),
-              ("Cold indexing 1,000 notes (ms)", r"BENCH-INDEX[^\\n]*cold_ms=([0-9.]+)"),
+              ("SQLite 512-note metadata (ms)", r"BENCH-SQLITE.*?median_ms=([0-9.]+)"),
+              ("Cold indexing 1,000 notes (ms)", r"BENCH-INDEX.*?cold_ms=([0-9.]+)"),
           ]:
               prefix = "sqlite" if metric.startswith("SQLite") else "index"
               samples = {}
@@ -100,7 +100,7 @@ jobs:
               "Negative percentages mean less elapsed time. Results are diagnostic; no automatic merge decision.",
               "ABBA order limits machine differences and partially controls warmup effects.",
           ])
-          summary = "\\n".join(output) + "\\n"
+          summary = "\n".join(output) + "\n"
           print(summary)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
               f.write(summary)
