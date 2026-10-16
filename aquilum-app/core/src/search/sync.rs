@@ -2,7 +2,7 @@ use super::error::SearchError;
 use super::fields;
 use super::tasks;
 use super::index::SearchIndex;
-use super::index_document::{apply_path, apply_prepared, prepare_file, probe, PreparedFile, Probe};
+use super::index_document::{apply_path, apply_prepared, prepare_file_with_probe, probe, PreparedFile, Probe};
 use super::metadata::{self, FileState, PathKey};
 use super::paths::{is_hidden, is_markdown, is_visible_entry};
 use super::progress::IndexProgress;
@@ -230,7 +230,7 @@ fn prepare_parallel(batch: Vec<PendingPrepare>) -> Vec<(String, Probe, Option<Pr
 
 fn prepare_one(item: PendingPrepare) -> (String, Probe, Option<PreparedFile>) {
     let PendingPrepare { key, probe, path } = item;
-    let prepared = prepare_file(path, probe.fingerprint);
+    let prepared = prepare_file_with_probe(path, probe);
     (key, probe, prepared)
 }
 
