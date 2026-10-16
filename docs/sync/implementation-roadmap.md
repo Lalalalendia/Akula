@@ -2,7 +2,7 @@
 
 **Status:** proposed plan, NOT implemented. **2026-10-16.** The feature must be built into Akula, NOT distributed through a plugin store.
 
-**Full architecture + diagrams (Tela):** [Sync architecture](https://telawiki.com/spaces/456/pages/7463), [immutable per-document revision RFC](https://telawiki.com/spaces/456/pages/7465/git-rfc), [11-PR implementation plan](https://telawiki.com/spaces/456/pages/7469/11-pr). [Notion research](https://app.notion.com/p/3fb32a84beec81c1b561db8ad0b19df6). [Source review](obsidian-plugin-research-and-architecture.md).
+**Full architecture + diagrams (Tela):** [Sync architecture](https://telawiki.com/spaces/456/pages/7463), [immutable per-document revision RFC](https://telawiki.com/spaces/456/pages/7465/git-rfc), [canonical PR 00–11 plan](https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11) and [historical product/crypto plan](https://telawiki.com/spaces/456/pages/7469/11-pr). [Notion research](https://app.notion.com/p/3fb32a84beec81c1b561db8ad0b19df6). [Source review](obsidian-plugin-research-and-architecture.md).
 
 ## Product contract
 
@@ -34,23 +34,32 @@ User sees only status, progress, retry/pause and meaningful conflict resolution.
 
 Recommended layout: `aquilum-app/core/src/sync/{mod,model,identity,journal,revision,planner,executor,local,crypto,provider}.rs` and `providers/{s3,yandex,google}.rs`.
 
-## Development PR sequence
+## Canonical development sequence — stages PR 00–11
 
-Each PR should be independently testable. The following PR numbers are **planned ordinal labels, not already-created GitHub PRs**.
+The **canonical numbered backlog** is [Tela: Akula sync PR 00–11](https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11). Previous "11 PR (01–11)" and "00–09" are historical ordinals, **not separate implementation backlogs**. Stage labels are not GitHub pull request numbers.
 
-| Step | Deliverable | Acceptance gate | Needs |
+**Actual implementation:** [GitHub PR #22](https://github.com/Lalalalendia/Akula/pull/22), draft, contains a **partial stage 00** implementation (typed IDs, wire, paths, provider/vault traits, FakeRemoteStore and tests). It is not merged, and neither S3 sync nor journaling are implemented. The native application must not expose an unverified Sync UI.
+
+| Stage | Deliverable | Acceptance gate | Prerequisite |
 | --- | --- | --- | --- |
-| **PR 01** | Versioned protocol v1, VaultID/DocID/DeviceID, normalized paths, `SyncConfig` (non-secret) | serde schema roundtrip; reject unsupported version, symlink/traversal/case/Unicode/path collisions | RFC |
-| **PR 02** | SQLite WAL journal, confirmed baseline, pending queue, crash recovery, device identity | restart midway through pending op twice; no deletion/duplication and old local bytes unchanged | 01 |
-| **PR 03** | Immutable content blobs, per-file parent DAG, multiple heads, rename and tombstone | two offline revisions survive upload in either order; merge revision points to both parents | 01–02 |
-| **PR 04** | Deterministic planner + executor + in-memory FakeRemoteStore, Core File Gate integration | two-client tests: concurrent edit, dirty buffer, delete-vs-edit, dropped response, duplicate retry | 02–03 |
-| **PR 05** | Real S3 adapter, MinIO CI, pagination and streamed binaries | MinIO two-device roundtrip and disconnect/restart, no silent last-write-wins | 04 |
-| **PR 06** | Optional encryption envelope + Keychain + password/recovery UX primitives | encrypted blobs **and** metadata; no plaintext credentials; bad passphrase/tamper/nonce tests | 03–05 |
-| **PR 07** | Built-in Settings → Sync, working S3 onboarding, first-sync preview, status/conflicts | UI user journey completes without CLI, survives restart, supports pause/retry | 05–06 |
-| **PR 08** | Yandex Disk OAuth and paginated REST provider | real sandbox two-client E2E + 401/429/5xx + encrypted mode | 07 |
-| **PR 09** | Google Drive v3 + desktop OAuth PKCE/drive.file + remote stable IDs/changes feed | real sandbox two-client E2E + renames, cursor replay, token refresh, encrypted mode | 07 |
-| **PR 10** | Optional readable unencrypted Markdown mirror and cloud-web edit importer | observed third-party changes imported as separate revision; provider limitations clearly surfaced | 08–09 |
-| **PR 11** | Production readiness: cross-platform, stress, crash, docs, migration/rollback | Windows/macOS/Linux smoke + 2-device/3-provider pass + no data-loss defects | 01–10 |
+| **00** | Protocol IDs/version/path policy; non-secret config; `VaultPort` + `RemoteStore` + capabilities; deterministic fake; disabled-by-default `aquilum-core::sync` | schema/version rejection, Unicode/traversal/collisions, CAS/page/drop-response tests, Rust core/native checks green | ADR |
+| **01** | Fail-closed `SessionIo::preserve/append/remember`, protective copy, Core File Gate regression | preservation failure always blocks overwrite/delete; dirty buffers safe | 00 |
+| **02** | Pure SnapshotDiff planner, object states/SafetyPolicy, **minimal immutable per-document DAG** with parent revisions/heads and tombstones | divergent r1/r2 remain accessible; merge retains parents; delete-vs-edit, missing root, refilter, clock skew | 00 |
+| **03** | SQLite WAL/FULL operation journal, idempotency keys, baseline/receipts, migrations, recovery | kill/restart/lost reply at each state transition; no double destructive op | 01–02 |
+| **04** | Guarded native Core bridge, watcher/rescan, safe binary staging and executor with FakeRemoteStore | 2 independent fake clients, 50+ fault/conflict cases, buffer guard, symlink races, safe copy | 01–03 |
+| **05** | S3/MinIO provider, paging >1000, streaming, conditional mutations where supported | real 2-client MinIO E2E, create/edit/delete/rename/binary, failure readback | 04 |
+| **06** | Optional AEAD encrypted cloud blobs+paths, Argon2id key wrapping, recovery + Keychain | bad passphrase, tamper/truncation/nonce reuse, cross-device unlock, never log secrets | 02–05 |
+| **07** | Built-in Settings → Sync, S3 onboarding/preview, progress/retry/pause, encrypted checkbox | S3 UI beta without CLI; restart, encrypted/plain modes, no public plugin loader | 05–06 |
+| **08** | Yandex Disk OAuth/REST adapter, full pagination, rate-limit resilience | real 2-client OAuth/401/403/404/429/5xx and encrypted-mode E2E | 04, 06–07 |
+| **09** | Google Drive API v3 + OAuth PKCE, stable ID/parent mapping and changes cursor | real 2-client rename/permissions/token-refresh/duplicate-name/encryption tests | 04, 06–07 |
+| **10** | Plaintext Markdown mirror **only if not encrypted** + import of observed external/cloud edits into DAG | cloud/web edits safely imported; never claim unobserved intermediate revisions | 08–09 |
+| **11** | Cross-platform release gate, stress 10k+, large binaries, corruption/crash/recovery/rollback | Windows/macOS/Linux, two clients x all providers, no silent data loss | 00–10 |
+
+**Architecture decision (ADR 0001):** keep the implementation built-in as `aquilum-core::sync`, using explicit host/provider traits; no separate `aquilum-sync` crate or plugin marketplace is required for v1. Revisit extraction only if actual coupling requires it. PR #22 documents the decision in `docs/sync/adr-0001-built-in-sync-contract.md`.
+
+**Safety rule:** an immutable DAG is deliberately **per logical document**, not a full Git implementation. Existing local `HistoryService` remains a distinct facility. Unknown/inaccessible/excluded/placeholder remote entries never imply deletion. For provider APIs lacking atomic CAS, reject unsafe mutation and make weaker guarantees explicit. Remote GC stays disabled until retention/reachability/ack safety is proven.
+
+**Parallelism:** stages 01/02 can proceed separately after 00; Yandex/Google adapters may be developed in parallel after `RemoteStore` and S3 semantics are stable, but they cannot be declared releasable without real end-to-end tests.
 
 ### Implementation and CI rules
 
@@ -66,12 +75,12 @@ Each PR should be independently testable. The following PR numbers are **planned
 
 ## Milestones
 
-**A: foundation (PR 01–04).** Two offline clients safely reconcile branches using only in-memory storage.
+**A: Protocol and safety (00–04).** Inert contracts, confirmed protective copies, immutable per-document DAG, crash recovery and two-client fault tests.
 
-**B: S3 product slice (PR 05–07).** MinIO/S3 works through actual built-in UI, with optional encryption. Internal beta only.
+**B: S3 beta with optional crypto (05–07).** MinIO/S3 provider and native UI; separate encrypted and plaintext acceptance.
 
-**C: three-provider parity (PR 08–09).** Yandex Disk + Google Drive adapters implement the same RemoteStore behavior without provider-specific forks in the planner.
+**C: Yandex/Google parity (08–09).** Provider adapters share the same planner and honor specific weaker guarantees.
 
-**D: external edits and release gate (PR 10–11).** Unencrypted optional cloud compatibility, data integrity and UI acceptance across platforms.
+**D: Cloud editor compatibility and production (10–11).** External plaintext edits, cross-platform release gate.
 
-**First coding task:** PR 01 (Rust sync models + wire format + unit tests). This roadmap and the architectural research are design artifacts, not proof of implemented syncing.
+**Next coding task:** finish **stage 00** in existing [GitHub PR #22](https://github.com/Lalalalendia/Akula/pull/22), verify new CI and review safety before merge; then stage 01 preservation and stage 02 planner/DAG. The roadmap is a design artifact and not evidence of working sync.
