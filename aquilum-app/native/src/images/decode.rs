@@ -49,10 +49,11 @@ fn jpeg(bytes: &[u8], fitted: impl Fn((u32, u32)) -> (u32, u32)) -> Option<Decod
     let info = decoder.info()?;
     let natural = (u32::from(info.width), u32::from(info.height));
     let target = fitted(natural);
-    let (w, h) = decoder.scale(target.0 as u16, target.1 as u16).ok()?;
-    if u32::from(w) == natural.0 {
-        return None;
-    }
+    let (w, h) = if target != natural {
+        decoder.scale(target.0 as u16, target.1 as u16).ok()?
+    } else {
+        (info.width, info.height)
+    };
     let pixels = decoder.decode().ok()?;
     let channels = match decoder.info()?.pixel_format {
         jpeg_decoder::PixelFormat::L8 => 1,
@@ -113,7 +114,11 @@ impl Shrink {
 
     fn push(&mut self, row: &[u8], channels: usize) {
         if (self.columns.len() as u32, self.from_height) == self.to {
-            self.out.extend(row.chunks_exact(channels).flat_map(rgba));
+            if channels == 4 {
+                self.out.extend_from_slice(row);
+            } else {
+                self.out.extend(row.chunks_exact(channels).flat_map(rgba));
+            }
             return;
         }
         for (px, &column) in row.chunks_exact(channels).zip(&self.columns) {
@@ -189,6 +194,31 @@ mod tests {
         let image = image::RgbaImage::from_fn(4, 2, |x, _| if x % 2 == 0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 0, 0]) });
         let decoded = decode(&encode(&image, image::ImageFormat::Png), 2, f64::INFINITY).unwrap();
         assert_eq!(&decoded.pixels[..4], [255, 0, 0, 128]);
+    }
+
+    #[test]
+    fn full_resolution_jpeg_uses_native_decoder_without_losing_dimensions() {
+        let sample = image::RgbaImage::from_fn(64, 48, |x, y| {
+            image::Rgba([(x * 3) as u8, (y * 4) as u8, 80, 255])
+        });
+        let data = encode(&sample, image::ImageFormat::Jpeg);
+        let native = super::jpeg(&data, |natural| natural)
+            .expect("JPEG decoder should support unscaled images");
+        let reference = super::any(&data, |natural| natural)
+            .expect("fallback decoder should support the same image");
+        assert_eq!((native.width, native.height, native.natural), (64, 48, (64, 48)));
+        assert_eq!((reference.width, reference.height, reference.natural), (64, 48, (64, 48)));
+        assert_eq!(native.pixels.len(), reference.pixels.len());
+        assert!(native.pixels.chunks_exact(4).all(|pixel| pixel[3] == 255));
+    }
+
+    #[test]
+    fn native_rgba_scanlines_are_preserved_without_resizing() {
+        let original = [100, 40, 10, 255, 20, 70, 200, 37];
+        let mut shrink = super::Shrink::new((2, 1), (2, 1));
+        shrink.push(&original, 4);
+        let decoded = shrink.finish((2, 1)).unwrap();
+        assert_eq!(decoded.pixels, original);
     }
 
     #[test]
