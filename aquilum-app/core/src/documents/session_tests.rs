@@ -8,6 +8,8 @@ struct FakeIo {
     point: RefCell<Option<SyncPoint>>,
     copies: RefCell<Vec<(ConflictCause, String)>>,
     appended: Cell<usize>,
+    updates: RefCell<Vec<Vec<u8>>>,
+    fail_append: Cell<bool>,
     writes: Cell<usize>,
     fail_preserve: Cell<bool>,
     changed_on_next_write: RefCell<Option<String>>,
@@ -69,8 +71,16 @@ impl SessionIo for FakeIo {
         Ok(())
     }
 
-    fn append(&self, _update: &[u8]) {
+    fn append(&self, update: &[u8]) -> Result<(), DiskError> {
+        if self.fail_append.get() {
+            return Err(DiskError::Other {
+                code: "append_failed",
+                message: "simulated SQLite I/O failure".into(),
+            });
+        }
         self.appended.set(self.appended.get() + 1);
+        self.updates.borrow_mut().push(update.to_vec());
+        Ok(())
     }
 
     fn sync_point(&self) -> SyncPointLookup {
@@ -168,7 +178,7 @@ fn pull_returns_what_happened_after_the_given_version() {
     let mut session = DocumentSession::open(&[], &io).expect("open");
     let start = session.version();
     session.push("left", start, &[insert_at(0, "x", 3)], &io).expect("push");
-    session.replace_text("xabc!", SYSTEM_CLIENT, &io);
+    session.replace_text("xabc!", SYSTEM_CLIENT, &io).unwrap();
 
     let Pull::Changes(changes) = session.pull(start) else { panic!("expected changes") };
     assert_eq!(changes.iter().map(|change| change.client.as_str()).collect::<Vec<_>>(), ["left", "system"]);
@@ -220,7 +230,7 @@ fn a_write_conflict_pulls_the_disk_and_writes_both_sides() {
 fn emptying_a_note_keeps_its_previous_text_as_a_copy() {
     let io = FakeIo::with_file("важный текст\n");
     let mut session = DocumentSession::open(&[], &io).expect("open");
-    session.replace_text("", "editor", &io);
+    session.replace_text("", "editor", &io).unwrap();
     session.write(&io).expect("write");
     assert_eq!(io.file(), "");
     assert_eq!(*io.copies.borrow(), vec![(ConflictCause::Truncated, "важный текст\n".to_owned())]);
@@ -230,7 +240,7 @@ fn emptying_a_note_keeps_its_previous_text_as_a_copy() {
 fn a_deleted_note_is_not_resurrected_by_saving() {
     let io = FakeIo::with_file("текст");
     let mut session = DocumentSession::open(&[], &io).expect("open");
-    session.replace_text("текст и ещё", "editor", &io);
+    session.replace_text("текст и ещё", "editor", &io).unwrap();
     *io.file.borrow_mut() = None;
     assert!(matches!(session.write(&io), Err(SessionError::Missing)));
     assert!(io.file.borrow().is_none());
@@ -240,7 +250,7 @@ fn a_deleted_note_is_not_resurrected_by_saving() {
 fn the_sync_point_is_remembered_only_after_a_successful_write() {
     let io = FakeIo::with_file("старое");
     let mut session = DocumentSession::open(&[], &io).expect("open");
-    session.replace_text("новое", "editor", &io);
+    session.replace_text("новое", "editor", &io).unwrap();
     assert_eq!(io.point.borrow().as_ref().map(|point| point.file_hash.clone()), Some(hash_of("старое")));
     session.write(&io).expect("write");
     assert_eq!(io.point.borrow().as_ref().map(|point| point.file_hash.clone()), Some(hash_of("новое")));
@@ -252,7 +262,7 @@ fn every_document_change_is_persisted() {
     let mut session = DocumentSession::open(&[], &io).expect("open");
     let before = io.appended.get();
     session.push("editor", session.version(), &[insert_at(0, "x", 3)], &io).expect("push");
-    session.replace_text("xabcy", "editor", &io);
+    session.replace_text("xabcy", "editor", &io).unwrap();
     assert_eq!(io.appended.get(), before + 2);
 }
 
@@ -298,7 +308,7 @@ fn a_failed_conflict_copy_blocks_open_without_publishing_over_the_document() {
 fn failed_preservation_prevents_destructive_truncation_and_keeps_retry_possible() {
     let io = FakeIo::with_file("important text\n");
     let mut session = DocumentSession::open(&[], &io).unwrap();
-    session.replace_text("", "editor", &io);
+    session.replace_text("", "editor", &io).unwrap();
     io.fail_preserve.set(true);
     let result = session.write(&io);
     assert!(matches!(
@@ -346,7 +356,7 @@ fn failed_preservation_cancels_revert_before_changing_the_replica() {
 fn failed_preservation_blocks_an_overlapping_external_merge() {
     let io = FakeIo::with_file("one\ntwo\nthree\n");
     let mut session = DocumentSession::open(&[], &io).unwrap();
-    session.replace_text("one\ntwo typed locally\nthree\n", "editor", &io);
+    session.replace_text("one\ntwo typed locally\nthree\n", "editor", &io).unwrap();
     let original = session.text();
     let version = session.version();
 
@@ -361,4 +371,106 @@ fn failed_preservation_blocks_an_overlapping_external_merge() {
     assert!(session.dirty());
     assert_eq!(io.file(), "one\ntwo updated externally\nthree\n");
     assert!(io.copies.borrow().is_empty());
+}
+
+
+#[test]
+fn failed_append_rejects_a_push_without_mutating_or_acknowledging_it() {
+    let io = FakeIo::with_file("abc");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let before = session.text();
+    let version = session.version();
+    let state = session.state();
+    let count = io.appended.get();
+    io.fail_append.set(true);
+
+    let result = session.push("editor", version, &[insert_at(3, "d", 3)], &io);
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "append_failed", .. })
+    ));
+    assert_eq!(session.text(), before);
+    assert_eq!(session.version(), version);
+    assert_eq!(session.state(), state);
+    assert!(!session.dirty());
+    assert_eq!(io.appended.get(), count);
+
+    io.fail_append.set(false);
+    assert!(session.push("editor", version, &[insert_at(3, "d", 3)], &io).unwrap());
+    assert_eq!(session.text(), "abcd");
+    assert_eq!(session.version(), version + 1);
+    assert_eq!(io.appended.get(), count + 1);
+}
+
+#[test]
+fn a_batch_is_appended_as_a_single_atomic_update() {
+    let io = FakeIo::with_file("abc");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let before = io.appended.get();
+    let version = session.version();
+    let changes = [insert_at(0, "x", 3), insert_at(4, "y", 4)];
+    session.push("editor", version, &changes, &io).unwrap();
+    assert_eq!(io.appended.get(), before + 1);
+    assert_eq!(session.version(), version + 2);
+    assert_eq!(session.text(), "xabcy");
+
+    let restored = Replica::restore(&io.updates.borrow()).unwrap();
+    assert_eq!(restored.text(), session.text());
+}
+
+#[test]
+fn journal_failure_blocks_replace_text_before_in_memory_mutation() {
+    let io = FakeIo::with_file("the original");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let version = session.version();
+    let state = session.state();
+    io.fail_append.set(true);
+    let result = session.replace_text("unsaved new version", "editor", &io);
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "append_failed", .. })
+    ));
+    assert_eq!(session.text(), "the original");
+    assert_eq!(session.version(), version);
+    assert_eq!(session.state(), state);
+    assert_eq!(io.file(), "the original");
+}
+
+#[test]
+fn journal_failure_blocks_external_reconciliation_without_losing_file_bytes() {
+    let io = FakeIo::with_file("a\nb\nc\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let original = session.text();
+    let version = session.version();
+    io.edit_file("a\nB\nc\n");
+    io.fail_append.set(true);
+    let result = session.reconcile(&io);
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "append_failed", .. })
+    ));
+    assert_eq!(session.text(), original);
+    assert_eq!(session.version(), version);
+    assert_eq!(io.file(), "a\nB\nc\n");
+
+    io.fail_append.set(false);
+    session.reconcile(&io).unwrap();
+    assert_eq!(session.text(), "a\nB\nc\n");
+}
+
+#[test]
+fn journal_failure_blocks_revert_and_preserves_original_bytes() {
+    let io = FakeIo::with_file("one\nlater independent edit\n");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    let original = session.text();
+    let version = session.version();
+    io.fail_append.set(true);
+    let result = session.revert("one\nversion edit\n", "one\nbase\n", SYSTEM_CLIENT, &io);
+    assert!(matches!(
+        result,
+        Err(SessionError::Disk { code: "append_failed", .. })
+    ));
+    assert_eq!(session.text(), original);
+    assert_eq!(session.version(), version);
+    assert_eq!(io.file(), original);
 }
