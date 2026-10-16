@@ -23,14 +23,14 @@ This document tracks measured performance work for the **Lalalalendia/Akula** fo
 | 6 | JPEG/RGBA decode optimization | [PR #12](https://github.com/Lalalalendia/Akula/pull/12), **closed without merge** | Direct JPEG decode was 31% slower on the controlled fixture; isolated RGBA scanline work remains unproven |
 | 7 | Three-way merge / LCS | Extract from PR #2 selectively | Text-edit and UTF-16 correctness, no conflict regressions, statistically credible performance gain |
 | 8 | Damage Tracker / frame allocations | Not started | Real UI frame timings and visual diffs, no dropped redraws |
-| 9 | Clean up exploratory PRs | Mixed [PR #2](https://github.com/Lalalalendia/Akula/pull/2) retained for remaining merge/LCS experiments; [PR #3](https://github.com/Lalalalendia/Akula/pull/3) **closed** | Never merge mixed experiments wholesale |
+| 9 | Clean up exploratory PRs | Mixed [PR #2](https://github.com/Lalalalendia/Akula/pull/2) and control [PR #3](https://github.com/Lalalalendia/Akula/pull/3) both **closed without merge** | Untested merge/LCS tweak remains inspectable in old PR #2; do not mix with separately validated changes |
 
 ## Active and completed benchmark work
 
 - [PR #15](https://github.com/Lalalalendia/Akula/pull/15), **merged**: `AQUILUM_BENCH_RICH=1` generates 32 inline metadata fields, 32 tasks and 32 wiki links per note. The matched-run workflow uses the same rich corpus in both versions only after this PR merged into main.
 - [PR #14](https://github.com/Lalalalendia/Akula/pull/14), **closed without merge**: [paired ABBA test](https://github.com/Lalalalendia/Akula/actions/runs/38950569881), AMD EPYC 7763, normal 1k-note cold scan 460.0 → 474.5 ms (+3.2%), rich 1k-note cold scan 787 → 850 ms (+8.0%). No convincing benefit; overhead of batch-barrier preparation likely dominates, but has not been conclusively profiled.
-- [PR #16](https://github.com/Lalalalendia/Akula/pull/16), **under review**: skip the costly Markdown AST pass for documents without `[[`; [isolated parser benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38950375959) 1.093 → 0.009 ms per 2.5k-paragraph note. This measures only wiki-parsing without links; no whole-index speedup claim.
-- [PR #17](https://github.com/Lalalalendia/Akula/pull/17), **under review**: exercise the pre-existing `benchmark_save_breakdown` via GitHub Actions to profile document updates, Tantivy commit/reload, SQLite commit, metadata maintenance and fsync.
+- [PR #16](https://github.com/Lalalalendia/Akula/pull/16), **merged**: skip the costly Markdown AST pass for documents without `[[`; [isolated parser benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38950375959) 1.093 → 0.009 ms per 2.5k-paragraph note. This measures only wiki-parsing without links; no whole-index speedup claim.
+- [PR #17](https://github.com/Lalalalendia/Akula/pull/17), **merged**: exercise the pre-existing `benchmark_save_breakdown` via GitHub Actions to profile document updates, Tantivy commit/reload, SQLite commit, metadata maintenance and fsync.
 
 
 ## Existing measurements
@@ -47,6 +47,18 @@ The original SQLite control (44.773 ms) and optimized (15.915 ms) were run on **
 - [Paired SQLite PR #7 comparison](https://github.com/Lalalalendia/Akula/actions/runs/38943049194), same AMD EPYC 9V74 in ABBA order: metadata 25.771 ms base versus 26.215 ms patched (+1.7% elapsed time); full indexing 347 ms both versions. **Caching was not merged**.
 - The paired workflow is permanently available as `.github/workflows/core-perf-compare.yml`.
 
+## Per-save hot path (not a global performance claim)
+
+[Core Performance CI with the existing save breakdown test](https://github.com/Lalalalendia/Akula/actions/runs/38951047812) showed on its 1,000-note fixture:
+- per-document index application: **0.29 ms**
+- Tantivy `IndexWriter::commit`: **12.52 ms**
+- index reload: **0.65 ms**
+- SQLite commit: **0.30 ms**
+- metadata maintenance: **0.54 ms**
+- a separate 4 KiB `fsync` sample: **0.30 ms**
+
+These are separately timed median sub-operations, not an additive breakdown of a specific full user save. In `search/worker.rs`, filesystem events are already coalesced over **80 ms**, and the Tantivy writer is released after **5 seconds** idle. Do not add a second debounce or defer index freshness without first measuring user-visible behavior; investigate Tantivy commit cost and the trade-offs of repeated versus batched commits.
+
 ## Benchmark commands
 
 From `aquilum-app`:
@@ -57,6 +69,7 @@ AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark
 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_search_pipeline -- --ignored --nocapture --test-threads=1
 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_link_pipeline -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1
+cargo test --release --locked -p aquilum-core benchmark_save_breakdown -- --ignored --nocapture --test-threads=1
 AQUILUM_BENCH_RICH=1 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
 ```
 
