@@ -57,7 +57,7 @@ The original SQLite control (44.773 ms) and optimized (15.915 ms) were run on **
 - metadata maintenance: **0.54 ms**
 - a separate 4 KiB `fsync` sample: **0.30 ms**
 
-These are separately timed median sub-operations, not an additive breakdown of a specific full user save. In `search/worker.rs`, filesystem events are already coalesced over **80 ms**, and the Tantivy writer is released after **5 seconds** idle. Do not add a second debounce or defer index freshness without first measuring user-visible behavior; investigate Tantivy commit cost and the trade-offs of repeated versus batched commits.
+These are separately timed median sub-operations, not an additive breakdown of a specific full user save. At the time of this measurement, `search/worker.rs` used a fixed **80 ms** event-collection window; [PR #28](https://github.com/Lalalalendia/Akula/pull/28) has since added adaptive collection while keeping an 80 ms maximum. The Tantivy writer is released after **5 seconds** idle. Do not add a second debounce or defer index freshness without first measuring user-visible behavior; investigate Tantivy commit cost and the trade-offs of repeated versus batched commits.
 
 ## Tantivy commit follow-up (2026-10-17)
 
@@ -81,7 +81,12 @@ Future Tantivy work should focus on measuring the **segment preparation/flush ph
 
   Grouping edits reduces total work dramatically, but a 64-document group itself takes about **65 ms** before the newest updates become searchable. This does **not** warrant adding interactive wait time; the watcher already groups events over a maximum **80 ms** window.
 
-- [PR #26](https://github.com/Lalalalendia/Akula/pull/26), **test-only, pending CI**: check existing `worker::collect_batch` behavior (duplicate paths, rescan preservation, queue sizes) and measure the built-in batch collection delay for 1, 64 and queued 8×8 events. These are synthetic queue measurements, not observations of real desktop event distributions. A larger optimization must measure production-like bursts and user-visible search staleness before changing the window.
+- [PR #26](https://github.com/Lalalalendia/Akula/pull/26), **merged, test-only**: tests prove path deduplication and rescan preservation; [baseline workflow](https://github.com/Lalalalendia/Akula/actions/runs/38963487524) measured the former fixed delay: **80.087 ms** for one note, **80.137 ms** for a 64-note message and **80.109 ms** for eight queued 8-note messages. These measure queue collection, not search latency.
+- [PR #28](https://github.com/Lalalalendia/Akula/pull/28), **merged, production behavior**: use **40 ms quiet window** after idle, retain hard **80 ms cap** from the first event, and temporarily use the full 80 ms window if a successful index update completed less than 80 ms earlier. No-op events do not activate cooldown. No change to commit durability or post-commit search visibility.
+  - [Final integrated same-runner quiet-window workflow](https://github.com/Lalalalendia/Akula/actions/runs/38968027407): isolated note event-to-search median **93.129 → 52.635 ms**, saving **40.494 ms**. The corpus contains 512 notes; all post-commit marker checks passed.
+  - Eight synthetic events at gaps of **5 / 15 / 30 / 45 / 60 ms** required **1 / 2 / 3 / 4 / 4 commits** with fixed 80 ms and **1 / 2 / 3 / 5 / 5** with the adaptive window. Thus the remaining trade-off is one extra commit in each tested slower-burst scenario.
+  - All six final-head Actions succeeded: [Rust CI](https://github.com/Lalalalendia/Akula/actions/runs/38968027440), [paired performance](https://github.com/Lalalalendia/Akula/actions/runs/38968027397), [core benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38968027486), [adaptive watcher](https://github.com/Lalalalendia/Akula/actions/runs/38968027407), [old watcher correctness](https://github.com/Lalalalendia/Akula/actions/runs/38968027448), [docs/installer](https://github.com/Lalalalendia/Akula/actions/runs/38968022543).
+  - These are synthetic event streams on Linux CI, **not** real Windows/macOS desktop telemetry. Follow-up acceptance should include manual/automated OS-specific filesystem notification smoke tests and production-like edit bursts, without logging users' file contents or paths.
 
 **Current strategy:** preserve immediate search visibility *after completed batches* and crash durability; improve naturally coalesced bursts rather than postponing single-note saves. Do not claim the 14× number for typical real-world editing without event-distribution evidence.
 
@@ -97,6 +102,7 @@ AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark
 cargo test --release --locked -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_save_breakdown -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_commit_batch_scaling -- --ignored --nocapture --test-threads=1
+cargo test --release --locked -p aquilum-core benchmark_quiet_window -- --ignored --nocapture --test-threads=1
 AQUILUM_BENCH_RICH=1 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
 ```
 
