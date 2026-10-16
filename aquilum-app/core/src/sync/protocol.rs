@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 pub const PROTOCOL_MAJOR: u16 = 1;
 pub const PROTOCOL_MINOR: u16 = 0;
+const KNOWN_REQUIRED_FEATURES: &[&str] = &[];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,10 +54,9 @@ impl WireEnvelope {
             if !seen.insert(feature.as_str()) {
                 return Err(ProtocolError::DuplicateCriticalFeature);
             }
-            // v1.0 defines no mandatory protocol extensions.
-            if !feature.is_empty() {
-                return Err(ProtocolError::UnsupportedCriticalFeature(feature.clone()));
-            } else {
+            // All mandatory extensions must be explicitly supported.
+            // v1.0 has no registered mandatory extensions.
+            if !KNOWN_REQUIRED_FEATURES.contains(&feature.as_str()) {
                 return Err(ProtocolError::UnsupportedCriticalFeature(feature.clone()));
             }
         }
