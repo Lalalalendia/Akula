@@ -19,11 +19,19 @@ This document tracks measured performance work for the **Lalalalendia/Akula** fo
 | 2 | Core Performance CI and deterministic SQLite benchmark | [PR #6](https://github.com/Lalalalendia/Akula/pull/6), **merged**; paired runner [PR #11](https://github.com/Lalalalendia/Akula/pull/11), **merged** | Release-mode index, search, link, SQLite benchmark logs and runner details as artifacts |
 | 3 | SQLite cached metadata inserts | [PR #7](https://github.com/Lalalalendia/Akula/pull/7), **closed without merge** | Same-run benchmark shows no improvement; no schema changes shipped |
 | 4 | Correct backlinks count beyond 200 links | [PR #10](https://github.com/Lalalalendia/Akula/pull/10), **merged** | 245 distinct sources counted correctly; list UI remains capped at 200 |
-| 5 | Parallel metadata preparation in indexer | [PR #9](https://github.com/Lalalalendia/Akula/pull/9), **merged prerequisite**; next: extract from [PR #2](https://github.com/Lalalalendia/Akula/pull/2) | Worker panics now surface as errors; next: bounded workers, cancellation, identical indexed content |
-| 6 | JPEG/RGBA decode optimization | [PR #12](https://github.com/Lalalalendia/Akula/pull/12), **Draft** | Pixel/dimension equivalence, cross-platform CI and representative decode benchmarks before merge |
+| 5 | Parallel metadata preparation in indexer | [PR #9](https://github.com/Lalalalendia/Akula/pull/9) **merged safety fix**, [PR #14](https://github.com/Lalalalendia/Akula/pull/14) **closed without merge** | Batch-style worker pre-parsing slowed cold scans; only retry with a separately profiled streaming pipeline that overlaps parsing and writes |
+| 6 | JPEG/RGBA decode optimization | [PR #12](https://github.com/Lalalalendia/Akula/pull/12), **closed without merge** | Direct JPEG decode was 31% slower on the controlled fixture; isolated RGBA scanline work remains unproven |
 | 7 | Three-way merge / LCS | Extract from PR #2 selectively | Text-edit and UTF-16 correctness, no conflict regressions, statistically credible performance gain |
 | 8 | Damage Tracker / frame allocations | Not started | Real UI frame timings and visual diffs, no dropped redraws |
-| 9 | Clean up exploratory PRs | [PR #2](https://github.com/Lalalalendia/Akula/pull/2), [PR #3](https://github.com/Lalalalendia/Akula/pull/3) | Close only after useful portions and baselines have been preserved |
+| 9 | Clean up exploratory PRs | Mixed [PR #2](https://github.com/Lalalalendia/Akula/pull/2) retained for remaining merge/LCS experiments; [PR #3](https://github.com/Lalalalendia/Akula/pull/3) **closed** | Never merge mixed experiments wholesale |
+
+## Active and completed benchmark work
+
+- [PR #15](https://github.com/Lalalalendia/Akula/pull/15), **merged**: `AQUILUM_BENCH_RICH=1` generates 32 inline metadata fields, 32 tasks and 32 wiki links per note. The matched-run workflow uses the same rich corpus in both versions only after this PR merged into main.
+- [PR #14](https://github.com/Lalalalendia/Akula/pull/14), **closed without merge**: [paired ABBA test](https://github.com/Lalalalendia/Akula/actions/runs/38950569881), AMD EPYC 7763, normal 1k-note cold scan 460.0 → 474.5 ms (+3.2%), rich 1k-note cold scan 787 → 850 ms (+8.0%). No convincing benefit; overhead of batch-barrier preparation likely dominates, but has not been conclusively profiled.
+- [PR #16](https://github.com/Lalalalendia/Akula/pull/16), **under review**: skip the costly Markdown AST pass for documents without `[[`; [isolated parser benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38950375959) 1.093 → 0.009 ms per 2.5k-paragraph note. This measures only wiki-parsing without links; no whole-index speedup claim.
+- [PR #17](https://github.com/Lalalalendia/Akula/pull/17), **under review**: exercise the pre-existing `benchmark_save_breakdown` via GitHub Actions to profile document updates, Tantivy commit/reload, SQLite commit, metadata maintenance and fsync.
+
 
 ## Existing measurements
 
@@ -49,6 +57,7 @@ AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark
 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_search_pipeline -- --ignored --nocapture --test-threads=1
 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_link_pipeline -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1
+AQUILUM_BENCH_RICH=1 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
 ```
 
 The SQLite-specific benchmark and both CI workflows are now available in `main`. Compare exact heads on the same CPU; runner-to-runner numbers alone are not sufficient.
