@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 const EVENT_QUEUE_CAPACITY: usize = 2_048;
 const EVENT_BATCH_WINDOW: Duration = Duration::from_millis(80);
+const EVENT_QUIET_WINDOW: Duration = Duration::from_millis(40);
 const WRITER_IDLE: Duration = Duration::from_secs(5);
 
 pub struct WorkerHandle {
@@ -115,24 +116,39 @@ fn run(
     synchronizer.full_scan(&context.cancelled)?;
     notify_index(context);
     let mut last_write = Instant::now();
+    let mut last_batch_completed: Option<Instant> = None;
 
     while !context.cancelled.load(Ordering::Relaxed) {
         if context.dirty.swap(false, Ordering::Relaxed) {
             synchronizer.full_scan(&context.cancelled)?;
             notify_index(context);
             last_write = Instant::now();
+            last_batch_completed = Some(last_write);
             continue;
         }
         match receiver.recv_timeout(Duration::from_millis(300)) {
             Ok(message) => {
-                let (paths, rescan) = collect_batch(message, &receiver);
-                if rescan {
+                // After a recently completed batch, use the original full
+                // 80 ms window to avoid a stream of individual commits.
+                let quiet_window = quiet_window_for(last_batch_completed);
+                let (paths, rescan) = collect_batch_with_quiet_window(message, &receiver, quiet_window);
+                let committed = if rescan {
                     synchronizer.full_scan(&context.cancelled)?;
                     notify_index(context);
-                } else if synchronizer.apply_paths(paths)? {
-                    notify_index(context);
-                }
+                    true
+                } else {
+                    let changed = synchronizer.apply_paths(paths)?;
+                    if changed {
+                        notify_index(context);
+                    }
+                    changed
+                };
                 last_write = Instant::now();
+                // No-op file events cannot amplify Tantivy commits, so they
+                // must not slow down the next genuine edit.
+                if committed {
+                    last_batch_completed = Some(last_write);
+                }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if synchronizer.holds_writer() && last_write.elapsed() >= WRITER_IDLE {
@@ -154,25 +170,50 @@ fn notify_index(context: &WorkerContext) {
     });
 }
 
+/// A quiet isolated event can flush early, but events arriving soon after
+/// a completed batch use the full window to prevent commit amplification.
+fn quiet_window_for(last_batch_completed: Option<Instant>) -> Duration {
+    if last_batch_completed.is_some_and(|at| at.elapsed() < EVENT_BATCH_WINDOW) {
+        EVENT_BATCH_WINDOW
+    } else {
+        EVENT_QUIET_WINDOW
+    }
+}
+
+#[cfg(test)]
 fn collect_batch(
     initial: WorkerMessage,
     receiver: &mpsc::Receiver<WorkerMessage>,
 ) -> (HashSet<PathBuf>, bool) {
+    collect_batch_with_quiet_window(initial, receiver, EVENT_QUIET_WINDOW)
+}
+
+fn collect_batch_with_quiet_window(
+    initial: WorkerMessage,
+    receiver: &mpsc::Receiver<WorkerMessage>,
+    quiet_window: Duration,
+) -> (HashSet<PathBuf>, bool) {
     let deadline = Instant::now() + EVENT_BATCH_WINDOW;
+    let mut quiet_deadline = Instant::now() + quiet_window;
     let (initial, mut rescan) = match initial {
         WorkerMessage::Paths(paths) => (paths, false),
         WorkerMessage::Rescan(paths) => (paths, true),
     };
     let mut paths = initial.into_iter().collect::<HashSet<_>>();
     loop {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        // Flush after a quiet gap, but never extend the 80 ms absolute cap.
+        let Some(remaining) = deadline.min(quiet_deadline).checked_duration_since(Instant::now()) else {
             return (paths, rescan);
         };
         match receiver.recv_timeout(remaining) {
-            Ok(WorkerMessage::Paths(next)) => paths.extend(next),
+            Ok(WorkerMessage::Paths(next)) => {
+                paths.extend(next);
+                quiet_deadline = Instant::now() + quiet_window;
+            }
             Ok(WorkerMessage::Rescan(next)) => {
                 paths.extend(next);
                 rescan = true;
+                quiet_deadline = Instant::now() + quiet_window;
             }
             Err(_) => return (paths, rescan),
         }
@@ -184,6 +225,10 @@ fn enqueue(sender: &mpsc::SyncSender<WorkerMessage>, dirty: &AtomicBool, message
         dirty.store(true, Ordering::Relaxed);
     }
 }
+
+#[cfg(test)]
+#[path = "worker_idle_tests.rs"]
+mod idle_tests;
 
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
