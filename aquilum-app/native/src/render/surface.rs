@@ -35,6 +35,27 @@ impl Surfaces {
         self.pool.len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn snapshot_rgba_for_test(&self) -> Option<Vec<u8>> {
+        // Graph scene ImageBrush deliberately carries an empty Blob and the
+        // pixels live in PUBLISHED. Read the most recent pixmap owned by this
+        // surface instance instead of mistaking Blob data for frame pixels.
+        let mine = Arc::as_ptr(&self.alive);
+        let published = PUBLISHED.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, _, pixmap) = published
+            .iter()
+            .rev()
+            .find(|(_, owner, _)| owner.as_ptr() == mine)?;
+        Some(
+            pixmap
+                .data()
+                .iter()
+                .flat_map(|pixel| [pixel.r, pixel.g, pixel.b, pixel.a])
+                .collect(),
+        )
+    }
+
+
     pub fn frame(&mut self, width: u16, height: u16, fill: [u8; 3], draw: impl FnOnce(&mut [u8])) -> ImageBrush {
         if self.pool.len() > POOL {
             let mut excess = self.pool.len() - POOL;
