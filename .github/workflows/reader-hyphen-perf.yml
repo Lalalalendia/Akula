@@ -70,7 +70,7 @@ jobs:
             cp "$RUNNER_TEMP/reader-bench.rs" "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs"
             rustc -O --edition=2024 "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs" -o "$RUNNER_TEMP/bench-$name" -Awarnings
             rm "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs"
-            rustc --test -O --edition=2024 "$dir/aquilum-app/native/src/reader/hyphen.rs" -o "$RUNNER_TEMP/tests-$name"
+            rustc --test -O --edition=2024 "$dir/aquilum-app/native/src/reader/hyphen_perf_probe.rs" -o "$RUNNER_TEMP/tests-$name"
           done
 
       - name: Check correctness and benchmark ABBA on same runner
