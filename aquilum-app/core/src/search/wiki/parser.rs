@@ -134,8 +134,8 @@ mod tests {
             "Plain text and *emphasis* with no link opener",
             "Title [single bracket] and escaped \\[ sequences",
             "Текст 😀 с UTF-16 символами",
-            "[[Valid]] \`[[Ignored]]\`",
-            "\`\`\`md\n[[Hidden]]\n\`\`\`",
+            "[[Valid]] `[[Ignored]]`",
+            "```md\n[[Hidden]]\n```",
             "[[unclosed and [[Valid]]",
         ] {
             assert_eq!(super::extract(source), super::scan_candidates(source));
@@ -149,7 +149,7 @@ mod tests {
         use std::time::Instant;
 
         let prose = (0..2500)
-            .map(|i| format!("## Section {i}\\nA prose paragraph with a [markdown label](https://example.invalid/{i}) and no wiki links.\\n"))
+            .map(|i| format!("## Section {i}\nA prose paragraph with a [markdown label](https://example.invalid/{i}) and no wiki links.\n"))
             .collect::<String>();
         assert!(super::extract(&prose).is_empty());
         let measure = |scanner: fn(&str) -> Vec<super::WikiLink>| {
