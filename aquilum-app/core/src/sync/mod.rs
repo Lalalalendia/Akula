@@ -3,14 +3,20 @@
 //! The existing local note history is not the distributed revision graph.
 //! Later stages must use the File Gate for writes and protect dirty editor buffers.
 
+mod dag;
 pub mod fake;
 mod identity;
+mod planner;
 mod path;
 mod protocol;
 mod provider;
 mod vault;
 
+pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
+pub use planner::{
+    plan_snapshot, HoldReason, ObservedObject, PlannedAction, SafetyPolicy, SnapshotDiff,
+};
 pub use path::{reject_path_collisions, resolve_no_symlinks, SyncPathError, SyncRelativePath};
 pub use protocol::{
     decode_identity_for_write, IdentityEnvelope, IdentityRecord, ProtocolCompatibility,
