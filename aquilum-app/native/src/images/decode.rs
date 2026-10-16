@@ -49,10 +49,11 @@ fn jpeg(bytes: &[u8], fitted: impl Fn((u32, u32)) -> (u32, u32)) -> Option<Decod
     let info = decoder.info()?;
     let natural = (u32::from(info.width), u32::from(info.height));
     let target = fitted(natural);
-    let (w, h) = decoder.scale(target.0 as u16, target.1 as u16).ok()?;
-    if u32::from(w) == natural.0 {
-        return None;
-    }
+    let (w, h) = if target != natural {
+        decoder.scale(target.0 as u16, target.1 as u16).ok()?
+    } else {
+        (info.width, info.height)
+    };
     let pixels = decoder.decode().ok()?;
     let channels = match decoder.info()?.pixel_format {
         jpeg_decoder::PixelFormat::L8 => 1,
@@ -113,7 +114,11 @@ impl Shrink {
 
     fn push(&mut self, row: &[u8], channels: usize) {
         if (self.columns.len() as u32, self.from_height) == self.to {
-            self.out.extend(row.chunks_exact(channels).flat_map(rgba));
+            if channels == 4 {
+                self.out.extend_from_slice(row);
+            } else {
+                self.out.extend(row.chunks_exact(channels).flat_map(rgba));
+            }
             return;
         }
         for (px, &column) in row.chunks_exact(channels).zip(&self.columns) {
