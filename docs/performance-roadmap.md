@@ -65,9 +65,25 @@ The initial save benchmark used Tantivy's default writer while production uses `
 
 - [Production-writer benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38955964260), AMD EPYC 7763: `tantivy_commit_ms=11.91`, including `prepare_commit` segment flush **9.66 ms** and final durable `PreparedCommit::commit` **2.07 ms**; reload **0.64 ms**. These phase medians are measured individually and need not sum exactly.
 - [Thread-count ABBA experiment](https://github.com/Lalalalendia/Akula/actions/runs/38955409107), [PR #20](https://github.com/Lalalalendia/Akula/pull/20), **closed without merge**: two-thread commits 11.800/11.613 ms versus one-thread 11.472/12.267 ms, with search visibility checked after every commit. No consistent win from changing the production writer thread count.
-- [PR #23](https://github.com/Lalalalendia/Akula/pull/23), **under correctness review**: avoid a needless Tantivy commit only for deleted `.md` files absent from **both** metadata and the live index, while retaining orphan cleanup. [Same-runner benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38957006845) for never-indexed deletion events on a populated 512-note index: previous behavior **0.869 ms**, patched path **0.014 ms** per event (median, ABBA). This does **not** speed up real document commits; full workspace CI and compatibility with latest main remain merge gates.
+- [PR #23](https://github.com/Lalalalendia/Akula/pull/23), **merged**: avoid a needless Tantivy commit only for deleted `.md` files absent from **both** metadata and the live index, while retaining orphan cleanup. [Same-runner benchmark](https://github.com/Lalalalendia/Akula/actions/runs/38957006845) for never-indexed deletion events on a populated 512-note index: previous behavior **0.869 ms**, patched path **0.014 ms** per event (median, ABBA). This does **not** speed up real document commits; full Rust CI and targeted ABBA benchmark passed before merge.
 
 Future Tantivy work should focus on measuring the **segment preparation/flush phase**, since it dominates real replacement commits. Do not suppress or defer commits for indexed document edits merely to improve a benchmark: immediately searchable results and crash durability remain required.
+
+## Commit batch-scaling experiment and worker-batch follow-up (2026-10-17)
+
+- [PR #25](https://github.com/Lalalalendia/Akula/pull/25), **merged, test-only**; [GitHub Actions](https://github.com/Lalalalendia/Akula/actions/runs/38961681206) passed Rust CI, core benchmark and search/durability checks. The 512-note fixture updated **64 notes** via production `apply_paths` in ABCCBA order on AMD EPYC 7763 (4 vCPUs):
+
+  | Group size | Total commits | Total time over 64 notes (two runs) | Median total | Median per edited note |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 64 | 930.299 / 893.730 ms | **912.015 ms** | **14.250 ms** |
+  | 8 | 8 | 180.237 / 167.948 ms | **174.093 ms** | **2.720 ms** |
+  | 64 | 1 | 67.122 / 62.488 ms | **64.805 ms** | **1.013 ms** |
+
+  Grouping edits reduces total work dramatically, but a 64-document group itself takes about **65 ms** before the newest updates become searchable. This does **not** warrant adding interactive wait time; the watcher already groups events over a maximum **80 ms** window.
+
+- [PR #26](https://github.com/Lalalalendia/Akula/pull/26), **test-only, pending CI**: check existing `worker::collect_batch` behavior (duplicate paths, rescan preservation, queue sizes) and measure the built-in batch collection delay for 1, 64 and queued 8×8 events. These are synthetic queue measurements, not observations of real desktop event distributions. A larger optimization must measure production-like bursts and user-visible search staleness before changing the window.
+
+**Current strategy:** preserve immediate search visibility *after completed batches* and crash durability; improve naturally coalesced bursts rather than postponing single-note saves. Do not claim the 14× number for typical real-world editing without event-distribution evidence.
 
 ## Benchmark commands
 
@@ -80,6 +96,7 @@ AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark
 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_link_pipeline -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_save_breakdown -- --ignored --nocapture --test-threads=1
+cargo test --release --locked -p aquilum-core benchmark_commit_batch_scaling -- --ignored --nocapture --test-threads=1
 AQUILUM_BENCH_RICH=1 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
 ```
 
