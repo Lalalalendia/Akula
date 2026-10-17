@@ -9,7 +9,7 @@ use super::models::SearchResult;
 use crate::text::cancel::Cancel;
 use crate::text::matcher::{Fold, Matcher, Mode, Options, EXACT};
 use excerpt::{excerpt, CHARS_AFTER_MATCH};
-use file::{first_match, read_through, FirstMatch};
+use file::{match_and_read_through, MatchWindow};
 use std::path::Path;
 use tantivy::{DocAddress, Searcher, TantivyDocument};
 
@@ -28,44 +28,80 @@ pub fn results(
 ) -> Result<Vec<SearchResult>, SearchError> {
     let counts = count::body_counts(searcher, fields.body, terms, addresses)?;
     let matcher = query_matcher(terms);
+    // These are query-scoped, not file-scoped: avoid allocating a matcher for
+    // each term of every search result when checking the filename.
+    let term_matchers: Vec<_> = terms
+        .iter()
+        .map(|term| query_matcher(std::slice::from_ref(term)))
+        .collect();
     let mut results = Vec::with_capacity(addresses.len());
     for (address, body) in addresses.iter().zip(counts) {
+        if cancel.is_cancelled() {
+            return Err(SearchError::Cancelled);
+        }
         let document = searcher.doc::<TantivyDocument>(*address)?;
         let Some(path) = stored_text(&document, fields.id) else {
             continue;
         };
         let title = stored_text(&document, fields.title).unwrap_or_default();
-        let first = match body.iter().any(|&count| count > 0) {
-            true => first_match(Path::new(&path), &matcher, cancel).ok().flatten(),
-            false => None,
+        let file = Path::new(&path);
+        let has_body_match = body.iter().any(|&count| count > 0);
+        let window = match match_and_read_through(
+            file,
+            has_body_match.then_some(&matcher),
+            CHARS_AFTER_MATCH * 4,
+            cancel,
+        ) {
+            Ok(window) => window,
+            Err(_) if has_body_match && !cancel.is_cancelled() => {
+                // Match scan errors previously fell back to an opening snippet
+                // on a second open. Retain that behavior only on this error path.
+                match_and_read_through(file, None, CHARS_AFTER_MATCH * 4, cancel)
+                    .unwrap_or_else(|_| empty_window())
+            }
+            Err(_) => empty_window(),
         };
         if cancel.is_cancelled() {
             return Err(SearchError::Cancelled);
         }
-        results.push(result(path, title, terms, &matcher, &body, first));
+        results.push(result(path, title, terms, &matcher, &term_matchers, &body, window));
     }
     Ok(results)
 }
 
-fn result(path: String, title: String, terms: &[String], matcher: &Matcher, body: &[u32], first: Option<FirstMatch>) -> SearchResult {
+fn empty_window() -> MatchWindow {
+    MatchWindow { first: None, text: String::new(), ended: true }
+}
+
+fn result(
+    path: String,
+    title: String,
+    terms: &[String],
+    matcher: &Matcher,
+    term_matchers: &[Matcher],
+    body: &[u32],
+    window: MatchWindow,
+) -> SearchResult {
     let file = Path::new(&path);
     let file_name = file.file_name().and_then(|value| value.to_str()).unwrap_or(&title);
     let match_count = matcher.find_all(file_name).len() + count::total(terms, body);
     let matched_terms = terms
         .iter()
         .zip(body)
-        .filter(|(term, &count)| count > 0 || query_matcher(&[term]).first(file_name).is_some())
-        .map(|(term, _)| term.clone())
+        .zip(term_matchers)
+        .filter_map(|((term, &count), term_matcher)| {
+            (count > 0 || term_matcher.first(file_name).is_some()).then(|| term.clone())
+        })
         .collect();
-    let wanted = first.as_ref().map_or(0, |found| found.byte);
-    let (text, ended) = read_through(file, wanted, CHARS_AFTER_MATCH * 4).unwrap_or_else(|_| (String::new(), true));
-    let at = (0..=wanted.min(text.len())).rev().find(|&at| text.is_char_boundary(at)).unwrap_or(0);
+    let wanted = window.first.as_ref().map_or(0, |found| found.byte);
+    let at = (0..=wanted.min(window.text.len())).rev().find(|&at| window.text.is_char_boundary(at)).unwrap_or(0);
+    let heading = window.first.as_ref().and_then(|_| heading_at(&window.text, at));
     SearchResult {
         extension: file.extension().and_then(|value| value.to_str()).unwrap_or_default().to_owned(),
-        snippet: excerpt(&text, at, ended),
+        snippet: excerpt(&window.text, at, window.ended),
         match_count,
-        match_offset: first.as_ref().map_or(0, |found| found.utf16),
-        heading: first.and_then(|_| heading_at(&text, at)),
+        match_offset: window.first.as_ref().map_or(0, |found| found.utf16),
+        heading,
         matched_terms,
         path,
         title,
