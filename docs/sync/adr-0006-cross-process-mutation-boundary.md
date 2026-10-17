@@ -140,4 +140,3 @@ The native **Settings → Sync recovery** section shows only metadata from an **
 - Tests cover failure to initialize an absent DB from UI, no migrations for old schema, wrong registered vault, in-vault journal, Unix symlink/hardlink journal aliases, bounded metadata and UI schema absence of writable controls. Dedicated core OS matrix and full native workspace CI must pass before merge.
 
 **Still blocked:** production Sync executor, cloud provider activation, plaintext forensic archive encryption/ACL/retention cleanup, genuine native authenticated review confirmation, physical preservation/quarantine decisions, and Windows power-loss directory durability. Current metadata-only section does not release SYNC-04 for production.
-
