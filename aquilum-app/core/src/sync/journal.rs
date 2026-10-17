@@ -778,10 +778,11 @@ impl SqliteSyncJournal {
         let history = Self::read_recovery_review_rows(
             &self.connection, operation, &fingerprint,
         )?;
-        let latest_event_digest = history.last()
-            .map(|event| blake3::hash(&serde_json::to_vec(event).unwrap())
-                .to_hex().to_string())
-            .unwrap_or_else(|| "genesis".to_string());
+        let latest_event_digest = match history.last() {
+            Some(event) => blake3::hash(&serde_json::to_vec(event)?)
+                .to_hex().to_string(),
+            None => "genesis".to_string(),
+        };
         Ok(LocalRecoveryReviewSnapshot {
             operation_id: operation,
             vault_id: incident.vault_id,
@@ -878,10 +879,11 @@ impl SqliteSyncJournal {
         let previous = Self::read_recovery_review_rows(
             &tx, operation, &snapshot.archive_fingerprint,
         )?;
-        let last_digest = previous.last()
-            .map(|event| blake3::hash(&serde_json::to_vec(event).unwrap())
-                .to_hex().to_string())
-            .unwrap_or_else(|| "genesis".to_string());
+        let last_digest = match previous.last() {
+            Some(event) => blake3::hash(&serde_json::to_vec(event)?)
+                .to_hex().to_string(),
+            None => "genesis".to_string(),
+        };
         if previous.len() as u32 != expected_review_count
             || last_digest != expected_previous_digest
             || previous.len() >= 128
