@@ -5,7 +5,7 @@ use crate::files::document::read_text;
 use crate::files::error::FileCommandError;
 use crate::files::relocate::{move_folder, remove_empty_ancestors, Placement};
 use crate::files::trash::trash_path;
-use crate::search::paths::{identity, strip_root};
+use crate::search::paths::{identity, same_path, strip_root};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
@@ -527,6 +527,24 @@ impl HistoryService {
             return Ok(());
         };
         state.assert_retry_pair(&source.key, &target.key, action)?;
+        if !same_path(&source.vault, &target.vault) {
+            // The legacy source-only journal cannot protect a second Core
+            // that has registered only the destination workspace.
+            // Normal File Gate preflight rejects this BEFORE the primary
+            // note move; refuse any direct call here without relocating
+            // history or claiming a successful transfer.
+            state.quarantine(
+                &source.key,
+                &target.key,
+                &[source.vault.as_path(), target.vault.as_path()],
+                "cross-vault history transfer requires bilateral admission",
+            );
+            return Err(HistoryMoveFailure::new(
+                action,
+                "cross-vault history transfer refused: source-only recovery is unsafe",
+                false,
+            ));
+        }
         if !allowed_history_directory(&source.vault, &source.dir)
             || !allowed_history_directory(&target.vault, &target.dir)
         {
