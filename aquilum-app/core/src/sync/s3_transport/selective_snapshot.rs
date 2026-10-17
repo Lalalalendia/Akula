@@ -624,7 +624,7 @@ mod tests {
             client.put_conditionally(&key, &bytes, S3PutCondition::IfAbsent)
                 .await.unwrap();
         }
-        client.put_conditionally(
+        let second_write = client.put_conditionally(
             &ns.current_head_key(), &new_head.encode(&ns).unwrap(),
             S3PutCondition::IfMatch(first_write.etag),
         ).await.unwrap();
@@ -664,6 +664,103 @@ mod tests {
         assert!(inspected.requires_full_apply_gate);
 
         // Preview is read-only: prior durable observation remains unchanged.
+        assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &old_head);
+
+        // One more offline generation preserves both earlier revisions and
+        // adds a tombstone. Only latest + old snapshots would be inadequate:
+        // a subsequent overwrite could otherwise hide the tombstone entirely.
+        let tombstone_id = RevisionId::new();
+        let tombstone = RevisionRecord {
+            id: tombstone_id,
+            document_id: new_ref.document_id,
+            parents: vec![new_ref.revision_id],
+            operation: RevisionOperation::Tombstone {
+                path: SyncRelativePath::parse("notes/fixture.md").unwrap(),
+            },
+        };
+        let tomb_json = serde_json::to_vec(&tombstone).unwrap();
+        let tomb_ref = S3RevisionRefV1 {
+            revision_id: tombstone_id, document_id: new_ref.document_id,
+            revision_blake3: blake3::hash(&tomb_json).to_hex().to_string(),
+            blob_bytes: None,
+        };
+        let tomb_shard = S3ManifestShardV1::new(
+            &ns, OperationId::new(), vec![tomb_ref.clone()],
+        ).unwrap();
+        let mut third_refs = vec![
+            old_shard.reference(&ns).unwrap(),
+            new_shard.reference(&ns).unwrap(),
+            tomb_shard.reference(&ns).unwrap(),
+        ];
+        third_refs.sort_by_key(|r| r.first_revision);
+        let third = S3ManifestV1::new(
+            &ns, OperationId::new(), 3,
+            Some((new_manifest.manifest_id, new_head.manifest_blake3().to_owned())),
+            third_refs,
+        ).unwrap();
+        let third_json = third.encode(&ns).unwrap();
+        let third_head = S3HeadPointerV1::new(
+            &ns, 3, third.manifest_id,
+            &blake3::hash(&third_json).to_hex().to_string(),
+            Some(new_manifest.manifest_id),
+        ).unwrap();
+        for (key, bytes) in [
+            (ns.immutable_revision_key(tombstone_id), tomb_json),
+            (ns.immutable_manifest_key(tomb_shard.shard_id), tomb_shard.encode(&ns).unwrap()),
+            (ns.immutable_manifest_key(third.manifest_id), third_json),
+        ] {
+            client.put_conditionally(&key, &bytes, S3PutCondition::IfAbsent)
+                .await.unwrap();
+        }
+        let third_write = client.put_conditionally(
+            &ns.current_head_key(), &third_head.encode(&ns).unwrap(),
+            S3PutCondition::IfMatch(second_write.etag),
+        ).await.unwrap();
+        let after_two_offline_generations = client.inspect_selective_from_persisted_hints(
+            &scope, &journal, &hints,
+            S3ManifestDeltaLimits::default(),
+        ).await.unwrap();
+        assert_eq!(after_two_offline_generations.total_revisions, 3);
+        assert_eq!(after_two_offline_generations.reused_revision_json, 1);
+        assert_eq!(after_two_offline_generations.downloaded_revision_json, 2);
+        assert_eq!(after_two_offline_generations.newly_verified_blobs, 1);
+        assert_eq!(after_two_offline_generations.new_revision_ids.len(), 2);
+        assert!(after_two_offline_generations.new_revision_ids.contains(&tombstone_id));
+
+        // Malicious/nonappend publisher drops the tombstone in a *fourth*
+        // generation. Even though the newest root has a valid hash and DAG,
+        // full per-generation history verification rejects its disappearance.
+        let mut dropped_refs = vec![
+            old_shard.reference(&ns).unwrap(),
+            new_shard.reference(&ns).unwrap(),
+        ];
+        dropped_refs.sort_by_key(|r| r.first_revision);
+        let dropped = S3ManifestV1::new(
+            &ns, OperationId::new(), 4,
+            Some((third.manifest_id, third_head.manifest_blake3().to_owned())),
+            dropped_refs,
+        ).unwrap();
+        client.put_conditionally(
+            &ns.immutable_manifest_key(dropped.manifest_id),
+            &dropped.encode(&ns).unwrap(),
+            S3PutCondition::IfAbsent,
+        ).await.unwrap();
+        let dropped_head = S3HeadPointerV1::new(
+            &ns, 4, dropped.manifest_id, &dropped.digest(&ns).unwrap(),
+            Some(third.manifest_id),
+        ).unwrap();
+        client.put_conditionally(
+            &ns.current_head_key(), &dropped_head.encode(&ns).unwrap(),
+            S3PutCondition::IfMatch(third_write.etag),
+        ).await.unwrap();
+        assert!(matches!(
+            client.inspect_selective_from_persisted_hints(
+                &scope, &journal, &hints, S3ManifestDeltaLimits::default(),
+            ).await,
+            Err(super::super::verified_cache_disk::S3VerifiedHintsError::Selective(
+                S3SelectiveReadError::MissingPreviouslyVerifiedRevision
+            ))
+        ));
         assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &old_head);
     }
 
