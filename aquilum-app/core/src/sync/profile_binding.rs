@@ -415,6 +415,83 @@ mod tests {
     }
 
     #[test]
+    fn bound_remote_vault_can_add_file_without_aliasing_local_registration() {
+        use crate::sync::{
+            DocumentId, JournalAction, JournalPhase, OperationIntent, RevisionId,
+            SqliteDagStore, SqliteSyncJournal, SyncRelativePath,
+        };
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("workspace");
+        let appdata = temp.path().join("appdata");
+        let core = core(&root, &appdata);
+        fs::create_dir_all(root.join("notes")).unwrap();
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let (profile, namespace, head) = s3();
+        assert_ne!(admission.registered_workspace_id(), namespace.vault_id().as_uuid());
+
+        let mut bindings = SqliteRegisteredS3Bindings::open(
+            &admission, &appdata.join("profiles.sqlite"),
+        ).unwrap();
+        bindings.bind_existing_verified_s3(
+            &admission, "joined-cloud", &profile, &namespace, &head,
+        ).unwrap();
+
+        let bytes = "Новая глава из S3\n".as_bytes();
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        let path = SyncRelativePath::parse("notes/new.md").unwrap();
+        let document = DocumentId::new();
+        let operation_id = OperationId::new();
+        let intent = OperationIntent {
+            operation_id,
+            vault_id: namespace.vault_id(),
+            document_id: document,
+            profile_id: "joined-cloud".into(),
+            revision_id: RevisionId::new(),
+            action: JournalAction::StageDownload,
+            path: path.clone(),
+            remote_object_id: namespace.immutable_blob_key(&hash).unwrap(),
+            remote_guard: None,
+            expected_content_hash: hash.clone(),
+            expected_baseline: None,
+        };
+        let mut journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+        let mut cache = SqliteDagStore::open(&appdata.join("blobs.sqlite")).unwrap();
+        assert_eq!(cache.store_blob(bytes).unwrap(), hash);
+        journal.begin(intent).unwrap();
+        journal.mark_staged(operation_id, bytes).unwrap();
+
+        // The legacy local-only path MUST still reject a remote vault UUID.
+        assert!(matches!(
+            admission.create_staged_if_absent(operation_id, &journal, &cache),
+            Err(super::super::host_admission::LocalCreateError::InvalidStagedIntent)
+        ));
+        assert!(!root.join(path.as_str()).exists());
+
+        // Wrong remote configuration is never a substitute for the binding.
+        let mut wrong_profile = profile.clone();
+        wrong_profile.force_path_style = false;
+        assert!(admission.create_staged_if_absent_for_registered_s3(
+            operation_id, &journal, &cache, &bindings, &wrong_profile, &namespace,
+        ).is_err());
+        assert!(!root.join(path.as_str()).exists());
+
+        // Only the exact registered profile + immutable blob key can use
+        // the existing no-replace File Gate path. No baseline is committed.
+        let published = admission.create_staged_if_absent_for_registered_s3(
+            operation_id, &journal, &cache, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(published.byte_length, bytes.len() as u64);
+        assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
+        assert_eq!(journal.get(operation_id).unwrap().unwrap().phase, JournalPhase::Staged);
+        assert!(journal.baseline(namespace.vault_id(), document).unwrap().is_none());
+        assert!(admission.create_staged_if_absent_for_registered_s3(
+            operation_id, &journal, &cache, &bindings, &profile, &namespace,
+        ).is_err());
+        assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
+    }
+
+    #[test]
     fn rebinding_or_shared_scope_reuse_in_one_appdata_is_denied() {
         let temp = tempfile::tempdir().unwrap();
         let data = temp.path().join("shared-app-data");
