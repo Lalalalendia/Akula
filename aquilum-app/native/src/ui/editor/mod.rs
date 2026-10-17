@@ -16,6 +16,8 @@ pub use embed::media::media_line;
 pub use widget::{Search, Smart, Status, TextEditor};
 pub(crate) use document::LayoutSnapshot;
 #[cfg(test)]
+pub(crate) use document::take_applied as take_plain_layout_reuses;
+#[cfg(test)]
 pub(crate) use document::take_document_build_profile;
 
 #[derive(Clone, Debug, PartialEq)]
