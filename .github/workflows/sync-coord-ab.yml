@@ -1,0 +1,125 @@
+name: S3 coordinate delta and pack A/B
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/coord_probe.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/multipart.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/selective_snapshot.rs'
+      - 'aquilum-app/core/src/sync/s3_manifest.rs'
+      - 'aquilum-app/core/src/sync/s3_manifest_delta.rs'
+      - 'docs/sync/coord-01-experiment.md'
+      - '.github/workflows/sync-coord-ab.yml'
+  workflow_dispatch:
+  # A one-time full 10k matrix on the initial merge of this benchmark
+  # workflow into main; routine changes elsewhere do not trigger it.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/sync-coord-ab.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-coord-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coordinate-pack:
+    name: Coordinate / ${{ matrix.edits }} changed / ${{ github.event_name == 'pull_request' && '64 smoke' || '10000 notes' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        edits: ${{ fromJSON(github.event_name == 'pull_request' && '[7]' || '[0,7,1000]') }}
+    env:
+      AWS_ACCESS_KEY_ID: akula_minio_ci
+      AWS_SECRET_ACCESS_KEY: isolated_akula_minio_ci_only_20261017
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_MAX_ATTEMPTS: '1'
+      AQ_S3_TEST_ENDPOINT: http://127.0.0.1:9000
+      AQ_COORD_BENCH_NOTES: ${{ github.event_name == 'pull_request' && '64' || '10000' }}
+      AQ_COORD_BENCH_EDITS: ${{ matrix.edits }}
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared read-only Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Start isolated, disposable localhost MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --rm --name akula-coord-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs akula-coord-minio
+          exit 1
+      - name: Real S3 A/B for letter, pack, and 7/16/32-ary Merkle
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 \
+            minio_coord_letter_pack_merkle_ab \
+            -- --ignored --test-threads=1 --nocapture 2>&1 | tee coord-ab.log
+          grep 'AKULA_COORD_AB {' coord-ab.log | sed 's/^.*AKULA_COORD_AB //' \
+            > coord-ab-results.jsonl
+          test "$(wc -l < coord-ab-results.jsonl)" -eq 5
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path("coord-ab-results.jsonl").read_text().splitlines()]
+          methods = {"letter_individual", "letter_pack", "merkle_7_pack",
+                     "merkle_16_pack", "merkle_32_pack"}
+          assert len(rows) == 5
+          assert {r["method"] for r in rows} == methods
+          assert all(r["notes"] == int(os.environ["AQ_COORD_BENCH_NOTES"]) for r in rows)
+          assert all(r["edits"] == int(os.environ["AQ_COORD_BENCH_EDITS"]) for r in rows)
+          assert all(r["assurance"] == "test-only-trusted-fixture-read-only-no-file-gate" for r in rows)
+          assert all(r["attempted_s3_head"] == 2 * r["attempted_s3_get"] for r in rows)
+          individual = next(r for r in rows if r["method"] == "letter_individual")
+          packed = next(r for r in rows if r["method"] == "letter_pack")
+          assert packed["attempted_s3_get"] <= individual["attempted_s3_get"]
+          assert packed["attempted_s3_get"] == 1 + ((packed["edits"] + 127) // 128)
+          for r in rows:
+              assert r["attempted_s3_get"] >= packed["attempted_s3_get"]
+          PY
+      - name: Upload sanitized coordinate measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-coord-ab-${{ github.event_name }}-${{ matrix.edits }}
+          path: aquilum-app/coord-ab-results.jsonl
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Stop disposable MinIO
+        if: always()
+        shell: bash
+        run: |
+          docker stop akula-coord-minio >/dev/null 2>&1 || true
