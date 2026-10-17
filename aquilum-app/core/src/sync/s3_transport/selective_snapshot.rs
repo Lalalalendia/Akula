@@ -472,4 +472,168 @@ mod tests {
             Err(S3SelectiveReadError::Head(S3HeadError::InvalidRevision))
         ));
     }
+
+    /// End-to-end AWS SDK + disposable MinIO. Exercises the actual
+    /// canonical full pinning of genesis, durable SQLite anchor, then
+    /// *selective* verification of one newly published revision/blob.
+    /// Never touches real buckets or user vaults.
+    #[tokio::test]
+    #[ignore = "requires isolated localhost MinIO and CI-only credentials"]
+    async fn live_minio_selective_one_edit_reuses_unchanged_revision_and_blob() {
+        use crate::sync::{
+            OperationId, S3ConnectionProfile, S3Keyspace, S3PutCondition,
+            S3ManifestShardV1, S3RemoteAnchorScope, S3RemoteAnchorJournal,
+            S3HeadPointerV1, S3ManifestDeltaLimits,
+        };
+        use tempfile::tempdir;
+
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT")
+            .expect("isolated localhost MinIO required");
+        assert!(
+            endpoint.starts_with("http://127.0.0.1:")
+                || endpoint.starts_with("http://localhost:"),
+        );
+        let bucket = format!("akula-selective-{}", uuid::Uuid::new_v4().simple());
+        let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new("us-east-1"))
+            .load()
+            .await;
+        let sdk = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::config::Builder::from(&shared)
+                .endpoint_url(endpoint.clone()).force_path_style(true).build(),
+        );
+        sdk.create_bucket().bucket(bucket.clone()).send().await.unwrap();
+        let profile = S3ConnectionProfile {
+            bucket, region: "us-east-1".into(),
+            endpoint: Some(endpoint), force_path_style: true,
+        };
+        let ns = S3Keyspace::new("akula/selective", VaultId::new()).unwrap();
+        let client = AwsS3ProbeClient::connect(profile.clone(), ns.clone())
+            .await.unwrap();
+        let scope = S3RemoteAnchorScope::new(
+            "selective-ci", "verified-disposable-ci-minio",
+            &profile, &ns,
+        ).unwrap();
+
+        let (old_ref, old_json) = fixture(
+            DocumentId::new(), RevisionId::new(), vec![], b"old-blob",
+        );
+        let old_blob = b"old-blob";
+        let old_record: RevisionRecord = serde_json::from_slice(&old_json).unwrap();
+        let old_hash = match old_record.operation {
+            RevisionOperation::Content { blob_hash, .. } => blob_hash,
+            _ => unreachable!(),
+        };
+        let old_shard = S3ManifestShardV1::new(
+            &ns, OperationId::new(), vec![old_ref.clone()],
+        ).unwrap();
+        let old_shard_bytes = old_shard.encode(&ns).unwrap();
+        let old_shard_ref = old_shard.reference(&ns).unwrap();
+        let old_manifest = S3ManifestV1::new(
+            &ns, OperationId::new(), 1, None, vec![old_shard_ref.clone()],
+        ).unwrap();
+        let old_manifest_bytes = old_manifest.encode(&ns).unwrap();
+        let old_head = S3HeadPointerV1::new(
+            &ns, 1, old_manifest.manifest_id,
+            &blake3::hash(&old_manifest_bytes).to_hex().to_string(), None,
+        ).unwrap();
+
+        for (key, bytes) in [
+            (ns.immutable_blob_key(&old_hash).unwrap(), old_blob.to_vec()),
+            (ns.immutable_revision_key(old_ref.revision_id), old_json.clone()),
+            (ns.immutable_manifest_key(old_shard.shard_id), old_shard_bytes),
+            (ns.immutable_manifest_key(old_manifest.manifest_id), old_manifest_bytes.clone()),
+        ] {
+            client.put_conditionally(&key, &bytes, S3PutCondition::IfAbsent)
+                .await.unwrap();
+        }
+        let first_write = client.put_conditionally(
+            &ns.current_head_key(), &old_head.encode(&ns).unwrap(),
+            S3PutCondition::IfAbsent,
+        ).await.unwrap();
+
+        let old_cache = client.materialize_verified_revision_metadata_store(512*1024)
+            .await.unwrap().unwrap();
+        let verified_head = client.read_verified_head().await.unwrap().unwrap();
+        let pinned = client.pin_revision_snapshot().await.unwrap().unwrap();
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("selective-anchor.sqlite");
+        let mut journal = S3RemoteAnchorJournal::open(&path).unwrap();
+        journal.record_verified_remote(
+            &scope, &verified_head, &pinned, &[old_manifest_bytes],
+        ).unwrap();
+        drop(journal);
+        let journal = S3RemoteAnchorJournal::open(&path).unwrap();
+
+        let new_data = b"brand-new-blob";
+        let (new_ref, new_json) = fixture(
+            DocumentId::new(), RevisionId::new(), vec![], new_data,
+        );
+        let new_record: RevisionRecord = serde_json::from_slice(&new_json).unwrap();
+        let new_hash = match new_record.operation {
+            RevisionOperation::Content { blob_hash, .. } => blob_hash,
+            _ => unreachable!(),
+        };
+        let new_shard = S3ManifestShardV1::new(
+            &ns, OperationId::new(), vec![new_ref.clone()],
+        ).unwrap();
+        let new_shard_bytes = new_shard.encode(&ns).unwrap();
+        let mut shard_refs = vec![old_shard_ref, new_shard.reference(&ns).unwrap()];
+        shard_refs.sort_by_key(|shard|shard.first_revision);
+        let new_manifest = S3ManifestV1::new(
+            &ns, OperationId::new(), 2,
+            Some((old_manifest.manifest_id, old_head.manifest_blake3().to_owned())),
+            shard_refs,
+        ).unwrap();
+        let new_manifest_bytes = new_manifest.encode(&ns).unwrap();
+        let new_head = S3HeadPointerV1::new(
+            &ns, 2, new_manifest.manifest_id,
+            &blake3::hash(&new_manifest_bytes).to_hex().to_string(),
+            Some(old_manifest.manifest_id),
+        ).unwrap();
+
+        for (key, bytes) in [
+            (ns.immutable_revision_key(new_ref.revision_id), new_json),
+            (ns.immutable_manifest_key(new_shard.shard_id), new_shard_bytes),
+            (ns.immutable_manifest_key(new_manifest.manifest_id), new_manifest_bytes),
+        ] {
+            client.put_conditionally(&key, &bytes, S3PutCondition::IfAbsent)
+                .await.unwrap();
+        }
+        client.put_conditionally(
+            &ns.current_head_key(), &new_head.encode(&ns).unwrap(),
+            S3PutCondition::IfMatch(first_write.etag),
+        ).await.unwrap();
+
+        // Even correctly linked manifest/revision JSON cannot claim a valid
+        // candidate until its *new* content blob was fetched and hashed.
+        assert!(matches!(
+            client.inspect_selective_s3_revision_changes(
+                &scope, &journal, &old_cache, 512*1024,
+                S3ManifestDeltaLimits::default(),
+            ).await,
+            Err(S3SelectiveReadError::Transport(S3TransportError::NotFound)),
+        ));
+        client.put_conditionally(
+            &ns.immutable_blob_key(&new_hash).unwrap(),
+            new_data, S3PutCondition::IfAbsent,
+        ).await.unwrap();
+
+        let inspected = client.inspect_selective_s3_revision_changes(
+            &scope, &journal, &old_cache, 512*1024,
+            S3ManifestDeltaLimits::default(),
+        ).await.unwrap();
+        assert_eq!(inspected.total_revisions, 2);
+        assert_eq!(inspected.reused_shards, 1);
+        assert_eq!(inspected.checked_new_shards, 1);
+        assert_eq!(inspected.reused_revision_json, 1);
+        assert_eq!(inspected.downloaded_revision_json, 1);
+        assert_eq!(inspected.newly_verified_blobs, 1);
+        assert_eq!(inspected.new_revision_ids, vec![new_ref.revision_id]);
+        assert!(inspected.requires_full_apply_gate);
+
+        // Preview is read-only: prior durable observation remains unchanged.
+        assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &old_head);
+    }
+
 }
