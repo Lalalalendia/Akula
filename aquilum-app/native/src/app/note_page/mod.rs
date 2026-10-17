@@ -43,6 +43,8 @@ impl App {
             file_name: &file_name,
             title: &title,
             body: self.body(),
+            #[cfg(test)]
+            parley_trial_layout: if self.parley_trial_enabled { self.parley_offer.take() } else { None },
             metadata: self.metadata_state(),
             can_back: self.navigation.can_back(),
             can_forward: self.navigation.can_forward(),
