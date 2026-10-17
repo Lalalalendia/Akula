@@ -198,6 +198,7 @@ pub enum BrokerError {
     UndeclaredCapability,
     Denied,
     StaleLease,
+    RevisionExhausted,
     StatePoisoned,
 }
 
@@ -323,8 +324,12 @@ impl PermissionBroker {
         }
         let grant = Grant { capability, scope };
         if !record.grants.contains(&grant) {
+            let next_revision = record
+                .revision
+                .checked_add(1)
+                .ok_or(BrokerError::RevisionExhausted)?;
             record.grants.push(grant);
-            record.revision = record.revision.wrapping_add(1);
+            record.revision = next_revision;
         }
         Ok(())
     }
@@ -378,8 +383,12 @@ impl PermissionBroker {
     ) -> Result<(), BrokerError> {
         let mut state = self.state.lock().map_err(|_| BrokerError::StatePoisoned)?;
         let record = state.instances.get_mut(&handle).ok_or(BrokerError::UnknownInstance)?;
+        let next_revision = record
+            .revision
+            .checked_add(1)
+            .ok_or(BrokerError::RevisionExhausted)?;
         record.grants.clear();
-        record.revision = record.revision.wrapping_add(1);
+        record.revision = next_revision;
         Ok(())
     }
 
