@@ -106,7 +106,7 @@ pub fn seal_recovery_archive(
     key.cipher()?.seal_in_place_append_tag(
         Nonce::assume_unique_for_key(nonce_bytes),
         Aad::from(aad.as_slice()),
-        &mut body,
+        &mut *body,
     ).map_err(|_| SealedArchiveError::CipherUnavailable)?;
     let mut envelope = Vec::with_capacity(HEADER_BYTES + body.len());
     envelope.extend_from_slice(MAGIC);
