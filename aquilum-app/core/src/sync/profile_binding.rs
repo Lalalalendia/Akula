@@ -464,6 +464,26 @@ mod tests {
         }
     }
 
+    /// Runs in a REAL second OS process when explicitly targeted by the
+    /// parent fixture. Normal unit-test runs do not take any lock.
+    #[test]
+    fn s3_interprocess_child_holds_external_custody_lock() {
+        let Some(scope) = std::env::var_os("AKULA_SYNC_S3_CUSTODY_CHILD_SCOPE") else {
+            return;
+        };
+        let signal = std::path::PathBuf::from(
+            std::env::var_os("AKULA_SYNC_S3_CUSTODY_CHILD_SIGNAL").unwrap(),
+        );
+        let root = super::super::filegate_lock_probe::PinnedProbeRoot::open(
+            std::path::Path::new(&scope),
+        ).unwrap();
+        let _held = root.try_lock().unwrap().expect("independent child acquires lock");
+        fs::write(signal, b"held").unwrap();
+        loop {
+            std::thread::park_timeout(std::time::Duration::from_secs(60));
+        }
+    }
+
     #[test]
     fn bound_remote_vault_can_add_file_without_aliasing_local_registration() {
         use crate::sync::{
@@ -551,8 +571,50 @@ mod tests {
         ).is_err());
         assert!(!root.join(path.as_str()).exists());
 
-        // Only the exact registered profile + immutable blob key can use
-        // the existing no-replace File Gate path. No baseline is committed.
+        // A REAL independent process holds the SAME physical external lock.
+        // The candidate Akula must decline BEFORE recording any one-shot
+        // native attempt and without creating either the stage or final name.
+        struct StopChild(std::process::Child);
+        impl Drop for StopChild {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let report = temp.path().join("independent-lock-held");
+        let mut child = StopChild(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("--exact")
+                .arg("sync::profile_binding::tests::s3_interprocess_child_holds_external_custody_lock")
+                .arg("--nocapture")
+                .env("AKULA_SYNC_S3_CUSTODY_CHILD_SCOPE", &anchor)
+                .env("AKULA_SYNC_S3_CUSTODY_CHILD_SIGNAL", &report)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn().unwrap()
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !report.exists() {
+            assert!(std::time::Instant::now() < deadline, "child lock barrier timed out");
+            assert!(child.0.try_wait().unwrap().is_none(), "child died before OS-lock acquisition");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(fs::read(&report).unwrap(), b"held");
+        assert!(matches!(
+            admission.create_staged_if_absent_for_registered_s3(
+                operation_id, &journal, &cache, &bindings, &profile, &namespace,
+                &custody, &anchor,
+            ),
+            Err(super::super::host_admission::LocalCreateError::Admission(
+                VaultPortError::PermissionDenied
+            ))
+        ));
+        assert!(journal.local_publication_review_queue().unwrap().is_empty());
+        assert!(!root.join(path.as_str()).exists());
+        drop(child); // kernel drops the child's held OS-lock handles.
+
+        // Only the exact registered profile + immutable blob key and the
+        // pinned, held external lock can enter the native no-replace path.
         let published = admission.create_staged_if_absent_for_registered_s3(
             operation_id, &journal, &cache, &bindings, &profile, &namespace,
             &custody, &anchor,
