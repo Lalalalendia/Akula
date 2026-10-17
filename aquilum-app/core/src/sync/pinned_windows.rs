@@ -228,6 +228,21 @@ pub(super) fn create_stage_child(
         | FILE_READ_ATTRIBUTES | DELETE_ACCESS | SYNCHRONIZE, FILE_CREATE)
 }
 
+/// Test-only: open an ALREADY EXISTING lock file for read/write OS locking,
+/// relative to the pinned root HANDLE. Never create, truncate or replace it.
+/// No caller can use this to authorize normal Akula file mutations.
+#[cfg(test)]
+pub(super) fn open_existing_probe_lock_child(
+    parent: &File,
+    name: &str,
+) -> Result<File, VaultPortError> {
+    open_child_access(parent, name, true,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+        | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+    )
+}
+
 /// Inspection-only, relative to the pinned directory HANDLE. Only the
 /// native STATUS_OBJECT_NAME_NOT_FOUND status means absent; all other NT
 /// errors and reparse/special-object aliases fail closed.

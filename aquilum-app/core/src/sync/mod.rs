@@ -11,6 +11,8 @@ mod dag_store;
 pub mod fake;
 mod fake_vault;
 mod host_admission;
+#[cfg(test)]
+pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::PinnedFileIdentity;
 #[cfg(test)]
@@ -31,6 +33,8 @@ mod protocol;
 mod provider;
 mod s3;
 mod s3_manifest;
+#[cfg(feature = "sync-s3")]
+mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
 mod s3_transport;
 mod upload;
@@ -72,6 +76,11 @@ pub use s3_manifest::{
     S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
     S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
     MAX_SHARD_ENTRIES, MAX_SHARDS,
+};
+#[cfg(feature = "sync-s3")]
+pub use s3_head_probe::{
+    observe_s3_current_head, read_s3_digest_matched_manifest, S3DigestMatchedManifest,
+    S3HeadReadError, S3ObservedHead,
 };
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
