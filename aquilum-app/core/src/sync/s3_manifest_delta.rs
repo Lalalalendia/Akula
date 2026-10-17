@@ -262,7 +262,7 @@ pub fn inspect_s3_manifest_delta(
 
 fn build_result(
     latest: &S3ManifestV1,
-    prior: Option<&&S3ManifestV1>,
+    prior: Option<&S3ManifestV1>,
     generations: usize,
 ) -> Result<S3ManifestDeltaOutcome, S3ManifestDeltaError> {
     let mut previous = BTreeMap::new();
