@@ -74,6 +74,13 @@ impl Renderer {
         };
         let mut damage = if full { Damage { areas: vec![(0, 0, width, height)], moves: Vec::new() } } else { damage };
         #[cfg(test)]
+        if std::env::var_os("AQ_TEST_FORCE_FULL_ON_SCROLL").is_some() && !damage.moves.is_empty() {
+            // Test-only falsifier: when a scroll would normally use pixel
+            // copies, re-encode and re-rasterize the *whole* screen. This
+            // isolates clipped-region painter issues from persistent context.
+            damage = Damage { areas: vec![(0, 0, width, height)], moves: Vec::new() };
+        }
+        #[cfg(test)]
         if std::env::var_os("AQ_TEST_REDRAW_SCROLL_VIEWPORT").is_some() {
             // Only for the release test harness: replace pixel copies with
             // full re-rasterization of the same scrolled viewport. This
