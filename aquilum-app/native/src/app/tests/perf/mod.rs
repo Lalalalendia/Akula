@@ -9,6 +9,7 @@ mod big;
 mod cost;
 mod frames;
 mod note_latency;
+mod window_preload;
 #[cfg(feature = "memory-probe")]
 mod open_memory;
 mod sash;
