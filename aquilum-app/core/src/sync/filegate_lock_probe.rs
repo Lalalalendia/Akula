@@ -1,7 +1,8 @@
-//! Test-only binding of a pre-existing advisory lock to a pinned vault root.
-//! Existing core paths are read-only and MUST NOT use this as write admission.
-//! No lock file is ever created or removed here: bootstrap, custody, registry
-//! authentication, reparse swaps and race-free write authority remain P0.
+//! Dormant file-lock identity diagnostic. It does not grant write authority.
+//! Root identity and the pre-existing lock filename are checked using pinned
+//! OS handles. Registration is verified separately by RegisteredReadAdmission.
+//! No normal File Gate mutation calls this; bootstrap, lock-object custody,
+//! hostile namespace swaps, and durable bilateral transactions remain P0.
 
 use std::fs::{File, TryLockError};
 #[cfg(unix)]
@@ -112,6 +113,14 @@ pub(crate) struct HeldProbeLock {
     // Keep root pinned while the lock remains held; never unlink lock files.
     _root: File,
     _file: File,
+    id: ObjectIdentity,
+}
+
+impl HeldProbeLock {
+    /// Diagnostic only. An observed lock ID is NOT transfer/write permission.
+    pub(crate) fn identity(&self) -> (u64, u64) {
+        (self.id.volume, self.id.file)
+    }
 }
 
 impl PinnedProbeRoot {
@@ -188,6 +197,7 @@ impl PinnedProbeRoot {
         Ok(Some(HeldProbeLock {
             _root: self.handle.try_clone()?,
             _file: file,
+            id: original,
         }))
     }
 }

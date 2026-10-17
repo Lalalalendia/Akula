@@ -87,6 +87,17 @@ pub(crate) struct RegisteredReadAdmission<'a> {
     initial: RootIdentity,
 }
 
+/// Snapshot of a registered root and its observed, locked OS object.
+/// The OS lock is released before this value is returned. These identities
+/// are NOT durable claims, leases or write permissions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+pub(crate) struct RegisteredLockObservation {
+    workspace_id: Uuid,
+    root_identity: (u64, u64),
+    lock_identity: (u64, u64),
+}
+
 #[allow(dead_code)]
 impl<'a> RegisteredReadAdmission<'a> {
     pub(crate) fn open(core: &'a Core, selected_root: &Path) -> Result<Self, VaultPortError> {
@@ -124,6 +135,40 @@ impl<'a> RegisteredReadAdmission<'a> {
     pub(crate) fn recheck_registered_root(&self) -> Result<(), VaultPortError> {
         self.check_root()
     }
+
+    /// Registry-bound OS lock forensics ONLY. This can never permit a File
+    /// Gate, HistoryService or sync write: the kernel lock is dropped when
+    /// this method returns. Durable lock custody/bootstrapping is still P0.
+    ///
+    /// The existing lock object is required. No file, database or journal is
+    /// created, unlinked, cleared, renamed or written during inspection.
+    pub(crate) fn inspect_existing_filegate_lock(
+        &self,
+    ) -> Result<RegisteredLockObservation, VaultPortError> {
+        self.check_root()?;
+        let root = super::filegate_lock_probe::PinnedProbeRoot::open(&self.root_path)
+            .map_err(|error| VaultPortError::Io(error.to_string()))?;
+        let expected_root = (self.initial.0, self.initial.1);
+        if root.identity() != expected_root {
+            return Err(VaultPortError::FileChanged);
+        }
+        let held = root
+            .try_lock()
+            .map_err(|error| VaultPortError::Io(error.to_string()))?
+            .ok_or(VaultPortError::PermissionDenied)?;
+        // Check SQLite registration and pinned physical identity once more
+        // while the advisory kernel lock is held. Return is NOT write authority.
+        self.check_root()?;
+        if root.identity() != expected_root {
+            return Err(VaultPortError::FileChanged);
+        }
+        Ok(RegisteredLockObservation {
+            workspace_id: self.workspace_id,
+            root_identity: expected_root,
+            lock_identity: held.identity(),
+        })
+    }
+
 
     fn check_root(&self) -> Result<(), VaultPortError> {
         let configured = self.core.ui_state.list_workspaces()
@@ -766,6 +811,84 @@ mod tests {
 
     fn note() -> SyncRelativePath {
         SyncRelativePath::parse("notes/caf\u{e9}.md").unwrap()
+    }
+
+    #[test]
+    fn host_admission_registry_lock_observation_requires_exact_registered_root() {
+        let (temp, core, root) = fixture();
+        let lock = root.join(super::super::filegate_lock_probe::LOCK_NAME);
+        fs::write(&lock, b"unchanged forensic fixture").unwrap();
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let evidence = admission.inspect_existing_filegate_lock().unwrap();
+        assert_eq!(
+            evidence.workspace_id,
+            core.ui_state.list_workspaces().unwrap()[0].id
+        );
+        assert_ne!(evidence.root_identity.1, 0);
+        assert_ne!(evidence.lock_identity.1, 0);
+        assert_eq!(fs::read(&lock).unwrap(), b"unchanged forensic fixture");
+
+        // Separate Core and SQLite database must register the root itself.
+        let other_data = temp.path().join("other-data");
+        fs::create_dir(&other_data).unwrap();
+        let other = Core::open(&other_data, Arc::new(|_: CoreEvent| {}));
+        assert!(matches!(
+            RegisteredReadAdmission::open(&other, &root),
+            Err(VaultPortError::PermissionDenied)
+        ));
+        other.ui_state.resolve_workspace(root.to_str().unwrap(), 2).unwrap();
+        let independent = RegisteredReadAdmission::open(&other, &root).unwrap();
+        let independent_evidence = independent.inspect_existing_filegate_lock().unwrap();
+        assert_ne!(evidence.workspace_id, independent_evidence.workspace_id);
+        assert_eq!(evidence.root_identity, independent_evidence.root_identity);
+        assert_eq!(evidence.lock_identity, independent_evidence.lock_identity);
+        assert_eq!(fs::read(&lock).unwrap(), b"unchanged forensic fixture");
+    }
+
+    #[test]
+    fn host_admission_registry_lock_missing_and_hardlinked_fail_closed() {
+        let (_temp, core, root) = fixture();
+        let lock = root.join(super::super::filegate_lock_probe::LOCK_NAME);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        assert!(admission.inspect_existing_filegate_lock().is_err());
+        assert!(!lock.exists(), "forensic admission must never create locks");
+
+        fs::write(&lock, b"keep").unwrap();
+        assert!(admission.inspect_existing_filegate_lock().is_ok());
+        let alias = root.join("hardlink-alias");
+        fs::hard_link(&lock, &alias).unwrap();
+        assert!(admission.inspect_existing_filegate_lock().is_err());
+        assert_eq!(fs::read(&lock).unwrap(), b"keep");
+        assert_eq!(fs::read(alias).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn host_admission_registry_lock_revocation_and_root_swap_fail_closed() {
+        let (temp, core, root) = fixture();
+        let lock = root.join(super::super::filegate_lock_probe::LOCK_NAME);
+        fs::write(&lock, b"original").unwrap();
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        assert!(admission.inspect_existing_filegate_lock().is_ok());
+
+        let workspace_id = core.ui_state.list_workspaces().unwrap()[0].id;
+        core.ui_state.forget_workspace(workspace_id).unwrap();
+        assert!(matches!(
+            admission.inspect_existing_filegate_lock(),
+            Err(VaultPortError::PermissionDenied)
+        ));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 3).unwrap();
+        let refreshed = RegisteredReadAdmission::open(&core, &root).unwrap();
+
+        let moved = temp.path().join("moved-original");
+        fs::rename(&root, &moved).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::write(&lock, b"substituted").unwrap();
+        assert!(refreshed.inspect_existing_filegate_lock().is_err());
+        assert_eq!(fs::read(&lock).unwrap(), b"substituted");
+        assert_eq!(
+            fs::read(moved.join(super::super::filegate_lock_probe::LOCK_NAME)).unwrap(),
+            b"original"
+        );
     }
 
     #[test]
