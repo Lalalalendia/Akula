@@ -109,3 +109,6 @@ jobs:
           cargo test --locked -p aquilum-core --features sync-engine history::recovery::tests:: -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine history_recovery_ -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine history_corrupt_recovery_marker -- --nocapture
+      - name: Cross-vault primary move admission and source-only journal denial
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine history_cross_vault_ -- --nocapture
