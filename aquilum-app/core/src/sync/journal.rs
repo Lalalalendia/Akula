@@ -9,6 +9,7 @@
 //! DocumentStore and from the immutable sync DAG blob cache.
 
 use super::{DocumentId, OperationId, RevisionId, SyncRelativePath, VaultId};
+use super::pinned_read::PinnedFileIdentity;
 use super::local_recovery::{self, ObservedLocalFile, ReadOnlyLocalPublicationEvidence};
 use super::recovery_review::{self, LocalRecoveryReviewEvent, LocalRecoveryReviewSnapshot,
     RecoveryReviewDisposition, RECOVERY_REVIEW_RETENTION};
@@ -16,7 +17,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -169,6 +170,21 @@ pub struct LocalPublicationReview {
     pub expected_content_hash: String,
 }
 
+/// Immutable app-data report from the successful, uninterrupted Unix
+/// stage fsync + atomic no-replace + pinned readback + parent fsync path.
+/// Does not prove protection against external writers or grant baseline.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NativeLocalPublicationObservation {
+    pub operation_id: OperationId,
+    pub vault_id: VaultId,
+    pub path: SyncRelativePath,
+    pub expected_content_hash: String,
+    pub parent: PinnedFileIdentity,
+    pub final_file: PinnedFileIdentity,
+    pub byte_length: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecoveryAction {
     /// No remote/local side-effect permitted before staging evidence exists.
@@ -221,6 +237,7 @@ pub enum JournalError {
     /// The durable record already claims this operation or portable target.
     /// Never automatically replay an uncertain local publication.
     PublicationAttemptAlreadyRecorded,
+    NativePublicationObservationAlreadyRecorded,
 }
 
 impl From<rusqlite::Error> for JournalError {
@@ -359,7 +376,13 @@ impl SqliteSyncJournal {
                      review_digest TEXT NOT NULL,
                      PRIMARY KEY(operation_id, sequence)
                  );
-                 PRAGMA user_version = 5;
+                 CREATE TABLE sync_local_native_publication_observations (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     observation_json BLOB NOT NULL,
+                     observation_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 6;
                  COMMIT;",
             )?,
             1 => connection.execute_batch(
@@ -396,7 +419,13 @@ impl SqliteSyncJournal {
                      review_digest TEXT NOT NULL,
                      PRIMARY KEY(operation_id, sequence)
                  );
-                 PRAGMA user_version = 5;
+                 CREATE TABLE sync_local_native_publication_observations (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     observation_json BLOB NOT NULL,
+                     observation_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 6;
                  COMMIT;",
             )?,
             2 => connection.execute_batch(
@@ -423,7 +452,13 @@ impl SqliteSyncJournal {
                      review_digest TEXT NOT NULL,
                      PRIMARY KEY(operation_id, sequence)
                  );
-                 PRAGMA user_version = 5;
+                 CREATE TABLE sync_local_native_publication_observations (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     observation_json BLOB NOT NULL,
+                     observation_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 6;
                  COMMIT;",
             )?,
             3 => connection.execute_batch(
@@ -444,7 +479,13 @@ impl SqliteSyncJournal {
                      review_digest TEXT NOT NULL,
                      PRIMARY KEY(operation_id, sequence)
                  );
-                 PRAGMA user_version = 5;
+                 CREATE TABLE sync_local_native_publication_observations (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     observation_json BLOB NOT NULL,
+                     observation_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 6;
                  COMMIT;",
             )?,
             4 => connection.execute_batch(
@@ -457,7 +498,24 @@ impl SqliteSyncJournal {
                      review_digest TEXT NOT NULL,
                      PRIMARY KEY(operation_id, sequence)
                  );
-                 PRAGMA user_version = 5;
+                 CREATE TABLE sync_local_native_publication_observations (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     observation_json BLOB NOT NULL,
+                     observation_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 6;
+                 COMMIT;",
+            )?,
+            5 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sync_local_native_publication_observations (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     observation_json BLOB NOT NULL,
+                     observation_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 6;
                  COMMIT;",
             )?,
             SCHEMA_VERSION => {},
@@ -530,6 +588,111 @@ impl SqliteSyncJournal {
             return Err(JournalError::CorruptedRecord);
         }
         Ok(())
+    }
+
+
+    /// Durable once-only REPORT after native Unix publication, never a safe
+    /// replay token. Caller must keep the Core File Gate and already have
+    /// checked the OS file/parent IDs plus successful parent-directory fsync.
+    /// An interrupted process prior to the SQLite transaction remains HOLD.
+    #[cfg(unix)]
+    pub(crate) fn record_native_local_publication_observation_once(
+        &self, obs: &NativeLocalPublicationObservation,
+    ) -> JournalResult<()> {
+        if obs.parent.device == 0 || obs.parent.file == 0
+            || obs.final_file.device == 0 || obs.final_file.file == 0
+            || obs.byte_length > 32 * 1024 * 1024
+            || obs.expected_content_hash.len() != 64
+        {
+            return Err(JournalError::InvalidTransition);
+        }
+        let record = self.get(obs.operation_id)?
+            .ok_or(JournalError::MissingOperation)?;
+        if record.phase != JournalPhase::Staged
+            || record.intent.action != JournalAction::StageDownload
+            || record.intent.remote_guard.is_some()
+            || record.intent.expected_baseline.is_some()
+            || record.intent.vault_id != obs.vault_id
+            || record.intent.path != obs.path
+            || record.intent.expected_content_hash != obs.expected_content_hash
+            || record.staged_hash.as_deref() != Some(obs.expected_content_hash.as_str())
+            || self.baseline(obs.vault_id, record.intent.document_id)?.is_some()
+        {
+            return Err(JournalError::InvalidTransition);
+        }
+        let claim = self.local_publication_review_queue()?.into_iter()
+            .find(|row| row.operation_id == obs.operation_id)
+            .ok_or(JournalError::InvalidTransition)?;
+        if claim.vault_id != obs.vault_id
+            || claim.path != obs.path
+            || claim.expected_content_hash != obs.expected_content_hash
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        let payload = serde_json::to_vec(obs)?;
+        let digest = blake3::hash(&payload).to_hex().to_string();
+        let n = self.connection.execute(
+            "INSERT OR IGNORE INTO sync_local_native_publication_observations
+             (operation_id,observation_json,observation_digest)
+             SELECT ?1,?2,?3 FROM sync_operations AS op
+             JOIN sync_local_publication_attempts AS claim
+               ON op.operation_id = claim.operation_id
+             WHERE op.operation_id = ?1 AND op.phase = 1
+               AND op.staged_hash = ?4 AND claim.expected_hash = ?4
+               AND claim.vault_id = ?5 AND claim.relative_path = ?6",
+            params![obs.operation_id.to_string(),payload,digest,
+                &obs.expected_content_hash,obs.vault_id.to_string(),obs.path.as_str()],
+        )?;
+        if n != 1 {
+            return Err(JournalError::NativePublicationObservationAlreadyRecorded);
+        }
+        if self.read_native_local_publication_observation(obs.operation_id)?.as_ref()
+            != Some(obs)
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(())
+    }
+
+    /// Informational, corruption-checked read; even a verified observation
+    /// cannot authorize local mutation, lost-ACK replay, or sync baseline.
+    pub(crate) fn read_native_local_publication_observation(
+        &self, operation: OperationId,
+    ) -> JournalResult<Option<NativeLocalPublicationObservation>> {
+        let row: Option<(Vec<u8>, String)> = self.connection.query_row(
+            "SELECT observation_json,observation_digest
+             FROM sync_local_native_publication_observations WHERE operation_id = ?1",
+            [operation.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        let Some((bytes,digest)) = row else { return Ok(None); };
+        if digest != blake3::hash(&bytes).to_hex().as_str() {
+            return Err(JournalError::CorruptedRecord);
+        }
+        let obs: NativeLocalPublicationObservation = serde_json::from_slice(&bytes)
+            .map_err(|_| JournalError::CorruptedRecord)?;
+        let rec = self.get(operation)?.ok_or(JournalError::CorruptedRecord)?;
+        if obs.operation_id != operation || rec.phase != JournalPhase::Staged
+            || rec.intent.action != JournalAction::StageDownload
+            || rec.intent.vault_id != obs.vault_id || rec.intent.path != obs.path
+            || rec.intent.expected_content_hash != obs.expected_content_hash
+            || rec.staged_hash.as_deref() != Some(obs.expected_content_hash.as_str())
+            || obs.parent.device == 0 || obs.parent.file == 0
+            || obs.final_file.device == 0 || obs.final_file.file == 0
+            || obs.byte_length > 32 * 1024 * 1024
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        let claim = self.local_publication_review_queue()?.into_iter()
+            .find(|row| row.operation_id == operation)
+            .ok_or(JournalError::CorruptedRecord)?;
+        if claim.vault_id != obs.vault_id
+            || claim.path != obs.path
+            || claim.expected_content_hash != obs.expected_content_hash
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(Some(obs))
     }
 
     /// Persisted recovery/quarantine *queue*, not a cleanup executor.
@@ -1530,7 +1693,8 @@ mod tests {
             journal.mark_staged(staged.operation_id, b"persist").unwrap();
             // Emulate the exact existing V1 tables/data, without the new table.
             journal.connection.execute_batch(
-                "DROP TABLE sync_local_recovery_reviews;
+                "DROP TABLE sync_local_native_publication_observations;
+                 DROP TABLE sync_local_recovery_reviews;
                  DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
                  DROP TABLE sync_local_publication_attempts;
@@ -1740,7 +1904,8 @@ mod tests {
             j.mark_staged(staged.operation_id, b"payload").unwrap();
             j.record_local_publication_attempt_once(&staged).unwrap();
             j.connection.execute_batch(
-                "DROP TABLE sync_local_recovery_reviews;
+                "DROP TABLE sync_local_native_publication_observations;
+                 DROP TABLE sync_local_recovery_reviews;
                  DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
                  PRAGMA user_version = 2;",
@@ -1853,7 +2018,8 @@ mod tests {
             journal.record_local_publication_attempt_once(&staged).unwrap();
             journal.record_local_recovery_case_once(&case).unwrap();
             journal.connection.execute_batch(
-                "DROP TABLE sync_local_recovery_reviews;
+                "DROP TABLE sync_local_native_publication_observations;
+                 DROP TABLE sync_local_recovery_reviews;
                  DROP TABLE sync_local_recovery_copies;
                  PRAGMA user_version = 3;",
             ).unwrap();
@@ -1898,7 +2064,8 @@ mod tests {
         let db = temp.path().join("sync.sqlite");
         let (journal, intent) = m1dc_fixture(&db);
         journal.connection.execute_batch(
-            "DROP TABLE sync_local_recovery_reviews;
+            "DROP TABLE sync_local_native_publication_observations;
+                 DROP TABLE sync_local_recovery_reviews;
              PRAGMA user_version = 4;",
         ).unwrap();
         drop(journal);
