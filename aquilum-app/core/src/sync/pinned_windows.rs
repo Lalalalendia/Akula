@@ -228,10 +228,9 @@ pub(super) fn create_stage_child(
         | FILE_READ_ATTRIBUTES | DELETE_ACCESS | SYNCHRONIZE, FILE_CREATE)
 }
 
-/// Test-only: open an ALREADY EXISTING lock file for read/write OS locking,
-/// relative to the pinned root HANDLE. Never create, truncate or replace it.
-/// No caller can use this to authorize normal Akula file mutations.
-#[cfg(test)]
+/// Dormant diagnostic: open an ALREADY EXISTING lock file relative to the
+/// pinned root HANDLE. Never create, truncate or replace it. This is not
+/// exposed as normal File Gate or sync write authority.
 pub(super) fn open_existing_probe_lock_child(
     parent: &File,
     name: &str,
