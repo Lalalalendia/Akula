@@ -98,7 +98,10 @@ pub(crate) fn inspect_external_scope(
     if selected.file_type().is_symlink() || !selected.is_dir() {
         return Err(reject());
     }
-    if candidate_scope.file_name().is_none_or(|name| name != scoped_leaf(expected_root_id)) {
+    let expected_leaf = scoped_leaf(expected_root_id);
+    if candidate_scope.file_name().and_then(|name| name.to_str())
+        != Some(expected_leaf.as_str())
+    {
         return Err(reject());
     }
     require_outside_registered_roots(candidate_scope, registered_roots)?;
