@@ -204,10 +204,12 @@ mod tests {
         let (_temp, core, root, appdata) = fixture();
         let db = appdata.join(RECOVERY_JOURNAL_FILENAME);
         let journal = SqliteSyncJournal::open(&db).unwrap();
-        journal.connection.execute_batch("PRAGMA user_version = 4;").unwrap();
+        drop(journal);
+        let direct = rusqlite::Connection::open(&db).unwrap();
+        direct.execute_batch("PRAGMA user_version = 4;").unwrap();
         assert_eq!(native_recovery_overview(&core, &appdata, &root),
             NativeRecoveryOverview::InspectionUnavailable);
-        let version: i64 = journal.connection.query_row(
+        let version: i64 = direct.query_row(
             "PRAGMA user_version", [], |r| r.get(0),
         ).unwrap();
         assert_eq!(version, 4);
