@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/s3_transport/scale_probe.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'
       - '.github/workflows/sync-s3-full-dag-scale.yml'
   workflow_dispatch:
 
@@ -49,7 +50,7 @@ jobs:
           set -euo pipefail
           docker run -d --rm --name akula-s3-full-dag-minio \
             -p 127.0.0.1:9000:9000 \
-            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
+            --tmpfs /data:rw,size=512m,uid=65532,gid=65532,mode=0700 \
             -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
             -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
             cgr.dev/chainguard/minio:latest server /data
@@ -61,6 +62,12 @@ jobs:
           done
           docker logs akula-s3-full-dag-minio
           exit 1
+      - name: Prove pack format rejects member and envelope corruption
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 s3_transport::pack_probe::tests
       - name: Measure complete 10k revision + 10k blob DAG and parent-index IO
         shell: bash
         working-directory: aquilum-app
