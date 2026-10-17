@@ -1,0 +1,137 @@
+name: UTF-16 paired microbenchmark
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/text/utf16.rs"
+      - ".github/workflows/utf16-perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare matching base on the same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}"
+          git worktree add --detach "$RUNNER_TEMP/utf16-base" "origin/${{ github.base_ref }}"
+          echo "BASE=$(git -C "$RUNNER_TEMP/utf16-base" rev-parse HEAD)" | tee environment.txt
+          echo "HEAD=$(git rev-parse HEAD)" | tee -a environment.txt
+          echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)" | tee -a environment.txt
+          rustc --version | tee -a environment.txt
+
+      - name: Compile release-mode base and candidate harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/utf16-probe.rs" <<'RS'
+          #[path = "utf16.rs"]
+          mod utf16;
+          use std::hint::black_box;
+          use std::time::Instant;
+          fn main() {
+              let seeds = [
+                  ("ascii", "Plain ASCII text. Every byte is a character!"),
+                  ("russian", "Русский текст с переносами и буквами ё. "),
+                  ("emoji", "😀🎉🚀🧠✨👩💻"),
+                  ("mixed", "ABC Привет 漢字 😀🎉 é e\u{301}"),
+              ];
+              for (kind, seed) in seeds {
+                  for (size, times) in [("short", 8usize), ("long", 800usize)] {
+                      let text = seed.repeat(times);
+                      let expected = text.encode_utf16().count();
+                      assert_eq!(utf16::utf16_len(&text), expected, "{kind}:{size}");
+                      let repeats = if size == "short" { 25000 } else { 1000 };
+                      let mut measurements = Vec::new();
+                      for _ in 0..9 {
+                          let now = Instant::now();
+                          for _ in 0..repeats {
+                              black_box(utf16::utf16_len(black_box(&text)));
+                          }
+                          measurements.push(now.elapsed().as_secs_f64() * 1e9 / repeats as f64);
+                      }
+                      measurements.sort_by(|a, b| a.total_cmp(b));
+                      println!("BENCH-UTF16 kind={kind} size={size} bytes={} units={expected} median_ns={:.3}", text.len(), measurements[4]);
+                  }
+              }
+          }
+          RS
+          for name in base head; do
+            if [ "$name" = base ]; then root="$RUNNER_TEMP/utf16-base"; else root="$GITHUB_WORKSPACE"; fi
+            module="$root/aquilum-app/core/src/text"
+            cp "$RUNNER_TEMP/utf16-probe.rs" "$module/utf16_perf_probe.rs"
+            rustc -O --edition=2024 "$module/utf16_perf_probe.rs" -o "$RUNNER_TEMP/utf16-bin-$name" -Awarnings
+            rustc --test -O --edition=2024 "$module/utf16.rs" -o "$RUNNER_TEMP/utf16-tests-$name"
+            rm "$module/utf16_perf_probe.rs"
+          done
+
+      - name: Check correctness and measure ABBA
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/utf16-tests-base"
+          "$RUNNER_TEMP/utf16-tests-head"
+          "$RUNNER_TEMP/utf16-bin-base" | tee base-1.txt
+          "$RUNNER_TEMP/utf16-bin-head" | tee head-1.txt
+          "$RUNNER_TEMP/utf16-bin-head" | tee head-2.txt
+          "$RUNNER_TEMP/utf16-bin-base" | tee base-2.txt
+
+      - name: Summarize paired comparison
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re, statistics
+          out = [
+              "## Paired UTF-16 byte-count benchmark",
+              "",
+              "| Case | Size | Base ns/call | PR ns/call | Change |",
+              "|---|---|---:|---:|---:|",
+          ]
+          for case in ("ascii", "russian", "emoji", "mixed"):
+              for size in ("short", "long"):
+                  timings = {}
+                  for variant in ("base", "head"):
+                      samples = []
+                      for trial in (1, 2):
+                          file = Path(f"{variant}-{trial}.txt")
+                          if not file.exists():
+                              continue
+                          match = re.search(
+                              rf"BENCH-UTF16 kind={case} size={size} bytes=\d+ units=\d+ median_ns=([0-9.]+)",
+                              file.read_text(),
+                          )
+                          if match:
+                              samples.append(float(match.group(1)))
+                      if samples:
+                          timings[variant] = statistics.median(samples)
+                  if set(timings) == {"base", "head"}:
+                      base, head = timings["base"], timings["head"]
+                      out.append(f"| {case} | {size} | {base:.2f} | {head:.2f} | {(head/base-1)*100:+.1f}% |")
+          out.extend(["", "Isolated UTF-16 length only; no claim about editor end-to-end latency."])
+          report = "\n".join(out) + "\n"
+          print(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(report)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: utf16-paired-${{ github.sha }}
+          path: |
+            environment.txt
+            base-*.txt
+            head-*.txt
+          retention-days: 30
