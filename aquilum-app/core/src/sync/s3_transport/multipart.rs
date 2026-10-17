@@ -392,8 +392,24 @@ impl AwsS3ProbeClient {
             .to_owned();
         // A process crash between remote creation and this SQLite write may
         // leave an orphan MPU; bucket abort-incomplete lifecycle is required.
-        journal.mark_started(intent.operation_id, &upload_id)?;
-        source.seek(SeekFrom::Start(0))?;
+        if let Err(error) = journal.mark_started(intent.operation_id, &upload_id) {
+            // The server session exists, but the durable SQLite checkpoint
+            // failed. We still have the UploadId in memory: abort it now.
+            // A failed abort remains subject to the bucket MPU lifecycle gate.
+            let _ = self.client.abort_multipart_upload()
+                .bucket(&self.bucket).key(&intent.blob_key)
+                .upload_id(&upload_id).send().await;
+            return Err(error);
+        }
+        if let Err(error) = source.seek(SeekFrom::Start(0)) {
+            // A source can fail to rewind after preflight. Never leave a
+            // successfully journaled session running without a best-effort
+            // abort. No published S3 blob or local vault file is removed.
+            self.abort_unfinished(
+                journal, intent.operation_id, &intent.blob_key, &upload_id,
+            ).await;
+            return Err(S3MultipartError::Source(error));
+        }
 
         let mut remaining = intent.byte_length;
         let mut parts = Vec::new();
