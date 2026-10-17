@@ -85,3 +85,21 @@ No production `VaultPort` implementation, no OS file-writing API, no `Preservati
 4. Two-client filesystem/provider fault matrices before S3/MinIO release. No user-facing Sync activation in M1b.
 
 **Risk decision:** deliberately leave unresolved claims permanently blocked until an independently accepted recovery design is implemented.
+
+
+## SYNC-04g-M1d-a — one-shot recovery audit and native-baseline refusal
+
+**Status:** in implementation via PR #125. No production `VaultPort` mutation or user-facing sync is enabled.
+
+1. Journal v3 adds one immutable `sync_local_recovery_evidence` row per M1b publication attempt, with a BLAKE3 checksum over serialized M1c descriptor-verified historical evidence. The row includes the registered vault, portable relative name, expected content hash, parent file ID, stage/final file IDs and lengths, and mismatch classification. It is tied to the existing SQLite WAL/FULL journal, not the vault.
+2. A Core-registered host can record **one** historical observation after read-only M1c inspection. Later observations cannot overwrite it; changed bytes or changed OS file identity must be treated as a new incident requiring separate policy, not proof of the old case. No stage is removed; the SQLite one-shot claim remains locked.
+3. **Mandatory negative gate:** `StageDownload` cannot advance through the generic journal's Applied, Verified or Committed APIs. Even a pre-existing Verified phase has no valid native File Gate durability receipt, and `recovery_queue` refuses to recommend RetryCommit for local downloads. Upload and remote manifest actions retain their own existing transitions.
+4. Real child-process exit cases cover both (a) after stage fsync but before publish and (b) after successful atomic no-replace publish but before any baseline acknowledgment. They are useful power-*process* interruption tests, **not** a Windows power-loss/disk-cache persistence proof.
+
+### SYNC-04g-M1d-b release criteria — outstanding
+
+- Define an operator-only resolution flow that does not infer provenance from matching BLAKE3 bytes. Any physical quarantine must hold OS file handles/identities and publish a no-replace, durable copy **outside** the synced vault. Never unlink the original stage merely to make a scan pass.
+- Verify exact parent-directory rename persistence over real Windows storage crash/power loss or conservatively refuse to claim durable publication on unverified filesystems. A clean process exit, NtSetInformationFile success or Flushing a stage file are insufficient.
+- Validate genuine interprocess adversarial races after inspection, recover orphan stage/final conflicts without overwriting, preserve immutable revision history, and emit host History/Search events only after proven admission.
+- Keep the existing one-shot publication and audit records until a separately reviewed, durable, operator-authorized recovery protocol can retire them. No automatic claim clearance or retry.
+
