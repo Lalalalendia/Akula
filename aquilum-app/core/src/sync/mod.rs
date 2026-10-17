@@ -32,6 +32,8 @@ mod profile_binding;
 mod path;
 mod pinned_read;
 #[cfg(windows)]
+mod filegate_windows_acl;
+#[cfg(windows)]
 mod pinned_windows;
 mod protocol;
 mod provider;
