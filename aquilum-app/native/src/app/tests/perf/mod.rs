@@ -22,6 +22,7 @@ mod vello_release;
 mod worker_crossover;
 mod worker_router;
 mod worker_fragmented;
+mod worker_adjacent;
 
 use crate::stats::percentiles;
 
