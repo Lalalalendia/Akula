@@ -66,6 +66,41 @@ jobs:
           echo "GUARD96_FAILURES=$failures / 20" | tee -a "$GITHUB_STEP_SUMMARY"
           grep -h 'VELLO_GUARD_PARITY_FAILURE' "$GITHUB_WORKSPACE"/vello-guard96-attempt-*.log >> "$GITHUB_STEP_SUMMARY" || true
           test "$failures" -eq 0
+      - name: Isolate glyph hinting, atlas and glyph-run visibility (20 fresh processes each)
+        if: always()
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -uo pipefail
+          unexpected=0
+          for mode in hint-off atlas-off full-glyph-visibility; do
+            case "$mode" in
+              hint-off) flag=AQ_TEST_DISABLE_GLYPH_HINTING ;;
+              atlas-off) flag=AQ_TEST_DISABLE_GLYPH_ATLAS ;;
+              full-glyph-visibility) flag=AQ_TEST_FULL_GLYPH_RUN_VISIBILITY ;;
+            esac
+            failures=0
+            for attempt in $(seq 1 20); do
+              log="$GITHUB_WORKSPACE/vello-guard96-$mode-attempt-$attempt.log"
+              if env "$flag=1" AQ_CROSSOVER_OUT="$GITHUB_WORKSPACE/vello-guard96-frames/$mode-attempt-$attempt" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                :
+              elif grep -q 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
+                failures=$((failures + 1))
+              else
+                echo "GUARD96_DIAG_UNEXPECTED=$mode/$attempt (not a pixel-parity failure)"
+                tail -n 25 "$log"
+                unexpected=1
+              fi
+            done
+            echo "GUARD96_DIAG mode=$mode failures=$failures/20" | tee -a "$GITHUB_STEP_SUMMARY"
+            grep -h 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$GITHUB_WORKSPACE"/vello-guard96-"$mode"-attempt-*.log >> "$GITHUB_STEP_SUMMARY" || true
+          done
+          test "$unexpected" -eq 0
       - name: Preserve exact failing pixels and full-reference PNGs
         if: always()
         uses: actions/upload-artifact@v4
@@ -74,6 +109,7 @@ jobs:
           path: |
             vello-guard96-environment.log
             vello-guard96-attempt-*.log
+            vello-guard96-*-attempt-*.log
             vello-guard96-frames/**/*.png
           if-no-files-found: warn
           retention-days: 14
