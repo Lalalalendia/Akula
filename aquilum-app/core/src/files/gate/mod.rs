@@ -12,6 +12,7 @@ pub use write::{copy, create, create_binary, create_folder, ensure_folder_tree, 
 use super::attachments::forget_attachments_if_touched;
 use crate::app_core::{Core, CoreEvent};
 use crate::history::NoteWrite;
+use crate::history::service::HistoryMoveFailure;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -36,6 +37,18 @@ pub struct NoteHistorySaveFailed {
     pub message: String,
 }
 
+/// A primary document rename/trash/restore completed, but history transfer
+/// did not. Both old and new history paths may need recovery.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteHistoryMoveFailed {
+    pub from: String,
+    pub to: String,
+    pub action: String,
+    pub message: String,
+    pub may_have_partial_files: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct NoteMove {
     pub from: String,
@@ -55,6 +68,22 @@ fn record(core: &Core, note: &Path, write: NoteWrite<'_>) {
             }));
         }
     }
+}
+
+pub(super) fn report_history_move_failure(
+    core: &Core,
+    from: &Path,
+    to: &Path,
+    error: &HistoryMoveFailure,
+) {
+    eprintln!("[aquilum:history] {} -> {}: {error}", from.display(), to.display());
+    core.emit(CoreEvent::NoteHistoryMoveFailed(NoteHistoryMoveFailed {
+        from: from.to_string_lossy().into_owned(),
+        to: to.to_string_lossy().into_owned(),
+        action: error.action.to_owned(),
+        message: error.message.clone(),
+        may_have_partial_files: error.may_have_partial_files,
+    }));
 }
 
 fn paths_changed(core: &Core, paths: Vec<PathBuf>) {
