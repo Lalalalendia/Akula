@@ -501,7 +501,8 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             // also be assumed to be the case for any other potential backend.)
             // Therefore, we can calculate the relative paint transform for
             // the glyph by pre-concatenating it with the inverted outline transform.
-            let outline_cache_key = outline_cache_enabled.then(|| {
+            let outline_cache_key = (outline_cache_enabled
+                && outline_atlas_has_exact_vertical_phase(outline_transform)).then(|| {
                 let fractional_x = outline_transform.translation().x.fract() as f32;
                 GlyphCacheKey::new(
                     font_info.id,
@@ -1279,6 +1280,17 @@ impl GlyphScaleProperties {
 fn snap_hinted_baseline(y: f64) -> f64 {
     const ROUNDING_EPSILON: f64 = 1e-8;
     (y + 0.5 + ROUNDING_EPSILON).floor()
+}
+
+/// Atlas outline bitmaps are generated at a zero-fractional-Y baseline and
+/// later positioned at `ty.floor()`. Unlike X, the atlas key has no Y
+/// subpixel bucket. Reusing it with a fractional Y would silently discard
+/// the glyph's vertical phase. Render these outlines directly instead;
+/// integer-aligned (including hinted) outlines keep using the atlas.
+#[inline]
+fn outline_atlas_has_exact_vertical_phase(transform: Affine) -> bool {
+    let y = transform.translation().y;
+    y.is_finite() && y.fract() == 0.0
 }
 
 /// Calculate transform for outline glyphs.
@@ -2306,7 +2318,22 @@ fn x_y_advances(transform: &Affine) -> (Vec2, Vec2) {
 
 #[cfg(test)]
 mod hinted_baseline_tests {
-    use super::snap_hinted_baseline;
+    use super::{outline_atlas_has_exact_vertical_phase, snap_hinted_baseline};
+    use crate::kurbo::Affine;
+
+    #[test]
+    fn cached_outlines_require_integral_vertical_origin() {
+        for y in [-1000.0, -29.0, -1.0, 0.0, 1.0, 29.0, 1000.0] {
+            assert!(outline_atlas_has_exact_vertical_phase(Affine::translate((12.3, y))));
+        }
+        for y in [-1000.000_000_001, -29.5, -0.25, 0.125, 0.5, 29.75, 1000.000_000_001] {
+            assert!(!outline_atlas_has_exact_vertical_phase(Affine::translate((12.3, y))));
+        }
+        for y in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!outline_atlas_has_exact_vertical_phase(Affine::translate((12.3, y))));
+        }
+    }
+
 
     #[test]
     fn hinted_vertical_snap_is_translation_invariant() {
