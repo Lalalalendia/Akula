@@ -121,6 +121,31 @@ impl HeldProbeLock {
     pub(crate) fn identity(&self) -> (u64, u64) {
         (self.id.volume, self.id.file)
     }
+
+    /// Negative forensic check ONLY. An exclusive OS lock protects an opened
+    /// file object, not its directory entry. Another process with sufficient
+    /// filesystem rights can rename the held object and replace its name;
+    /// the replacement then has a *different*, independently lockable ID.
+    ///
+    /// Detect an already-performed swap while this handle is still held.
+    /// This cannot prevent a swap immediately AFTER the check, must not be
+    /// used for production mutation admission, and does not clear HOLD.
+    #[cfg(test)]
+    pub(crate) fn recheck_held_name(&self, root: &PinnedProbeRoot) -> io::Result<()> {
+        root.recheck_root()?;
+        if descriptor_identity(&self._root, false)? != root.id {
+            return Err(refused("held lock belongs to a different pinned root"));
+        }
+        if descriptor_identity(&self._file, true)? != self.id {
+            return Err(refused("held OS lock handle identity changed"));
+        }
+        let named = open_existing_leaf(&root.handle)?;
+        if descriptor_identity(&named, true)? != self.id {
+            return Err(refused("held lock pathname now points to another OS object"));
+        }
+        root.recheck_root()?;
+        Ok(())
+    }
 }
 
 impl PinnedProbeRoot {
