@@ -32,6 +32,7 @@ on:
       - "aquilum-app/native/src/app/templates/starters.rs"
       - "aquilum-app/core/src/files/gate/tests.rs"
       - "aquilum-app/core/src/files/gate/interprocess_probe.rs"
+      - "aquilum-app/core/src/sync/filegate_lock_probe.rs"
       - "aquilum-app/core/src/documents/hub.rs"
       - "aquilum-app/core/src/documents/hub_tests.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
