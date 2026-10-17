@@ -653,3 +653,130 @@ fn m1d_no_ticket_cannot_persist_recovery_evidence() {
     assert!(journal.read_local_recovery_case(op).unwrap().is_none());
     assert!(journal.baseline(vault, doc).unwrap().is_none());
 }
+
+
+#[test]
+fn m1db_crash_stage_copy_is_retained_after_original_loss_and_restart() {
+    let (temp, _core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/crash-stage.md";
+    let output = run_child(&temp, &root, relative, op, "crash");
+    assert_eq!(output.status.code(), Some(87));
+    let appdata = temp.path().join("child-appdata");
+    let core = core_at(&root, &appdata);
+    let db = appdata.join("ops.sqlite");
+    let journal = SqliteSyncJournal::open(&db).unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let case = host.record_local_recovery_evidence(op, &journal).unwrap();
+    assert_eq!(case.evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::StagedOnly);
+    let archive = host.archive_local_recovery_copy(op, &journal).unwrap();
+    assert_eq!(archive.stage_bytes.as_deref(), Some(&b"staged before process exit"[..]));
+    assert_eq!(archive.final_bytes, None);
+    let incident = journal.get(op).unwrap().unwrap().intent;
+    assert!(journal.baseline(incident.vault_id, incident.document_id).unwrap().is_none());
+    assert!(matches!(host.archive_local_recovery_copy(op, &journal),
+        Err(LocalRecoveryError::Journal(JournalError::RecoveryCopyAlreadyRecorded))));
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    fs::remove_file(&stage).unwrap(); // simulate external loss, NOT product recovery
+    drop(journal);
+    let reopened = SqliteSyncJournal::open(&db).unwrap();
+    assert_eq!(reopened.read_local_recovery_copy(op).unwrap(), Some(archive));
+    assert!(!stage.exists());
+    assert_eq!(reopened.local_publication_review_queue().unwrap().len(), 1);
+    assert!(reopened.baseline(incident.vault_id, incident.document_id)
+        .unwrap().is_none());
+}
+
+#[test]
+fn m1db_published_file_copy_does_not_mutate_vault_or_confirm_baseline() {
+    let (temp, _core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/lost-ack.md";
+    let output = run_child(&temp, &root, relative, op, "published");
+    assert_eq!(output.status.code(), Some(88));
+    let appdata = temp.path().join("child-appdata");
+    let core = core_at(&root, &appdata);
+    let journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    host.record_local_recovery_evidence(op, &journal).unwrap();
+    let archive = host.archive_local_recovery_copy(op, &journal).unwrap();
+    assert_eq!(archive.stage_bytes, None);
+    assert_eq!(archive.final_bytes.as_deref(),
+        Some(&b"published before lost acknowledgement"[..]));
+    assert_eq!(fs::read(root.join(relative)).unwrap(),
+        b"published before lost acknowledgement");
+    let intent = journal.get(op).unwrap().unwrap().intent;
+    assert_eq!(journal.get(op).unwrap().unwrap().phase, JournalPhase::Staged);
+    assert!(journal.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+}
+
+#[test]
+fn m1db_external_stage_inode_swap_with_same_bytes_refuses_archive() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/external.md";
+    let (journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), relative, b"unchanged bytes", op,
+    );
+    m1c_claim(&journal, op);
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    fs::write(&stage, b"unchanged bytes").unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    host.record_local_recovery_evidence(op, &journal).unwrap();
+    let moved = temp.path().join("original-stage");
+    fs::rename(&stage, &moved).unwrap();
+    fs::write(&stage, b"unchanged bytes").unwrap();
+    assert!(host.archive_local_recovery_copy(op, &journal).is_err());
+    assert!(journal.read_local_recovery_copy(op).unwrap().is_none());
+    assert_eq!(fs::read(&moved).unwrap(), b"unchanged bytes");
+    assert_eq!(fs::read(&stage).unwrap(), b"unchanged bytes");
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[test]
+fn m1db_conflicting_external_final_bytes_are_copied_not_overwritten() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/competing.md";
+    let (journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), relative, b"our intended data", op,
+    );
+    m1c_claim(&journal, op);
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    fs::write(&stage, b"our intended data").unwrap();
+    fs::write(root.join(relative), b"other process data").unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let evidence = host.record_local_recovery_evidence(op, &journal).unwrap();
+    assert_eq!(evidence.evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::DifferentFinalFile);
+    let copy = host.archive_local_recovery_copy(op, &journal).unwrap();
+    assert_eq!(copy.stage_bytes.as_deref(), Some(&b"our intended data"[..]));
+    assert_eq!(copy.final_bytes.as_deref(), Some(&b"other process data"[..]));
+    assert_eq!(fs::read(&stage).unwrap(), b"our intended data");
+    assert_eq!(fs::read(root.join(relative)).unwrap(), b"other process data");
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[test]
+fn m1db_refuses_appdata_archive_inside_registered_vault() {
+    let (temp, core, root) = fixture();
+    fs::create_dir_all(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let (journal, _cache, vault, doc) = staged(
+        &core, &root.join("untrusted-journal"), "notes/user.md", b"payload", op,
+    );
+    m1c_claim(&journal, op);
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    host.record_local_recovery_evidence(op, &journal).unwrap();
+    assert!(matches!(
+        host.archive_local_recovery_copy(op, &journal),
+        Err(LocalRecoveryError::Journal(JournalError::UnsafeArchiveLocation))
+    ));
+    assert!(journal.read_local_recovery_copy(op).unwrap().is_none());
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}

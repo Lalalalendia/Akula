@@ -13,7 +13,7 @@ use super::protection_store::{
 use super::OperationId;
 use super::local_create::{self, UnconfirmedLocalCreate};
 use super::local_recovery::{self, ReadOnlyLocalPublicationEvidence};
-use super::journal::LocalRecoveryEvidenceCase;
+use super::journal::{LocalRecoveryArchivedCopy, LocalRecoveryEvidenceCase};
 use super::{DagStoreError, JournalAction, JournalError, JournalPhase, LocalFileSnapshot,
     SqliteDagStore, SqliteSyncJournal, SyncRelativePath, VaultPortError};
 use crate::app_core::Core;
@@ -484,6 +484,69 @@ impl<'a> RegisteredReadAdmission<'a> {
         };
         journal.record_local_recovery_case_once(&case)?;
         Ok(case)
+    }
+
+    /// M1d-b: preserve a COPY of the first incident's stage and/or final
+    /// bytes in host app-data SQLite. No vault names are deleted, renamed,
+    /// hidden or unlocked. A final hash-match is NOT ownership proof.
+    pub(crate) fn archive_local_recovery_copy(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+    ) -> Result<LocalRecoveryArchivedCopy, LocalRecoveryError> {
+        // An attacker-controlled sync folder must never become the location
+        // of an archive / WAL / SHM sidecar. The journal's host app-data path
+        // is checked before archive bytes are written.
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        let case = journal.read_local_recovery_case(operation)?
+            .ok_or(LocalRecoveryError::MissingTicket)?;
+        if case.vault_id.as_uuid() != self.workspace_id
+            || case.evidence.operation_id != operation
+        {
+            return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+        }
+        self.check_root()?;
+        let relative = &case.relative_path;
+        let target = self.root_path.join(relative.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&target)
+            .map_err(admission_error)?;
+        let _gate = self.core.file_mutations.lock()
+            .map_err(|_| VaultPortError::PermissionDenied)?;
+        self.check_root()?;
+
+        let parent = self.pinned.open_parent_for_inspection(relative)?;
+        let parent_id = local_create::directory_identity(&parent)?;
+        if parent_id != case.evidence.parent_identity {
+            return Err(LocalRecoveryError::UnstableObservation);
+        }
+        let leaf = relative.as_str().rsplit('/').next()
+            .ok_or(LocalRecoveryError::Admission(VaultPortError::UnsafePath))?;
+        let (stage, final_name) = local_recovery::capture_names(
+            &parent, operation, leaf, &case.evidence,
+            &case.expected_content_hash, MAX_PROTECTED_ORIGINAL_BYTES as u64,
+        )?;
+        // Copy bytes only after comparing current names again against the
+        // historical identities. This still cannot prevent another process
+        // changing the vault immediately after a successful archive.
+        let observed = local_recovery::inspect_names(
+            &parent, operation, leaf, &case.expected_content_hash,
+            MAX_PROTECTED_ORIGINAL_BYTES as u64,
+        )?;
+        if observed.0 != case.evidence.stage || observed.1 != case.evidence.final_name {
+            return Err(LocalRecoveryError::UnstableObservation);
+        }
+        let current_parent = self.pinned.open_parent_for_inspection(relative)
+            .map_err(|_| LocalRecoveryError::UnstableObservation)?;
+        if local_create::directory_identity(&current_parent)
+            .map_err(|_| LocalRecoveryError::UnstableObservation)? != parent_id
+        {
+            return Err(LocalRecoveryError::UnstableObservation);
+        }
+        self.check_root()?;
+        // A single INSERT/COMMIT writes durable independent bytes without
+        // clearing the permanent local publication/recovery review tickets.
+        let result = journal.record_local_recovery_copy_once(
+            operation, stage.as_deref(), final_name.as_deref(),
+        )?;
+        Ok(result)
     }
 
     /// Bind file identity by pinned handles without reading bytes or taking
