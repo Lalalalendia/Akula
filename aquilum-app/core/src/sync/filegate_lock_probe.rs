@@ -235,7 +235,7 @@ fn exclusive_test_leaf(root: &PinnedProbeRoot) -> io::Result<Option<File>> {
             Mode::RUSR | Mode::WUSR,
         ) {
             Ok(fd) => Ok(Some(File::from(fd))),
-            Err(rustix::io::Errno::EXIST) => Ok(None),
+            Err(error) if error == rustix::io::Errno::EXIST => Ok(None),
             Err(error) => Err(converted(error)),
         };
     }
@@ -306,6 +306,7 @@ impl PinnedProbeRoot {
         let created = created_file.is_some();
         let mut created_id = None;
         let mut created_generation = None;
+        let mut parent_sync_completed = false;
         if let Some(mut file) = created_file {
             let id = descriptor_identity(&file, true)?;
             let generation = uuid::Uuid::new_v4();
@@ -314,9 +315,18 @@ impl PinnedProbeRoot {
             file.sync_all()?;
             created_id = Some(id);
             created_generation = Some(generation);
-            // This is metadata evidence only, not portable power-loss proof.
+            // Directory fsync is not uniformly supported (notably on some
+            // macOS and virtual filesystems). Record an unsupported result
+            // explicitly; never claim parent durability on such a filesystem.
             #[cfg(unix)]
-            self.handle.sync_all()?;
+            match self.handle.sync_all() {
+                Ok(()) => parent_sync_completed = true,
+                Err(error) if matches!(
+                    error.kind(),
+                    ErrorKind::InvalidInput | ErrorKind::Unsupported
+                ) => {}
+                Err(error) => return Err(error),
+            }
         }
         self.recheck_root()?;
         // Open the named object again relative to the original pinned root:
@@ -340,7 +350,7 @@ impl PinnedProbeRoot {
             created,
             generation,
             identity: (id.volume, id.file),
-            parent_sync_completed: cfg!(unix) && created,
+            parent_sync_completed,
         })
     }
 }
