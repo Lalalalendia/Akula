@@ -7,6 +7,7 @@ on:
       - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/multi_threaded.rs'
       - 'aquilum-app/native/src/app/tests/perf/vello_release.rs'
       - 'aquilum-app/native/src/render/paint/runs.rs'
+      - 'aquilum-app/native/src/render/damage/glyphs.rs'
       - 'aquilum-app/native/src/app/tests/perf/mod.rs'
       - '.github/scripts/summarize-vello-profile.py'
       - '.github/workflows/native-vello-release-profile.yml'
@@ -78,6 +79,19 @@ jobs:
             benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
             2>&1 | tee "$GITHUB_WORKSPACE/vello-pixel-no-atlas.log"
           grep -F "VELLO_PIXEL_DIAG_SUMMARY case=text_175" "$GITHUB_WORKSPACE/vello-pixel-no-atlas.log"
+      - name: Check first-glyph culling of multiline text runs (test only)
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_PIXEL_DIAG: "1"
+          AQ_TEST_FULL_GLYPH_RUN_VISIBILITY: "1"
+          AQ_OUT: ${{ github.workspace }}/vello-glyph-visibility-frames
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/vello-glyph-visibility.log"
+          grep -F "VELLO_PIXEL_DIAG_SUMMARY case=text_175" "$GITHUB_WORKSPACE/vello-glyph-visibility.log"
       - name: Falsify scroll-copy defect with full viewport reraster (test only)
         shell: bash
         working-directory: aquilum-app
@@ -145,6 +159,7 @@ jobs:
             vello-release-env.txt
             vello-pixel-diag.log
             vello-pixel-no-atlas.log
+            vello-glyph-visibility.log
             vello-pixel-full-viewport.log
             vello-pixel-guard96.log
             vello-untraced.log
@@ -153,6 +168,7 @@ jobs:
             vello-release-summary.md
             vello-failed-frames/*.png
             vello-no-atlas-frames/*.png
+            vello-glyph-visibility-frames/*.png
             vello-force-viewport-frames/*.png
             vello-edge-guard-frames/*.png
           if-no-files-found: warn
