@@ -543,6 +543,30 @@ mod tests {
             S3MultipartPhase::Verified);
     }
 
+    #[test]
+    fn journal_rejects_invalid_phases_and_does_not_promote_aborted_uploads() {
+        let dir = tempfile::tempdir().unwrap();
+        let ns = S3Keyspace::new("akula-sync/test", VaultId::new()).unwrap();
+        let op = intent(b"never remotely written", &ns);
+        let mut journal = S3MultipartJournal::open(&dir.path().join("phases.sqlite")).unwrap();
+        assert!(journal.begin(&op).unwrap());
+        assert!(matches!(
+            journal.mark_finalizing(op.operation_id, true),
+            Err(S3MultipartError::InvalidTransition)
+        ));
+        journal.mark_started(op.operation_id, "incomplete-test-mpu").unwrap();
+        journal.mark_aborted(op.operation_id).unwrap();
+        assert_eq!(
+            journal.status(op.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Aborted
+        );
+        assert!(matches!(
+            journal.mark_verified(op.operation_id, "\"unexpected\""),
+            Err(S3MultipartError::InvalidTransition)
+        ));
+        assert!(!journal.begin(&op).unwrap());
+    }
+
     /// Run only against disposable loopback MinIO with fresh bucket credentials.
     #[tokio::test]
     #[ignore = "requires the isolated MinIO service in sync-s3-minio.yml"]
@@ -604,5 +628,64 @@ mod tests {
         ).await.unwrap(), S3MultipartOutcome::RecoveredVerified);
         assert_eq!(recovered.status(op.operation_id).unwrap().unwrap().phase,
             S3MultipartPhase::Verified);
+
+        // Untrusted same-key remote data must never be promoted merely
+        // because HEAD says the key exists. Preserve the server object.
+        let corrupt = intent(b"expected", &ns);
+        transport.put_conditionally(
+            &corrupt.blob_key, b"corrupt!", S3PutCondition::IfAbsent,
+        ).await.unwrap();
+        let mut genuine = Cursor::new(b"expected".to_vec());
+        assert!(matches!(
+            transport.upload_immutable_multipart(
+                &mut recovered, corrupt.clone(), &mut genuine,
+            ).await,
+            Err(S3MultipartError::ContentMismatch)
+        ));
+        assert_eq!(recovered.status(corrupt.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Prepared);
+        assert_eq!(transport.get_bounded(&corrupt.blob_key, 32).await.unwrap().bytes,
+            b"corrupt!");
+
+        // A source with an unexpected digest must be rejected BEFORE the
+        // operation is journaled and before any S3 transfer is started.
+        let wrong = intent(b"original", &ns);
+        let mut modified = Cursor::new(b"modified".to_vec());
+        assert!(matches!(
+            transport.upload_immutable_multipart(
+                &mut recovered, wrong.clone(), &mut modified,
+            ).await,
+            Err(S3MultipartError::ContentMismatch)
+        ));
+        assert!(recovered.status(wrong.operation_id).unwrap().is_none());
+
+        // A partially sent MPU with no published object is NOT replayed.
+        // No create/put is attempted, even with the source still available.
+        let interrupted = intent(b"pending", &ns);
+        recovered.begin(&interrupted).unwrap();
+        recovered.mark_started(interrupted.operation_id, "simulated-lost-mpu").unwrap();
+        let mut pending_source = Cursor::new(b"pending".to_vec());
+        assert!(matches!(
+            transport.upload_immutable_multipart(
+                &mut recovered, interrupted.clone(), &mut pending_source,
+            ).await,
+            Err(S3MultipartError::RecoveryRequired)
+        ));
+        assert_eq!(
+            recovered.status(interrupted.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Uploading
+        );
+        assert_eq!(transport.head(&interrupted.blob_key).await,
+            Err(S3TransportError::NotFound));
+
+        // Empty blobs are valid immutable content and never need an MPU.
+        let empty = intent(b"", &ns);
+        let mut empty_source = Cursor::new(Vec::new());
+        assert_eq!(transport.upload_immutable_multipart(
+            &mut recovered, empty.clone(), &mut empty_source,
+        ).await.unwrap(), S3MultipartOutcome::UploadedVerified);
+        assert_eq!(recovered.status(empty.operation_id).unwrap().unwrap().completed_parts, 0);
+        assert_eq!(transport.digest_stream_bounded(&empty.blob_key, 0).await.unwrap().blake3,
+            empty.expected_blake3);
     }
 }
