@@ -457,7 +457,7 @@ mod tests {
         for id in [base,left,right] {
             assert!(old.cached_revision(id).is_some());
         }
-        assert!(old.is_verified_for(old.vault_id, "pinned-prior-root"));
+        assert!(old.is_verified_for(old.verified_revision_inventory().unwrap().vault_id, "pinned-prior-root"));
     }
 
     #[test]
