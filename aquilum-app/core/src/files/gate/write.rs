@@ -107,12 +107,11 @@ pub fn create_folder(core: &Core, path: &Path) -> Result<(), FileCommandError> {
     }
 }
 
-
 /// Create a missing template directory tree under the Core File Gate.
- /// Keep create_dir_all semantics for native starter templates: parents can be
- /// created, an existing directory is accepted, and an existing file fails.
- /// This is process-local serialization only, not root confinement or a
- /// handle-relative sync mutation authority.
+/// Keep create_dir_all semantics for native starter templates: parents can be
+/// created, an existing directory is accepted, and an existing file fails.
+/// This is process-local serialization only, not root confinement or a
+/// handle-relative sync mutation authority.
 pub fn ensure_folder_tree(core: &Core, path: &Path) -> Result<(), FileCommandError> {
     let _guard = core.file_mutation_guard()?;
     std::fs::create_dir_all(path)?;
@@ -163,6 +162,7 @@ mod folder_tests {
             Err(FileCommandError::AlreadyExists { .. })
         ));
     }
+
     #[test]
     fn core_file_gate_serializes_template_folder_tree_across_core_instances() {
         let temp = tempfile::tempdir().unwrap();
@@ -202,5 +202,4 @@ mod folder_tests {
         assert!(ensure_folder_tree(&first, &existing).is_err());
         assert_eq!(fs::read(&existing).unwrap(), b"unchanged");
     }
-
 }
