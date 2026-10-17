@@ -74,3 +74,97 @@ fn a_deleted_folder_reports_the_notes_it_held() {
     assert_eq!(relocation.removed, vec![folder.join("А.md").to_string_lossy().into_owned()]);
     assert!(relocation.moves.is_empty());
 }
+
+
+/// If another in-process File Gate operation holds the interlock, each real
+/// operation must block until it is released. This does not protect against
+/// writes by a separate process or authorize sync mutations.
+#[test]
+fn core_file_gate_serializes_create_write_copy_rename_trash_and_restore() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::files::error::FileCommandError;
+    use crate::history::Source;
+    use std::path::PathBuf;
+    use std::sync::{mpsc, Arc};
+    use std::thread;
+    use std::time::Duration;
+
+    fn under_lock(
+        core: &Arc<Core>,
+        act: impl FnOnce(Arc<Core>) -> Result<(), FileCommandError> + Send + 'static,
+    ) {
+        let lock = core.file_mutations.lock().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let core = Arc::clone(core);
+        let worker = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let result = act(core);
+            done_tx.send(result).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "disk mutation completed while the Core File Gate lock was held");
+        drop(lock);
+        done_rx.recv_timeout(Duration::from_secs(30)).unwrap().unwrap();
+        worker.join().unwrap();
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let vault = temp.path().join("vault");
+    fs::create_dir(&vault).unwrap();
+    let data = temp.path().join("appdata");
+    fs::create_dir(&data).unwrap();
+    let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+    core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
+    let first: PathBuf = vault.join("first.md");
+    let copy = vault.join("copy.md");
+    let renamed = vault.join("renamed.md");
+
+    let p = first.clone();
+    under_lock(&core, move |core| {
+        super::write::create(&core, &p, "original", Source::Me, None).map(|_| ())
+    });
+    assert_eq!(fs::read(&first).unwrap(), b"original");
+
+    let p = first.clone();
+    let old_hash = blake3::hash(b"original").to_hex().to_string();
+    under_lock(&core, move |core| {
+        super::write::write(&core, &p, "changed", Some(&old_hash), Source::Me, None).map(|_| ())
+    });
+    assert_eq!(fs::read(&first).unwrap(), b"changed");
+
+    let from = first.clone();
+    let to = copy.clone();
+    under_lock(&core, move |core| super::write::copy(&core, &from, &to));
+    assert_eq!(fs::read(&copy).unwrap(), b"changed");
+
+    let from = first.clone();
+    let to = renamed.clone();
+    under_lock(&core, move |core| super::moves::rename(&core, &from, &to).map(|_| ()));
+    assert!(!first.exists());
+    assert_eq!(fs::read(&renamed).unwrap(), b"changed");
+
+    // For trash and restore, use an explicit signal from the worker and
+    // acquire the lock across the real move operation, not only an adapter.
+    let root = vault.clone();
+    let target = renamed.clone();
+    let moved = Arc::new(std::sync::Mutex::new(None::<PathBuf>));
+    let saved = Arc::clone(&moved);
+    under_lock(&core, move |core| {
+        let path = super::trash::trash(&core, &root, &target)?;
+        *saved.lock().unwrap() = Some(path);
+        Ok(())
+    });
+    let moved = moved.lock().unwrap().clone().unwrap();
+    assert!(!renamed.exists());
+    assert!(moved.exists());
+
+    let root = vault.clone();
+    under_lock(&core, move |core| {
+        super::trash::restore(&core, &root, &moved).map(|_| ())
+    });
+    assert_eq!(fs::read(&renamed).unwrap(), b"changed");
+}
