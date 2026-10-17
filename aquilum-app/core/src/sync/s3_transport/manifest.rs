@@ -269,6 +269,21 @@ fn accept_verified_revision(
     Ok(())
 }
 
+/// Proof by immutable revision-reference inclusion. Every predecessor entry
+/// (including tombstones and both sides of a conflict) must still appear in
+/// the successor with precisely the same document ID, BLAKE3 JSON digest and
+/// blob size. This check alone does NOT verify content bytes; it is valid only
+/// after the current manifest's full DAG/blob readback has already succeeded.
+fn assert_revision_refs_retained(
+    parent: &BTreeMap<crate::sync::RevisionId, S3RevisionRefV1>,
+    child: &BTreeMap<crate::sync::RevisionId, S3RevisionRefV1>,
+) -> Result<(), S3HeadError> {
+    if !parent.iter().all(|(id, original)| child.get(id) == Some(original)) {
+        return Err(S3HeadError::InvalidManifest);
+    }
+    Ok(())
+}
+
 impl AwsS3ProbeClient {
     async fn fetch_verified_revision(
         &self, reference: S3RevisionRefV1,
@@ -426,14 +441,7 @@ impl AwsS3ProbeClient {
     ) -> Result<(), S3HeadError> {
         let old = self.revision_index(parent).await?;
         let new = self.revision_index(child).await?;
-        for (id, original) in old {
-            if new.get(&id) != Some(&original) {
-                // A missing, modified or duplicate ancestor is a hard hold,
-                // even when the proposed manifest has a valid parent hash.
-                return Err(S3HeadError::InvalidManifest);
-            }
-        }
-        Ok(())
+        assert_revision_refs_retained(&old, &new)
     }
 
     /// Root read is protected by HEAD/GET If-Match/HEAD; referent's exact
@@ -462,7 +470,12 @@ impl AwsS3ProbeClient {
             let (Some(parent_id), Some(parent_hash)) = (
                 manifest.previous_manifest_id, manifest.previous_manifest_blake3.as_deref()
             ) else { return Err(S3HeadError::InvalidManifest); };
-            let previous = self.read_verified_manifest(parent_id, parent_hash).await?;
+            // The CURRENT manifest already passed full JSON/DAG/blob readback.
+            // Re-fetch the immutable predecessor envelope by its pinned BLAKE3,
+            // then verify the exact reference inclusion through strict shard
+            // digests. Re-hashing all predecessor blobs would only repeat the
+            // same proof and makes N generations increasingly expensive.
+            let previous = self.read_manifest_envelope(parent_id, parent_hash).await?;
             if !manifest.is_successor_of(&previous, parent_hash) {
                 return Err(S3HeadError::InvalidManifest);
             }
@@ -492,6 +505,14 @@ impl AwsS3ProbeClient {
             return Err(S3HeadError::TooManyAncestors);
         }
         let mut cursor = head.manifest.clone();
+        // Anchor the caller's pinned manifest to immutable cloud bytes even
+        // when this method is invoked directly with a constructed value.
+        let cursor_digest = cursor.digest(&self.keyspace)?;
+        let root = self.read_manifest_envelope(cursor.manifest_id, &cursor_digest).await?;
+        if root != cursor {
+            return Err(S3HeadError::InvalidManifest);
+        }
+        let mut cursor_refs = self.revision_index(&cursor).await?;
         let mut visited = BTreeSet::new();
         let mut hops = 0;
         while let (Some(id), Some(hash)) = (
@@ -500,12 +521,19 @@ impl AwsS3ProbeClient {
             if hops == max_hops || !visited.insert(id) {
                 return Err(S3HeadError::TooManyAncestors);
             }
-            let parent = self.read_verified_manifest(id, hash).await?;
+            // Authenticate the immutable manifest *envelope* and each shard,
+            // not every previous content blob. The current complete snapshot
+            // was verified upstream and all predecessor refs must survive
+            // unchanged into it. Reuse the child index for the next edge,
+            // fetching each ancestral index only once.
+            let parent = self.read_manifest_envelope(id, hash).await?;
             if !cursor.is_successor_of(&parent, hash) {
                 return Err(S3HeadError::InvalidManifest);
             }
-            self.ensure_ancestor_revisions_retained(&parent, &cursor).await?;
+            let parent_refs = self.revision_index(&parent).await?;
+            assert_revision_refs_retained(&parent_refs, &cursor_refs)?;
             cursor = parent;
+            cursor_refs = parent_refs;
             hops += 1;
         }
         Ok(hops)
@@ -838,6 +866,63 @@ mod tests {
         assert_eq!(again.phase(op).unwrap(), Some(S3HeadAttemptPhase::Prepared));
         again.mark_published(op, "\"etag\"").unwrap();
         assert_eq!(again.phase(op).unwrap(), Some(S3HeadAttemptPhase::Published));
+    }
+
+    #[test]
+    fn immutable_ancestry_rejects_dropped_or_rewritten_history_without_blobs() {
+        let document = DocumentId::new();
+        let root = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            document_id: document,
+            revision_blake3: blake3::hash(b"root json").to_hex().to_string(),
+            blob_bytes: Some(7),
+        };
+        let deletion = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            document_id: document,
+            revision_blake3: blake3::hash(b"tombstone json").to_hex().to_string(),
+            blob_bytes: None,
+        };
+        let added = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            document_id: document,
+            revision_blake3: blake3::hash(b"new json").to_hex().to_string(),
+            blob_bytes: Some(15),
+        };
+        let old: BTreeMap<_, _> = [root.clone(), deletion.clone()]
+            .into_iter().map(|r| (r.revision_id, r)).collect();
+        let valid: BTreeMap<_, _> = [root.clone(), deletion.clone(), added]
+            .into_iter().map(|r| (r.revision_id, r)).collect();
+        assert!(assert_revision_refs_retained(&old, &valid).is_ok());
+
+        let no_tombstone: BTreeMap<_, _> = [root.clone()]
+            .into_iter().map(|r| (r.revision_id, r)).collect();
+        assert!(matches!(
+            assert_revision_refs_retained(&old, &no_tombstone),
+            Err(S3HeadError::InvalidManifest)
+        ));
+        for changed in [
+            S3RevisionRefV1 { document_id: DocumentId::new(), ..root.clone() },
+            S3RevisionRefV1 {
+                revision_blake3: blake3::hash(b"rewritten json").to_hex().to_string(),
+                ..root.clone()
+            },
+            S3RevisionRefV1 { blob_bytes: Some(8), ..root.clone() },
+        ] {
+            let mut child = valid.clone();
+            child.insert(root.revision_id, changed);
+            assert!(matches!(
+                assert_revision_refs_retained(&old, &child),
+                Err(S3HeadError::InvalidManifest)
+            ));
+        }
+        // Historical tombstones must not become content or disappear.
+        let mut rewrote_tombstone = valid;
+        rewrote_tombstone.get_mut(&deletion.revision_id).unwrap().blob_bytes = Some(9);
+        assert!(matches!(
+            assert_revision_refs_retained(&old, &rewrote_tombstone),
+            Err(S3HeadError::InvalidManifest)
+        ));
     }
 
     #[test]
@@ -1267,5 +1352,22 @@ mod tests {
             BTreeSet::from([winner_revision.id, loser_revision.id]));
         assert_eq!(second.get_bounded(&loser_blob, 128).await.unwrap().bytes,
             b"bob edits while offline");
+
+        // A current gen3 fully verified snapshot is not evidence that a
+        // rewritten gen2 manifest can still be trusted. Tamper only with
+        // test-bucket immutable gen2 bytes. The root's pinned parent digest
+        // MUST reject even same-length replacement.
+        let original_parent = winner.encode(&ns).unwrap();
+        first.client.put_object()
+            .bucket(&first.bucket)
+            .key(ns.immutable_manifest_key(id_winner))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                vec![b'!'; original_parent.len()],
+            ))
+            .send().await.unwrap();
+        assert!(matches!(
+            second.read_verified_head().await,
+            Err(S3HeadError::IntegrityMismatch)
+        ));
     }
 }
