@@ -61,6 +61,7 @@ jobs:
             2>&1 | tee "$GITHUB_WORKSPACE/damage-profile.log"
           test "$(grep -c 'DAMAGE_PROFILE case=' "$GITHUB_WORKSPACE/damage-profile.log")" -eq 2
           test "$(grep -c 'DAMAGE_PARITY case=' "$GITHUB_WORKSPACE/damage-profile.log")" -eq 2
+          test "$(grep -c 'DAMAGE_COVERAGE case=' "$GITHUB_WORKSPACE/damage-profile.log")" -eq 2
       - name: Summarize measured frame stages
         shell: bash
         run: |
@@ -70,13 +71,17 @@ jobs:
           from pathlib import Path
 
           rows = []
+          cover = {}
           for line in Path("damage-profile.log").read_text().splitlines():
-              if "DAMAGE_PROFILE case=" not in line:
-                  continue
-              tokens = line.split("DAMAGE_PROFILE ", 1)[1].split()
-              values = dict(token.split("=", 1) for token in tokens if "=" in token)
-              rows.append(values)
-          assert len(rows) == 2, rows
+              if "DAMAGE_PROFILE case=" in line:
+                  tokens = line.split("DAMAGE_PROFILE ", 1)[1].split()
+                  values = dict(token.split("=", 1) for token in tokens if "=" in token)
+                  rows.append(values)
+              elif "DAMAGE_COVERAGE case=" in line:
+                  tokens = line.split("DAMAGE_COVERAGE ", 1)[1].split()
+                  values = dict(token.split("=", 1) for token in tokens if "=" in token)
+                  cover[values["case"]] = values
+          assert len(rows) == len(cover) == 2, (rows, cover)
           assert {r["case"] for r in rows} == {"standard_1x", "fractional_1_75x"}
           fields = ["record", "detect", "sort", "compare", "moves", "merge", "encode", "raster"]
           out = [
@@ -97,6 +102,24 @@ jobs:
                   f"| {r['case']} | {r['shifts']} | "
                   f"{r['max_draws']} / {r['max_changed']} / {r['max_raw_rects']} | "
                   + " | ".join(field_data) + " |"
+              )
+          out.extend([
+              "",
+              "### Final scheduled raster workload after merging and live updates",
+              "",
+              "Percentages are summed raster area divided by physical-screen area,",
+              "**excluding the first full frame**. Areas may overlap and can exceed",
+              "100%; these are raster work estimates, not unique damaged pixels.",
+              "",
+              "| Case | Raster area p50 / p95 (%) | Scroll shift p50 / p95 (%) | Max raster rects | Empty raster frames |",
+              "|---|---:|---:|---:|---:|",
+          ])
+          for r in rows:
+              c = cover[r["case"]]
+              out.append(
+                  f"| {r['case']} | {c['raster_p50_pct']} / {c['raster_p95_pct']} | "
+                  f"{c['shifted_p50_pct']} / {c['shifted_p95_pct']} | "
+                  f"{c['max_final_rects']} | {c['empty_rasters']} |"
               )
           report = "\n".join(out) + "\n"
           Path("damage-profile-summary.md").write_text(report)
