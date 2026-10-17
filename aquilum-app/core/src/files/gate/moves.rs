@@ -54,18 +54,34 @@ fn move_across_now(core: &Core, from: &Path, to: &Path) -> Result<(), FileComman
 /// filesystem must agree with the lexical path: never infer a safe same-vault
 /// transfer through a junction, symlink or a nested ambiguous registration.
 /// This is a gate admission check, NOT pinned-directory OS authorization.
-fn matching_vaults(roots: &[PathBuf], candidate: &Path) -> Vec<String> {
-    let resolved = canonical_path(candidate);
-    let mut matches: Vec<String> = roots
-        .iter()
-        .filter(|root| {
-            strip_root(root, candidate).is_some() || strip_root(root, &resolved).is_some()
-        })
-        .map(|root| identity(root))
-        .collect();
-    matches.sort();
-    matches.dedup();
-    matches
+fn matching_vaults(roots: &[PathBuf], candidate: &Path) -> Option<Vec<String>> {
+    // A source must resolve as an existing object. The destination may be new,
+    // but its immediate parent must already exist and resolve successfully.
+    // Never substitute a raw path when OS identity resolution fails.
+    let resolved = match std::fs::symlink_metadata(candidate) {
+        Ok(_) => std::fs::canonicalize(candidate).ok()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = std::fs::canonicalize(candidate.parent()?).ok()?;
+            parent.join(candidate.file_name()?)
+        }
+        Err(_) => return None,
+    };
+    let resolved = canonical_path(&resolved);
+    let owners = |path: &Path| {
+        let mut matches: Vec<String> = roots
+            .iter()
+            .filter(|root| strip_root(root, path).is_some())
+            .map(|root| identity(root))
+            .collect();
+        matches.sort();
+        matches.dedup();
+        matches
+    };
+    let lexical = owners(candidate);
+    let physical = owners(&resolved);
+    // An alias to a different vault or unregistered storage cannot authorize
+    // moving the primary bytes or their history.
+    (lexical == physical).then_some(physical)
 }
 
 /// PR 04g-3b-7b-0: do not move the PRIMARY file until durable recovery
@@ -79,12 +95,15 @@ fn admit_vault_relocation(core: &Core, from: &Path, to: &Path) -> Result<(), Fil
             "Workspace registry cannot be read; refusing to move a primary file before validating history ownership: {error:?}"
         ),
     })?;
-    let source = matching_vaults(&roots, from);
-    let destination = matching_vaults(&roots, to);
-    if (source.is_empty() && destination.is_empty())
-        || (source.len() == 1 && destination.len() == 1 && source == destination)
-    {
-        return Ok(());
+    if let (Some(source), Some(destination)) = (
+        matching_vaults(&roots, from),
+        matching_vaults(&roots, to),
+    ) {
+        if (source.is_empty() && destination.is_empty())
+            || (source.len() == 1 && destination.len() == 1 && source == destination)
+        {
+            return Ok(());
+        }
     }
     Err(FileCommandError::Task {
         message: format!(

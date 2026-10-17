@@ -30,8 +30,10 @@ impl Recording {
 
 fn open_core() -> (tempfile::TempDir, Arc<Core>, Arc<Recording>) {
     let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("data");
+    fs::create_dir_all(&data).unwrap();
     let events = Arc::new(Recording::default());
-    let core = Core::open(&directory.path().join("data"), Arc::clone(&events) as Arc<dyn EventSink>);
+    let core = Core::open(&data, Arc::clone(&events) as Arc<dyn EventSink>);
     (directory, core, events)
 }
 
@@ -218,6 +220,35 @@ fn history_cross_vault_movement_cannot_escape_to_unregistered_destination() {
     assert_eq!(core.history.page(&|| core.known_roots(), &from, 0, 10).total, 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn history_cross_vault_symlink_parent_must_not_escape_to_unregistered_storage() {
+    let (_directory, core, events, root_a, _root_b) = cross_vault_fixture();
+    let external = tempfile::tempdir().unwrap();
+    let external_file = external.path().join("Foreign.md");
+    fs::write(&external_file, b"must stay outside").unwrap();
+    let alias = root_a.join("alias-outside");
+    std::os::unix::fs::symlink(external.path(), &alias).unwrap();
+
+    // Lexically these paths are inside one vault, but one resolves outside.
+    // The previous OR-based owner lookup admitted both moves.
+    let destination = root_a.join("Imported.md");
+    events.clear();
+    let error = gate::move_across(&core, &alias.join("Foreign.md"), &destination).unwrap_err();
+    assert!(matches!(error, crate::files::error::FileCommandError::Task { .. }));
+    assert_eq!(fs::read(&external_file).unwrap(), b"must stay outside");
+    assert!(!destination.exists());
+    assert!(!events.names().contains(&"notes-relocated"));
+
+    let local = root_a.join("Local.md");
+    fs::write(&local, b"must stay inside").unwrap();
+    let exported = alias.join("Exported.md");
+    let error = gate::move_across(&core, &local, &exported).unwrap_err();
+    assert!(matches!(error, crate::files::error::FileCommandError::Task { .. }));
+    assert_eq!(fs::read(&local).unwrap(), b"must stay inside");
+    assert!(!external.path().join("Exported.md").exists());
+}
+
 #[test]
 fn history_same_vault_move_still_preserves_versions_with_multiple_roots_registered() {
     let (_directory, core, events, root_a, _root_b) = cross_vault_fixture();
@@ -343,6 +374,8 @@ fn a_rename_announces_the_move_before_the_old_path_disappears_from_the_listing()
     let (directory, core, events) = open_core();
     let workspace = directory.path().join("База");
     fs::create_dir_all(&workspace).unwrap();
+    let workspace = fs::canonicalize(workspace).unwrap();
+    core.ui_state.resolve_workspace(workspace.to_str().unwrap(), 1).unwrap();
     let note = workspace.join("Без названия.md");
     fs::write(&note, "текст\n").unwrap();
     core.search.prepare(&workspace.to_string_lossy()).unwrap();
