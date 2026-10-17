@@ -8,6 +8,10 @@ use super::Painter;
 use super::convert;
 use crate::render::live;
 
+#[cfg(test)]
+static TEST_GLYPH_ATLAS: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("AQ_TEST_DISABLE_GLYPH_ATLAS").is_none());
+
 impl Painter {
     pub(in crate::render) fn paint_live(&mut self, transform: Affine, shape: &GeometryRef<'_>, motion: live::Motion) {
         let Some(rounded) = live::shape(shape) else { return };
@@ -53,11 +57,18 @@ impl Painter {
             Style::Fill(fill_rule) => self.ctx.set_fill_rule(*fill_rule),
             Style::Stroke(stroke) => self.ctx.set_stroke(stroke.clone()),
         }
+        // Experimental A/B switch applies equally to the incremental
+        // renderer and the independent fresh-full reference in test binaries.
+        // Release application builds always keep the current atlas setting.
+        #[cfg(test)]
+        let atlas_cache = *TEST_GLYPH_ATLAS;
+        #[cfg(not(test))]
+        let atlas_cache = true;
         let builder = self
             .ctx
             .glyph_run(&mut self.resources, run.font)
             .font_size(run.font_size)
-            .atlas_cache(true)
+            .atlas_cache(atlas_cache)
             .hint(run.hint)
             .normalized_coords(run.normalized_coords);
         let builder = match run.glyph_transform {
