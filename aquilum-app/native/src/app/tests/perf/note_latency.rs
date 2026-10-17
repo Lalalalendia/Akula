@@ -92,11 +92,13 @@ fn native_note_latency_matrix() {
 
         let mut switches = Vec::with_capacity(cycles);
         let mut scenes = Vec::with_capacity(cycles);
+        let mut stages = Vec::with_capacity(cycles);
         for i in 0..cycles {
             let (id, path, letter) = if i % 2 == 0 { (first_id, &first, "A") } else { (second_id, &second, "B") };
             let timer = Instant::now();
             h.app.on_titlebar(&mut h.root, &crate::ui::titlebar::TitlebarAction::Select(id), Size::new(f64::from(W), f64::from(H)));
             let switched_ms = milliseconds(timer.elapsed());
+            stages.push(crate::app::tabs::open::take_tab_switch_stages());
             let timer = Instant::now();
             let _ = h.root.redraw();
             let scene_ms = milliseconds(timer.elapsed());
@@ -143,6 +145,18 @@ fn native_note_latency_matrix() {
         h.app.on_titlebar(&mut h.root, &crate::ui::titlebar::TitlebarAction::Select(first_id), Size::new(f64::from(W), f64::from(H)));
         assert_open_note(&h, &first, "D");
 
+        let p95_stage = |field: fn(&crate::app::tabs::open::TabSwitchStages) -> Duration| {
+            let samples: Vec<f64> = stages.iter().map(|sample| milliseconds(field(sample))).collect();
+            percentiles(&samples, [0.95])[0]
+        };
+        let leave_p95 = p95_stage(|s| s.leave);
+        let read_p95 = p95_stage(|s| s.file_read);
+        let page_p95 = p95_stage(|s| s.page_build);
+        let tree_p95 = p95_stage(|s| s.tree);
+        let tab_p95 = p95_stage(|s| s.tab);
+        let version_p95 = p95_stage(|s| s.version);
+        let strip_p95 = p95_stage(|s| s.strip);
+        let panel_p95 = p95_stage(|s| s.panel);
         let [switch_p50, switch_p95, switch_max] = percentiles(&switches, [0.5, 0.95, 1.0]);
         let [_, scene_p95, scene_max] = percentiles(&scenes, [0.5, 0.95, 1.0]);
         let [_, dispatch_p95, dispatch_max] = percentiles(&dispatches, [0.5, 0.95, 1.0]);
@@ -152,6 +166,11 @@ fn native_note_latency_matrix() {
              scene_p95_ms={scene_p95:.3} scene_max_ms={scene_max:.3} \
              dispatch_p95_ms={dispatch_p95:.3} dispatch_max_ms={dispatch_max:.3} \
              external_visible_ms={external_visible_ms:.3} stale_overwrites=0"
+        );
+        eprintln!(
+            "TAB_STAGE kib={kib} cycles={cycles} leave_p95_ms={leave_p95:.3} read_p95_ms={read_p95:.3} \
+             page_p95_ms={page_p95:.3} tree_p95_ms={tree_p95:.3} tab_p95_ms={tab_p95:.3} \
+             version_p95_ms={version_p95:.3} strip_p95_ms={strip_p95:.3} panel_p95_ms={panel_p95:.3}"
         );
         // Cleanup is deliberately excluded from the measured operation times.
         // Shutdown joins background search/index workers before TempDir removal.
