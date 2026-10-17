@@ -763,6 +763,155 @@ impl SqliteSyncJournal {
         }))
     }
 
+    /// A read-only, bounded snapshot for a future host-native human review
+    /// screen. No original bytes are exposed by this API; the opaque
+    /// fingerprint is bound to the first immutable incident + forensic copy.
+    /// Retention is ALWAYS indefinite until a separately approved purge gate.
+    pub(crate) fn recovery_review_snapshot(
+        &self, operation: OperationId,
+    ) -> JournalResult<LocalRecoveryReviewSnapshot> {
+        let incident = self.read_local_recovery_case(operation)?
+            .ok_or(JournalError::MissingRecoveryArchive)?;
+        let copy = self.read_local_recovery_copy(operation)?
+            .ok_or(JournalError::MissingRecoveryArchive)?;
+        let fingerprint = recovery_review::archive_fingerprint(&incident, &copy)?;
+        let history = Self::read_recovery_review_rows(
+            &self.connection, operation, &fingerprint,
+        )?;
+        let latest_event_digest = history.last()
+            .map(|event| blake3::hash(&serde_json::to_vec(event).unwrap())
+                .to_hex().to_string())
+            .unwrap_or_else(|| "genesis".to_string());
+        Ok(LocalRecoveryReviewSnapshot {
+            operation_id: operation,
+            vault_id: incident.vault_id,
+            path: incident.relative_path,
+            assessment: incident.evidence.assessment,
+            archive_fingerprint: fingerprint,
+            review_count: history.len() as u32,
+            latest_event_digest,
+            retention: RECOVERY_REVIEW_RETENTION,
+        })
+    }
+
+    /// Every review event is append-only, chained by BLAKE3 to the previous
+    /// event, and checked against the *same* historical immutable archive.
+    /// A hash chain detects accidental data damage, not privileged SQLite
+    /// tampering by an attacker who can rewrite the database and all digests.
+    fn read_recovery_review_rows(
+        connection: &Connection,
+        operation: OperationId,
+        archive_fingerprint: &str,
+    ) -> JournalResult<Vec<LocalRecoveryReviewEvent>> {
+        let mut statement = connection.prepare(
+            "SELECT sequence, review_json, review_digest
+             FROM sync_local_recovery_reviews
+             WHERE operation_id = ?1 ORDER BY sequence",
+        )?;
+        let mut rows = statement.query([operation.to_string()])?;
+        let mut events = Vec::new();
+        let mut previous_digest = "genesis".to_string();
+        while let Some(row) = rows.next()? {
+            let sequence: i64 = row.get(0)?;
+            let payload: Vec<u8> = row.get(1)?;
+            let expected_digest: String = row.get(2)?;
+            let actual_digest = blake3::hash(&payload).to_hex().to_string();
+            let event: LocalRecoveryReviewEvent = serde_json::from_slice(&payload)
+                .map_err(|_| JournalError::CorruptedRecord)?;
+            if sequence != (events.len() + 1) as i64
+                || sequence > 128
+                || event.sequence as i64 != sequence
+                || event.operation_id != operation
+                || event.previous_event_digest != previous_digest
+                || event.archive_fingerprint != archive_fingerprint
+                || event.retention != RECOVERY_REVIEW_RETENTION
+                || recovery_review::validated_review_note(&event.note)
+                    .as_deref() != Some(event.note.as_str())
+                || expected_digest != actual_digest
+            {
+                return Err(JournalError::CorruptedRecord);
+            }
+            previous_digest = actual_digest;
+            events.push(event);
+        }
+        Ok(events)
+    }
+
+    pub(crate) fn recovery_review_history(
+        &self, operation: OperationId,
+    ) -> JournalResult<Vec<LocalRecoveryReviewEvent>> {
+        let snapshot = self.recovery_review_snapshot(operation)?;
+        Self::read_recovery_review_rows(
+            &self.connection, operation, &snapshot.archive_fingerprint,
+        )
+    }
+
+    /// Metadata-only future operator intent; no physical action is attached
+    /// to either allowed disposition. Caller must supply both the previously
+    /// displayed archive fingerprint and the latest event revision/digest.
+    /// For safety, a stale screen or concurrent editor cannot silently append.
+    pub(crate) fn append_recovery_review(
+        &mut self,
+        operation: OperationId,
+        expected_vault: VaultId,
+        expected_path: &SyncRelativePath,
+        expected_archive_fingerprint: &str,
+        expected_review_count: u32,
+        expected_previous_digest: &str,
+        disposition: RecoveryReviewDisposition,
+        note: &str,
+    ) -> JournalResult<LocalRecoveryReviewEvent> {
+        let note = recovery_review::validated_review_note(note)
+            .ok_or(JournalError::InvalidRecoveryReview)?;
+        let snapshot = self.recovery_review_snapshot(operation)?;
+        if snapshot.vault_id != expected_vault
+            || &snapshot.path != expected_path
+            || snapshot.archive_fingerprint != expected_archive_fingerprint
+            || snapshot.review_count != expected_review_count
+            || snapshot.latest_event_digest != expected_previous_digest
+        {
+            return Err(JournalError::StaleRecoveryReview);
+        }
+        let tx = self.connection.transaction_with_behavior(
+            TransactionBehavior::Immediate,
+        )?;
+        let previous = Self::read_recovery_review_rows(
+            &tx, operation, &snapshot.archive_fingerprint,
+        )?;
+        let last_digest = previous.last()
+            .map(|event| blake3::hash(&serde_json::to_vec(event).unwrap())
+                .to_hex().to_string())
+            .unwrap_or_else(|| "genesis".to_string());
+        if previous.len() as u32 != expected_review_count
+            || last_digest != expected_previous_digest
+            || previous.len() >= 128
+        {
+            return Err(JournalError::StaleRecoveryReview);
+        }
+        let event = LocalRecoveryReviewEvent {
+            operation_id: operation,
+            sequence: previous.len() as u32 + 1,
+            archive_fingerprint: snapshot.archive_fingerprint,
+            disposition,
+            note,
+            previous_event_digest: last_digest,
+            retention: RECOVERY_REVIEW_RETENTION.to_string(),
+        };
+        let bytes = serde_json::to_vec(&event)?;
+        let digest = blake3::hash(&bytes).to_hex().to_string();
+        tx.execute(
+            "INSERT INTO sync_local_recovery_reviews
+                 (operation_id, sequence, review_json, review_digest)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                operation.to_string(), i64::from(event.sequence),
+                &bytes, digest,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(event)
+    }
+
     /// Same operation ID and intent is idempotent; reusing the UUID for a
     /// different action is rejected. One in-flight operation per document
     /// prevents two workers from publishing incompatible baselines.
