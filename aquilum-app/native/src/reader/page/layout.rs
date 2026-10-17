@@ -238,8 +238,8 @@ mod partition_tests {
     #[test]
     fn weighted_ranges_cover_items_once_in_original_order() {
         // Exhaustive small weights, nonempty partitions, 1–4 workers.
-        for len in 1..=7 {
-            let combinations = 4usize.pow(len);
+        for len in 1usize..=7 {
+            let combinations = 4usize.pow(len as u32);
             for value in 0..combinations {
                 let mut value = value;
                 let weights: Vec<usize> = (0..len).map(|_| {
