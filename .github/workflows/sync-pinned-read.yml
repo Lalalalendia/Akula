@@ -9,6 +9,10 @@ on:
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/local_create.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
+      - "aquilum-app/core/src/sync/journal.rs"
+      - "aquilum-app/core/src/sync/core_scan.rs"
+      - "aquilum-app/core/src/sync/path.rs"
+      - "aquilum-app/core/src/search/paths.rs"
       - "aquilum-app/core/src/sync/host_admission.rs"
       - "aquilum-app/core/src/app_core.rs"
       - "aquilum-app/core/src/files/gate/write.rs"
@@ -58,6 +62,16 @@ jobs:
       - name: Registered Core root and editor admission
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine host_admission -- --nocapture
+      - name: Durable local publication recovery and stage exclusion
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --features sync-engine journal::tests::local_publication -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine journal::tests::legacy_schema_one -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine journal::tests::separate_sqlite_connections -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine core_scan::tests::orphan_create_stage -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine core_scan::tests::stage_name_directory -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine path::tests::refuses_reserved_local_create -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine search::paths::tests::incomplete_sync_stages -- --nocapture
       - name: Host-scoped plugin read deny/allow and OS path threats
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine plugins::read_tests -- --nocapture
