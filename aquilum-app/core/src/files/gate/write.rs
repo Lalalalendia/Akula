@@ -108,6 +108,17 @@ pub fn create_folder(core: &Core, path: &Path) -> Result<(), FileCommandError> {
 }
 
 
+/// Create a missing template directory tree under the Core File Gate.
+ /// Keep create_dir_all semantics for native starter templates: parents can be
+ /// created, an existing directory is accepted, and an existing file fails.
+ /// This is process-local serialization only, not root confinement or a
+ /// handle-relative sync mutation authority.
+pub fn ensure_folder_tree(core: &Core, path: &Path) -> Result<(), FileCommandError> {
+    let _guard = core.file_mutation_guard()?;
+    std::fs::create_dir_all(path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod folder_tests {
     use super::*;
@@ -152,4 +163,44 @@ mod folder_tests {
             Err(FileCommandError::AlreadyExists { .. })
         ));
     }
+    #[test]
+    fn core_file_gate_serializes_template_folder_tree_across_core_instances() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let app_a = temp.path().join("app-a");
+        let app_b = temp.path().join("app-b");
+        for path in [&vault, &app_a, &app_b] {
+            fs::create_dir(path).unwrap();
+        }
+        let first = Core::open(&app_a, Arc::new(|_: CoreEvent| {}));
+        let second = Core::open(&app_b, Arc::new(|_: CoreEvent| {}));
+        let templates = vault.join("Шаблоны 😀").join("Nested");
+        let expected = templates.clone();
+
+        let held = first.file_mutations.lock().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            done_tx.send(ensure_folder_tree(&second, &templates)).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "template folder creation bypassed the process-wide File Gate");
+        assert!(!expected.parent().unwrap().exists());
+        drop(held);
+
+        done_rx.recv_timeout(Duration::from_secs(30)).unwrap().unwrap();
+        worker.join().unwrap();
+        assert!(expected.is_dir());
+        let existing = expected.join("Keep.md");
+        fs::write(&existing, b"unchanged").unwrap();
+        ensure_folder_tree(&first, &expected).unwrap();
+        assert_eq!(fs::read(&existing).unwrap(), b"unchanged");
+        assert!(ensure_folder_tree(&first, &existing).is_err());
+        assert_eq!(fs::read(&existing).unwrap(), b"unchanged");
+    }
+
 }
