@@ -128,6 +128,11 @@ jobs:
           set -euo pipefail
           (
             cd aquilum-app
+            # ABBA ends with a base-worktree build sharing CARGO_TARGET_DIR.
+            # Force a fresh core test executable from the actual PR checkout.
+            cargo clean --release -p aquilum-core
+            cargo test --release --locked -p aquilum-core -- --list | tee ../surface-tests-list.txt
+            grep 'benchmark_surface_tokenizer' ../surface-tests-list.txt
             cargo test --release --locked -p aquilum-core benchmark_surface_tokenizer -- --ignored --nocapture --test-threads=1
           ) 2>&1 | tee surface-analyzer.txt
           grep 'BENCH-SURFACE' surface-analyzer.txt | tee -a "$GITHUB_STEP_SUMMARY"
