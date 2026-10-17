@@ -64,19 +64,19 @@ impl UiStateDatabase {
                     "DELETE FROM tabs WHERE workspace_id = ?1 AND window_id = ?2",
                     params![input.workspace_id.to_string(), input.window_id],
                 )?;
+                let mut insert_tab = transaction.prepare_cached(
+                    "INSERT INTO tabs(workspace_id, window_id, tab_id, document_id, kind, position)
+                     VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                )?;
                 for tab in tabs {
-                    transaction.execute(
-                        "INSERT INTO tabs(workspace_id, window_id, tab_id, document_id, kind, position)
-                         VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-                        params![
-                            input.workspace_id.to_string(),
-                            input.window_id,
-                            tab.tab_id.to_string(),
-                            tab.document_id.map(|id| id.to_string()),
-                            tab.kind.as_str(),
-                            tab.position
-                        ],
-                    )?;
+                    insert_tab.execute(params![
+                        input.workspace_id.to_string(),
+                        input.window_id,
+                        tab.tab_id.to_string(),
+                        tab.document_id.map(|id| id.to_string()),
+                        tab.kind.as_str(),
+                        tab.position
+                    ])?;
                 }
             }
             transaction.execute(
@@ -89,8 +89,8 @@ impl UiStateDatabase {
                 ],
             )?;
         }
-        for view in &input.views {
-            transaction.execute(
+        if !input.views.is_empty() {
+            let mut upsert_view = transaction.prepare_cached(
                 "INSERT INTO view_states(
                      workspace_id, window_id, document_id, pane_id, cursor_anchor, cursor_head,
                      fallback_anchor, fallback_head, scroll_anchor, fallback_scroll_anchor,
@@ -104,7 +104,9 @@ impl UiStateDatabase {
                      scroll_offset_px = excluded.scroll_offset_px,
                      focused_surface = excluded.focused_surface,
                      updated_at_ms = excluded.updated_at_ms",
-                params![
+            )?;
+            for view in &input.views {
+                upsert_view.execute(params![
                     input.workspace_id.to_string(),
                     input.window_id,
                     view.document_id.to_string(),
@@ -118,8 +120,8 @@ impl UiStateDatabase {
                     view.scroll_offset_px,
                     view.focused_surface,
                     input.now_ms
-                ],
-            )?;
+                ])?;
+            }
         }
         if let Some(camera) = &input.graph_camera {
             transaction.execute(
