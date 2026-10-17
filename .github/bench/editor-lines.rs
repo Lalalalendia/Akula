@@ -33,8 +33,8 @@ fn one(name: &str, text: &str) {
     let iterations = if text.len() < 200 { 200_000 } else {
         (48_000_000 / text.len()).clamp(5, 30_000)
     };
-    let before = || black_box(baseline::Lines::new(black_box(text)));
-    let after = || black_box(candidate::Lines::new(black_box(text)));
+    let before = || { black_box(baseline::Lines::new(black_box(text))); };
+    let after = || { black_box(candidate::Lines::new(black_box(text))); };
     let mut before_samples = Vec::new();
     let mut after_samples = Vec::new();
     for _ in 0..7 {
