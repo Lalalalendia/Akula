@@ -16,7 +16,7 @@ use rustix::fs::{openat, Mode, OFlags};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ObservedLocalFile {
     Absent,
     Present {
@@ -26,7 +26,7 @@ pub(crate) enum ObservedLocalFile {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum LocalRecoveryAssessment {
     /// An attempt exists, but neither name is visible during inspection.
     NoVisibleNames,
@@ -42,7 +42,7 @@ pub(crate) enum LocalRecoveryAssessment {
     UntrustedStage,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ReadOnlyLocalPublicationEvidence {
     pub operation_id: OperationId,
     pub parent_identity: PinnedFileIdentity,
