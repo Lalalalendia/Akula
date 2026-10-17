@@ -364,6 +364,43 @@ mod tests {
         assert!(!pending(vault).unwrap());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_recovery_directory_is_never_followed() {
+        use std::os::unix::fs::symlink;
+        let vault = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::create_dir(vault.path().join(".aquilum")).unwrap();
+        symlink(external.path(), journal_dir(vault.path())).unwrap();
+        assert!(pending(vault.path()).is_err());
+        let source = vault.path().join(".aquilum/history/source.md");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("1_device_me.md"), "private").unwrap();
+        let before = fs::read_dir(external.path()).unwrap().count();
+        assert!(transfer(
+            vault.path(), "move", &vault.path().join("source.md"),
+            &vault.path().join("target.md"), vault.path(), vault.path(),
+            &source, &vault.path().join(".aquilum/history/target.md"), || Ok(())
+        ).is_err());
+        assert_eq!(fs::read_dir(external.path()).unwrap().count(), before);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_recovery_directory_is_never_followed() {
+        use std::process::Command;
+        let vault = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir(vault.path().join(".aquilum")).unwrap();
+        let target = journal_dir(vault.path());
+        let output = Command::new("cmd")
+            .arg("/C").arg("mklink").arg("/J")
+            .arg(&target).arg(outside.path()).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(pending(vault.path()).is_err());
+        fs::remove_dir(target).unwrap();
+    }
+
     #[test]
     fn malformed_recovery_marker_never_allows_history_access() {
         let tmp = tempfile::tempdir().unwrap();
