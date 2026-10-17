@@ -5,6 +5,7 @@ on:
     paths:
       - 'aquilum-app/native/src/app/tests/perf/note_latency.rs'
       - 'aquilum-app/native/src/app/tabs/open.rs'
+      - 'scripts/benchmarks/summarize-tab-phases.py'
       - 'aquilum-app/native/src/app/tests/perf/mod.rs'
       - '.github/workflows/native-note-latency.yml'
   workflow_dispatch:
@@ -101,6 +102,13 @@ jobs:
               f.write(report)
           print(report)
           PY
+      - name: Summarize selected tab activation stages
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/summarize-tab-phases.py note-latency.log |
+            tee -a note-latency-summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload raw diagnostics
         if: always()
         uses: actions/upload-artifact@v4
