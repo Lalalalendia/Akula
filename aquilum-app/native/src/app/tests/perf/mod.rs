@@ -19,6 +19,7 @@ mod sash;
 mod search;
 mod timing;
 mod vello_release;
+mod worker_crossover;
 
 use crate::stats::percentiles;
 
