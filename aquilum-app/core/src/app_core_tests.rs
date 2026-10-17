@@ -102,8 +102,11 @@ fn history_move_failure_after_primary_rename_has_distinct_event_and_retry() {
     fs::create_dir_all(&data).unwrap();
     let events = Arc::new(Recording::default());
     let core = Core::open(&data, Arc::clone(&events) as Arc<dyn EventSink>);
-    let vault = directory.path().join("vault");
-    fs::create_dir_all(&vault).unwrap();
+    let vault_dir = directory.path().join("vault");
+    fs::create_dir_all(&vault_dir).unwrap();
+    // On macOS the temp directory can be spelled /var/... or /private/var/...
+    // Use the same canonical root for the stored workspace and every note.
+    let vault = fs::canonicalize(&vault_dir).unwrap();
     core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
     let original = vault.join("Before.md");
     let moved = vault.join("After.md");
