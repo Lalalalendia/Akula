@@ -121,9 +121,12 @@ impl Harness {
     }
 
     pub(super) fn replace_body(&mut self, text: &str) {
-        let body = self.app.note_ids.as_ref().unwrap().body.id();
+        let body = self.app.note_ids.as_ref().unwrap().body;
         let range = 0..self.app.text.byte_len() - self.app.hidden;
-        self.act(body, crate::ui::editor::TextAction::Edited(vec![crate::ui::editor::Edit { range, insert: text.to_owned() }]));
+        // Match the real editor: mutate the widget first, then deliver its edit
+        // notification. A bare synthetic Edited action has no matching rope.
+        body.edit(&mut self.root, |mut editor| crate::ui::editor::TextEditor::apply_external(&mut editor, range.clone(), text));
+        self.act(body.id(), crate::ui::editor::TextAction::Edited(vec![crate::ui::editor::Edit { range, insert: text.to_owned() }]));
     }
 
     pub(super) fn save_now(&mut self) {
