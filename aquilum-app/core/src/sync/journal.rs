@@ -602,6 +602,11 @@ impl SqliteSyncJournal {
     pub fn mark_applied(&mut self, id: OperationId) -> JournalResult<JournalPhase> {
         let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
+        // A remote download has no native, crash-durable local apply receipt.
+        // Generic provider readback/hash must never turn it into a baseline.
+        if record.intent.action == JournalAction::StageDownload {
+            return Err(JournalError::LocalDownloadNeedsNativeReceipt);
+        }
         match record.phase {
             JournalPhase::Staged if record.staged_hash.as_deref()
                 == Some(record.intent.expected_content_hash.as_str()) => {
@@ -626,6 +631,11 @@ impl SqliteSyncJournal {
     {
         let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
+        // A remote download has no native, crash-durable local apply receipt.
+        // Generic provider readback/hash must never turn it into a baseline.
+        if record.intent.action == JournalAction::StageDownload {
+            return Err(JournalError::LocalDownloadNeedsNativeReceipt);
+        }
         let digest = blake3::hash(observed_bytes).to_hex().to_string();
         if digest != record.intent.expected_content_hash || provider_revision.is_empty() {
             return Err(JournalError::ReadbackMismatch);
@@ -653,6 +663,11 @@ impl SqliteSyncJournal {
     pub fn commit(&mut self, id: OperationId) -> JournalResult<JournalPhase> {
         let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
+        // A remote download has no native, crash-durable local apply receipt.
+        // Generic provider readback/hash must never turn it into a baseline.
+        if record.intent.action == JournalAction::StageDownload {
+            return Err(JournalError::LocalDownloadNeedsNativeReceipt);
+        }
         if record.phase == JournalPhase::Committed {
             return Ok(JournalPhase::Committed);
         }
@@ -709,11 +724,23 @@ impl SqliteSyncJournal {
             let id = raw?.parse().map_err(|_| JournalError::CorruptedRecord)?;
             let record = read_operation(&self.connection, id)?
                 .ok_or(JournalError::CorruptedRecord)?;
-            let action = match record.phase {
-                JournalPhase::Pending => RecoveryAction::ResumeStaging,
-                JournalPhase::Staged | JournalPhase::Applied => RecoveryAction::InspectBeforeRetry,
-                JournalPhase::Verified => RecoveryAction::RetryCommit,
-                JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
+            let action = if record.intent.action == JournalAction::StageDownload {
+                // Local files may have changed outside Akula's in-process
+                // File Gate; no retry or commit based on a prior hash.
+                match record.phase {
+                    JournalPhase::Pending => RecoveryAction::ResumeStaging,
+                    JournalPhase::Staged | JournalPhase::Applied | JournalPhase::Verified =>
+                        RecoveryAction::InspectBeforeRetry,
+                    JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
+                }
+            } else {
+                match record.phase {
+                    JournalPhase::Pending => RecoveryAction::ResumeStaging,
+                    JournalPhase::Staged | JournalPhase::Applied =>
+                        RecoveryAction::InspectBeforeRetry,
+                    JournalPhase::Verified => RecoveryAction::RetryCommit,
+                    JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
+                }
             };
             result.push(RecoveryItem { record, action });
         }
