@@ -7,24 +7,6 @@ use aquilum_core::files::error::FileCommandError;
 
 const BLOCK: usize = 8 << 20;
 
-const HASH_BUFFER: usize = 64 << 10;
-
-/// Hash on-disk bytes without decoding Markdown or building a second Rope.
-/// The BLAKE3 digest intentionally covers raw CRLF bytes, like `read()`.
-pub fn hash_raw(path: &Path) -> Result<String, FileCommandError> {
-    let mut file = File::open(path)?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0u8; HASH_BUFFER];
-    loop {
-        let count = file.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
 pub struct Loaded {
     pub text: crop::Rope,
     pub hash: String,
@@ -78,7 +60,7 @@ pub fn read(path: &Path) -> Result<Loaded, FileCommandError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_raw, read};
+    use super::read;
 
     #[test]
     fn a_file_reads_into_the_same_text_and_hash_as_before() {
@@ -90,17 +72,5 @@ mod tests {
         let snapshot = aquilum_core::files::document::read_file_snapshot_impl(&path).unwrap();
         assert_eq!(loaded.text.to_string(), snapshot.content);
         assert_eq!(loaded.hash, snapshot.hash);
-    }
-
-    #[test]
-    fn streamed_raw_hash_matches_full_loader_across_chunks_and_crlf() {
-        let dir = crate::test_dir::tempdir();
-        let path = dir.path().join("raw.md");
-        let body = "строка 🌐\r\n".repeat(40_000) + "финал\rхвост";
-        std::fs::write(&path, &body).unwrap();
-        let loaded = read(&path).unwrap();
-        assert_eq!(hash_raw(&path).unwrap(), loaded.hash);
-        assert_eq!(hash_raw(&path).unwrap(), aquilum_core::files::document::hash_bytes(body.as_bytes()));
-        assert!(loaded.text.to_string().contains("строка 🌐\n"));
     }
 }
