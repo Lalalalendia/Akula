@@ -97,6 +97,15 @@ impl Renderer {
         }
     }
 
+    /// Construct a renderer with an explicitly detected SIMD level for parity/perf
+    /// experiments. Production still uses the conservative paint::settings cap.
+    #[cfg(test)]
+    pub(crate) fn with_simd_level_for_test(threads: u16, level: vello_cpu::Level) -> Self {
+        let mut renderer = Self::new(threads);
+        renderer.painter = Painter::new(1, 1, vello_cpu::RenderSettings { num_threads: threads, level });
+        renderer
+    }
+
     pub fn toggle_overlay(&mut self) {
         self.overlay.on = !self.overlay.on;
         self.overlay.pending = true;
