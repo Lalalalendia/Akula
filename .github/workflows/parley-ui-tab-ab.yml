@@ -45,6 +45,7 @@ jobs:
         env:
           AQ_TEST_PARLEY_UI_REUSE: '0'
           AQ_LATENCY_SWITCHES: '16'
+          AQ_TEST_PARLEY_MIXED_FIXTURE: '1'
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-native --bin aquilum-native native_note_latency_matrix \
@@ -55,6 +56,7 @@ jobs:
         env:
           AQ_TEST_PARLEY_UI_REUSE: '1'
           AQ_LATENCY_SWITCHES: '16'
+          AQ_TEST_PARLEY_MIXED_FIXTURE: '1'
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-native --bin aquilum-native native_note_latency_matrix \
