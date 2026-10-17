@@ -235,6 +235,15 @@ impl S3MultipartJournal {
         self.transition(id, 1, 4, None)
     }
 
+    /// Only used when CreateMultipartUpload returned an ID, persisting the
+    /// Uploading phase failed, and S3 confirmed AbortMultipartUpload.
+    /// A simple Prepared state alone never authorizes this transition.
+    fn mark_unstarted_aborted(&mut self, id: OperationId)
+        -> Result<(), S3MultipartError>
+    {
+        self.transition(id, 0, 4, None)
+    }
+
     fn transition(&mut self, id: OperationId, previous: i64, next: i64,
         upload_id: Option<&str>) -> Result<(), S3MultipartError>
     {
@@ -396,9 +405,14 @@ impl AwsS3ProbeClient {
             // The server session exists, but the durable SQLite checkpoint
             // failed. We still have the UploadId in memory: abort it now.
             // A failed abort remains subject to the bucket MPU lifecycle gate.
-            let _ = self.client.abort_multipart_upload()
+            if self.client.abort_multipart_upload()
                 .bucket(&self.bucket).key(&intent.blob_key)
-                .upload_id(&upload_id).send().await;
+                .upload_id(&upload_id).send().await.is_ok()
+            {
+                // If SQLite remains writable, release this failed transfer
+                // without granting any upload or baseline confirmation.
+                let _ = journal.mark_unstarted_aborted(intent.operation_id);
+            }
             return Err(error);
         }
         if let Err(error) = source.seek(SeekFrom::Start(0)) {
