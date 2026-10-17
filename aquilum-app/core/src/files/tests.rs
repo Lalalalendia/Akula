@@ -223,7 +223,7 @@ fn raw_hash_is_streamed_without_changing_conflict_or_crlf_semantics() {
 fn streamed_hash_of_empty_and_binary_files_matches_byte_hash() {
     let directory = tempfile::tempdir().expect("workspace");
     let path = directory.path().join("bytes");
-    fs::write(&path, []).expect("empty fixture");
+    fs::write(&path, b"").expect("empty fixture");
     assert_eq!(read_file_hash_impl(&path).unwrap(), hash_bytes(b""));
     let bytes = [0, 255, 128, 13, 10, 0, 7];
     fs::write(&path, bytes).expect("binary fixture");
