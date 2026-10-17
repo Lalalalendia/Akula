@@ -74,6 +74,7 @@ pub use s3_transport::{
     S3ObservedObject, S3PutCondition, S3TransportError,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
+    S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
 };
 
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
