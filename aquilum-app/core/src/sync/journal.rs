@@ -848,6 +848,145 @@ mod tests {
         assert!(matches!(j.begin(different_profile), Err(JournalError::ProfileChanged)));
     }
 
+    fn local_stage_intent(vault: VaultId, document: DocumentId, path: &str, bytes: &[u8])
+        -> OperationIntent
+    {
+        let mut item = intent(vault, document, RevisionId::new(), None, bytes);
+        item.action = JournalAction::StageDownload;
+        item.remote_guard = None;
+        item.path = SyncRelativePath::parse(path).unwrap();
+        item
+    }
+
+    #[test]
+    fn local_publication_claim_is_once_per_operation_and_portable_name() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let vault = VaultId::new();
+        let first = local_stage_intent(vault, DocumentId::new(), "notes/Café.md", b"one");
+        let second = local_stage_intent(vault, DocumentId::new(),
+            "notes/cafe\u{301}.md", b"two");
+        journal.begin(first.clone()).unwrap();
+        journal.begin(second.clone()).unwrap();
+        journal.mark_staged(first.operation_id, b"one").unwrap();
+        journal.mark_staged(second.operation_id, b"two").unwrap();
+
+        journal.record_local_publication_attempt_once(&first).unwrap();
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&first),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&second),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        let queue = journal.local_publication_review_queue().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].operation_id, first.operation_id);
+        assert_eq!(queue[0].path.as_str(), "notes/Café.md");
+        assert!(journal.baseline(vault, first.document_id).unwrap().is_none());
+        assert!(journal.baseline(vault, second.document_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn local_publication_claim_requires_a_verified_staged_intent() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/new.md", b"verified");
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&staged),
+            Err(JournalError::MissingOperation)
+        ));
+        journal.begin(staged.clone()).unwrap();
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&staged),
+            Err(JournalError::InvalidTransition)
+        ));
+        journal.mark_staged(staged.operation_id, b"verified").unwrap();
+        let mut collision = staged.clone();
+        collision.expected_content_hash = blake3::hash(b"other").to_hex().to_string();
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&collision),
+            Err(JournalError::IntentCollision)
+        ));
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+    }
+
+    #[test]
+    fn legacy_schema_one_migrates_without_losing_staged_operations() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/legacy.md", b"persist");
+        {
+            let mut journal = SqliteSyncJournal::open(&path).unwrap();
+            journal.begin(staged.clone()).unwrap();
+            journal.mark_staged(staged.operation_id, b"persist").unwrap();
+            // Emulate the exact existing V1 tables/data, without the new table.
+            journal.connection.execute_batch(
+                "DROP TABLE sync_local_publication_attempts;
+                 PRAGMA user_version = 1;",
+            ).unwrap();
+        }
+        let migrated = SqliteSyncJournal::open(&path).unwrap();
+        let version: i64 = migrated.connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(migrated.get(staged.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        migrated.record_local_publication_attempt_once(&staged).unwrap();
+        drop(migrated);
+        let reopened = SqliteSyncJournal::open(&path).unwrap();
+        assert!(matches!(
+            reopened.record_local_publication_attempt_once(&staged),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        let queue = reopened.local_publication_review_queue().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].expected_content_hash, staged.expected_content_hash);
+        assert!(reopened.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[test]
+    fn local_publication_ledger_corruption_fails_closed() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/new.md", b"payload");
+        journal.begin(staged.clone()).unwrap();
+        journal.mark_staged(staged.operation_id, b"payload").unwrap();
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+        journal.connection.execute(
+            "UPDATE sync_local_publication_attempts
+             SET expected_hash = 'corrupted' WHERE operation_id = ?1",
+            [staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            journal.local_publication_review_queue(),
+            Err(JournalError::CorruptedRecord)
+        ));
+    }
+
+    #[test]
+    fn separate_sqlite_connections_cannot_claim_the_same_local_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/two-processes.md", b"claim");
+        {
+            let mut journal = SqliteSyncJournal::open(&path).unwrap();
+            journal.begin(staged.clone()).unwrap();
+            journal.mark_staged(staged.operation_id, b"claim").unwrap();
+        }
+        let first = SqliteSyncJournal::open(&path).unwrap();
+        let second = SqliteSyncJournal::open(&path).unwrap();
+        first.record_local_publication_attempt_once(&staged).unwrap();
+        assert!(matches!(
+            second.record_local_publication_attempt_once(&staged),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        assert_eq!(second.local_publication_review_queue().unwrap().len(), 1);
+    }
+
     #[test]
     fn newer_schema_must_never_be_overwritten() {
         let conn = Connection::open_in_memory().unwrap();
