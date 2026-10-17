@@ -49,6 +49,13 @@ impl App {
                 CoreEvent::NoteHistoryChanged(changed) => {
                     history_changed |= self.tabs.active().path.as_deref() == Some(Path::new(&changed.path));
                 }
+                CoreEvent::NoteHistorySaveFailed(failure) => {
+                    report!("история {} не сохранена ({}): {}", failure.path, failure.action, failure.message);
+                    // A partial version/name mutation may have reached disk.
+                    // Refresh the active history panel, but do not claim that
+                    // the primary note is unsaved or history is persisted.
+                    history_changed |= self.tabs.active().path.as_deref() == Some(Path::new(&failure.path));
+                }
                 CoreEvent::NotesRelocated(relocation) => {
                     for moved in &relocation.moves {
                         self.follow_move(root, Path::new(&moved.from), Path::new(&moved.to));
