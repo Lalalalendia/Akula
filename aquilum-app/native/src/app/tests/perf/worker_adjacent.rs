@@ -62,6 +62,57 @@ fn peak_channel(a: &[u32], b: &[u32]) -> u8 {
         .unwrap_or(0)
 }
 
+/// Diagnostic with bounded output; the default assert_eq! for million-pixel
+/// framebuffers would flood CI logs and obscure which pixels actually differ.
+fn describe_diff(
+    case: &str,
+    step: u32,
+    strips: u16,
+    mode: &str,
+    width: u16,
+    a: &[u32],
+    b: &[u32],
+) -> (usize, usize, u8) {
+    assert_eq!(a.len(), b.len(), "frame dimensions differ");
+    let mut changed = 0usize;
+    let mut worse_than_one = 0usize;
+    let mut peak = 0u8;
+    let mut bbox = (usize::MAX, usize::MAX, 0usize, 0usize);
+    let mut examples = Vec::new();
+    let mut at_seam = 0usize;
+    for (index, (&left, &right)) in a.iter().zip(b).enumerate() {
+        if left == right { continue; }
+        let px = index % usize::from(width);
+        let py = index / usize::from(width);
+        let delta = [0, 8, 16, 24].map(|bits| {
+            ((left >> bits) as u8).abs_diff((right >> bits) as u8)
+        }).into_iter().max().unwrap_or(0);
+        changed += 1;
+        worse_than_one += usize::from(delta > 1);
+        peak = peak.max(delta);
+        bbox.0 = bbox.0.min(px);
+        bbox.1 = bbox.1.min(py);
+        bbox.2 = bbox.2.max(px);
+        bbox.3 = bbox.3.max(py);
+        let height = a.len() / usize::from(width);
+        let band = height.div_ceil(usize::from(strips));
+        if band != 0 && (py % band < 2 || (py + 1) % band < 2) {
+            at_seam += 1;
+        }
+        if examples.len() < 16 {
+            examples.push(format!("({px},{py}):{left:08x}/{right:08x} delta={delta}"));
+        }
+    }
+    if changed > 0 {
+        eprintln!(
+            "VELLO_ADJACENT_DIFF case={case} strips={strips} step={step} mode={mode} \
+             pixels_changed={changed} worse_than_one={worse_than_one} max_channel={peak} \
+             seam_near_pixels={at_seam} bbox={bbox:?} examples={examples:?}"
+        );
+    }
+    (changed, worse_than_one, peak)
+}
+
 fn quantiles(times: &[Timing], get: impl Fn(&Timing) -> f64) -> [f64; 2] {
     let data: Vec<f64> = times.iter().map(get).collect();
     percentiles(&data, [0.50, 0.95])
@@ -153,10 +204,32 @@ fn run_batch_case(
         let times = frame.map(|v| v.expect("all four renderers drew this frame"));
 
         for index in 1..4 {
-            assert_eq!(
-                renderers[0].frame_pixels(),
-                renderers[index].frame_pixels(),
-                "{case}/strips={strips}/step={step}/mode={}: byte parity",
+            let (changed, severe, peak) = describe_diff(
+                case, step, strips, MODES[index], w,
+                renderers[0].frame_pixels(), renderers[index].frame_pixels(),
+            );
+            if changed > 0 {
+                let reference = render_full(&layers, w, hh, scale);
+                describe_diff(
+                    case, step, strips, "baseline_vs_full", w,
+                    renderers[0].frame_pixels(), reference.frame_pixels(),
+                );
+                describe_diff(
+                    case, step, strips, "variant_vs_full", w,
+                    renderers[index].frame_pixels(), reference.frame_pixels(),
+                );
+                if let Some(path) = std::env::var_os("AQ_ADJACENT_DIAG_OUT") {
+                    let dir = std::path::PathBuf::from(path);
+                    std::fs::create_dir_all(&dir).expect("create diagnostic artifact directory");
+                    let stem = format!("{case}-strips{strips}-step{step}");
+                    std::fs::write(dir.join(format!("{stem}-baseline.png")), renderers[0].png()).expect("baseline png");
+                    std::fs::write(dir.join(format!("{stem}-{}.png", MODES[index])), renderers[index].png()).expect("variant png");
+                    std::fs::write(dir.join(format!("{stem}-full.png")), reference.png()).expect("reference png");
+                }
+            }
+            assert!(
+                changed == 0,
+                "{case}/strips={strips}/step={step}/mode={}: byte parity                  changed={changed}, severe_gt1={severe}, peak={peak}/255",
                 MODES[index],
             );
             assert_eq!(
@@ -256,17 +329,26 @@ fn run_batch_case(
 #[test]
 #[ignore = "opt-in lossless adjacent-region batching A/B; production unchanged"]
 fn benchmark_vello_adjacent_batching() {
+    let only_case = std::env::var("AQ_ADJACENT_ONLY_CASE").ok();
+    let only_strips = std::env::var("AQ_ADJACENT_ONLY_STRIPS").ok().map(|v| v.parse::<u16>().expect("valid strip count"));
+    let only_every = std::env::var("AQ_ADJACENT_ONLY_EVERY").ok().map(|v| v.parse::<u32>().expect("valid full refresh cadence"));
+    let mut selected = 0;
     for (case, width, height, scale, cover) in [
         ("text_1x", 1000, 600, 1.0, false),
         ("text_175", 1750, 1051, 1.75, false),
         ("cover_175", 1750, 1051, 1.75, true),
     ] {
+        if only_case.as_deref().is_some_and(|selected| selected != case) { continue; }
         for full_every in [8, 3] {
+            if only_every.is_some_and(|selected| selected != full_every) { continue; }
             for strips in STRIPS {
+                if only_strips.is_some_and(|selected| selected != strips) { continue; }
+                selected += 1;
                 run_batch_case(
                     case, width, height, scale, cover, full_every, strips,
                 );
             }
         }
     }
+    assert!(selected > 0, "no matching A/B scene selected");
 }
