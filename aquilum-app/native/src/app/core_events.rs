@@ -67,10 +67,8 @@ impl App {
             if let Some(embeds) = &self.embeds {
                 embeds.forget_paths(&touched);
             }
-            if let Some(note) = self.note.as_mut().filter(|n| rescan || touched.iter().any(|p| n.is(p)))
-                && let Some(text) = note.reload()
-            {
-                self.set_text(root, text);
+            if let Some(note) = self.note.as_mut().filter(|n| rescan || touched.iter().any(|p| n.is(p))) {
+                note.request_reload(Arc::clone(&self.workspace.wake));
             }
         }
         if rescan {
@@ -80,6 +78,11 @@ impl App {
         } else if !changed.is_empty() {
             self.tree.paths_changed(root, &changed);
             title |= self.close_missing_tabs(root, &changed);
+        }
+        // A worker's wake brings results here; a superseded tab, local edit,
+        // or newer filesystem event may discard them before the UI is touched.
+        if let Some(text) = self.note.as_mut().and_then(|note| note.take_reload(&self.workspace.wake)) {
+            self.set_text(root, text);
         }
         for navigation in navigations {
             title |= match navigation {
