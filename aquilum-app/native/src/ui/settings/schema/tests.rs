@@ -106,7 +106,7 @@ fn m1dd_native_recovery_settings_are_read_only_for_every_state() {
         assert!(rows.iter().all(|row| match &row.control {
             Control::Status { .. } => true,
             Control::Buttons(buttons) =>
-                buttons.iter().all(|b| matches!(b.action, Action::InspectRecovery(_))),
+                buttons.iter().all(|b| matches!(&b.action, Action::InspectRecovery(_))),
             _ => false,
         }), "Only read-only inspection buttons may appear before explicit selection");
         assert!(rows.iter().all(|row| row.setter.is_none()));
@@ -167,7 +167,7 @@ fn m1de_native_review_only_offers_explicit_nondestructive_intents() {
     let rows = &blocks(Section::Sync, &AppConfig::default(), &ctx)[0].rows;
     assert!(rows.iter().all(|r| match &r.control {
         Control::Status { .. } => true,
-        Control::Buttons(buttons) => buttons.iter().all(|b| matches!(b.action, Action::InspectRecovery(_))),
+        Control::Buttons(buttons) => buttons.iter().all(|b| matches!(&b.action, Action::InspectRecovery(_))),
         _ => false,
     }), "forged selection cannot expose even a confirmation action");
 }
