@@ -30,9 +30,11 @@ The old 10k Gen1 note histories are a **synthetic trusted local cache**, and onl
 
 The test reports one machine-readable `AKULA_COORD_AB` line per method with:
 - attempted AWS SDK `GET` and `HEAD`, received payload bytes, wall time;
-- fixture publication overhead: count and payload bytes for immutable objects written, including shared new revision/blob objects, packs and letter, plus changed Merkle nodes;
+- mode-specific required immutable publication footprint (number and payload bytes of letter + individual JSON/blobs or letter + packs, plus changed Merkle nodes);
 - `letter_bytes` for index-overhead tradeoffs;
 - explicit `assurance=test-only-trusted-fixture-read-only-no-file-gate`.
+
+**All variants' objects are seeded together into the same test bucket** to keep read phases comparable. The reported `mode_required_immutable_objects` and `mode_required_payload_bytes` are therefore **per-mode required object/byte counts derived from objects actually built and uploaded**, not separately timed PUT traffic for that mode. A follow-up publish-path A/B must measure actual PUT latency, CAS, lost ACK and compaction amplification.
 
 **No S3 PUT is included in measured read latency.** Request counters cover Akula's SDK attempted methods (HEAD/GET), not network/TCP bytes or automatic internal SDK retries; retries are disabled in MinIO CI. Real WAN RTT, upload wall time, packing CPU and whole-app startup need separate further trials.
 
