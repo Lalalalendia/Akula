@@ -231,6 +231,18 @@ mod tests {
     }
 
     #[test]
+    fn clean_editor_edit_reporting_does_not_suppress_reuse() {
+        let content = "обычный текст и Unicode 😀\\n".replace("\\n", "\n").repeat(48);
+        let styles = StyleSet::new(16.0);
+        let mut doc = doc(&content);
+        doc.report_edits();
+        shape(&mut doc, 600.0, &styles);
+        assert!(doc.trial_snapshot(&styles).is_some(), "clean note has an empty edit-reporting queue");
+        doc.report(0..0, "inserted");
+        assert!(doc.trial_snapshot(&styles).is_none(), "actual unconsumed edits must disable transfer");
+    }
+
+    #[test]
     fn snapshot_rejects_pending_document_edits() {
         let text = "текст\n".repeat(32);
         let styles = StyleSet::new(16.0);
