@@ -15,7 +15,7 @@ pub use table::Command as TableCommand;
 pub use embed::media::media_line;
 pub use widget::{Search, Smart, Status, TextEditor};
 #[cfg(test)]
-pub(crate) use document::{take_document_build_profile, TrialSnapshot};
+pub(crate) use document::{take_document_build_profile, take_ui_restore_hits, TrialSnapshot};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Edit {
