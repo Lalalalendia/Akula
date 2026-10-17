@@ -91,3 +91,38 @@ fn deleted_file_never_reopens_stale_cached_bytes() {
     assert!(!stages.cache_hit);
     assert!(h.app.open_error.is_some(), "missing file must surface open error, not cached text");
 }
+
+#[test]
+fn parley_trial_rejects_selected_text_and_secondary_carets() {
+    let mut h = Harness::new();
+    h.app.parley_trial_enabled = true;
+    let text = "Обычный абзац без ссылок или украшений.\n".repeat(120);
+    let path = h.write_note("parley-multicaret.md", &text);
+    assert!(h.app.open_in(&mut h.root, path.clone(), true));
+    let _ = h.root.redraw();
+
+    let body = h.app.note_ids.as_ref().expect("active editor").body;
+    assert!(
+        body.get(&h.root).and_then(|editor| editor.parley_trial_snapshot()).is_some(),
+        "control: a clean, already-laid-out plain note should be eligible"
+    );
+
+    body.edit(&mut h.root, |mut editor| {
+        crate::ui::editor::TextEditor::select_byte_range(&mut editor, 0, 6);
+    });
+    assert!(
+        body.get(&h.root).and_then(|editor| editor.parley_trial_snapshot()).is_none(),
+        "a highlighted selection must never enter the layout cache"
+    );
+
+    body.edit(&mut h.root, |mut editor| {
+        crate::ui::editor::TextEditor::select_byte_range(&mut editor, 6, 6);
+        crate::ui::editor::TextEditor::add_secondary_caret_for_trial_test(&mut editor, 12);
+    });
+    assert!(
+        body.get(&h.root).and_then(|editor| editor.parley_trial_snapshot()).is_none(),
+        "even a zero-width secondary caret must invalidate the layout snapshot"
+    );
+    assert_eq!(h.body_text(), text, "rejecting cached layouts must not mutate source text");
+    h.app.shutdown();
+}
