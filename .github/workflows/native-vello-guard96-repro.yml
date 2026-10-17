@@ -7,6 +7,7 @@ on:
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
       - 'aquilum-app/native/src/render/paint/mod.rs'
       - 'aquilum-app/native/vendor/vello_cpu/src/text.rs'
+      - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
   workflow_dispatch:
 
 permissions:
@@ -80,17 +81,24 @@ jobs:
         run: |
           set -uo pipefail
           unexpected=0
-          for mode in hint-off atlas-off full-glyph-visibility cold-atlas; do
+          for mode in hint-off atlas-off full-glyph-visibility cold-atlas outline-off color-bitmap-off; do
             case "$mode" in
               hint-off) flag=AQ_TEST_DISABLE_GLYPH_HINTING ;;
               atlas-off) flag=AQ_TEST_DISABLE_GLYPH_ATLAS ;;
               full-glyph-visibility) flag=AQ_TEST_FULL_GLYPH_RUN_VISIBILITY ;;
               cold-atlas) flag=AQ_TEST_COLD_GLYPH_ATLAS_PER_CROP ;;
+              outline-off) flag=AQ_TEST_GLIFO_ATLAS_KIND ;;
+              color-bitmap-off) flag=AQ_TEST_GLIFO_ATLAS_KIND ;;
             esac
             failures=0
             for attempt in $(seq 1 20); do
               log="$GITHUB_WORKSPACE/vello-guard96-$mode-attempt-$attempt.log"
-              if env "$flag=1" AQ_CROSSOVER_OUT="$GITHUB_WORKSPACE/vello-guard96-frames/$mode-attempt-$attempt" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+              flag_value=1
+              case "$mode" in
+                outline-off) flag_value=without-outline ;;
+                color-bitmap-off) flag_value=without-color-bitmap ;;
+              esac
+              if env "$flag=$flag_value" AQ_CROSSOVER_OUT="$GITHUB_WORKSPACE/vello-guard96-frames/$mode-attempt-$attempt" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
                 :
               elif grep -q 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
                 failures=$((failures + 1))
