@@ -5,6 +5,15 @@ use unicode_normalization::UnicodeNormalization;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 
+/// Internal in-vault staging artifacts are intentionally outside the wire
+/// namespace. Never accept this prefix (including case aliases) as a user
+/// sync path or remote object name.
+pub(crate) fn is_internal_stage_name(name: &str) -> bool {
+    const PREFIX: &str = ".akula-sync-stage-";
+    name.get(..PREFIX.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(PREFIX))
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SyncPathError {
     InvalidPath,
@@ -53,6 +62,11 @@ impl SyncRelativePath {
                 return Err(SyncPathError::InvalidPath);
             }
             let normalized: String = part.nfc().collect();
+            // A crash-stage filename cannot be imported from a cloud
+            // manifest, indexed as a note or mistaken for a regular attachment.
+            if is_internal_stage_name(&normalized) {
+                return Err(SyncPathError::ReservedName);
+            }
             let base = normalized.split('.').next().unwrap_or("").to_ascii_uppercase();
             // Windows treats ISO-8859-1 superscript 1/2/3 as serial-port
             // digits too: COM¹ and LPT³ are device names, including when
@@ -185,6 +199,25 @@ mod tests {
             serde_json::to_string(&canonical).unwrap(),
             "\"notes/caf\u{e9}.md\""
         );
+    }
+
+    #[test]
+    fn refuses_reserved_local_create_stage_namespace_on_wire_and_paths() {
+        use super::is_internal_stage_name;
+        let stage = ".akula-sync-stage-11111111-1111-4111-8111-111111111111";
+        assert!(is_internal_stage_name(stage));
+        assert!(is_internal_stage_name(".AKULA-SYNC-STAGE-anything"));
+        assert!(!is_internal_stage_name(".akula-sync-stages-unrelated"));
+        for path in [
+            stage.to_string(),
+            format!("notes/{stage}"),
+            "notes/.AKULA-SYNC-STAGE-notes.md".into(),
+            "images/.akula-sync-stage-".into(),
+        ] {
+            assert_eq!(SyncRelativePath::parse(&path), Err(SyncPathError::ReservedName));
+            let json = serde_json::to_string(&path).unwrap();
+            assert!(serde_json::from_str::<SyncRelativePath>(&json).is_err());
+        }
     }
 
     #[test]
