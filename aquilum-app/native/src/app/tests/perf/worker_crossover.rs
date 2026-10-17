@@ -62,6 +62,7 @@ fn diagnose_channel_mismatch(
     width: u16,
     partial: &Renderer,
     full: &Renderer,
+    previous_full: Option<&[u32]>,
 ) {
     let (mut count, mut worst) = (0usize, 0u8);
     let mut examples = Vec::new();
@@ -80,7 +81,26 @@ fn diagnose_channel_mismatch(
         x1 = x1.max(x);
         y1 = y1.max(y);
         if examples.len() < 16 {
-            examples.push(format!("({x},{y}):{a:08x}/{b:08x} peak={peak}"));
+            let shifted_from = partial.moved.iter().find_map(|&(mx, my, mw, mh, dy)| {
+                let within_x = x >= usize::from(mx) && x < usize::from(mx) + usize::from(mw);
+                let within_y = y >= usize::from(my) && y < usize::from(my) + usize::from(mh);
+                if !within_x || !within_y {
+                    return None;
+                }
+                let source_y = usize::try_from(i64::try_from(y).ok()? - i64::from(dy)).ok()?;
+                let prior_color = previous_full.and_then(|pixels| {
+                    let offset = source_y.checked_mul(usize::from(width))?.checked_add(x)?;
+                    pixels.get(offset).map(|color| format!("{color:08x}"))
+                });
+                Some((source_y, prior_color))
+            });
+            let rerastered = partial.rastered.iter().any(|&(rx, ry, rw, rh)| {
+                x >= usize::from(rx) && x < usize::from(rx) + usize::from(rw)
+                    && y >= usize::from(ry) && y < usize::from(ry) + usize::from(rh)
+            });
+            examples.push(format!(
+                "({x},{y}):{a:08x}/{b:08x} peak={peak} shifted_from={shifted_from:?} rerastered={rerastered}"
+            ));
         }
     }
     eprintln!(
@@ -159,6 +179,7 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
     ];
     let mut samples: [Vec<WorkerSample>; 3] =
         std::array::from_fn(|_| Vec::with_capacity((STEPS - 1) as usize));
+    let mut previous_full: Option<(u32, Vec<u32>)> = None;
 
     for step in 0..STEPS {
         if step % 8 == 7 {
@@ -203,8 +224,18 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
             let full = render_full(&layers, w, hh, scale);
             let peak = max_pixel_channel_delta(renderers[0].frame_pixels(), full.frame_pixels());
             if peak > 1 {
-                diagnose_channel_mismatch(case, workload, step, w, &renderers[0], &full);
+                let previous = previous_full.as_ref().and_then(|(previous_step, pixels)| {
+                    (*previous_step + 1 == step).then_some(pixels.as_slice())
+                });
+                diagnose_channel_mismatch(case, workload, step, w, &renderers[0], &full, previous);
+                let repeated = render_full(&layers, w, hh, scale);
+                let repeated_peak =
+                    max_pixel_channel_delta(full.frame_pixels(), repeated.frame_pixels());
+                eprintln!(
+                    "VELLO_GUARD_FULL_REPEAT case={case} workload={workload} step={step} max_channel={repeated_peak}"
+                );
             }
+            previous_full = Some((step, full.frame_pixels().to_vec()));
             assert!(
                 peak <= 1,
                 "{case}/{workload}: partial/full channel difference {peak}/255 on frame {step}",
