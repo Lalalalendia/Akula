@@ -14,6 +14,7 @@ mod fault_matrix;
 mod identity;
 mod journal;
 mod planner;
+mod protection_store;
 mod path;
 mod pinned_read;
 #[cfg(windows)]
