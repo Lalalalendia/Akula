@@ -78,17 +78,17 @@ impl Document {
             || self.editing.is_some() || self.text.len() > MAX_WINDOW_BYTES
         {
             if parley_trace_enabled() {
-            eprintln!(
-                "PARLEY_TAB_TRACE stage=snapshot_reject placed={} dirty={} pending_edits={} editing={} window_bytes={}",
-                self.placed, self.dirty.is_some(), has_pending_edits,
-                self.editing.is_some(), self.text.len()
-            );
+                eprintln!(
+                    "PARLEY_TAB_TRACE stage=snapshot_reject placed={} dirty={} pending_edits={} editing={} window_bytes={}",
+                    self.placed, self.dirty.is_some(), has_pending_edits,
+                    self.editing.is_some(), self.text.len()
+                );
             }
             return None;
         }
         let Some(width) = self.width else {
             if parley_trace_enabled() {
-            eprintln!("PARLEY_TAB_TRACE stage=snapshot_reject reason=no_width");
+                eprintln!("PARLEY_TAB_TRACE stage=snapshot_reject reason=no_width");
             }
             return None;
         };
@@ -116,7 +116,7 @@ impl Document {
             entries.push(PlainLayout { line: i, layout: laid.layout.clone() });
         }
         if parley_trace_enabled() {
-        eprintln!("PARLEY_TAB_TRACE stage=snapshot_candidates layouts={}", entries.len());
+            eprintln!("PARLEY_TAB_TRACE stage=snapshot_candidates layouts={}", entries.len());
         }
         (!entries.is_empty()).then(|| Snapshot {
             base: self.base,
@@ -156,18 +156,18 @@ impl Document {
             || styles_key(styles) != snapshot.style_key
         {
             if parley_trace_enabled() {
-            eprintln!(
-                "PARLEY_TAB_TRACE stage=restore_reject width_match={} requested_width={width:?} snapshot_width={} current_width={:?} placed={} windowed={} len={} base={} text={} fonts={} styles={} compose={} caret={}",
-                width == Some(snapshot.width), snapshot.width, self.width, self.placed,
-                self.windowed == snapshot.windowed,
-                self.full.byte_len() == snapshot.full_len,
-                self.base == snapshot.base,
-                self.text == snapshot.text,
-                fonts_key(self.markdown.as_ref()) == snapshot.font_key,
-                styles_key(styles) == snapshot.style_key,
-                compose.is_some(),
-                caret.is_some()
-            );
+                eprintln!(
+                    "PARLEY_TAB_TRACE stage=restore_reject width_match={} requested_width={width:?} snapshot_width={} current_width={:?} placed={} windowed={} len={} base={} text={} fonts={} styles={} compose={} caret={}",
+                    width == Some(snapshot.width), snapshot.width, self.width, self.placed,
+                    self.windowed == snapshot.windowed,
+                    self.full.byte_len() == snapshot.full_len,
+                    self.base == snapshot.base,
+                    self.text == snapshot.text,
+                    fonts_key(self.markdown.as_ref()) == snapshot.font_key,
+                    styles_key(styles) == snapshot.style_key,
+                    compose.is_some(),
+                    caret.is_some()
+                );
             }
             return 0;
         }
@@ -193,10 +193,10 @@ impl Document {
         }
         if needs_rebreak && reused != 0 {
             if parley_trace_enabled() {
-            eprintln!(
-                "PARLEY_TAB_TRACE stage=rebreak_shaped cached_width={} actual_width={width:?} reused={reused}",
-                snapshot.width
-            );
+                eprintln!(
+                    "PARLEY_TAB_TRACE stage=rebreak_shaped cached_width={} actual_width={width:?} reused={reused}",
+                    snapshot.width
+                );
             }
         }
         if reused != 0 {
