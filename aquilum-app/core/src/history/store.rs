@@ -92,6 +92,12 @@ fn checked_history_prefix(base: &Path, directory: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// The move-intent directory receives the same no-alias prefix checks as
+/// normal version history, before any journal file is opened or created.
+pub(super) fn checked_history_recovery_directory(base: &Path) -> io::Result<()> {
+    checked_history_prefix(base, &base.join(AQUILUM_FOLDER).join("history-moves"))
+}
+
 /// Fail closed on pre-existing symlink/junction aliases before any ordinary
 /// HistoryService read, write or relocation. Reuse the migration preflight,
 /// but require this path to be inside THIS base's .aquilum/history tree.

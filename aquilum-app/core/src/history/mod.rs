@@ -26,6 +26,7 @@
 //! let _mutate = store::remove_expired;
 //! ```
 
+mod recovery;
 pub mod milestone;
 pub mod service;
 pub mod store;

@@ -88,6 +88,54 @@ handle-relative operations are future requirements. Blocking an unrelated
 vault's retention while another vault has unresolved history is conservative
 and needs later per-root partitioning.
 
+## Persistent version-transfer intent and inventory admission (04g-3b-7a)
+
+Before changing **history version files** for a rename, trash or restore,
+the Core now records a per-workspace one-in-flight intent at
+`<vault>/.aquilum/history-moves/pending-v1.json`. It contains the selected
+operation, source and destination identities, history paths and the exact
+union of relative filenames and BLAKE3 content fingerprints from both
+history trees. The manifest is written using `create_new`, flushed with
+`File::sync_all`, and its containing directory is fsynced on Unix.
+Directories created for the journal are also synced on Unix.
+
+A process restart no longer loses the recovery signal: each subsequent
+history read, version write, label write and maintenance pass checks for
+an existing or **unreadable/malformed** intent under the process history
+mutex and refuses normal history operations. A fresh `HistoryService`
+with different app-data cannot silently fork history while an intent
+remains in the shared vault. While a transfer is unfinished, the Core
+does NOT silently remove a version or announce that its history moved.
+The host continues to receive the separate
+`note-history-move-failed` event, independently of the already-moved
+primary note.
+
+The **same operation and same source/destination pair** may be retried.
+Before retry and after the move, the service compares the union of file
+digests against the recorded manifest: every original file must exist on
+exactly one side and retain its exact bytes. The intent is cleared only
+when the source contains no recorded files and the destination matches
+the complete inventory. Even if the source directory has disappeared,
+missing or modified versions cause a fail-closed error; they are never
+treated as a successful transfer. Name collisions and unknown files are
+rejected. Case-only renames on case-insensitive filesystems use a single
+tree inventory. Intent entries with symlinked/junction/reparse ancestors
+are rejected, and corrupted manifests are **not auto-deleted**.
+
+**Remaining restrictions:** the marker is a conservative
+cooperating-process checkpoint, **not** a complete cross-process locking
+protocol. In particular, another process can still modify a path after
+its pathname preflight, separate processes may register different sets
+of workspaces, and an untrusted process can modify the marker. On
+Windows the marker file is flushed, but parent directory fsync/power-loss
+durability is not certified; neither platform has proved full power-loss
+durability for the underlying history directory renames. A pending marker
+blocks all history activity in a registered Core's known workspaces
+conservatively until its transfer is safely retried. An explicit repair
+screen, operator-guided response to corrupt inventory, trusted
+interprocess admission, and OS-handle-relative mutation remain P0.
+**Local sync write/delete authority is still disabled.**
+
 ## Tests and limits
 
 - A real FS two-service regression holds the global history mutex while the second service attempts to persist a new history snapshot. Bytes remain untouched until release.

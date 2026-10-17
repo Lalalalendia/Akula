@@ -1,4 +1,5 @@
 use super::milestone::{self, Before, Incoming, MilestonePlan, Recorded, Source};
+use super::recovery;
 use super::store;
 use crate::files::document::read_text;
 use crate::files::error::FileCommandError;
@@ -266,8 +267,8 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return Ok(false);
         };
-        if state.is_blocked(&located.key) {
-            return Err(HistorySaveFailure::new("history relocation pending", "history transfer must be retried before recording a new version"));
+        if history_blocked(&state, &located) {
+            return Err(HistorySaveFailure::new("history relocation pending", "pending or unreadable version-transfer intent; history write refused"));
         }
         if !allowed_history_directory(&located.vault, &located.dir) {
             return Err(HistorySaveFailure::new("history path", "unsafe history directory"));
@@ -429,7 +430,7 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
-        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
+        if history_blocked(&state, &located) || !allowed_history_directory(&located.vault, &located.dir) {
             return None;
         }
         let target = match id {
@@ -457,7 +458,7 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return HistoryPage::default();
         };
-        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
+        if history_blocked(&state, &located) || !allowed_history_directory(&located.vault, &located.dir) {
             return HistoryPage::default();
         }
         let current = read_text(note).ok();
@@ -491,7 +492,7 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
-        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
+        if history_blocked(&state, &located) || !allowed_history_directory(&located.vault, &located.dir) {
             return None;
         }
         let versions = store::versions(&located.dir);
@@ -532,7 +533,17 @@ impl HistoryService {
             state.quarantine(&source.key, &target.key, &[source.vault.as_path(), target.vault.as_path()], "unsafe history directory");
             return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
-        if let Err(error) = self.move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault) {
+        if let Err(error) = recovery::transfer(
+            &source.vault,
+            "move",
+            from,
+            to,
+            &source.vault,
+            &target.vault,
+            &source.dir,
+            &target.dir,
+            || self.move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault),
+        ) {
             state.quarantine(&source.key, &target.key, &[source.vault.as_path(), target.vault.as_path()], &error.to_string());
             return Err(HistoryMoveFailure::new(action, error, true));
         }
@@ -573,7 +584,17 @@ impl HistoryService {
             state.quarantine(&located.key, &destination_key, &[located.vault.as_path()], "unsafe history directory");
             return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
-        if let Err(error) = self.move_history(&located.dir, &target, Placement::Trash, &located.vault) {
+        if let Err(error) = recovery::transfer(
+            &located.vault,
+            "trash",
+            note,
+            trashed_at,
+            &located.vault,
+            &trash,
+            &located.dir,
+            &target,
+            || self.move_history(&located.dir, &target, Placement::Trash, &located.vault),
+        ) {
             state.quarantine(&located.key, &destination_key, &[located.vault.as_path()], &error.to_string());
             return Err(HistoryMoveFailure::new(action, error, true));
         }
@@ -613,7 +634,17 @@ impl HistoryService {
             state.quarantine(&source_key, &located.key, &[located.vault.as_path()], "unsafe history directory");
             return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
-        if let Err(error) = self.move_history(&source, &located.dir, Placement::Workspace, &trash) {
+        if let Err(error) = recovery::transfer(
+            &located.vault,
+            "restore",
+            trashed_at,
+            restored,
+            &trash,
+            &located.vault,
+            &source,
+            &located.dir,
+            || self.move_history(&source, &located.dir, Placement::Workspace, &trash),
+        ) {
             state.quarantine(&source_key, &located.key, &[located.vault.as_path()], &error.to_string());
             return Err(HistoryMoveFailure::new(action, error, true));
         }
@@ -695,6 +726,14 @@ impl HistoryService {
         })) {
             return Err("history relocation pending in selected workspace; retention deferred");
         }
+        let recovery_root = if workspace.file_name().is_some_and(|name| name == ".trash") {
+            workspace.parent().unwrap_or(workspace)
+        } else {
+            workspace
+        };
+        if !matches!(recovery::pending(recovery_root), Ok(false)) {
+            return Err("pending or invalid on-disk history move intent; retention deferred");
+        }
         store::adopt_quantum_history(workspace);
         store::adopt_quantum_history(&trash_path(workspace));
         Ok(store::remove_expired(workspace, retention_days))
@@ -740,6 +779,30 @@ fn allowed_history_directory(base: &Path, directory: &Path) -> bool {
             false
         }
     }
+}
+
+/// The intent record lives in the selected vault, rather than the private
+/// app-data directory, so another Core can fail closed after a restart.
+/// Scanning every known root also blocks cross-vault consumers that currently
+/// have both workspaces registered. Separate-process admission remains a P0.
+fn history_blocked(state: &HistoryFilesStateGuard<'_>, located: &Located) -> bool {
+    if state.is_blocked(&located.key) {
+        return true;
+    }
+    for root in &state.roots {
+        match recovery::pending(root) {
+            Ok(false) => {}
+            Ok(true) => {
+                report(root, "заблокирована незавершённым переносом", "persistent move intent");
+                return true;
+            }
+            Err(error) => {
+                report(root, "заблокирована повреждённым журналом переноса", &error.to_string());
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn name_version(device: &str, dir: &Path, id: Option<String>, name: &str) -> Option<String> {
@@ -1170,6 +1233,80 @@ mod tests {
             texts(&fixture.history_of("Агент.md")),
             [("от агента".to_owned(), Source::Agent), ("от агента и снова".to_owned(), Source::Agent)]
         );
+    }
+
+    #[test]
+    fn history_recovery_manifest_survives_state_loss_and_verifies_all_version_bytes() {
+        use super::{HistoryFault, PROCESS_HISTORY_FILES};
+        let fixture = Fixture::new();
+        let first = fixture.service();
+        let old = fixture.vault.join("Durable.md");
+        let new = fixture.vault.join("Durable-new.md");
+        fixture.save(&first, &old, "first version", Source::Agent);
+        fixture.save(&first, &old, "second version", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+
+        first.fail_once(HistoryFault::MoveAfterOneFile);
+        assert!(first.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        assert!(crate::history::recovery::pending(&fixture.vault).unwrap());
+
+        // Simulate process restart by discarding only THIS transfer's
+        // process-local quarantine, not other concurrent tests' entries.
+        let mut process = PROCESS_HISTORY_FILES.lock().unwrap();
+        process.blocked.remove(&crate::search::paths::identity(&old));
+        process.blocked.remove(&crate::search::paths::identity(&new));
+        drop(process);
+        let reopened = fixture.service();
+        assert_eq!(reopened.page(&|| fixture.roots(), &new, 0, 10).total, 0);
+        assert_eq!(
+            reopened.try_saved(&|| fixture.roots(), &new, write("forbidden", Source::Agent, "hash", None))
+                .unwrap_err().action,
+            "history relocation pending"
+        );
+        assert!(reopened.maintain_retention(&fixture.vault, 30).is_err());
+
+        let target = fixture.history_of("Durable-new.md");
+        let moved = fs::read_dir(&target).unwrap().next().unwrap().unwrap().path();
+        let saved = fs::read(&moved).unwrap();
+        fs::remove_file(&moved).unwrap();
+
+        // Source may be absent or incomplete: it is NEVER evidence of
+        // completion unless all recorded filenames and BLAKE3 digests match.
+        assert!(reopened.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        assert!(crate::history::recovery::pending(&fixture.vault).unwrap());
+        fs::write(&moved, &saved).unwrap();
+
+        reopened.try_moved(&|| fixture.roots(), &old, &new).unwrap();
+        assert!(!crate::history::recovery::pending(&fixture.vault).unwrap());
+        assert_eq!(reopened.page(&|| fixture.roots(), &new, 0, 10).total, 2);
+        assert!(!fixture.history_of("Durable.md").exists());
+        assert!(reopened.maintain_retention(&fixture.vault, 0).is_ok());
+    }
+
+    #[test]
+    fn history_corrupt_recovery_marker_denies_reopened_core() {
+        use super::{HistoryFault, PROCESS_HISTORY_FILES};
+        let fixture = Fixture::new();
+        let first = fixture.service();
+        let old = fixture.vault.join("Broken.md");
+        let new = fixture.vault.join("Broken-new.md");
+        fixture.save(&first, &old, "version", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+        first.fail_once(HistoryFault::MoveBefore);
+        assert!(first.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        let marker = crate::history::recovery::marker_path(&fixture.vault);
+        fs::write(&marker, b"{not-json").unwrap();
+
+        let mut process = PROCESS_HISTORY_FILES.lock().unwrap();
+        process.blocked.remove(&crate::search::paths::identity(&old));
+        process.blocked.remove(&crate::search::paths::identity(&new));
+        drop(process);
+        let second = fixture.service();
+        assert!(crate::history::recovery::pending(&fixture.vault).is_err());
+        assert!(second.page(&|| fixture.roots(), &new, 0, 10).versions.is_empty());
+        assert!(second.try_saved(&|| fixture.roots(), &new, write("blocked", Source::Agent, "hash", None)).is_err());
+        assert!(second.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        assert!(marker.exists(), "corrupt recovery marker must never be deleted automatically");
     }
 
     #[test]
