@@ -50,6 +50,26 @@ fn identity(file: &File) -> Result<PinnedFileIdentity, VaultPortError> {
     }
 }
 
+pub(super) fn directory_identity(parent: &File) -> Result<PinnedFileIdentity, VaultPortError> {
+    let meta = parent.metadata().map_err(|error| VaultPortError::Io(error.to_string()))?;
+    if !meta.is_dir() {
+        return Err(VaultPortError::UnsafePath);
+    }
+    #[cfg(unix)]
+    {
+        Ok(PinnedFileIdentity { device: meta.dev(), file: meta.ino() })
+    }
+    #[cfg(windows)]
+    {
+        let (volume, id) = super::pinned_windows::file_identity(parent)?;
+        Ok(PinnedFileIdentity { device: u64::from(volume), file: id })
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err(VaultPortError::PermissionDenied)
+    }
+}
+
 #[cfg(unix)]
 fn stage_file(parent: &File, name: &str) -> Result<File, VaultPortError> {
     let flags = OFlags::RDWR | OFlags::CREATE | OFlags::EXCL
