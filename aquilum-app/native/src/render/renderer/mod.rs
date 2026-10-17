@@ -87,6 +87,8 @@ pub struct Renderer {
     #[cfg(test)]
     pub(crate) split_full_frame_strips: Option<u16>,
     #[cfg(test)]
+    pub(crate) split_first_cut_bias_for_test: i32,
+    #[cfg(test)]
     pub(crate) coalesce_adjacent_for_test: bool,
     #[cfg(test)]
     pub shifts: usize,
@@ -122,6 +124,8 @@ impl Renderer {
             last_stages: FrameStages::default(),
             #[cfg(test)]
             split_full_frame_strips: None,
+            #[cfg(test)]
+            split_first_cut_bias_for_test: 0,
             #[cfg(test)]
             coalesce_adjacent_for_test: false,
             #[cfg(test)]
@@ -171,6 +175,13 @@ impl Renderer {
 
     /// Opt-in test-only batching of full-edge adjacent disjoint regions.
     /// Never changes production damage or its pixel footprint.
+    #[cfg(test)]
+    pub(crate) fn set_split_first_cut_bias_for_test(&mut self, bias: i32) {
+        assert!(self.split_full_frame_strips.is_some(), "enable split before bias");
+        assert!(bias.abs() <= 80, "bias must stay near first band cut");
+        self.split_first_cut_bias_for_test = bias;
+    }
+
     #[cfg(test)]
     pub(crate) fn enable_adjacent_coalescing_for_test(&mut self) {
         self.coalesce_adjacent_for_test = true;
