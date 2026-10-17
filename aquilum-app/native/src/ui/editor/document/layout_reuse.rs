@@ -67,9 +67,17 @@ impl Document {
         if !self.placed || self.dirty.is_some() || self.edits.is_some()
             || self.editing.is_some() || self.text.len() > MAX_WINDOW_BYTES
         {
+            eprintln!(
+                "PARLEY_TAB_TRACE stage=snapshot_reject placed={} dirty={} edits={} editing={} window_bytes={}",
+                self.placed, self.dirty.is_some(), self.edits.is_some(),
+                self.editing.is_some(), self.text.len()
+            );
             return None;
         }
-        let width = self.width?;
+        let Some(width) = self.width else {
+            eprintln!("PARLEY_TAB_TRACE stage=snapshot_reject reason=no_width");
+            return None;
+        };
         let mut indices: Vec<usize> = self.laid.iter()
             .map(|(i, _)| i)
             .filter(|&i| i < self.lines.count() && *self.blocks.get(i) == Block::Text)
@@ -93,6 +101,7 @@ impl Document {
             bytes += size;
             entries.push(PlainLayout { line: i, layout: laid.layout.clone() });
         }
+        eprintln!("PARLEY_TAB_TRACE stage=snapshot_candidates layouts={}", entries.len());
         (!entries.is_empty()).then(|| Snapshot {
             base: self.base,
             text: self.text.clone(),
@@ -122,12 +131,24 @@ impl Document {
         // IME composition and caret-dependent Markdown can change the Parley
         // shape of a line even if the file bytes remain identical.
         if compose.is_some() || caret.is_some()
-            || width != Some(snapshot.width) || !self.windowed.eq(&snapshot.windowed)
+            || width != Some(snapshot.width) || self.windowed != snapshot.windowed
             || self.full.byte_len() != snapshot.full_len || self.base != snapshot.base
             || self.text != snapshot.text
             || fonts_key(self.markdown.as_ref()) != snapshot.font_key
             || styles_key(styles) != snapshot.style_key
         {
+            eprintln!(
+                "PARLEY_TAB_TRACE stage=restore_reject width={} windowed={} len={} base={} text={} fonts={} styles={} compose={} caret={}",
+                width == Some(snapshot.width),
+                self.windowed == snapshot.windowed,
+                self.full.byte_len() == snapshot.full_len,
+                self.base == snapshot.base,
+                self.text == snapshot.text,
+                fonts_key(self.markdown.as_ref()) == snapshot.font_key,
+                styles_key(styles) == snapshot.style_key,
+                compose.is_some(),
+                caret.is_some()
+            );
             return 0;
         }
         let mut reused = 0;
