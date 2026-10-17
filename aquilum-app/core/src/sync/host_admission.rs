@@ -348,4 +348,145 @@ mod tests {
             &SyncRelativePath::parse("jump/private.md").unwrap(), 1024
         ).is_err());
     }
+
+    fn protection_store(temp: &tempfile::TempDir) -> SqliteProtectionStore {
+        SqliteProtectionStore::open(&temp.path().join("appdata/protected.sqlite")).unwrap()
+    }
+
+    #[test]
+    fn live_preimage_survives_database_restart_with_bound_root_and_file_identity() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let bytes = "Глава 140. Русский текст 😀".as_bytes();
+        let note = note();
+        fs::write(root.join(note.as_str()), bytes).unwrap();
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let original_root = guard.initial;
+        let file_id = guard.pinned.read_identified_bounded(
+            &note, MAX_PROTECTED_ORIGINAL_BYTES as u64).unwrap().identity.unwrap();
+        {
+            let mut store = protection_store(&temp);
+            assert_eq!(
+                guard.preserve_closed_original(&note, &hash, operation, &mut store).unwrap(),
+                ProtectionOutcome::Stored
+            );
+            assert_eq!(
+                guard.preserve_closed_original(&note, &hash, operation, &mut store).unwrap(),
+                ProtectionOutcome::AlreadyStored
+            );
+        }
+        let store = protection_store(&temp);
+        let saved = store.read_bound_preimage(operation).unwrap().unwrap();
+        assert_eq!(saved.original.bytes, bytes);
+        assert_eq!(saved.original.path, note);
+        assert_eq!(saved.original.content_hash, hash);
+        assert_eq!(saved.root.device, original_root.0);
+        assert_eq!(saved.root.file, original_root.1);
+        assert_eq!(saved.file, file_id);
+        assert_eq!(fs::read(root.join(note.as_str())).unwrap(), bytes);
+    }
+
+    #[test]
+    fn preimage_capture_rejects_unexpected_hash_or_open_editor_without_backup() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let note = note();
+        let target = root.join(note.as_str());
+        fs::write(&target, b"original").unwrap();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let op = OperationId::new();
+
+        assert!(matches!(
+            guard.preserve_closed_original(&note, "wrong", op, &mut store),
+            Err(BoundCaptureError::OriginalHashMismatch)
+        ));
+        core.documents.open(&core, &target, 0).unwrap();
+        let digest = blake3::hash(b"original").to_hex().to_string();
+        assert!(matches!(
+            guard.preserve_closed_original(&note, &digest, op, &mut store),
+            Err(BoundCaptureError::Admission(VaultPortError::DirtyEditorBuffer))
+        ));
+        core.documents.release(&core, &target);
+        assert!(store.read_preimage(op).unwrap().is_none());
+        assert_eq!(fs::read(target).unwrap(), b"original");
+    }
+
+    #[test]
+    fn replacing_a_file_with_identical_bytes_does_not_preserve_old_file_identity() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let note = note();
+        let target = root.join(note.as_str());
+        fs::write(&target, b"same text").unwrap();
+        let digest = blake3::hash(b"same text").to_hex().to_string();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let id = OperationId::new();
+
+        let result = guard.preserve_with_hook(&note, &digest, id, &mut store, || {
+            fs::rename(&target, root.join("notes/moved.md")).unwrap();
+            fs::write(&target, b"same text").unwrap();
+        });
+        assert!(matches!(
+            result, Err(BoundCaptureError::Admission(VaultPortError::FileChanged))
+        ));
+        let saved = store.read_bound_preimage(id).unwrap().unwrap();
+        assert_eq!(saved.original.bytes, b"same text");
+        assert_eq!(fs::read(&target).unwrap(), b"same text");
+        // Reusing the same operation ID after the file was swapped must not
+        // silently confer the old file's recorded identity on a new inode.
+        assert!(matches!(
+            guard.preserve_closed_original(&note, &digest, id, &mut store),
+            Err(BoundCaptureError::Protection(ProtectionStoreError::OperationCollision))
+        ));
+    }
+
+    #[test]
+    fn root_replacement_before_persistence_refuses_without_storing_a_backup() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        fs::write(root.join(note().as_str()), b"original").unwrap();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let operation = OperationId::new();
+        let digest = blake3::hash(b"original").to_hex().to_string();
+        let result = guard.preserve_with_hook(&note(), &digest, operation, &mut store, || {
+            fs::rename(&root, temp.path().join("moved-vault")).unwrap();
+            fs::create_dir(&root).unwrap();
+            fs::create_dir(root.join("notes")).unwrap();
+            fs::write(root.join(note().as_str()), b"replacement").unwrap();
+        });
+        assert!(result.is_err());
+        assert!(store.read_preimage(operation).unwrap().is_none());
+        assert_eq!(fs::read(root.join(note().as_str())).unwrap(), b"replacement");
+    }
+
+    #[test]
+    fn hardlink_alias_and_workspace_local_database_cannot_pass_capture() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let target = root.join(note().as_str());
+        fs::write(&target, b"protected source").unwrap();
+        fs::hard_link(&target, root.join("notes/alias.md")).unwrap();
+        let digest = blake3::hash(b"protected source").to_hex().to_string();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut outside_store = protection_store(&temp);
+        let id = OperationId::new();
+        assert!(matches!(
+            guard.preserve_closed_original(&note(), &digest, id, &mut outside_store),
+            Err(BoundCaptureError::Admission(VaultPortError::UnsafePath))
+        ));
+        assert!(outside_store.read_preimage(id).unwrap().is_none());
+
+        fs::remove_file(root.join("notes/alias.md")).unwrap();
+        let mut inside_store = SqliteProtectionStore::open(&root.join("protection.sqlite")).unwrap();
+        assert!(matches!(
+            guard.preserve_closed_original(&note(), &digest, id, &mut inside_store),
+            Err(BoundCaptureError::Admission(VaultPortError::PermissionDenied))
+        ));
+        assert!(inside_store.read_preimage(id).unwrap().is_none());
+    }
 }
