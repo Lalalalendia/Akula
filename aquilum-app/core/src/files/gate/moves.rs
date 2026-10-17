@@ -148,3 +148,30 @@ pub(super) fn relocated(notes: &[PathBuf], from: &Path, to: &Path) -> Relocation
         removed: Vec::new(),
     }
 }
+
+#[cfg(test)]
+mod cross_vault_admission_tests {
+    use super::*;
+    use crate::app_core::CoreEvent;
+    use std::fs;
+    use std::sync::Arc;
+
+    #[test]
+    fn history_cross_vault_registry_failure_does_not_become_unrestricted_admission() {
+        let temp = tempfile::tempdir().unwrap();
+        let uninitialized_data = temp.path().join("missing-app-data");
+        let source = temp.path().join("Before.md");
+        let target = temp.path().join("After.md");
+        fs::write(&source, b"keep original").unwrap();
+        let core = Core::open(&uninitialized_data, Arc::new(|_: CoreEvent| {}));
+        assert!(core.ui_state.workspace_roots().is_err());
+
+        let error = admit_vault_relocation(&core, &source, &target).unwrap_err();
+        assert!(
+            matches!(error, FileCommandError::Task { .. }),
+            "missing registry must fail closed: {error:?}"
+        );
+        assert_eq!(fs::read(&source).unwrap(), b"keep original");
+        assert!(!target.exists());
+    }
+}
