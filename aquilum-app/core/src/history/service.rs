@@ -132,6 +132,9 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return false;
         };
+        if !allowed_history_directory(&located.vault, &located.dir) {
+            return false;
+        }
         let entry = state
             .notes
             .entry(located.key)
@@ -226,6 +229,9 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
+        if !allowed_history_directory(&located.vault, &located.dir) {
+            return None;
+        }
         let target = match id {
             Some(id) => Some(
                 store::versions(&located.dir)
@@ -251,6 +257,9 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return HistoryPage::default();
         };
+        if !allowed_history_directory(&located.vault, &located.dir) {
+            return HistoryPage::default();
+        }
         let current = read_text(note).ok();
         let names = store::names(&located.dir);
         let versions = store::versions(&located.dir);
@@ -282,6 +291,9 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
+        if !allowed_history_directory(&located.vault, &located.dir) {
+            return None;
+        }
         let versions = store::versions(&located.dir);
         let id = id?;
         let index = versions.iter().position(|version| version.id == id)?;
@@ -304,6 +316,11 @@ impl HistoryService {
         ) else {
             return;
         };
+        if !allowed_history_directory(&source.vault, &source.dir)
+            || !allowed_history_directory(&target.vault, &target.dir)
+        {
+            return;
+        }
         let note = state.notes.remove(&source.key);
         state.notes.remove(&target.key);
         move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault);
@@ -320,12 +337,17 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return;
         };
-        let note = state.notes.remove(&located.key);
         let trash = trash_path(&located.vault);
         let Some(in_trash) = relative_inside(&trash, trashed_at) else {
             return;
         };
         let target = store::history_dir(&trash, &in_trash);
+        if !allowed_history_directory(&located.vault, &located.dir)
+            || !allowed_history_directory(&trash, &target)
+        {
+            return;
+        }
+        let note = state.notes.remove(&located.key);
         move_history(&located.dir, &target, Placement::Trash, &located.vault);
         if let Some(mut note) = note {
             note.dir = target;
@@ -340,13 +362,18 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, restored) else {
             return;
         };
-        let note = state.notes.remove(&identity(trashed_at));
-        state.notes.remove(&located.key);
         let trash = trash_path(&located.vault);
         let Some(in_trash) = relative_inside(&trash, trashed_at) else {
             return;
         };
         let source = store::history_dir(&trash, &in_trash);
+        if !allowed_history_directory(&trash, &source)
+            || !allowed_history_directory(&located.vault, &located.dir)
+        {
+            return;
+        }
+        let note = state.notes.remove(&identity(trashed_at));
+        state.notes.remove(&located.key);
         move_history(&source, &located.dir, Placement::Workspace, &trash);
         if let Some(mut note) = note {
             note.dir = located.dir;
@@ -409,6 +436,20 @@ fn relative_inside(root: &Path, path: &Path) -> Option<PathBuf> {
     strip_root(root, path)
         .filter(|relative| !relative.as_os_str().is_empty())
         .map(Path::to_path_buf)
+}
+
+/// Deny pre-existing directory aliases and malformed descendants for normal
+/// history operations. The caller already holds PROCESS_HISTORY_FILES; a
+/// cooperating Core cannot swap history directories during the operation.
+/// External processes remain outside that guarantee.
+fn allowed_history_directory(base: &Path, directory: &Path) -> bool {
+    match store::checked_history_note_directory(base, directory) {
+        Ok(()) => true,
+        Err(error) => {
+            report(directory, "заблокирована из-за небезопасного пути", &error.to_string());
+            false
+        }
+    }
 }
 
 fn name_version(device: &str, dir: &Path, id: Option<String>, name: &str) -> Option<String> {
@@ -600,6 +641,91 @@ mod tests {
         assert_eq!(fs::read(&expected).unwrap(), b"legacy bytes");
         assert!(!old.exists());
         drop(first);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_service_rejects_symlinked_history_root_for_reads_and_writes() {
+        use std::os::unix::fs::symlink;
+        let fixture = Fixture::new();
+        let outside = tempfile::tempdir().unwrap();
+        let foreign = outside.path().join("history/Идея.md");
+        fs::create_dir_all(&foreign).unwrap();
+        let private = foreign.join("0000000000001_other_me.md");
+        fs::write(&private, "private foreign history").unwrap();
+        symlink(outside.path(), fixture.vault.join(".aquilum")).unwrap();
+        let history = fixture.service();
+        let note = fixture.vault.join("Идея.md");
+        fs::write(&note, "local note").unwrap();
+        assert!(!history.saved(&|| fixture.roots(), &note, write("local edit", Source::Agent, "hash", None)));
+        assert_eq!(history.page(&|| fixture.roots(), &note, 0, 20).total, 0);
+        assert!(history.name(&|| fixture.roots(), &note, None, "foreign").is_none());
+        assert_eq!(fs::read_to_string(&private).unwrap(), "private foreign history");
+        assert_eq!(fs::read_dir(&foreign).unwrap().count(), 1);
+        fs::remove_file(fixture.vault.join(".aquilum")).unwrap();
+        assert!(history.saved(&|| fixture.roots(), &note, write("local edit", Source::Agent, "hash", None)));
+        assert_eq!(versions(&fixture.history_of("Идея.md")).len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_service_rejects_nested_symlink_move_and_write_targets() {
+        use std::os::unix::fs::symlink;
+        let fixture = Fixture::new();
+        let outside = tempfile::tempdir().unwrap();
+        let history = fixture.service();
+        let old = fixture.vault.join("Старое.md");
+        fixture.save(&history, &old, "safe version", Source::Agent);
+        let original_dir = fixture.history_of("Старое.md");
+        let target = fixture.vault.join("Linked/Новая.md");
+        let history_root = fixture.history_of("");
+        symlink(outside.path(), history_root.join("Linked")).unwrap();
+
+        history.moved(&|| fixture.roots(), &old, &target);
+        assert_eq!(texts(&original_dir), [("safe version".to_owned(), Source::Agent)]);
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+        assert!(!history.saved(&|| fixture.roots(), &target, write("do not leak", Source::Agent, "hash", None)));
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn history_service_rejects_junction_root_and_nested_write_targets() {
+        use std::process::Command;
+        fn junction(link: &Path, target: &Path) {
+            let output = Command::new("cmd")
+                .arg("/C")
+                .arg("mklink")
+                .arg("/J")
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "mklink /J failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let fixture = Fixture::new();
+        let outside = tempfile::tempdir().unwrap();
+        let history = fixture.service();
+        let note = fixture.vault.join("Идея.md");
+        fs::write(&note, "local").unwrap();
+        let history_root = fixture.vault.join(".aquilum");
+        junction(&history_root, outside.path());
+        assert!(!history.saved(&|| fixture.roots(), &note, write("blocked", Source::Agent, "hash", None)));
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+        fs::remove_dir(&history_root).unwrap();
+
+        let nested = fixture.history_of("");
+        fs::create_dir_all(&nested).unwrap();
+        junction(&nested.join("Идея.md"), outside.path());
+        assert!(!history.saved(&|| fixture.roots(), &note, write("still blocked", Source::Agent, "hash", None)));
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+        fs::remove_dir(nested.join("Идея.md")).unwrap();
+        assert!(history.saved(&|| fixture.roots(), &note, write("local", Source::Agent, "hash", None)));
+        assert_eq!(versions(&fixture.history_of("Идея.md")).len(), 1);
     }
 
     #[test]

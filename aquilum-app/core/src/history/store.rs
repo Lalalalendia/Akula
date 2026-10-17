@@ -92,6 +92,24 @@ fn checked_history_prefix(base: &Path, directory: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Fail closed on pre-existing symlink/junction aliases before any ordinary
+/// HistoryService read, write or relocation. Reuse the migration preflight,
+/// but require this path to be inside THIS base's .aquilum/history tree.
+/// This is a pathname check, not protection against external TOCTOU swaps.
+pub(crate) fn checked_history_note_directory(base: &Path, directory: &Path) -> io::Result<()> {
+    let root = history_root(base);
+    let relative = directory.strip_prefix(&root).map_err(|_| {
+        io::Error::new(ErrorKind::PermissionDenied, "history note is outside its selected root")
+    })?;
+    if !relative.components().all(|component| matches!(component, Component::Normal(_))) {
+        return Err(io::Error::new(
+            ErrorKind::PermissionDenied,
+            "invalid history note path component",
+        ));
+    }
+    checked_history_prefix(base, directory)
+}
+
 /// WalkDir's default no-follow setting alone is not enough when the root
 /// itself is an alias, on Windows junctions, or if traversal errors get
 /// discarded by filter_map(Result::ok). Refuse the entire maintenance pass.

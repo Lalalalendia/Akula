@@ -17,6 +17,27 @@ Every `HistoryService` previously serialized its own `State` with a private mute
 
 `History-files -> HistoryService state` is valid; `File Gate -> HistoryService state` is used for `disk_before` only. **Never** acquire File Gate, emit callbacks or reconcile DocumentHub while holding the process history-files mutex. File Gate operations release their lock before `saved/moved/trashed/restored` history bookkeeping. The history files mutex does not grant, verify or change sync write permissions.
 
+## Normal history I/O alias preflight (04g-3b-3)
+
+Normal `HistoryService::saved`, `name`, `page`, `version`, `moved`,
+`trashed` and `restored` now validate their selected
+`<base>/.aquilum/history/...` directories **before** reading,
+writing or changing cached location state. The preflight requires all existing
+directory components from the trusted selected base to be ordinary
+directories; symlinks, Windows NTFS junctions/reparse directories,
+`..` components and paths outside the selected history root are rejected.
+Trash history is checked against its own `.trash` base.
+
+Checks occur under the existing `PROCESS_HISTORY_FILES` mutex,
+without acquiring the File Gate mutex. This is a *static alias guard*, not a
+pinned OS file handle, cross-process lock or prevention of external TOCTOU
+directory swaps. Low-level `history::store` functions remain callable
+outside this guarded service; they are **not** approved as a sync mutation API.
+A guard failure logs a refusal, but legacy `bool`, `Option` and `()`
+history signatures cannot yet report the full error to the caller.
+Dedicated Unix symlink and Windows junction regressions exercise version
+read/write denial and nested write/move denial.
+
 ## Tests and limits
 
 - A real FS two-service regression holds the global history mutex while the second service attempts to persist a new history snapshot. Bytes remain untouched until release.
