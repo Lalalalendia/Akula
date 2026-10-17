@@ -202,3 +202,32 @@ fn sync_reservation_only_blocks_its_own_document_identity() {
     core.documents.release(&core, &b);
     assert_eq!(fs::read_to_string(&a).unwrap(), "alpha");
 }
+
+
+#[test]
+fn sync_reservation_denies_an_editor_open_from_another_thread() {
+    use crate::documents::hub::HubError;
+    let dir = tempfile::tempdir().unwrap();
+    let app_data = dir.path().join("app-data");
+    fs::create_dir_all(&app_data).unwrap();
+    let core = Core::open(&app_data, Arc::new(Recording::default()));
+    let note = dir.path().join("threaded.md");
+    fs::write(&note, "original contents").unwrap();
+
+    let reservation = core.documents.reserve_sync_closed_document(&note).unwrap();
+    let other_core = Arc::clone(&core);
+    let other_note = note.clone();
+    let denied = std::thread::spawn(move || {
+        matches!(
+            other_core.documents.open(&other_core, &other_note, 0),
+            Err(HubError::SyncReserved)
+        )
+    }).join().unwrap();
+    assert!(denied, "editor open crossed an active sync reservation");
+    assert_eq!(fs::read_to_string(&note).unwrap(), "original contents");
+
+    drop(reservation);
+    let opened = core.documents.open(&core, &note, 0).unwrap();
+    assert_eq!(opened.text, "original contents");
+    core.documents.release(&core, &note);
+}
