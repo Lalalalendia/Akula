@@ -144,6 +144,10 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
     let mut partial_full_changed = 0usize;
     let mut partial_full_max_channel = 0u8;
     let (start, end) = trace_marks(case);
+    let diagnostic = std::env::var_os("AQ_PIXEL_DIAG").is_some();
+    let mut first_missed_step = None;
+    let mut previous_moved = Vec::new();
+    let mut previous_rastered = Vec::new();
     aq_trace::mark(start);
     for step in 0..FRAMES {
         if step % 8 == 7 {
@@ -174,6 +178,33 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
         );
         assert_eq!(mismatch, 0, "{case}: serial/parallel pixels disagree on frame {step}");
 
+        // In diagnostic-only mode compare every frame, rather than only
+        // the benchmark's four snapshots, to isolate the *first* bad shift.
+        // This deliberately does NOT produce performance samples.
+        if diagnostic {
+            let full = render_full(&layers, w, hh, scale);
+            let (bad, peak) = describe_difference(
+                case, step, w, serial.frame_pixels(), full.frame_pixels(),
+            );
+            if peak > 1 {
+                first_missed_step.get_or_insert(step);
+                eprintln!(
+                    "VELLO_PIXEL_DIAG case={case} step={step} bad_pixels={bad} peak={peak} \
+                     current_moves={:?} previous_moves={previous_moved:?} \
+                     current_raster={:?} previous_raster={previous_rastered:?}",
+                    serial.moved, serial.rastered
+                );
+                if let Some(output) = std::env::var_os("AQ_OUT") {
+                    let dir = std::path::PathBuf::from(output);
+                    std::fs::create_dir_all(&dir).unwrap();
+                    std::fs::write(dir.join(format!("{case}-step{step}-partial.png")), serial.png()).unwrap();
+                    std::fs::write(dir.join(format!("{case}-step{step}-full.png")), full.png()).unwrap();
+                }
+            }
+            previous_moved = serial.moved.clone();
+            previous_rastered = serial.rastered.clone();
+            continue;
+        }
         // Never fold pixel-validation work into the raster or frame samples.
         if matches!(step, 0 | 10 | 20 | 31) {
             let full = render_full(&layers, w, hh, scale);
@@ -222,6 +253,10 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
         }
     }
     aq_trace::mark(end);
+    if diagnostic {
+        eprintln!("VELLO_PIXEL_DIAG_SUMMARY case={case} frames={FRAMES} first_missed_step={first_missed_step:?}");
+        return;
+    }
 
     assert_eq!(samples_serial.len(), FRAMES as usize - 1);
     assert_eq!(samples_parallel.len(), FRAMES as usize - 1);
@@ -261,6 +296,10 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
 fn benchmark_vello_release_trace() {
     if std::env::var_os("AQ_TRACE").is_some() {
         aq_trace::start();
+    }
+    if std::env::var_os("AQ_PIXEL_DIAG").is_some() {
+        profile_case("text_175", 1.75, 1750, 1051, false);
+        return;
     }
     for (case, scale, width, height, cover) in [
         ("text_1x", 1.0, 1000, 600, false),
