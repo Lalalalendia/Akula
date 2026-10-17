@@ -28,9 +28,9 @@
 
 ### Complete study (manual GitHub Actions)
 
-Use GitHub Actions → **S3 delta A/B network benchmark** → **Run workflow** on a revision containing the benchmark. One workflow dispatch creates three parallel, individually isolated disposable MinIO jobs: **10,000 notes × 0, 7, 1,000 edits**. Each job builds and fully verifies the initial vault, publishes the chosen successor, then records selective/full read metrics separately.
+The **initial merge adding the benchmark workflow file to main** also triggers one full 10k study (push event restricted to changes in that workflow file), without burdening unrelated future PRs. Alternatively, use GitHub Actions → **S3 delta A/B network benchmark** → **Run workflow**. One full push/dispatch creates three parallel, individually isolated disposable MinIO jobs: **10,000 notes × 0, 7, 1,000 edits**. Each job builds and fully verifies the initial vault, publishes the chosen successor, then records selective/full read metrics separately.
 
-Artifacts: `akula-delta-ab-workflow_dispatch-0`, `...-7`, `...-1000`, containing `delta-ab-results.jsonl` with two rows each. The job also prints lines beginning `AKULA_DELTA_AB` for log-based audit. Empty/incomplete JSON is a hard failure. The benchmark workflow itself does not issue any S3 DELETE/GC or touch user data; temporary MinIO runs in Docker tmpfs and is stopped in a guaranteed cleanup step.
+Artifacts: `akula-delta-ab-push-{0,7,1000}` (automatic first merge) or `akula-delta-ab-workflow_dispatch-{0,7,1000}` (manual), containing `delta-ab-results.jsonl` with two rows each. The job also prints lines beginning `AKULA_DELTA_AB` for log-based audit. Empty/incomplete JSON is a hard failure. The benchmark workflow itself does not issue any S3 DELETE/GC or touch user data; temporary MinIO runs in Docker tmpfs and is stopped in a guaranteed cleanup step.
 
 No background work is implied by this document: until a workflow dispatch is actually executed and succeeds, the 10k measurements remain **unrun**.
 
