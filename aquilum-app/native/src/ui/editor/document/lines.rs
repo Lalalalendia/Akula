@@ -11,8 +11,9 @@ fn starts(text: &str, base: usize) -> impl Iterator<Item = usize> + '_ {
 
 impl Lines {
     pub(super) fn new(text: &str) -> Self {
-        let mut all = Vec::with_capacity(text.bytes().filter(|&b| b == b'\n').count() + 1);
-        all.extend(starts(text, 0));
+        // Collect line starts in one scan. The previous exact reservation made
+        // an extra full pass over the text just to count line breaks.
+        let all = starts(text, 0).collect();
         Lines { starts: all, len: text.len() }
     }
 
@@ -77,5 +78,47 @@ impl Lines {
     #[cfg(feature = "memory-probe")]
     pub(super) fn bytes(&self) -> usize {
         self.starts.capacity() * size_of::<usize>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Lines;
+
+    #[test]
+    fn line_index_preserves_reference_byte_positions() {
+        for text in [
+            "", "a", "\n", "\n\n", "a\n", "a\nb", "a\r\nb\r\n",
+            "Русский 😀 中文\nsecond\n", "\0\n\0", "line\n\nlast",
+        ] {
+            let expected: Vec<usize> = std::iter::once(0)
+                .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+                .collect();
+            let lines = Lines::new(text);
+            assert_eq!(lines.count(), expected.len(), "{text:?}");
+            for (line, &at) in expected.iter().enumerate() {
+                assert_eq!(lines.start(line), at, "{text:?}, line={line}");
+                let end = expected.get(line + 1).map_or(text.len(), |next| next - 1);
+                assert_eq!(lines.end(line), end, "{text:?}, line={line}");
+                assert_eq!(lines.range(line), at..end, "{text:?}, line={line}");
+            }
+            for offset in 0..=text.len() {
+                let expected_line = expected.partition_point(|&at| at <= offset).saturating_sub(1);
+                assert_eq!(lines.at(offset), expected_line, "{text:?}, offset={offset}");
+            }
+        }
+    }
+
+    #[test]
+    fn large_multilingual_line_index_matches_exact_reference() {
+        let text = "Глава 😀 one\nline two\r\n\n漢字 text\n".repeat(4000);
+        let lines = Lines::new(&text);
+        let expected: Vec<usize> = std::iter::once(0)
+            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        assert_eq!(lines.count(), expected.len());
+        for (line, &start) in expected.iter().enumerate() {
+            assert_eq!(lines.start(line), start);
+        }
     }
 }
