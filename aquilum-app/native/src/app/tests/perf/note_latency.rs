@@ -239,8 +239,8 @@ fn native_note_latency_matrix() {
             trial.attempted, trial.clean, trial.widget_found, trial.snapshots, trial.offered,
         );
         eprintln!(
-            "PARLEY_REJECT kib={kib} attempted={} passed={} width={} full_len={} base={} text={} windowed={} fonts={} style={} ime={} caret={}",
-            gate.attempted, gate.passed, gate.width, gate.full_len, gate.base, gate.text,
+            "PARLEY_REJECT kib={kib} attempted={} passed={} deferred={} width={} full_len={} base={} text={} windowed={} fonts={} style={} ime={} caret={}",
+            gate.attempted, gate.passed, gate.deferred_initial_width, gate.width, gate.full_len, gate.base, gate.text,
             gate.windowed, gate.fonts, gate.style, gate.ime, gate.caret,
         );
         eprintln!(
