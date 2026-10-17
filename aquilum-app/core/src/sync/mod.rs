@@ -30,6 +30,7 @@ mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
+mod s3_manifest;
 #[cfg(feature = "sync-s3")]
 mod s3_transport;
 mod upload;
@@ -62,6 +63,11 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+pub use s3_manifest::{
+    S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
+    S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
+    MAX_SHARD_ENTRIES, MAX_SHARDS,
+};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
     AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
