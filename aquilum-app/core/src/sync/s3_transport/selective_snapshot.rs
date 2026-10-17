@@ -62,6 +62,7 @@ pub enum S3SelectiveReadError {
     /// tombstone or concurrent offline sibling records.
     VerifiedFullHistoryRequired,
     ImmutableRevisionRewritten,
+    ImmutableShardRewritten,
     MissingPreviouslyVerifiedRevision,
     InconsistentContentLength,
     HeadChangedDuringVerification,
@@ -191,7 +192,7 @@ impl AwsS3ProbeClient {
         let delta = walk_s3_delta_from_saved_anchor(self, scope, journal, limits).await?;
         let remote = delta.observed_head.pointer();
         let remote_id = snapshot_id(remote);
-        match delta.outcome {
+        let generations = match delta.outcome {
             S3ManifestDeltaOutcome::HeadUnchanged => {
                 return Ok(S3SelectiveRevisionPreview {
                     remote_snapshot_id: remote_id,
@@ -206,12 +207,12 @@ impl AwsS3ProbeClient {
                 });
             }
             S3ManifestDeltaOutcome::Complete {
-                generations_traversed: 1,
+                generations_traversed,
                 base: S3ManifestDeltaBase::VerifiedCheckpoint,
                 ..
-            } => {}
+            } if generations_traversed >= 1 => generations_traversed,
             _ => return Err(S3SelectiveReadError::VerifiedFullHistoryRequired),
-        }
+        };
 
         // The walker already checked stable root and exact parent chain.
         // Pin the latest immutable root again and recheck it against the
@@ -227,15 +228,31 @@ impl AwsS3ProbeClient {
             &self.keyspace, remote.manifest_id(), &raw.bytes,
         ).map_err(S3HeadError::from)?;
         if manifest.generation != remote.generation()
-            || manifest.previous_manifest_id != Some(anchor.pointer().manifest_id())
-            || manifest.previous_manifest_blake3.as_deref()
-                != Some(anchor.pointer().manifest_blake3())
+            || (generations == 1
+                && (manifest.previous_manifest_id != Some(anchor.pointer().manifest_id())
+                    || manifest.previous_manifest_blake3.as_deref()
+                        != Some(anchor.pointer().manifest_blake3())))
+            || (generations > 1
+                && delta.verified_manifest_frames.first().map(|f| f.as_slice())
+                    != Some(raw.bytes.as_slice()))
         {
             return Err(S3SelectiveReadError::Head(S3HeadError::InvalidManifest));
         }
         let prior = S3ManifestV1::decode(
             &self.keyspace, anchor.pointer().manifest_id(), anchor.manifest_bytes(),
         ).map_err(S3HeadError::from)?;
+        if generations > 1 {
+            // Prior full verification + exact BLAKE3-linked manifest frames
+            // are insufficient on their own: a deleted intermediate sibling
+            // or tombstone could be absent from the latest canonical root.
+            // Fetch and verify each changed shard through EVERY generation,
+            // refuse any disappearance or UUID rewrite, then proceed to the
+            // existing final JSON/blob/DAG verifier. This remains advisory.
+            super::offline_retention::verify_offline_retention(
+                self, &self.keyspace, &prior, previously_pinned, remote,
+                &delta.verified_manifest_frames, limits,
+            ).await?;
+        }
         let old_shards: BTreeMap<_,_> =
             prior.shards.iter().map(|r| (r.shard_id, r)).collect();
 
