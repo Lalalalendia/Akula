@@ -8,6 +8,7 @@ on:
       - 'aquilum-app/native/src/app/tests/perf/vello_release.rs'
       - 'aquilum-app/native/src/render/paint/runs.rs'
       - 'aquilum-app/native/src/render/damage/glyphs.rs'
+      - 'aquilum-app/native/src/render/renderer/pass.rs'
       - 'aquilum-app/native/src/app/tests/perf/mod.rs'
       - '.github/scripts/summarize-vello-profile.py'
       - '.github/workflows/native-vello-release-profile.yml'
@@ -105,6 +106,19 @@ jobs:
             benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
             2>&1 | tee "$GITHUB_WORKSPACE/vello-pixel-full-viewport.log"
           grep -F "VELLO_PIXEL_DIAG_SUMMARY case=text_175" "$GITHUB_WORKSPACE/vello-pixel-full-viewport.log"
+      - name: Full-screen reraster on scroll to isolate cropped-region semantics
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_PIXEL_DIAG: "1"
+          AQ_TEST_FORCE_FULL_ON_SCROLL: "1"
+          AQ_OUT: ${{ github.workspace }}/vello-full-screen-frames
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/vello-pixel-full-screen.log"
+          grep -F "VELLO_PIXEL_DIAG_SUMMARY case=text_175" "$GITHUB_WORKSPACE/vello-pixel-full-screen.log"
       - name: Probe 96 px scroll-edge re-raster guard (test only)
         shell: bash
         working-directory: aquilum-app
@@ -161,6 +175,7 @@ jobs:
             vello-pixel-no-atlas.log
             vello-glyph-visibility.log
             vello-pixel-full-viewport.log
+            vello-pixel-full-screen.log
             vello-pixel-guard96.log
             vello-untraced.log
             vello-traced.log
@@ -170,6 +185,7 @@ jobs:
             vello-no-atlas-frames/*.png
             vello-glyph-visibility-frames/*.png
             vello-force-viewport-frames/*.png
+            vello-full-screen-frames/*.png
             vello-edge-guard-frames/*.png
           if-no-files-found: warn
           retention-days: 21
