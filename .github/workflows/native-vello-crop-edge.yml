@@ -1,0 +1,72 @@
+name: Native Vello cropped header boundary falsifier
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-crop-edge.yml'
+      - '.github/scripts/summarize-vello-crop-edge.py'
+      - 'aquilum-app/native/src/app/tests/perf/worker_crop_edge.rs'
+      - 'aquilum-app/native/src/render/renderer/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-crop-edge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  crop-edge:
+    name: Real focus-button 8-strip first-cut bias sweep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-crop-edge-v1
+          cache-workspace-crates: true
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record runner CPU and source identity
+        shell: bash
+        run: |
+          {
+            git rev-parse HEAD
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+          } | tee vello-crop-env.txt
+      - name: Sweep first-band cutoff in 12 fresh processes
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          for trial in $(seq 1 12); do
+            AQ_CROP_EDGE_ARTIFACTS="$GITHUB_WORKSPACE/vello-crop-frames/trial-$trial" cargo test --release --locked -p aquilum-native --bin aquilum-native diagnose_vello_cropped_header_layer -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-crop-trial-$trial.log"
+          done
+      - name: Require all 60 crop-cut observations and summarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/summarize-vello-crop-edge.py
+          python3 .github/scripts/summarize-vello-crop-edge.py vello-crop-trial-{1..12}.log --output vello-crop-summary.md
+          cat vello-crop-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve failing pixels and environment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-crop-edge-${{ github.sha }}
+          path: |
+            vello-crop-env.txt
+            vello-crop-trial-*.log
+            vello-crop-summary.md
+            vello-crop-frames/**/*.png
+          if-no-files-found: warn
+          retention-days: 14
