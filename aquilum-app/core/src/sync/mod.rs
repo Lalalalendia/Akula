@@ -32,6 +32,7 @@ mod s3;
 mod s3_transport;
 mod upload;
 mod vault;
+pub mod webdav_probe;
 
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
