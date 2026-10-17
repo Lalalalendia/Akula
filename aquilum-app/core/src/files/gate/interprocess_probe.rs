@@ -154,6 +154,33 @@ mod tests {
                     thread::park_timeout(Duration::from_secs(60));
                 }
             }
+            "bootstrap-on-signal" => {
+                // Both child *processes* advertise readiness, then the parent
+                // releases a shared barrier. Never create outside temp vaults.
+                let start = PathBuf::from(
+                    std::env::var_os("AKULA_FILEGATE_OSLOCK_START").unwrap()
+                );
+                fs::write(report.with_extension("ready"), b"ready").unwrap();
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while !start.exists() {
+                    assert!(Instant::now() < deadline, "bootstrap barrier timed out");
+                    thread::sleep(Duration::from_millis(10));
+                }
+                let inspected = PinnedProbeRoot::open(&left).unwrap();
+                let message = match inspected.bootstrap_exclusive_for_test() {
+                    Ok(evidence) => format!(
+                        "{}|{}|{}:{}",
+                        if evidence.created { "created" } else { "existing" },
+                        evidence.generation,
+                        evidence.identity.0,
+                        evidence.identity.1,
+                    ),
+                    // A second child can observe a still-incomplete winner's
+                    // record: refusing is safe; overwriting is NOT.
+                    Err(_) => "refused".to_string(),
+                };
+                fs::write(report, message).unwrap();
+            }
             other => panic!("unknown test-only child mode: {other}"),
         }
     }
@@ -264,6 +291,144 @@ mod tests {
         symlink(&left, &alias).unwrap();
         assert!(try_one(&alias).is_err());
         assert!(try_one(&left).unwrap().is_some());
+    }
+
+
+    #[test]
+    fn oslock_bootstrap_exclusive_create_then_reopen_keeps_generation_and_bytes() {
+        let (_temp, left, _right) = fixture();
+        let lock = left.join(TEST_LOCK_NAME);
+        fs::remove_file(&lock).unwrap();
+        let first_root = PinnedProbeRoot::open(&left).unwrap();
+        let first = first_root.bootstrap_exclusive_for_test().unwrap();
+        assert!(first.created);
+        assert_ne!(first.generation, uuid::Uuid::nil());
+        assert_ne!(first.identity.1, 0);
+        #[cfg(windows)]
+        assert!(!first.parent_sync_completed, "Windows parent fsync is not proven");
+        let before = fs::read(&lock).unwrap();
+        assert!(!before.is_empty());
+        drop(first_root);
+
+        // Simulate Core restart: a fresh handle sees the SAME file object,
+        // not a recreated pathname and not a new local workspace UUID.
+        let second_root = PinnedProbeRoot::open(&left).unwrap();
+        let reopened = second_root.bootstrap_exclusive_for_test().unwrap();
+        assert!(!reopened.created);
+        assert_eq!(first.generation, reopened.generation);
+        assert_eq!(first.identity, reopened.identity);
+        assert_eq!(fs::read(&lock).unwrap(), before);
+        assert!(second_root.try_lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn oslock_bootstrap_torn_record_is_never_repaired_or_overwritten() {
+        let (_temp, left, _right) = fixture();
+        let lock = left.join(TEST_LOCK_NAME);
+        fs::write(&lock, b"interrupted-creator").unwrap();
+        let pinned = PinnedProbeRoot::open(&left).unwrap();
+        assert!(pinned.bootstrap_exclusive_for_test().is_err());
+        assert_eq!(fs::read(&lock).unwrap(), b"interrupted-creator");
+
+        fs::remove_file(&lock).unwrap();
+        pinned.bootstrap_exclusive_for_test().unwrap();
+        let mut damaged = fs::read(&lock).unwrap();
+        *damaged.last_mut().unwrap() ^= 0x7a;
+        fs::write(&lock, &damaged).unwrap();
+        assert!(pinned.bootstrap_exclusive_for_test().is_err());
+        assert_eq!(fs::read(&lock).unwrap(), damaged);
+    }
+
+    #[test]
+    fn oslock_bootstrap_hardlink_and_swapped_root_refuse_without_cleanup() {
+        let (temp, left, _right) = fixture();
+        let lock = left.join(TEST_LOCK_NAME);
+        fs::remove_file(&lock).unwrap();
+        let pinned = PinnedProbeRoot::open(&left).unwrap();
+        pinned.bootstrap_exclusive_for_test().unwrap();
+        let saved = fs::read(&lock).unwrap();
+
+        let alias = left.join("untrusted-hardlink");
+        fs::hard_link(&lock, &alias).unwrap();
+        assert!(pinned.bootstrap_exclusive_for_test().is_err());
+        assert_eq!(fs::read(&alias).unwrap(), saved);
+        fs::remove_file(alias).unwrap(); // Explicitly dispose test fixture alias.
+
+        let moved = temp.path().join("original-vault-moved");
+        fs::rename(&left, &moved).unwrap();
+        fs::create_dir(&left).unwrap();
+        assert!(pinned.bootstrap_exclusive_for_test().is_err());
+        assert!(!left.join(TEST_LOCK_NAME).exists());
+        assert_eq!(fs::read(moved.join(TEST_LOCK_NAME)).unwrap(), saved);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oslock_bootstrap_symlink_and_special_leaf_fail_closed() {
+        use std::os::unix::fs::symlink;
+        let (temp, left, _right) = fixture();
+        let lock = left.join(TEST_LOCK_NAME);
+        let outside = temp.path().join("outside-bytes");
+        fs::write(&outside, b"never modified").unwrap();
+        fs::remove_file(&lock).unwrap();
+        symlink(&outside, &lock).unwrap();
+        let pinned = PinnedProbeRoot::open(&left).unwrap();
+        assert!(pinned.bootstrap_exclusive_for_test().is_err());
+        assert_eq!(fs::read(&outside).unwrap(), b"never modified");
+        fs::remove_file(&lock).unwrap();
+        fs::create_dir(&lock).unwrap();
+        assert!(pinned.bootstrap_exclusive_for_test().is_err());
+        assert!(lock.is_dir());
+    }
+
+    #[test]
+    fn oslock_bootstrap_two_real_processes_never_create_two_lock_generations() {
+        let (temp, left, right) = fixture();
+        fs::remove_file(left.join(TEST_LOCK_NAME)).unwrap();
+        let start = temp.path().join("bootstrap-start.signal");
+        let reports = [
+            temp.path().join("bootstrap-child-a.txt"),
+            temp.path().join("bootstrap-child-b.txt"),
+        ];
+        let mut children: Vec<KillChild> = reports.iter().map(|report| {
+            KillChild(
+                child_command("bootstrap-on-signal", &left, &right, report)
+                    .env("AKULA_FILEGATE_OSLOCK_START", &start)
+                    .spawn()
+                    .unwrap()
+            )
+        }).collect();
+        for (child, report) in children.iter_mut().zip(reports.iter()) {
+            wait_for_report(child, &report.with_extension("ready"), b"ready");
+        }
+        // The child processes are independently alive at the release point.
+        assert!(children.iter_mut().all(|child| child.0.try_wait().unwrap().is_none()));
+        fs::write(&start, b"start").unwrap();
+        for child in &mut children {
+            assert!(child.0.wait().unwrap().success());
+        }
+        let results: Vec<String> = reports.iter()
+            .map(|report| fs::read_to_string(report).unwrap())
+            .collect();
+        let creators: Vec<&String> = results.iter()
+            .filter(|result| result.starts_with("created|"))
+            .collect();
+        assert_eq!(creators.len(), 1, "exclusive create must have one winner: {results:?}");
+
+        let creator_tokens: Vec<&str> = creators[0].split('|').collect();
+        assert_eq!(creator_tokens.len(), 3);
+        let remaining = results.iter().find(|result| !result.starts_with("created|")).unwrap();
+        assert!(remaining == "refused" || remaining.starts_with("existing|"), "{results:?}");
+        if remaining.starts_with("existing|") {
+            let read_tokens: Vec<&str> = remaining.split('|').collect();
+            assert_eq!(read_tokens[1..], creator_tokens[1..]);
+        }
+        let third = PinnedProbeRoot::open(&left).unwrap()
+            .bootstrap_exclusive_for_test().unwrap();
+        assert!(!third.created);
+        assert_eq!(third.generation.to_string(), creator_tokens[1]);
+        assert_eq!(format!("{}:{}", third.identity.0, third.identity.1), creator_tokens[2]);
+        assert!(left.join(TEST_LOCK_NAME).is_file());
     }
 
     #[test]
