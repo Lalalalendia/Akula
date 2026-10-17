@@ -61,6 +61,21 @@ fn m1_create_is_complete_no_replace_and_leaves_baseline_unconfirmed() {
     let result = admission.create_staged_if_absent(id, &journal, &cache).unwrap();
     assert_eq!(result.byte_length, bytes.len() as u64);
     assert_eq!(fs::read(root.join(relative)).unwrap(), bytes);
+    #[cfg(unix)]
+    {
+        let observation = journal.read_native_local_publication_observation(id)
+            .unwrap().expect("Unix parent fsync and pinned readback must be audited");
+        assert_eq!(observation.operation_id, id);
+        assert_eq!(observation.vault_id, vault);
+        assert_eq!(observation.file, result.file);
+        assert_eq!(observation.byte_length, bytes.len() as u64);
+        assert_eq!(observation.expected_content_hash,
+            blake3::hash(bytes).to_hex().to_string());
+        assert_eq!(observation.path.as_str(), relative);
+    }
+    #[cfg(not(unix))]
+    assert!(journal.read_native_local_publication_observation(id).unwrap().is_none());
+
     assert!(!root.join("notes").join(format!(".akula-sync-stage-{id}")).exists());
     assert!(matches!(
         admission.create_staged_if_absent(id, &journal, &cache),
@@ -305,6 +320,9 @@ fn m1_real_process_exit_after_staging_recovers_without_false_ack() {
     let journal = SqliteSyncJournal::open(&db.join("ops.sqlite")).unwrap();
     let record = journal.get(id).unwrap().unwrap();
     assert_eq!(record.phase, JournalPhase::Staged);
+    // The process stopped before no-replace, pinned final readback and
+    // directory fsync: no native publication observation may be synthesized.
+    assert!(journal.read_native_local_publication_observation(id).unwrap().is_none());
     assert!(journal.baseline(record.intent.vault_id, record.intent.document_id)
         .unwrap().is_none());
     let pending = journal.local_publication_review_queue().unwrap();
