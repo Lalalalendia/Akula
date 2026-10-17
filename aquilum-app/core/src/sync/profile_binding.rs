@@ -464,12 +464,35 @@ mod tests {
         }
     }
 
+    /// Runs in a REAL second OS process when explicitly targeted by the
+    /// parent fixture. Normal unit-test runs do not take any lock.
+    #[test]
+    fn s3_interprocess_child_holds_external_custody_lock() {
+        let Some(scope) = std::env::var_os("AKULA_SYNC_S3_CUSTODY_CHILD_SCOPE") else {
+            return;
+        };
+        let signal = std::path::PathBuf::from(
+            std::env::var_os("AKULA_SYNC_S3_CUSTODY_CHILD_SIGNAL").unwrap(),
+        );
+        let root = super::super::filegate_lock_probe::PinnedProbeRoot::open(
+            std::path::Path::new(&scope),
+        ).unwrap();
+        let _held = root.try_lock().unwrap().expect("independent child acquires lock");
+        fs::write(signal, b"held").unwrap();
+        loop {
+            std::thread::park_timeout(std::time::Duration::from_secs(60));
+        }
+    }
+
     #[test]
     fn bound_remote_vault_can_add_file_without_aliasing_local_registration() {
         use crate::sync::{
             DocumentId, JournalAction, JournalPhase, OperationIntent, RevisionId,
             SqliteDagStore, SqliteSyncJournal, SyncRelativePath,
         };
+        use super::super::filegate_custody_identity::SqliteCustodyIdentityStore;
+        use super::super::filegate_lock_custody::scoped_leaf;
+        use super::super::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
 
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("workspace");
@@ -486,6 +509,27 @@ mod tests {
         bindings.bind_existing_verified_s3(
             &admission, "joined-cloud", &profile, &namespace, &head,
         ).unwrap();
+
+        // A verified cloud profile alone MUST NOT unlock local writes. An
+        // independent, pre-existing outside-vault OS lock has its own durable
+        // binding to this exact physical root and shared cloud VaultId.
+        let anchor = temp.path().join("os-custody")
+            .join(scoped_leaf(PinnedProbeRoot::open(&root).unwrap().identity()));
+        fs::create_dir_all(&anchor).unwrap();
+        let lock_file = anchor.join(LOCK_NAME);
+        fs::write(&lock_file, b"pre-existing, never replaced by Akula").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&anchor, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock_file, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        #[cfg(unix)]
+        let anchor = fs::canonicalize(anchor).unwrap();
+        let mut custody = SqliteCustodyIdentityStore::open(
+            &admission, &appdata.join("custody.sqlite"),
+        ).unwrap();
+        custody.bind_registered_s3(&admission, &bindings, &anchor).unwrap();
 
         let bytes = "Новая глава из S3\n".as_bytes();
         let hash = blake3::hash(bytes).to_hex().to_string();
@@ -523,13 +567,77 @@ mod tests {
         wrong_profile.force_path_style = false;
         assert!(admission.create_staged_if_absent_for_registered_s3(
             operation_id, &journal, &cache, &bindings, &wrong_profile, &namespace,
+            &custody, &anchor,
         ).is_err());
         assert!(!root.join(path.as_str()).exists());
 
-        // Only the exact registered profile + immutable blob key can use
-        // the existing no-replace File Gate path. No baseline is committed.
+        // A REAL independent process holds the SAME physical external lock.
+        // The candidate Akula must decline BEFORE recording any one-shot
+        // native attempt and without creating either the stage or final name.
+        struct StopChild(std::process::Child);
+        impl Drop for StopChild {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let report = temp.path().join("independent-lock-held");
+        let mut child = StopChild(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("--exact")
+                .arg("sync::profile_binding::tests::s3_interprocess_child_holds_external_custody_lock")
+                .arg("--nocapture")
+                .env("AKULA_SYNC_S3_CUSTODY_CHILD_SCOPE", &anchor)
+                .env("AKULA_SYNC_S3_CUSTODY_CHILD_SIGNAL", &report)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn().unwrap()
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !report.exists() {
+            assert!(std::time::Instant::now() < deadline, "child lock barrier timed out");
+            assert!(child.0.try_wait().unwrap().is_none(), "child died before OS-lock acquisition");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(fs::read(&report).unwrap(), b"held");
+        assert!(matches!(
+            admission.create_staged_if_absent_for_registered_s3(
+                operation_id, &journal, &cache, &bindings, &profile, &namespace,
+                &custody, &anchor,
+            ),
+            Err(super::super::host_admission::LocalCreateError::Admission(
+                VaultPortError::PermissionDenied
+            ))
+        ));
+        assert!(journal.local_publication_review_queue().unwrap().is_empty());
+        assert!(!root.join(path.as_str()).exists());
+        drop(child); // kernel drops the child's held OS-lock handles.
+
+        // An existing SQLite custody checksum cannot authorize a NEW file
+        // object that replaced the trusted OS lock pathname. Never rebind it
+        // implicitly and never consume the one-shot local publication ticket.
+        let preserved_lock = anchor.join("original-lock-retained");
+        fs::rename(&lock_file, &preserved_lock).unwrap();
+        fs::write(&lock_file, b"new physical inode, same familiar name").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&lock_file, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert!(admission.create_staged_if_absent_for_registered_s3(
+            operation_id, &journal, &cache, &bindings, &profile, &namespace,
+            &custody, &anchor,
+        ).is_err());
+        assert!(journal.local_publication_review_queue().unwrap().is_empty());
+        assert!(!root.join(path.as_str()).exists());
+        fs::remove_file(&lock_file).unwrap();
+        fs::rename(&preserved_lock, &lock_file).unwrap();
+
+        // Only the exact registered profile + immutable blob key and the
+        // pinned, held external lock can enter the native no-replace path.
         let published = admission.create_staged_if_absent_for_registered_s3(
             operation_id, &journal, &cache, &bindings, &profile, &namespace,
+            &custody, &anchor,
         ).unwrap();
         assert_eq!(published.byte_length, bytes.len() as u64);
         assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
@@ -537,6 +645,7 @@ mod tests {
         assert!(journal.baseline(namespace.vault_id(), document).unwrap().is_none());
         assert!(admission.create_staged_if_absent_for_registered_s3(
             operation_id, &journal, &cache, &bindings, &profile, &namespace,
+            &custody, &anchor,
         ).is_err());
         assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
 

@@ -382,22 +382,27 @@ impl<'a> RegisteredReadAdmission<'a> {
         )
     }
 
-    /// SYNC-05e-2: additive-only target publish for one durably registered S3
-    /// profile. It is deliberately NOT an overwrite/right-to-commit or a
-    /// proof of verified remote content. The caller must have staged exact
-    /// S3 bytes through the verified remote transport first.
+    /// SYNC-05e-6: S3 additive-only local publication under a PINNED,
+    /// held interprocess OS lock. Two cooperating Akula Core processes on the
+    /// same physical workspace cannot publish simultaneously through this API.
+    ///
+    /// The lock MUST pre-exist in external host custody and be durably bound
+    /// to the shared VaultId and physical root in app-data. No auto-bootstrap,
+    /// rewrite, or fallback on a missing/busy lock. Advisory locks alone cannot
+    /// stop a hostile same-user process replacing the lock's pathname.
+    /// Never grants baseline, overwrite, trash or cross-process File Gate rights.
     #[cfg(feature = "sync-s3")]
     pub(crate) fn create_staged_if_absent_for_registered_s3(
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         cache: &SqliteDagStore,
         bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
         profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+        custody: &super::filegate_custody_identity::SqliteCustodyIdentityStore,
+        custody_scope: &Path,
     ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
-        // Every lookup rechecks the Core registration and pinned root IDs.
-        // A newly constructed struct or an unverified manifest cannot replace
-        // this SQLite-backed binding check.
+        let denied = || LocalCreateError::Admission(VaultPortError::PermissionDenied);
         let binding = bindings.load_for_registered(self)
-            .map_err(|_| LocalCreateError::Admission(VaultPortError::PermissionDenied))?
+            .map_err(|_| denied())?
             .ok_or(LocalCreateError::InvalidStagedIntent)?;
         if !binding.matches_remote(profile, keyspace) {
             return Err(LocalCreateError::InvalidStagedIntent);
@@ -410,10 +415,47 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(LocalCreateError::InvalidStagedIntent);
         }
         journal.require_appdata_outside_vault(&self.root_path)?;
-        self.create_staged_with_bound_vault_and_hook(
-            operation, journal, cache, binding.vault_id,
-            Some(binding.profile_id.as_str()), || {},
-        )
+
+        // Use the same validated lock *lifetime* as the already merged
+        // cooperative File Gate + HistoryService experiment (#193). It
+        // checks exact persisted physical custody IDs, registered root and
+        // external namespace/owner/DACL both before and after the callback.
+        // Do not take a second OS lock inside native File Gate.
+        //
+        // If any *post*-check fails, publication may already have happened.
+        // The caller MUST report an ambiguous HOLD instead of blind replay.
+        let mut entered = false;
+        let outcome = custody.with_cooperative_writer_lifetime(
+            self, binding.vault_id, custody_scope, || {
+                entered = true;
+                // Revalidate the S3 configuration WHILE the OS lock is held.
+                if bindings.load_for_registered(self).map_err(|_| denied())?
+                    .as_ref() != Some(&binding)
+                {
+                    return Err(denied());
+                }
+                let published = self.create_staged_with_bound_vault_and_hook(
+                    operation, journal, cache, binding.vault_id,
+                    Some(binding.profile_id.as_str()), || {},
+                );
+                if published.is_ok() {
+                    if bindings.load_for_registered(self)
+                        .map_err(|_| LocalCreateError::PublicationUncertain)?
+                        .as_ref() != Some(&binding)
+                    {
+                        return Err(LocalCreateError::PublicationUncertain);
+                    }
+                }
+                published
+            },
+        );
+        match outcome {
+            Ok(published) => published,
+            // Even if the filesystem publish finished, a revoked lock or
+            // altered root/ACL during postflight is never reported as ACK.
+            Err(_) if entered => Err(LocalCreateError::PublicationUncertain),
+            Err(_) => Err(denied()),
+        }
     }
 
     fn create_staged_with_bound_vault_and_hook(

@@ -1,0 +1,51 @@
+name: Sync S3-bound custody OS checks
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/sync/profile_binding.rs"
+      - "aquilum-app/core/src/sync/filegate_custody_identity.rs"
+      - "aquilum-app/core/src/sync/filegate_lock_probe.rs"
+      - "aquilum-app/core/src/sync/filegate_lock_custody.rs"
+      - "aquilum-app/core/src/sync/host_admission.rs"
+      - "aquilum-app/core/src/sync/pinned_windows.rs"
+      - "aquilum-app/core/src/sync/s3_transport/core_stage.rs"
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/Cargo.lock"
+      - ".github/workflows/sync-s3-platform.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-s3-platform-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  s3-custody:
+    name: Bound S3 external OS lock / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: sync-s3-native-${{ matrix.os }}-v1
+          cache-workspace-crates: true
+      - name: Compile real S3 feature and verify registered custody / child OS process
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 profile_binding::tests -- --nocapture
+      - name: Verify S3 immutable revision intent validation without network
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 additive_gate_rejects_cross_vault_and_wrong_revision_or_path -- --nocapture
