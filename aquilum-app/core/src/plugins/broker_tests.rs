@@ -53,9 +53,9 @@ fn manifest_requests_never_issue_grants_and_unknown_identity_is_denied() {
         broker.authorize(handle, ctx, Capability::UiCommand, &Resource::Ui).unwrap_err(),
         BrokerError::Denied
     );
-    let different = super::PluginInstanceHandle(uuid::Uuid::new_v4());
+    broker.unregister_host_instance(handle).unwrap();
     assert_eq!(
-        broker.authorize(different, ctx, Capability::NotesRead, &file).unwrap_err(),
+        broker.authorize(handle, ctx, Capability::NotesRead, &file).unwrap_err(),
         BrokerError::UnknownInstance
     );
 }
