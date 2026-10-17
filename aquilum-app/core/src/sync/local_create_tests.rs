@@ -780,3 +780,142 @@ fn m1db_refuses_appdata_archive_inside_registered_vault() {
     assert!(journal.read_local_recovery_copy(op).unwrap().is_none());
     assert!(journal.baseline(vault, doc).unwrap().is_none());
 }
+
+
+#[test]
+fn m1dc_explicit_review_hold_then_escalation_never_changes_files_or_baseline() {
+    use super::super::recovery_review::{RecoveryReviewDisposition, RECOVERY_REVIEW_RETENTION};
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/manual-review.md";
+    let (mut journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), relative, b"safe staged bytes", op,
+    );
+    m1c_claim(&journal, op);
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    let final_file = root.join(relative);
+    fs::write(&stage, b"safe staged bytes").unwrap();
+    fs::write(&final_file, b"different human work").unwrap();
+    let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+    admission.record_local_recovery_evidence(op, &journal).unwrap();
+    admission.archive_local_recovery_copy(op, &journal).unwrap();
+
+    let preview = admission.recovery_operator_preview(op, &journal).unwrap();
+    assert_eq!(preview.retention, RECOVERY_REVIEW_RETENTION);
+    assert_eq!(preview.review_count, 0);
+    assert_eq!(preview.latest_event_digest, "genesis");
+    assert_eq!(preview.assessment,
+        local_recovery::LocalRecoveryAssessment::DifferentFinalFile);
+    let first = admission.record_recovery_operator_review(
+        op, &preview.path, &preview.archive_fingerprint,
+        preview.review_count, &preview.latest_event_digest,
+        RecoveryReviewDisposition::KeepBlocked,
+        "Keep both original versions for inspection", &mut journal,
+    ).unwrap();
+    assert_eq!(first.sequence, 1);
+    assert_eq!(first.disposition, RecoveryReviewDisposition::KeepBlocked);
+
+    let new_preview = admission.recovery_operator_preview(op, &journal).unwrap();
+    assert_eq!(new_preview.review_count, 1);
+    assert_ne!(new_preview.latest_event_digest, "genesis");
+    let second = admission.record_recovery_operator_review(
+        op, &new_preview.path, &new_preview.archive_fingerprint,
+        new_preview.review_count, &new_preview.latest_event_digest,
+        RecoveryReviewDisposition::EscalateManualReview,
+        "Requires verified Windows durability before future resolution",
+        &mut journal,
+    ).unwrap();
+    assert_eq!(second.sequence, 2);
+    assert_eq!(second.previous_event_digest, new_preview.latest_event_digest);
+    let history = journal.recovery_review_history(op).unwrap();
+    assert_eq!(history, vec![first, second]);
+    assert_eq!(fs::read(&stage).unwrap(), b"safe staged bytes");
+    assert_eq!(fs::read(&final_file).unwrap(), b"different human work");
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+    assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+    assert_eq!(journal.get(op).unwrap().unwrap().phase, JournalPhase::Staged);
+    let archive = journal.read_local_recovery_copy(op).unwrap().unwrap();
+    assert_eq!(archive.stage_bytes.as_deref(), Some(&b"safe staged bytes"[..]));
+    assert_eq!(archive.final_bytes.as_deref(), Some(&b"different human work"[..]));
+}
+
+#[test]
+fn m1dc_stale_or_forged_confirmation_is_rejected_without_new_review() {
+    use super::super::recovery_review::RecoveryReviewDisposition;
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let (mut journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), "notes/for-review.md", b"payload", op,
+    );
+    m1c_claim(&journal, op);
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    fs::write(&stage, b"payload").unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    host.record_local_recovery_evidence(op, &journal).unwrap();
+    let no_archive = host.recovery_operator_preview(op, &journal);
+    assert!(matches!(
+        no_archive, Err(LocalRecoveryError::Journal(JournalError::MissingRecoveryArchive))
+    ));
+    host.archive_local_recovery_copy(op, &journal).unwrap();
+    let preview = host.recovery_operator_preview(op, &journal).unwrap();
+    let wrong = SyncRelativePath::parse("notes/wrong.md").unwrap();
+    for (path, hash, count, prev, note) in [
+        (&wrong, preview.archive_fingerprint.as_str(), 0, "genesis", "valid"),
+        (&preview.path, "deadbeef", 0, "genesis", "valid"),
+        (&preview.path, preview.archive_fingerprint.as_str(), 1, "genesis", "valid"),
+        (&preview.path, preview.archive_fingerprint.as_str(), 0, "outdated", "valid"),
+    ] {
+        assert!(matches!(
+            host.record_recovery_operator_review(
+                op, path, hash, count, prev,
+                RecoveryReviewDisposition::KeepBlocked, note, &mut journal,
+            ),
+            Err(LocalRecoveryError::Journal(JournalError::StaleRecoveryReview))
+        ));
+    }
+    for note in ["  ", "contains\nnewline", "leading\ttab"] {
+        assert!(matches!(
+            host.record_recovery_operator_review(
+                op, &preview.path, &preview.archive_fingerprint,
+                0, "genesis", RecoveryReviewDisposition::KeepBlocked,
+                note, &mut journal,
+            ),
+            Err(LocalRecoveryError::Journal(JournalError::InvalidRecoveryReview))
+        ));
+    }
+    assert!(journal.recovery_review_history(op).unwrap().is_empty());
+    assert_eq!(fs::read(&stage).unwrap(), b"payload");
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[test]
+fn m1dc_review_requires_registered_host_and_archive_outside_vault() {
+    use super::super::recovery_review::RecoveryReviewDisposition;
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let (mut journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), "notes/hold.md", b"payload", op,
+    );
+    m1c_claim(&journal, op);
+    fs::write(root.join("notes").join(format!(".akula-sync-stage-{op}")),
+        b"payload").unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    host.record_local_recovery_evidence(op, &journal).unwrap();
+    host.archive_local_recovery_copy(op, &journal).unwrap();
+    let preview = host.recovery_operator_preview(op, &journal).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let other_root = other.path().join("vault");
+    fs::create_dir(&other_root).unwrap();
+    let other_core = core_at(&other_root, &other.path().join("appdata"));
+    let other_host = RegisteredReadAdmission::open(&other_core, &other_root).unwrap();
+    assert!(other_host.recovery_operator_preview(op, &journal).is_err());
+    assert!(other_host.record_recovery_operator_review(
+        op, &preview.path, &preview.archive_fingerprint, 0, "genesis",
+        RecoveryReviewDisposition::KeepBlocked, "not my vault", &mut journal,
+    ).is_err());
+    assert!(journal.recovery_review_history(op).unwrap().is_empty());
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
