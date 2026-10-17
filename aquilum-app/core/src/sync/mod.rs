@@ -9,6 +9,7 @@ mod download;
 mod dag_store;
 pub mod fake;
 mod fake_vault;
+mod host_admission;
 #[cfg(test)]
 mod fault_matrix;
 mod identity;

@@ -44,3 +44,35 @@ Create a small proof that a local file can be opened for **bounded reading** thr
 Stage 04g-2 ties trusted root registration and DocumentHub + unsent host editor buffers to the OS authority, with platform-specific handle identity verification. Stage 04g-3 adds durable protective copies, safe atomic write and readback, then journal commit. No direct write path is introduced by this PR.
 
 Canonical roadmap: https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11
+
+
+## Stage 04g-3a — registered read admission (2026-10-17)
+
+A separate crate-private `RegisteredReadAdmission` composes three existing
+guardrails **without adding a mutation method**:
+
+1. Accept a path only when the host's local `UiStateService` still registers
+   the workspace; reject a direct symbolic-link/reparse root.
+2. Retain the OS-pinned read-only directory handle. Check its stable device/file
+   identity against the current registered pathname before and after each
+   read (Unix device+inode, Windows volume serial+file index).
+3. Hold a `DocumentHub::SyncReservation` while reading: clean or dirty open
+   editor sessions and competing reservations fail closed. The reservation is
+   released on success *and* error.
+
+Cross-platform tests cover Unicode bytes, size ceilings, unregistered/revoked
+roots, open documents, competing reservations and root pathname replacement.
+macOS testing found an alias bypass: a DocumentHub session opened via `/var`
+was not recognized when the same file was reserved through `/private/var`.
+Admission now checks the canonical filesystem spelling of both open sessions
+and reservations, and `DocumentHub::open` checks it in the opposite direction.
+Unix symlink and Windows junction alias tests are retained as regressions.
+On Windows, the pinned directory identity is obtained via the stable
+`GetFileInformationByHandle` API instead of unstable Rust metadata methods.
+The existing pinned-read tests additionally reject symlink and NTFS junction
+traversal. This stage can prove **only a guarded preflight read**. It does not
+freeze external processes, detect every possible hardlink/ancestor race or
+authorize a save, upload, rename, trash, replacement, journal baseline commit
+or exposure of a Sync UI. A protected write requires an OS-handle-relative
+mutation primitive, host-wide write exclusion, durable protective copy,
+fresh fingerprint check and crash/recovery tests in a separate PR.
