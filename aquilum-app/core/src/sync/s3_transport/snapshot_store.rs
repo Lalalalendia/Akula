@@ -12,7 +12,7 @@ use crate::sync::{
     ProviderCapabilities, RemoteObject, RemotePage,
     RemotePrecondition, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
     RevisionDag, RevisionOperation, RevisionRecord, S3HeadPointerV1,
-    S3RevisionRefV1,
+    S3RevisionRefV1, RevisionId, RevisionInventory, VaultId,
 };
 use std::collections::BTreeMap;
 
@@ -23,6 +23,7 @@ const MAX_EXTERNAL_PAGE_SIZE: usize = 1_000;
 
 #[derive(Clone, Debug)]
 struct StoredVerifiedRevision {
+    revision_id: RevisionId,
     metadata: RemoteObject,
     json: Vec<u8>,
 }
@@ -38,14 +39,19 @@ struct StoredVerifiedRevision {
 /// capability. No method may advance a confirmed sync baseline.
 #[derive(Clone, Debug)]
 pub struct S3VerifiedRevisionMetadataStore {
+    vault_id: VaultId,
     snapshot_id: String,
     records: BTreeMap<String, StoredVerifiedRevision>,
     total_bytes: usize,
     max_total_bytes: usize,
+    // Only a checked, complete DAG may be projected as a complete inventory.
+    complete_dag: bool,
 }
 
 impl S3VerifiedRevisionMetadataStore {
-    fn new(snapshot_id: String, max_total_bytes: usize) -> Result<Self, S3HeadError> {
+    fn new(
+        vault_id: VaultId, snapshot_id: String, max_total_bytes: usize,
+    ) -> Result<Self, S3HeadError> {
         if snapshot_id.is_empty() || snapshot_id.chars().any(char::is_control)
             || max_total_bytes == 0
             || max_total_bytes > MAX_S3_REVISION_METADATA_CACHE_BYTES
@@ -53,10 +59,12 @@ impl S3VerifiedRevisionMetadataStore {
             return Err(S3HeadError::SnapshotBudgetExceeded);
         }
         Ok(Self {
+            vault_id,
             snapshot_id,
             records: BTreeMap::new(),
             total_bytes: 0,
             max_total_bytes,
+            complete_dag: false,
         })
     }
 
@@ -64,6 +72,21 @@ impl S3VerifiedRevisionMetadataStore {
     pub fn is_empty(&self) -> bool { self.records.is_empty() }
     pub fn total_bytes(&self) -> usize { self.total_bytes }
     pub fn snapshot_id(&self) -> &str { &self.snapshot_id }
+
+    /// Project the fully checked remote *revision metadata* as an inventory.
+    /// The vault ID is bound to the verified S3 keyspace, not supplied by the
+    /// planner. This does not authorize local writes, deletion, or a baseline.
+    pub fn verified_revision_inventory(&self) -> Result<RevisionInventory, S3HeadError> {
+        if !self.complete_dag {
+            return Err(S3HeadError::InvalidManifest);
+        }
+        Ok(RevisionInventory {
+            vault_id: self.vault_id,
+            snapshot_id: self.snapshot_id.clone(),
+            complete: true,
+            revisions: self.records.values().map(|item| item.revision_id).collect(),
+        })
+    }
 
     /// Re-check exact immutable bytes and identities even though the network
     /// stage already verified them. Never trust a JSON value merely because
@@ -73,6 +96,9 @@ impl S3VerifiedRevisionMetadataStore {
         reference: S3RevisionRefV1,
         json: Vec<u8>,
     ) -> Result<(), S3HeadError> {
+        if self.complete_dag {
+            return Err(S3HeadError::InvalidManifest);
+        }
         if json.len() as u64 > MAX_SINGLE_REVISION_BYTES {
             return Err(S3HeadError::SnapshotBudgetExceeded);
         }
@@ -106,14 +132,17 @@ impl S3VerifiedRevisionMetadataStore {
             byte_length: json.len() as u64,
             content_hash: Some(digest),
         };
-        if self.records.insert(id, StoredVerifiedRevision { metadata, json }).is_some() {
+        if self.records.contains_key(&id) {
             return Err(S3HeadError::InvalidRevision);
         }
+        self.records.insert(id, StoredVerifiedRevision {
+            revision_id: reference.revision_id, metadata, json,
+        });
         self.total_bytes = next_bytes;
         Ok(())
     }
 
-    fn validate_complete_dag(&self) -> Result<(), S3HeadError> {
+    fn validate_complete_dag(&mut self) -> Result<(), S3HeadError> {
         let mut dag = RevisionDag::new();
         for record in self.records.values() {
             let revision: RevisionRecord = serde_json::from_slice(&record.json)
@@ -123,6 +152,7 @@ impl S3VerifiedRevisionMetadataStore {
         if dag.pending_len() != 0 || dag.active_len() != self.records.len() {
             return Err(S3HeadError::InvalidManifest);
         }
+        self.complete_dag = true;
         Ok(())
     }
 
@@ -236,7 +266,7 @@ impl AwsS3ProbeClient {
             return Ok(None);
         };
         let mut view = S3VerifiedRevisionMetadataStore::new(
-            snapshot.snapshot_id.clone(), max_total_bytes,
+            self.keyspace.vault_id(), snapshot.snapshot_id.clone(), max_total_bytes,
         )?;
         let mut cursor = None;
         loop {
@@ -274,7 +304,10 @@ impl AwsS3ProbeClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::{collect_verified_listing, DocumentId, RevisionId, SyncRelativePath};
+    use crate::sync::{
+        collect_verified_listing, plan_revision_exchange, DeltaPlanError,
+        DocumentId, RevisionId, SyncRelativePath,
+    };
 
     fn fixture(
         document: DocumentId,
@@ -305,7 +338,7 @@ mod tests {
         let (left, b) = fixture(document, vec![root.revision_id], b"alice");
         let (right, c) = fixture(document, vec![root.revision_id], b"bob");
         let mut store = S3VerifiedRevisionMetadataStore::new(
-            "manifest-identity:verified-hash".into(), 1_048_576,
+            VaultId::new(), "manifest-identity:verified-hash".into(), 1_048_576,
         ).unwrap();
         // Unordered arrivals are okay; closure is checked at the end.
         store.accept(left, b).unwrap();
@@ -350,7 +383,9 @@ mod tests {
         let tail = store.list_page(first.next_cursor.as_deref(), 2).unwrap();
         assert!(tail.complete);
         assert_eq!(tail.objects.len(), 1);
-        let other = S3VerifiedRevisionMetadataStore::new("other:root".into(), 1024).unwrap();
+        let other = S3VerifiedRevisionMetadataStore::new(
+            VaultId::new(), "other:root".into(), 1024,
+        ).unwrap();
         assert_eq!(other.list_page(first.next_cursor.as_deref(), 2),
             Err(RemoteStoreError::InvalidCursor));
         for cursor in [
@@ -374,7 +409,9 @@ mod tests {
     fn rejects_invalid_bytes_and_missing_parent_without_treating_as_empty() {
         let doc = DocumentId::new();
         let (root, bytes) = fixture(doc, vec![], b"valid");
-        let mut store = S3VerifiedRevisionMetadataStore::new("root:valid".into(), 1024).unwrap();
+        let mut store = S3VerifiedRevisionMetadataStore::new(
+            VaultId::new(), "root:valid".into(), 1024,
+        ).unwrap();
         let mut changed = bytes.clone();
         changed.push(b' ');
         assert!(matches!(store.accept(root.clone(), changed),
@@ -388,10 +425,13 @@ mod tests {
         assert!(matches!(store.validate_complete_dag(),
             Err(S3HeadError::InvalidManifest)));
         assert!(store.accept(root.clone(), bytes).is_ok());
-        assert!(matches!(S3VerifiedRevisionMetadataStore::new("root".into(), 0),
+        assert!(matches!(S3VerifiedRevisionMetadataStore::new(
+            VaultId::new(), "root".into(), 0,
+        ),
             Err(S3HeadError::SnapshotBudgetExceeded)));
-        assert!(matches!(S3VerifiedRevisionMetadataStore::new("root".into(),
-            MAX_S3_REVISION_METADATA_CACHE_BYTES + 1),
+        assert!(matches!(S3VerifiedRevisionMetadataStore::new(
+            VaultId::new(), "root".into(), MAX_S3_REVISION_METADATA_CACHE_BYTES + 1,
+        ),
             Err(S3HeadError::SnapshotBudgetExceeded)));
     }
 
@@ -400,10 +440,114 @@ mod tests {
         let doc = DocumentId::new();
         let (reference, bytes) = fixture(doc, vec![], b"safe");
         let budget = bytes.len() - 1;
-        let mut store = S3VerifiedRevisionMetadataStore::new("id:digest".into(), budget).unwrap();
+        let mut store = S3VerifiedRevisionMetadataStore::new(
+            VaultId::new(), "id:digest".into(), budget,
+        ).unwrap();
         assert!(matches!(store.accept(reference, bytes),
             Err(S3HeadError::SnapshotBudgetExceeded)));
         assert_eq!(store.len(), 0);
         assert_eq!(store.total_bytes(), 0);
     }
+
+    #[test]
+    fn vault_bound_verified_inventory_preserves_both_offline_edit_branches() {
+        let vault = VaultId::new();
+        let document = DocumentId::new();
+        let (root, root_json) = fixture(document, vec![], b"base");
+        let (left, left_json) = fixture(document, vec![root.revision_id], b"laptop A");
+        let (right, right_json) = fixture(document, vec![root.revision_id], b"laptop B");
+        let mut view = S3VerifiedRevisionMetadataStore::new(
+            vault, "verified-manifest:blake3".into(), 1024 * 1024,
+        ).unwrap();
+
+        // Hash-valid individual records are not yet a complete DAG or listing.
+        assert!(matches!(
+            view.verified_revision_inventory(), Err(S3HeadError::InvalidManifest)
+        ));
+        view.accept(left.clone(), left_json.clone()).unwrap();
+        view.accept(right.clone(), right_json.clone()).unwrap();
+        assert!(matches!(
+            view.validate_complete_dag(), Err(S3HeadError::InvalidManifest)
+        ));
+        assert!(matches!(
+            view.verified_revision_inventory(), Err(S3HeadError::InvalidManifest)
+        ));
+        view.accept(root.clone(), root_json.clone()).unwrap();
+        view.validate_complete_dag().unwrap();
+
+        let remote = view.verified_revision_inventory().unwrap();
+        assert_eq!(remote.vault_id, vault);
+        assert_eq!(remote.revisions.len(), 3);
+        assert!(remote.complete);
+
+        // Shared HAVE/WANT planner must not elect a winner or issue deletion:
+        // the other laptop's sibling remains independent of our local edit.
+        let mut dag = RevisionDag::new();
+        for json in [&root_json, &left_json, &right_json] {
+            let record: RevisionRecord = serde_json::from_slice(json).unwrap();
+            dag.ingest(record).unwrap();
+        }
+        let local = RevisionInventory {
+            vault_id: vault,
+            snapshot_id: "verified-local-source".into(),
+            complete: true,
+            revisions: [root.revision_id, left.revision_id].into_iter().collect(),
+        };
+        let plan = plan_revision_exchange(&dag, &local, &remote).unwrap();
+        assert!(plan.to_remote.revisions.is_empty());
+        assert_eq!(plan.to_local.revisions, vec![right.revision_id]);
+        assert_eq!(
+            plan.to_local.candidate_blob_hashes,
+            vec![blake3::hash(b"laptop B").to_hex().to_string()],
+        );
+        assert_eq!(dag.heads(document).len(), 2);
+
+        let foreign = RevisionInventory {
+            vault_id: VaultId::new(),
+            ..local.clone()
+        };
+        assert_eq!(
+            plan_revision_exchange(&dag, &foreign, &remote),
+            Err(DeltaPlanError::VaultMismatch)
+        );
+        let incomplete = RevisionInventory {
+            complete: false,
+            ..local
+        };
+        assert_eq!(
+            plan_revision_exchange(&dag, &incomplete, &remote),
+            Err(DeltaPlanError::IncompleteInventory)
+        );
+
+        // Complete stores cannot be mutated or relabeled as new generations.
+        assert!(matches!(
+            view.accept(root, root_json), Err(S3HeadError::InvalidManifest)
+        ));
+        assert_eq!(view.verified_revision_inventory().unwrap(), remote);
+    }
+
+    #[test]
+    fn duplicate_rejected_without_replacing_earlier_verified_bytes() {
+        let vault = VaultId::new();
+        let document = DocumentId::new();
+        let (reference, bytes) = fixture(document, vec![], b"first");
+        let mut view = S3VerifiedRevisionMetadataStore::new(
+            vault, "manifest:hash".into(), 1024,
+        ).unwrap();
+        view.accept(reference.clone(), bytes.clone()).unwrap();
+        let original_total = view.total_bytes();
+        assert!(matches!(
+            view.accept(reference.clone(), bytes.clone()),
+            Err(S3HeadError::InvalidRevision)
+        ));
+        assert_eq!(view.total_bytes(), original_total);
+        assert_eq!(view.len(), 1);
+        assert_eq!(
+            view.read(&format!("revisions/{}", reference.revision_id)).unwrap(),
+            bytes
+        );
+        view.validate_complete_dag().unwrap();
+        assert_eq!(view.verified_revision_inventory().unwrap().revisions.len(), 1);
+    }
+
 }

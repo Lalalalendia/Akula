@@ -954,6 +954,12 @@ mod tests {
         let mut view = second.materialize_verified_revision_metadata_store(
             256 * 1024,
         ).await.unwrap().unwrap();
+        // Real MinIO readback must bind the complete inventory to the same
+        // S3 vault, with all three sibling/ancestor revisions preserved.
+        let inventory = view.verified_revision_inventory().unwrap();
+        assert_eq!(inventory.vault_id, ns.vault_id());
+        assert!(inventory.complete);
+        assert_eq!(inventory.revisions, revision_ids);
         let assembled = crate::sync::collect_verified_listing(&view, 1, 3).unwrap();
         assert_eq!(assembled.objects.len(), 3);
         assert_eq!(assembled.snapshot_id, view.snapshot_id());
