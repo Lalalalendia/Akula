@@ -20,7 +20,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 const EXPERIMENT_SCHEMA: u16 = 1;
-const TREE_MAX_DEPTH: usize = 5;
 const MAX_COORD_NODE_BYTES: usize = 128 * 1024;
 const MAX_LETTER_BYTES: usize = 512 * 1024;
 const MAX_BENCH_REVISIONS: usize = 1_000;
@@ -83,7 +82,6 @@ enum CellProbeError {
     InvalidLetter,
     DigestMismatch,
     MissingReference,
-    TooLarge,
 }
 
 struct BuiltTree {
@@ -395,9 +393,9 @@ fn verify_individual(
     {
         return Err(CellProbeError::InvalidLetter);
     }
-    match parsed.operation {
-        RevisionOperation::Content { ref blob_hash, .. }
-        | RevisionOperation::Rename { ref blob_hash, .. } => {
+    match &parsed.operation {
+        RevisionOperation::Content { blob_hash, .. }
+        | RevisionOperation::Rename { blob_hash, .. } => {
             if reference.blob_bytes != Some(blob.len() as u64)
                 || blake3::hash(blob).to_hex().as_str() != blob_hash
             {
