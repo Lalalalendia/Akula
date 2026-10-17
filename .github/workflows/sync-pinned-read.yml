@@ -80,3 +80,6 @@ jobs:
       - name: Normal history reads, writes and moves reject symlink/junction aliases
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine history_service_rejects -- --nocapture
+      - name: Interrupted history relocation and cross-Core quarantine
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine history_move_ -- --nocapture
