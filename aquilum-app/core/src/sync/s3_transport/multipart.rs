@@ -270,6 +270,8 @@ impl AwsS3ProbeClient {
         if before.byte_length > max_bytes {
             return Err(S3TransportError::ObjectTooLarge);
         }
+        #[cfg(test)]
+        self.test_io.get.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let response = self.client.get_object().bucket(&self.bucket).key(key)
             .if_match(&before.etag).send().await
             .map_err(|e| classify(e.as_service_error().and_then(|v| v.code())))?;
@@ -288,6 +290,8 @@ impl AwsS3ProbeClient {
         if before != after || total != before.byte_length {
             return Err(S3TransportError::ChangedDuringRead);
         }
+        #[cfg(test)]
+        self.test_io.payload_bytes.fetch_add(total, std::sync::atomic::Ordering::Relaxed);
         Ok(S3StreamDigest {
             object: after,
             blake3: hasher.finalize().to_hex().to_string(),
