@@ -7,7 +7,7 @@ impl App {
         match action {
             Action::OpenTrash => {
                 if let Some(workspace) = workspace {
-                    match ensure_trash_impl(&workspace) {
+                    match gate::ensure_trash(core, &workspace) {
                         Ok(path) => system::open(&path),
                         Err(error) => report!("корзина не открыта: {error:?}"),
                     }

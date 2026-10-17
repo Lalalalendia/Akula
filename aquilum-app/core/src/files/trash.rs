@@ -41,8 +41,32 @@ pub fn trash_path(workspace: &Path) -> PathBuf {
     workspace.join(TRASH_FOLDER)
 }
 
+/// Reject a pre-existing symlink/junction at the workspace's trash root.
+/// This is a stable-alias guard, NOT an OS handle-pinned defense against a
+/// concurrent external process replacing a directory after this check.
+fn checked_trash_root(trash: &Path) -> Result<bool, FileCommandError> {
+    let metadata = match fs::symlink_metadata(trash) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let unsafe_type = metadata.file_type().is_symlink() || !metadata.is_dir();
+    #[cfg(windows)]
+    let unsafe_type = {
+        use std::os::windows::fs::MetadataExt;
+        unsafe_type || (metadata.file_attributes() & 0x0000_0400 != 0)
+    };
+    if unsafe_type {
+        return Err(FileCommandError::Io {
+            message: format!("unsafe trash root (symlink/reparse or not a directory): {}", trash.display()),
+        });
+    }
+    Ok(true)
+}
+
 pub fn trash_state_impl(workspace: &Path) -> Result<TrashState, FileCommandError> {
     let path = trash_path(workspace);
+    checked_trash_root(&path)?;
     let (count, bytes) = trashed_notes(&path)
         .fold((0, 0), |(count, bytes), (_, metadata)| (count + 1, bytes + metadata.len()));
     Ok(TrashState {
@@ -57,7 +81,7 @@ pub fn cleanup_trash_impl(
     retention_days: u32,
 ) -> Result<u64, FileCommandError> {
     let trash = trash_path(workspace);
-    if retention_days == 0 || !trash.is_dir() {
+    if retention_days == 0 || !checked_trash_root(&trash)? {
         return Ok(0);
     }
     let lifetime = Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
@@ -79,7 +103,7 @@ pub fn cleanup_trash_impl(
 
 pub fn empty_trash_impl(workspace: &Path) -> Result<u64, FileCommandError> {
     let trash = trash_path(workspace);
-    if !trash.is_dir() {
+    if !checked_trash_root(&trash)? {
         return Ok(0);
     }
     let files = trashed_files(&trash).map(|(path, _)| path).collect::<Vec<_>>();
@@ -90,6 +114,7 @@ pub fn empty_trash_impl(workspace: &Path) -> Result<u64, FileCommandError> {
 
 pub fn list_trash_impl(workspace: &Path) -> Result<Vec<TrashedFile>, FileCommandError> {
     let trash = trash_path(workspace);
+    checked_trash_root(&trash)?;
     let mut files = trashed_notes(&trash)
         .map(|(path, metadata)| TrashedFile {
             original: slash_path(&original_path(&trash, &path)),
@@ -127,6 +152,7 @@ pub fn restore_from_trash_impl(
     workspace: &Path,
     trashed: &Path,
 ) -> Result<Relocated, FileCommandError> {
+    checked_trash_root(&trash_path(workspace))?;
     let trash = canonical_path(&trash_path(workspace));
     let trashed = canonical_path(trashed);
     let relative = Some(original_path(&trash, &trashed))
@@ -148,13 +174,21 @@ pub fn move_to_trash_impl(
     workspace: &Path,
     entry: &Path,
 ) -> Result<Relocated, FileCommandError> {
+    checked_trash_root(&trash_path(workspace))?;
     let target = trash_path(workspace).join(place_in_trash(workspace, entry));
     relocate(entry, &target, Placement::Trash)
 }
 
 pub fn ensure_trash_impl(workspace: &Path) -> Result<String, FileCommandError> {
     let path = trash_path(workspace);
-    fs::create_dir_all(&path)?;
+    if !checked_trash_root(&path)? {
+        fs::create_dir_all(&path)?;
+        if !checked_trash_root(&path)? {
+            return Err(FileCommandError::Io {
+                message: format!("trash directory disappeared after creation: {}", path.display()),
+            });
+        }
+    }
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -230,6 +264,43 @@ mod tests {
 
     fn workspace() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsafe_trash_root_symlink_does_not_delete_or_enumerate_outside_files() {
+        use std::os::unix::fs::symlink;
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let original = outside.path().join("keep-original.md");
+        aged_file(&original, 45);
+        symlink(outside.path(), trash_path(workspace.path())).unwrap();
+        assert!(cleanup_trash_impl(workspace.path(), 30).is_err());
+        assert!(empty_trash_impl(workspace.path()).is_err());
+        assert!(list_trash_impl(workspace.path()).is_err());
+        assert!(ensure_trash_impl(workspace.path()).is_err());
+        assert!(original.is_file());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unsafe_trash_root_ntfs_junction_does_not_delete_outside_files() {
+        use std::process::Command;
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let original = outside.path().join("keep-original.md");
+        aged_file(&original, 45);
+        let junction = trash_path(workspace.path());
+        let result = Command::new("cmd")
+            .arg("/C").arg("mklink").arg("/J").arg(&junction).arg(outside.path())
+            .output().unwrap();
+        assert!(result.status.success(), "NTFS junction fixture failed: {}",
+            String::from_utf8_lossy(&result.stderr));
+        assert!(cleanup_trash_impl(workspace.path(), 30).is_err());
+        assert!(empty_trash_impl(workspace.path()).is_err());
+        assert!(list_trash_impl(workspace.path()).is_err());
+        assert!(ensure_trash_impl(workspace.path()).is_err());
+        assert!(original.is_file());
     }
 
     #[test]

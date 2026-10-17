@@ -3,7 +3,7 @@ use std::path::Path;
 
 use aquilum_core::files::gate;
 use crate::ui::editor::TextEditor;
-use aquilum_core::files::trash::{cleanup_trash_impl, ensure_trash_impl};
+use aquilum_core::files::trash::cleanup_trash_impl;
 use masonry::app::RenderRoot;
 use masonry::core::keyboard::{Key, NamedKey};
 use masonry::core::{ErasedAction, WidgetId};
