@@ -16,6 +16,7 @@ pub(crate) use pinned_read::PinnedFileIdentity;
 mod fault_matrix;
 mod identity;
 mod journal;
+mod local_create;
 mod planner;
 mod protection_store;
 mod path;

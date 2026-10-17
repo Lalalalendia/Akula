@@ -24,6 +24,10 @@ const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const SHARE_ALL: u32 = 0x0000_0007;
 const FILE_OPEN: u32 = 1;
+const FILE_CREATE: u32 = 2;
+const FILE_ADD_FILE_OR_WRITE_DATA: u32 = 0x0000_0002;
+const DELETE_ACCESS: u32 = 0x0001_0000;
+const STATUS_OBJECT_NAME_COLLISION: u32 = 0xc000_0035;
 const FILE_DIRECTORY_FILE: u32 = 0x0000_0001;
 const FILE_NON_DIRECTORY_FILE: u32 = 0x0000_0040;
 const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x0000_0020;
@@ -127,7 +131,24 @@ extern "system" {
         ea_buffer: *mut c_void,
         ea_length: u32,
     ) -> i32;
+
+    fn NtSetInformationFile(
+        file_handle: *mut c_void,
+        io_status_block: *mut NtIoStatusBlock,
+        file_information: *mut c_void,
+        length: u32,
+        file_information_class: u32,
+    ) -> i32;
 }
+
+#[repr(C)]
+struct NtRenameInfo {
+    replace_if_exists: u8,
+    root_directory: *mut c_void,
+    file_name_length: u32,
+    file_name: [u16; 1],
+}
+const FILE_RENAME_INFORMATION_CLASS: u32 = 10;
 
 fn io(error: impl std::fmt::Display) -> VaultPortError {
     VaultPortError::Io(error.to_string())
@@ -156,13 +177,59 @@ pub(super) fn open_root(root: &Path) -> Result<File, VaultPortError> {
     Ok(handle)
 }
 
+/// One trusted registered root opened with the least directory write access
+/// required for child creation. The caller MUST compare OS identity against its
+/// existing pinned read-only root before publishing anything.
+pub(super) fn open_root_for_create(root: &Path) -> Result<File, VaultPortError> {
+    let mut options = OpenOptions::new();
+    options.access_mode(FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+        | FILE_READ_ATTRIBUTES | SYNCHRONIZE);
+    options.share_mode(SHARE_ALL);
+    options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let handle = options.open(root).map_err(io)?;
+    let meta = handle.metadata().map_err(io)?;
+    reject_reparse(&meta)?;
+    if !meta.is_dir() {
+        return Err(VaultPortError::UnsafePath);
+    }
+    Ok(handle)
+}
+
 /// Only ONE already-validated portable name component is accepted.
-/// OBJ_DONT_REPARSE rejects traversal, FILE_OPEN_REPARSE_POINT opens a reparse
-/// target as the reparse object itself, and its attribute is then rejected.
+/// OBJ_DONT_REPARSE rejects traversal; reparse points and hard links are not
+/// trusted as directories. FILE_CREATE (stage only) refuses any existing name.
 pub(super) fn open_child(
     parent: &File,
     name: &str,
     leaf: bool,
+) -> Result<File, VaultPortError> {
+    open_child_access(parent, name, leaf,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN)
+}
+
+/// The parent is opened with child-add authority without passing an arbitrary
+/// global pathname to the Windows kernel.
+pub(super) fn open_child_dir_for_create(
+    parent: &File, name: &str,
+) -> Result<File, VaultPortError> {
+    open_child_access(parent, name, false,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+        | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN)
+}
+
+/// Create a hidden in-progress file exclusively relative to its pinned parent.
+/// DELETE access is required to rename the SAME opened handle later.
+pub(super) fn create_stage_child(
+    parent: &File, name: &str,
+) -> Result<File, VaultPortError> {
+    open_child_access(parent, name, true,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+        | FILE_READ_ATTRIBUTES | DELETE_ACCESS | SYNCHRONIZE, FILE_CREATE)
+}
+
+fn open_child_access(
+    parent: &File, name: &str, leaf: bool, desired_access: u32,
+    disposition: u32,
 ) -> Result<File, VaultPortError> {
     if name.is_empty() || name == "." || name == ".."
         || name.chars().any(|ch| matches!(ch, '/' | '\\' | ':' | '\0'))
@@ -174,7 +241,6 @@ pub(super) fn open_child(
     if bytes == 0 || bytes > u16::MAX as usize {
         return Err(VaultPortError::UnsafePath);
     }
-
     let unicode = NtUnicodeString {
         length: bytes as u16,
         maximum_length: bytes as u16,
@@ -196,32 +262,33 @@ pub(super) fn open_child(
     let opts = FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT
         | if leaf { FILE_NON_DIRECTORY_FILE } else { FILE_DIRECTORY_FILE };
 
-    // SAFETY:
-    // - All pointers refer to live, stack-owned C ABI structures/UTF-16 bytes.
-    // - The parent handle remains open for the duration of the synchronous call.
-    // - Each name is one path component, with no separators, colon or NUL.
-    // - FILE_OPEN is read-only and cannot create or overwrite objects.
-    // - On NT_SUCCESS the returned raw handle is uniquely owned by File.
+    // SAFETY: all pointers are valid for the synchronous NT call; parent
+    // handle stays open; each name is one validated component; on success the
+    // returned handle is uniquely owned by File. FILE_CREATE is exclusive.
     let status = unsafe {
         NtCreateFile(
             &mut raw,
-            FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            desired_access,
             &attributes,
             &mut status_block,
             ptr::null(),
             0,
             SHARE_ALL,
-            FILE_OPEN,
+            disposition,
             opts,
             ptr::null_mut(),
             0,
         )
     };
     if status < 0 || raw.is_null() {
-        return Err(VaultPortError::Io(format!(
-            "root-relative NT open failed (NTSTATUS 0x{:08x})",
-            status as u32
-        )));
+        return if status as u32 == STATUS_OBJECT_NAME_COLLISION {
+            Err(VaultPortError::DestinationExists)
+        } else {
+            Err(VaultPortError::Io(format!(
+                "root-relative NT open failed (NTSTATUS 0x{:08x})",
+                status as u32
+            )))
+        };
     }
     // SAFETY: NtCreateFile succeeded and returned a unique owned HANDLE.
     let file = unsafe { File::from_raw_handle(raw) };
@@ -231,4 +298,62 @@ pub(super) fn open_child(
         return Err(VaultPortError::UnsafePath);
     }
     Ok(file)
+}
+
+/// Rename the fully flushed opened stage HANDLE with an OS-atomic
+/// no-replace predicate. RootDirectory is the pinned parent HANDLE, not a
+/// path re-resolved through an ambient process root.
+pub(super) fn rename_staged_no_replace(
+    stage: &File, parent: &File, leaf: &str,
+) -> Result<(), VaultPortError> {
+    if leaf.is_empty() || leaf == "." || leaf == ".."
+        || leaf.chars().any(|ch| matches!(ch, '/' | '\\' | ':' | '\0'))
+    {
+        return Err(VaultPortError::UnsafePath);
+    }
+    let name: Vec<u16> = leaf.encode_utf16().collect();
+    let bytes = name.len().checked_mul(2).ok_or(VaultPortError::UnsafePath)?;
+    if bytes == 0 || bytes > u32::MAX as usize {
+        return Err(VaultPortError::UnsafePath);
+    }
+    // Heap allocation aligned for pointers; struct contains one WCHAR at its
+    // tail followed by enough space for the entire validated component.
+    let total = std::mem::size_of::<NtRenameInfo>() + bytes;
+    let words = (total + std::mem::size_of::<usize>() - 1)
+        / std::mem::size_of::<usize>();
+    let mut buffer = vec![0usize; words];
+    let info = buffer.as_mut_ptr().cast::<NtRenameInfo>();
+    // SAFETY: buffer length/alignment account for the header and full UTF-16
+    // component; no references alias the raw write; the NT call is synchronous
+    // and both directory and staged handles stay live.
+    let status = unsafe {
+        ptr::write(info, NtRenameInfo {
+            replace_if_exists: 0,
+            root_directory: parent.as_raw_handle(),
+            file_name_length: bytes as u32,
+            file_name: [0u16; 1],
+        });
+        let dst = ptr::addr_of_mut!((*info).file_name).cast::<u16>();
+        ptr::copy_nonoverlapping(name.as_ptr(), dst, name.len());
+        let mut iosb = NtIoStatusBlock {
+            status_or_pointer: 0, information: 0,
+        };
+        NtSetInformationFile(
+            stage.as_raw_handle(), &mut iosb,
+            buffer.as_mut_ptr().cast::<c_void>(),
+            total as u32,
+            FILE_RENAME_INFORMATION_CLASS,
+        )
+    };
+    if status >= 0 {
+        return Ok(());
+    }
+    if status as u32 == STATUS_OBJECT_NAME_COLLISION {
+        Err(VaultPortError::DestinationExists)
+    } else {
+        Err(VaultPortError::Io(format!(
+            "root-relative NT no-replace rename failed (NTSTATUS 0x{:08x})",
+            status as u32
+        )))
+    }
 }
