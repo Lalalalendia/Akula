@@ -1,0 +1,67 @@
+name: PUB Masonry geometry probe
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/render/tests.rs"
+      - "aquilum-app/native/src/render/tests/pub_canvas_probe.rs"
+      - ".github/workflows/pub-masonry-geometry-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  geometry-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: pub-masonry-geometry-probe
+
+      - name: Install Linux native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Exercise real Masonry RenderRoot and vello_cpu renderer (S0 only)
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_PUB_PROBE_DIR: ${{ github.workspace }}/pub-probe
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native pub_canvas_probe_ -- --nocapture
+
+      - name: Capture geometry-only evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find pub-probe -maxdepth 1 -type f -name 's0-dpi-*.png' | wc -l)" -eq 9
+          test -s pub-probe/s0-geometry.json
+          sha256sum pub-probe/*.png > pub-probe/frame-sha256.txt
+          {
+            echo "## AK-PUB-MASONRY-PROBE-01: S0 geometry only"
+            echo
+            echo "Masonry RenderRoot + Canvas widget + vello_cpu Renderer::draw_frame"
+            echo "produced 9 PNGs and a JSON receipt. This is synthetic geometry,"
+            echo "not real PUB layout, text, editing, 60 FPS, or an egui comparison."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pub-masonry-s0-geometry-${{ github.sha }}
+          path: pub-probe/
+          retention-days: 14

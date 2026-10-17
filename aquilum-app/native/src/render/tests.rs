@@ -146,3 +146,5 @@ fn overlay_leaves_no_trace() {
     stamps.restore(&mut canvas);
     assert_eq!(canvas.2, clean, "после подсветки холст прежний");
 }
+
+mod pub_canvas_probe;
