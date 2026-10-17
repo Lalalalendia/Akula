@@ -36,6 +36,8 @@ pub(crate) struct TabSwitchStages {
     pub strip: std::time::Duration,
     pub panel: std::time::Duration,
     pub cache_hit: bool,
+    pub layout_offered: bool,
+    pub layout_reused: usize,
 }
 
 #[cfg(test)]
