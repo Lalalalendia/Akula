@@ -24,11 +24,11 @@ Tests for this logic run on every PR in the stable `Main PR gate`. A malfunction
 
 ## Weekly Actions budget audit
 
-`.github/scripts/ci-run-budget.cjs` runs only during the existing Monday `Branch hygiene` scheduled audit or manual `audit` dispatch. It uses read-only GitHub Actions metadata from up to the latest 200 PR workflow runs during the preceding seven days. Output goes to the workflow's step summary. Its step is explicitly `continue-on-error`; a metrics API outage must not block branch hygiene.
+`.github/scripts/ci-run-budget.cjs` runs only during the existing Monday `Branch hygiene` scheduled audit or manual `audit` dispatch. It fetches GitHub Actions metadata newest-first until the seven-day boundary (up to 12 pages / 1,200 runs), explicitly warning if the cap prevents full coverage. Completed skipped workflow events count as triggered, but not as non-skipped CI workload. Output goes to the workflow's step summary. Its step is explicitly `continue-on-error`; a metrics API outage must not block branch hygiene.
 
 - Record **median and p90 wall-clock duration** for `Application checks` and busiest workflows; flag p90 above 10 min or median above 8 min with >=10 observations.
-- Record **distinct workflows** and **raw run count** (including repeated/cancelled) per PR branch/SHA; flag p90 distinct workflow fan-out greater than 3 after >=10 sampled revisions.
-- Track failures/cancellations. Cancellations are excluded from duration medians, but counted as cancelled runs.
+- Record **triggered distinct workflows** separately from **non-skipped distinct workflows** and **raw run count** (including repeated/cancelled) per PR branch/SHA; flag p90 non-skipped workflow fan-out greater than 3 after >=10 sampled revisions.
+- Track failures/cancellations/skips separately. Cancellations are excluded from duration medians but retained in non-skipped fan-out as an upper bound (some may have been cancelled before starting a runner); completed skipped workflows are excluded from non-skipped fan-out.
 - Do not sum concurrent workflow durations and call that a PR's critical path. The timestamps include queue latency and do **not** measure billed runner-minutes or exact runner queue delays.
 
 ## Avoid needless overhead
@@ -40,3 +40,5 @@ No new workflow file or required branch status check is introduced for this moni
 ## After observation
 
 Collect at least 1-2 weeks of data, identify the slowest job steps and redundant builds, then decide which budgets (if any) deserve hard enforcement. Prefer structural rules about forbidden dependencies/cycles and lossless behavior, not arbitrary LOC caps. Do not claim reduced real-world runner cost until after-versus-before data is available.
+
+The existing `Branch hygiene` push-on-main path filter also executes the read-only telemetry step after changes to the analyzer or hygiene workflow, to smoke-test authenticated GitHub Actions API access immediately after merge. No extra workflow is created.
