@@ -1,0 +1,56 @@
+name: Parley layout reuse ABBA
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/ui/editor/document/layout_reuse.rs'
+      - '.github/workflows/parley-layout-reuse-abba.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parley-layout-reuse-abba-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Paired bounded-layout snapshot trial (diagnostic)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Run paired trial including snapshot capture overhead
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native benchmark_parley_plain_reuse_abba \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/parley-layout-abba.log"
+          grep -F "PARLEY_REUSE_ABBA " "$GITHUB_WORKSPACE/parley-layout-abba.log" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload raw benchmark log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parley-layout-reuse-${{ github.sha }}
+          path: parley-layout-abba.log
+          if-no-files-found: warn
+          retention-days: 14
