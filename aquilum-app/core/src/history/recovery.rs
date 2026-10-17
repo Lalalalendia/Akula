@@ -5,7 +5,7 @@
 
 use super::store;
 use crate::files::error::FileCommandError;
-use crate::search::paths::identity;
+use crate::search::paths::{identity, same_path};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -30,6 +30,7 @@ struct MoveIntent {
     /// Relative history filename -> BLAKE3 of its exact bytes.
     /// The union must remain unchanged as files move between directories.
     expected: BTreeMap<String, String>,
+    same_tree: bool,
 }
 
 fn denied(message: impl Into<String>) -> io::Error {
@@ -202,8 +203,17 @@ fn union(
     Ok(result)
 }
 
-fn verify_split(from: &Path, to: &Path, expected: &BTreeMap<String, String>) -> io::Result<()> {
-    let observed = union(&inventory(from)?, &inventory(to)?)?;
+fn verify_split(
+    from: &Path,
+    to: &Path,
+    expected: &BTreeMap<String, String>,
+    same_tree: bool,
+) -> io::Result<()> {
+    let observed = if same_tree {
+        inventory(to)?
+    } else {
+        union(&inventory(from)?, &inventory(to)?)?
+    };
     if &observed != expected {
         return Err(denied("history recovery inventory differs from the recorded file digests"));
     }
@@ -264,18 +274,20 @@ pub(super) fn transfer(
 ) -> io::Result<()> {
     store::checked_history_note_directory(from_base, from)?;
     store::checked_history_note_directory(to_base, to)?;
+    let same_tree = same_path(from, to);
     let existing = read_pending(vault)?;
     let manifest = if let Some(existing) = existing {
         if existing.kind != kind || existing.from_note != identity(from_note)
             || existing.to_note != identity(to_note)
             || existing.from_dir != identity(from) || existing.to_dir != identity(to)
+            || existing.same_tree != same_tree
         {
             return Err(denied("another unfinished history transfer owns this workspace"));
         }
         existing
     } else {
         let from_files = inventory(from)?;
-        let to_files = inventory(to)?;
+        let to_files = if same_tree { BTreeMap::new() } else { inventory(to)? };
         if from_files.is_empty() {
             if !to_files.is_empty() {
                 return Err(denied("history source absent but destination already contains versions"));
@@ -292,6 +304,7 @@ pub(super) fn transfer(
             from_dir: identity(from),
             to_dir: identity(to),
             expected,
+            same_tree,
         };
         write_intent(vault, &manifest)?;
         manifest
@@ -299,10 +312,10 @@ pub(super) fn transfer(
 
     // Verify every recorded byte is still present on precisely one side.
     // An absent source is NOT sufficient evidence of a successful transfer.
-    verify_split(from, to, &manifest.expected)?;
+    verify_split(from, to, &manifest.expected, same_tree)?;
     attempt().map_err(|error| io::Error::other(error.to_string()))?;
-    verify_split(from, to, &manifest.expected)?;
-    if !inventory(from)?.is_empty() || inventory(to)? != manifest.expected {
+    verify_split(from, to, &manifest.expected, same_tree)?;
+    if (!same_tree && !inventory(from)?.is_empty()) || inventory(to)? != manifest.expected {
         return Err(denied("history transfer has not finished moving all recorded files"));
     }
     clear_intent(vault)
@@ -334,6 +347,21 @@ mod tests {
         fs::remove_file(b.join("1_device_agent.md")).unwrap();
         assert!(transfer(vault, "move", &from_note, &to_note, vault, vault, &a, &b, || Ok(())).is_err());
         assert!(pending(vault).unwrap());
+    }
+
+    #[test]
+    fn inventory_same_history_tree_is_not_treated_as_duplicate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path();
+        let a = vault.join(".aquilum/history/idea.md");
+        fs::create_dir_all(&a).unwrap();
+        fs::write(a.join("1_device_me.md"), b"one").unwrap();
+        transfer(
+            vault, "move", &vault.join("idea.md"), &vault.join("idea.md"),
+            vault, vault, &a, &a, || Ok(())
+        ).unwrap();
+        assert_eq!(inventory(&a).unwrap().len(), 1);
+        assert!(!pending(vault).unwrap());
     }
 
     #[test]
