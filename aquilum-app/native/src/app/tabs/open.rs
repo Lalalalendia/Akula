@@ -143,7 +143,7 @@ impl App {
             };
             if self.parley_trial_enabled {
                 if parley_trace_enabled() {
-                eprintln!("PARLEY_TAB_TRACE stage=capture found={}", self.parley_capture.is_some());
+                    eprintln!("PARLEY_TAB_TRACE stage=capture found={}", self.parley_capture.is_some());
                 }
             }
         }
@@ -264,7 +264,7 @@ impl App {
                     record_stage(|stage| stage.cache_hit = true);
                     if self.parley_trial_enabled {
                         if parley_trace_enabled() {
-                        eprintln!("PARLEY_TAB_TRACE stage=verified_cache candidate={}", cached.layout.is_some());
+                            eprintln!("PARLEY_TAB_TRACE stage=verified_cache candidate={}", cached.layout.is_some());
                         }
                         // The original Rope hash has just been checked against
                         // disk; an unverified or edited file never receives
