@@ -271,6 +271,7 @@ mod tests {
     async fn live_minio_two_core_verified_stage_and_no_replace() {
         use crate::app_core::{Core, CoreEvent};
         use crate::sync::{JournalError, RegisteredReadAdmission};
+        use aws_sdk_s3::error::ProvideErrorMetadata;
         use std::fs;
         use std::sync::Arc;
 
@@ -318,7 +319,16 @@ mod tests {
         };
         let writer = AwsS3ProbeClient::connect(profile.clone(), ns.clone()).await.unwrap();
         let reader = AwsS3ProbeClient::connect(profile, ns.clone()).await.unwrap();
-        writer.client.create_bucket().bucket("akula-core-stage-test").send().await.unwrap();
+        // The MinIO workflow runs several live tests against one server.
+        // A bucket already owned by these isolated test credentials is fine:
+        // each fixture uses a fresh random vault keyspace. Any other S3
+        // response must still fail rather than masking an authorization error.
+        match writer.client.create_bucket().bucket("akula-core-stage-test").send().await {
+            Ok(_) => {}
+            Err(error) if error.as_service_error()
+                .and_then(|service| service.code()) == Some("BucketAlreadyOwnedByYou") => {}
+            Err(error) => panic!("test bucket provisioning failed: {error}"),
+        }
 
         let blob_hash = captured.content_hash;
         let blob_key = ns.immutable_blob_key(&blob_hash).unwrap();
