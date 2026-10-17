@@ -60,6 +60,34 @@ acknowledged as complete. A crash can discard an in-memory pending baseline;
 interprocess locking, durable recovery and OS-pinned operations remain future
 work. These changes do NOT authorize sync local writes.
 
+## History relocation acknowledgement and retry quarantine (04g-3b-6)
+
+`HistoryService::try_moved/try_trashed/try_restored` report typed errors
+without silently updating `State.notes` or `Note.dir` when version-folder
+relocation fails. The primary note operation already completed under File
+Gate; a failure therefore emits `note-history-move-failed` (from, to,
+action, error, possibly-partial) instead of misreporting a failed note rename
+or silently claiming history arrived.
+
+A process-wide quarantine (under `PROCESS_HISTORY_FILES`, shared by
+all cooperating Core instances) records BOTH source and destination note
+identities after a failed file transfer, including preflight denial. History
+version writes, labels and reads refuse blocked locations. Retry of the
+**same** source/destination pair under the history lock merges remaining
+version files; an unrelated transfer cannot clear that quarantine. History
+maintenance is deferred while any unresolved pair remains, to avoid
+deleting potentially split versions. No callbacks or Core File Gate
+acquisition occur while holding the history mutex.
+
+`move_folder` still permits incremental merges into an already existing
+target, so filesystem operations are NOT atomic: failure can leave versions
+in both trees. Never assume rollback, and never automatically delete one
+side. Quarantine is **in-process only** and is lost on restart; crash-durable
+recovery manifests, an explicit repair UI, cross-process coordination and
+handle-relative operations are future requirements. Blocking an unrelated
+vault's retention while another vault has unresolved history is conservative
+and needs later per-root partitioning.
+
 ## Tests and limits
 
 - A real FS two-service regression holds the global history mutex while the second service attempts to persist a new history snapshot. Bytes remain untouched until release.
