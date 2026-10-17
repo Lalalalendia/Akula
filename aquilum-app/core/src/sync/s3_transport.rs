@@ -18,6 +18,8 @@ mod replan;
 mod core_stage;
 pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError};
 mod snapshot_store;
+mod verified_cache_disk;
+pub use verified_cache_disk::{S3VerifiedHintsError, S3VerifiedHintsJournal};
 mod selective_snapshot;
 pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
 pub use snapshot_store::{
