@@ -127,6 +127,9 @@ impl S3RemoteAnchorScope {
     pub fn keyspace(&self) -> &S3Keyspace { &self.keyspace }
     pub fn profile_id(&self) -> &str { &self.profile_id }
 
+    /// A non-secret context digest. This is NOT an authentication token or MAC.
+    pub(super) fn binding_fingerprint(&self) -> &str { &self.fingerprint }
+
     /// Both the exact vault namespace and the actual AWS SDK connection must
     /// match. This compares non-secret transport identity only; the caller
     /// still must obtain the account/deployment binding from a trusted source.
