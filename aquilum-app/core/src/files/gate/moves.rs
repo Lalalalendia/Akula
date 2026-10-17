@@ -56,9 +56,15 @@ fn relocating<T>(
     to: &Path,
     run: impl FnOnce() -> Result<T, FileCommandError>,
 ) -> Result<(T, Relocation), FileCommandError> {
-    let notes = notes_under(from);
-    let done = run()?;
-    let relocation = relocated(&notes, from, to);
+    let (done, relocation) = {
+        // Lock preflight enumeration, rename and all link rewrites as one
+        // in-process filesystem critical section. History and UI callbacks
+        // run only after releasing the lock.
+        let _guard = core.file_mutation_guard()?;
+        let notes = notes_under(from);
+        let done = run()?;
+        (done, relocated(&notes, from, to))
+    };
     for step in &relocation.moves {
         core.history.moved(&|| core.known_roots(), Path::new(&step.from), Path::new(&step.to));
     }
