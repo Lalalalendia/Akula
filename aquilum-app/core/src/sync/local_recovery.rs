@@ -163,6 +163,73 @@ pub(super) fn inspect_names(
     Ok((stage, final_name))
 }
 
+/// Capture historical evidence bytes from exactly the opened OS file ID
+/// that the M1d-a journal previously observed. A bytewise copy is *not* a
+/// provenance/commit capability; it never changes the source in the vault.
+fn capture_child(
+    parent: &File, name: &str, expected: &ObservedLocalFile,
+    expected_hash: &str, max_bytes: u64,
+) -> Result<Option<Vec<u8>>, VaultPortError> {
+    if max_bytes == 0 || max_bytes > 32 * 1024 * 1024 {
+        return Err(VaultPortError::PermissionDenied);
+    }
+    let found = open_optional_file(parent, name)?;
+    match (found, expected) {
+        (None, ObservedLocalFile::Absent) => Ok(None),
+        (Some(mut file), ObservedLocalFile::Present {
+            identity, byte_length, matches_expected_hash,
+        }) => {
+            let before = file.metadata()
+                .map_err(|e| VaultPortError::Io(e.to_string()))?;
+            if before.len() != *byte_length || before.len() > max_bytes
+                || file_identity(&file)? != *identity
+            {
+                return Err(VaultPortError::FileChanged);
+            }
+            let mut bytes = Vec::new();
+            (&mut file).take(max_bytes + 1).read_to_end(&mut bytes)
+                .map_err(|e| VaultPortError::Io(e.to_string()))?;
+            let after = file.metadata()
+                .map_err(|e| VaultPortError::Io(e.to_string()))?;
+            if bytes.len() as u64 != *byte_length
+                || after.len() != before.len()
+                || before.modified().ok() != after.modified().ok()
+                || file_identity(&file)? != *identity
+            {
+                return Err(VaultPortError::FileChanged);
+            }
+            let hash_matches = blake3::hash(&bytes).to_hex().as_str() == expected_hash;
+            if hash_matches != *matches_expected_hash {
+                return Err(VaultPortError::FileChanged);
+            }
+            Ok(Some(bytes))
+        }
+        _ => Err(VaultPortError::FileChanged),
+    }
+}
+
+/// Optional stage/final bytes, each no larger than 32 MiB. Both names are
+/// opened relative to the same pinned parent directory. Missing/changed IDs,
+/// hardlink aliases, junctions, symlinks, changed bytes or oversized inputs
+/// cause fail-closed refusal without removing either source.
+pub(super) fn capture_names(
+    parent: &File, operation: OperationId, leaf: &str,
+    evidence: &ReadOnlyLocalPublicationEvidence,
+    expected_hash: &str, max_bytes: u64,
+) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>), VaultPortError> {
+    if evidence.operation_id != operation {
+        return Err(VaultPortError::FileChanged);
+    }
+    let stage_name = format!(".akula-sync-stage-{operation}");
+    let stage = capture_child(
+        parent, &stage_name, &evidence.stage, expected_hash, max_bytes,
+    )?;
+    let final_name = capture_child(
+        parent, leaf, &evidence.final_name, expected_hash, max_bytes,
+    )?;
+    Ok((stage, final_name))
+}
+
 pub(super) fn classify(
     stage: &ObservedLocalFile, final_name: &ObservedLocalFile,
 ) -> LocalRecoveryAssessment {
