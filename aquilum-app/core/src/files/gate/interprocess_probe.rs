@@ -108,20 +108,20 @@ mod tests {
         }
     }
 
-    fn wait_until_held(child: &mut KillChild, report: &Path) {
+    fn wait_for_report(child: &mut KillChild, report: &Path, expected: &[u8]) {
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             if report.exists() {
-                assert_eq!(fs::read(report).unwrap(), b"held");
+                assert_eq!(fs::read(report).unwrap(), expected);
                 return;
             }
             assert!(
                 child.0.try_wait().unwrap().is_none(),
-                "child exited before reporting an acquired pair"
+                "child exited before reporting its lock state"
             );
             thread::sleep(Duration::from_millis(15));
         }
-        panic!("child failed to acquire an OS lock pair before deadline");
+        panic!("child failed to report its lock state before deadline");
     }
 
     #[test]
@@ -140,6 +140,15 @@ mod tests {
             "hold" => {
                 let _pair = try_both(&left, &right).unwrap().expect("uncontended pair");
                 fs::write(report, b"held").unwrap();
+                loop {
+                    thread::park_timeout(Duration::from_secs(60));
+                }
+            }
+            "try-hold-after-decline" => {
+                assert!(try_both(&left, &right).unwrap().is_none());
+                fs::write(report, b"busy").unwrap();
+                // Stay alive: parent must prove partial locks were dropped
+                // before this process is killed or exits.
                 loop {
                     thread::park_timeout(Duration::from_secs(60));
                 }
@@ -168,9 +177,16 @@ mod tests {
         ordered.sort_unstable();
         let _second = try_one(&ordered[1]).unwrap().expect("lock second root");
         let report = temp.path().join("partial.txt");
-        assert_eq!(try_in_other_process(&ordered[1], &ordered[0], &report), "busy");
-        // The child obtained the first lock but must not retain a partial claim.
+        let child = child_command("try-hold-after-decline", &ordered[1], &ordered[0], &report)
+            .spawn()
+            .unwrap();
+        let mut child = KillChild(child);
+        wait_for_report(&mut child, &report, b"busy");
+        // The child is STILL ALIVE. It obtained the first lock before
+        // declining the second, so the first must already be released.
+        assert!(child.0.try_wait().unwrap().is_none());
         assert!(try_one(&ordered[0]).unwrap().is_some());
+        child.terminate();
     }
 
     #[test]
@@ -179,7 +195,7 @@ mod tests {
         let ready = temp.path().join("ready.txt");
         let child = child_command("hold", &left, &right, &ready).spawn().unwrap();
         let mut child = KillChild(child);
-        wait_until_held(&mut child, &ready);
+        wait_for_report(&mut child, &ready, b"held");
         assert!(try_both(&left, &right).unwrap().is_none());
         child.terminate();
         // Dead process releases OS file locks; no unlink means no split lock.
