@@ -69,6 +69,8 @@ impl App {
         });
         #[cfg(test)]
         LAST_TAB_SWITCH.with(|slot| slot.set(TabSwitchStages::default()));
+        #[cfg(test)]
+        let _ = crate::ui::editor::take_plain_layout_reuses();
         if let Some((layer, _)) = self.suggest_layer.take() {
             root.remove_layer(layer);
         }
@@ -139,6 +141,8 @@ impl App {
         drop(read);
         match opened {
             Ok((note, text, layout)) => {
+                #[cfg(test)]
+                record_stage(|s| s.layout_offered = layout.is_some());
                 self.pending_parley = layout;
                 self.open_error = None;
                 self.open_error_ids = None;
@@ -150,7 +154,10 @@ impl App {
                 self.render_note(root);
                 self.reveal_pending(root);
                 #[cfg(test)]
-                record_stage(|s| s.page_build = started.elapsed());
+                record_stage(|s| {
+                    s.page_build = started.elapsed();
+                    s.layout_reused = crate::ui::editor::take_plain_layout_reuses();
+                });
             }
             Err(error) => {
                 let err_str = format!("{error}");
