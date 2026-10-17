@@ -38,6 +38,8 @@ mod s3_manifest_delta;
 #[cfg(feature = "sync-s3")]
 mod s3_delta_walker;
 #[cfg(feature = "sync-s3")]
+mod s3_remote_anchor;
+#[cfg(feature = "sync-s3")]
 mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
 mod s3_transport;
@@ -76,6 +78,11 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+#[cfg(feature = "sync-s3")]
+pub use s3_remote_anchor::{
+    S3RemoteAnchor, S3RemoteAnchorError, S3RemoteAnchorJournal,
+    S3RemoteAnchorOutcome, S3RemoteAnchorScope,
+};
 #[cfg(feature = "sync-s3")]
 pub use s3_delta_walker::{
     walk_s3_manifest_delta, S3DeltaWalkCheckpoint, S3DeltaWalkError, S3DeltaWalkPreview,
