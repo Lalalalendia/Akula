@@ -168,12 +168,25 @@ impl<'a> RegisteredReadAdmission<'a> {
         Ok(result)
     }
 
+    /// Bind file identity by pinned handles without reading bytes or taking
+    /// guest authority. A later read must verify this exact file ID.
+    pub(crate) fn bind_plugin_file_identity(
+        &self,
+        relative: &SyncRelativePath,
+    ) -> Result<PinnedFileIdentity, VaultPortError> {
+        self.check_root()?;
+        let file = self.pinned.identify_file(relative)?;
+        self.check_root()?;
+        Ok(file)
+    }
+
     /// PLUGIN-04: descriptor-relative read of a closed editor document.
     /// The host must authorize first and revalidate the grant after reading.
     /// Reject hard-link aliases and a replaced file even with identical bytes.
     pub(crate) fn read_plugin_identified_bounded(
         &self,
         relative: &SyncRelativePath,
+        expected_file: PinnedFileIdentity,
         max_bytes: u64,
     ) -> Result<LocalFileSnapshot, VaultPortError> {
         self.check_root()?;
@@ -186,6 +199,9 @@ impl<'a> RegisteredReadAdmission<'a> {
         self.check_root()?;
         let first = self.pinned.read_identified_bounded(relative, max_bytes)?;
         let identity = first.identity.ok_or(VaultPortError::PermissionDenied)?;
+        if identity != expected_file {
+            return Err(VaultPortError::FileChanged);
+        }
         self.check_root()?;
         let second = self.pinned.read_identified_bounded(relative, max_bytes)?;
         if second.identity != Some(identity)

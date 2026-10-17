@@ -11,6 +11,7 @@ pub mod fake;
 mod fake_vault;
 mod host_admission;
 pub(crate) use host_admission::RegisteredReadAdmission;
+pub(crate) use pinned_read::PinnedFileIdentity;
 #[cfg(test)]
 mod fault_matrix;
 mod identity;
