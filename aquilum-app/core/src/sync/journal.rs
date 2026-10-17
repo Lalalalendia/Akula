@@ -1504,6 +1504,117 @@ mod tests {
     }
 
     #[test]
+    fn m1db_copy_is_write_once_and_tampering_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(
+            VaultId::new(), DocumentId::new(), "notes/stage.md", b"payload",
+        );
+        let historical = m1d_test_evidence(&staged);
+        {
+            let mut j = SqliteSyncJournal::open(&db).unwrap();
+            j.begin(staged.clone()).unwrap();
+            j.mark_staged(staged.operation_id, b"payload").unwrap();
+            j.record_local_publication_attempt_once(&staged).unwrap();
+            j.record_local_recovery_case_once(&historical).unwrap();
+            let archived = j.record_local_recovery_copy_once(
+                staged.operation_id, Some(b"payload"), None,
+            ).unwrap();
+            assert_eq!(archived.stage_bytes.as_deref(), Some(&b"payload"[..]));
+            assert_eq!(archived.final_bytes, None);
+            assert!(matches!(
+                j.record_local_recovery_copy_once(staged.operation_id, Some(b"payload"), None),
+                Err(JournalError::RecoveryCopyAlreadyRecorded)
+            ));
+            assert!(matches!(
+                j.record_local_recovery_copy_once(staged.operation_id, Some(b"changed"), None),
+                Err(JournalError::CorruptedRecord)
+            ));
+        }
+        let j = SqliteSyncJournal::open(&db).unwrap();
+        assert_eq!(
+            j.read_local_recovery_copy(staged.operation_id).unwrap().unwrap()
+                .stage_bytes.as_deref(),
+            Some(&b"payload"[..]),
+        );
+        j.connection.execute(
+            "UPDATE sync_local_recovery_copies SET stage_bytes = ?1 WHERE operation_id = ?2",
+            params![b"corrupt".as_slice(), staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            j.read_local_recovery_copy(staged.operation_id),
+            Err(JournalError::CorruptedRecord)
+        ));
+        assert!(j.baseline(staged.vault_id, staged.document_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn m1db_archive_requires_matching_historical_observation() {
+        let mut j = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(
+            VaultId::new(), DocumentId::new(), "notes/stage.md", b"payload",
+        );
+        j.begin(staged.clone()).unwrap();
+        j.mark_staged(staged.operation_id, b"payload").unwrap();
+        j.record_local_publication_attempt_once(&staged).unwrap();
+        assert!(matches!(
+            j.record_local_recovery_copy_once(staged.operation_id, Some(b"payload"), None),
+            Err(JournalError::CorruptedRecord)
+        ));
+        j.record_local_recovery_case_once(&m1d_test_evidence(&staged)).unwrap();
+        for (stage, final_name) in [
+            (None, None),
+            (Some(&b"payload"[..]), Some(&b"unexpected"[..])),
+            (Some(&b"wrong"[..]), None),
+        ] {
+            assert!(matches!(
+                j.record_local_recovery_copy_once(staged.operation_id, stage, final_name),
+                Err(JournalError::CorruptedRecord)
+            ));
+        }
+        assert!(j.read_local_recovery_copy(staged.operation_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn m1db_schema_three_migrates_without_dropping_incident_or_claim() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(
+            VaultId::new(), DocumentId::new(), "notes/stage.md", b"payload",
+        );
+        let case = m1d_test_evidence(&staged);
+        {
+            let mut journal = SqliteSyncJournal::open(&db).unwrap();
+            journal.begin(staged.clone()).unwrap();
+            journal.mark_staged(staged.operation_id, b"payload").unwrap();
+            journal.record_local_publication_attempt_once(&staged).unwrap();
+            journal.record_local_recovery_case_once(&case).unwrap();
+            journal.connection.execute_batch(
+                "DROP TABLE sync_local_recovery_copies;
+                 PRAGMA user_version = 3;",
+            ).unwrap();
+        }
+        let journal = SqliteSyncJournal::open(&db).unwrap();
+        let version: i64 = journal.connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(journal.read_local_recovery_case(staged.operation_id).unwrap(),
+            Some(case));
+        assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&staged),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        assert!(journal.read_local_recovery_copy(staged.operation_id).unwrap().is_none());
+        journal.record_local_recovery_copy_once(
+            staged.operation_id, Some(b"payload"), None,
+        ).unwrap();
+        assert!(journal.read_local_recovery_copy(staged.operation_id).unwrap().is_some());
+        assert!(journal.baseline(staged.vault_id, staged.document_id).unwrap().is_none());
+    }
+
+    #[test]
     fn newer_schema_must_never_be_overwritten() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA user_version = 99;").unwrap();
