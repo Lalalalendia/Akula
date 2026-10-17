@@ -119,6 +119,28 @@ pub(crate) fn inspect_external_scope(
     candidate_scope: &Path,
     recheck_registration: impl Fn() -> Result<(), VaultPortError>,
 ) -> Result<CustodyObservation, VaultPortError> {
+    with_cooperative_scope_lock(
+        selected_root, expected_root_id, current_registered_roots,
+        candidate_scope, recheck_registration, |observation| observation,
+    )
+}
+
+/// An explicit, cooperative-process *lifetime* experiment. The caller's
+/// closure executes while the same kernel lock is held. Pinned name/root,
+/// registry and owner/ACL evidence are checked before AND after it.
+/// This is NOT a production write capability: the containing namespace can
+/// still be replaced by a malicious same-user actor, and post-write refusal
+/// cannot undo already published bytes. All normal File Gate lanes remain
+/// unchanged. Only test fixtures currently exercise a real write within it.
+#[allow(dead_code)]
+pub(crate) fn with_cooperative_scope_lock<T>(
+    selected_root: &Path,
+    expected_root_id: (u64, u64),
+    current_registered_roots: impl Fn() -> Result<Vec<PathBuf>, VaultPortError>,
+    candidate_scope: &Path,
+    recheck_registration: impl Fn() -> Result<(), VaultPortError>,
+    operation: impl FnOnce(CustodyObservation) -> T,
+) -> Result<T, VaultPortError> {
     recheck_registration()?;
     require_no_alias_ancestors(candidate_scope)?;
     let selected = fs::symlink_metadata(candidate_scope).map_err(io)?;
@@ -147,6 +169,8 @@ pub(crate) fn inspect_external_scope(
     #[cfg(windows)]
     external.audit_windows_acl().map_err(io)?;
 
+    // A competing cooperating process receives a refusal rather than a
+    // blocking loop; no ambiguous partial acquisition can start a write.
     let held = external.try_lock().map_err(io)?.ok_or(VaultPortError::PermissionDenied)?;
 
     #[cfg(unix)]
@@ -154,16 +178,37 @@ pub(crate) fn inspect_external_scope(
     #[cfg(windows)]
     held.audit_windows_acl().map_err(io)?;
 
-    // The caller's SQLite registration and opened physical workspace must
-    // still describe the same root while this external OS lock is held.
     recheck_registration()?;
     workspace.recheck_root().map_err(io)?;
     external.recheck_root().map_err(io)?;
-    if workspace.identity() != expected_root_id {
-        return Err(VaultPortError::FileChanged);
-    }
+    held.recheck_held_name(&external).map_err(io)?;
     require_no_alias_ancestors(candidate_scope)?;
-    // A fresh SQLite registry snapshot closes the prior stale-list gap.
+    require_outside_registered_roots(candidate_scope, &current_registered_roots()?)?;
+
+    #[cfg(unix)]
+    let permission_evidence = CustodyPermissionEvidence::UnixPrivateModeOnly;
+    #[cfg(windows)]
+    let permission_evidence = CustodyPermissionEvidence::WindowsOwnerDaclRestricted;
+    #[cfg(not(any(unix, windows)))]
+    return Err(reject());
+
+    let observation = CustodyObservation {
+        registered_root: expected_root_id,
+        custody_scope: external.identity(),
+        lock_object: held.identity(),
+        permission_evidence,
+    };
+    // Entire caller operation, INCLUDING HistoryService callbacks, runs
+    // under this held OS lock. No new lock is taken by HistoryService.
+    let outcome = operation(observation);
+
+    // Postflight is only a DETECTION aid. If it refuses, the operation may
+    // already have committed and must not be silently retried or rolled back.
+    recheck_registration()?;
+    workspace.recheck_root().map_err(io)?;
+    external.recheck_root().map_err(io)?;
+    held.recheck_held_name(&external).map_err(io)?;
+    require_no_alias_ancestors(candidate_scope)?;
     require_outside_registered_roots(candidate_scope, &current_registered_roots()?)?;
     #[cfg(unix)]
     {
@@ -175,18 +220,5 @@ pub(crate) fn inspect_external_scope(
         external.audit_windows_acl().map_err(io)?;
         held.audit_windows_acl().map_err(io)?;
     }
-
-    #[cfg(unix)]
-    let permission_evidence = CustodyPermissionEvidence::UnixPrivateModeOnly;
-    #[cfg(windows)]
-    let permission_evidence = CustodyPermissionEvidence::WindowsOwnerDaclRestricted;
-    #[cfg(not(any(unix, windows)))]
-    return Err(reject());
-
-    Ok(CustodyObservation {
-        registered_root: expected_root_id,
-        custody_scope: external.identity(),
-        lock_object: held.identity(),
-        permission_evidence,
-    })
+    Ok(outcome)
 }

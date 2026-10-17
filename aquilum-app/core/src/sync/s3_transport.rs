@@ -12,6 +12,9 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod manifest;
+// Strict pack framing is experimental and available to tests only.
+#[cfg(test)]
+mod pack_probe;
 // Heavy full-DAG benchmark is ignored unless explicitly run with MinIO.
 #[cfg(test)]
 mod scale_probe;
@@ -22,6 +25,7 @@ mod snapshot_store;
 mod verified_cache_disk;
 pub use verified_cache_disk::{S3VerifiedHintsError, S3VerifiedHintsJournal};
 mod selective_snapshot;
+mod offline_retention;
 pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
 pub use snapshot_store::{
     S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,

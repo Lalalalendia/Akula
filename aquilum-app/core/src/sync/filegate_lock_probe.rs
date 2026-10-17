@@ -140,9 +140,9 @@ impl HeldProbeLock {
     /// the replacement then has a *different*, independently lockable ID.
     ///
     /// Detect an already-performed swap while this handle is still held.
-    /// This cannot prevent a swap immediately AFTER the check. New S3
-    /// additive-only operations use it as a *negative* interlock check,
-    /// never proof of hostile same-user custody or baseline authorization.
+    /// A result is negative forensic evidence, NOT a production write grant:
+    /// another actor may swap the directory entry immediately afterward.
+    /// The method is also used by the cooperative lifetime test harness.
     pub(crate) fn recheck_held_name(&self, root: &PinnedProbeRoot) -> io::Result<()> {
         root.recheck_root()?;
         if descriptor_identity(&self._root, false)? != root.id {

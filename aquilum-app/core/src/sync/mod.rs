@@ -13,6 +13,8 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
+#[cfg(test)]
+mod cooperative_gate_tests;
 pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::PinnedFileIdentity;

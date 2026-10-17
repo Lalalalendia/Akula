@@ -156,6 +156,76 @@ impl SqliteCustodyIdentityStore {
         Ok(existing)
     }
 
+    /// Hold one existing, identity-matched OS lock ACROSS a complete closure.
+    /// The closure can invoke the actual File Gate *and* HistoryService,
+    /// neither of which should try to reacquire this OS lock.
+    ///
+    /// This is a cooperative test/experiment, NOT a write-admission API.
+    /// Ordinary Akula writers are unchanged, and a hostile same-UID actor
+    /// still can replace the anchor or forge this SQLite evidence.
+    #[allow(dead_code)]
+    pub(crate) fn with_cooperative_writer_lifetime<T>(
+        &self,
+        admission: &RegisteredReadAdmission<'_>,
+        expected_vault: VaultId,
+        existing_scope: &Path,
+        operation: impl FnOnce() -> T,
+    ) -> Result<T, CustodyBindingError> {
+        validate_store_location(admission, &self.database_path)?;
+        let record = load(&self.connection, admission.registered_workspace_id())?
+            .ok_or(CustodyBindingError::MissingBinding)?;
+        let root = admission.registered_root_identity_for_profile()?;
+        let root_path = admission.registered_root_path().to_str()
+            .ok_or(CustodyBindingError::InvalidAppdata)?;
+        let scope_path = fs::canonicalize(existing_scope)?;
+        let scope_name = scope_path.to_str()
+            .ok_or(CustodyBindingError::InvalidAppdata)?;
+        if record.vault_id != expected_vault
+            || record.workspace_id != admission.registered_workspace_id()
+            || (record.registered_root_volume, record.registered_root_file) != root
+            || record.registered_root_path != root_path
+            || record.custody_scope_path != scope_name
+        {
+            return Err(CustodyBindingError::ConflictingIdentity);
+        }
+
+        let completed: Result<T, CustodyBindingError> =
+            filegate_lock_custody::with_cooperative_scope_lock(
+                admission.registered_root_path(),
+                root,
+                || admission.registered_workspace_roots(),
+                existing_scope,
+                || admission.recheck_registered_root(),
+                |observed| {
+                    // Compare the persisted kernel object IDs WHILE held:
+                    // two independent Core databases must agree on exactly
+                    // the same physical lock object, not just path or UUID.
+                    if observed.registered_root != root
+                        || observed.custody_scope
+                            != (record.custody_scope_volume, record.custody_scope_file)
+                        || observed.lock_object
+                            != (record.lock_volume, record.lock_file)
+                    {
+                        return Err(CustodyBindingError::ConflictingIdentity);
+                    }
+                    if load(&self.connection, record.workspace_id)?.as_ref() != Some(&record) {
+                        return Err(CustodyBindingError::ConflictingIdentity);
+                    }
+                    let result = operation();
+                    // Post-check runs while lock remains acquired. A failure
+                    // cannot undo a completed writer and must not be retried.
+                    if load(&self.connection, record.workspace_id)?.as_ref() != Some(&record) {
+                        return Err(CustodyBindingError::ConflictingIdentity);
+                    }
+                    Ok(result)
+                },
+            )?;
+        let value = completed?;
+        validate_store_location(admission, &self.database_path)?;
+        admission.recheck_registered_root()?;
+        Ok(value)
+    }
+
     /// Only an existing, Core-registered S3 configuration supplies VaultId.
     /// A copied configuration or remote head is still NOT authenticated.
     #[cfg(feature = "sync-s3")]
