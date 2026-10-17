@@ -125,26 +125,6 @@ impl Document {
         caret: Option<usize>,
     ) -> usize {
         let Some(snapshot) = self.trial_snapshot.take() else { return 0 };
-        // Diagnostic only: identify the first rejected context when a page
-        // has already passed the disk BLAKE3 freshness gate.
-        #[cfg(test)]
-        if std::env::var_os("AQ_PARLEY_TRACE").is_some() {
-            eprintln!(
-                "PARLEY_CONTEXT candidate={} width_actual={width:?} width_saved={} compose={} caret={} window={} len={} base={} text={} fonts={} styles={} theme={} editor_font={}",
-                snapshot.entries.len(),
-                snapshot.width,
-                compose.is_some(),
-                caret.is_some(),
-                self.windowed == snapshot.windowed,
-                self.full.byte_len() == snapshot.full_len,
-                self.base == snapshot.base,
-                self.text == snapshot.text,
-                fonts_key(self.markdown.as_ref()) == snapshot.font_key,
-                styles_key(styles) == snapshot.style_key,
-                snapshot.theme_generation == crate::ui::theme::generation(),
-                snapshot.editor_font == *crate::ui::theme::editor_font_settings(),
-            );
-        }
         // IME preedit text changes shaping and blocks all reuse. A normal
         // caret is different: the usual Document::measure() invalidates only
         // the caret-bearing line because snapshot decorations have caret=None.
