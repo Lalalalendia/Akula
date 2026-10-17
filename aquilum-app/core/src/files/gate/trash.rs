@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// Opening the directory in the OS shell happens only after this guard drops.
 /// This is not a remote sync mutation authority or an external-process lock.
 pub fn ensure_trash(core: &Core, workspace: &Path) -> Result<String, FileCommandError> {
-    let _guard = core.file_mutation_guard()?;
+    let _guard = core.file_mutation_guard_for_write()?;
     ensure_trash_impl(workspace)
 }
 
@@ -35,7 +35,7 @@ pub fn cleanup_retention(
     let mut removed = 0;
     for candidate in candidates {
         {
-            let _guard = core.file_mutation_guard()?;
+            let _guard = core.file_mutation_guard_for_write()?;
             if remove_still_expired_trash_candidate(workspace, &candidate, retention_days)? {
                 removed += 1;
             }
@@ -45,7 +45,7 @@ pub fn cleanup_retention(
     let directories = retention_directory_candidates(workspace)?;
     for directory in directories {
         {
-            let _guard = core.file_mutation_guard()?;
+            let _guard = core.file_mutation_guard_for_write()?;
             remove_still_empty_trash_directory(workspace, &directory)?;
         }
         std::thread::yield_now();
@@ -63,7 +63,7 @@ pub fn trash(
 
 fn trash_now(core: &Core, workspace: &Path, path: &Path) -> Result<PathBuf, FileCommandError> {
     let moved = {
-        let _guard = core.file_mutation_guard()?;
+        let _guard = core.file_mutation_guard_for_write()?;
         move_to_trash_impl(workspace, path)?
     };
     let notes = note_moves(&moved.files);
@@ -105,7 +105,7 @@ fn restore_all(
     let mut failure = None;
     for path in trashed {
         let attempt = {
-            let _guard = core.file_mutation_guard()?;
+            let _guard = core.file_mutation_guard_for_write()?;
             restore_from_trash_impl(workspace, path)
         };
         match attempt {

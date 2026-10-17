@@ -159,6 +159,94 @@ fn cross_vault_fixture() -> (tempfile::TempDir, Arc<Core>, Arc<Recording>, std::
     (directory, core, events, root_a, root_b)
 }
 
+fn history_cross_vault_write_test_hold(owner: &Path, source: &Path, destination: &Path) -> std::path::PathBuf {
+    let directory = owner.join(".aquilum/history-moves");
+    fs::create_dir_all(&directory).unwrap();
+    let marker = directory.join("cross-vault-hold-v1.json");
+    let record = json!({
+        "schema": 1,
+        "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+        "side": "source",
+        "source_vault": crate::search::paths::identity(source),
+        "destination_vault": crate::search::paths::identity(destination),
+        "source_note": crate::search::paths::identity(&source.join("Original.md")),
+        "destination_note": crate::search::paths::identity(&destination.join("Original.md")),
+        "primary_blake3": blake3::hash(b"original").to_hex().to_string(),
+        "history_inventory_blake3": blake3::hash(b"history").to_hex().to_string(),
+    });
+    fs::write(&marker, serde_json::to_vec(&record).unwrap()).unwrap();
+    marker
+}
+
+#[test]
+fn history_cross_vault_filegate_hold_denies_primary_mutations_and_keeps_versions() {
+    let (directory, core, events, root_a, root_b) = cross_vault_fixture();
+    let original = root_a.join("Original.md");
+    gate::create(&core, &original, "original", Source::Agent, None).unwrap();
+    let history_dir = root_a.join(".aquilum/history/Original.md");
+    let mut before: Vec<_> = fs::read_dir(&history_dir).unwrap()
+        .map(|entry| entry.unwrap().file_name()).collect();
+    before.sort();
+    assert!(!before.is_empty());
+    let marker = history_cross_vault_write_test_hold(&root_a, &root_a, &root_b);
+    events.clear();
+
+    let checks = [
+        gate::write(&core, &original, "destructive edit", None, Source::Agent, None).is_err(),
+        gate::create(&core, &root_a.join("New.md"), "new", Source::Agent, None).is_err(),
+        gate::create_binary(&core, &root_a.join("Attachment.png"), b"binary").is_err(),
+        gate::copy(&core, &original, &root_a.join("Copy.md")).is_err(),
+        gate::rename(&core, &original, &root_a.join("Renamed.md")).is_err(),
+        gate::move_across(&core, &original, &root_a.join("Moved.md")).is_err(),
+        gate::trash(&core, &root_a, &original).is_err(),
+        gate::create_folder(&core, &root_a.join("Folder")).is_err(),
+        gate::ensure_folder_tree(&core, &root_a.join("Templates/Deep")).is_err(),
+        gate::ensure_trash(&core, &root_a).is_err(),
+        core.empty_trash_guarded(&root_a).is_err(),
+    ];
+    assert!(checks.iter().all(|denied| *denied), "a File Gate entrypoint bypassed HOLD: {checks:?}");
+    assert_eq!(fs::read(&original).unwrap(), b"original");
+    let mut after: Vec<_> = fs::read_dir(&history_dir).unwrap()
+        .map(|entry| entry.unwrap().file_name()).collect();
+    after.sort();
+    assert_eq!(after, before);
+    assert!(marker.exists());
+    assert!(!root_a.join("New.md").exists());
+    assert!(!root_a.join("Renamed.md").exists());
+    assert!(!root_a.join("Templates").exists());
+    assert!(!events.names().contains(&"notes-relocated"));
+
+    // A new Core which registered ONLY an unrelated root may still write,
+    // without consulting another Core's unrelated workspace registration.
+    let other_data = directory.path().join("unrelated-data");
+    fs::create_dir_all(&other_data).unwrap();
+    let independent = Core::open(&other_data, Arc::new(Recording::default()));
+    independent.ui_state.resolve_workspace(root_b.to_str().unwrap(), 1).unwrap();
+    let independent_note = root_b.join("Independent.md");
+    gate::create(&independent, &independent_note, "independent", Source::Agent, None).unwrap();
+    assert_eq!(fs::read(&independent_note).unwrap(), b"independent");
+    assert_eq!(independent.history.page(&|| independent.known_roots(), &independent_note, 0, 10).total, 1);
+}
+
+#[test]
+fn history_cross_vault_filegate_corrupt_hold_cannot_allow_primary_write_after_restart() {
+    let (directory, core, _events, root_a, root_b) = cross_vault_fixture();
+    let original = root_a.join("Original.md");
+    gate::create(&core, &original, "original", Source::Agent, None).unwrap();
+    let marker = history_cross_vault_write_test_hold(&root_a, &root_a, &root_b);
+    fs::write(&marker, b"{broken").unwrap();
+
+    let app_data = directory.path().join("restarted-data");
+    fs::create_dir_all(&app_data).unwrap();
+    let restarted = Core::open(&app_data, Arc::new(Recording::default()));
+    restarted.ui_state.resolve_workspace(root_a.to_str().unwrap(), 1).unwrap();
+    assert!(gate::write(&restarted, &original, "changed", None, Source::Agent, None).is_err());
+    assert!(gate::create(&restarted, &root_a.join("Unrelated.md"), "new", Source::Agent, None).is_err());
+    assert_eq!(fs::read(&original).unwrap(), b"original");
+    assert!(!root_a.join("Unrelated.md").exists());
+    assert_eq!(fs::read(&marker).unwrap(), b"{broken");
+}
+
 #[test]
 fn history_cross_vault_primary_move_is_denied_before_any_disk_or_event_change() {
     let (directory, core, events, root_a, root_b) = cross_vault_fixture();
@@ -366,8 +454,15 @@ fn core_file_gate_serializes_mcp_trash_purge_across_core_instances() {
     let deleted = trash.join("Восстановить.md");
     fs::write(&deleted, b"valuable original").unwrap();
 
-    let first = Core::open(&directory.path().join("data-a"), Arc::new(Recording::default()));
-    let second = Core::open(&directory.path().join("data-b"), Arc::new(Recording::default()));
+    let data_a = directory.path().join("data-a");
+    let data_b = directory.path().join("data-b");
+    fs::create_dir_all(&data_a).unwrap();
+    fs::create_dir_all(&data_b).unwrap();
+    let first = Core::open(&data_a, Arc::new(Recording::default()));
+    let second = Core::open(&data_b, Arc::new(Recording::default()));
+    for core in [&first, &second] {
+        core.ui_state.resolve_workspace(workspace.to_str().unwrap(), 1).unwrap();
+    }
     let held = first.file_mutation_guard().unwrap();
 
     let (started_tx, started_rx) = channel();
