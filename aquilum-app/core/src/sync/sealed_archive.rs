@@ -100,7 +100,8 @@ pub fn seal_recovery_archive(
     let mut nonce_bytes = [0u8; NONCE_BYTES];
     SystemRandom::new().fill(&mut nonce_bytes)
         .map_err(|_| SealedArchiveError::RandomnessUnavailable)?;
-    let mut body = plaintext.to_vec();
+    // If sealing fails, the transient plaintext buffer is zeroized.
+    let mut body = Zeroizing::new(plaintext.to_vec());
     let aad = authenticated_context(binding);
     key.cipher()?.seal_in_place_append_tag(
         Nonce::assume_unique_for_key(nonce_bytes),
@@ -130,7 +131,9 @@ pub fn open_recovery_archive(
     }
     let mut nonce_bytes = [0u8; NONCE_BYTES];
     nonce_bytes.copy_from_slice(&sealed[MAGIC.len()..HEADER_BYTES]);
-    let mut body = sealed[HEADER_BYTES..].to_vec();
+    // Authentication failure may leave partially decrypted bytes in memory:
+    // scrub the entire transient buffer on every failure path.
+    let mut body = Zeroizing::new(sealed[HEADER_BYTES..].to_vec());
     let aad = authenticated_context(binding);
     let plaintext_len = key.cipher()?.open_in_place(
         Nonce::assume_unique_for_key(nonce_bytes),
@@ -138,7 +141,9 @@ pub fn open_recovery_archive(
         &mut body,
     ).map_err(|_| SealedArchiveError::AuthenticationFailed)?.len();
     body.truncate(plaintext_len);
-    Ok(body)
+    // Ownership transfers to the trusted caller on successful authentication.
+    // The caller MUST scrub this result when finished with the secret bytes.
+    Ok(std::mem::take(&mut *body))
 }
 
 #[cfg(test)]
