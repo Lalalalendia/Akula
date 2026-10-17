@@ -47,7 +47,7 @@ def main() -> None:
         "Measured draw_frame() includes context selection, encoding and raster work;",
         "it is NOT a full application FPS measurement.",
         "",
-        "| Scene | Full every | Workload | Serial p50 | 2-worker p50 | Routed p50 | Routed vs best fixed (total) |",
+        "| Scene | Full every | Workload | Serial p50 | 2-worker p50 | Routed p50 | Routed vs segment-best fixed (total) |",
         "|---|---:|---|---:|---:|---:|---:|",
     ]
     for case in CASES:
@@ -66,7 +66,34 @@ def main() -> None:
                 )
     out += [
         "",
-        "The comparison uses observed segment totals rather than adding medians.",
+        "## Combined workload comparison (sum of sampled frame times)",
+        "",
+        "A fixed renderer must handle **both** scroll and full frames. "
+        "Comparing the routed mode separately to the best fixed mode in each "
+        "segment gives an impossible oracle baseline and understates its benefit.",
+        "",
+        "| Scene | Full every | Serial total | 2-worker total | Routed total | Gain vs best fixed |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for case in CASES:
+        for every in FREQUENCIES:
+            totals = {
+                mode: sum(found[(case, every, mode, segment)][3] for segment in WORKLOADS)
+                for mode in MODES
+            }
+            baseline = min(totals["serial"], totals["parallel2"])
+            gain = (baseline - totals["routed"]) / baseline * 100.0
+            out.append(
+                f"| {case} | {every} "
+                f"| {totals['serial'] / 1000:.2f} ms "
+                f"| {totals['parallel2'] / 1000:.2f} ms "
+                f"| {totals['routed'] / 1000:.2f} ms "
+                f"| {gain:+.1f}% |"
+            )
+
+    out += [
+        "",
+        "Totals sum actual sampled frame times; do not sum p50 medians.",
         "A positive gain is provisional evidence; repeated ABBA runs, "
         "tail-latency and memory analysis are required before product changes.",
         "",
