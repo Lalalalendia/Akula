@@ -1,6 +1,13 @@
 use super::*;
 
 impl TextEditor {
+    // Regression hook: a second caret with no selection must still prevent
+    // sharing layout state with the next tab (the active cursor is not unique).
+    pub(crate) fn set_secondary_caret_for_test(this: &mut WidgetMut<'_, Self>, offset: usize) {
+        this.widget.extra_cursors.push((offset, offset));
+        this.ctx.request_layout();
+    }
+
     pub fn selected(&self) -> String {
         self.selected_text().unwrap_or_default()
     }
