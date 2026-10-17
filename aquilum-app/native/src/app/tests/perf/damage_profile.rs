@@ -120,10 +120,10 @@ fn run_damage_profile(name: &str, scale: f64, width: u32, height: u32) {
     let total_raster_pixels: u64 = partial.iter().map(|s| s.raster_pixels).sum();
     assert!(total_raster_pixels > 0, "{name}: no rasterized pixels in scroll workload");
     eprintln!(
-        "DAMAGE_COVERAGE case={name} frames=47 screen_pixels={} \\
-         raster_p50_pct={coverage_p50:.3} raster_p95_pct={coverage_p95:.3} \\
-         raster_max_pct={max_coverage:.3} shifted_p50_pct={shifted_p50:.3} \\
-         shifted_p95_pct={shifted_p95:.3} max_final_rects={max_final_rects} \\
+        "DAMAGE_COVERAGE case={name} frames=47 screen_pixels={} \
+         raster_p50_pct={coverage_p50:.3} raster_p95_pct={coverage_p95:.3} \
+         raster_max_pct={max_coverage:.3} shifted_p50_pct={shifted_p50:.3} \
+         shifted_p95_pct={shifted_p95:.3} max_final_rects={max_final_rects} \
          empty_rasters={empty_rasters} total_raster_pixels={total_raster_pixels}",
         u64::from(w) * u64::from(hh)
     );
