@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Cancel outdated checks for the same PR after a new commit. Other PRs stay independent.
+concurrency:
+  group: main-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     name: Main PR gate
