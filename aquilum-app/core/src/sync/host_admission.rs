@@ -309,6 +309,11 @@ impl<'a> RegisteredReadAdmission<'a> {
 
         let leaf = relative.as_str().rsplit('/').next()
             .ok_or(LocalCreateError::InvalidStagedIntent)?;
+        // A FULL-sync SQLite INSERT is the last admission barrier before
+        // creating the first stage file. Uncertain results, crashes and even
+        // successful publications leave this durable one-shot claim intact.
+        // A different process or later run must inspect, never blindly retry.
+        journal.record_local_publication_attempt_once(&record.intent)?;
         let outcome = local_create::create_with_hook(
             &parent, leaf, operation, &bytes, before_publish,
         ).map_err(|error| match error {
