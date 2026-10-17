@@ -1,0 +1,308 @@
+//! Stage 04g-3b-0: durable, inert preservation of already-verified originals.
+//!
+//! The backup is a SQLite BLOB in a *host-selected app-data database*, never
+//! in the synced workspace. SQLite WAL + FULL synchronous protects committed
+//! preimages across process restarts. Persisting bytes here is NOT a verified
+//! source-file read and never authorizes a local overwrite or a VaultPort
+//! PreservationReceipt. No mutation executor calls this module yet.
+//!
+//! The host must later bind it to the pinned root, editor admission, expected
+//! on-disk hash and exclusive File Gate operation. This module cannot itself
+//! prove those conditions or the integrity of the underlying storage device.
+
+use super::{OperationId, SyncRelativePath};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::path::Path;
+
+const SCHEMA_VERSION: i64 = 1;
+pub(crate) const MAX_PROTECTED_ORIGINAL_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Debug)]
+pub(crate) enum ProtectionStoreError {
+    Sqlite(rusqlite::Error),
+    UnsupportedSchema(i64),
+    WrongContentHash,
+    TooLarge,
+    OperationCollision,
+    CorruptedRecord,
+}
+
+impl From<rusqlite::Error> for ProtectionStoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sqlite(error)
+    }
+}
+
+pub(crate) type ProtectionResult<T> = Result<T, ProtectionStoreError>;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ProtectionOutcome {
+    Stored,
+    AlreadyStored,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProtectedOriginal {
+    pub operation_id: OperationId,
+    pub path: SyncRelativePath,
+    pub content_hash: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Does not implement VaultPort, expose PreservationReceipt or hold permission
+/// to write any user document. Intended only for a future trusted host bridge.
+#[allow(dead_code)]
+pub(crate) struct SqliteProtectionStore {
+    connection: Connection,
+}
+
+#[allow(dead_code)]
+impl SqliteProtectionStore {
+    /// Caller supplies a trusted private app-data path OUTSIDE the workspace.
+    /// Never derive this path from a remote manifest or SyncRelativePath.
+    pub(crate) fn open(app_data_database: &Path) -> ProtectionResult<Self> {
+        let connection = Connection::open(app_data_database)?;
+        connection.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = FULL;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 5000;",
+        )?;
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        match version {
+            0 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE protected_originals (
+                    operation_id TEXT PRIMARY KEY NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    byte_length INTEGER NOT NULL
+                        CHECK (byte_length BETWEEN 0 AND 33554432),
+                    original_bytes BLOB NOT NULL
+                 );
+                 PRAGMA user_version = 1;
+                 COMMIT;",
+            )?,
+            SCHEMA_VERSION => (),
+            other => return Err(ProtectionStoreError::UnsupportedSchema(other)),
+        };
+        Ok(Self { connection })
+    }
+
+    /// Persists a supplied preimage after checking BLAKE3, in a FULL-sync
+    /// SQLite transaction. It does NOT assert the bytes still belong to a
+    /// registered workspace file: only an OS-pinned host reader can do that.
+    ///
+    /// Same operation ID/path/hash/bytes is idempotent; any other reuse of
+    /// this ID fails without touching the existing original.
+    pub(crate) fn store_preimage(
+        &mut self,
+        operation_id: OperationId,
+        path: &SyncRelativePath,
+        expected_hash: &str,
+        bytes: &[u8],
+    ) -> ProtectionResult<ProtectionOutcome> {
+        if bytes.len() > MAX_PROTECTED_ORIGINAL_BYTES {
+            return Err(ProtectionStoreError::TooLarge);
+        }
+        let calculated = blake3::hash(bytes).to_hex().to_string();
+        if calculated != expected_hash {
+            return Err(ProtectionStoreError::WrongContentHash);
+        }
+
+        let transaction =
+            self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) = load_one(&transaction, operation_id)? {
+            if existing.path != *path || existing.content_hash != expected_hash
+                || existing.bytes != bytes
+            {
+                return Err(ProtectionStoreError::OperationCollision);
+            }
+            return Ok(ProtectionOutcome::AlreadyStored);
+        }
+        transaction.execute(
+            "INSERT INTO protected_originals
+             (operation_id, relative_path, content_hash, byte_length, original_bytes)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                operation_id.to_string(),
+                path.as_str(),
+                expected_hash,
+                bytes.len() as i64,
+                bytes,
+            ],
+        )?;
+        transaction.commit()?;
+
+        // The committed backup must be readable and exactly match its digest
+        // before any higher-level host may rely on this persistence result.
+        let after = load_one(&self.connection, operation_id)?
+            .ok_or(ProtectionStoreError::CorruptedRecord)?;
+        if after.path != *path || after.content_hash != expected_hash || after.bytes != bytes {
+            return Err(ProtectionStoreError::CorruptedRecord);
+        }
+        Ok(ProtectionOutcome::Stored)
+    }
+
+    /// A validated copy, not an authority-bearing receipt.
+    pub(crate) fn read_preimage(
+        &self,
+        operation_id: OperationId,
+    ) -> ProtectionResult<Option<ProtectedOriginal>> {
+        load_one(&self.connection, operation_id)
+    }
+}
+
+fn load_one(
+    connection: &Connection,
+    id: OperationId,
+) -> ProtectionResult<Option<ProtectedOriginal>> {
+    let record: Option<(String, String, i64, Vec<u8>)> = connection.query_row(
+        "SELECT relative_path, content_hash, byte_length, original_bytes
+         FROM protected_originals WHERE operation_id = ?1",
+        [id.to_string()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).optional()?;
+    let Some((raw_path, content_hash, stored_len, bytes)) = record else {
+        return Ok(None);
+    };
+    if bytes.len() > MAX_PROTECTED_ORIGINAL_BYTES
+        || stored_len != bytes.len() as i64
+        || content_hash != blake3::hash(&bytes).to_hex().to_string()
+    {
+        return Err(ProtectionStoreError::CorruptedRecord);
+    }
+    let path = SyncRelativePath::parse(&raw_path)
+        .map_err(|_| ProtectionStoreError::CorruptedRecord)?;
+    if path.as_str() != raw_path {
+        return Err(ProtectionStoreError::CorruptedRecord);
+    }
+    Ok(Some(ProtectedOriginal {
+        operation_id: id,
+        path,
+        content_hash,
+        bytes,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn path(raw: &str) -> SyncRelativePath {
+        SyncRelativePath::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn protection_store_survives_reopen_without_touching_original_file() {
+        let root = tempfile::tempdir().unwrap();
+        let db = root.path().join("appdata").join("protection.sqlite3");
+        fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let original = root.path().join("user-document.md");
+        let bytes = "Глава 140 😀\n".as_bytes();
+        fs::write(&original, bytes).unwrap();
+        let id = OperationId::new();
+        let digest = blake3::hash(bytes).to_hex().to_string();
+        let p = path("notes/Глава 140.md");
+        {
+            let mut store = SqliteProtectionStore::open(&db).unwrap();
+            assert_eq!(
+                store.store_preimage(id, &p, &digest, bytes).unwrap(),
+                ProtectionOutcome::Stored
+            );
+        }
+        let store = SqliteProtectionStore::open(&db).unwrap();
+        let restored = store.read_preimage(id).unwrap().unwrap();
+        assert_eq!(restored.bytes, bytes);
+        assert_eq!(restored.path, p);
+        assert_eq!(restored.content_hash, digest);
+        assert_eq!(fs::read(original).unwrap(), bytes);
+    }
+
+    #[test]
+    fn same_operation_is_idempotent_and_never_replaces_an_original() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("protection.sqlite");
+        let mut store = SqliteProtectionStore::open(&db).unwrap();
+        let id = OperationId::new();
+        let bytes = b"first original";
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        let p = path("notes/a.md");
+        assert_eq!(store.store_preimage(id, &p, &hash, bytes).unwrap(), ProtectionOutcome::Stored);
+        assert_eq!(
+            store.store_preimage(id, &p, &hash, bytes).unwrap(),
+            ProtectionOutcome::AlreadyStored
+        );
+        assert!(matches!(
+            store.store_preimage(id, &path("notes/b.md"), &hash, bytes),
+            Err(ProtectionStoreError::OperationCollision)
+        ));
+        let modified = b"other original";
+        let modified_hash = blake3::hash(modified).to_hex().to_string();
+        assert!(matches!(
+            store.store_preimage(id, &p, &modified_hash, modified),
+            Err(ProtectionStoreError::OperationCollision)
+        ));
+        assert_eq!(store.read_preimage(id).unwrap().unwrap().bytes, bytes);
+    }
+
+    #[test]
+    fn wrong_hash_and_unbounded_payload_refuse_before_persisting() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = SqliteProtectionStore::open(&temp.path().join("p.sqlite")).unwrap();
+        let id = OperationId::new();
+        let p = path("notes/a.md");
+        assert!(matches!(
+            store.store_preimage(id, &p, "wrong", b"actual"),
+            Err(ProtectionStoreError::WrongContentHash)
+        ));
+        let too_big = vec![0u8; MAX_PROTECTED_ORIGINAL_BYTES + 1];
+        let hash = blake3::hash(&too_big).to_hex().to_string();
+        assert!(matches!(
+            store.store_preimage(id, &p, &hash, &too_big),
+            Err(ProtectionStoreError::TooLarge)
+        ));
+        assert!(store.read_preimage(id).unwrap().is_none());
+        let empty_hash = blake3::hash(b"").to_hex().to_string();
+        assert_eq!(
+            store.store_preimage(id, &p, &empty_hash, b"").unwrap(),
+            ProtectionOutcome::Stored
+        );
+    }
+
+    #[test]
+    fn corruption_in_persisted_bytes_or_metadata_fails_closed() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = SqliteProtectionStore::open(&temp.path().join("p.sqlite")).unwrap();
+        let id = OperationId::new();
+        let data = b"protected bytes";
+        let hash = blake3::hash(data).to_hex().to_string();
+        store.store_preimage(id, &path("notes/a.md"), &hash, data).unwrap();
+        store.connection.execute(
+            "UPDATE protected_originals SET original_bytes = ?1 WHERE operation_id = ?2",
+            params![b"corrupted bytes".as_slice(), id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            store.read_preimage(id),
+            Err(ProtectionStoreError::CorruptedRecord)
+        ));
+        assert!(matches!(
+            store.store_preimage(id, &path("notes/a.md"), &hash, data),
+            Err(ProtectionStoreError::CorruptedRecord)
+        ));
+    }
+
+    #[test]
+    fn unknown_future_schema_fails_closed_without_migrating_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("p.sqlite");
+        let store = SqliteProtectionStore::open(&db).unwrap();
+        store.connection.pragma_update(None, "user_version", 2).unwrap();
+        drop(store);
+        assert!(matches!(
+            SqliteProtectionStore::open(&db),
+            Err(ProtectionStoreError::UnsupportedSchema(2))
+        ));
+    }
+}
