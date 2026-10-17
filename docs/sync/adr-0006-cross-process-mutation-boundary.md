@@ -128,3 +128,15 @@ A private Core host first rejects journal locations under the registered vault, 
 - A power-cut recovery test is distinct from child-process exit. Windows parent-directory / NT rename durability under a real power failure remains **unverified**. No new user-facing Sync features are authorized by this ledger.
 
 **Cross-platform acceptance:** exact-head core tests, migrations from v4 and legacy v1–v3, two independent SQLite connections rejecting stale revision, corrupt digest / missing archive / wrong-vault tests, plus Windows/macOS/Linux review safety matrix. No mutation-based recovery until separately reviewed.
+
+## SYNC-04g-M1d-d — native read-only recovery status
+
+The native **Settings → Sync recovery** section shows only metadata from an **already existing** host-app-data Sync operations journal. Opening Settings never creates or migrates the journal. The canonical future journal name is `sync-operations.sqlite3` under the trusted native `Workspace.data_dir`; this is not evidence that the currently disabled production Sync runtime has started writing it.
+
+- The Core bridge first validates the selected, registered vault with the pinned File Gate identity contract. It refuses app-data roots nested within the vault (or vice versa), symlink/hardlink journal aliases, unknown schemas, unreadable/invalid records and oversized previews. SQLite opens in **read-only, query-only** mode with no migrations, recovery, cleanup or mutation authority.
+- The view distinguishes **not configured**, **this journal has no local publication claims**, **historical unresolved attempts** (bounded to five path examples) and **inspection unavailable**. In particular, no-claims/not-configured MUST NOT be worded as a successful cloud sync, verified S3 listing or proof that files are safe.
+- The new native section uses existing Masonry Settings primitives and English/Russian localization. All controls are passive status indicators; no approval, retry, quarantine, export, file deletion, upload, baseline confirmation or key-management controls exist. Public Core API exports only this metadata-only summary and never forensic archived file BLOBs.
+- Settings UI loads the journal only while the Sync section is actually selected, not on every unrelated settings change. The screen deliberately does not identify an authenticated human operator. M1d-c review intents remain internal until separate identity/consent UI gates.
+- Tests cover failure to initialize an absent DB from UI, no migrations for old schema, wrong registered vault, in-vault journal, Unix symlink/hardlink journal aliases, bounded metadata and UI schema absence of writable controls. Dedicated core OS matrix and full native workspace CI must pass before merge.
+
+**Still blocked:** production Sync executor, cloud provider activation, plaintext forensic archive encryption/ACL/retention cleanup, genuine native authenticated review confirmation, physical preservation/quarantine decisions, and Windows power-loss directory durability. Current metadata-only section does not release SYNC-04 for production.

@@ -1,4 +1,6 @@
-use super::release::{ENDPOINT, PUBLIC_KEY, newer, verify};
+use super::release::{channel_ready, ENDPOINT, PUBLIC_KEY, newer};
+use super::{available, Status, Updater};
+use std::sync::Arc;
 
 #[test]
 fn versions_compare_numerically() {
@@ -9,13 +11,18 @@ fn versions_compare_numerically() {
 }
 
 #[test]
-#[ignore]
-fn verifies_real_release_signature() {
-    let manifest: serde_json::Value = serde_json::from_reader(aquilum_core::web_agent::web_agent("updates").get(ENDPOINT).call().unwrap().into_reader()).unwrap();
-    let platform = &manifest["platforms"]["windows-x86_64"];
-    let mut data = Vec::new();
-    std::io::Read::read_to_end(&mut aquilum_core::web_agent::web_agent("updates").get(platform["url"].as_str().unwrap()).call().unwrap().into_reader(), &mut data).unwrap();
-    verify(&data, platform["signature"].as_str().unwrap(), PUBLIC_KEY).unwrap();
-    data[100] ^= 1;
-    assert!(verify(&data, platform["signature"].as_str().unwrap(), PUBLIC_KEY).is_err());
+fn no_upstream_update_channel_is_available() {
+    assert_eq!(ENDPOINT, "https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json");
+    assert!(PUBLIC_KEY.is_empty(), "an Akula signing key must be provisioned separately");
+    assert!(!channel_ready());
+    assert!(!available(), "installed builds must not offer an upstream Aquilum update");
+}
+
+#[test]
+fn disabled_update_channel_never_starts_network_work() {
+    let updater = Updater::new(Arc::new(|| {}));
+    updater.check();
+    assert_eq!(updater.status(), Status::Idle);
+    updater.install();
+    assert_eq!(updater.status(), Status::Idle);
 }

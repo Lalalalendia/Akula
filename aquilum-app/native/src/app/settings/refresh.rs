@@ -18,7 +18,7 @@ impl App {
         let offset = dialog.content.get(root).map(|area| area.inner().offset());
         let switches = switch_travel(root, &dialog.bindings);
         let config = self.workspace.core.settings.get_config();
-        let ctx = self.settings_context(dialog.copied, dialog.trash_page);
+        let ctx = self.settings_context(dialog.section, dialog.copied, dialog.trash_page);
         let (card, finish) = settings::card(&config, &ctx, dialog.section);
         root.edit_widget(dialog.layer, |mut w| Modal::set_card(&mut w.downcast(), card, &crate::i18n::t("settings.title")));
         let fresh = finish(dialog.layer);
@@ -61,7 +61,7 @@ impl App {
         dialog.trash_page = 0;
         self.interface.set_settings_section(section.key());
         let config = self.workspace.core.settings.get_config();
-        let ctx = self.settings_context(None, 0);
+        let ctx = self.settings_context(section, None, 0);
         let (content, bindings) = settings::content(&config, &ctx, section);
         dialog.bindings = bindings;
         dialog.content.edit(root, |mut area| {
@@ -74,7 +74,7 @@ impl App {
         let Some(Popup::Settings { dialog, .. }) = &self.popup else { return };
         let (section, copied, page) = (dialog.section, dialog.copied, dialog.trash_page);
         let config = self.workspace.core.settings.get_config();
-        let ctx = self.settings_context(copied, page);
+        let ctx = self.settings_context(section, copied, page);
         let (content, bindings) = settings::content(&config, &ctx, section);
         let Some(Popup::Settings { dialog, .. }) = &mut self.popup else { return };
         let switches = switch_travel(root, &dialog.bindings);

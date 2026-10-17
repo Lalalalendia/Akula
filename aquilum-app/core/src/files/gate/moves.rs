@@ -129,7 +129,7 @@ fn relocating<T>(
         // Lock preflight enumeration, rename and all link rewrites as one
         // in-process filesystem critical section. History and UI callbacks
         // run only after releasing the lock.
-        let _guard = core.file_mutation_guard()?;
+        let _guard = core.file_mutation_guard_for_write()?;
         // Deny before the primary file rename, including directory moves.
         // Never acquire the HistoryService mutex while File Gate is held.
         admit_vault_relocation(core, from, to)?;

@@ -5,7 +5,7 @@
 
 use super::store;
 use crate::files::error::FileCommandError;
-use crate::search::paths::{identity, same_path};
+use crate::search::paths::{identity, same_path, strip_root};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -17,6 +17,31 @@ const SCHEMA: u32 = 1;
 const MAX_INTENT_BYTES: u64 = 16 * 1024 * 1024;
 const JOURNAL_FOLDER: &str = "history-moves";
 const JOURNAL_FILE: &str = "pending-v1.json";
+const CROSS_VAULT_HOLD_FILE: &str = "cross-vault-hold-v1.json";
+const MAX_CROSS_VAULT_HOLD_BYTES: u64 = 4096;
+
+// This is a read-only, untrusted stop signal. No production writer, pair
+// admission, move, cleanup, or automatic release exists in 04g-3b-7c-a.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CrossVaultHoldSide {
+    Source,
+    Destination,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CrossVaultHold {
+    schema: u32,
+    operation_id: String,
+    side: CrossVaultHoldSide,
+    source_vault: String,
+    destination_vault: String,
+    source_note: String,
+    destination_note: String,
+    primary_blake3: String,
+    history_inventory_blake3: String,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct MoveIntent {
@@ -134,8 +159,82 @@ fn read_pending(vault: &Path) -> io::Result<Option<MoveIntent>> {
     Ok(Some(intent))
 }
 
+fn cross_vault_hold_path(vault: &Path) -> PathBuf {
+    journal_dir(vault).join(CROSS_VAULT_HOLD_FILE)
+}
+
+/// A single side is enough to stop local history changes, including on a
+/// destination-only Core after restart. Even a matching pair is NOT a
+/// prepare/commit authorization: two pathname markers are not atomic and
+/// cannot exclude independent or noncooperating processes.
+fn read_cross_vault_hold(vault: &Path) -> io::Result<bool> {
+    let dir = checked_journal(vault)?;
+    if !ordinary(&dir, true)? {
+        return Ok(false);
+    }
+    let marker = cross_vault_hold_path(vault);
+    if !ordinary(&marker, false)? {
+        return Ok(false);
+    }
+    let mut file = File::open(&marker)?;
+    if file.metadata()?.len() > MAX_CROSS_VAULT_HOLD_BYTES {
+        return Err(denied("oversize cross-vault hold marker"));
+    }
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(MAX_CROSS_VAULT_HOLD_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_CROSS_VAULT_HOLD_BYTES {
+        return Err(denied("oversize cross-vault hold marker"));
+    }
+    let record: CrossVaultHold = serde_json::from_slice(&bytes)
+        .map_err(|error| denied(format!("invalid cross-vault hold marker: {error}")))?;
+    let transaction = uuid::Uuid::parse_str(&record.operation_id)
+        .map_err(|_| denied("invalid cross-vault hold transaction id"))?;
+    let lowercase_blake3 = |value: &str| {
+        value.len() == 64 && value.bytes().all(|byte| {
+            byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+        })
+    };
+    let checked_note = |root: &str, note: &str| {
+        let path = Path::new(note);
+        let root = Path::new(root);
+        root.is_absolute()
+            && path.is_absolute()
+            && !root.components().any(|part| {
+                matches!(part, std::path::Component::ParentDir | std::path::Component::CurDir)
+            })
+            && !path.components().any(|part| {
+                matches!(part, std::path::Component::ParentDir | std::path::Component::CurDir)
+            })
+            && strip_root(root, path).is_some_and(|relative| !relative.as_os_str().is_empty())
+    };
+    let expected_side_vault = match record.side {
+        CrossVaultHoldSide::Source => &record.source_vault,
+        CrossVaultHoldSide::Destination => &record.destination_vault,
+    };
+    if record.schema != 1
+        || transaction.is_nil()
+        || record.source_vault == record.destination_vault
+        || identity(Path::new(&record.source_vault)) != record.source_vault
+        || identity(Path::new(&record.destination_vault)) != record.destination_vault
+        || expected_side_vault != &identity(vault)
+        || !checked_note(&record.source_vault, &record.source_note)
+        || !checked_note(&record.destination_vault, &record.destination_note)
+        || !lowercase_blake3(&record.primary_blake3)
+        || !lowercase_blake3(&record.history_inventory_blake3)
+    {
+        return Err(denied("invalid cross-vault hold identity, digest or schema"));
+    }
+    Ok(true)
+}
+
 pub(super) fn pending(vault: &Path) -> io::Result<bool> {
-    Ok(read_pending(vault)?.is_some())
+    // Check both records, even if the legacy marker already exists. Never let
+    // one valid journal conceal corruption or an unsafe alias in the other.
+    let legacy = read_pending(vault)?;
+    let bilateral_hold = read_cross_vault_hold(vault)?;
+    Ok(legacy.is_some() || bilateral_hold)
 }
 
 fn fingerprint(path: &Path) -> io::Result<String> {
@@ -324,6 +423,102 @@ pub(super) fn transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_cross_vault_test_hold(
+        owner: &Path,
+        source: &Path,
+        destination: &Path,
+        side: &str,
+    ) -> serde_json::Value {
+        let record = serde_json::json!({
+            "schema": 1,
+            "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+            "side": side,
+            "source_vault": identity(source),
+            "destination_vault": identity(destination),
+            "source_note": identity(&source.join("Original.md")),
+            "destination_note": identity(&destination.join("Transferred.md")),
+            "primary_blake3": blake3::hash(b"original").to_hex().to_string(),
+            "history_inventory_blake3": blake3::hash(b"inventory").to_hex().to_string(),
+        });
+        ensure_journal(owner).unwrap();
+        fs::write(cross_vault_hold_path(owner), serde_json::to_vec(&record).unwrap()).unwrap();
+        record
+    }
+
+    #[test]
+    fn history_cross_vault_hold_marker_is_visible_from_either_independent_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        assert!(!pending(&source).unwrap());
+        assert!(!pending(&destination).unwrap());
+        write_cross_vault_test_hold(&source, &source, &destination, "source");
+        assert!(pending(&source).unwrap());
+        assert!(!pending(&destination).unwrap());
+        write_cross_vault_test_hold(&destination, &source, &destination, "destination");
+        assert!(pending(&source).unwrap());
+        assert!(pending(&destination).unwrap());
+        // Both matching markers remain HOLD, never an implicit commit receipt.
+        assert!(cross_vault_hold_path(&source).exists());
+        assert!(cross_vault_hold_path(&destination).exists());
+    }
+
+    #[test]
+    fn history_cross_vault_hold_rejects_corruption_future_fields_and_wrong_owner() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        let good = write_cross_vault_test_hold(&destination, &source, &destination, "destination");
+        let marker = cross_vault_hold_path(&destination);
+
+        for broken in [
+            b"{\"partial\":".to_vec(),
+            vec![b'A'; 4097],
+            serde_json::to_vec(&serde_json::json!({"schema": 99})).unwrap(),
+        ] {
+            fs::write(&marker, broken).unwrap();
+            assert!(pending(&destination).is_err());
+        }
+        for patch in [
+            serde_json::json!({"schema": 2}),
+            serde_json::json!({"side": "source"}),
+            serde_json::json!({"source_vault": identity(&destination)}),
+            serde_json::json!({"operation_id": "not-a-uuid"}),
+            serde_json::json!({"primary_blake3": "forged"}),
+            serde_json::json!({"unexpected_write_authority": true}),
+        ] {
+            let mut record = good.clone();
+            for (key, value) in patch.as_object().unwrap() {
+                record[key] = value.clone();
+            }
+            fs::write(&marker, serde_json::to_vec(&record).unwrap()).unwrap();
+            assert!(pending(&destination).is_err(), "unsafe record accepted: {record}");
+        }
+        fs::write(&marker, serde_json::to_vec(&good).unwrap()).unwrap();
+        assert!(pending(&destination).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_cross_vault_hold_symlink_marker_is_never_followed() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        let _good = write_cross_vault_test_hold(&source, &source, &destination, "source");
+        let outside = temp.path().join("outside.json");
+        fs::rename(cross_vault_hold_path(&source), &outside).unwrap();
+        symlink(&outside, cross_vault_hold_path(&source)).unwrap();
+        assert!(pending(&source).is_err());
+        assert!(fs::read(outside).unwrap().starts_with(b"{"));
+    }
 
     #[test]
     fn recovery_rejects_deleted_version_even_when_source_is_missing() {

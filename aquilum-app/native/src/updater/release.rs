@@ -1,7 +1,14 @@
 use base64::Engine;
 
-pub(super) const ENDPOINT: &str = "https://github.com/Freaction/Aquilum/releases/latest/download/latest.json";
-pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI4QTY0MzM1MDczQUNDMTQKUldRVXpEb0hOVU9tdUFCWnVMRWlBVTRGWmlFOW0wd2VteVlXd3luMFAyMmczWktQbkRvVmhTQSsK";
+pub(super) const ENDPOINT: &str = "https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json";
+// No Akula signing key is provisioned. Never reuse the Aquilum signing key.
+pub(super) const PUBLIC_KEY: &str = "";
+
+/// Intentionally fail closed until a separately signed Akula release stream
+/// exists, with a tested upgrade/migration path and a pinned Akula public key.
+pub(super) const fn channel_ready() -> bool {
+    false
+}
 
 #[derive(Clone)]
 pub(super) struct Release {
