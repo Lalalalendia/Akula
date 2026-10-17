@@ -146,6 +146,8 @@ pub struct AwsS3ProbeClient {
     client: aws_sdk_s3::Client,
     bucket: String,
     keyspace: S3Keyspace,
+    /// Non-secret endpoint/bucket/region identity used to bind durable anchors.
+    profile: S3ConnectionProfile,
 }
 
 impl AwsS3ProbeClient {
@@ -155,7 +157,7 @@ impl AwsS3ProbeClient {
     ) -> Result<Self, S3TransportError> {
         profile.validate()?;
         let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(profile.region))
+            .region(aws_config::Region::new(profile.region.clone()))
             .timeout_config(
                 aws_config::timeout::TimeoutConfig::builder()
                     .connect_timeout(Duration::from_secs(5))
@@ -166,7 +168,7 @@ impl AwsS3ProbeClient {
             .await;
         let mut config = aws_sdk_s3::config::Builder::from(&shared)
             .force_path_style(profile.force_path_style);
-        if let Some(endpoint) = profile.endpoint {
+        if let Some(endpoint) = profile.endpoint.clone() {
             config = config.endpoint_url(endpoint);
         } else {
             // AWS_ENDPOINT_URL[_S3] and shared ~/.aws/config can otherwise
@@ -176,9 +178,18 @@ impl AwsS3ProbeClient {
         }
         Ok(Self {
             client: aws_sdk_s3::Client::from_conf(config.build()),
-            bucket: profile.bucket,
+            bucket: profile.bucket.clone(),
             keyspace,
+            profile,
         })
+    }
+
+    pub(super) fn bound_profile(&self) -> &S3ConnectionProfile {
+        &self.profile
+    }
+
+    pub(super) fn bound_keyspace(&self) -> &S3Keyspace {
+        &self.keyspace
     }
 
     fn checked_key(&self, key: &str) -> Result<(), S3TransportError> {
