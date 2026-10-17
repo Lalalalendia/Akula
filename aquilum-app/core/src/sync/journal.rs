@@ -10,11 +10,13 @@
 
 use super::{DocumentId, OperationId, RevisionId, SyncRelativePath, VaultId};
 use super::local_recovery::{self, ObservedLocalFile, ReadOnlyLocalPublicationEvidence};
+use super::recovery_review::{self, LocalRecoveryReviewEvent, LocalRecoveryReviewSnapshot,
+    RecoveryReviewDisposition, RECOVERY_REVIEW_RETENTION};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -210,6 +212,12 @@ pub enum JournalError {
     RecoveryCopyAlreadyRecorded,
     /// A forensic archive may only be stored in host-selected app-data, not inside the vault.
     UnsafeArchiveLocation,
+    /// Missing immutable archive means the incident cannot be reviewed yet.
+    MissingRecoveryArchive,
+    /// The operator must reconfirm when the displayed archive fingerprint differs.
+    StaleRecoveryReview,
+    /// Unsupported action or unbounded/control-character note.
+    InvalidRecoveryReview,
     /// The durable record already claims this operation or portable target.
     /// Never automatically replay an uncertain local publication.
     PublicationAttemptAlreadyRecorded,
@@ -296,7 +304,15 @@ impl SqliteSyncJournal {
                      final_bytes BLOB,
                      final_hash TEXT
                  );
-                 PRAGMA user_version = 4;
+                 CREATE TABLE sync_local_recovery_reviews (
+                     operation_id TEXT NOT NULL
+                         REFERENCES sync_local_recovery_copies(operation_id),
+                     sequence INTEGER NOT NULL CHECK(sequence > 0),
+                     review_json BLOB NOT NULL,
+                     review_digest TEXT NOT NULL,
+                     PRIMARY KEY(operation_id, sequence)
+                 );
+                 PRAGMA user_version = 5;
                  COMMIT;",
             )?,
             1 => connection.execute_batch(
@@ -325,7 +341,15 @@ impl SqliteSyncJournal {
                      final_bytes BLOB,
                      final_hash TEXT
                  );
-                 PRAGMA user_version = 4;
+                 CREATE TABLE sync_local_recovery_reviews (
+                     operation_id TEXT NOT NULL
+                         REFERENCES sync_local_recovery_copies(operation_id),
+                     sequence INTEGER NOT NULL CHECK(sequence > 0),
+                     review_json BLOB NOT NULL,
+                     review_digest TEXT NOT NULL,
+                     PRIMARY KEY(operation_id, sequence)
+                 );
+                 PRAGMA user_version = 5;
                  COMMIT;",
             )?,
             2 => connection.execute_batch(
@@ -344,7 +368,15 @@ impl SqliteSyncJournal {
                      final_bytes BLOB,
                      final_hash TEXT
                  );
-                 PRAGMA user_version = 4;
+                 CREATE TABLE sync_local_recovery_reviews (
+                     operation_id TEXT NOT NULL
+                         REFERENCES sync_local_recovery_copies(operation_id),
+                     sequence INTEGER NOT NULL CHECK(sequence > 0),
+                     review_json BLOB NOT NULL,
+                     review_digest TEXT NOT NULL,
+                     PRIMARY KEY(operation_id, sequence)
+                 );
+                 PRAGMA user_version = 5;
                  COMMIT;",
             )?,
             3 => connection.execute_batch(
@@ -357,7 +389,28 @@ impl SqliteSyncJournal {
                      final_bytes BLOB,
                      final_hash TEXT
                  );
-                 PRAGMA user_version = 4;
+                 CREATE TABLE sync_local_recovery_reviews (
+                     operation_id TEXT NOT NULL
+                         REFERENCES sync_local_recovery_copies(operation_id),
+                     sequence INTEGER NOT NULL CHECK(sequence > 0),
+                     review_json BLOB NOT NULL,
+                     review_digest TEXT NOT NULL,
+                     PRIMARY KEY(operation_id, sequence)
+                 );
+                 PRAGMA user_version = 5;
+                 COMMIT;",
+            )?,
+            4 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sync_local_recovery_reviews (
+                     operation_id TEXT NOT NULL
+                         REFERENCES sync_local_recovery_copies(operation_id),
+                     sequence INTEGER NOT NULL CHECK(sequence > 0),
+                     review_json BLOB NOT NULL,
+                     review_digest TEXT NOT NULL,
+                     PRIMARY KEY(operation_id, sequence)
+                 );
+                 PRAGMA user_version = 5;
                  COMMIT;",
             )?,
             SCHEMA_VERSION => {},
@@ -1269,7 +1322,8 @@ mod tests {
             journal.mark_staged(staged.operation_id, b"persist").unwrap();
             // Emulate the exact existing V1 tables/data, without the new table.
             journal.connection.execute_batch(
-                "DROP TABLE sync_local_recovery_copies;
+                "DROP TABLE sync_local_recovery_reviews;
+                 DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
                  DROP TABLE sync_local_publication_attempts;
                  PRAGMA user_version = 1;",
@@ -1478,7 +1532,8 @@ mod tests {
             j.mark_staged(staged.operation_id, b"payload").unwrap();
             j.record_local_publication_attempt_once(&staged).unwrap();
             j.connection.execute_batch(
-                "DROP TABLE sync_local_recovery_copies;
+                "DROP TABLE sync_local_recovery_reviews;
+                 DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
                  PRAGMA user_version = 2;",
             ).unwrap();
@@ -1590,7 +1645,8 @@ mod tests {
             journal.record_local_publication_attempt_once(&staged).unwrap();
             journal.record_local_recovery_case_once(&case).unwrap();
             journal.connection.execute_batch(
-                "DROP TABLE sync_local_recovery_copies;
+                "DROP TABLE sync_local_recovery_reviews;
+                 DROP TABLE sync_local_recovery_copies;
                  PRAGMA user_version = 3;",
             ).unwrap();
         }
