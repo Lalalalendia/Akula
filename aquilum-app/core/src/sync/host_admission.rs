@@ -14,6 +14,8 @@ use super::OperationId;
 use super::local_create::{self, UnconfirmedLocalCreate};
 use super::local_recovery::{self, ReadOnlyLocalPublicationEvidence};
 use super::journal::{LocalRecoveryArchivedCopy, LocalRecoveryEvidenceCase};
+use super::recovery_review::{LocalRecoveryReviewEvent, LocalRecoveryReviewSnapshot,
+    RecoveryReviewDisposition};
 use super::{DagStoreError, JournalAction, JournalError, JournalPhase, LocalFileSnapshot,
     SqliteDagStore, SqliteSyncJournal, SyncRelativePath, VaultPortError};
 use crate::app_core::Core;
@@ -547,6 +549,62 @@ impl<'a> RegisteredReadAdmission<'a> {
             operation, stage.as_deref(), final_name.as_deref(),
         )?;
         Ok(result)
+    }
+
+    /// Host-scoped, metadata-only operator preview. The native UI must still
+    /// authenticate an actual local operator and obtain explicit confirmation;
+    /// the internal API alone does not prove identity or UI consent.
+    pub(crate) fn recovery_operator_preview(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+    ) -> Result<LocalRecoveryReviewSnapshot, LocalRecoveryError> {
+        self.check_root()?;
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        let preview = journal.recovery_review_snapshot(operation)?;
+        if preview.vault_id.as_uuid() != self.workspace_id {
+            return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+        }
+        self.check_root()?;
+        Ok(preview)
+    }
+
+    /// Only two safe dispositions exist: KeepBlocked and EscalateManualReview.
+    /// This records an explicit, revision-bound review event in app-data.
+    /// There is NO code path to move/delete/retry a user file or clear an
+    /// M1b one-shot publication claim or remote Sync baseline.
+    pub(crate) fn record_recovery_operator_review(
+        &self,
+        operation: OperationId,
+        displayed_path: &SyncRelativePath,
+        displayed_archive_fingerprint: &str,
+        displayed_review_count: u32,
+        displayed_previous_digest: &str,
+        disposition: RecoveryReviewDisposition,
+        reason: &str,
+        journal: &mut SqliteSyncJournal,
+    ) -> Result<LocalRecoveryReviewEvent, LocalRecoveryError> {
+        let snapshot = self.recovery_operator_preview(operation, journal)?;
+        if snapshot.path != *displayed_path
+            || snapshot.archive_fingerprint != displayed_archive_fingerprint
+            || snapshot.review_count != displayed_review_count
+            || snapshot.latest_event_digest != displayed_previous_digest
+        {
+            return Err(LocalRecoveryError::Journal(JournalError::StaleRecoveryReview));
+        }
+        let target = self.root_path.join(displayed_path.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&target)
+            .map_err(admission_error)?;
+        let _gate = self.core.file_mutations.lock()
+            .map_err(|_| VaultPortError::PermissionDenied)?;
+        self.check_root()?;
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        let recorded = journal.append_recovery_review(
+            operation, super::VaultId::from_uuid(self.workspace_id),
+            displayed_path, displayed_archive_fingerprint,
+            displayed_review_count, displayed_previous_digest,
+            disposition, reason,
+        )?;
+        self.check_root()?;
+        Ok(recorded)
     }
 
     /// Bind file identity by pinned handles without reading bytes or taking
