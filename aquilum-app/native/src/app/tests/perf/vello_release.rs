@@ -51,6 +51,51 @@ fn quantiles(samples: &[Sample], f: impl Fn(&Sample) -> f64) -> [f64; 2] {
     percentiles(&values, [0.50, 0.95])
 }
 
+fn describe_difference(case: &str, step: u32, width: u16, lhs: &[u32], rhs: &[u32]) -> usize {
+    assert_eq!(lhs.len(), rhs.len(), "different framebuffer sizes");
+    let mut changed = 0usize;
+    let mut one_channel_step = 0usize;
+    let mut at_most_two = 0usize;
+    let mut max_channel = 0u8;
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (usize::MAX, usize::MAX, 0, 0);
+    let mut examples = Vec::new();
+    for (index, (&a, &b)) in lhs.iter().zip(rhs).enumerate() {
+        if a == b {
+            continue;
+        }
+        changed += 1;
+        let x = index % usize::from(width);
+        let y = index / usize::from(width);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+        let deltas = [0, 8, 16, 24].map(|shift| {
+            ((a >> shift) as u8).abs_diff((b >> shift) as u8)
+        });
+        let peak = deltas.into_iter().max().unwrap_or_default();
+        max_channel = max_channel.max(peak);
+        if peak <= 1 {
+            one_channel_step += 1;
+        }
+        if peak <= 2 {
+            at_most_two += 1;
+        }
+        if examples.len() < 12 {
+            examples.push(format!("({x},{y}):{a:08x}/{b:08x} peak={peak}"));
+        }
+    }
+    if changed != 0 {
+        eprintln!(
+            "VELLO_DIFF case={case} step={step} changed={changed} \
+             one_step={one_channel_step} within_two={at_most_two} \
+             max_channel={max_channel} bbox={min_x},{min_y},{max_x},{max_y} \
+             examples={examples:?}"
+        );
+    }
+    changed
+}
+
 fn trace_marks(case: &str) -> (&'static str, &'static str) {
     match case {
         "text_1x" => ("vello_text_1x_begin", "vello_text_1x_end"),
@@ -122,19 +167,38 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
             let a = draw(&mut serial, &layers, w, hh, scale, step == 0, "bench: serial frame");
             (a, b)
         };
-        let mismatch = serial.frame_pixels().iter()
-            .zip(parallel.frame_pixels())
-            .filter(|(a, b)| a != b)
-            .count();
+        let mismatch = describe_difference(
+            case, step, w, serial.frame_pixels(), parallel.frame_pixels(),
+        );
         assert_eq!(mismatch, 0, "{case}: serial/parallel pixels disagree on frame {step}");
 
         // Never fold pixel-validation work into the raster or frame samples.
         if matches!(step, 0 | 10 | 20 | 31) {
             let full = render_full(&layers, w, hh, scale);
-            let bad = full.frame_pixels().iter()
-                .zip(serial.frame_pixels())
-                .filter(|(a, b)| a != b)
-                .count();
+            let bad = describe_difference(
+                case, step, w, serial.frame_pixels(), full.frame_pixels(),
+            );
+            if bad != 0 {
+                let stats = serial.last_stages;
+                eprintln!(
+                    "VELLO_DIFF_WORK case={case} step={step} raster_pixels={}                      shifted_pixels={} final_rects={} encode_us={:.1} raster_us={:.1}",
+                    stats.raster_pixels, stats.shifted_pixels, stats.raster_rects,
+                    stats.encode.as_secs_f64() * 1e6,
+                    stats.raster.as_secs_f64() * 1e6
+                );
+                if let Some(output) = std::env::var_os("AQ_OUT") {
+                    let dir = std::path::PathBuf::from(output);
+                    std::fs::create_dir_all(&dir).unwrap();
+                    std::fs::write(
+                        dir.join(format!("{case}-step{step}-partial.png")),
+                        serial.png(),
+                    ).unwrap();
+                    std::fs::write(
+                        dir.join(format!("{case}-step{step}-full.png")),
+                        full.png(),
+                    ).unwrap();
+                }
+            }
             assert_eq!(bad, 0, "{case}: partial/full raster mismatch on frame {step}");
             parity_checks += 1;
         }
