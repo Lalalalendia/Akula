@@ -23,6 +23,8 @@ jobs:
     name: Release Vello coarse/fine attribution
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      AQ_OUT: ${{ github.workspace }}/vello-failed-frames
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -94,5 +96,6 @@ jobs:
             vello-traced.log
             vello-release-trace.json
             vello-release-summary.md
+            vello-failed-frames/*.png
           if-no-files-found: warn
           retention-days: 21
