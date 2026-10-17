@@ -217,7 +217,17 @@ pub fn write_version(
     snapshot: &Snapshot,
 ) -> Result<PathBuf, FileCommandError> {
     let label = snapshot.source.file_label();
-    let path = free_name(dir, millis(snapshot.at), |at| {
+    // Different source labels on one device must not reuse a millisecond:
+    // history ordering must reflect the actual write order.
+    let taken = versions(dir)
+        .into_iter()
+        .filter(|version| version.device == device)
+        .map(|version| version.at_ms)
+        .collect::<std::collections::HashSet<_>>();
+    let first_available = (millis(snapshot.at)..)
+        .find(|at| !taken.contains(at))
+        .unwrap_or_else(|| millis(snapshot.at));
+    let path = free_name(dir, first_available, |at| {
         format!("{at:013}_{device}_{label}{VERSION_EXTENSION}")
     });
     fs::create_dir_all(dir)?;
