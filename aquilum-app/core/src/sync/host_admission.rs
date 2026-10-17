@@ -382,22 +382,27 @@ impl<'a> RegisteredReadAdmission<'a> {
         )
     }
 
-    /// SYNC-05e-2: additive-only target publish for one durably registered S3
-    /// profile. It is deliberately NOT an overwrite/right-to-commit or a
-    /// proof of verified remote content. The caller must have staged exact
-    /// S3 bytes through the verified remote transport first.
+    /// SYNC-05e-6: S3 additive-only local publication under a PINNED,
+    /// held interprocess OS lock. Two cooperating Akula Core processes on the
+    /// same physical workspace cannot publish simultaneously through this API.
+    ///
+    /// The lock MUST pre-exist in external host custody and be durably bound
+    /// to the shared VaultId and physical root in app-data. No auto-bootstrap,
+    /// rewrite, or fallback on a missing/busy lock. Advisory locks alone cannot
+    /// stop a hostile same-user process replacing the lock's pathname.
+    /// Never grants baseline, overwrite, trash or cross-process File Gate rights.
     #[cfg(feature = "sync-s3")]
     pub(crate) fn create_staged_if_absent_for_registered_s3(
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         cache: &SqliteDagStore,
         bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
         profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+        custody: &super::filegate_custody_identity::SqliteCustodyIdentityStore,
+        custody_scope: &Path,
     ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
-        // Every lookup rechecks the Core registration and pinned root IDs.
-        // A newly constructed struct or an unverified manifest cannot replace
-        // this SQLite-backed binding check.
+        let denied = || LocalCreateError::Admission(VaultPortError::PermissionDenied);
         let binding = bindings.load_for_registered(self)
-            .map_err(|_| LocalCreateError::Admission(VaultPortError::PermissionDenied))?
+            .map_err(|_| denied())?
             .ok_or(LocalCreateError::InvalidStagedIntent)?;
         if !binding.matches_remote(profile, keyspace) {
             return Err(LocalCreateError::InvalidStagedIntent);
@@ -410,10 +415,57 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(LocalCreateError::InvalidStagedIntent);
         }
         journal.require_appdata_outside_vault(&self.root_path)?;
-        self.create_staged_with_bound_vault_and_hook(
+
+        // This initial scope verification releases its diagnostic probe lock.
+        // Acquire a NEW held lock and keep it throughout the actual operation.
+        let record = custody.verify_registered_s3(self, bindings, custody_scope)
+            .map_err(|_| denied())?;
+        if record.vault_id != binding.vault_id
+            || record.workspace_id != self.workspace_id
+            || (record.registered_root_volume, record.registered_root_file)
+                != (self.initial.0, self.initial.1)
+        {
+            return Err(denied());
+        }
+        let scope = super::filegate_lock_probe::PinnedProbeRoot::open(custody_scope)
+            .map_err(|_| denied())?;
+        if scope.identity() != (record.custody_scope_volume, record.custody_scope_file) {
+            return Err(denied());
+        }
+        let held = scope.try_lock().map_err(|_| denied())?
+            .ok_or_else(denied)?;
+        if held.identity() != (record.lock_volume, record.lock_file) {
+            return Err(denied());
+        }
+        held.recheck_held_name(&scope).map_err(|_| denied())?;
+        self.check_root()?;
+        if bindings.load_for_registered(self).map_err(|_| denied())?
+            .as_ref() != Some(&binding)
+        {
+            return Err(denied());
+        }
+
+        // The OS handle remains exclusively locked during journal's one-shot
+        // claim, native no-replace, pinned final readback, fsync and audit.
+        // Cooperative second processes sharing this lock cannot interleave.
+        let result = self.create_staged_with_bound_vault_and_hook(
             operation, journal, cache, binding.vault_id,
             Some(binding.profile_id.as_str()), || {},
-        )
+        );
+        if result.is_ok() {
+            // Post-publish substitution must produce HOLD, not a false ACK.
+            held.recheck_held_name(&scope)
+                .map_err(|_| LocalCreateError::PublicationUncertain)?;
+            self.check_root()
+                .map_err(|_| LocalCreateError::PublicationUncertain)?;
+            if bindings.load_for_registered(self)
+                .map_err(|_| LocalCreateError::PublicationUncertain)?
+                .as_ref() != Some(&binding)
+            {
+                return Err(LocalCreateError::PublicationUncertain);
+            }
+        }
+        result
     }
 
     fn create_staged_with_bound_vault_and_hook(
