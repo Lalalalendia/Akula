@@ -33,6 +33,7 @@ struct HistoryMoveBlock {
     from: String,
     to: String,
     reason: String,
+    affected_roots: Vec<PathBuf>,
 }
 
 static PROCESS_HISTORY_FILES: LazyLock<Mutex<HistoryFilesShared>> =
@@ -130,8 +131,13 @@ impl HistoryFilesStateGuard<'_> {
         Ok(())
     }
 
-    fn quarantine(&mut self, from: &str, to: &str, why: &str) {
-        let block = HistoryMoveBlock { from: from.to_owned(), to: to.to_owned(), reason: why.to_owned() };
+    fn quarantine(&mut self, from: &str, to: &str, affected_roots: &[&Path], why: &str) {
+        let block = HistoryMoveBlock {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            reason: why.to_owned(),
+            affected_roots: affected_roots.iter().map(|path| path.to_path_buf()).collect(),
+        };
         self.process.blocked.insert(from.to_owned(), block.clone());
         self.process.blocked.insert(to.to_owned(), block);
     }
@@ -523,11 +529,11 @@ impl HistoryService {
         if !allowed_history_directory(&source.vault, &source.dir)
             || !allowed_history_directory(&target.vault, &target.dir)
         {
-            state.quarantine(&source.key, &target.key, "unsafe history directory");
+            state.quarantine(&source.key, &target.key, &[source.vault.as_path(), target.vault.as_path()], "unsafe history directory");
             return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
         if let Err(error) = self.move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault) {
-            state.quarantine(&source.key, &target.key, &error.to_string());
+            state.quarantine(&source.key, &target.key, &[source.vault.as_path(), target.vault.as_path()], &error.to_string());
             return Err(HistoryMoveFailure::new(action, error, true));
         }
         let note = state.notes.remove(&source.key);
@@ -564,11 +570,11 @@ impl HistoryService {
         if !allowed_history_directory(&located.vault, &located.dir)
             || !allowed_history_directory(&trash, &target)
         {
-            state.quarantine(&located.key, &destination_key, "unsafe history directory");
+            state.quarantine(&located.key, &destination_key, &[located.vault.as_path()], "unsafe history directory");
             return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
         if let Err(error) = self.move_history(&located.dir, &target, Placement::Trash, &located.vault) {
-            state.quarantine(&located.key, &destination_key, &error.to_string());
+            state.quarantine(&located.key, &destination_key, &[located.vault.as_path()], &error.to_string());
             return Err(HistoryMoveFailure::new(action, error, true));
         }
         let note = state.notes.remove(&located.key);
@@ -604,11 +610,11 @@ impl HistoryService {
         if !allowed_history_directory(&trash, &source)
             || !allowed_history_directory(&located.vault, &located.dir)
         {
-            state.quarantine(&source_key, &located.key, "unsafe history directory");
+            state.quarantine(&source_key, &located.key, &[located.vault.as_path()], "unsafe history directory");
             return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
         if let Err(error) = self.move_history(&source, &located.dir, Placement::Workspace, &trash) {
-            state.quarantine(&source_key, &located.key, &error.to_string());
+            state.quarantine(&source_key, &located.key, &[located.vault.as_path()], &error.to_string());
             return Err(HistoryMoveFailure::new(action, error, true));
         }
         let note = state.notes.remove(&source_key);
@@ -682,8 +688,12 @@ impl HistoryService {
         let guard = PROCESS_HISTORY_FILES
             .lock()
             .map_err(|_| "process history-files lock poisoned; refusing cleanup")?;
-        if !guard.blocked.is_empty() {
-            return Err("history relocation pending; retention deferred");
+        // A failed transfer in one vault must not stall retention in every
+        // unrelated vault. The global lock is still held only during work.
+        if guard.blocked.values().any(|block| block.affected_roots.iter().any(|root| {
+            root.as_path() == workspace || trash_path(root).as_path() == workspace
+        })) {
+            return Err("history relocation pending in selected workspace; retention deferred");
         }
         store::adopt_quantum_history(workspace);
         store::adopt_quantum_history(&trash_path(workspace));
