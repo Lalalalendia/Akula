@@ -104,9 +104,21 @@ impl Renderer {
                 for &(x, y, w, h) in &damage.areas {
                     let parts = u32::from(strips).min(u32::from(h));
                     if parts == 0 { continue; }
-                    for slice in 0..parts {
-                        let start = u32::from(h) * slice / parts;
-                        let end = u32::from(h) * (slice + 1) / parts;
+                    let mut boundaries: Vec<u32> = (0..=parts)
+                        .map(|slice| u32::from(h) * slice / parts)
+                        .collect();
+                    if parts >= 2 && self.split_first_cut_bias_for_test != 0 {
+                        // Test-only boundary falsifier: change *only* the first
+                        // cut while retaining exact disjoint coverage and all
+                        // subsequent band boundaries. No painted pixel is added.
+                        let cut = i64::from(boundaries[1]) + i64::from(self.split_first_cut_bias_for_test);
+                        let min_cut = i64::from(boundaries[0]) + 1;
+                        let max_cut = i64::from(boundaries[2]) - 1;
+                        boundaries[1] = cut.clamp(min_cut, max_cut) as u32;
+                    }
+                    for slice in 0..parts as usize {
+                        let start = boundaries[slice];
+                        let end = boundaries[slice + 1];
                         fragmented.push((x, y + start as u16, w, (end - start) as u16));
                     }
                 }
