@@ -29,6 +29,14 @@ PREFIX = "masonry: "
 ROOT_ZONE = "masonry: rewrite passes"
 PAGE_BEGIN = "akula: note page edit begin"
 PAGE_END = "akula: note page edit end"
+PARAGRAPH_COUNTERS = (
+    "akula: paragraph built",
+    "akula: paragraph reused",
+    "akula: paragraph skipped",
+    "akula: paragraph rebroken",
+    "akula: paragraph shape micros",
+    "akula: paragraph rebreak micros",
+)
 
 
 def p95(values):
@@ -76,6 +84,12 @@ def profile(trace, expected_cycles=16):
              and start["ts"] <= e["ts"] <= stop["ts"]),
             key=lambda e: e["ts"],
         )
+        own_counters = sorted(
+            (e for e in events if e.get("ph") == "C" and e.get("tid") == tid
+             and e.get("name") in PARAGRAPH_COUNTERS
+             and start["ts"] <= e["ts"] <= stop["ts"]),
+            key=lambda e: e["ts"],
+        )
         samples = []
         for a, b in pairs:
             timings = defaultdict(float)
@@ -94,6 +108,17 @@ def profile(trace, expected_cycles=16):
                     counts[name] += 1
             if counts[ROOT_ZONE] != 1:
                 raise AssertionError(f"{size}: expected one rewrite per edit; got {counts[ROOT_ZONE]}")
+            counter_count = defaultdict(int)
+            for e in own_counters:
+                at = e["ts"]
+                if at < a:
+                    continue
+                if at > b:
+                    break
+                timings[e["name"]] += e["args"]["value"]
+                counter_count[e["name"]] += 1
+            if any(counter_count[name] == 0 for name in PARAGRAPH_COUNTERS):
+                raise AssertionError(f"{size}: missing per-paragraph trace counters in a page edit")
             timings["full_edit"] = (b - a) / 1000.0
             timings["outside_rewrite"] = max(0.0, timings["full_edit"] - timings[ROOT_ZONE])
             samples.append(timings)
@@ -103,6 +128,8 @@ def profile(trace, expected_cycles=16):
             "p95_ms": {field: round(p95([s.get(field, 0.0) for s in samples]), 4)
                        for field in ("full_edit", ROOT_ZONE, "outside_rewrite")
                        + tuple(PREFIX + name for name in PASSES)},
+            "paragraph_p95": {field: round(p95([s.get(field, 0.0) for s in samples]), 3)
+                              for field in PARAGRAPH_COUNTERS},
         }
         results.append(result)
     return results
@@ -130,8 +157,26 @@ def main():
         values = " | ".join(f"{r['p95_ms'][key]:.3f}" for r in results)
         print(f"| {label} | {values} |")
     print()
-    print("Exact one-page-edit and rewrite-zone count verified per switch. Full trace")
-    print("is retained as an artifact for inspection of nested widget layout zones.")
+    print("### Paragraph shaping and cache activity per page edit (p95)")
+    print()
+    print("| Metric | 64 KiB | 512 KiB | 4096 KiB |")
+    print("|---|---:|---:|---:|")
+    labels = (
+        ("akula: paragraph built", "New layouts, paragraphs", 1),
+        ("akula: paragraph reused", "Reused cached layouts, paragraphs", 1),
+        ("akula: paragraph skipped", "Skipped offscreen paragraphs", 1),
+        ("akula: paragraph rebroken", "Cached layouts rewrapped", 1),
+        ("akula: paragraph shape micros", "Time building new layouts, ms", 1/1000),
+        ("akula: paragraph rebreak micros", "Time rewrapping cached layouts, ms", 1/1000),
+    )
+    for key, label, scale in labels:
+        values = " | ".join(f"{r['paragraph_p95'][key] * scale:.3f}" for r in results)
+        print(f"| {label} | {values} |")
+    print()
+    print("Counter totals include all paragraph measurement invocations inside a single")
+    print("page edit. Per-column p95s are independent; they cannot be added.")
+    print("Each page edit has one verified rewrite zone and all six paragraph counters.")
+    print("The full trace remains as an artifact for deeper inspection.")
 
 
 if __name__ == "__main__":
