@@ -21,3 +21,14 @@ impl TextEditor {
         })
     }
 }
+
+impl TextEditor {
+    pub(crate) fn parley_trial_snapshot(&self) -> Option<super::super::LayoutTrialSnapshot> {
+        self.doc.trial_snapshot(&self.styles)
+    }
+
+    pub(crate) fn with_parley_trial(mut self, snapshot: super::super::LayoutTrialSnapshot) -> Self {
+        self.doc.trial_offer(snapshot);
+        self
+    }
+}
