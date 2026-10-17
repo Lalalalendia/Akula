@@ -417,7 +417,7 @@ mod tests {
             revision_id: record.id,
             action: JournalAction::StageDownload,
             path: relative.clone(),
-            remote_object_id: blob_key,
+            remote_object_id: blob_key.clone(),
             remote_guard: None,
             expected_content_hash: blob_hash.clone(),
             expected_baseline: None,
