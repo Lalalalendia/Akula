@@ -123,6 +123,9 @@ pub fn match_and_read_through(
         if cancel.is_cancelled() {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "search cancelled"));
         }
+        // Finish using the borrowed line before probing the reader's buffer.
+        byte += line.len();
+        utf16 += utf16_len(line);
         if !prefix_complete {
             prefix.push_str(line);
             if !prefix.is_empty() {
@@ -133,8 +136,6 @@ pub fn match_and_read_through(
                 prefix_ended = lines.reader.fill_buf()?.is_empty();
             }
         }
-        byte += line.len();
-        utf16 += utf16_len(line);
     }
     Ok(MatchWindow { first: None, text: prefix, ended: !prefix_complete || prefix_ended })
 }
