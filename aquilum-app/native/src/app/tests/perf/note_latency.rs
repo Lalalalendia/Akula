@@ -101,6 +101,8 @@ fn native_note_latency_matrix() {
         let mut scenes = Vec::with_capacity(cycles);
         let mut stages = Vec::with_capacity(cycles);
         let mut editor_profiles = Vec::with_capacity(cycles);
+        let mut parley_restored = 0usize;
+        let _ = crate::ui::editor::take_ui_restore_hits();
         if trace_output.is_some() {
             aq_trace::mark(match kib {
                 64 => "akula: matrix 64 begin",
@@ -119,6 +121,7 @@ fn native_note_latency_matrix() {
             let timer = Instant::now();
             let _ = h.root.redraw();
             let scene_ms = milliseconds(timer.elapsed());
+            parley_restored += crate::ui::editor::take_ui_restore_hits();
             assert_open_note(&h, path, letter);
             switches.push(switched_ms);
             scenes.push(scene_ms);
@@ -206,7 +209,7 @@ fn native_note_latency_matrix() {
              switch_p50_ms={switch_p50:.3} switch_p95_ms={switch_p95:.3} switch_max_ms={switch_max:.3} \
              scene_p95_ms={scene_p95:.3} scene_max_ms={scene_max:.3} \
              dispatch_p95_ms={dispatch_p95:.3} dispatch_max_ms={dispatch_max:.3} \
-             external_visible_ms={external_visible_ms:.3} cache_hits={cache_hits} stale_overwrites=0"
+             external_visible_ms={external_visible_ms:.3} cache_hits={cache_hits} parley_restored={parley_restored} stale_overwrites=0"
         );
         eprintln!(
             "TAB_STAGE kib={kib} cycles={cycles} leave_p95_ms={leave_p95:.3} read_p95_ms={read_p95:.3} \
