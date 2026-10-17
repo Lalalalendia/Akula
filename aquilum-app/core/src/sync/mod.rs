@@ -31,6 +31,8 @@ mod protocol;
 mod provider;
 mod s3;
 #[cfg(feature = "sync-s3")]
+mod s3_head_probe;
+#[cfg(feature = "sync-s3")]
 mod s3_transport;
 mod upload;
 mod vault;
@@ -67,6 +69,11 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+#[cfg(feature = "sync-s3")]
+pub use s3_head_probe::{
+    observe_s3_current_head, read_s3_digest_matched_manifest, S3DigestMatchedManifest,
+    S3HeadReadError, S3ObservedHead,
+};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
     AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
