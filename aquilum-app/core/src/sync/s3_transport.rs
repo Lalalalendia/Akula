@@ -15,6 +15,8 @@ mod replan;
 mod core_stage;
 pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError};
 mod snapshot_store;
+mod selective_snapshot;
+pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
 pub use snapshot_store::{
     S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
 };
