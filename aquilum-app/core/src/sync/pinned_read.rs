@@ -137,6 +137,45 @@ impl PinnedReadOnlyRoot {
         }
     }
 
+    /// M1c recovery diagnostics ONLY: resolve the existing containing
+    /// directory using the previously pinned root and read-only child
+    /// handles. Do not request Windows FILE_ADD_FILE, OS writes or deletes.
+    /// A missing intermediate parent is an error, never an absent leaf.
+    pub(super) fn open_parent_for_inspection(
+        &self, relative: &SyncRelativePath,
+    ) -> Result<std::fs::File, VaultPortError> {
+        let mut components = relative.as_str().split('/').peekable();
+        #[cfg(unix)]
+        {
+            let mut parent = rustix::io::dup(&self.root)
+                .map_err(|error| VaultPortError::Io(error.to_string()))?;
+            while let Some(name) = components.next() {
+                if components.peek().is_none() { break; }
+                parent = openat(
+                    &parent, name,
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
+                ).map_err(|error| VaultPortError::Io(error.to_string()))?;
+            }
+            Ok(std::fs::File::from(parent))
+        }
+        #[cfg(windows)]
+        {
+            let mut parent = self.root.try_clone()
+                .map_err(|error| VaultPortError::Io(error.to_string()))?;
+            while let Some(name) = components.next() {
+                if components.peek().is_none() { break; }
+                parent = super::pinned_windows::open_child(&parent, name, false)?;
+            }
+            Ok(parent)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = components;
+            Err(VaultPortError::PermissionDenied)
+        }
+    }
+
     /// Pin a file identity without reading content; this is only for
     /// trusted host indexing, never a guest-callable API.
     pub(crate) fn identify_file(

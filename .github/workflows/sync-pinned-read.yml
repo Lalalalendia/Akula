@@ -8,6 +8,7 @@ on:
       - "aquilum-app/core/src/plugins/permission_broker.rs"
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/local_create.rs"
+      - "aquilum-app/core/src/sync/local_recovery.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
       - "aquilum-app/core/src/sync/journal.rs"
       - "aquilum-app/core/src/sync/core_scan.rs"
@@ -62,6 +63,9 @@ jobs:
       - name: Registered Core root and editor admission
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine host_admission -- --nocapture
+      - name: Read-only M1c recovery race and provenance gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1c_ -- --nocapture
       - name: Durable local publication recovery and stage exclusion
         working-directory: aquilum-app
         run: |

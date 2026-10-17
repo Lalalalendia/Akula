@@ -12,6 +12,7 @@ use super::protection_store::{
 };
 use super::OperationId;
 use super::local_create::{self, UnconfirmedLocalCreate};
+use super::local_recovery::{self, ReadOnlyLocalPublicationEvidence};
 use super::{DagStoreError, JournalAction, JournalError, JournalPhase, LocalFileSnapshot,
     SqliteDagStore, SqliteSyncJournal, SyncRelativePath, VaultPortError};
 use crate::app_core::Core;
@@ -55,6 +56,22 @@ impl From<JournalError> for LocalCreateError {
 }
 impl From<DagStoreError> for LocalCreateError {
     fn from(error: DagStoreError) -> Self { Self::Cache(error) }
+}
+
+/// Read-only diagnosis can fail closed if the registered vault, journal,
+/// editor admission, pinned OS handles or two observations disagree.
+#[derive(Debug)]
+pub(crate) enum LocalRecoveryError {
+    Admission(VaultPortError),
+    Journal(JournalError),
+    MissingTicket,
+    UnstableObservation,
+}
+impl From<VaultPortError> for LocalRecoveryError {
+    fn from(error: VaultPortError) -> Self { Self::Admission(error) }
+}
+impl From<JournalError> for LocalRecoveryError {
+    fn from(error: JournalError) -> Self { Self::Journal(error) }
 }
 
 /// Not externally constructible, and deliberately has no mutation methods.
@@ -373,6 +390,70 @@ impl<'a> RegisteredReadAdmission<'a> {
             }
         }
         Ok(())
+    }
+
+    /// SYNC-04g-M1c: inspect exactly one durable publication-attempt ticket.
+    /// Does not write/delete/quarantine/release the attempt or update a
+    /// confirmed remote baseline. A final name matching expected bytes is
+    /// NOT proof that this operation created it. Two checked reads are not
+    /// an interprocess atomic filesystem snapshot.
+    pub(crate) fn inspect_local_publication(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+    ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
+        self.inspect_local_publication_with_hook(operation, journal, || {})
+    }
+
+    fn inspect_local_publication_with_hook(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        before_second: impl FnOnce(),
+    ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
+        let ticket = journal.local_publication_review_queue()?
+            .into_iter().find(|entry| entry.operation_id == operation)
+            .ok_or(LocalRecoveryError::MissingTicket)?;
+        if ticket.vault_id.as_uuid() != self.workspace_id {
+            return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+        }
+        let relative = &ticket.path;
+        self.check_root()?;
+        let target = self.root_path.join(relative.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&target)
+            .map_err(admission_error)?;
+        let _gate = self.core.file_mutations.lock()
+            .map_err(|_| VaultPortError::PermissionDenied)?;
+        self.check_root()?;
+
+        let parent = self.pinned.open_parent_for_inspection(relative)?;
+        let parent_identity = local_create::directory_identity(&parent)?;
+        let leaf = relative.as_str().rsplit('/').next()
+            .ok_or(LocalRecoveryError::Admission(VaultPortError::UnsafePath))?;
+        let (first_stage, first_final) = local_recovery::inspect_names(
+            &parent, operation, leaf, &ticket.expected_content_hash,
+            MAX_PROTECTED_ORIGINAL_BYTES as u64,
+        )?;
+        self.check_root()?;
+        before_second();
+        let (stage, final_name) = local_recovery::inspect_names(
+            &parent, operation, leaf, &ticket.expected_content_hash,
+            MAX_PROTECTED_ORIGINAL_BYTES as u64,
+        )?;
+        if first_stage != stage || first_final != final_name {
+            return Err(LocalRecoveryError::UnstableObservation);
+        }
+        // An external process can detach a pinned former directory. Require
+        // the registered path to reach that same directory at return time.
+        let current_parent = self.pinned.open_parent_for_inspection(relative)
+            .map_err(|_| LocalRecoveryError::UnstableObservation)?;
+        if local_create::directory_identity(&current_parent)
+            .map_err(|_| LocalRecoveryError::UnstableObservation)? != parent_identity
+        {
+            return Err(LocalRecoveryError::UnstableObservation);
+        }
+        self.check_root()?;
+        let assessment = local_recovery::classify(&stage, &final_name);
+        Ok(ReadOnlyLocalPublicationEvidence {
+            operation_id: operation, parent_identity,
+            stage, final_name, assessment,
+        })
     }
 
     /// Bind file identity by pinned handles without reading bytes or taking
