@@ -11,7 +11,7 @@
 //! nor possession of this record is authorization to sync or write files.
 
 use super::{
-    RegisteredReadAdmission, S3ConnectionProfile, S3HeadPointerV1, S3Keyspace,
+    RegisteredReadAdmission, S3ConnectionProfile, S3Keyspace,
     S3VerifiedHead, VaultId, VaultPortError,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -157,8 +157,8 @@ impl SqliteRegisteredS3Bindings {
         {
             return Err(S3BindingError::InvalidProfile);
         }
-        // Require a non-empty, internally consistent *existing* immutable
-        // manifest. A synthetic/empty root is not bootstrap permission.
+        // Require a self-consistent *existing* remote pointer and manifest.
+        // An absent root is not automatically an empty synchronized vault.
         if verified.pointer.encode(keyspace).is_err()
             || verified.manifest.encode(keyspace).is_err()
             || verified.manifest.manifest_id != verified.pointer.manifest_id()
@@ -174,7 +174,8 @@ impl SqliteRegisteredS3Bindings {
         let (device, file) = admission.registered_root_identity_for_profile()?;
         let proposal = RegisteredS3Binding {
             workspace_id: admission.registered_workspace_id(),
-            local_root_path: admission.registered_root_path().to_string_lossy().to_string(),
+            local_root_path: admission.registered_root_path().to_str()
+                .ok_or(S3BindingError::InvalidStoreLocation)?.to_owned(),
             local_root_device: device,
             local_root_file: file,
             profile_id: profile_id.to_owned(),
@@ -232,7 +233,8 @@ impl SqliteRegisteredS3Bindings {
             if binding.local_root_device != device
                 || binding.local_root_file != file
                 || binding.local_root_path
-                    != admission.registered_root_path().to_string_lossy()
+                    != admission.registered_root_path().to_str()
+                        .ok_or(S3BindingError::InvalidStoreLocation)?
             {
                 return Err(S3BindingError::BindingConflict);
             }
@@ -313,7 +315,7 @@ fn validate_appdata_location(
 mod tests {
     use super::*;
     use crate::app_core::{Core, CoreEvent};
-    use crate::sync::{OperationId, S3ManifestV1};
+    use crate::sync::{OperationId, S3HeadPointerV1, S3ManifestV1};
     use std::sync::Arc;
 
     fn core(root: &Path, data: &Path) -> Arc<Core> {
