@@ -106,3 +106,50 @@ pub fn create_folder(core: &Core, path: &Path) -> Result<(), FileCommandError> {
         Err(error) => Err(error.into()),
     }
 }
+
+
+#[cfg(test)]
+mod folder_tests {
+    use super::*;
+    use crate::app_core::{Core, CoreEvent};
+    use std::fs;
+    use std::sync::{mpsc, Arc};
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn core_file_gate_serializes_folder_creation_without_clobber() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let app_data = temp.path().join("appdata");
+        fs::create_dir(&vault).unwrap();
+        fs::create_dir(&app_data).unwrap();
+        let core = Core::open(&app_data, Arc::new(|_: CoreEvent| {}));
+        let folder = vault.join("Новая папка 😀");
+
+        let held = core.file_mutations.lock().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let other_core = Arc::clone(&core);
+        let target = folder.clone();
+        let worker = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            done_tx.send(create_folder(&other_core, &target)).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "folder creation bypassed the Core File Gate lock");
+        assert!(!folder.exists());
+        drop(held);
+
+        done_rx.recv_timeout(Duration::from_secs(30)).unwrap().unwrap();
+        worker.join().unwrap();
+        assert!(folder.is_dir());
+        assert!(matches!(
+            create_folder(&core, &folder),
+            Err(FileCommandError::AlreadyExists { .. })
+        ));
+    }
+}
