@@ -12,7 +12,7 @@ mod layout;
 #[cfg(test)]
 mod layout_reuse;
 #[cfg(test)]
-pub(crate) use layout_reuse::Snapshot as TrialSnapshot;
+pub(crate) use layout_reuse::{Snapshot as TrialSnapshot, take_ui_restore_hits};
 mod lines;
 mod paragraph;
 #[cfg(feature = "memory-probe")]
