@@ -20,6 +20,8 @@ mod journal;
 mod local_create;
 mod local_recovery;
 mod recovery_review;
+/// Crypto envelope contract only: no production key custody or archive writer yet.
+pub mod sealed_archive;
 mod recovery_dashboard;
 mod planner;
 mod protection_store;
