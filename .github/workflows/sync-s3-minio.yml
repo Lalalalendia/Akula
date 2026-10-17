@@ -105,6 +105,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 snapshot_store::tests
+      - name: Validate held CAS replan and both immutable DAG branches
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 cas_replay_plans_both_offline_siblings_without_rewriting_either_head
       - name: Two independent S3 clients CAS, conflicts and lost ACK
         shell: bash
         working-directory: aquilum-app
