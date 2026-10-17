@@ -64,6 +64,8 @@ pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
 pub use s3_transport::{
     AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
     S3ObservedObject, S3PutCondition, S3TransportError,
+    S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
+    S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
 };
 
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};

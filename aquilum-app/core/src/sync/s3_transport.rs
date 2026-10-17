@@ -8,6 +8,12 @@
 //! Run these async calls in a dedicated Core worker; never from native UI.
 
 use super::s3::S3Keyspace;
+
+mod multipart;
+pub use multipart::{
+    S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
+    S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
+};
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
 use std::time::Duration;
