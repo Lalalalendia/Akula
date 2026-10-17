@@ -645,6 +645,31 @@ mod tests {
         }
     }
 
+    /// Preflight succeeds (two rewinds), but the actual upload rewind fails
+    /// after the server created its MPU session.
+    struct FailingUploadRewind {
+        reader: Cursor<Vec<u8>>,
+        rewind_count: usize,
+    }
+
+    impl Read for FailingUploadRewind {
+        fn read(&mut self, data: &mut [u8]) -> std::io::Result<usize> {
+            self.reader.read(data)
+        }
+    }
+
+    impl Seek for FailingUploadRewind {
+        fn seek(&mut self, offset: SeekFrom) -> std::io::Result<u64> {
+            if matches!(offset, SeekFrom::Start(0)) {
+                self.rewind_count += 1;
+                if self.rewind_count >= 3 {
+                    return Err(std::io::Error::other("synthetic post-create seek failure"));
+                }
+            }
+            self.reader.seek(offset)
+        }
+    }
+
     /// Run only against disposable loopback MinIO with fresh bucket credentials.
     #[tokio::test]
     #[ignore = "requires the isolated MinIO service in sync-s3-minio.yml"]
@@ -845,5 +870,80 @@ mod tests {
             S3MultipartPhase::Aborted);
         assert_eq!(transport.head(&failed.blob_key).await,
             Err(S3TransportError::NotFound));
+
+        // Regression: hash preflight passed but the upload input cannot
+        // rewind after the remote session exists. Must abort that MPU.
+        let failed_seek = intent(
+            &vec![0x73_u8; SMALL_PUT_BYTES as usize + 1], &ns,
+        );
+        let mut failing_seek = FailingUploadRewind {
+            reader: Cursor::new(vec![0x73_u8; SMALL_PUT_BYTES as usize + 1]),
+            rewind_count: 0,
+        };
+        assert!(matches!(
+            transport.upload_immutable_multipart(
+                &mut recovered, failed_seek.clone(), &mut failing_seek,
+            ).await,
+            Err(S3MultipartError::Source(_))
+        ));
+        assert_eq!(recovered.status(failed_seek.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Aborted);
+        assert_eq!(transport.head(&failed_seek.blob_key).await,
+            Err(S3TransportError::NotFound));
+
+        // SQLite rejected the first UploadId checkpoint AFTER the S3
+        // CreateMultipartUpload call. Abort with in-memory UploadId and
+        // transition Prepared -> Aborted only if S3 confirms cancellation.
+        recovered.db.execute_batch(
+            "CREATE TEMP TRIGGER inject_start_failure
+             BEFORE UPDATE OF phase ON s3_multipart_uploads
+             WHEN OLD.phase=0 AND NEW.phase=1
+             BEGIN SELECT RAISE(ABORT, 'injected start failure'); END;",
+        ).unwrap();
+        let rejected = intent(&vec![0x74_u8; SMALL_PUT_BYTES as usize + 1], &ns);
+        let mut rejected_source = Cursor::new(vec![0x74_u8; SMALL_PUT_BYTES as usize + 1]);
+        assert!(matches!(
+            transport.upload_immutable_multipart(
+                &mut recovered, rejected.clone(), &mut rejected_source,
+            ).await,
+            Err(S3MultipartError::Sqlite(_))
+        ));
+        assert_eq!(recovered.status(rejected.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Aborted);
+        recovered.db.execute_batch("DROP TRIGGER inject_start_failure;").unwrap();
+
+        // SQLite rejected the Finalizing checkpoint AFTER upload parts.
+        // No CompleteMultipartUpload request is permitted before the durable
+        // transition; AbortMultipartUpload must run instead.
+        recovered.db.execute_batch(
+            "CREATE TEMP TRIGGER inject_finalize_failure
+             BEFORE UPDATE OF phase ON s3_multipart_uploads
+             WHEN OLD.phase=1 AND NEW.phase=2
+             BEGIN SELECT RAISE(ABORT, 'injected finalize failure'); END;",
+        ).unwrap();
+        let blocked = intent(&vec![0x75_u8; SMALL_PUT_BYTES as usize + 1], &ns);
+        let mut blocked_source = Cursor::new(vec![0x75_u8; SMALL_PUT_BYTES as usize + 1]);
+        assert!(matches!(
+            transport.upload_immutable_multipart(
+                &mut recovered, blocked.clone(), &mut blocked_source,
+            ).await,
+            Err(S3MultipartError::Sqlite(_))
+        ));
+        assert_eq!(recovered.status(blocked.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Aborted);
+        recovered.db.execute_batch("DROP TRIGGER inject_finalize_failure;").unwrap();
+
+        // Verify not just absence of completed objects, but actual lack of
+        // incomplete MPU sessions after every injected failure and abort.
+        for object in [&failed_seek, &rejected, &blocked, &failed, &cancelled] {
+            assert_eq!(transport.head(&object.blob_key).await,
+                Err(S3TransportError::NotFound));
+            let pending = transport.client.list_multipart_uploads()
+                .bucket(&transport.bucket).prefix(&object.blob_key)
+                .send().await.unwrap();
+            assert!(!pending.uploads().iter().any(|upload| {
+                upload.key() == Some(object.blob_key.as_str())
+            }), "unaborted MPU session for {:?}", object.operation_id);
+        }
     }
 }
