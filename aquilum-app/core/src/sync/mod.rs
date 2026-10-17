@@ -18,6 +18,7 @@ mod identity;
 mod journal;
 mod local_create;
 mod local_recovery;
+mod recovery_review;
 mod planner;
 mod protection_store;
 mod path;
