@@ -20,7 +20,7 @@ pub(crate) struct RegisteredReadAdmission<'a> {
     core: &'a Core,
     root_path: PathBuf,
     pinned: PinnedReadOnlyRoot,
-    initial: Metadata,
+    initial: RootIdentity,
 }
 
 #[allow(dead_code)]
@@ -39,8 +39,8 @@ impl<'a> RegisteredReadAdmission<'a> {
         }
 
         let pinned = PinnedReadOnlyRoot::open(&root_path)?;
-        let initial = pinned.root_metadata()?;
-        if !same_root_identity(&initial, &selected) {
+        let initial = pinned_identity(&pinned)?;
+        if initial != named_identity(selected_root)? {
             return Err(VaultPortError::UnsafePath);
         }
         let admission = Self { core, root_path, pinned, initial };
@@ -54,13 +54,10 @@ impl<'a> RegisteredReadAdmission<'a> {
         if !configured.iter().any(|path| same_path(path, &self.root_path)) {
             return Err(VaultPortError::PermissionDenied);
         }
-        let live = fs::symlink_metadata(&self.root_path).map_err(io)?;
-        reject_reparse_root(&live)?;
-        let pinned = self.pinned.root_metadata()?;
         // A replaced pathname must never cause a silent switch to another
         // directory, even though the old descriptor is still readable.
-        if !same_root_identity(&pinned, &self.initial)
-            || !same_root_identity(&live, &self.initial)
+        if pinned_identity(&self.pinned)? != self.initial
+            || named_identity(&self.root_path)? != self.initial
         {
             return Err(VaultPortError::FileChanged);
         }
@@ -113,26 +110,47 @@ fn reject_reparse_root(meta: &Metadata) -> Result<(), VaultPortError> {
     Ok(())
 }
 
-fn same_root_identity(first: &Metadata, second: &Metadata) -> bool {
+// OS-native file identity, not path spelling or last-modified timestamps.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RootIdentity(u64, u64);
+
+fn pinned_identity(root: &PinnedReadOnlyRoot) -> Result<RootIdentity, VaultPortError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        return first.dev() == second.dev() && first.ino() == second.ino();
+        let meta = root.root_metadata()?;
+        Ok(RootIdentity(meta.dev(), meta.ino()))
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        // Missing volume/file IDs cannot create authorization by accident.
-        return matches!(
-            (first.volume_serial_number(), first.file_index(),
-             second.volume_serial_number(), second.file_index()),
-            (Some(av), Some(ai), Some(bv), Some(bi)) if av == bv && ai == bi
-        );
+        let (volume, index) = root.root_win_identity()?;
+        Ok(RootIdentity(u64::from(volume), index))
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (first, second);
-        false
+        let _ = root;
+        Err(VaultPortError::PermissionDenied)
+    }
+}
+
+fn named_identity(path: &Path) -> Result<RootIdentity, VaultPortError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let meta = fs::symlink_metadata(path).map_err(io)?;
+        reject_reparse_root(&meta)?;
+        Ok(RootIdentity(meta.dev(), meta.ino()))
+    }
+    #[cfg(windows)]
+    {
+        let root = super::pinned_windows::open_root(path)?;
+        let (volume, index) = super::pinned_windows::file_identity(&root)?;
+        Ok(RootIdentity(u64::from(volume), index))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Err(VaultPortError::PermissionDenied)
     }
 }
 
