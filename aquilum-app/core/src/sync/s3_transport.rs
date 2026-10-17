@@ -150,6 +150,11 @@ impl AwsS3ProbeClient {
             .force_path_style(profile.force_path_style);
         if let Some(endpoint) = profile.endpoint {
             config = config.endpoint_url(endpoint);
+        } else {
+            // AWS_ENDPOINT_URL[_S3] and shared ~/.aws/config can otherwise
+            // silently redirect signed requests around our HTTPS/loopback
+            // validation. No custom endpoint means *AWS regional S3*.
+            config.set_endpoint_url(None);
         }
         Ok(Self {
             client: aws_sdk_s3::Client::from_conf(config.build()),
