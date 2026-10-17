@@ -14,6 +14,7 @@ pub use manifest::{
 
 pub use permission_broker::{
     AuthorizationLease, BrokerError, GrantScope, HostContext, NetworkHost, NoteId,
+    PluginIdentity,
     NoteResource, PermissionBroker, PluginInstanceHandle, RelativeVaultPath, Resource,
     VaultId,
 };

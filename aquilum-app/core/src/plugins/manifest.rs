@@ -274,7 +274,7 @@ fn valid_entry(entry: &str) -> bool {
     })
 }
 
-fn valid_domain(domain: &str) -> bool {
+pub(super) fn valid_domain(domain: &str) -> bool {
     if domain.len() > 253
         || domain.ends_with(".local")
         || domain.ends_with(".internal")

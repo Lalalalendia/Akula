@@ -5,7 +5,7 @@
 //! Only trusted host code may call register_host_package/grant_host_approved;
 //! guest/WIT messages must never be mapped directly to these methods.
 
-use super::{Capability, PluginManifest};
+use super::{manifest::valid_domain, Capability, PluginManifest};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Mutex;
@@ -35,6 +35,29 @@ impl NoteId {
 /// This is only a host-side in-memory handle, not an OS capability.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PluginInstanceHandle(Uuid);
+
+/// Host-bound package identity: the publisher claim is validated by a future
+/// trusted installer, never by accepting guest-provided JSON as authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginIdentity {
+    plugin_id: String,
+    publisher: String,
+    artifact_digest: [u8; 32],
+}
+
+impl PluginIdentity {
+    pub fn plugin_id(&self) -> &str {
+        &self.plugin_id
+    }
+
+    pub fn publisher(&self) -> &str {
+        &self.publisher
+    }
+
+    pub fn artifact_digest(&self) -> [u8; 32] {
+        self.artifact_digest
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RelativeVaultPath(String);
@@ -76,27 +99,7 @@ pub struct NetworkHost(String);
 
 impl NetworkHost {
     pub fn parse_declared_host(raw: &str) -> Result<Self, BrokerError> {
-        if raw.len() > 253
-            || raw.ends_with(".local")
-            || raw.ends_with(".internal")
-            || raw.ends_with(".localhost")
-        {
-            return Err(BrokerError::InvalidResource);
-        }
-        let labels: Vec<&str> = raw.split('.').collect();
-        if labels.len() < 2
-            || labels.last().is_some_and(|last| last.bytes().all(|c| c.is_ascii_digit()))
-            || labels.iter().any(|label| {
-                let bytes = label.as_bytes();
-                bytes.is_empty()
-                    || bytes.len() > 63
-                    || !bytes[0].is_ascii_alphanumeric()
-                    || !bytes[bytes.len() - 1].is_ascii_alphanumeric()
-                    || !bytes
-                        .iter()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
-            })
-        {
+        if !valid_domain(raw) {
             return Err(BrokerError::InvalidResource);
         }
         Ok(Self(raw.to_owned()))
@@ -218,8 +221,8 @@ struct Grant {
 
 struct RegisteredInstance {
     vault: VaultId,
-    /// The host, never the guest, supplies a verified bundle digest.
-    artifact_digest: [u8; 32],
+    /// The host, never the guest, supplies the installed package identity.
+    identity: PluginIdentity,
     /// Only capabilities declared by the pinned manifest may be consented to.
     declarations: BTreeSet<u8>,
     network_domains: Vec<NetworkHost>,
@@ -291,7 +294,11 @@ impl PermissionBroker {
             handle,
             RegisteredInstance {
                 vault,
-                artifact_digest,
+                identity: PluginIdentity {
+                    plugin_id: manifest.id.clone(),
+                    publisher: manifest.publisher.clone(),
+                    artifact_digest,
+                },
                 declarations,
                 network_domains,
                 grants: Vec::new(),
@@ -299,6 +306,16 @@ impl PermissionBroker {
             },
         );
         Ok(handle)
+    }
+
+    /// Host-side inventory for future consent/audit UI, not a guest API.
+    pub fn host_instance_identity(
+        &self,
+        handle: PluginInstanceHandle,
+    ) -> Result<PluginIdentity, BrokerError> {
+        let state = self.state.lock().map_err(|_| BrokerError::StatePoisoned)?;
+        let record = state.instances.get(&handle).ok_or(BrokerError::UnknownInstance)?;
+        Ok(record.identity.clone())
     }
 
     /// TRUSTED HOST CONSENT PATH ONLY. This does not run a consent UI (PLUGIN-11).
@@ -350,7 +367,7 @@ impl PermissionBroker {
             capability,
             resource: resource.clone(),
             revision: record.revision,
-            artifact_digest: record.artifact_digest,
+            artifact_digest: record.identity.artifact_digest,
         })
     }
 
@@ -368,7 +385,7 @@ impl PermissionBroker {
             .ok_or(BrokerError::UnknownInstance)?;
         if lease.context != current_context
             || lease.revision != record.revision
-            || lease.artifact_digest != record.artifact_digest
+            || lease.artifact_digest != record.identity.artifact_digest
         {
             return Err(BrokerError::StaleLease);
         }

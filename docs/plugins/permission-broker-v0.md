@@ -13,7 +13,7 @@ The trusted host owns the broker. A host installation step first validates a can
 ## Implemented conceptual types and their meaning
 
 - \`VaultId\`, \`NoteId\`: strongly typed host-provided identities, not serialized to guests. The temporary plugin vault ID is distinct from the sync-engine's distributed identity; actual integration must map these safely.
-- \`PluginInstanceHandle\`: random in-memory unexported handle minted by the broker, bound to one registered package/digest and vault. A guess of an unknown instance cannot authorize access.
+- \`PluginInstanceHandle\`: random in-memory unexported handle minted by the broker, bound to one registered package/digest and vault. \`PluginIdentity\` also retains the host-bound plugin ID, publisher namespace and package digest for future consent/audit; a manifest's publisher claim is not proof of identity. A guess of an unknown instance cannot authorize access.
 - \`HostContext\`: current vault and current note supplied by the host, not by plugin JSON.
 - \`NoteResource\`: logical note ID/path from the host index; **not** an OS file descriptor or proof of path confinement.
 - \`GrantScope\`: Action, CurrentNote, SelectedNotes, Folder, WholeVault, NetworkHost. Scope classes must match the operation; no network grant authorizes notes, and no notes grant authorizes a network destination.
@@ -50,7 +50,7 @@ cargo test --workspace --locked
 cargo test -p aquilum-core --features sync-engine --locked
 \`\`\`
 
-Twelve negative/matrix tests cover default deny, wrong vault and instance, CurrentNote, SelectedNotes and search hit filtering expectation, segment-aware Folder, WholeVault, invalid action-scope pairs, undeclared capability, per-host network grants, invalid paths, revocation and stale leases, duplicate grant, cross-vault table matrix and independent package instances. No external test crate added.
+Thirteen negative/matrix tests cover default deny, wrong vault and instance, CurrentNote, SelectedNotes and search hit filtering expectation, segment-aware Folder, WholeVault, invalid action-scope pairs, undeclared capability, per-host network grants, invalid paths, revocation and stale leases, duplicate grant, cross-vault table matrix and independent package instances. No external test crate added.
 
 Required \`Main PR gate\` remains the single protected main check; no new workflow or dependency. Production sandbox tests must be added later before external plugin code is runnable.
 

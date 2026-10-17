@@ -275,6 +275,17 @@ fn every_unrequested_capability_cannot_be_authorized_by_any_grant() {
 }
 
 #[test]
+fn registered_identity_is_host_owned_and_bound_to_digest_and_publisher() {
+    let (broker, handle, _, _) = fixture();
+    let identity = broker.host_instance_identity(handle).unwrap();
+    assert_eq!(identity.plugin_id(), "org.example.word-count");
+    assert_eq!(identity.publisher(), "org.example");
+    assert_eq!(identity.artifact_digest(), [0xAA; 32]);
+    broker.unregister_host_instance(handle).unwrap();
+    assert_eq!(broker.host_instance_identity(handle).unwrap_err(), BrokerError::UnknownInstance);
+}
+
+#[test]
 fn no_zero_digest_and_independent_instance_grants_even_for_same_manifest() {
     let broker = PermissionBroker::new();
     let vault = VaultId::new_for_host();
