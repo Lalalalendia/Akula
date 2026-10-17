@@ -1,3 +1,4 @@
+mod binary;
 mod cfi;
 mod dom;
 mod epub;
@@ -13,6 +14,7 @@ mod zip;
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -27,7 +29,7 @@ pub struct Section {
 
 pub struct Book {
     pub(super) epub: Option<epub::Epub>,
-    pub(super) binaries: HashMap<String, String>,
+    pub(super) binaries: HashMap<String, binary::Binary>,
     pub sections: Vec<Section>,
 }
 
@@ -51,7 +53,7 @@ impl Book {
                 .root_element()
                 .children()
                 .filter(|c| c.is_element() && c.tag_name().name() == "binary")
-                .filter_map(|c| Some((c.attribute("id")?.to_owned(), c.text().unwrap_or_default().to_owned())))
+                .filter_map(|c| Some((c.attribute("id")?.to_owned(), binary::Binary::new(c.text().unwrap_or_default().to_owned()))))
                 .collect();
             return Some(Book { epub: None, binaries, sections });
         }
@@ -72,14 +74,11 @@ impl Book {
         }
     }
 
-    pub fn resource(&self, index: usize, src: &str) -> Option<Vec<u8>> {
+    pub fn resource(&self, index: usize, src: &str) -> Option<Cow<'_, [u8]>> {
         if let Some(epub) = &self.epub {
-            return epub.resource(index, src);
+            return epub.resource(index, src).map(Cow::Owned);
         }
-        use base64::Engine;
-        let data = self.binaries.get(src.strip_prefix('#')?)?;
-        let clean: String = data.chars().filter(|c| !c.is_whitespace()).collect();
-        base64::engine::general_purpose::STANDARD.decode(clean).ok()
+        self.binaries.get(src.strip_prefix('#')?)?.bytes().map(Cow::Borrowed)
     }
 
     pub fn resolve(&self, source: &str) -> Option<(usize, Point, Point)> {
@@ -97,5 +96,33 @@ impl Book {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn text(&self, index: usize, start: Point, end: Point) -> Option<String> {
         Some(cfi::text(self.document(index)?, start, end))
+    }
+}
+
+#[cfg(test)]
+mod binary_book_tests {
+    use std::borrow::Cow;
+    use super::Book;
+
+    #[test]
+    fn fb2_resources_are_borrowed_and_keep_fragment_lookup_semantics() {
+        let xml = r#"<FictionBook><body><section><p>Text</p></section></body>
+            <binary id="cover">aGVsbG8=</binary>
+            <binary id="bad">!</binary>
+            <binary id="empty"></binary>
+            <binary id="duplicate">aGVsbG8=</binary>
+            <binary id="duplicate">!</binary>
+        </FictionBook>"#;
+        let (_dir, path) = super::tests::book_file(xml.into());
+        let book = Book::open(&path).expect("FB2 opens despite invalid image");
+        let first = book.resource(0, "#cover").unwrap();
+        assert!(matches!(&first, Cow::Borrowed(_)));
+        assert_eq!(first.as_ref(), b"hello");
+        assert_eq!(first.as_ptr(), book.resource(0, "#cover").unwrap().as_ptr());
+        assert!(book.resource(0, "cover").is_none());
+        assert!(book.resource(0, "#missing").is_none());
+        assert!(book.resource(0, "#bad").is_none());
+        assert!(book.resource(0, "#duplicate").is_none());
+        assert_eq!(book.resource(0, "#empty").unwrap().as_ref(), b"");
     }
 }
