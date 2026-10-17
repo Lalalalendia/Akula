@@ -103,10 +103,13 @@ jobs:
           assert all(r["edits"] == int(os.environ["AQ_COORD_BENCH_EDITS"]) for r in rows)
           assert all(r["assurance"] == "test-only-trusted-fixture-read-only-no-file-gate" for r in rows)
           assert all(r["attempted_s3_head"] == 2 * r["attempted_s3_get"] for r in rows)
+          assert all(r["mode_required_immutable_objects"] >= 1 for r in rows)
           individual = next(r for r in rows if r["method"] == "letter_individual")
           packed = next(r for r in rows if r["method"] == "letter_pack")
           assert packed["attempted_s3_get"] <= individual["attempted_s3_get"]
           assert packed["attempted_s3_get"] == 1 + ((packed["edits"] + 127) // 128)
+          assert packed["mode_required_immutable_objects"] == 1 + ((packed["edits"] + 127) // 128)
+          assert individual["mode_required_immutable_objects"] == 1 + 2 * individual["edits"]
           for r in rows:
               assert r["attempted_s3_get"] >= packed["attempted_s3_get"]
           PY
