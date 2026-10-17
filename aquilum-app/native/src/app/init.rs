@@ -29,6 +29,12 @@ impl App {
             note: None,
             text: crop::Rope::from(initial_text),
             inactive_notes: Vec::new(),
+            #[cfg(test)]
+            parley_trial_enabled: false,
+            #[cfg(test)]
+            parley_capture: None,
+            #[cfg(test)]
+            parley_offer: None,
             system_dark: false,
             tabs,
             renaming_tab: None,
