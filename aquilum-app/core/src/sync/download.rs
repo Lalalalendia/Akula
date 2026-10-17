@@ -364,4 +364,48 @@ mod tests {
         ), Err(StageDownloadError::InvalidIntent)));
         assert!(journal.get(wrong.operation_id).unwrap().is_none());
     }
+
+
+    #[test]
+    fn reused_operation_id_cannot_replace_a_staged_blob_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut journal, mut cache) = stores(dir.path());
+        let mut remote = FakeRemoteStore::new();
+        let original = b"immutable original";
+        let op = intent(original);
+        remote.put(&op.remote_object_id, original, &RemotePrecondition::Absent).unwrap();
+
+        stage_remote_download(
+            &mut journal, &mut cache, &remote, op.clone(), 4096,
+        ).unwrap();
+        let mut replay_with_other_bytes = op.clone();
+        replay_with_other_bytes.expected_content_hash =
+            blake3::hash(b"malicious replacement").to_hex().to_string();
+
+        assert!(matches!(
+            stage_remote_download(
+                &mut journal, &mut cache, &remote, replay_with_other_bytes, 4096,
+            ),
+            Err(StageDownloadError::Journal(_))
+        ));
+        assert_eq!(
+            journal.get(op.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged
+        );
+        assert_eq!(cache.verified_blob(&op.expected_content_hash).unwrap(), original);
+        assert!(journal.baseline(op.vault_id, op.document_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn zero_read_bound_fails_before_persisting_an_intent() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut journal, mut cache) = stores(dir.path());
+        let remote = FakeRemoteStore::new();
+        let op = intent(b"not read");
+        assert!(matches!(
+            stage_remote_download(&mut journal, &mut cache, &remote, op.clone(), 0),
+            Err(StageDownloadError::InvalidIntent)
+        ));
+        assert!(journal.get(op.operation_id).unwrap().is_none());
+    }
 }
