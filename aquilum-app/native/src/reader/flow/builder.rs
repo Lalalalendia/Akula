@@ -1,10 +1,12 @@
 use super::{Align, Block, Origin, Role, Span, Style};
 use crate::reader::dom::{Dom, Kind, NodeId};
 
-const SKIP: &[&str] = &["head", "script", "style", "title", "noscript"];
+// A nonconforming EPUB may place chapter titles directly inside <body>.
+// Keep metadata and SVG titles hidden without dropping those chapter headings.
+const SKIP: &[&str] = &["head", "script", "style", "noscript"];
 const BLOCKS: &[&str] = &[
     "p", "div", "section", "article", "header", "footer", "aside", "nav", "main", "body", "html", "blockquote", "ul", "ol", "li", "dl", "dt", "dd", "pre",
-    "table", "thead", "tbody", "tfoot", "tr", "td", "th", "figure", "figcaption", "center", "h1", "h2", "h3", "h4", "h5", "h6", "caption", "address",
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th", "figure", "figcaption", "center", "h1", "h2", "h3", "h4", "h5", "h6", "title", "caption", "address",
 ];
 
 struct Builder<'a> {
@@ -109,7 +111,7 @@ impl Builder<'_> {
             Kind::Element { name, .. } => {
                 let name = name.to_ascii_lowercase();
                 let name = name.as_str();
-                if SKIP.contains(&name) {
+                if SKIP.contains(&name) || (name == "title" && dom.node(node).parent.and_then(|parent| dom.name(parent)) != Some("body")) {
                     return;
                 }
                 match name {
@@ -137,6 +139,7 @@ impl Builder<'_> {
                         "pre" => Role::Pre,
                         "li" | "dd" => Role::Item,
                         "td" | "th" => Role::Cell,
+                        "title" => Role::Heading(2),
                         _ => heading(name).map_or(self.role, Role::Heading),
                     };
                     if name == "blockquote" {
@@ -175,4 +178,62 @@ pub fn blocks(dom: &Dom) -> Vec<Block> {
     builder.walk(Dom::ROOT);
     builder.flush();
     builder.blocks
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::{Block, Role, blocks};
+    use crate::reader::dom::Dom;
+
+    fn text_blocks(xhtml: &str) -> Vec<(String, Role)> {
+        let doc = roxmltree::Document::parse(xhtml).expect("fixture is valid XML");
+        blocks(&Dom::from_xml(&doc))
+            .into_iter()
+            .filter_map(|block| match block {
+                Block::Text { text, role, .. } => Some((text, role)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn nonconforming_epub_body_titles_are_visible_but_metadata_titles_are_not() {
+        // Some EPUB 2 generators place a chapter heading in a direct body/title
+        // child, rather than an h1/h2. Do not discard the chapter heading.
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>Hidden metadata</title></head>
+            <body>
+                <title><p>Chapter One</p></title>
+                <div>Opening text</div>
+                <svg><title>SVG accessible name, not body text</title></svg>
+                <title><b>Chapter Two</b></title>
+                <div>Closing text</div>
+            </body>
+        </html>"#;
+        assert_eq!(
+            text_blocks(xhtml),
+            vec![
+                ("Chapter One".into(), Role::Heading(2)),
+                ("Opening text".into(), Role::Paragraph),
+                ("Chapter Two".into(), Role::Heading(2)),
+                ("Closing text".into(), Role::Paragraph),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_direct_body_titles_get_recovery_treatment() {
+        let xhtml = r#"<html><body>
+            <section><title>Non-heading metadata</title><p>Keep paragraph</p></section>
+            <title>Visible chapter</title>
+        </body></html>"#;
+        assert_eq!(
+            text_blocks(xhtml),
+            vec![
+                ("Keep paragraph".into(), Role::Paragraph),
+                ("Visible chapter".into(), Role::Heading(2)),
+            ]
+        );
+    }
 }
