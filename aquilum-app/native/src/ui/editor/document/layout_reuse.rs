@@ -4,7 +4,7 @@
 //! state may depend on style, width, caret, resolver and live media. A durable
 //! production cache needs stronger invalidation and paired UI/fidelity tests.
 use masonry::core::{BrushIndex, StyleSet};
-use masonry::parley::Layout;
+use masonry::parley::{Alignment, AlignmentOptions, Layout};
 
 use super::super::markdown::{Block, Decor, Fonts};
 use super::{Document, Fold};
@@ -119,7 +119,9 @@ impl Document {
     }
 
     /// Install a candidate; no layouts are reused until the next width-aware
-    /// layout call validates the same content and rendering context.
+    /// layout call validates identical content and rendering context. The
+    /// target width may differ: Parley rebreaks *already-shaped glyphs*
+    /// exactly at that width before exposing them to the new Document.
     pub(crate) fn trial_offer(&mut self, snapshot: Snapshot) {
         self.trial_snapshot = Some(snapshot);
     }
@@ -135,7 +137,7 @@ impl Document {
         // IME composition and caret-dependent Markdown can change the Parley
         // shape of a line even if the file bytes remain identical.
         if compose.is_some() || caret.is_some()
-            || width != Some(snapshot.width) || self.windowed != snapshot.windowed
+            || self.windowed != snapshot.windowed
             || self.full.byte_len() != snapshot.full_len || self.base != snapshot.base
             || self.text != snapshot.text
             || fonts_key(self.markdown.as_ref()) != snapshot.font_key
@@ -155,21 +157,37 @@ impl Document {
             );
             return 0;
         }
+        let needs_rebreak = width != Some(snapshot.width);
         let mut reused = 0;
         for item in snapshot.entries {
             if item.line >= self.lines.count() || *self.blocks.get(item.line) != Block::Text {
                 continue;
             }
-            let height = f64::from(item.layout.height());
+            let mut layout = item.layout;
+            if needs_rebreak {
+                // Reuse Parley's expensive shaping, never the old line breaks.
+                // This is the identical rebreak+alignment API already used by
+                // Document::measure on ordinary editor width changes.
+                layout.break_all_lines(width);
+                layout.align(Alignment::Start, AlignmentOptions::default());
+            }
+            let height = f64::from(layout.height());
             self.heights.set_text(item.line, height);
             self.heights.set(item.line, height, Fold::None);
-            self.laid.insert(item.line, super::laid::Laid { layout: item.layout, decor: Decor::default() });
+            self.laid.insert(item.line, super::laid::Laid { layout, decor: Decor::default() });
             reused += 1;
+        }
+        if needs_rebreak && reused != 0 {
+            eprintln!(
+                "PARLEY_TAB_TRACE stage=rebreak_shaped cached_width={} actual_width={width:?} reused={reused}",
+                snapshot.width
+            );
         }
         if reused != 0 {
             TRIAL_RESTORED.with(|slot| slot.set(slot.get().saturating_add(reused)));
-            // Preserve the validated width so that first layout won't
-            // gratuitously rewrap layouts that already use that width.
+            // Preserve the *actual* width. Both unchanged and rebroken
+            // candidates now use it, so the first layout must not rebreak
+            // them a second time.
             self.width = width;
         }
         reused
