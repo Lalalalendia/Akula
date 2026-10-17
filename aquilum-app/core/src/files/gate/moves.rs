@@ -1,4 +1,4 @@
-use super::{announce, paths_changed, record, NoteMove, Relocation};
+use super::{announce, paths_changed, record, report_history_move_failure, NoteMove, Relocation};
 use crate::app_core::Core;
 use crate::files::entries::rename_file_impl;
 use crate::files::error::FileCommandError;
@@ -66,7 +66,11 @@ fn relocating<T>(
         (done, relocated(&notes, from, to))
     };
     for step in &relocation.moves {
-        core.history.moved(&|| core.known_roots(), Path::new(&step.from), Path::new(&step.to));
+        let from = Path::new(&step.from);
+        let to = Path::new(&step.to);
+        if let Err(error) = core.history.try_moved(&|| core.known_roots(), from, to) {
+            report_history_move_failure(core, from, to, &error);
+        }
     }
     Ok((done, relocation))
 }
