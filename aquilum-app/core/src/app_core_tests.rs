@@ -36,6 +36,60 @@ fn open_core() -> (tempfile::TempDir, Arc<Core>, Arc<Recording>) {
 }
 
 #[test]
+fn history_failure_after_primary_note_commit_uses_distinct_event_and_recovers() {
+    use crate::history::service::HistoryFault;
+
+    let (directory, core, events) = open_core();
+    let vault = directory.path().join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
+
+    let note = vault.join("Important.md");
+    fs::write(&note, b"untouched original").unwrap();
+    let expected_hash = crate::files::document::hash_bytes(b"untouched original");
+    core.history.fail_once(HistoryFault::CreateVersion);
+    events.clear();
+
+    let first = gate::write(
+        &core,
+        &note,
+        "first primary commit",
+        Some(&expected_hash),
+        Source::Me,
+        None,
+    ).unwrap();
+    assert_eq!(fs::read(&note).unwrap(), b"first primary commit");
+    let names = events.names();
+    assert!(names.contains(&"note-history-save-failed"), "{names:?}");
+    assert!(!names.contains(&"note-history-changed"), "{names:?}");
+    assert!(!names.contains(&"document-save-failed"), "{names:?}");
+    let recorded = events.0.lock().unwrap();
+    let error = recorded.iter().find_map(|event| match event {
+        CoreEvent::NoteHistorySaveFailed(error) => Some(error),
+        _ => None,
+    }).unwrap();
+    assert_eq!(error.action, "write baseline");
+    assert_eq!(error.path, note.to_string_lossy());
+    drop(recorded);
+
+    events.clear();
+    let retry = gate::write(
+        &core,
+        &note,
+        "second primary commit",
+        Some(&first.hash),
+        Source::Me,
+        None,
+    ).unwrap();
+    assert_eq!(fs::read(&note).unwrap(), b"second primary commit");
+    assert_ne!(retry.hash, first.hash);
+    assert!(events.names().contains(&"note-history-changed"));
+    assert!(!events.names().contains(&"note-history-save-failed"));
+    let page = core.history.page(&|| core.known_roots(), &note, 0, 10);
+    assert_eq!(page.total, 2, "the original baseline and retry should persist");
+}
+
+#[test]
 fn core_file_gate_serializes_mcp_trash_purge_across_core_instances() {
     use std::sync::mpsc::{channel, RecvTimeoutError};
     use std::thread;
