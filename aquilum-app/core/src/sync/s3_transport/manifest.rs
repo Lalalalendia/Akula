@@ -17,6 +17,11 @@ use std::path::Path;
 
 const MAX_REVISION_JSON_BYTES: u64 = 64 * 1024;
 const MAX_ANCESTOR_HOPS: usize = 1_024;
+// Never issue an unbounded request fan-out for an attacker-controlled DAG.
+// Metadata is capped at 16 * 64 KiB in-flight; content streams are separately
+// capped at four concurrent reads, regardless of manifest revision count.
+const MAX_PARALLEL_REVISION_READS: usize = 16;
+const MAX_PARALLEL_BLOB_STREAMS: usize = 4;
 
 #[derive(Debug)]
 pub enum S3HeadError {
@@ -228,10 +233,66 @@ impl S3HeadJournal {
     }
 }
 
+/// Validate every revision identity and retain immutable blob candidates.
+/// Completion order can differ from manifest order: RevisionDag.ingest
+/// explicitly holds children until all their parents are present.
+fn accept_verified_revision(
+    dag: &mut RevisionDag,
+    unique_blobs: &mut BTreeMap<String, u64>,
+    total: &mut usize,
+    reference: S3RevisionRefV1,
+    revision: RevisionRecord,
+) -> Result<(), S3HeadError> {
+    if revision.id != reference.revision_id
+        || revision.document_id != reference.document_id
+    {
+        return Err(S3HeadError::InvalidRevision);
+    }
+    match &revision.operation {
+        RevisionOperation::Tombstone { .. } if reference.blob_bytes.is_none() => {}
+        RevisionOperation::Content { blob_hash, .. }
+        | RevisionOperation::Rename { blob_hash, .. } => {
+            let len = reference.blob_bytes.ok_or(S3HeadError::InvalidRevision)?;
+            if let Some(previous) = unique_blobs.insert(blob_hash.clone(), len) {
+                if previous != len {
+                    return Err(S3HeadError::InvalidRevision);
+                }
+            }
+        }
+        _ => return Err(S3HeadError::InvalidRevision),
+    }
+    dag.ingest(revision)?;
+    *total = total.checked_add(1).ok_or(S3HeadError::InvalidManifest)?;
+    if *total > MAX_REVISIONS {
+        return Err(S3HeadError::InvalidManifest);
+    }
+    Ok(())
+}
+
 impl AwsS3ProbeClient {
+    async fn fetch_verified_revision(
+        &self, reference: S3RevisionRefV1,
+    ) -> Result<(S3RevisionRefV1, RevisionRecord), S3HeadError> {
+        let key = self.keyspace.immutable_revision_key(reference.revision_id);
+        let observed = self.get_bounded(&key, MAX_REVISION_JSON_BYTES).await?;
+        if observed.blake3 != reference.revision_blake3 {
+            return Err(S3HeadError::IntegrityMismatch);
+        }
+        let record: RevisionRecord = serde_json::from_slice(&observed.bytes)
+            .map_err(|_| S3HeadError::InvalidRevision)?;
+        if record.id != reference.revision_id
+            || record.document_id != reference.document_id
+        {
+            return Err(S3HeadError::InvalidRevision);
+        }
+        Ok((reference, record))
+    }
+
     /// Retrieve a BLAKE3-pinned immutable manifest and verify every shard,
-    /// per-document revision DAG and referenced blob, with fixed read bounds.
-    /// This does NOT use ListObjectsV2 or establish a local FS write right.
+    /// per-document revision DAG and referenced blob, with strict I/O bounds.
+    /// Independent S3 objects may be checked concurrently, but any missing,
+    /// malformed or stale object fails the entire manifest verification.
+    /// No ListObjectsV2 discovery, local filesystem access, or baseline write.
     pub async fn read_verified_manifest(
         &self,
         manifest_id: OperationId,
@@ -248,63 +309,79 @@ impl AwsS3ProbeClient {
         let mut unique_blobs = BTreeMap::new();
         let mut unique_revisions = BTreeSet::new();
         let mut total = 0_usize;
+
         for shard_ref in &manifest.shards {
             let skey = ns.immutable_manifest_key(shard_ref.shard_id);
             let shard_data = self.get_bounded(&skey, MAX_SHARD_BYTES as u64).await?;
             if shard_data.blake3 != shard_ref.shard_blake3 {
                 return Err(S3HeadError::IntegrityMismatch);
             }
-            let shard = S3ManifestShardV1::decode(ns, shard_ref.shard_id, &shard_data.bytes)?;
+            let shard = S3ManifestShardV1::decode(
+                ns, shard_ref.shard_id, &shard_data.bytes,
+            )?;
             if shard.revisions.len() != shard_ref.count as usize
                 || shard.revisions.first().map(|r| r.revision_id) != Some(shard_ref.first_revision)
                 || shard.revisions.last().map(|r| r.revision_id) != Some(shard_ref.last_revision)
-            { return Err(S3HeadError::InvalidManifest); }
+            {
+                return Err(S3HeadError::InvalidManifest);
+            }
+
+            // JoinSet aborts remaining read-only tasks on any early return.
+            // Never queue more than 16 revision JSON requests at once.
+            let mut tasks = tokio::task::JoinSet::new();
             for reference in shard.revisions {
                 if !unique_revisions.insert(reference.revision_id) {
                     return Err(S3HeadError::InvalidRevision);
                 }
-                let rkey = ns.immutable_revision_key(reference.revision_id);
-                let rev_data = self.get_bounded(&rkey, MAX_REVISION_JSON_BYTES).await?;
-                if rev_data.blake3 != reference.revision_blake3 {
-                    return Err(S3HeadError::IntegrityMismatch);
+                let worker = self.clone();
+                tasks.spawn(async move { worker.fetch_verified_revision(reference).await });
+                if tasks.len() >= MAX_PARALLEL_REVISION_READS {
+                    let (reference, record) = tasks.join_next().await
+                        .ok_or(S3HeadError::InvalidManifest)?
+                        .map_err(|_| S3HeadError::InvalidRevision)??;
+                    accept_verified_revision(
+                        &mut dag, &mut unique_blobs, &mut total, reference, record,
+                    )?;
                 }
-                let revision: RevisionRecord = serde_json::from_slice(&rev_data.bytes)
-                    .map_err(|_| S3HeadError::InvalidRevision)?;
-                if revision.id != reference.revision_id
-                    || revision.document_id != reference.document_id
-                { return Err(S3HeadError::InvalidRevision); }
-                match &revision.operation {
-                    RevisionOperation::Tombstone { .. } if reference.blob_bytes.is_none() => {}
-                    RevisionOperation::Content { blob_hash, .. }
-                    | RevisionOperation::Rename { blob_hash, .. } => {
-                        let bytes = reference.blob_bytes.ok_or(S3HeadError::InvalidRevision)?;
-                        // A second reference to one content-addressed blob must
-                        // declare the same length. Verify each distinct blob once.
-                        match unique_blobs.insert(blob_hash.clone(), bytes) {
-                            Some(previous) if previous != bytes => {
-                                return Err(S3HeadError::InvalidRevision);
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => return Err(S3HeadError::InvalidRevision),
-                }
-                dag.ingest(revision)?;
-                total += 1;
-                if total > MAX_REVISIONS { return Err(S3HeadError::InvalidManifest); }
+            }
+            while let Some(completed) = tasks.join_next().await {
+                let (reference, record) = completed
+                    .map_err(|_| S3HeadError::InvalidRevision)??;
+                accept_verified_revision(
+                    &mut dag, &mut unique_blobs, &mut total, reference, record,
+                )?;
             }
         }
+
         if total != manifest.total_revisions as usize || dag.pending_len() != 0
             || dag.active_len() != total
-        { return Err(S3HeadError::InvalidManifest); }
+        {
+            return Err(S3HeadError::InvalidManifest);
+        }
 
+        // Verify distinct content-addressed blobs only after DAG closure.
+        // At most four whole-object streaming digests are active concurrently.
+        // Every worker performs HEAD/GET If-Match/HEAD + BLAKE3, not ETag trust.
+        let mut streams = tokio::task::JoinSet::new();
         for (hash, len) in unique_blobs {
-            let bkey = ns.immutable_blob_key(&hash)
-                .map_err(|_| S3HeadError::InvalidRevision)?;
-            let verified = self.digest_stream_bounded(&bkey, len).await?;
-            if verified.blake3 != hash || verified.object.byte_length != len {
-                return Err(S3HeadError::IntegrityMismatch);
+            let worker = self.clone();
+            streams.spawn(async move {
+                let bkey = worker.keyspace.immutable_blob_key(&hash)
+                    .map_err(|_| S3HeadError::InvalidRevision)?;
+                let verified = worker.digest_stream_bounded(&bkey, len).await?;
+                if verified.blake3 != hash || verified.object.byte_length != len {
+                    return Err(S3HeadError::IntegrityMismatch);
+                }
+                Ok::<(), S3HeadError>(())
+            });
+            if streams.len() >= MAX_PARALLEL_BLOB_STREAMS {
+                streams.join_next().await
+                    .ok_or(S3HeadError::InvalidManifest)?
+                    .map_err(|_| S3HeadError::InvalidManifest)??;
             }
+        }
+        while let Some(completed) = streams.join_next().await {
+            completed.map_err(|_| S3HeadError::InvalidManifest)??;
         }
         Ok(manifest)
     }
