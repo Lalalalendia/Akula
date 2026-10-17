@@ -500,6 +500,10 @@ fn named_identity(path: &Path) -> Result<RootIdentity, VaultPortError> {
 }
 
 #[cfg(test)]
+#[path = "local_create_tests.rs"]
+mod local_create_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_core::{Core, CoreEvent};
