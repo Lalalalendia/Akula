@@ -24,6 +24,7 @@ const MAX_EXTERNAL_PAGE_SIZE: usize = 1_000;
 #[derive(Clone, Debug)]
 struct StoredVerifiedRevision {
     revision_id: RevisionId,
+    reference: S3RevisionRefV1,
     metadata: RemoteObject,
     json: Vec<u8>,
 }
@@ -49,7 +50,7 @@ pub struct S3VerifiedRevisionMetadataStore {
 }
 
 impl S3VerifiedRevisionMetadataStore {
-    fn new(
+    pub(super) fn new(
         vault_id: VaultId, snapshot_id: String, max_total_bytes: usize,
     ) -> Result<Self, S3HeadError> {
         if snapshot_id.is_empty() || snapshot_id.chars().any(char::is_control)
@@ -73,6 +74,28 @@ impl S3VerifiedRevisionMetadataStore {
     pub fn total_bytes(&self) -> usize { self.total_bytes }
     pub fn snapshot_id(&self) -> &str { &self.snapshot_id }
 
+    /// Reuse is restricted to a previously fully verified canonical S3
+    /// materialization (all blobs and entire DAG were pinned at that time).
+    /// The caller must separately bind this old snapshot to a durable remote
+    /// anchor from the exact same profile/vault and verify a new successor.
+    pub(super) fn is_verified_for(&self, vault: VaultId, snapshot_id: &str) -> bool {
+        self.complete_dag && self.vault_id == vault && self.snapshot_id == snapshot_id
+    }
+
+    pub(super) fn cached_revision(
+        &self, id: RevisionId,
+    ) -> Option<(&S3RevisionRefV1, &[u8])> {
+        if !self.complete_dag { return None; }
+        self.records.get(&format!("revisions/{id}"))
+            .map(|item| (&item.reference, item.json.as_slice()))
+    }
+
+    pub(super) fn verified_entries(
+        &self,
+    ) -> impl Iterator<Item = (&S3RevisionRefV1, &[u8])> {
+        self.records.values().map(|item| (&item.reference, item.json.as_slice()))
+    }
+
     /// Project the fully checked remote *revision metadata* as an inventory.
     /// The vault ID is bound to the verified S3 keyspace, not supplied by the
     /// planner. This does not authorize local writes, deletion, or a baseline.
@@ -91,7 +114,7 @@ impl S3VerifiedRevisionMetadataStore {
     /// Re-check exact immutable bytes and identities even though the network
     /// stage already verified them. Never trust a JSON value merely because
     /// it arrived with a valid snapshot token.
-    fn accept(
+    pub(super) fn accept(
         &mut self,
         reference: S3RevisionRefV1,
         json: Vec<u8>,
@@ -136,13 +159,13 @@ impl S3VerifiedRevisionMetadataStore {
             return Err(S3HeadError::InvalidRevision);
         }
         self.records.insert(id, StoredVerifiedRevision {
-            revision_id: reference.revision_id, metadata, json,
+            revision_id: reference.revision_id, reference, metadata, json,
         });
         self.total_bytes = next_bytes;
         Ok(())
     }
 
-    fn validate_complete_dag(&mut self) -> Result<(), S3HeadError> {
+    pub(super) fn validate_complete_dag(&mut self) -> Result<(), S3HeadError> {
         let mut dag = RevisionDag::new();
         for record in self.records.values() {
             let revision: RevisionRecord = serde_json::from_slice(&record.json)
