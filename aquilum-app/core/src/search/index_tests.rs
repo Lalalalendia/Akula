@@ -125,3 +125,49 @@ fn a_multi_word_query_ranks_partial_matches_instead_of_returning_nothing() {
     assert_eq!(results[1].matched_terms.len(), 2);
     assert_eq!(results[0].heading.as_deref(), Some("Ощущение камеры"), "фрагмент подписан разделом, в котором нашлось совпадение");
 }
+
+#[test]
+fn a_distant_crlf_body_match_keeps_heading_and_normalized_utf16_offset() {
+    let mut body = "# Заголовок\r\n".to_owned();
+    body.push_str(&"😀 длинный абзац без искомого слова\r\n".repeat(500));
+    body.push_str("## Нужный раздел\r\nЗдесь находится УникальныйТермин\r\nСтрока после совпадения\r\n");
+    let (_guard, index) = indexed(&[("Книга.md", &body)]);
+    let results = search(&index, "уникальныйтермин");
+    assert_eq!(results.len(), 1);
+    let result = &results[0];
+    let normalized = crate::files::document::normalize_line_endings(body);
+    let byte_offset = normalized.find("УникальныйТермин").unwrap();
+    assert_eq!(result.match_offset, normalized[..byte_offset].encode_utf16().count());
+    assert_eq!(result.heading.as_deref(), Some("Нужный раздел"));
+    assert!(result.snippet.contains("УникальныйТермин"));
+}
+
+#[test]
+fn a_stale_index_match_keeps_the_opening_snippet_bounded() {
+    let (guard, index) = indexed(&[("Данные.md", "originalneedle был здесь")]);
+    let file = guard.path().join("Данные.md");
+    std::fs::write(&file, "Нет совпадений, только начало заметки.\n".repeat(50_000)).unwrap();
+
+    let results = search(&index, "originalneedle");
+    assert_eq!(results.len(), 1, "the live index still contains the previously indexed token");
+    let result = &results[0];
+    assert_eq!(result.match_offset, 0);
+    assert_eq!(result.heading, None);
+    assert!(result.snippet.starts_with("Нет совпадений"));
+    assert!(result.snippet.len() < 1024, "do not buffer or expose the entire stale file");
+    assert!(result.snippet.ends_with("..."));
+}
+
+#[test]
+fn unreadable_or_invalid_utf8_search_hits_do_not_crash() {
+    let (guard, index) = indexed(&[("Данные.md", "originalneedle был здесь")]);
+    let path = guard.path().join("Данные.md");
+    std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+    let result = &search(&index, "originalneedle")[0];
+    assert_eq!(result.match_offset, 0);
+    assert!(result.snippet.is_empty());
+    std::fs::remove_file(&path).unwrap();
+    let removed_result = &search(&index, "originalneedle")[0];
+    assert_eq!(removed_result.match_offset, 0);
+    assert!(removed_result.snippet.is_empty());
+}
