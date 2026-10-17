@@ -22,16 +22,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  classify:
     if: github.event_name == 'pull_request'
-    name: Main PR gate
+    name: Classify required CI lanes
     runs-on: ubuntu-24.04
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Classify Rust test scope
+      - name: Classify Rust test scope (fail closed)
         id: scope
         shell: bash
         env:
@@ -40,6 +41,16 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+
+  required-tests:
+    if: github.event_name == 'pull_request'
+    needs: classify
+    name: Required Rust tests and policy checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Validate patch whitespace
         shell: bash
@@ -74,11 +85,11 @@ jobs:
           node --test .github/scripts/branch-hygiene.test.cjs
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.scope.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none'
 
       - name: Restore shared main Rust cache (read-only on PRs)
         uses: swatinem/rust-cache@v2
-        if: steps.scope.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none'
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           shared-key: akula-main-gate-v1
@@ -87,7 +98,7 @@ jobs:
           save-if: false
 
       - name: Install Linux dependencies
-        if: steps.scope.outputs.mode == 'workspace'
+        if: needs.classify.outputs.mode == 'workspace'
         shell: bash
         run: |
           sudo apt-get update
@@ -95,7 +106,7 @@ jobs:
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
       - name: Run Core tests in both modes (sync-only changes)
-        if: steps.scope.outputs.mode == 'sync'
+        if: needs.classify.outputs.mode == 'sync'
         working-directory: aquilum-app
         shell: bash
         run: |
@@ -104,13 +115,92 @@ jobs:
           cargo test -p aquilum-core --features sync-engine --locked
 
       - name: Run full Rust workspace and sync-engine tests
-        if: steps.scope.outputs.mode == 'workspace'
+        if: needs.classify.outputs.mode == 'workspace'
         working-directory: aquilum-app
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --workspace --locked
+          cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
+
+
+  native-frames:
+    name: Native frame fidelity
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.mode == 'workspace'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Run all frame-fidelity tests (required, not just informational)
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
+          printf 'Required frame-fidelity lane: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
+
+  checks:
+    # The ONLY status required by Protect main. GitHub cannot report success
+    # until every mandatory lane is green. Always run even on upstream failure.
+    name: Main PR gate
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs: [classify, required-tests, native-frames]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Enforce all required lanes (fail closed)
+        shell: bash
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          REQUIRED_RESULT: ${{ needs.required-tests.result }}
+          FRAMES_RESULT: ${{ needs.native-frames.result }}
+          TEST_SCOPE: ${{ needs.classify.outputs.mode }}
+        run: |
+          set -euo pipefail
+          echo "Classification: $CLASSIFY_RESULT / $TEST_SCOPE"
+          echo "Required tests: $REQUIRED_RESULT; native fidelity: $FRAMES_RESULT"
+          if [ "$CLASSIFY_RESULT" != success ] || [ "$REQUIRED_RESULT" != success ]; then
+            echo "::error::CI classification or required tests failed"
+            exit 1
+          fi
+          case "$TEST_SCOPE" in
+            workspace)
+              if [ "$FRAMES_RESULT" != success ]; then
+                echo "::error::Native fidelity lane did not pass"
+                exit 1
+              fi
+              ;;
+            sync|none)
+              if [ "$FRAMES_RESULT" != skipped ]; then
+                echo "::error::Unexpected native fidelity state for non-workspace PR"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unknown test scope"
+              exit 1
+              ;;
+          esac
+          echo "Required checks passed for $TEST_SCOPE scope" >> "$GITHUB_STEP_SUMMARY"
 
   seed-rust-cache:
     name: Seed shared Rust cache for future PRs
@@ -154,48 +244,3 @@ jobs:
         run: |
           echo "Shared Rust cache exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
           echo "Only the main branch can save the shared cache; PRs restore but never upload." >> "$GITHUB_STEP_SUMMARY"
-
-  # Temporary measurement only: the protected Main PR gate above remains
-  # unchanged. Runs ONLY in a clearly named experiment PR.
-  native-shard-profile:
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'ci/native-visual-split-experiment-')
-    name: Profile native fidelity / ${{ matrix.shard }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [frames, remainder]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Restore main Rust cache (read-only)
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: aquilum-app -> ../.artifacts/cargo-native
-          shared-key: akula-main-gate-v1
-          add-job-id-key: false
-          cache-workspace-crates: true
-          save-if: false
-      - name: Install native Linux dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-      - name: Profile native test group without reducing assertion counts
-        shell: bash
-        working-directory: aquilum-app
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          set -euo pipefail
-          start=$SECONDS
-          if [ "$SHARD" = frames ]; then
-            cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
-          else
-            cargo test --locked -p aquilum-native --bin aquilum-native -- --skip app::tests::perf::frames::
-          fi
-          duration=$((SECONDS - start))
-          printf 'Native %s shard completed in %s seconds; see test logs for executed and ignored test counts.\n' "$SHARD" "$duration" | tee -a "$GITHUB_STEP_SUMMARY"
