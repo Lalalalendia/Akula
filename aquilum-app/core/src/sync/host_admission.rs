@@ -17,6 +17,7 @@ use crate::documents::hub::SyncAdmissionError;
 use crate::search::paths::{canonical_path, same_path};
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
 /// Errors from a read-only source capture. None grants a write permission.
 #[derive(Debug)]
@@ -38,6 +39,7 @@ impl From<ProtectionStoreError> for BoundCaptureError {
 pub(crate) struct RegisteredReadAdmission<'a> {
     core: &'a Core,
     root_path: PathBuf,
+    workspace_id: Uuid,
     pinned: PinnedReadOnlyRoot,
     initial: RootIdentity,
 }
@@ -51,9 +53,14 @@ impl<'a> RegisteredReadAdmission<'a> {
         reject_reparse_root(&selected)?;
         let resolved = fs::canonicalize(selected_root).map_err(io)?;
         let root_path = canonical_path(&resolved);
-        let registered = core.ui_state.workspace_roots()
+        let registered = core.ui_state.list_workspaces()
             .map_err(|_| VaultPortError::PermissionDenied)?;
-        if !registered.iter().any(|path| same_path(path, &root_path)) {
+        let mut matches = registered.iter()
+            .filter(|item| same_path(Path::new(&item.path), &root_path));
+        let workspace_id = matches.next()
+            .ok_or(VaultPortError::PermissionDenied)?.id;
+        if matches.next().is_some() {
+            // A duplicated workspace path must not allow arbitrary grant binding.
             return Err(VaultPortError::PermissionDenied);
         }
 
@@ -62,15 +69,26 @@ impl<'a> RegisteredReadAdmission<'a> {
         if initial != named_identity(selected_root)? {
             return Err(VaultPortError::UnsafePath);
         }
-        let admission = Self { core, root_path, pinned, initial };
+        let admission = Self { core, root_path, workspace_id, pinned, initial };
         admission.check_root()?;
         Ok(admission)
     }
 
+    pub(crate) fn registered_workspace_id(&self) -> Uuid {
+        self.workspace_id
+    }
+
+    pub(crate) fn recheck_registered_root(&self) -> Result<(), VaultPortError> {
+        self.check_root()
+    }
+
     fn check_root(&self) -> Result<(), VaultPortError> {
-        let configured = self.core.ui_state.workspace_roots()
+        let configured = self.core.ui_state.list_workspaces()
             .map_err(|_| VaultPortError::PermissionDenied)?;
-        if !configured.iter().any(|path| same_path(path, &self.root_path)) {
+        if !configured.iter().any(|item| {
+            item.id == self.workspace_id
+                && same_path(Path::new(&item.path), &self.root_path)
+        }) {
             return Err(VaultPortError::PermissionDenied);
         }
         // A replaced pathname must never cause a silent switch to another
@@ -148,6 +166,36 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(VaultPortError::FileChanged.into());
         }
         Ok(result)
+    }
+
+    /// PLUGIN-04: descriptor-relative read of a closed editor document.
+    /// The host must authorize first and revalidate the grant after reading.
+    /// Reject hard-link aliases and a replaced file even with identical bytes.
+    pub(crate) fn read_plugin_identified_bounded(
+        &self,
+        relative: &SyncRelativePath,
+        max_bytes: u64,
+    ) -> Result<LocalFileSnapshot, VaultPortError> {
+        self.check_root()?;
+        let path = self.root_path.join(relative.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&path)
+            .map_err(admission_error)?;
+        // Respect the same lock order as protected-original capture.
+        let _gate = self.core.file_mutations.lock()
+            .map_err(|_| VaultPortError::PermissionDenied)?;
+        self.check_root()?;
+        let first = self.pinned.read_identified_bounded(relative, max_bytes)?;
+        let identity = first.identity.ok_or(VaultPortError::PermissionDenied)?;
+        self.check_root()?;
+        let second = self.pinned.read_identified_bounded(relative, max_bytes)?;
+        if second.identity != Some(identity)
+            || first.snapshot.bytes != second.snapshot.bytes
+            || first.snapshot.content_hash != second.snapshot.content_hash
+        {
+            return Err(VaultPortError::FileChanged);
+        }
+        self.check_root()?;
+        Ok(second.snapshot)
     }
 
     /// A preflight only. Reserves a CLOSED editor session while reading, so
