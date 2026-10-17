@@ -189,6 +189,95 @@ fn history_cross_vault_primary_move_is_denied_before_any_disk_or_event_change() 
 }
 
 #[test]
+fn history_cross_vault_hold_destination_only_core_rejects_history_write_after_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let source_root = temp.path().join("source");
+    let destination_root = temp.path().join("destination");
+    let data_a = temp.path().join("appdata-a");
+    let data_b = temp.path().join("appdata-b");
+    for directory in [&source_root, &destination_root, &data_a, &data_b] {
+        fs::create_dir_all(directory).unwrap();
+    }
+    let source_root = fs::canonicalize(source_root).unwrap();
+    let destination_root = fs::canonicalize(destination_root).unwrap();
+    let events = Arc::new(Recording::default());
+    let source_core = Core::open(&data_a, Arc::clone(&events) as Arc<dyn EventSink>);
+    source_core.ui_state.resolve_workspace(source_root.to_str().unwrap(), 1).unwrap();
+    let destination_core = Core::open(&data_b, Arc::new(Recording::default()));
+    destination_core.ui_state.resolve_workspace(destination_root.to_str().unwrap(), 1).unwrap();
+
+    let source_note = source_root.join("Original.md");
+    let destination_note = destination_root.join("Transferred.md");
+    gate::create(&source_core, &source_note, "original", Source::Agent, None).unwrap();
+    gate::create(&destination_core, &destination_note, "existing", Source::Agent, None).unwrap();
+    let history_dir = destination_root.join(".aquilum/history/Transferred.md");
+    let before: Vec<_> = fs::read_dir(&history_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert!(!before.is_empty());
+
+    let hold_dir = destination_root.join(".aquilum/history-moves");
+    fs::create_dir_all(&hold_dir).unwrap();
+    let marker = hold_dir.join("cross-vault-hold-v1.json");
+    let hold = json!({
+        "schema": 1,
+        "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+        "side": "destination",
+        "source_vault": crate::search::paths::identity(&source_root),
+        "destination_vault": crate::search::paths::identity(&destination_root),
+        "source_note": crate::search::paths::identity(&source_note),
+        "destination_note": crate::search::paths::identity(&destination_note),
+        "primary_blake3": blake3::hash(b"original").to_hex().to_string(),
+        "history_inventory_blake3": blake3::hash(b"history").to_hex().to_string(),
+    });
+    fs::write(&marker, serde_json::to_vec(&hold).unwrap()).unwrap();
+    drop(destination_core);
+
+    // The reopened destination-only Core has never registered source_root.
+    let reopened = Core::open(&data_b, Arc::new(Recording::default()));
+    reopened.ui_state.resolve_workspace(destination_root.to_str().unwrap(), 1).unwrap();
+    assert!(reopened.history.try_saved(
+        &|| reopened.known_roots(),
+        &destination_note,
+        crate::history::NoteWrite {
+            disk_before: None,
+            text: "unacknowledged edit",
+            hash: "never-committed",
+            source: Source::Agent,
+            name: None,
+        },
+    ).is_err());
+    assert_eq!(reopened.history.page(&|| reopened.known_roots(), &destination_note, 0, 10).total, 0);
+    assert_eq!(fs::read(&destination_note).unwrap(), b"existing");
+    let after: Vec<_> = fs::read_dir(&history_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(after, before);
+    assert!(gate::move_across(&source_core, &source_note, &destination_note).is_err());
+    assert_eq!(fs::read(&source_note).unwrap(), b"original");
+    assert!(marker.exists(), "the marker is never cleared automatically");
+
+    // Corruption cannot turn HOLD into permission, even after another reopen.
+    fs::write(&marker, b"{invalid").unwrap();
+    let third = Core::open(&data_b, Arc::new(Recording::default()));
+    third.ui_state.resolve_workspace(destination_root.to_str().unwrap(), 1).unwrap();
+    assert!(third.history.try_saved(
+        &|| third.known_roots(),
+        &destination_note,
+        crate::history::NoteWrite {
+            disk_before: None,
+            text: "still denied",
+            hash: "also-not-committed",
+            source: Source::Agent,
+            name: None,
+        },
+    ).is_err());
+    assert_eq!(fs::read(&destination_note).unwrap(), b"existing");
+}
+
+#[test]
 fn history_cross_vault_folder_rename_is_denied_before_primary_folder_moves() {
     let (_directory, core, events, root_a, root_b) = cross_vault_fixture();
     let old_folder = root_a.join("Folder");
