@@ -122,6 +122,16 @@ pub enum S3HeadAttemptPhase {
     Published,
 }
 
+// A test-only stand-in for the verified pinning API. Production builds can
+// obtain this type only through the existing complete S3 snapshot pipeline.
+#[cfg(test)]
+impl S3PinnedRevisionSnapshot {
+    pub(crate) fn for_remote_anchor_test(snapshot_id: String, count: usize) -> Self {
+        assert_eq!(count, 0, "only empty verified-DAG test fixtures are supported");
+        Self { snapshot_id, revisions: Vec::new() }
+    }
+}
+
 pub struct S3HeadJournal {
     db: Connection,
 }
