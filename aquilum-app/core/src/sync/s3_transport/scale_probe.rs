@@ -14,7 +14,7 @@ use super::pack_probe::{
     ingest_verified_pack, PackBuilder, PackDescriptor, PackProbeError,
     MAX_PACK_BYTES, MAX_PACK_MEMBERS,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use crate::sync::{
     DocumentId, OperationId, RevisionId, RevisionOperation, RevisionRecord,
     S3HeadPointerV1, S3Keyspace, S3ManifestShardV1, S3ManifestV1,
@@ -263,6 +263,21 @@ async fn minio_full_10k_revision_dag_and_blob_readback() {
         "AKULA_S3_FULL_DAG_10K ancestry_ms={} ancestry_hops={}          sdk_ancestry_get={} sdk_ancestry_head={}",
         ancestry_ms, hops, ancestry.get, ancestry.head,
     );
+
+    // Binding the pack sidecar's entire member identity to the already
+    // verified raw manifest is stricter than comparing UUIDs alone.
+    // Otherwise a test-generated descriptor could silently alter the
+    // document, JSON BLAKE3, or blob-length under the same revision ID.
+    let expected_refs: BTreeMap<_, _> = references.iter()
+        .map(|reference| (reference.revision_id, reference.clone()))
+        .collect();
+    let packed_refs: BTreeMap<_, _> = descriptors.iter()
+        .flat_map(|descriptor| descriptor.references.iter())
+        .map(|reference| (reference.revision_id, reference.clone()))
+        .collect();
+    assert_eq!(expected_refs.len(), REVISION_COUNT);
+    assert_eq!(packed_refs.len(), REVISION_COUNT);
+    assert_eq!(packed_refs, expected_refs);
 
     // Read-only packed sidecar A/B, after the original full S3 manifest has
     // independently passed its canonical integrity and ancestry checks.
