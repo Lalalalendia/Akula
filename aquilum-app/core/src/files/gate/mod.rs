@@ -6,7 +6,7 @@ mod write;
 mod tests;
 
 pub use moves::{move_across, rename};
-pub use trash::{restore, restore_deletion, trash};
+pub use trash::{ensure_trash, restore, restore_deletion, trash};
 pub use write::{copy, create, create_binary, create_folder, name_version, write};
 
 use super::attachments::forget_attachments_if_touched;
