@@ -132,6 +132,33 @@ jobs:
             benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
             2>&1 | tee "$GITHUB_WORKSPACE/vello-pixel-guard96.log"
           grep -F "VELLO_PIXEL_DIAG_SUMMARY case=text_175" "$GITHUB_WORKSPACE/vello-pixel-guard96.log"
+      - name: Falsify glyph hinting as source of fractional-scroll mismatches
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_PIXEL_DIAG: "1"
+          AQ_TEST_DISABLE_GLYPH_HINTING: "1"
+          AQ_OUT: ${{ github.workspace }}/vello-no-hint-frames
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/vello-pixel-no-hint.log"
+          grep -F "VELLO_PIXEL_DIAG_SUMMARY case=text_175" "$GITHUB_WORKSPACE/vello-pixel-no-hint.log"
+      - name: Falsify glyph hinting with full scroll viewport reraster
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_PIXEL_DIAG: "1"
+          AQ_TEST_DISABLE_GLYPH_HINTING: "1"
+          AQ_TEST_REDRAW_SCROLL_VIEWPORT: "1"
+          AQ_OUT: ${{ github.workspace }}/vello-viewport-no-hint-frames
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/vello-pixel-viewport-no-hint.log"
+          grep -F "VELLO_PIXEL_DIAG_SUMMARY case=text_175" "$GITHUB_WORKSPACE/vello-pixel-viewport-no-hint.log"
       - name: Untraced release-mode serial/parallel ABBA and strict pixel parity
         shell: bash
         working-directory: aquilum-app
@@ -177,6 +204,8 @@ jobs:
             vello-pixel-full-viewport.log
             vello-pixel-full-screen.log
             vello-pixel-guard96.log
+            vello-pixel-no-hint.log
+            vello-pixel-viewport-no-hint.log
             vello-untraced.log
             vello-traced.log
             vello-release-trace.json
@@ -187,5 +216,7 @@ jobs:
             vello-force-viewport-frames/*.png
             vello-full-screen-frames/*.png
             vello-edge-guard-frames/*.png
+            vello-no-hint-frames/*.png
+            vello-viewport-no-hint-frames/*.png
           if-no-files-found: warn
           retention-days: 21
