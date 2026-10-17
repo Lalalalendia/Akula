@@ -47,8 +47,8 @@ jobs:
           set -euo pipefail
           cargo test -p aquilum-native --bin aquilum-native --locked native_note_latency_matrix \
             -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/note-latency.log"
-          if [ "$(grep -c 'NOTE_LATENCY ' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ]; then
-            echo "::error::Expected three completed note-size measurements"
+          if [ "$(grep -c 'NOTE_LATENCY kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ] ||              [ "$(grep -c 'TAB_STAGE kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ]; then
+            echo "::error::Expected three complete note-size and tab-stage profiles"
             exit 1
           fi
       - name: Summarize comparable measurements
@@ -61,13 +61,16 @@ jobs:
           from pathlib import Path
 
           rows = []
+          stages = {}
           for line in Path("note-latency.log").read_text().splitlines():
-              if "NOTE_LATENCY " not in line:
-                  continue
-              pairs = line.split("NOTE_LATENCY ", 1)[1].split()
-              row = dict(part.split("=", 1) for part in pairs if "=" in part)
-              rows.append(row)
-          assert len(rows) == 3, rows
+              if "NOTE_LATENCY kib=" in line:
+                  pairs = line.split("NOTE_LATENCY ", 1)[1].split()
+                  rows.append(dict(part.split("=", 1) for part in pairs if "=" in part))
+              elif "TAB_STAGE kib=" in line:
+                  pairs = line.split("TAB_STAGE ", 1)[1].split()
+                  row = dict(part.split("=", 1) for part in pairs if "=" in part)
+                  stages[row["kib"]] = row
+          assert len(rows) == len(stages) == 3, (rows, stages)
           text = [
               "## Native note UI latency",
               "",
@@ -86,6 +89,23 @@ jobs:
                   f"{r['dispatch_p95_ms']} | {r['external_visible_ms']} |"
               )
           text.extend([
+              "",
+              "### UI-thread tab-switch stage p95 (ms)",
+              "",
+              "| Size | Leave/flush | File read + Rope | Page build | Tree | Tab total | Tab strip | Panel |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|",
+          ])
+          for r in rows:
+              s = stages[r["kib"]]
+              text.append(
+                  f"| {r['kib']} KiB | {s['leave_p95_ms']} | "
+                  f"{s['read_p95_ms']} | {s['page_p95_ms']} | {s['tree_p95_ms']} | "
+                  f"{s['tab_p95_ms']} | {s['strip_p95_ms']} | {s['panel_p95_ms']} |"
+              )
+          text.extend([
+              "",
+              "Stage p95 values are computed separately and must not be added to",
+              "reconstruct one particular p95 switch. Version/history is in raw logs.",
               "",
               "Every case exercises 16 tab switches, 12 no-op watcher signals,",
               "one externally changed file and a stale-worker/tab-switch assertion.",
