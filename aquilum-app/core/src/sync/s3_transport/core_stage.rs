@@ -12,7 +12,7 @@
 
 use super::{
     AwsS3ProbeClient, S3BoundedObject, S3HeadError, S3TransportError,
-    S3VerifiedRevisionMetadataStore, MAX_PROBE_BYTES,
+    S3VerifiedRevisionMetadataStore, MAX_CORE_STAGE_BLOB_BYTES,
 };
 use crate::sync::{
     DagStoreError, JournalAction, JournalError, JournalPhase, OperationIntent,
@@ -119,8 +119,9 @@ impl AwsS3ProbeClient {
     /// Only the existing host-admitted additive local create may later consume
     /// these staged bytes; its successful return is still not a baseline.
     ///
-    /// This first adapter is deliberately limited to the transport's 1-MiB
-    /// bounded GET. Larger blobs need the independent streaming reader.
+    /// Stage immutable Markdown/attachments up to the native no-replace
+    /// File Gate limit (32 MiB), with HEAD / guarded GET / HEAD + BLAKE3.
+    /// A larger object requires a future direct-to-staging streaming path.
     pub async fn stage_verified_s3_content_for_core(
         &self,
         verified: &S3VerifiedRevisionMetadataStore,
@@ -129,7 +130,7 @@ impl AwsS3ProbeClient {
         intent: OperationIntent,
         max_blob_bytes: u64,
     ) -> Result<StagedDownload, S3CoreStageError> {
-        if max_blob_bytes == 0 || max_blob_bytes > MAX_PROBE_BYTES {
+        if max_blob_bytes == 0 || max_blob_bytes > MAX_CORE_STAGE_BLOB_BYTES {
             return Err(S3CoreStageError::InvalidIntent);
         }
         let inventory = verified.verified_revision_inventory()?;
@@ -152,7 +153,9 @@ impl AwsS3ProbeClient {
         // transfer. A new head causes HOLD, not a silent fallback to a stale
         // pointer. These checks are staging evidence, not a global OS lease.
         let before = self.core_stage_current_head(verified).await?;
-        let payload = self.get_bounded(&intent.remote_object_id, max_blob_bytes).await?;
+        let payload = self.get_immutable_blob_for_core_stage(
+            &intent.expected_content_hash, max_blob_bytes,
+        ).await?;
         if payload.blake3 != intent.expected_content_hash {
             return Err(S3CoreStageError::IntegrityMismatch);
         }
