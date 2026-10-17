@@ -13,12 +13,12 @@ const MAX_LAYOUT_CANDIDATES: usize = 2;
 // Test-only observability to distinguish an ineligible document from a
 // rejected cache context. No diagnostics are built into release binaries.
 #[derive(Clone, Copy, Default)]
-pub(super) struct TrialCounts {
-    pub attempted: usize,
-    pub clean: usize,
-    pub widget_found: usize,
-    pub snapshots: usize,
-    pub offered: usize,
+pub(crate) struct TrialCounts {
+    pub(crate) attempted: usize,
+    pub(crate) clean: usize,
+    pub(crate) widget_found: usize,
+    pub(crate) snapshots: usize,
+    pub(crate) offered: usize,
 }
 
 thread_local! {
@@ -35,7 +35,7 @@ fn count(update: impl FnOnce(&mut TrialCounts)) {
     });
 }
 
-pub(super) fn take_counts() -> TrialCounts {
+pub(crate) fn take_counts() -> TrialCounts {
     COUNTS.with(|slot| slot.replace(TrialCounts::default()))
 }
 
