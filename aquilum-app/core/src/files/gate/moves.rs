@@ -79,9 +79,14 @@ fn matching_vaults(roots: &[PathBuf], candidate: &Path) -> Option<Vec<String>> {
     };
     let lexical = owners(candidate);
     let physical = owners(&resolved);
-    // An alias to a different vault or unregistered storage cannot authorize
-    // moving the primary bytes or their history.
-    (lexical == physical).then_some(physical)
+    // macOS /var -> /private/var may be outside the canonical root lexically.
+    // Its resolved owner still gives a stable vault classification. But an
+    // explicitly matched lexical vault may NEVER resolve to another vault or
+    // unregistered storage (symlink/junction escape).
+    if !lexical.is_empty() && lexical != physical {
+        return None;
+    }
+    Some(physical)
 }
 
 /// PR 04g-3b-7b-0: do not move the PRIMARY file until durable recovery
@@ -174,6 +179,20 @@ mod cross_vault_admission_tests {
     use crate::app_core::CoreEvent;
     use std::fs;
     use std::sync::Arc;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn history_cross_vault_macos_temp_directory_alias_resolves_to_registered_owner() {
+        let directory = tempfile::tempdir().unwrap();
+        let raw_root = directory.path().join("vault");
+        fs::create_dir_all(&raw_root).unwrap();
+        let registered = fs::canonicalize(&raw_root).unwrap();
+        let new_note = raw_root.join("note.md");
+        assert_eq!(
+            matching_vaults(&[registered.clone()], &new_note),
+            Some(vec![identity(&registered)])
+        );
+    }
 
     #[test]
     fn history_cross_vault_registry_failure_does_not_become_unrestricted_admission() {
