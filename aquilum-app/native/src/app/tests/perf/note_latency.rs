@@ -71,6 +71,13 @@ fn rapid_tab_switches_never_adopt_a_previous_notes_background_reload() {
 fn native_note_latency_matrix() {
     let cycles: usize = std::env::var("AQ_LATENCY_SWITCHES").ok().and_then(|x| x.parse().ok()).unwrap_or(16);
     assert!((2..=100).contains(&cycles));
+    // This profiler is intentionally opt-in: aq_trace adds synchronization
+    // and timestamping overhead, so ordinary latency measurements must not
+    // use the trace as a speedup baseline.
+    let trace_output = std::env::var_os("AQ_REWRITE_TRACE");
+    if trace_output.is_some() {
+        aq_trace::start();
+    }
     for kib in [64, 512, 4096] {
         let mut h = Harness::new();
         let target = kib * 1024;
@@ -94,6 +101,14 @@ fn native_note_latency_matrix() {
         let mut scenes = Vec::with_capacity(cycles);
         let mut stages = Vec::with_capacity(cycles);
         let mut editor_profiles = Vec::with_capacity(cycles);
+        if trace_output.is_some() {
+            aq_trace::mark(match kib {
+                64 => "akula: matrix 64 begin",
+                512 => "akula: matrix 512 begin",
+                4096 => "akula: matrix 4096 begin",
+                _ => unreachable!(),
+            });
+        }
         for i in 0..cycles {
             let (id, path, letter) = if i % 2 == 0 { (first_id, &first, "A") } else { (second_id, &second, "B") };
             let timer = Instant::now();
@@ -108,6 +123,14 @@ fn native_note_latency_matrix() {
             switches.push(switched_ms);
             scenes.push(scene_ms);
             h.app.on_core_events(&mut h.root);
+        }
+        if trace_output.is_some() {
+            aq_trace::mark(match kib {
+                64 => "akula: matrix 64 end",
+                512 => "akula: matrix 512 end",
+                4096 => "akula: matrix 4096 end",
+                _ => unreachable!(),
+            });
         }
 
         // Event burst from an unchanged file: time only the UI-thread
@@ -204,5 +227,8 @@ fn native_note_latency_matrix() {
         // Cleanup is deliberately excluded from the measured operation times.
         // Shutdown joins background search/index workers before TempDir removal.
         h.app.shutdown();
+    }
+    if let Some(path) = trace_output {
+        aq_trace::write(std::path::Path::new(&path)).expect("failed to write Masonry rewrite trace");
     }
 }
