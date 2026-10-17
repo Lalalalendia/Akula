@@ -34,6 +34,7 @@ mod protocol;
 mod provider;
 mod s3;
 mod s3_manifest;
+mod s3_manifest_delta;
 #[cfg(feature = "sync-s3")]
 mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
@@ -73,6 +74,11 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+pub use s3_manifest_delta::{
+    inspect_s3_manifest_delta, S3ManifestDeltaBase, S3ManifestDeltaError,
+    S3ManifestDeltaLimits, S3ManifestDeltaOutcome, S3ManifestShardDelta,
+    S3ManifestSnapshotReason,
+};
 pub use s3_manifest::{
     S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
     S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
