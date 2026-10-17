@@ -232,6 +232,11 @@ pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
         if header.ace_size < 4 || u32::from(header.ace_size) > info.bytes_in_use {
             return Err(refuse());
         }
+        if header.ace_flags & INHERIT_ONLY_ACE != 0 {
+            // Inherit-only ACEs do not grant access to THIS opened object.
+            // A child lock is separately audited through its own HANDLE.
+            continue;
+        }
         if header.ace_type == ACCESS_DENIED_ACE_TYPE {
             continue; // A deny ACE never adds permission.
         }
@@ -239,9 +244,8 @@ pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
             // Object/callback ACE layouts are not interpreted: fail closed.
             return Err(refuse());
         }
-        // Reject dangerous inherited grants as well: they may give an
-        // untrusted account authority over children of the custody folder.
-        let _inherit_only = header.ace_flags & INHERIT_ONLY_ACE != 0;
+        // An effective inherited allow ACE is treated like an explicit
+        // allow ACE; only strictly inherit-only entries are skipped above.
         // SAFETY: ACCESS_ALLOWED_ACE layout is header(4) mask(4) SID(>=8).
         let mask = unsafe { *ace.cast::<u8>().add(4).cast::<u32>() };
         if mask & NAMESPACE_WRITE == 0 {
