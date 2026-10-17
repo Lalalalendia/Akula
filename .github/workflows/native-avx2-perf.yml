@@ -1,0 +1,76 @@
+name: Native SSE4.2 vs AVX2 pixel parity and frame benchmark
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/render/tests.rs"
+      - "aquilum-app/native/src/render/renderer/mod.rs"
+      - ".github/workflows/native-avx2-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-avx2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: native-avx2-probe
+      - name: Install Linux native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record exact CPU and toolchain
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          {
+            git rev-parse HEAD
+            rustc --version
+            cargo --version
+            grep -m1 'model name' /proc/cpuinfo || true
+            grep -m1 'flags' /proc/cpuinfo || true
+          } | tee simd-env.txt
+      - name: Require byte-identical text and RGBA image frames
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            avx2_raster_matches_sse4_2_pixels -- --nocapture --test-threads=1 \
+            2>&1 | tee simd-parity.log
+          grep -q 'PASS-SIMD-PARITY' simd-parity.log
+      - name: Compare paired full-frame raster timings
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_avx2_vs_sse4 -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee simd-perf.log
+          grep 'BENCH-AVX2' simd-perf.log | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$(grep -c 'BENCH-AVX2' simd-perf.log)" -ge 4
+      - name: Preserve pixel parity and ABBA traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-avx2-parity-${{ github.sha }}
+          path: |
+            aquilum-app/simd-env.txt
+            aquilum-app/simd-parity.log
+            aquilum-app/simd-perf.log
+          retention-days: 30
