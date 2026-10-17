@@ -23,6 +23,30 @@ pub(crate) fn record_ui_restore_hits(count: usize) {
     UI_RESTORED_PARAGRAPHS.with(|v| v.set(v.get() + count));
 }
 
+// Count independently the reasons a snapshot cannot be used by the actual
+// Masonry layout pass. This diagnostic is never built into release binaries.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct RestoreGateCounts {
+    pub attempted: usize,
+    pub width: usize,
+    pub full_len: usize,
+    pub base: usize,
+    pub text: usize,
+    pub windowed: usize,
+    pub fonts: usize,
+    pub style: usize,
+    pub ime: usize,
+    pub caret: usize,
+    pub passed: usize,
+}
+thread_local! {
+    static RESTORE_GATES: std::cell::Cell<RestoreGateCounts> =
+        std::cell::Cell::new(RestoreGateCounts::default());
+}
+pub(crate) fn take_restore_gate_counts() -> RestoreGateCounts {
+    RESTORE_GATES.with(|v| v.replace(RestoreGateCounts::default()))
+}
+
 const MAX_WINDOW_BYTES: usize = 512 * 1024;
 const MAX_PARAGRAPHS: usize = 32;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
@@ -128,13 +152,30 @@ impl Document {
         let Some(snapshot) = self.trial_snapshot.take() else { return 0 };
         // IME composition and caret-dependent Markdown can change the Parley
         // shape of a line even if the file bytes remain identical.
-        if compose.is_some() || caret.is_some()
-            || width != Some(snapshot.width) || !self.windowed.eq(&snapshot.windowed)
-            || self.full.byte_len() != snapshot.full_len || self.base != snapshot.base
-            || self.text != snapshot.text
-            || fonts_key(self.markdown.as_ref()) != snapshot.font_key
-            || styles_key(styles) != snapshot.style_key
-        {
+        let blocked = RESTORE_GATES.with(|slot| {
+            let mut v = slot.get();
+            v.attempted += 1;
+            let failed = width != Some(snapshot.width)
+                || self.full.byte_len() != snapshot.full_len || self.base != snapshot.base
+                || self.text != snapshot.text || self.windowed != snapshot.windowed
+                || fonts_key(self.markdown.as_ref()) != snapshot.font_key
+                || styles_key(styles) != snapshot.style_key || compose.is_some() || caret.is_some();
+            v.width += usize::from(width != Some(snapshot.width));
+            v.full_len += usize::from(self.full.byte_len() != snapshot.full_len);
+            v.base += usize::from(self.base != snapshot.base);
+            v.text += usize::from(self.text != snapshot.text);
+            v.windowed += usize::from(self.windowed != snapshot.windowed);
+            v.fonts += usize::from(fonts_key(self.markdown.as_ref()) != snapshot.font_key);
+            v.style += usize::from(styles_key(styles) != snapshot.style_key);
+            v.ime += usize::from(compose.is_some());
+            v.caret += usize::from(caret.is_some());
+            if !failed {
+                v.passed += 1;
+            }
+            slot.set(v);
+            failed
+        });
+        if blocked {
             return 0;
         }
         let mut reused = 0;
