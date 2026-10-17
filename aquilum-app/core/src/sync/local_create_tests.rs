@@ -226,15 +226,23 @@ fn m1_external_process_fixture() {
         fs::write(marker, b"child completed").unwrap();
         return;
     }
-    assert_eq!(action, "crash");
+    assert!(action == "crash" || action == "published");
     let core = core_at(&root, &appdata);
-    let bytes = b"staged before process exit";
+    let bytes: &[u8] = if action == "crash" {
+        b"staged before process exit"
+    } else {
+        b"published before lost acknowledgement"
+    };
     let (journal, cache, _, _) = staged(&core, &appdata, &relative, bytes, operation);
     let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
-    admission.create_staged_with_hook(operation, &journal, &cache, || {
-        std::process::exit(87);
-    }).unwrap();
-    unreachable!("child must terminate before publishing");
+    if action == "crash" {
+        admission.create_staged_with_hook(operation, &journal, &cache, || {
+            std::process::exit(87);
+        }).unwrap();
+        unreachable!("child must terminate before publishing");
+    }
+    admission.create_staged_if_absent(operation, &journal, &cache).unwrap();
+    std::process::exit(88);
 }
 
 fn run_child(
@@ -555,4 +563,93 @@ fn m1c_refuses_unknown_or_foreign_vault_ticket_and_oversize_file() {
     file.set_len(32 * 1024 * 1024 + 1).unwrap();
     assert!(matches!(host.inspect_local_publication(op, &journal),
         Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied))));
+}
+
+
+#[test]
+fn m1d_post_crash_review_evidence_is_immutable_across_restarts() {
+    let (temp, _core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/recover.md";
+    let output = run_child(&temp, &root, relative, op, "crash");
+    assert_eq!(output.status.code(), Some(87),
+        "child did not reach the crash point: {}",
+        String::from_utf8_lossy(&output.stderr));
+    let appdata = temp.path().join("child-appdata");
+    let journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+    let core = core_at(&root, &appdata);
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let recorded = host.record_local_recovery_evidence(op, &journal).unwrap();
+    assert_eq!(recorded.evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::StagedOnly);
+    assert_eq!(journal.read_local_recovery_case(op).unwrap(), Some(recorded.clone()));
+    let record = journal.get(op).unwrap().unwrap();
+    assert_eq!(record.phase, JournalPhase::Staged);
+    assert!(journal.baseline(record.intent.vault_id, record.intent.document_id)
+        .unwrap().is_none());
+
+    let staged_path = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    let moved = temp.path().join("outside-old-stage");
+    fs::rename(&staged_path, &moved).unwrap();
+    fs::write(&staged_path, b"staged before process exit").unwrap();
+    // Identical bytes do not give the replacement the prior OS file ID or
+    // authority to rewrite the immutable historical incident.
+    assert!(matches!(
+        host.record_local_recovery_evidence(op, &journal),
+        Err(LocalRecoveryError::Journal(
+            JournalError::RecoveryEvidenceAlreadyRecorded))
+    ));
+    assert_eq!(journal.read_local_recovery_case(op).unwrap(), Some(recorded));
+    assert_eq!(fs::read(&moved).unwrap(), b"staged before process exit");
+    assert_eq!(fs::read(&staged_path).unwrap(), b"staged before process exit");
+    assert!(!root.join(relative).exists());
+}
+
+#[test]
+fn m1d_exit_after_atomic_publish_still_requires_review_not_baseline() {
+    let (temp, _core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/lost-confirmation.md";
+    let output = run_child(&temp, &root, relative, op, "published");
+    assert_eq!(output.status.code(), Some(88),
+        "child did not exit after no-replace publish: {}",
+        String::from_utf8_lossy(&output.stderr));
+    assert_eq!(fs::read(root.join(relative)).unwrap(),
+        b"published before lost acknowledgement");
+    let appdata = temp.path().join("child-appdata");
+    let core = core_at(&root, &appdata);
+    let journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let case = host.record_local_recovery_evidence(op, &journal).unwrap();
+    assert_eq!(case.evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::FinalNameMatchesExpected);
+    assert_eq!(journal.get(op).unwrap().unwrap().phase, JournalPhase::Staged);
+    let doc = journal.get(op).unwrap().unwrap().intent;
+    assert!(journal.baseline(doc.vault_id, doc.document_id).unwrap().is_none());
+    assert!(matches!(
+        journal.read_local_recovery_case(op),
+        Ok(Some(_))
+    ));
+    // The only supported disposition remains HOLD: a matching final inode
+    // does not prove it survived an actual power loss or was created by us.
+    assert!(!root.join("notes").join(format!(".akula-sync-stage-{op}")).exists());
+}
+
+#[test]
+fn m1d_no_ticket_cannot_persist_recovery_evidence() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let (journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), "notes/unclaimed.md", b"new", op,
+    );
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    assert!(matches!(
+        host.record_local_recovery_evidence(op, &journal),
+        Err(LocalRecoveryError::MissingTicket)
+    ));
+    assert!(journal.read_local_recovery_case(op).unwrap().is_none());
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
 }
