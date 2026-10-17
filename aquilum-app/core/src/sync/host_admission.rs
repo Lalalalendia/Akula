@@ -311,7 +311,14 @@ impl<'a> RegisteredReadAdmission<'a> {
             .ok_or(LocalCreateError::InvalidStagedIntent)?;
         let outcome = local_create::create_with_hook(
             &parent, leaf, operation, &bytes, before_publish,
-        )?;
+        ).map_err(|error| match error {
+            // No-replace has a defined and non-destructive collision result.
+            VaultPortError::DestinationExists =>
+                LocalCreateError::Admission(VaultPortError::DestinationExists),
+            // Any other OS result may follow a successful publish whose
+            // acknowledgement or durability check was lost. Never replay.
+            _ => LocalCreateError::PublicationUncertain,
+        })?;
         // The OS publication has happened. Any error below is ambiguous:
         // leave the staged journal intact and require recovery/readback.
         let fresh_parent = self.pinned.open_parent_for_create(&self.root_path, relative)
