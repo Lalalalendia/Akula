@@ -88,6 +88,55 @@ impl PinnedReadOnlyRoot {
         super::pinned_windows::file_identity(&self.root)
     }
 
+    /// Stage 04g-M1 only: open the EXISTING parent directory for an
+    /// additive-only operation. Every child directory is opened relative to
+    /// its live parent descriptor/HANDLE; no symlink/reparse traversal.
+    /// The host must authenticate the registered root, reserve the editor and
+    /// hold the Core File Gate before calling this method. No VaultPort exposes
+    /// the resulting parent file descriptor to a network provider.
+    pub(super) fn open_parent_for_create(
+        &self, root_path: &Path, relative: &SyncRelativePath,
+    ) -> Result<std::fs::File, VaultPortError> {
+        let mut components = relative.as_str().split('/').peekable();
+        #[cfg(unix)]
+        {
+            let _ = root_path;
+            let mut parent = rustix::io::dup(&self.root)
+                .map_err(|error| VaultPortError::Io(error.to_string()))?;
+            while let Some(name) = components.next() {
+                if components.peek().is_none() {
+                    break;
+                }
+                parent = openat(&parent, name,
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
+                ).map_err(|error| VaultPortError::Io(error.to_string()))?;
+            }
+            Ok(std::fs::File::from(parent))
+        }
+        #[cfg(windows)]
+        {
+            let mut parent = super::pinned_windows::open_root_for_create(root_path)?;
+            if super::pinned_windows::file_identity(&parent)?
+                != super::pinned_windows::file_identity(&self.root)?
+            {
+                return Err(VaultPortError::FileChanged);
+            }
+            while let Some(name) = components.next() {
+                if components.peek().is_none() {
+                    break;
+                }
+                parent = super::pinned_windows::open_child_dir_for_create(&parent, name)?;
+            }
+            Ok(parent)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (root_path, relative, components);
+            Err(VaultPortError::PermissionDenied)
+        }
+    }
+
     /// Pin a file identity without reading content; this is only for
     /// trusted host indexing, never a guest-callable API.
     pub(crate) fn identify_file(
