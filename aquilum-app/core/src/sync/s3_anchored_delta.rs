@@ -191,6 +191,13 @@ mod tests {
         }
     }
 
+
+    fn sample_head(head: &S3VerifiedHead, keyspace: &S3Keyspace) -> S3BoundedObject {
+        let mut response = sample(&head.pointer.encode(keyspace).unwrap());
+        response.object.etag = head.etag.clone();
+        response
+    }
+
     #[derive(Default)]
     struct ScriptedReader {
         replies: Mutex<BTreeMap<String, VecDeque<Result<S3BoundedObject, S3TransportError>>>>,
@@ -260,7 +267,7 @@ mod tests {
         let reader = ScriptedReader::default();
         reader.responses(
             keyspace.current_head_key(),
-            vec![Ok(sample(&h1.pointer.encode(&keyspace).unwrap()))],
+            vec![Ok(sample_head(&h1, &keyspace))],
         );
 
         let preview = walk_from_anchor_with(
@@ -292,7 +299,7 @@ mod tests {
         let reader = ScriptedReader::default();
         reader.responses(
             keyspace.current_head_key(),
-            vec![Ok(sample(&h3.pointer.encode(&keyspace).unwrap()))],
+            vec![Ok(sample_head(&h3, &keyspace))],
         );
         reader.responses(
             keyspace.immutable_manifest_key(h3.pointer.manifest_id()),
@@ -400,7 +407,7 @@ mod tests {
             S3RemoteAnchorJournal::open(&dir.path().join("anchor.sqlite")).unwrap();
         let (h1, b1) = frame(&keyspace, 1, None);
         saved(&mut journal, &scope, &h1, &b1);
-        let mut changed = sample(&h1.pointer.encode(&keyspace).unwrap());
+        let mut changed = sample_head(&h1, &keyspace);
         changed.object.etag = "\"rewritten-root-etag\"".into();
         let reader = ScriptedReader::default();
         reader.responses(keyspace.current_head_key(), vec![Ok(changed)]);
@@ -428,7 +435,7 @@ mod tests {
         let reader = ScriptedReader::default();
         reader.responses(
             keyspace.current_head_key(),
-            vec![Ok(sample(&h1.pointer.encode(&keyspace).unwrap()))],
+            vec![Ok(sample_head(&h1, &keyspace))],
         );
         assert!(matches!(
             walk_from_anchor_with(
@@ -449,7 +456,7 @@ mod tests {
         let reader = ScriptedReader::default();
         reader.responses(
             keyspace.current_head_key(),
-            vec![Ok(sample(&h2.pointer.encode(&keyspace).unwrap()))],
+            vec![Ok(sample_head(&h2, &keyspace))],
         );
         reader.responses(
             keyspace.immutable_manifest_key(h2.pointer.manifest_id()),
@@ -480,7 +487,7 @@ mod tests {
         let reader = ScriptedReader::default();
         reader.responses(
             keyspace.current_head_key(),
-            vec![Ok(sample(&h3.pointer.encode(&keyspace).unwrap()))],
+            vec![Ok(sample_head(&h3, &keyspace))],
         );
         reader.responses(
             keyspace.immutable_manifest_key(h3.pointer.manifest_id()),
