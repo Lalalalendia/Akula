@@ -67,7 +67,7 @@ fn m1_create_is_complete_no_replace_and_leaves_baseline_unconfirmed() {
             .unwrap().expect("Unix parent fsync and pinned readback must be audited");
         assert_eq!(observation.operation_id, id);
         assert_eq!(observation.vault_id, vault);
-        assert_eq!(observation.file, result.file);
+        assert_eq!(observation.final_file, result.file);
         assert_eq!(observation.byte_length, bytes.len() as u64);
         assert_eq!(observation.expected_content_hash,
             blake3::hash(bytes).to_hex().to_string());
