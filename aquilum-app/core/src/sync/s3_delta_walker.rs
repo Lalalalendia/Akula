@@ -517,4 +517,132 @@ mod tests {
             Err(S3DeltaWalkError::InvalidManifestReadback),
         );
     }
+
+    /// Isolated disposable MinIO only: publishes three immutable manifests,
+    /// with server-side conditional head CAS, then reads two missing ancestors.
+    /// No native vault or user storage is ever accessed or modified.
+    #[tokio::test]
+    #[ignore = "requires localhost disposable MinIO and test-only credentials"]
+    async fn live_minio_delta_walker_three_generations() {
+        use super::super::s3_transport::{S3ConnectionProfile, S3PutCondition};
+
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT")
+            .expect("only isolated localhost MinIO is allowed");
+        assert!(
+            endpoint.starts_with("http://127.0.0.1:")
+                || endpoint.starts_with("http://localhost:"),
+        );
+        let bucket = format!("akula-delta-{}", uuid::Uuid::new_v4().simple());
+        let region = "us-east-1";
+
+        // Create only a disposable bucket on the validated localhost endpoint.
+        let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(region))
+            .load()
+            .await;
+        let sdk = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::config::Builder::from(&shared)
+                .endpoint_url(&endpoint)
+                .force_path_style(true)
+                .build(),
+        );
+        sdk.create_bucket().bucket(&bucket).send().await.unwrap();
+
+        let layout = ns();
+        let client = AwsS3ProbeClient::connect(
+            S3ConnectionProfile {
+                bucket: bucket.clone(),
+                region: region.into(),
+                endpoint: Some(endpoint),
+                force_path_style: true,
+            },
+            layout.clone(),
+        )
+        .await
+        .unwrap();
+
+        let (b1, h1) = frame(&layout, 1, None, vec![]);
+        let (b2, h2) = frame(&layout, 2, Some(&h1), vec![]);
+        let (b3, h3) = frame(&layout, 3, Some(&h2), vec![]);
+
+        for (head, body) in [(&h1, &b1), (&h2, &b2), (&h3, &b3)] {
+            client
+                .put_conditionally(
+                    &layout.immutable_manifest_key(head.manifest_id()),
+                    body,
+                    S3PutCondition::IfAbsent,
+                )
+                .await
+                .unwrap();
+        }
+
+        let p1 = client
+            .put_conditionally(
+                &layout.current_head_key(),
+                &h1.encode(&layout).unwrap(),
+                S3PutCondition::IfAbsent,
+            )
+            .await
+            .unwrap();
+
+        let unchanged = walk_s3_manifest_delta(
+            &client,
+            &layout,
+            Some(S3DeltaWalkCheckpoint {
+                pointer: &h1,
+                manifest_bytes: &b1,
+            }),
+            S3ManifestDeltaLimits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(unchanged.outcome, S3ManifestDeltaOutcome::HeadUnchanged);
+        assert_eq!(unchanged.immutable_manifests_read, 0);
+
+        let p2 = client
+            .put_conditionally(
+                &layout.current_head_key(),
+                &h2.encode(&layout).unwrap(),
+                S3PutCondition::IfMatch(p1.etag),
+            )
+            .await
+            .unwrap();
+        client
+            .put_conditionally(
+                &layout.current_head_key(),
+                &h3.encode(&layout).unwrap(),
+                S3PutCondition::IfMatch(p2.etag),
+            )
+            .await
+            .unwrap();
+
+        let result = walk_s3_manifest_delta(
+            &client,
+            &layout,
+            Some(S3DeltaWalkCheckpoint {
+                pointer: &h1,
+                manifest_bytes: &b1,
+            }),
+            S3ManifestDeltaLimits::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.observed_head.pointer(), &h3);
+        assert_eq!(result.immutable_manifests_read, 2);
+        assert_eq!(
+            result.outcome,
+            S3ManifestDeltaOutcome::Complete {
+                generations_traversed: 2,
+                base: S3ManifestDeltaBase::VerifiedCheckpoint,
+                shards: S3ManifestShardDelta {
+                    candidate_shards: vec![],
+                    reused_shards: 0,
+                    superseded_shards: 0,
+                    requires_verified_revision_retention: false,
+                },
+            }
+        );
+    }
+
 }
