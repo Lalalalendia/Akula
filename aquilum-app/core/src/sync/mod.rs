@@ -27,6 +27,8 @@ mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
+#[cfg(feature = "sync-s3")]
+mod s3_transport;
 mod upload;
 mod vault;
 
@@ -55,6 +57,12 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+#[cfg(feature = "sync-s3")]
+pub use s3_transport::{
+    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
+    S3ObservedObject, S3PutCondition, S3TransportError,
+};
+
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
