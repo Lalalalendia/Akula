@@ -660,32 +660,27 @@ mod tests {
 
         let observed = admission.inspect_local_publication_for_registered_s3(
             operation_id, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(observed.assessment,
             crate::sync::local_recovery::LocalRecoveryAssessment::FinalNameMatchesExpected);
         let case = admission.record_local_recovery_evidence_for_registered_s3(
             operation_id, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(case.vault_id, namespace.vault_id());
         assert_eq!(case.evidence, observed);
         assert!(admission.record_local_recovery_evidence_for_registered_s3(
             operation_id, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).is_err(), "forensic evidence is write-once");
 
         // Archive a COPY of the final bytes, not the vault file. It remains
         // app-private and does not release the original one-shot claim.
         let archived = admission.archive_local_recovery_copy_for_registered_s3(
             operation_id, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(archived.stage_bytes, None);
         assert_eq!(archived.final_bytes.as_deref(), Some(bytes));
         let preview = admission.recovery_operator_preview_for_registered_s3(
             operation_id, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(preview.vault_id, namespace.vault_id());
         assert_eq!(preview.review_count, 0);
@@ -696,7 +691,6 @@ mod tests {
             crate::sync::recovery_review::RecoveryReviewDisposition::KeepBlocked,
             "Keep blocked until native receipt is independently verified",
             &mut journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(reviewed.sequence, 1);
         assert!(admission.record_recovery_operator_review_for_registered_s3(
@@ -705,7 +699,6 @@ mod tests {
             crate::sync::recovery_review::RecoveryReviewDisposition::KeepBlocked,
             "Stale confirmation must not replace the review",
             &mut journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).is_err());
 
         // A process may also die BEFORE the no-replace rename. Simulate a
@@ -735,18 +728,15 @@ mod tests {
         fs::write(&stage_path, bytes).unwrap();
         let staged_observation = admission.inspect_local_publication_for_registered_s3(
             unfinished_op, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(staged_observation.assessment,
             crate::sync::local_recovery::LocalRecoveryAssessment::StagedOnly);
         let stage_case = admission.record_local_recovery_evidence_for_registered_s3(
             unfinished_op, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(stage_case.evidence, staged_observation);
         let stage_archive = admission.archive_local_recovery_copy_for_registered_s3(
             unfinished_op, &journal, &bindings, &profile, &namespace,
-            &custody, &anchor,
         ).unwrap();
         assert_eq!(stage_archive.stage_bytes.as_deref(), Some(bytes));
         assert_eq!(stage_archive.final_bytes, None);
