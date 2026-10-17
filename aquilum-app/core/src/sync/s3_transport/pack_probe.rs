@@ -94,8 +94,9 @@ impl PackBuilder {
         self.bytes.extend_from_slice(revision_json);
         self.bytes.extend_from_slice(blob);
         self.references.push(reference);
+        let member_count = self.references.len() as u16;
         self.bytes[MAGIC.len()..HEADER_BYTES]
-            .copy_from_slice(&(self.len() as u16).to_le_bytes());
+            .copy_from_slice(&member_count.to_le_bytes());
         Ok(())
     }
 
