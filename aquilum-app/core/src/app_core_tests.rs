@@ -454,8 +454,15 @@ fn core_file_gate_serializes_mcp_trash_purge_across_core_instances() {
     let deleted = trash.join("Восстановить.md");
     fs::write(&deleted, b"valuable original").unwrap();
 
-    let first = Core::open(&directory.path().join("data-a"), Arc::new(Recording::default()));
-    let second = Core::open(&directory.path().join("data-b"), Arc::new(Recording::default()));
+    let data_a = directory.path().join("data-a");
+    let data_b = directory.path().join("data-b");
+    fs::create_dir_all(&data_a).unwrap();
+    fs::create_dir_all(&data_b).unwrap();
+    let first = Core::open(&data_a, Arc::new(Recording::default()));
+    let second = Core::open(&data_b, Arc::new(Recording::default()));
+    for core in [&first, &second] {
+        core.ui_state.resolve_workspace(workspace.to_str().unwrap(), 1).unwrap();
+    }
     let held = first.file_mutation_guard().unwrap();
 
     let (started_tx, started_rx) = channel();
