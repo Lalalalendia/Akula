@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {percentile,elapsed,analyze,report,fetchPage,run}=require('./ci-run-budget.cjs');
+const {percentile,elapsed,analyze,report,fetchPage,sampleRecent,run,MAX_PAGES}=require('./ci-run-budget.cjs');
 const t=n=>new Date(Date.UTC(2026,9,17,0,n)).toISOString();
 const make=(name,id,minutes=7,conclusion='success',override={})=>({
   event:'pull_request',head_branch:'feature/'+id,head_sha:id,
@@ -53,4 +53,66 @@ test('GitHub request is read-only and authenticated',async()=>{
   assert.equal(requested.opts.headers.Authorization,'Bearer token');
   const summary=await run({GH_TOKEN:'token',GITHUB_REPOSITORY:'owner/repo'},fake);
   assert.match(summary,/Sample/);
+});
+
+test('completed skipped workflows count toward triggers, not useful workload',()=>{
+  const sample=[
+    make('Application checks','a',7),
+    make('Core performance baseline','a',1,'skipped'),
+    make('Paired core performance comparison','a',1,'skipped'),
+    make('Branch hygiene','a',1)
+  ];
+  const d=analyze(sample,Date.parse(t(30)));
+  assert.equal(d.triggeredFanout.max,4);
+  assert.equal(d.fanout.max,2);
+  assert.equal(d.skipped,2);
+  assert.equal(d.gate.n,1);
+  assert.match(report({...d,pages:1,truncated:false}),/NON-SKIPPED/);
+});
+test('weekly collector traverses beyond the old 200-run cap',async()=>{
+  let visited=0;
+  const fake=async(url)=>{
+    const page=Number(new URL(url).searchParams.get('page'));
+    visited++;
+    const count=page===3?37:100;
+    return {ok:true,json:async()=>({workflow_runs:Array.from({length:count},(_,i)=>
+      make('Application checks',page+'-'+i,2))})};
+  };
+  const now=Date.parse(t(30));
+  const sample=await sampleRecent('token','owner/repo',fake,now);
+  assert.equal(visited,3);
+  assert.equal(sample.runs.length,237);
+  assert.equal(sample.truncated,false);
+  const summary=await run({GH_TOKEN:'token',GITHUB_REPOSITORY:'owner/repo'},fake,now);
+  assert.match(summary,/237 PR workflow runs/);
+  assert.match(summary,/3 API page/);
+});
+test('oldest timestamp ends pagination despite a full page',async()=>{
+  let visited=0;
+  const fake=async()=>{
+    visited++;
+    const rows=Array.from({length:100},(_,i)=>make('Application checks',String(i)));
+    rows[99].created_at='2025-01-01T00:00:00Z';
+    return {ok:true,json:async()=>({workflow_runs:rows})};
+  };
+  const sample=await sampleRecent('token','owner/repo',fake,Date.parse(t(30)));
+  assert.equal(visited,1);
+  assert.equal(sample.pages,1);
+  assert.equal(sample.truncated,false);
+  assert.equal(analyze(sample.runs,Date.parse(t(30))).recent,99);
+});
+test('bounded maximum reports truncation rather than pretending full coverage',async()=>{
+  let visited=0;
+  const fake=async()=>{
+    visited++;
+    return {ok:true,json:async()=>({workflow_runs:Array.from({length:100},(_,i)=>
+      make('Application checks','same-'+i))})};
+  };
+  const now=Date.parse(t(30));
+  const sample=await sampleRecent('token','owner/repo',fake,now);
+  assert.equal(visited,MAX_PAGES);
+  assert.equal(sample.runs.length,MAX_PAGES*100);
+  assert.equal(sample.truncated,true);
+  const result={...analyze(sample.runs,now),pages:sample.pages,truncated:sample.truncated};
+  assert.match(report(result),/WARNING: sample stopped/);
 });
