@@ -6,6 +6,8 @@ on:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
       - 'aquilum-app/core/src/sync/profile_binding.rs'
       - 'aquilum-app/core/src/sync/host_admission.rs'
+      - 'aquilum-app/core/src/sync/journal.rs'
+      - 'aquilum-app/core/src/sync/local_create_tests.rs'
       - 'aquilum-app/core/src/sync/local_create.rs'
       - 'aquilum-app/core/src/sync/s3_transport/**'
       - 'aquilum-app/core/src/sync/s3.rs'

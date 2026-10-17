@@ -88,6 +88,9 @@ jobs:
       - name: M1d-e explicit native review and no-mutation gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1de_ -- --nocapture
+      - name: Native Unix post-rename audit and v6 crash-retention gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1e4_ -- --nocapture
       - name: M1d-f1 sealed archive AEAD integrity and no-plaintext gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1df1_ -- --nocapture

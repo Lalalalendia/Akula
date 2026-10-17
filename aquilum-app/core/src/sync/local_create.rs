@@ -21,6 +21,10 @@ use std::os::unix::fs::MetadataExt;
 pub(crate) struct UnconfirmedLocalCreate {
     pub file: PinnedFileIdentity,
     pub byte_length: u64,
+    /// Set only after successful same-handle Unix parent-directory fsync.
+    /// This is NOT an independent provenance or sync-baseline receipt.
+    #[cfg(unix)]
+    pub native_parent_synced: bool,
 }
 
 fn identity(file: &File) -> Result<PinnedFileIdentity, VaultPortError> {
@@ -232,5 +236,7 @@ pub(super) fn create_with_hook(
     Ok(UnconfirmedLocalCreate {
         file: staged_id,
         byte_length: bytes.len() as u64,
+        #[cfg(unix)]
+        native_parent_synced: true,
     })
 }
