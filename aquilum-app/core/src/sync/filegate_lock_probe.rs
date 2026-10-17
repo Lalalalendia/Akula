@@ -122,6 +122,11 @@ impl HeldProbeLock {
         (self.id.volume, self.id.file)
     }
 
+    /// Metadata is read from the pinned kernel handle, not a mutable path.
+    pub(crate) fn opened_file_metadata(&self) -> io::Result<std::fs::Metadata> {
+        self._file.metadata()
+    }
+
     /// Negative forensic check ONLY. An exclusive OS lock protects an opened
     /// file object, not its directory entry. Another process with sufficient
     /// filesystem rights can rename the held object and replace its name;
@@ -165,6 +170,10 @@ impl PinnedProbeRoot {
 
     pub(crate) fn identity(&self) -> (u64, u64) {
         (self.id.volume, self.id.file)
+    }
+
+    pub(crate) fn opened_root_metadata(&self) -> io::Result<std::fs::Metadata> {
+        self.handle.metadata()
     }
 
     pub(crate) fn recheck_root(&self) -> io::Result<()> {
