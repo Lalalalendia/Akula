@@ -6,6 +6,7 @@
 mod core_scan;
 mod dag;
 mod delta;
+mod delta_manifest;
 mod download;
 mod dag_store;
 pub mod fake;
@@ -40,6 +41,11 @@ mod vault;
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
+pub use delta_manifest::{
+    inspect_delta_manifest_chain, DeltaChainBase, DeltaChainError, DeltaChainLimits,
+    DeltaChainResult, DeltaManifestError, DeltaManifestParentV1, DeltaManifestV1,
+    DeltaSnapshotReason, MAX_DELTA_MANIFEST_BYTES,
+};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
 pub use recovery_dashboard::{
     native_recovery_overview, native_recovery_case_preview, native_record_recovery_decision,
