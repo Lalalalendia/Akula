@@ -85,7 +85,14 @@ impl App {
         #[cfg(test)]
         let _ = Slot::take_replace_timings();
         if let Some(chrome) = &self.chrome {
+            // aq_trace stays disabled unless the opt-in test explicitly starts
+            // it. These two markers isolate the framework rewrite passes of
+            // the note-page edit from other tab chrome and event callbacks.
+            #[cfg(test)]
+            aq_trace::mark("akula: note page edit begin");
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page));
+            #[cfg(test)]
+            aq_trace::mark("akula: note page edit end");
         }
         #[cfg(test)]
         let edit_elapsed = started.elapsed();
