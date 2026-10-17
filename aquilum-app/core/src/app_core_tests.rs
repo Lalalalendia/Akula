@@ -30,8 +30,10 @@ impl Recording {
 
 fn open_core() -> (tempfile::TempDir, Arc<Core>, Arc<Recording>) {
     let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("data");
+    fs::create_dir_all(&data).unwrap();
     let events = Arc::new(Recording::default());
-    let core = Core::open(&directory.path().join("data"), Arc::clone(&events) as Arc<dyn EventSink>);
+    let core = Core::open(&data, Arc::clone(&events) as Arc<dyn EventSink>);
     (directory, core, events)
 }
 
@@ -136,6 +138,130 @@ fn history_move_failure_after_primary_rename_has_distinct_event_and_retry() {
     assert_eq!(core.history.page(&|| core.known_roots(), &moved, 0, 10).total, 0);
     core.history.try_moved(&|| core.known_roots(), &original, &moved).unwrap();
     assert_eq!(core.history.page(&|| core.known_roots(), &moved, 0, 10).total, 1);
+}
+
+fn cross_vault_fixture() -> (tempfile::TempDir, Arc<Core>, Arc<Recording>, std::path::PathBuf, std::path::PathBuf) {
+    let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("data");
+    let root_a = directory.path().join("workspace-a");
+    let root_b = directory.path().join("workspace-b");
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&root_a).unwrap();
+    fs::create_dir_all(&root_b).unwrap();
+    // Avoid macOS /var -> /private/var spelling differences in workspace
+    // registration and filesystem paths used in the same regression.
+    let root_a = fs::canonicalize(root_a).unwrap();
+    let root_b = fs::canonicalize(root_b).unwrap();
+    let events = Arc::new(Recording::default());
+    let core = Core::open(&data, Arc::clone(&events) as Arc<dyn EventSink>);
+    core.ui_state.resolve_workspace(root_a.to_str().unwrap(), 1).unwrap();
+    core.ui_state.resolve_workspace(root_b.to_str().unwrap(), 2).unwrap();
+    (directory, core, events, root_a, root_b)
+}
+
+#[test]
+fn history_cross_vault_primary_move_is_denied_before_any_disk_or_event_change() {
+    let (directory, core, events, root_a, root_b) = cross_vault_fixture();
+    let original = root_a.join("Versioned.md");
+    let target = root_b.join("Versioned.md");
+    gate::create(&core, &original, "valuable version", Source::Agent, None).unwrap();
+    let before = core.history.page(&|| core.known_roots(), &original, 0, 10);
+    assert_eq!(before.total, 1);
+    events.clear();
+
+    let err = gate::move_across(&core, &original, &target).unwrap_err();
+    assert!(matches!(&err, crate::files::error::FileCommandError::Task { .. }), "{err:?}");
+    assert_eq!(fs::read_to_string(&original).unwrap(), "valuable version");
+    assert!(!target.exists());
+    assert_eq!(core.history.page(&|| core.known_roots(), &original, 0, 10).total, 1);
+    assert!(!root_a.join(".aquilum/history-moves/pending-v1.json").exists());
+    assert!(!root_b.join(".aquilum/history-moves/pending-v1.json").exists());
+    assert!(!events.names().contains(&"notes-relocated"));
+    assert!(!events.names().contains(&"note-history-move-failed"));
+
+    // Another Core with only the destination registered observes no
+    // incoming document and therefore cannot race a half-finished transfer.
+    let second_data = directory.path().join("data-b");
+    fs::create_dir_all(&second_data).unwrap();
+    let second = Core::open(&second_data, Arc::new(Recording::default()));
+    second.ui_state.resolve_workspace(root_b.to_str().unwrap(), 1).unwrap();
+    assert_eq!(second.history.page(&|| second.known_roots(), &target, 0, 10).total, 0);
+}
+
+#[test]
+fn history_cross_vault_folder_rename_is_denied_before_primary_folder_moves() {
+    let (_directory, core, events, root_a, root_b) = cross_vault_fixture();
+    let old_folder = root_a.join("Folder");
+    fs::create_dir(&old_folder).unwrap();
+    let note = old_folder.join("Inside.md");
+    gate::create(&core, &note, "version inside folder", Source::Agent, None).unwrap();
+    let target_folder = root_b.join("Folder");
+    events.clear();
+
+    let err = gate::rename(&core, &old_folder, &target_folder).unwrap_err();
+    assert!(matches!(&err, crate::files::error::FileCommandError::Task { .. }), "{err:?}");
+    assert_eq!(fs::read_to_string(&note).unwrap(), "version inside folder");
+    assert!(!target_folder.exists());
+    assert_eq!(core.history.page(&|| core.known_roots(), &note, 0, 10).total, 1);
+    assert!(!events.names().contains(&"notes-relocated"));
+}
+
+#[test]
+fn history_cross_vault_movement_cannot_escape_to_unregistered_destination() {
+    let (_directory, core, _events, root_a, _root_b) = cross_vault_fixture();
+    let from = root_a.join("Outside.md");
+    gate::create(&core, &from, "version", Source::Agent, None).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let to = other.path().join("Outside.md");
+
+    assert!(gate::move_across(&core, &from, &to).is_err());
+    assert!(from.exists());
+    assert!(!to.exists());
+    assert_eq!(core.history.page(&|| core.known_roots(), &from, 0, 10).total, 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn history_cross_vault_symlink_parent_must_not_escape_to_unregistered_storage() {
+    let (_directory, core, events, root_a, _root_b) = cross_vault_fixture();
+    let external = tempfile::tempdir().unwrap();
+    let external_file = external.path().join("Foreign.md");
+    fs::write(&external_file, b"must stay outside").unwrap();
+    let alias = root_a.join("alias-outside");
+    std::os::unix::fs::symlink(external.path(), &alias).unwrap();
+
+    // Lexically these paths are inside one vault, but one resolves outside.
+    // The previous OR-based owner lookup admitted both moves.
+    let destination = root_a.join("Imported.md");
+    events.clear();
+    let error = gate::move_across(&core, &alias.join("Foreign.md"), &destination).unwrap_err();
+    assert!(matches!(error, crate::files::error::FileCommandError::Task { .. }));
+    assert_eq!(fs::read(&external_file).unwrap(), b"must stay outside");
+    assert!(!destination.exists());
+    assert!(!events.names().contains(&"notes-relocated"));
+
+    let local = root_a.join("Local.md");
+    fs::write(&local, b"must stay inside").unwrap();
+    let exported = alias.join("Exported.md");
+    let error = gate::move_across(&core, &local, &exported).unwrap_err();
+    assert!(matches!(error, crate::files::error::FileCommandError::Task { .. }));
+    assert_eq!(fs::read(&local).unwrap(), b"must stay inside");
+    assert!(!external.path().join("Exported.md").exists());
+}
+
+#[test]
+fn history_same_vault_move_still_preserves_versions_with_multiple_roots_registered() {
+    let (_directory, core, events, root_a, _root_b) = cross_vault_fixture();
+    let from = root_a.join("One.md");
+    let to = root_a.join("Two.md");
+    gate::create(&core, &from, "still safe", Source::Agent, None).unwrap();
+    events.clear();
+
+    gate::move_across(&core, &from, &to).unwrap();
+    assert!(!from.exists());
+    assert_eq!(fs::read_to_string(&to).unwrap(), "still safe");
+    assert_eq!(core.history.page(&|| core.known_roots(), &to, 0, 10).total, 1);
+    assert!(events.names().contains(&"notes-relocated"));
 }
 
 #[test]
@@ -248,6 +374,8 @@ fn a_rename_announces_the_move_before_the_old_path_disappears_from_the_listing()
     let (directory, core, events) = open_core();
     let workspace = directory.path().join("База");
     fs::create_dir_all(&workspace).unwrap();
+    let workspace = fs::canonicalize(workspace).unwrap();
+    core.ui_state.resolve_workspace(workspace.to_str().unwrap(), 1).unwrap();
     let note = workspace.join("Без названия.md");
     fs::write(&note, "текст\n").unwrap();
     core.search.prepare(&workspace.to_string_lossy()).unwrap();
