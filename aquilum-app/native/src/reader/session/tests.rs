@@ -67,3 +67,92 @@ fn a_selection_over_both_columns_and_beyond_the_screen_makes_a_whole_quote() {
     assert!(text.starts_with("Абзац номер 1.") && text.ends_with("Абзац номер"), "{}", &text[text.len() - 40..]);
     assert!(session.range_cfi(from, far).is_some_and(|cfi| cfi.starts_with("epubcfi(/6/2!")));
 }
+
+
+fn reference_needs_layout(session: &Session) -> bool {
+    use crate::reader::flow::Block;
+    // Freeze the behavior of the old on_screen() allocation-heavy path.
+    session.laid.is_none()
+        || session.on_screen().into_iter().any(|item| match &session.blocks[item] {
+            Block::Text { .. } => !session.layouts.iter().any(|(shown, _)| *shown == item),
+            Block::Image { src, .. } => !session.images.contains_key(src),
+            Block::Rule => false,
+        })
+}
+
+#[test]
+fn needs_layout_matches_legacy_visibility_scan_while_navigating() {
+    let (mut fcx, mut lcx) = (FontContext::new(), LayoutContext::new());
+    for scrolled in [false, true] {
+        let (mut session, _dir) = open();
+        assert!(session.needs_layout());
+        assert_eq!(session.needs_layout(), reference_needs_layout(&session));
+        for turn in 0..28 {
+            assert_eq!(
+                session.needs_layout(), reference_needs_layout(&session),
+                "before ensuring: scrolled={scrolled}, turn={turn}"
+            );
+            session.ensure(VIEW, &settings(18.0, scrolled), &mut fcx, &mut lcx);
+            assert_eq!(
+                session.needs_layout(), reference_needs_layout(&session),
+                "after ensuring: scrolled={scrolled}, turn={turn}"
+            );
+            if turn % 5 == 0 {
+                session.layouts.clear();
+                assert_eq!(
+                    session.needs_layout(), reference_needs_layout(&session),
+                    "after eviction: scrolled={scrolled}, turn={turn}"
+                );
+                assert!(session.needs_layout(), "evicted visible text must be refreshed");
+                session.ensure(VIEW, &settings(18.0, scrolled), &mut fcx, &mut lcx);
+                assert_eq!(session.needs_layout(), reference_needs_layout(&session));
+            }
+            if scrolled {
+                session.scroll_by(447.0);
+            } else {
+                session.next();
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "opt-in same-process A/B reader layout microbenchmark"]
+fn needs_layout_reference_vs_fast_microbenchmark() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    fn ns_per_call(count: usize, f: impl Fn() -> bool) -> f64 {
+        let started = Instant::now();
+        for _ in 0..count {
+            black_box(f());
+        }
+        started.elapsed().as_secs_f64() * 1_000_000_000.0 / count as f64
+    }
+
+    let (mut fcx, mut lcx) = (FontContext::new(), LayoutContext::new());
+    for scrolled in [false, true] {
+        let (mut session, _dir) = open();
+        session.ensure(VIEW, &settings(18.0, scrolled), &mut fcx, &mut lcx);
+        assert_eq!(reference_needs_layout(&session), session.needs_layout());
+        let calls = 150_000usize;
+        let mut baseline = Vec::new();
+        let mut optimized = Vec::new();
+        // ABBA in each trial reduces systematic scheduling and warmup bias.
+        for _ in 0..7 {
+            let session = black_box(&session);
+            baseline.push(ns_per_call(calls, || reference_needs_layout(session)));
+            optimized.push(ns_per_call(calls, || session.needs_layout()));
+            optimized.push(ns_per_call(calls, || session.needs_layout()));
+            baseline.push(ns_per_call(calls, || reference_needs_layout(session)));
+        }
+        baseline.sort_by(f64::total_cmp);
+        optimized.sort_by(f64::total_cmp);
+        let (before, after) = (baseline[baseline.len() / 2], optimized[optimized.len() / 2]);
+        println!(
+            "BENCH-NEEDS-LAYOUT mode={} baseline_ns={before:.3} optimized_ns={after:.3} change_pct={:.1}",
+            if scrolled { "scroll" } else { "pages" },
+            (after / before - 1.0) * 100.0
+        );
+    }
+}
