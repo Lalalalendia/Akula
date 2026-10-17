@@ -168,7 +168,8 @@ mod tests {
     #[test]
     fn points_of_a_running_scan_follow_later_edits_and_the_end_is_reached() {
         let (tx, rx) = channel();
-        let mut points = Checkpoints { rx: Some(rx), ..Checkpoints::default() };
+        let mut points = Checkpoints::default();
+        points.rx = Some(rx);
         points.edited((100, 200), 5);
         tx.send([50, 150, 300].map(|at| (at, State::default())).to_vec()).unwrap();
         assert!(points.poll());
