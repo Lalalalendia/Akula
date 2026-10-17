@@ -75,3 +75,6 @@ jobs:
       - name: Cross-Core history files and maintenance interlock
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine history_service_serializes -- --nocapture
+      - name: Normal history reads, writes and moves reject symlink/junction aliases
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine history_service_rejects -- --nocapture
