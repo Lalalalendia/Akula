@@ -102,3 +102,16 @@ No production `VaultPort` implementation, no OS file-writing API, no `Preservati
 - Verify exact parent-directory rename persistence over real Windows storage crash/power loss or conservatively refuse to claim durable publication on unverified filesystems. A clean process exit, NtSetInformationFile success or Flushing a stage file are insufficient.
 - Validate genuine interprocess adversarial races after inspection, recover orphan stage/final conflicts without overwriting, preserve immutable revision history, and emit host History/Search events only after proven admission.
 - Keep the existing one-shot publication and audit records until a separately reviewed, durable, operator-authorized recovery protocol can retire them. No automatic claim clearance or retry.
+
+## SYNC-04g-M1d-b — immutable copy-out without removing originals
+
+**Scope:** inert, host-only recovery preservation. Stage and final contents can be copied to the **already host-selected app-data SQLite Sync journal**, never to a remote-selected path or to the registered vault. Journal schema v4 atomically adds write-once copied BLOBs, each rechecked against its immutable M1d-a incident, exact observed length, bounded size and BLAKE3 digest. An altered copy fails closed after restart. The recovery incident and M1b publication claims remain permanent.
+
+A private Core host first rejects journal locations under the registered vault, reserves the closed document, holds the Core File Gate, and opens stage/final leaves from the same OS-pinned read-only parent descriptor/HANDLE. The file ID, hardlink count, size, mtime and hash classification must match the historical first audit; a subsequent pinned read and parent revalidation must agree before durable archive write. No source name is created, overwritten, moved or removed. External same-user writers are not excluded by the in-process File Gate, so this is **forensic preservation, not a transaction or an ownership certificate**.
+
+- An absent source remains absent in the archive. Two present conflicting files are copied as distinct BLOBs. Matching expected hash does not imply provenance.
+- The archive does not lift scan refusal caused by an orphan stage; it deliberately cannot clear a claimed name, mark a cloud baseline committed or authorize a retry.
+- Neither SQLite FULL nor clean child-process exit proves Windows final-name persistence under actual power loss. No platform is declared release-ready on that basis.
+- All tests are non-destructive and run under the existing Linux/macOS/Windows security matrix. Full user-facing recovery still needs an operator-authorized disposition protocol, OS-handle-safe external copy/relink decisions, History/Search reconciliation and tested Windows power-loss durability.
+
+**No enablement:** `VaultPort` write executor, cloud sync, file deletion and physical quarantine remain disabled.
