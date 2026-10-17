@@ -16,7 +16,16 @@ type RectU16 = (u16, u16, u16, u16);
 #[derive(Clone, Copy)]
 struct Observation {
     total_us: f64,
-    stages: crate::render::renderer::FrameStages,
+    record_us: f64,
+    detect_us: f64,
+    reset_us: f64,
+    replay_us: f64,
+    flush_us: f64,
+    raster_us: f64,
+    raster_pct: f64,
+    rects: usize,
+    shifts: usize,
+    pixels: u64,
     eligible_adjacent: bool,
 }
 
@@ -64,9 +73,19 @@ fn sample(
         .draw_frame(layers, w, h, scale, theme::background(), full)
         .expect("natural scroll frame");
     let total_us = begun.elapsed().as_secs_f64() * 1e6;
+    let stages = renderer.last_stages;
     Observation {
         total_us,
-        stages: renderer.last_stages,
+        record_us: stages.record.as_secs_f64() * 1e6,
+        detect_us: stages.detect.as_secs_f64() * 1e6,
+        reset_us: stages.reset.as_secs_f64() * 1e6,
+        replay_us: stages.replay.as_secs_f64() * 1e6,
+        flush_us: stages.flush.as_secs_f64() * 1e6,
+        raster_us: stages.raster.as_secs_f64() * 1e6,
+        raster_pct: 100.0 * stages.raster_pixels as f64 / stages.screen_pixels as f64,
+        rects: stages.raster_rects,
+        shifts: stages.damage.shifts,
+        pixels: stages.raster_pixels,
         eligible_adjacent: adjacent_candidate(&renderer.rastered),
     }
 }
@@ -151,13 +170,13 @@ fn run_case(name: &str, scale: f64, width: u32, height: u32, cover: bool) {
                 "{name} step={step}: identical native regions across workers must be bitwise equal"
             );
             assert_eq!(
-                frame[0].stages.raster_rects,
-                frame[index].stages.raster_rects,
+                frame[0].rects,
+                frame[index].rects,
                 "{name} step={step}: workers disagree on region count"
             );
             assert_eq!(
-                frame[0].stages.raster_pixels,
-                frame[index].stages.raster_pixels,
+                frame[0].pixels,
+                frame[index].pixels,
                 "{name} step={step}: workers disagree on damaged pixel area"
             );
         }
@@ -172,7 +191,7 @@ fn run_case(name: &str, scale: f64, width: u32, height: u32, cover: bool) {
         }
         // Exclude setup and pointer-only steps, retaining only actual scroll
         // candidates from the Damage Tracker. Do not fabricate fragmentation.
-        if step > 0 && frame[0].stages.damage.shifts > 0 {
+        if step > 0 && frame[0].shifts > 0 {
             for i in 0..3 {
                 values[i].push(frame[i]);
             }
@@ -188,15 +207,15 @@ fn run_case(name: &str, scale: f64, width: u32, height: u32, cover: bool) {
             percentiles(&durations, [0.50, 0.95])
         };
         let [total50, total95] = get(|v| v.total_us);
-        let [record50, record95] = get(|v| v.stages.record.as_secs_f64() * 1e6);
-        let [detect50, detect95] = get(|v| v.stages.detect.as_secs_f64() * 1e6);
-        let [reset50, reset95] = get(|v| v.stages.reset.as_secs_f64() * 1e6);
-        let [replay50, replay95] = get(|v| v.stages.replay.as_secs_f64() * 1e6);
-        let [flush50, flush95] = get(|v| v.stages.flush.as_secs_f64() * 1e6);
-        let [raster50, raster95] = get(|v| v.stages.raster.as_secs_f64() * 1e6);
-        let [area50, area95] = get(|v| 100.0 * v.stages.raster_pixels as f64 / v.stages.screen_pixels as f64);
-        let max_rects = samples.iter().map(|s| s.stages.raster_rects).max().unwrap_or(0);
-        let multi_rect = samples.iter().filter(|s| s.stages.raster_rects > 1).count();
+        let [record50, record95] = get(|v| v.record_us);
+        let [detect50, detect95] = get(|v| v.detect_us);
+        let [reset50, reset95] = get(|v| v.reset_us);
+        let [replay50, replay95] = get(|v| v.replay_us);
+        let [flush50, flush95] = get(|v| v.flush_us);
+        let [raster50, raster95] = get(|v| v.raster_us);
+        let [area50, area95] = get(|v| v.raster_pct);
+        let max_rects = samples.iter().map(|s| s.rects).max().unwrap_or(0);
+        let multi_rect = samples.iter().filter(|s| s.rects > 1).count();
         let eligible = samples.iter().filter(|s| s.eligible_adjacent).count();
         let total_sum: f64 = samples.iter().map(|s| s.total_us).sum();
         eprintln!(
