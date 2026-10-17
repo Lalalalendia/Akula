@@ -109,7 +109,7 @@ pub(super) fn open_child(
     leaf: bool,
 ) -> Result<File, VaultPortError> {
     if name.is_empty() || name == "." || name == ".."
-        || name.contains(['/', '\\', ':', '\0'])
+        || name.chars().any(|ch| matches!(ch, '/' | '\\' | ':' | '\0'))
     {
         return Err(VaultPortError::UnsafePath);
     }
