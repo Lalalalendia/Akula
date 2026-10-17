@@ -301,15 +301,30 @@ pub(super) fn update_version_text(
     write_file_atomic_impl(&dir.join(version_id), text, None).map(|_| ())
 }
 
-pub(super) fn remove_version_and_names(dir: &Path, version_id: &str) {
-    let _ = fs::remove_file(dir.join(version_id));
-    for (file_name, path) in files(dir) {
-        if let Some((version, _, _)) = name_mark(&file_name) {
+pub(super) fn remove_version_and_names(
+    dir: &Path,
+    version_id: &str,
+) -> Result<(), FileCommandError> {
+    // Enumerate labels before the destructive phase. An unreadable directory
+    // must not result in an acknowledged, incomplete removal.
+    let mut labels = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        if let Some((version, _, _)) = name_mark(&file_name.to_string_lossy()) {
             if version == version_id {
-                let _ = fs::remove_file(path);
+                labels.push(entry.path());
             }
         }
     }
+    fs::remove_file(dir.join(version_id))?;
+    for label in labels {
+        fs::remove_file(label)?;
+    }
+    Ok(())
 }
 
 pub fn system_time_from_ms(millis: u64) -> SystemTime {
