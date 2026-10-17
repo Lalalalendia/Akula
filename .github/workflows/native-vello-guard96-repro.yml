@@ -47,6 +47,7 @@ jobs:
         working-directory: aquilum-app
         env:
           AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_EVERY_FRAME: '1'
           AQ_CROSSOVER_WORKLOAD: guard96
           AQ_TEST_SCROLL_EDGE_GUARD: '96'
           AQ_CROSSOVER_OUT: ${{ github.workspace }}/vello-guard96-frames
