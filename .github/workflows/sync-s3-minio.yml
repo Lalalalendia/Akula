@@ -6,6 +6,7 @@ on:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
       - 'aquilum-app/core/src/sync/s3_transport/**'
       - 'aquilum-app/core/src/sync/s3.rs'
+      - 'aquilum-app/core/src/sync/s3_manifest.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
@@ -91,6 +92,19 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 multipart::tests -- --ignored --test-threads=1 --nocapture
+      - name: Verify strict sharded 10k manifest index and root journal
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 s3_manifest::tests
+          cargo test --locked -p aquilum-core --features sync-s3 s3_transport::manifest::tests -- --skip minio_
+      - name: Two independent S3 clients CAS, conflicts and lost ACK
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 minio_two_clients_manifest_cas_and_lost_ack -- --ignored --test-threads=1 --nocapture
       - name: Shutdown MinIO and print sanitized diagnostics
         if: always()
         shell: bash
