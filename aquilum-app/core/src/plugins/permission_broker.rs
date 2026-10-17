@@ -85,13 +85,11 @@ impl RelativeVaultPath {
     /// This is a lexical logical-path check, not a filesystem confinement API.
     /// PLUGIN-04 must pin real OS resource identity and reject symlink/junction races.
     pub fn parse_host_path(path: &str) -> Result<Self, BrokerError> {
-        if path.is_empty()
-            || path.len() > 1024
-            || path.starts_with('/')
-            || path.contains('\\')
-            || path.contains(':')
-            || path.chars().any(char::is_control)
-            || path.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        // Reuse the portable path parser of the pinned sync reader.
+        // Reject noncanonical normalization; never silently change a grant key.
+        if path.len() > 1024
+            || !crate::sync::SyncRelativePath::parse(path)
+                .is_ok_and(|parsed| parsed.as_str() == path)
         {
             return Err(BrokerError::InvalidResource);
         }

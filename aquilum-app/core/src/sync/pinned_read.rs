@@ -28,7 +28,7 @@ pub(crate) struct PinnedReadOnlyRoot {
 /// Identity of an opened file descriptor / HANDLE, not a pathname lookup.
 /// Never treat this value alone as an authorization to mutate a document.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct PinnedFileIdentity {
+pub(crate) struct PinnedFileIdentity {
     pub device: u64,
     pub file: u64,
 }
@@ -88,6 +88,77 @@ impl PinnedReadOnlyRoot {
         super::pinned_windows::file_identity(&self.root)
     }
 
+    /// Pin a file identity without reading content; this is only for
+    /// trusted host indexing, never a guest-callable API.
+    pub(crate) fn identify_file(
+        &self, relative: &SyncRelativePath,
+    ) -> Result<PinnedFileIdentity, VaultPortError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let file = self.open_relative_file(relative)?;
+            let meta = file.metadata()
+                .map_err(|err| VaultPortError::Io(err.to_string()))?;
+            if !meta.is_file() || meta.ino() == 0 || meta.nlink() != 1 {
+                return Err(VaultPortError::UnsafePath);
+            }
+            Ok(PinnedFileIdentity { device: meta.dev(), file: meta.ino() })
+        }
+        #[cfg(windows)]
+        {
+            let file = self.open_relative_file(relative)?;
+            let meta = file.metadata()
+                .map_err(|err| VaultPortError::Io(err.to_string()))?;
+            if !meta.is_file() {
+                return Err(VaultPortError::UnsafePath);
+            }
+            let (volume, id, links) = super::pinned_windows::file_identity_with_links(&file)?;
+            if links != 1 {
+                return Err(VaultPortError::UnsafePath);
+            }
+            Ok(PinnedFileIdentity { device: u64::from(volume), file: id })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = relative;
+            Err(VaultPortError::PermissionDenied)
+        }
+    }
+
+    #[cfg(unix)]
+    fn open_relative_file(
+        &self, relative: &SyncRelativePath,
+    ) -> Result<std::fs::File, VaultPortError> {
+        let mut parent = rustix::io::dup(&self.root)
+            .map_err(|err| VaultPortError::Io(err.to_string()))?;
+        let mut names = relative.as_str().split('/').peekable();
+        while let Some(name) = names.next() {
+            let leaf = names.peek().is_none();
+            let flags = if leaf {
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC
+            } else {
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
+            };
+            parent = openat(&parent, name, flags, Mode::empty())
+                .map_err(|err| VaultPortError::Io(err.to_string()))?;
+        }
+        Ok(std::fs::File::from(parent))
+    }
+
+    #[cfg(windows)]
+    fn open_relative_file(
+        &self, relative: &SyncRelativePath,
+    ) -> Result<std::fs::File, VaultPortError> {
+        let mut parent = self.root.try_clone()
+            .map_err(|err| VaultPortError::Io(err.to_string()))?;
+        let mut names = relative.as_str().split('/').peekable();
+        while let Some(name) = names.next() {
+            let leaf = names.peek().is_none();
+            parent = super::pinned_windows::open_child(&parent, name, leaf)?;
+        }
+        Ok(parent)
+    }
+
     /// Opens each path component relative to its pinned parent FD, without
     /// following symlinks at any level. The final FD is checked as a regular
     /// file *before* bounded reading. No caller gets write rights.
@@ -126,23 +197,7 @@ impl PinnedReadOnlyRoot {
 
         #[cfg(unix)]
         {
-            let mut parent = rustix::io::dup(&self.root)
-                .map_err(|err| VaultPortError::Io(err.to_string()))?;
-            let mut parts = relative.as_str().split('/').peekable();
-            while let Some(name) = parts.next() {
-                let last = parts.peek().is_none();
-                let flags = if last {
-                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK
-                        | OFlags::CLOEXEC
-                } else {
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW
-                        | OFlags::CLOEXEC
-                };
-                parent = openat(&parent, name, flags, Mode::empty())
-                    .map_err(|err| VaultPortError::Io(err.to_string()))?;
-            }
-
-            let mut file = std::fs::File::from(parent);
+            let mut file = self.open_relative_file(relative)?;
             let before = file.metadata()
                 .map_err(|err| VaultPortError::Io(err.to_string()))?;
             if !before.is_file() {
@@ -187,13 +242,7 @@ impl PinnedReadOnlyRoot {
         }
         #[cfg(windows)]
         {
-            let mut parent = self.root.try_clone()
-                .map_err(|error| VaultPortError::Io(error.to_string()))?;
-            let mut parts = relative.as_str().split('/').peekable();
-            while let Some(name) = parts.next() {
-                let leaf = parts.peek().is_none();
-                parent = super::pinned_windows::open_child(&parent, name, leaf)?;
-            }
+            let mut parent = self.open_relative_file(relative)?;
             let before = parent.metadata()
                 .map_err(|error| VaultPortError::Io(error.to_string()))?;
             if !before.is_file() {

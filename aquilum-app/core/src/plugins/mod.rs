@@ -7,6 +7,7 @@
 mod manifest;
 mod permission_broker;
 mod permission_store;
+mod vault_reader;
 
 pub use manifest::{
     ApiRequirement, Capability, HostPlatform, ManifestError, PermissionRequests, PluginDependency,
@@ -19,6 +20,11 @@ pub use permission_broker::{
     NoteResource, PermissionBroker, PluginInstanceHandle, RelativeVaultPath, Resource,
     VaultId,
 };
+
+pub use vault_reader::{HostPluginVaultReader, PluginReadError, ScopedNoteHandle};
+
+#[cfg(test)]
+mod read_tests;
 
 #[cfg(test)]
 mod broker_tests;
