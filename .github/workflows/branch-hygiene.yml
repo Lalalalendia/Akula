@@ -71,7 +71,8 @@ jobs:
             await run({ github, context, core, mode: process.env.MODE });
 
       - name: Weekly CI runtime and fan-out audit (non-blocking)
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'audit')
+        # Smoke the real Actions API after telemetry changes land on main.
+        if: github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'audit')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
