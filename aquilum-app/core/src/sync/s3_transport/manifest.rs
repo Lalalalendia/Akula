@@ -736,6 +736,11 @@ mod tests {
         loop {
             let page = transport.diagnostic_list_page(cursor.as_deref(), 1000)
                 .await.unwrap();
+            // S3/MinIO may legally return a separate empty *final* page
+            // when object count is an exact multiple of max_keys=1000.
+            // Truncation and the cursor, NOT a presumed page count, decide.
+            assert!(!page.keys.is_empty() || page.complete,
+                "empty nonterminal S3 page cannot prove completeness");
             for key in page.keys { assert!(keys.insert(key), "duplicate S3 key"); }
             pages += 1;
             if page.complete {
@@ -743,10 +748,11 @@ mod tests {
                 break;
             }
             cursor = Some(page.next_cursor.expect("required continuation token"));
-            assert!(pages <= 12, "looping S3 continuation cursor");
+            assert!(pages <= 10_001, "looping S3 continuation cursor");
         }
         assert_eq!(keys.len(), 10_000);
-        assert_eq!(pages, 10);
+        assert!(pages >= 10 && pages <= 10_001);
+        eprintln!("verified 10000 distinct MinIO S3 objects across {pages} pages");
 
         // Confirm that a 10k LIST did not conceal an absent or malformed
         // sampled object. For complete DAG readback every revision and shard
