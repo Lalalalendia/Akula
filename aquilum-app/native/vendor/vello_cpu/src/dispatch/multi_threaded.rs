@@ -398,6 +398,9 @@ impl MultiThreadedDispatcher {
         );
 
         drop(bucket_zone);
+        // Wall time from worker-alpha staging through the parallel fine pass.
+        // Worker-local `vello: fine` zones overlap; do not sum them as wall time.
+        let _fine_wall = aq_trace::zone("vello: fine wall");
         let alpha_slots = self.alpha_storage.take();
         {
             let alpha_buffers = alpha_slots.iter().map(Vec::as_slice).collect::<Vec<_>>();
