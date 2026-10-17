@@ -46,6 +46,12 @@ pub(crate) struct FrameStages {
     pub record: std::time::Duration,
     pub detect: std::time::Duration,
     pub encode: std::time::Duration,
+    /// Time spent resetting and resizing Vello (including worker wake-up).
+    pub reset: std::time::Duration,
+    /// Masonry scene replay and Vello command encoding.
+    pub replay: std::time::Duration,
+    /// Flush of encoded work before rasterization.
+    pub flush: std::time::Duration,
     pub raster: std::time::Duration,
     /// Pixels scheduled for rasterization after merging and live-layer updates.
     /// Areas may overlap, so this is workload area, not distinct-screen coverage.
