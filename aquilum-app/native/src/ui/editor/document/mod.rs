@@ -36,6 +36,25 @@ use super::markdown::{self, Fonts};
 use super::resolve::Resolver;
 pub use paragraph::Paragraph;
 
+// Test-only measurements: never add timing instrumentation to release builds.
+#[cfg(test)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct DocumentBuildProfile {
+    pub rescan: std::time::Duration,
+    pub load: std::time::Duration,
+}
+
+#[cfg(test)]
+thread_local! {
+    static LAST_BUILD: std::cell::Cell<DocumentBuildProfile> =
+        std::cell::Cell::new(DocumentBuildProfile::default());
+}
+
+#[cfg(test)]
+pub(crate) fn take_document_build_profile() -> DocumentBuildProfile {
+    LAST_BUILD.with(|slot| slot.replace(DocumentBuildProfile::default()))
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Fold {
     #[default]
@@ -137,8 +156,16 @@ impl Document {
             shift: 0.0,
             line: 0.0,
         };
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         doc.rescan();
+        #[cfg(test)]
+        let rescan = started.elapsed();
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         doc.load(0, None);
+        #[cfg(test)]
+        LAST_BUILD.with(|slot| slot.set(DocumentBuildProfile { rescan, load: started.elapsed() }));
         doc
     }
 

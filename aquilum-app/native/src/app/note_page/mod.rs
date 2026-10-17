@@ -77,10 +77,14 @@ impl App {
     pub(in crate::app) fn render_note(&mut self, root: &mut RenderRoot) {
         self.find = None;
         let page = self.note_widget();
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         if let Some(chrome) = &self.chrome {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page));
         }
         self.refresh_save_error(root);
+        #[cfg(test)]
+        note::page::record_page_install(started.elapsed());
     }
 
     pub(in crate::app) fn refresh_save_error(&mut self, root: &mut RenderRoot) {
