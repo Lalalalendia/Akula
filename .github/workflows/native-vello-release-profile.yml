@@ -6,6 +6,7 @@ on:
       - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/single_threaded.rs'
       - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/multi_threaded.rs'
       - 'aquilum-app/native/src/app/tests/perf/vello_release.rs'
+      - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
       - 'aquilum-app/native/src/render/paint/runs.rs'
       - 'aquilum-app/native/src/render/damage/glyphs.rs'
       - 'aquilum-app/native/src/render/renderer/pass.rs'
@@ -56,6 +57,12 @@ jobs:
             rustc --version
             cargo --version
           } | tee vello-release-env.txt
+      - name: Check hinted glyph baseline under integer viewport translations
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p glifo --lib hinted_vertical_snap -- --nocapture
       - name: Find the first inaccurate fractional-scroll frame
         shell: bash
         working-directory: aquilum-app
