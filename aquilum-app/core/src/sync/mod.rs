@@ -11,6 +11,7 @@ mod dag_store;
 pub mod fake;
 mod fake_vault;
 mod host_admission;
+mod filegate_lock_custody;
 pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::PinnedFileIdentity;
