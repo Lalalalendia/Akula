@@ -51,10 +51,10 @@ impl App {
         };
         match result {
             Ok(_) => {
-                if let Some(note) = &mut self.note
-                    && let Some(text) = note.reload()
-                {
-                    self.set_text(root, text);
+                if let Some(note) = &mut self.note {
+                    // History restore is a disk change too: refresh on the
+                    // background worker, then adopt on the next window wake.
+                    note.request_reload(std::sync::Arc::clone(&self.workspace.wake));
                 }
                 if self.opened_versions.contains_key(&self.tabs.active_id()) {
                     self.close_version(root);
