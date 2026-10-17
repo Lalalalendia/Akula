@@ -41,16 +41,16 @@ jobs:
             echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
             rustc --version
           } | tee environment.txt
-          rustc --edition=2024 -O --test "$RUNNER_TEMP/lines-probe/baseline.rs" -o "$RUNNER_TEMP/lines-tests-base" -Awarnings
-          rustc --edition=2024 -O --test "$RUNNER_TEMP/lines-probe/candidate.rs" -o "$RUNNER_TEMP/lines-tests-head" -Awarnings
+          # Module sources contain pub(super) visibility; compile their parent
+          # harness (which includes both files), not each module as crate root.
+          rustc --edition=2024 -O --test "$RUNNER_TEMP/lines-probe/bench.rs" -o "$RUNNER_TEMP/lines-tests" -Awarnings
           rustc --edition=2024 -O "$RUNNER_TEMP/lines-probe/bench.rs" -o "$RUNNER_TEMP/lines-benchmark" -Awarnings
 
       - name: Validate exact line offsets and benchmark A/B in one process
         shell: bash
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/lines-tests-base" | tee base-test.log
-          "$RUNNER_TEMP/lines-tests-head" | tee head-test.log
+          "$RUNNER_TEMP/lines-tests" | tee lines-test.log
           "$RUNNER_TEMP/lines-benchmark" | tee line-bench.log
 
       - name: Summarize full matrix including regressions
@@ -93,7 +93,6 @@ jobs:
           name: editor-lines-ab-${{ github.sha }}
           path: |
             environment.txt
-            base-test.log
-            head-test.log
+            lines-test.log
             line-bench.log
           retention-days: 30
