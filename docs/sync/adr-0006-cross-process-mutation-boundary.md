@@ -115,3 +115,17 @@ A private Core host first rejects journal locations under the registered vault, 
 - All tests are non-destructive and run under the existing Linux/macOS/Windows security matrix. Full user-facing recovery still needs an operator-authorized disposition protocol, OS-handle-safe external copy/relink decisions, History/Search reconciliation and tested Windows power-loss durability.
 
 **No enablement:** `VaultPort` write executor, cloud sync, file deletion and physical quarantine remain disabled.
+
+## SYNC-04g-M1d-c — explicit review ledger and retention hold (PR pending)
+
+**Scope:** Private Core-only review metadata, not automatic file recovery. A future native, authenticated operator screen must display the immutable first M1d-a evidence and the verified M1d-b copy digest, request a deliberate path confirmation, and disclose that file byte matching is **not** provenance.
+
+- SQLite Sync journal schema v5 migrates existing v1–v4 journals transactionally and adds `sync_local_recovery_reviews`. Review events are **append-only** per operation, have a monotonically increasing sequence, and chain BLAKE3 checksums. Database hash chains detect corruption; they are **not** trusted signatures against an attacker with database write privileges.
+- Two safe review outcomes are supported: `KeepBlocked` and `EscalateManualReview`. **Both mean keep every source file and archived byte, preserve the M1b one-shot publication claim, and leave the Sync baseline unconfirmed.** There is no `ApproveDelete`, `ClearClaim`, `Overwrite`, `Retry`, `ExportPlaintext` or physical quarantine operation in this API.
+- Explicit confirmations must match the exact registered Core workspace and relative path, the current immutable incident+archive fingerprint, and the most recent review revision/digest. A concurrent or stale confirmation is rejected. Notes are bounded to 1,024 UTF-8 bytes and may contain no control characters; up to 128 reviews per incident are accepted before failing closed.
+- Every review row persists `indefinite_hold_no_automatic_purge_v1`. This is the only allowed current retention policy. No TTL-based deletion, hidden cleanup scheduler or auto-resolution is implemented. Archived copies in app-data may contain **unencrypted Markdown and binary attachments**; protection of local app-data, future encryption and an operator-authorized privacy-safe purge workflow remain release blockers.
+- The API is `pub(crate)` and Core-scoped. **It does not authenticate a human operator by itself.** There is still no public recovery UI, signing authority, OS-rooted physical quarantine, conflict-safe restore or repair permission. A future UI must implement identity/consent and independent file-state revalidation before any destructive action.
+- A power-cut recovery test is distinct from child-process exit. Windows parent-directory / NT rename durability under a real power failure remains **unverified**. No new user-facing Sync features are authorized by this ledger.
+
+**Cross-platform acceptance:** exact-head core tests, migrations from v4 and legacy v1–v3, two independent SQLite connections rejecting stale revision, corrupt digest / missing archive / wrong-vault tests, plus Windows/macOS/Linux review safety matrix. No mutation-based recovery until separately reviewed.
+
