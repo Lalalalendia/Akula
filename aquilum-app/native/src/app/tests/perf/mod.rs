@@ -21,6 +21,7 @@ mod timing;
 mod vello_release;
 mod worker_crossover;
 mod worker_router;
+mod worker_fragmented;
 
 use crate::stats::percentiles;
 
