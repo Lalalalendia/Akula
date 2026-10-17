@@ -1173,6 +1173,142 @@ mod tests {
     }
 
     #[test]
+    fn history_move_failure_does_not_retarget_cached_version_path() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let old = fixture.vault.join("Old.md");
+        let new = fixture.vault.join("New.md");
+        fixture.save(&history, &old, "first", Source::Agent);
+        fixture.save(&history, &old, "second", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+        let original = fixture.history_of("Old.md");
+        let target = fixture.history_of("New.md");
+        let source_key = crate::search::paths::identity(&old);
+        let target_key = crate::search::paths::identity(&new);
+
+        history.fail_once(HistoryFault::MoveBefore);
+        let error = history.try_moved(&|| fixture.roots(), &old, &new).unwrap_err();
+        assert_eq!(error.action, "move history");
+        assert!(error.may_have_partial_files);
+        assert!(original.is_dir());
+        assert!(!target.exists());
+        assert_eq!(history.lock().notes.get(&source_key).unwrap().dir, original);
+        assert!(!history.lock().notes.contains_key(&target_key));
+        assert!(history.page(&|| fixture.roots(), &new, 0, 10).versions.is_empty());
+        assert_eq!(history.try_saved(
+            &|| fixture.roots(), &new, write("should not fork", Source::Agent, "hash", None)
+        ).unwrap_err().action, "history relocation pending");
+
+        history.try_moved(&|| fixture.roots(), &old, &new).unwrap();
+        assert!(!original.exists());
+        assert_eq!(texts(&target), [
+            ("first".to_owned(), Source::Agent), ("second".to_owned(), Source::Agent)
+        ]);
+        assert_eq!(history.lock().notes.get(&target_key).unwrap().dir, target);
+        assert!(!history.lock().notes.contains_key(&source_key));
+        assert_eq!(history.page(&|| fixture.roots(), &new, 0, 10).total, 2);
+    }
+
+    #[test]
+    fn history_move_partial_failure_quarantines_both_trees_across_cores() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let first = fixture.service();
+        let second = HistoryService::new(&fixture._directory.path().join("other-data"));
+        let old = fixture.vault.join("Partial.md");
+        let new = fixture.vault.join("Recovered.md");
+        fixture.save(&first, &old, "version one", Source::Agent);
+        fixture.save(&first, &old, "version two", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+        let source = fixture.history_of("Partial.md");
+        let target = fixture.history_of("Recovered.md");
+
+        first.fail_once(HistoryFault::MoveAfterOneFile);
+        let failure = first.try_moved(&|| fixture.roots(), &old, &new).unwrap_err();
+        assert!(failure.may_have_partial_files);
+        assert_eq!(versions(&source).len(), 1);
+        assert_eq!(versions(&target).len(), 1);
+        assert_eq!(first.page(&|| fixture.roots(), &old, 0, 10).total, 0);
+        assert_eq!(second.page(&|| fixture.roots(), &new, 0, 10).total, 0);
+        assert_eq!(second.try_saved(
+            &|| fixture.roots(), &new, write("cannot fork", Source::Agent, "new-hash", None)
+        ).unwrap_err().action, "history relocation pending");
+        assert!(first.try_moved(
+            &|| fixture.roots(), &old, &fixture.vault.join("Unrelated.md")
+        ).is_err());
+        assert!(first.maintain_retention(&fixture.vault, 30).is_err());
+        let unrelated = fixture._directory.path().join("other-workspace");
+        fs::create_dir_all(&unrelated).unwrap();
+        assert_eq!(second.maintain_retention(&unrelated, 0).unwrap(), 0);
+
+        first.try_moved(&|| fixture.roots(), &old, &new).unwrap();
+        assert!(!source.exists());
+        assert_eq!(texts(&target), [
+            ("version one".to_owned(), Source::Agent),
+            ("version two".to_owned(), Source::Agent),
+        ]);
+        assert_eq!(second.page(&|| fixture.roots(), &new, 0, 10).total, 2);
+        assert_eq!(first.maintain_retention(&fixture.vault, 0).unwrap(), 0);
+    }
+
+    #[test]
+    fn history_move_trash_failure_keeps_original_cache_until_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("TrashMe.md");
+        fixture.save(&history, &note, "kept history", Source::Agent);
+        let trashed = move_to_trash_impl(&fixture.vault, &note).unwrap().root;
+        let original = fixture.history_of("TrashMe.md");
+        let target = history_dir(&trash_path(&fixture.vault), Path::new("TrashMe.md"));
+        let source_key = crate::search::paths::identity(&note);
+
+        history.fail_once(HistoryFault::MoveBefore);
+        let err = history.try_trashed(&|| fixture.roots(), &note, &trashed).unwrap_err();
+        assert_eq!(err.action, "trash history");
+        assert!(original.exists());
+        assert!(!target.exists());
+        assert_eq!(history.lock().notes.get(&source_key).unwrap().dir, original);
+        history.try_trashed(&|| fixture.roots(), &note, &trashed).unwrap();
+        assert!(!original.exists());
+        assert_eq!(texts(&target), [("kept history".to_owned(), Source::Agent)]);
+        assert!(history.lock().notes.get(&source_key).is_none());
+        assert_eq!(history.lock().notes.get(&crate::search::paths::identity(&trashed)).unwrap().dir, target);
+    }
+
+    #[test]
+    fn history_move_restore_failure_keeps_trash_cache_until_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("RestoreMe.md");
+        fixture.save(&history, &note, "recover this", Source::Agent);
+        let trashed = move_to_trash_impl(&fixture.vault, &note).unwrap().root;
+        history.try_trashed(&|| fixture.roots(), &note, &trashed).unwrap();
+        let restored = restore_from_trash_impl(&fixture.vault, &trashed).unwrap().root;
+        let trash_dir = history_dir(&trash_path(&fixture.vault), Path::new("RestoreMe.md"));
+        let restored_dir = fixture.history_of("RestoreMe.md");
+        let source_key = crate::search::paths::identity(&trashed);
+
+        history.fail_once(HistoryFault::MoveBefore);
+        let err = history.try_restored(&|| fixture.roots(), &trashed, &restored).unwrap_err();
+        assert_eq!(err.action, "restore history");
+        assert!(trash_dir.exists());
+        assert!(!restored_dir.exists());
+        assert_eq!(history.lock().notes.get(&source_key).unwrap().dir, trash_dir);
+        assert_eq!(history.try_saved(
+            &|| fixture.roots(), &restored, write("must wait", Source::Agent, "hash", None)
+        ).unwrap_err().action, "history relocation pending");
+
+        history.try_restored(&|| fixture.roots(), &trashed, &restored).unwrap();
+        assert!(!trash_dir.exists());
+        assert_eq!(texts(&restored_dir), [("recover this".to_owned(), Source::Agent)]);
+        assert!(history.lock().notes.get(&source_key).is_none());
+        assert_eq!(history.page(&|| fixture.roots(), &restored, 0, 10).total, 1);
+    }
+
+    #[test]
     fn the_history_follows_a_renamed_note() {
         let fixture = Fixture::new();
         let history = fixture.service();
