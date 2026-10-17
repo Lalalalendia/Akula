@@ -29,6 +29,7 @@ impl App {
             note: None,
             text: crop::Rope::from(initial_text),
             inactive_notes: Vec::new(),
+            pending_parley: None,
             system_dark: false,
             tabs,
             renaming_tab: None,
