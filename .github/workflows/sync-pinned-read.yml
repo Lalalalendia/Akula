@@ -7,6 +7,8 @@ on:
       - "aquilum-app/core/src/plugins/read_tests.rs"
       - "aquilum-app/core/src/plugins/permission_broker.rs"
       - "aquilum-app/core/src/sync/pinned_read.rs"
+      - "aquilum-app/core/src/sync/local_create.rs"
+      - "aquilum-app/core/src/sync/local_create_tests.rs"
       - "aquilum-app/core/src/sync/host_admission.rs"
       - "aquilum-app/core/src/app_core.rs"
       - "aquilum-app/core/src/files/gate/write.rs"
