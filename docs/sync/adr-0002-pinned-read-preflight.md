@@ -62,6 +62,13 @@ guardrails **without adding a mutation method**:
 
 Cross-platform tests cover Unicode bytes, size ceilings, unregistered/revoked
 roots, open documents, competing reservations and root pathname replacement.
+macOS testing found an alias bypass: a DocumentHub session opened via `/var`
+was not recognized when the same file was reserved through `/private/var`.
+Admission now checks the canonical filesystem spelling of both open sessions
+and reservations, and `DocumentHub::open` checks it in the opposite direction.
+Unix symlink and Windows junction alias tests are retained as regressions.
+On Windows, the pinned directory identity is obtained via the stable
+`GetFileInformationByHandle` API instead of unstable Rust metadata methods.
 The existing pinned-read tests additionally reject symlink and NTFS junction
 traversal. This stage can prove **only a guarded preflight read**. It does not
 freeze external processes, detect every possible hardlink/ancestor race or
