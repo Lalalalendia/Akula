@@ -73,6 +73,23 @@ impl Renderer {
             ..Default::default()
         };
         let mut damage = if full { Damage { areas: vec![(0, 0, width, height)], moves: Vec::new() } } else { damage };
+        #[cfg(test)]
+        if std::env::var_os("AQ_TEST_REDRAW_SCROLL_VIEWPORT").is_some() {
+            // Only for the release test harness: replace pixel copies with
+            // full re-rasterization of the same scrolled viewport. This
+            // falsifies stale-pixel reuse without altering release behavior.
+            damage.areas.extend(damage.moves.iter().map(|m| (m.x, m.y, m.w, m.h)));
+            damage.moves.clear();
+        }
+        #[cfg(test)]
+        if let Ok(guard) = std::env::var("AQ_TEST_SCROLL_EDGE_GUARD") {
+            let guard = guard.parse::<u16>().expect("edge guard must be u16");
+            for m in &damage.moves {
+                let band = guard.min(m.h);
+                damage.areas.push((m.x, m.y, m.w, band));
+                damage.areas.push((m.x, m.y.saturating_add(m.h - band), m.w, band));
+            }
+        }
         let bounds = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let layers = self.tracker.live.iter().filter_map(|&(id, rect, transform, shape)| Some(Layer { id, area: area_of(rect, bounds)?, transform, shape })).collect();
         self.refresh_live(layers, &mut damage, full, seconds);
