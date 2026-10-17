@@ -196,6 +196,7 @@ dependencies = [
  "memchr",
  "notify",
  "pulldown-cmark",
+ "ring",
  "rusqlite",
  "rust-stemmers",
  "rustix 0.38.44",
@@ -210,6 +211,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "yrs",
+ "zeroize",
 ]
 
 [[package]]
