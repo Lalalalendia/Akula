@@ -3,6 +3,9 @@ name: Sync pinned-read OS checks
 on:
   pull_request:
     paths:
+      - "aquilum-app/core/src/plugins/vault_reader.rs"
+      - "aquilum-app/core/src/plugins/read_tests.rs"
+      - "aquilum-app/core/src/plugins/permission_broker.rs"
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/host_admission.rs"
       - "aquilum-app/core/src/app_core.rs"
@@ -25,6 +28,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: pinned-read-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   pinned-read-platform:
     name: Pinned read / ${{ matrix.os }}
@@ -46,6 +53,9 @@ jobs:
       - name: Registered Core root and editor admission
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine host_admission -- --nocapture
+      - name: Host-scoped plugin read deny/allow and OS path threats
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine plugins::read_tests -- --nocapture
       - name: Canonical aliases cannot bypass DocumentHub reservations
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine sync_reservation_blocks -- --nocapture

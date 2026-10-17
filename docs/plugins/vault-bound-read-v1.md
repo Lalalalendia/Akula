@@ -20,7 +20,7 @@ The pinning code is **reused** from aquilum-app/core/src/sync/pinned_read.rs, pi
 
 - T01: wrong vault, wrong plugin/grant, selected note vs folder vs whole-vault, revoked grant after read, switch of current note/context, forgotten/reissued workspace registration.
 - T02: absolute/traversal path, Windows drive/ADS/UNC form, device aliases, decomposed Unicode, symlink leaf/parent, NTFS junction, hardlink, root directory replacement, file under edit, bounded content.
-- Test matrix: existing Linux Main PR gate and **scoped cross-OS Windows/macOS** regression workflow for this path-sensitive change. Paths unrelated to plugins/sync keep their existing lightweight CI.
+- Test matrix: existing Linux Main PR gate and **already existing** Sync pinned-read OS checks (Windows/macOS/Linux) extended with PLUGIN-04 read threat tests; it cancels stale PR runs. Paths unrelated to plugins/sync keep their existing lightweight CI.
 - Red-team tests exercise the *actual host API*, not only string parser/permission methods.
 - Document all checked SHA/status and residual risk. A green build is not a certification of a guest runtime, OS sandbox, or File Gate writes.
 
