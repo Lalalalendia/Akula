@@ -10,6 +10,7 @@ on:
       - 'aquilum-app/core/src/sync/s3_manifest_delta.rs'
       - 'aquilum-app/core/src/sync/s3_head_probe.rs'
       - 'aquilum-app/core/src/sync/s3_delta_walker.rs'
+      - 'aquilum-app/core/src/sync/s3_remote_anchor.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
@@ -102,6 +103,14 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_manifest::tests
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::manifest::tests -- --skip minio_
+      - name: Verify durable profile-bound remote anchors and delta lineage
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 s3_remote_anchor::tests
+          cargo test --locked -p aquilum-core --features sync-s3 s3_delta_walker::tests -- --skip live_minio_
+
       - name: Validate bounded read-only RemoteStore snapshot projection
         shell: bash
         working-directory: aquilum-app
