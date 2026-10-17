@@ -1,0 +1,74 @@
+name: Parley real tab-switch ABBA (test only)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/ui/editor/document/layout_reuse.rs'
+      - 'aquilum-app/native/src/ui/editor/widget/testing.rs'
+      - 'aquilum-app/native/src/app/tabs/open.rs'
+      - 'aquilum-app/native/src/app/tests/perf/parley_tabs.rs'
+      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - 'aquilum-app/native/src/ui/note/page.rs'
+      - '.github/workflows/parley-real-tabs-abba.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parley-real-tabs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abba:
+    name: Real note tab snapshot trial (diagnostic)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record exact source and runner
+        shell: bash
+        run: |
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee parley-tabs-env.txt
+      - name: Compare real tab switches and reject stale cached layouts
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native \
+            benchmark_parley_real_tabs_abba -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/parley-real-tabs.log"
+          grep -F "PARLEY_TAB_ABBA " "$GITHUB_WORKSPACE/parley-real-tabs.log" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -F "PARLEY_TAB_FRESHNESS stale_hash_rejected=true restored=0" \
+            "$GITHUB_WORKSPACE/parley-real-tabs.log" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Preserve baseline, candidate and hash-freshness diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parley-real-tabs-${{ github.sha }}
+          path: |
+            parley-tabs-env.txt
+            parley-real-tabs.log
+          retention-days: 21
