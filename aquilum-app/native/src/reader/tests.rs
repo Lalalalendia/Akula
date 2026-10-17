@@ -182,12 +182,14 @@ fn synthetic_epub_shape_pipeline_profile() {
     let mut layout_ms = 0.0;
     let mut paginate_ms = 0.0;
     let mut blocks_total = 0;
+    let mut first_section_ms = 0.0;
     let mut max_block_bytes = 0;
     let mut headings = 0;
     let mut pages = 0;
     let mut xhtml_bytes = 0;
     let mut collected = String::new();
     for index in 0..book.sections.len() {
+        let section_start = Instant::now();
         xhtml_bytes += book.size(index);
         let start = Instant::now();
         let dom = book.document(index).expect("parse generated XHTML");
@@ -214,6 +216,9 @@ fn synthetic_epub_shape_pipeline_profile() {
         let laid = page::paginate(items, 720.0);
         paginate_ms += elapsed(start);
         pages += laid.columns.len();
+        if index == 0 {
+            first_section_ms = elapsed(section_start);
+        }
     }
     assert_eq!(headings, 18, "recover all chapter headings");
     assert_eq!(collected.matches('~').count(), 2 * 5324, "retain all line tokens");
@@ -233,7 +238,7 @@ fn synthetic_epub_shape_pipeline_profile() {
         })
         .unwrap_or(0);
     println!(
-        "READER_EPUB_SHAPE mode={mode} sections={} xhtml_bytes={xhtml_bytes} blocks={blocks_total} headings={headings} max_block_bytes={max_block_bytes} pages={pages} open_ms={open_ms:.3} parse_ms={parse_ms:.3} flow_ms={flow_ms:.3} layout_ms={layout_ms:.3} paginate_ms={paginate_ms:.3} rss_kib={peak_rss_kib} digest={digest:016x}",
+        "READER_EPUB_SHAPE mode={mode} sections={} xhtml_bytes={xhtml_bytes} blocks={blocks_total} headings={headings} max_block_bytes={max_block_bytes} pages={pages} first_section_ms={first_section_ms:.3} open_ms={open_ms:.3} parse_ms={parse_ms:.3} flow_ms={flow_ms:.3} layout_ms={layout_ms:.3} paginate_ms={paginate_ms:.3} rss_kib={peak_rss_kib} digest={digest:016x}",
         book.sections.len(),
     );
 }
