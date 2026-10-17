@@ -25,7 +25,7 @@ fn tokenize(source: &str) -> Vec<Tok> {
     let mut state: Option<String> = None;
     let mut escape = false;
     let mut value = String::new();
-    let chars: Vec<Option<char>> = source.trim().chars().map(Some).chain([None]).collect();
+    let chars = source.trim().chars().map(Some).chain([None]);
     for ch in chars {
         if ch == Some('^') && !escape {
             escape = true;
@@ -33,7 +33,7 @@ fn tokenize(source: &str) -> Vec<Tok> {
         }
         let digit = ch.is_some_and(|c| c.is_ascii_digit());
         let decimal = digit || ch == Some('.');
-        match state.clone().as_deref() {
+        match state.as_deref() {
             Some("!") => {
                 tokens.push(Tok::Bang);
                 state = None;
@@ -179,5 +179,61 @@ pub fn parse(source: &str) -> Cfi {
     match groups.as_slice() {
         [parent, start, end] => Cfi::Range { parent: steps(parent), start: steps(start), end: steps(end) },
         _ => Cfi::Point(steps(&tokens)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Tok, parts, tokenize};
+
+    #[test]
+    fn tokenizer_keeps_spatial_temporal_and_side_parameters() {
+        let tokens = tokenize("/6[глава]/4:12[до,после;s=b]~1.25@20:30");
+        assert_eq!(tokens, vec![
+            Tok::Slash(6), Tok::Bracket("глава".into()), Tok::Slash(4),
+            Tok::Colon(12), Tok::Bracket("до".into()), Tok::Bracket("после".into()),
+            Tok::Param(";s".into(), "b".into()), Tok::Tilde(1.25),
+            Tok::At(20.0), Tok::At(30.0),
+        ]);
+        let path = parts(&tokens);
+        assert_eq!(path[0].id.as_deref(), Some("глава"));
+        assert_eq!(path[1].offset, Some(12));
+        assert_eq!(path[1].text, ["до", "после"]);
+        assert_eq!(path[1].side.as_deref(), Some("b"));
+        assert_eq!(path[1].temporal, Some(1.25));
+        assert_eq!(path[1].spatial, [20.0, 30.0]);
+    }
+
+    #[test]
+    fn tokenizer_keeps_escaped_delimiters_and_parameter_values() {
+        assert_eq!(tokenize("/2[a^,b^;c^]d^^e;s=v^;x;p=q^=r]"), vec![
+            Tok::Slash(2), Tok::Bracket("a,b;c]d^e".into()),
+            Tok::Param(";s".into(), "v;x".into()),
+            Tok::Param(";p".into(), "q=r".into()),
+        ]);
+    }
+
+    #[test]
+    fn tokenizer_flushes_final_numbers_and_range_separators() {
+        assert_eq!(tokenize(" /6/2!/4/1:0,/1:2,/1:5 "), vec![
+            Tok::Slash(6), Tok::Slash(2), Tok::Bang, Tok::Slash(4),
+            Tok::Slash(1), Tok::Colon(0), Tok::Comma, Tok::Slash(1),
+            Tok::Colon(2), Tok::Comma, Tok::Slash(1), Tok::Colon(5),
+        ]);
+        assert_eq!(tokenize("!"), vec![Tok::Bang]);
+        assert_eq!(tokenize(","), vec![Tok::Comma]);
+        assert!(tokenize("").is_empty());
+        // Preserve existing forgiving handling, including unterminated assertions.
+        assert_eq!(tokenize("/2[unfinished"), vec![Tok::Slash(2)]);
+        assert_eq!(tokenize("/4294967296"), vec![Tok::Slash(0)]);
+    }
+
+    #[test]
+    fn tokenizer_accepts_long_unicode_assertions() {
+        let text = "Глава🦈".repeat(10_000);
+        let source = format!("/2[{text};s=b]");
+        assert_eq!(tokenize(&source), vec![
+            Tok::Slash(2), Tok::Bracket(text), Tok::Param(";s".into(), "b".into()),
+        ]);
     }
 }

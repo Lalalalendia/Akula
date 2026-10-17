@@ -521,6 +521,45 @@ impl<'a> RegisteredReadAdmission<'a> {
         Ok(())
     }
 
+    /// SYNC-05e-3: fail-closed admission for read-only recovery of a
+    /// cloud-vault publication whose UUID differs from the local workspace.
+    /// This is not File Gate permission, provenance, or a baseline receipt.
+    #[cfg(feature = "sync-s3")]
+    fn checked_registered_s3_recovery_scope(
+        &self,
+        operation: OperationId,
+        journal: &SqliteSyncJournal,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile,
+        keyspace: &super::S3Keyspace,
+    ) -> Result<super::VaultId, LocalRecoveryError> {
+        self.check_root()?;
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        let bound = bindings.load_for_registered(self)
+            .map_err(|_| LocalRecoveryError::Admission(VaultPortError::PermissionDenied))?
+            .ok_or(LocalRecoveryError::Admission(VaultPortError::PermissionDenied))?;
+        if !bound.matches_remote(profile, keyspace) {
+            return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+        }
+        let record = journal.get(operation)?.ok_or(LocalRecoveryError::MissingTicket)?;
+        let expected_key = keyspace.immutable_blob_key(&record.intent.expected_content_hash)
+            .map_err(|_| LocalRecoveryError::Admission(VaultPortError::PermissionDenied))?;
+        if record.intent.action != JournalAction::StageDownload
+            || record.intent.vault_id != bound.vault_id
+            || record.intent.profile_id != bound.profile_id
+            || record.intent.remote_object_id != expected_key
+            || record.intent.remote_guard.is_some()
+            || record.intent.expected_baseline.is_some()
+            || record.phase != JournalPhase::Staged
+            || record.staged_hash.as_deref()
+                != Some(record.intent.expected_content_hash.as_str())
+        {
+            return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+        }
+        self.check_root()?;
+        Ok(bound.vault_id)
+    }
+
     /// SYNC-04g-M1c: inspect exactly one durable publication-attempt ticket.
     /// Does not write/delete/quarantine/release the attempt or update a
     /// confirmed remote baseline. A final name matching expected bytes is
@@ -536,10 +575,33 @@ impl<'a> RegisteredReadAdmission<'a> {
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         before_second: impl FnOnce(),
     ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
+        self.inspect_local_publication_for_vault_with_hook(
+            operation, journal, super::VaultId::from_uuid(self.workspace_id), before_second,
+        )
+    }
+
+    /// Inspect exactly one cloud-origin publication under an existing,
+    /// registered SQLite profile. Matching bytes never grant write authority.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn inspect_local_publication_for_registered_s3(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
+        let vault = self.checked_registered_s3_recovery_scope(
+            operation, journal, bindings, profile, keyspace,
+        )?;
+        self.inspect_local_publication_for_vault_with_hook(operation, journal, vault, || {})
+    }
+
+    fn inspect_local_publication_for_vault_with_hook(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        expected_vault: super::VaultId, before_second: impl FnOnce(),
+    ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
         let ticket = journal.local_publication_review_queue()?
             .into_iter().find(|entry| entry.operation_id == operation)
             .ok_or(LocalRecoveryError::MissingTicket)?;
-        if ticket.vault_id.as_uuid() != self.workspace_id {
+        if ticket.vault_id != expected_vault {
             return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
         }
         let relative = &ticket.path;
@@ -595,12 +657,40 @@ impl<'a> RegisteredReadAdmission<'a> {
     pub(crate) fn record_local_recovery_evidence(
         &self, operation: OperationId, journal: &SqliteSyncJournal,
     ) -> Result<LocalRecoveryEvidenceCase, LocalRecoveryError> {
-        let evidence = self.inspect_local_publication(operation, journal)?;
+        self.record_local_recovery_evidence_for_vault(
+            operation, journal, super::VaultId::from_uuid(self.workspace_id),
+        )
+    }
+
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn record_local_recovery_evidence_for_registered_s3(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<LocalRecoveryEvidenceCase, LocalRecoveryError> {
+        let vault = self.checked_registered_s3_recovery_scope(
+            operation, journal, bindings, profile, keyspace,
+        )?;
+        self.record_local_recovery_evidence_for_vault(operation, journal, vault)
+    }
+
+    fn record_local_recovery_evidence_for_vault(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        expected_vault: super::VaultId,
+    ) -> Result<LocalRecoveryEvidenceCase, LocalRecoveryError> {
+        // Durable forensic evidence is itself a SQLite write. A journal
+        // inside the registered vault could be externally modified or synced,
+        // so reject it before recording any recovery evidence. Pure read-only
+        // inspection remains separately available.
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        let evidence = self.inspect_local_publication_for_vault_with_hook(
+            operation, journal, expected_vault, || {},
+        )?;
         self.check_root()?;
         let ticket = journal.local_publication_review_queue()?
             .into_iter().find(|entry| entry.operation_id == operation)
             .ok_or(LocalRecoveryError::MissingTicket)?;
-        if ticket.vault_id.as_uuid() != self.workspace_id {
+        if ticket.vault_id != expected_vault {
             return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
         }
         let case = LocalRecoveryEvidenceCase {
@@ -620,13 +710,34 @@ impl<'a> RegisteredReadAdmission<'a> {
     pub(crate) fn archive_local_recovery_copy(
         &self, operation: OperationId, journal: &SqliteSyncJournal,
     ) -> Result<LocalRecoveryArchivedCopy, LocalRecoveryError> {
+        self.archive_local_recovery_copy_for_vault(
+            operation, journal, super::VaultId::from_uuid(self.workspace_id),
+        )
+    }
+
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn archive_local_recovery_copy_for_registered_s3(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<LocalRecoveryArchivedCopy, LocalRecoveryError> {
+        let vault = self.checked_registered_s3_recovery_scope(
+            operation, journal, bindings, profile, keyspace,
+        )?;
+        self.archive_local_recovery_copy_for_vault(operation, journal, vault)
+    }
+
+    fn archive_local_recovery_copy_for_vault(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        expected_vault: super::VaultId,
+    ) -> Result<LocalRecoveryArchivedCopy, LocalRecoveryError> {
         // An attacker-controlled sync folder must never become the location
         // of an archive / WAL / SHM sidecar. The journal's host app-data path
         // is checked before archive bytes are written.
         journal.require_appdata_outside_vault(&self.root_path)?;
         let case = journal.read_local_recovery_case(operation)?
             .ok_or(LocalRecoveryError::MissingTicket)?;
-        if case.vault_id.as_uuid() != self.workspace_id
+        if case.vault_id != expected_vault
             || case.evidence.operation_id != operation
         {
             return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
@@ -683,10 +794,31 @@ impl<'a> RegisteredReadAdmission<'a> {
     pub(crate) fn recovery_operator_preview(
         &self, operation: OperationId, journal: &SqliteSyncJournal,
     ) -> Result<LocalRecoveryReviewSnapshot, LocalRecoveryError> {
+        self.recovery_operator_preview_for_vault(
+            operation, journal, super::VaultId::from_uuid(self.workspace_id),
+        )
+    }
+
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn recovery_operator_preview_for_registered_s3(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<LocalRecoveryReviewSnapshot, LocalRecoveryError> {
+        let vault = self.checked_registered_s3_recovery_scope(
+            operation, journal, bindings, profile, keyspace,
+        )?;
+        self.recovery_operator_preview_for_vault(operation, journal, vault)
+    }
+
+    fn recovery_operator_preview_for_vault(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        expected_vault: super::VaultId,
+    ) -> Result<LocalRecoveryReviewSnapshot, LocalRecoveryError> {
         self.check_root()?;
         journal.require_appdata_outside_vault(&self.root_path)?;
         let preview = journal.recovery_review_snapshot(operation)?;
-        if preview.vault_id.as_uuid() != self.workspace_id {
+        if preview.vault_id != expected_vault {
             return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
         }
         self.check_root()?;
@@ -708,7 +840,54 @@ impl<'a> RegisteredReadAdmission<'a> {
         reason: &str,
         journal: &mut SqliteSyncJournal,
     ) -> Result<LocalRecoveryReviewEvent, LocalRecoveryError> {
-        let snapshot = self.recovery_operator_preview(operation, journal)?;
+        self.record_recovery_operator_review_for_vault(
+            operation, displayed_path, displayed_archive_fingerprint,
+            displayed_review_count, displayed_previous_digest,
+            disposition, reason, journal,
+            super::VaultId::from_uuid(self.workspace_id),
+        )
+    }
+
+    /// Only blocked/manual-review events; never replay, unlink or commit.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn record_recovery_operator_review_for_registered_s3(
+        &self,
+        operation: OperationId,
+        displayed_path: &SyncRelativePath,
+        displayed_archive_fingerprint: &str,
+        displayed_review_count: u32,
+        displayed_previous_digest: &str,
+        disposition: RecoveryReviewDisposition,
+        reason: &str,
+        journal: &mut SqliteSyncJournal,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<LocalRecoveryReviewEvent, LocalRecoveryError> {
+        let vault = self.checked_registered_s3_recovery_scope(
+            operation, journal, bindings, profile, keyspace,
+        )?;
+        self.record_recovery_operator_review_for_vault(
+            operation, displayed_path, displayed_archive_fingerprint,
+            displayed_review_count, displayed_previous_digest,
+            disposition, reason, journal, vault,
+        )
+    }
+
+    fn record_recovery_operator_review_for_vault(
+        &self,
+        operation: OperationId,
+        displayed_path: &SyncRelativePath,
+        displayed_archive_fingerprint: &str,
+        displayed_review_count: u32,
+        displayed_previous_digest: &str,
+        disposition: RecoveryReviewDisposition,
+        reason: &str,
+        journal: &mut SqliteSyncJournal,
+        expected_vault: super::VaultId,
+    ) -> Result<LocalRecoveryReviewEvent, LocalRecoveryError> {
+        let snapshot = self.recovery_operator_preview_for_vault(
+            operation, journal, expected_vault,
+        )?;
         if snapshot.path != *displayed_path
             || snapshot.archive_fingerprint != displayed_archive_fingerprint
             || snapshot.review_count != displayed_review_count
@@ -724,7 +903,7 @@ impl<'a> RegisteredReadAdmission<'a> {
         self.check_root()?;
         journal.require_appdata_outside_vault(&self.root_path)?;
         let recorded = journal.append_recovery_review(
-            operation, super::VaultId::from_uuid(self.workspace_id),
+            operation, expected_vault,
             displayed_path, displayed_archive_fingerprint,
             displayed_review_count, displayed_previous_digest,
             disposition, reason,

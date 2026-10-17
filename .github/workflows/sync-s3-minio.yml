@@ -14,6 +14,7 @@ on:
       - 'aquilum-app/core/src/sync/s3_head_probe.rs'
       - 'aquilum-app/core/src/sync/s3_delta_walker.rs'
       - 'aquilum-app/core/src/sync/s3_remote_anchor.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/selective_snapshot.rs'
       - 'aquilum-app/core/src/sync/s3_anchored_delta.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
@@ -114,6 +115,7 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_remote_anchor::tests
           cargo test --locked -p aquilum-core --features sync-s3 s3_anchored_delta::tests
+          cargo test --locked -p aquilum-core --features sync-s3 selective_snapshot::tests -- --skip live_minio_
           cargo test --locked -p aquilum-core --features sync-s3 s3_delta_walker::tests -- --skip live_minio_
 
       - name: Validate bounded read-only RemoteStore snapshot projection
@@ -150,6 +152,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 minio_two_clients_manifest_cas_and_lost_ack -- --ignored --test-threads=1 --nocapture
+      - name: Prove bounded parallel DAG verification and reject corrupted S3 blobs
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 bounded_parallel_verifier_keeps_out_of_order_parent_closure_and_blob_lengths
+          cargo test --locked -p aquilum-core --features sync-s3 minio_verified_384_revision_dag_parallel_and_corruption -- --ignored --test-threads=1 --nocapture
       - name: Stress 10k actual S3 objects and 1000-key pagination
         shell: bash
         working-directory: aquilum-app

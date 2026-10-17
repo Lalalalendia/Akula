@@ -15,6 +15,8 @@ mod replan;
 mod core_stage;
 pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError};
 mod snapshot_store;
+mod selective_snapshot;
+pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
 pub use snapshot_store::{
     S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
 };
@@ -142,6 +144,7 @@ impl S3PutCondition {
 /// An authenticated SDK client scoped to one Akula vault prefix.
 /// Credentials come from the caller-controlled AWS provider chain, not from
 /// the vault, local journal, ordinary settings JSON, logs or object names.
+#[derive(Clone)]
 pub struct AwsS3ProbeClient {
     client: aws_sdk_s3::Client,
     bucket: String,
