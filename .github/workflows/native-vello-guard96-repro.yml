@@ -7,6 +7,7 @@ on:
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
       - 'aquilum-app/native/src/render/paint/mod.rs'
       - 'aquilum-app/native/vendor/vello_cpu/src/text.rs'
+      - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
   workflow_dispatch:
 
 permissions:
@@ -44,6 +45,10 @@ jobs:
             rustc --version
             cargo --version
           } | tee vello-guard96-environment.log
+      - name: Verify fractional Y atlas fallback invariant in vendored glifo
+        shell: bash
+        working-directory: aquilum-app
+        run: cargo test --release --locked -p glifo --lib cached_outlines_require_integral_vertical_origin -- --nocapture
       - name: Build benchmark once, then repeat 20 independent strict parity runs
         shell: bash
         working-directory: aquilum-app
