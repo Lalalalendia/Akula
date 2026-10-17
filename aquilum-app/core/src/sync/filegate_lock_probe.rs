@@ -127,6 +127,13 @@ impl HeldProbeLock {
         self._file.metadata()
     }
 
+    /// Owner/DACL read is through the LIVE locked file handle.
+    /// This is a negative forensic check, never a write permit.
+    #[cfg(windows)]
+    pub(crate) fn audit_windows_acl(&self) -> io::Result<()> {
+        super::filegate_windows_acl::audit_owner_dacl(&self._file).map_err(converted)
+    }
+
     /// Negative forensic check ONLY. An exclusive OS lock protects an opened
     /// file object, not its directory entry. Another process with sufficient
     /// filesystem rights can rename the held object and replace its name;
@@ -174,6 +181,12 @@ impl PinnedProbeRoot {
 
     pub(crate) fn opened_root_metadata(&self) -> io::Result<std::fs::Metadata> {
         self.handle.metadata()
+    }
+
+    /// ACL is read from the PINNED external custody directory handle.
+    #[cfg(windows)]
+    pub(crate) fn audit_windows_acl(&self) -> io::Result<()> {
+        super::filegate_windows_acl::audit_owner_dacl(&self.handle).map_err(converted)
     }
 
     pub(crate) fn recheck_root(&self) -> io::Result<()> {
