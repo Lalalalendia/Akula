@@ -31,6 +31,7 @@ on:
       - "aquilum-app/native/src/app/settings/mod.rs"
       - "aquilum-app/native/src/app/templates/starters.rs"
       - "aquilum-app/core/src/files/gate/tests.rs"
+      - "aquilum-app/core/src/files/gate/interprocess_probe.rs"
       - "aquilum-app/core/src/documents/hub.rs"
       - "aquilum-app/core/src/documents/hub_tests.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
@@ -104,6 +105,9 @@ jobs:
       - name: Core File Gate mutation interlock
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine core_file_gate_serializes -- --nocapture
+      - name: OS two-process File Gate advisory lock probe (test-only)
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine oslock_ -- --nocapture
       - name: Trash symlink and NTFS junction fail-closed checks
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine unsafe_trash_root -- --nocapture
