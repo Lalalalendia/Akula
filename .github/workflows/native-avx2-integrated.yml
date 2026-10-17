@@ -55,8 +55,11 @@ jobs:
       - name: Full Akula scroll and animation frames under both SIMD backends
         shell: bash
         working-directory: aquilum-app
+        env:
+          AQ_OUT: ${{ github.workspace }}/avx2-diff
         run: |
           set -euo pipefail
+          mkdir -p "$AQ_OUT"
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             avx2_integrated_ -- --ignored --nocapture --test-threads=1 \
             2>&1 | tee integrated-perf.log
@@ -78,4 +81,5 @@ jobs:
           path: |
             aquilum-app/integrated-env.txt
             aquilum-app/integrated-perf.log
+            avx2-diff/*.png
           retention-days: 30
