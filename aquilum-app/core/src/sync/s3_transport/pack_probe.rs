@@ -74,7 +74,9 @@ impl PackBuilder {
         }
         if revision_json.is_empty() || revision_json.len() > MAX_PACK_REVISION_BYTES
             || blob.len() > MAX_PACK_MEMBER_BLOB_BYTES
-            || reference.blob_bytes != Some(blob.len() as u64)
+            || !matches!(reference.blob_bytes,
+                Some(size) if size == blob.len() as u64)
+                && !(reference.blob_bytes.is_none() && blob.is_empty())
             || blake3::hash(revision_json).to_hex().as_str() != reference.revision_blake3
         {
             return Err(PackProbeError::Invalid);
@@ -161,7 +163,8 @@ pub(super) fn ingest_verified_pack(
         let blob_len = next_u32(payload, &mut cursor)?;
         if revision_len == 0 || revision_len > MAX_PACK_REVISION_BYTES
             || blob_len > MAX_PACK_MEMBER_BLOB_BYTES
-            || reference.blob_bytes != Some(blob_len as u64)
+            || !matches!(reference.blob_bytes, Some(n) if n == blob_len as u64)
+                && !(reference.blob_bytes.is_none() && blob_len == 0)
         {
             return Err(PackProbeError::Invalid);
         }
@@ -177,14 +180,21 @@ pub(super) fn ingest_verified_pack(
         {
             return Err(PackProbeError::Invalid);
         }
-        let expected_blob_hash = match &record.operation {
+        match &record.operation {
             RevisionOperation::Content { blob_hash, .. }
-            | RevisionOperation::Rename { blob_hash, .. } => blob_hash,
-            RevisionOperation::Tombstone { .. } =>
-                return Err(PackProbeError::Invalid),
-        };
-        if blake3::hash(blob).to_hex().as_str() != expected_blob_hash {
-            return Err(PackProbeError::IntegrityMismatch);
+            | RevisionOperation::Rename { blob_hash, .. } => {
+                if reference.blob_bytes != Some(blob_len as u64) {
+                    return Err(PackProbeError::Invalid);
+                }
+                if blake3::hash(blob).to_hex().as_str() != blob_hash {
+                    return Err(PackProbeError::IntegrityMismatch);
+                }
+            }
+            RevisionOperation::Tombstone { .. } => {
+                if reference.blob_bytes.is_some() || blob_len != 0 {
+                    return Err(PackProbeError::Invalid);
+                }
+            }
         }
         if !local.insert(record.id) || seen.contains(&record.id) {
             return Err(PackProbeError::DuplicateRevision);
@@ -249,6 +259,52 @@ mod tests {
         assert_eq!(descriptor.key, ns.immutable_blob_key(&descriptor.digest).unwrap());
         assert_eq!(ingest_verified_pack(&bytes, &descriptor, &mut dag, &mut seen),
             Err(PackProbeError::DuplicateRevision));
+    }
+
+    #[test]
+    fn packed_tombstone_and_offline_siblings_remain_distinct_heads() {
+        let ns = S3Keyspace::new("akula-sync/packed-forks-fixture", VaultId::new()).unwrap();
+        let doc = DocumentId::new();
+        let root = RevisionId::new();
+        let alice = RevisionId::new();
+        let bob = RevisionId::new();
+        let deleted = RevisionId::new();
+        let mut builder = PackBuilder::new();
+        for (id, parents, payload) in [
+            (root, vec![], Some(&b"base"[..])),
+            (alice, vec![root], Some(&b"alice edits"[..])),
+            (bob, vec![root], Some(&b"bob edits"[..])),
+            (deleted, vec![root], None),
+        ] {
+            let record = RevisionRecord {
+                id, document_id: doc, parents,
+                operation: match payload {
+                    Some(blob) => RevisionOperation::Content {
+                        path: SyncRelativePath::parse("notes/conflict.md").unwrap(),
+                        blob_hash: blake3::hash(blob).to_hex().to_string(),
+                    },
+                    None => RevisionOperation::Tombstone {
+                        path: SyncRelativePath::parse("notes/conflict.md").unwrap(),
+                    },
+                },
+            };
+            let json = serde_json::to_vec(&record).unwrap();
+            let ref_v1 = S3RevisionRefV1 {
+                revision_id: id,
+                document_id: doc,
+                revision_blake3: blake3::hash(&json).to_hex().to_string(),
+                blob_bytes: payload.map(|b| b.len() as u64),
+            };
+            builder.push(ref_v1, &json, payload.unwrap_or_default()).unwrap();
+        }
+        let (descriptor, payload) = builder.seal(&ns).unwrap();
+        let mut dag = RevisionDag::new();
+        let mut seen = BTreeSet::new();
+        ingest_verified_pack(&payload, &descriptor, &mut dag, &mut seen).unwrap();
+        assert_eq!(dag.active_len(), 4);
+        assert_eq!(dag.pending_len(), 0);
+        assert_eq!(dag.heads(doc), BTreeSet::from([alice, bob, deleted]));
+        assert_eq!(seen.len(), 4);
     }
 
     #[test]
