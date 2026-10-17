@@ -637,3 +637,347 @@ mod tests {
     }
 
 }
+
+
+/// Explicitly invoked disposable-MinIO performance experiment. This test is
+/// ignored in the standard suite and records observed SDK HEAD/GET attempts,
+/// payload bytes and wall time for full pinning versus selective PREVIEW.
+///
+/// Important: a selective preview is NOT a fresh full-availability proof or
+/// File Gate receipt. Speed ratios are discovery-only, not end-to-end sync.
+/// Existing 10k S3 pagination tests are not a substitute for this workload.
+#[cfg(test)]
+mod selective_ab_benchmark {
+    use super::*;
+    use super::super::{S3TestIoCounts, S3PutCondition};
+    use crate::sync::{
+        DocumentId, OperationId, S3ConnectionProfile, S3HeadPointerV1,
+        S3Keyspace, S3ManifestDeltaLimits, S3ManifestShardRefV1,
+        S3RemoteAnchorJournal, S3RemoteAnchorScope, SyncRelativePath,
+        VaultId, MAX_SHARD_ENTRIES,
+    };
+    use std::time::Instant;
+
+    struct InitialShard {
+        reference: S3ManifestShardRefV1,
+        entries: Vec<S3RevisionRefV1>,
+    }
+
+    fn base_id(index: usize) -> RevisionId {
+        RevisionId::from_uuid(uuid::Uuid::from_u128(
+            ((index as u128 + 1) << 64) | 0x4000_0000_0000_0001,
+        ))
+    }
+
+    fn updated_id(index: usize) -> RevisionId {
+        RevisionId::from_uuid(uuid::Uuid::from_u128(
+            ((index as u128 + 1) << 64) | 0x4000_0000_0000_0002,
+        ))
+    }
+
+    fn document_id(index: usize) -> DocumentId {
+        DocumentId::from_uuid(uuid::Uuid::from_u128(
+            ((index as u128 + 1) << 64) | 0x5000_0000_0000_0001,
+        ))
+    }
+
+    fn note(index: usize, edited: bool) -> (S3RevisionRefV1, Vec<u8>, Vec<u8>) {
+        let blob = format!(
+            "# Note {index:05}\n\nbench key: {index:05}; generation: {}\n",
+            if edited { 2 } else { 1 },
+        ).into_bytes();
+        let id = if edited { updated_id(index) } else { base_id(index) };
+        let record = RevisionRecord {
+            id,
+            document_id: document_id(index),
+            parents: if edited { vec![base_id(index)] } else { Vec::new() },
+            operation: RevisionOperation::Content {
+                path: SyncRelativePath::parse(
+                    &format!("notes/note-{index:05}.md"),
+                ).unwrap(),
+                blob_hash: blake3::hash(&blob).to_hex().to_string(),
+            },
+        };
+        let json = serde_json::to_vec(&record).unwrap();
+        let r = S3RevisionRefV1 {
+            revision_id: id,
+            document_id: record.document_id,
+            revision_blake3: blake3::hash(&json).to_hex().to_string(),
+            blob_bytes: Some(blob.len() as u64),
+        };
+        (r, json, blob)
+    }
+
+    async fn upload_objects(
+        client: &AwsS3ProbeClient,
+        entries: Vec<(String, Vec<u8>)>,
+    ) {
+        let mut workers = tokio::task::JoinSet::new();
+        for (key, bytes) in entries {
+            let client = client.clone();
+            workers.spawn(async move {
+                client.put_conditionally(
+                    &key, &bytes, S3PutCondition::IfAbsent,
+                ).await.expect("disposable MinIO immutable upload");
+            });
+            if workers.len() >= 32 {
+                workers.join_next().await.unwrap().unwrap();
+            }
+        }
+        while let Some(finished) = workers.join_next().await {
+            finished.unwrap();
+        }
+    }
+
+    async fn upload_shard(
+        client: &AwsS3ProbeClient,
+        ns: &S3Keyspace,
+        entries: Vec<S3RevisionRefV1>,
+    ) -> S3ManifestShardRefV1 {
+        let shard = S3ManifestShardV1::new(ns, OperationId::new(), entries).unwrap();
+        client.put_conditionally(
+            &ns.immutable_manifest_key(shard.shard_id),
+            &shard.encode(ns).unwrap(),
+            S3PutCondition::IfAbsent,
+        ).await.unwrap();
+        shard.reference(ns).unwrap()
+    }
+
+    /// Preserve old shard IDs whose exact ranges do not contain any new IDs.
+    /// Split only changed ranges into <=128-reference new shards, and create
+    /// separate gap shards if new IDs fall between existing shard ranges.
+    /// This is a benchmark fixture policy, NOT a production publisher change.
+    async fn publish_stable_shards(
+        client: &AwsS3ProbeClient,
+        ns: &S3Keyspace,
+        old: &[InitialShard],
+        additions: Vec<S3RevisionRefV1>,
+    ) -> Vec<S3ManifestShardRefV1> {
+        let mut inside = vec![Vec::<S3RevisionRefV1>::new(); old.len()];
+        let mut gaps = vec![Vec::<S3RevisionRefV1>::new(); old.len()+1];
+        for reference in additions {
+            let mut position = Some(reference);
+            for (index, shard) in old.iter().enumerate() {
+                let candidate = position.as_ref().unwrap();
+                if candidate.revision_id < shard.reference.first_revision {
+                    gaps[index].push(position.take().unwrap());
+                    break;
+                }
+                if candidate.revision_id <= shard.reference.last_revision {
+                    inside[index].push(position.take().unwrap());
+                    break;
+                }
+            }
+            if let Some(candidate) = position {
+                gaps[old.len()].push(candidate);
+            }
+        }
+        let mut result = Vec::new();
+        for (index, shard) in old.iter().enumerate() {
+            gaps[index].sort_by_key(|r| r.revision_id);
+            for chunk in gaps[index].chunks(MAX_SHARD_ENTRIES) {
+                result.push(upload_shard(client, ns, chunk.to_vec()).await);
+            }
+            if inside[index].is_empty() {
+                result.push(shard.reference.clone());
+            } else {
+                let mut merged = shard.entries.clone();
+                merged.append(&mut inside[index]);
+                merged.sort_by_key(|r| r.revision_id);
+                for chunk in merged.chunks(MAX_SHARD_ENTRIES) {
+                    result.push(upload_shard(client, ns, chunk.to_vec()).await);
+                }
+            }
+        }
+        gaps[old.len()].sort_by_key(|r| r.revision_id);
+        for chunk in gaps[old.len()].chunks(MAX_SHARD_ENTRIES) {
+            result.push(upload_shard(client, ns, chunk.to_vec()).await);
+        }
+        // The canonical S3ManifestV1 constructor checks sorted disjoint ranges.
+        result
+    }
+
+    fn report(
+        label: &str,
+        size: usize,
+        updates: usize,
+        counts: S3TestIoCounts,
+        elapsed_ms: u128,
+    ) {
+        // JSON lines deliberately exclude credentials, paths, raw note text,
+        // object URLs and any content-bearing S3 response data.
+        eprintln!(
+            "AKULA_DELTA_AB {}",
+            serde_json::json!({
+                "scenario": label,
+                "notes": size,
+                "new_revisions": updates,
+                "elapsed_ms": elapsed_ms,
+                "attempted_s3_head": counts.head,
+                "attempted_s3_get": counts.get,
+                "downloaded_payload_bytes": counts.payload_bytes,
+                "security_scope": if label == "selective_preview" {
+                    "advisory-verified-new-only"
+                } else { "full-current-availability-pin" },
+            })
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "manual disposable MinIO benchmark, S3 HTTP request attempts only"]
+    async fn minio_selective_ab_notes_network_requests() {
+        let size = std::env::var("AQ_DELTA_BENCH_NOTES")
+            .unwrap_or_else(|_| "64".into()).parse::<usize>().unwrap();
+        let updates = std::env::var("AQ_DELTA_BENCH_CHANGES")
+            .unwrap_or_else(|_| "7".into()).parse::<usize>().unwrap();
+        assert!((1..=10_000).contains(&size));
+        assert!(updates <= size && updates <= 1_000);
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").unwrap();
+        assert!(
+            endpoint.starts_with("http://127.0.0.1:")
+                || endpoint.starts_with("http://localhost:"),
+            "only isolated disposable localhost MinIO is accepted",
+        );
+
+        let bucket = format!("akula-delta-ab-{}", uuid::Uuid::new_v4().simple());
+        let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new("us-east-1")).load().await;
+        let sdk = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::config::Builder::from(&shared)
+                .endpoint_url(endpoint.clone()).force_path_style(true).build(),
+        );
+        sdk.create_bucket().bucket(bucket.clone()).send().await.unwrap();
+        let profile = S3ConnectionProfile {
+            bucket, region: "us-east-1".into(),
+            endpoint: Some(endpoint), force_path_style: true,
+        };
+        let ns = S3Keyspace::new("akula/benchmark", VaultId::new()).unwrap();
+        let client = AwsS3ProbeClient::connect(profile.clone(), ns.clone()).await.unwrap();
+        let scope = S3RemoteAnchorScope::new(
+            "benchmark-ci", "verified-disposable-minio",
+            &profile, &ns,
+        ).unwrap();
+
+        let mut uploads = Vec::with_capacity(size * 2);
+        let mut refs = Vec::with_capacity(size);
+        for i in 0..size {
+            let (reference, json, blob) = note(i, false);
+            let record: RevisionRecord = serde_json::from_slice(&json).unwrap();
+            let hash = match record.operation {
+                RevisionOperation::Content { blob_hash, .. } => blob_hash,
+                _ => unreachable!(),
+            };
+            uploads.push((ns.immutable_revision_key(reference.revision_id), json));
+            uploads.push((ns.immutable_blob_key(&hash).unwrap(), blob));
+            refs.push(reference);
+        }
+        upload_objects(&client, uploads).await;
+        refs.sort_by_key(|reference| reference.revision_id);
+
+        let mut shards = Vec::new();
+        for chunk in refs.chunks(MAX_SHARD_ENTRIES) {
+            let entries = chunk.to_vec();
+            let reference = upload_shard(&client, &ns, entries.clone()).await;
+            shards.push(InitialShard { reference, entries });
+        }
+        let old_root = S3ManifestV1::new(
+            &ns, OperationId::new(), 1, None,
+            shards.iter().map(|s| s.reference.clone()).collect(),
+        ).unwrap();
+        let old_bytes = old_root.encode(&ns).unwrap();
+        upload_objects(&client, vec![(
+            ns.immutable_manifest_key(old_root.manifest_id), old_bytes.clone(),
+        )]).await;
+        let old_head = S3HeadPointerV1::new(
+            &ns, 1, old_root.manifest_id,
+            &blake3::hash(&old_bytes).to_hex().to_string(), None,
+        ).unwrap();
+        let old_put = client.put_conditionally(
+            &ns.current_head_key(), &old_head.encode(&ns).unwrap(),
+            S3PutCondition::IfAbsent,
+        ).await.unwrap();
+
+        // Setup intentionally performs the expensive FULL cold verification
+        // to create a legitimate cache. It is outside both measured phases.
+        let cache = client.materialize_verified_revision_metadata_store(
+            MAX_S3_REVISION_METADATA_CACHE_BYTES,
+        ).await.unwrap().unwrap();
+        assert_eq!(cache.len(), size);
+        let verified = client.read_verified_head().await.unwrap().unwrap();
+        let pinned = client.pin_revision_snapshot().await.unwrap().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dbpath = tmp.path().join("prior-remote-observation.sqlite");
+        let mut journal = S3RemoteAnchorJournal::open(&dbpath).unwrap();
+        journal.record_verified_remote(
+            &scope, &verified, &pinned, &[old_bytes],
+        ).unwrap();
+        drop(journal);
+        let journal = S3RemoteAnchorJournal::open(&dbpath).unwrap();
+
+        if updates != 0 {
+            let mut new_refs = Vec::with_capacity(updates);
+            let mut upload = Vec::with_capacity(updates * 2);
+            for j in 0..updates {
+                let i = j * size / updates;
+                let (reference, json, blob) = note(i, true);
+                let record: RevisionRecord = serde_json::from_slice(&json).unwrap();
+                let hash = match record.operation {
+                    RevisionOperation::Content { blob_hash, .. } => blob_hash,
+                    _ => unreachable!(),
+                };
+                upload.push((ns.immutable_revision_key(reference.revision_id), json));
+                upload.push((ns.immutable_blob_key(&hash).unwrap(), blob));
+                new_refs.push(reference);
+            }
+            upload_objects(&client, upload).await;
+            let successor_refs = publish_stable_shards(
+                &client, &ns, &shards, new_refs,
+            ).await;
+            let new_root = S3ManifestV1::new(
+                &ns, OperationId::new(), 2,
+                Some((old_root.manifest_id, old_head.manifest_blake3().to_owned())),
+                successor_refs,
+            ).unwrap();
+            upload_objects(&client, vec![(
+                ns.immutable_manifest_key(new_root.manifest_id),
+                new_root.encode(&ns).unwrap(),
+            )]).await;
+            let new_head = S3HeadPointerV1::new(
+                &ns, 2, new_root.manifest_id, &new_root.digest(&ns).unwrap(),
+                Some(old_root.manifest_id),
+            ).unwrap();
+            client.put_conditionally(
+                &ns.current_head_key(), &new_head.encode(&ns).unwrap(),
+                S3PutCondition::IfMatch(old_put.etag),
+            ).await.unwrap();
+        }
+
+        let before_selective = client.test_io_snapshot();
+        let started_selective = Instant::now();
+        let preview = client.inspect_selective_s3_revision_changes(
+            &scope, &journal, &cache,
+            MAX_S3_REVISION_METADATA_CACHE_BYTES,
+            S3ManifestDeltaLimits::default(),
+        ).await.unwrap();
+        let selective_ms = started_selective.elapsed().as_millis();
+        let selective = client.test_io_snapshot().since(before_selective);
+        assert_eq!(preview.total_revisions, size + updates);
+        assert_eq!(preview.downloaded_revision_json, updates);
+        assert_eq!(preview.newly_verified_blobs, updates);
+        assert_eq!(preview.reused_revision_json, size);
+        assert_eq!(preview.requires_full_apply_gate, true);
+        assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &old_head);
+        report("selective_preview", size, updates, selective, selective_ms);
+
+        let before_full = client.test_io_snapshot();
+        let started_full = Instant::now();
+        let pinned_now = client.pin_revision_snapshot().await.unwrap().unwrap();
+        let full_ms = started_full.elapsed().as_millis();
+        let full = client.test_io_snapshot().since(before_full);
+        assert_eq!(pinned_now.len(), size + updates);
+        report("full_verified_pin", size, updates, full, full_ms);
+        // These differ in assurance; this is NOT an apples-to-apples
+        // benchmark for permission to apply or delete user files.
+        assert!(selective.get < full.get);
+    }
+}
