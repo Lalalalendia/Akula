@@ -1,0 +1,111 @@
+name: Native note latency matrix
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/app/tests/perf/note_latency.rs'
+      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - '.github/workflows/native-note-latency.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-note-latency-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Note UI latency (diagnostic, non-gating)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Run opt-in note-size and tab-churn matrix
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_LATENCY_SWITCHES: '16'
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-native --bin aquilum-native --locked native_note_latency_matrix \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/note-latency.log"
+          if [ "$(grep -c 'NOTE_LATENCY ' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ]; then
+            echo "::error::Expected three completed note-size measurements"
+            exit 1
+          fi
+      - name: Summarize comparable measurements
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          rows = []
+          for line in Path("note-latency.log").read_text().splitlines():
+              if "NOTE_LATENCY " not in line:
+                  continue
+              pairs = line.split("NOTE_LATENCY ", 1)[1].split()
+              row = dict(part.split("=", 1) for part in pairs if "=" in part)
+              rows.append(row)
+          assert len(rows) == 3, rows
+          text = [
+              "## Native note UI latency",
+              "",
+              "Ubuntu 24.04 GitHub runner, **debug/test profile**. Measurements are",
+              "diagnostic: runner contention, caching and host differences affect absolute",
+              "latency. No speedup claim or timing-based CI gate is made.",
+              "",
+              "| Note size | Cold open (ms) | Switch p50 / p95 (ms) | First scene (ms) | Scene p95 (ms) | Event dispatch p95 (ms) | External edit visible (ms) |",
+              "|---|---:|---:|---:|---:|---:|---:|",
+          ]
+          for r in rows:
+              text.append(
+                  f"| {r['kib']} KiB | {r['cold_open_ms']} | "
+                  f"{r['switch_p50_ms']} / {r['switch_p95_ms']} | "
+                  f"{r['first_scene_ms']} | {r['scene_p95_ms']} | "
+                  f"{r['dispatch_p95_ms']} | {r['external_visible_ms']} |"
+              )
+          text.extend([
+              "",
+              "Every case exercises 16 tab switches, 12 no-op watcher signals,",
+              "one externally changed file and a stale-worker/tab-switch assertion.",
+              "The cold-open and tab-switch timings include synchronous UI work;",
+              "the external-change latency additionally includes background IO.",
+              "",
+          ])
+          report = "\n".join(text)
+          Path("note-latency-summary.md").write_text(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(report)
+          print(report)
+          PY
+      - name: Upload raw diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-note-latency-${{ github.sha }}
+          path: |
+            note-latency.log
+            note-latency-summary.md
+          if-no-files-found: warn
+          retention-days: 21
