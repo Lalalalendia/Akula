@@ -11,6 +11,13 @@ on:
       - 'docs/sync/delta-ab-benchmark.md'
       - '.github/workflows/sync-s3-delta-ab.yml'
   workflow_dispatch:
+  # A one-time full 10k matrix on the initial merge of this benchmark
+  # workflow into main; routine changes elsewhere do not trigger it.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/sync-s3-delta-ab.yml'
 
 permissions:
   contents: read
