@@ -546,7 +546,7 @@ mod tests {
     /// Run only against disposable loopback MinIO with fresh bucket credentials.
     #[tokio::test]
     #[ignore = "requires the isolated MinIO service in sync-s3-minio.yml"]
-    async fn live_minio_multipart_64mib_and_recovery() {
+    async fn minio_multipart_64mib_and_recovery() {
         let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").unwrap();
         assert!(endpoint.starts_with("http://127.0.0.1:")
             || endpoint.starts_with("http://localhost:"));
