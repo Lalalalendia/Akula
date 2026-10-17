@@ -1,3 +1,6 @@
+#[cfg(test)]
+use std::time::{Duration, Instant};
+
 use masonry::app::VisualLayerPlan;
 use masonry::kurbo::Rect;
 use vello_cpu::{PixelFormat, PixmapMut, RasterizerSettings, TargetInit};
@@ -39,11 +42,35 @@ impl Renderer {
             return Ok(Vec::new());
         };
         self.painter.regions = crate::render::scroll::snapshot().iter().map(|r| r.viewport.scale_from_origin(scale)).collect();
+        #[cfg(test)]
+        let record_time;
+        #[cfg(test)]
+        let detect_time;
         let damage = {
             let _zone = aq_trace::zone("поиск изменений");
+            #[cfg(test)]
+            let record_started = Instant::now();
             self.tracker.begin(width, height, scale);
             frame.paint_into(&mut self.tracker);
-            self.tracker.damage()
+            #[cfg(test)]
+            {
+                record_time = record_started.elapsed();
+            }
+            #[cfg(test)]
+            let detect_started = Instant::now();
+            let damage = self.tracker.damage();
+            #[cfg(test)]
+            {
+                detect_time = detect_started.elapsed();
+            }
+            damage
+        };
+        #[cfg(test)]
+        let mut stages = super::FrameStages {
+            record: record_time,
+            detect: detect_time,
+            damage: self.tracker.last_stats,
+            ..Default::default()
         };
         let mut damage = if full { Damage { areas: vec![(0, 0, width, height)], moves: Vec::new() } } else { damage };
         let bounds = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
@@ -64,6 +91,10 @@ impl Renderer {
         let touched: Vec<Area> = dirty.iter().copied().chain(self.due_areas(seconds)).collect();
         self.lift_sprites(canvas, &touched);
         if dirty.is_empty() {
+            #[cfg(test)]
+            {
+                self.last_stages = stages;
+            }
             return Ok(dirty);
         }
         for &rect in &damage.areas {
@@ -72,12 +103,18 @@ impl Renderer {
         let painter = &mut self.painter;
         painter.seconds = seconds;
         let mut result = Ok(());
+        #[cfg(test)]
+        let mut encoding = Duration::ZERO;
+        #[cfg(test)]
+        let mut rasterizing = Duration::ZERO;
         canvas.with_target(&mut |Target { pixels, width, height }| {
             for shift in &damage.moves {
                 let _zone = aq_trace::zone("сдвиг прокрутки");
                 crate::render::scroll::shift_rows(pixels, usize::from(width), *shift);
             }
             for &(x, y, w, h) in &damage.areas {
+                #[cfg(test)]
+                let encoding_started = Instant::now();
                 {
                     let _zone = aq_trace::zone("кодирование");
                     painter.begin(x, y, w, h);
@@ -87,12 +124,28 @@ impl Renderer {
                         return;
                     }
                 }
+                #[cfg(test)]
+                {
+                    encoding += encoding_started.elapsed();
+                }
+                #[cfg(test)]
+                let raster_started = Instant::now();
                 let _zone = aq_trace::zone("растеризация");
                 let pixmap = PixmapMut::new(width, height, bytemuck::cast_slice_mut(&mut *pixels)).expect("холст вывода");
                 let settings = RasterizerSettings { target_init: TargetInit::SrcOver, pixel_format: PixelFormat::Bgra8, offset: (x, y) };
                 painter.ctx.render_with(pixmap, &mut painter.resources, settings);
+                #[cfg(test)]
+                {
+                    rasterizing += raster_started.elapsed();
+                }
             }
         });
+        #[cfg(test)]
+        {
+            stages.encode = encoding;
+            stages.raster = rasterizing;
+            self.last_stages = stages;
+        }
         if result.is_err() {
             self.tracker.forget();
         }
