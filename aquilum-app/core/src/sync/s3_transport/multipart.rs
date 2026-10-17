@@ -114,13 +114,15 @@ impl S3MultipartJournal {
              PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS s3_multipart_uploads (
                  operation_id TEXT PRIMARY KEY,
-                 blob_key TEXT NOT NULL UNIQUE,
+                 blob_key TEXT NOT NULL,
                  expected_hash TEXT NOT NULL,
                  byte_length INTEGER NOT NULL,
                  phase INTEGER NOT NULL CHECK(phase BETWEEN 0 AND 4),
                  upload_id TEXT,
                  verified_etag TEXT
              );
+             CREATE UNIQUE INDEX IF NOT EXISTS one_active_s3_blob_upload
+                ON s3_multipart_uploads(blob_key) WHERE phase IN (0,1,2);
              CREATE TABLE IF NOT EXISTS s3_multipart_parts (
                  operation_id TEXT NOT NULL REFERENCES s3_multipart_uploads(operation_id),
                  part_number INTEGER NOT NULL CHECK(part_number BETWEEN 1 AND 10000),
@@ -319,10 +321,18 @@ impl AwsS3ProbeClient {
         if journal.status(intent.operation_id)?.is_some() {
             let saved = journal.begin(&intent)?; // detect identity collision
             debug_assert!(!saved);
-            if journal.status(intent.operation_id)?
-                .is_some_and(|s| s.phase == S3MultipartPhase::Verified)
-            {
-                return Ok(S3MultipartOutcome::AlreadyVerified);
+            if let Some(status) = journal.status(intent.operation_id)? {
+                if status.phase == S3MultipartPhase::Verified {
+                    // A previous SQLite receipt is not proof the provider
+                    // still retains the immutable bytes. Verify even a
+                    // finished operation after restart or lost remote data.
+                    let observed = self.verify_blob(&intent).await
+                        .map_err(|_| S3MultipartError::RecoveryRequired)?;
+                    if status.verified_etag.as_deref() != Some(observed.etag.as_str()) {
+                        return Err(S3MultipartError::RecoveryRequired);
+                    }
+                    return Ok(S3MultipartOutcome::AlreadyVerified);
+                }
             }
             // An earlier call might have completed before losing its ACK.
             // Remote absence or an inaccessible response REQUIRES review,
@@ -541,6 +551,11 @@ mod tests {
         journal.mark_verified(op.operation_id, "\"remote-etag\"").unwrap();
         assert_eq!(journal.status(op.operation_id).unwrap().unwrap().phase,
             S3MultipartPhase::Verified);
+        // Content-addressed blobs are shared. Once the first operation has
+        // completed, a second operation may independently verify the same key.
+        assert!(journal.begin(&other).unwrap());
+        assert_eq!(journal.status(other.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Prepared);
     }
 
     #[test]
@@ -687,5 +702,13 @@ mod tests {
         assert_eq!(recovered.status(empty.operation_id).unwrap().unwrap().completed_parts, 0);
         assert_eq!(transport.digest_stream_bounded(&empty.blob_key, 0).await.unwrap().blake3,
             empty.expected_blake3);
+        let mut independent = empty.clone();
+        independent.operation_id = OperationId::new();
+        let mut shared_source = Cursor::new(Vec::new());
+        assert_eq!(transport.upload_immutable_multipart(
+            &mut recovered, independent.clone(), &mut shared_source,
+        ).await.unwrap(), S3MultipartOutcome::RecoveredVerified);
+        assert_eq!(recovered.status(independent.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Verified);
     }
 }
