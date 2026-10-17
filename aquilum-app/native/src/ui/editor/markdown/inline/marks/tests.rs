@@ -87,4 +87,5 @@ fn paired_fast_path_preserves_unclosed_and_adjacent_delimiters() {
     assert_eq!(paired("==не закрыто", '=', true), Vec::new());
     assert_eq!(paired("===не пара===", '=', true), Vec::new());
     assert_eq!(paired("%%заметка%%", '%', false), vec![(0, "%%заметка".len())]);
+    assert_eq!(paired("жжтекстжж", 'ж', false), vec![(0, "жжтекст".len())]);
 }
