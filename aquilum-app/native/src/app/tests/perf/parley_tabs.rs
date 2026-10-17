@@ -211,3 +211,83 @@ fn benchmark_parley_real_tabs_multiscale_fidelity() {
     }
     assert_eq!(scenarios, 4, "both DPI factors and both widths must be checked");
 }
+
+fn release_parley_fixture(marker: char, target: usize) -> String {
+    let plain = "Обычный абзац без выделения, с переносами кириллицы и Unicode emoji 🐱 для типичной заметки.\n";
+    let rich = "Абзац с **жирным** текстом, ссылкой [пример](https://example.org) и Markdown.\n";
+    let mut body = String::with_capacity(target);
+    body.push(marker);
+    let mut paragraph = 0usize;
+    while body.len() + plain.len().max(rich.len()) <= target {
+        body.push_str(if paragraph % 4 == 0 { rich } else { plain });
+        paragraph += 1;
+    }
+    body.push_str(&" ".repeat(target - body.len()));
+    assert_eq!(body.len(), target, "file size must be exact in bytes");
+    body
+}
+
+/// Paired release-profile A/B across representative note sizes. This is a
+/// diagnostic, not a production toggle or speed-based required CI threshold.
+/// Timing includes the whole native UI switch and first Masonry redraw;
+/// it excludes GPU presentation / the OS compositor. Pixel parity and stale
+/// file invalidation are independently gated by the real tab ABBA test.
+#[test]
+#[ignore = "opt-in release-profile real tab-switch latency matrix"]
+fn benchmark_parley_release_tabs_matrix() {
+    assert!(!cfg!(debug_assertions), "run with cargo test --release");
+    for kib in [64usize, 512, 4096] {
+        let mut h = Harness::new();
+        let first = h.write_note("release-parley-A.md", &release_parley_fixture('A', kib * 1024));
+        let second = h.write_note("release-parley-B.md", &release_parley_fixture('B', kib * 1024));
+        assert!(h.app.open_in(&mut h.root, first.clone(), true));
+        assert!(h.app.open_in(&mut h.root, second.clone(), true));
+        let _ = h.root.redraw();
+
+        let mut baseline = Vec::<f64>::new();
+        let mut candidate = Vec::<f64>::new();
+        let mut restored = 0usize;
+        let mut verified_hits = 0usize;
+
+        for enabled in [false, true, true, false] {
+            h.app.parley_trial_enabled = enabled;
+            for iteration in 0..13 {
+                let _ = select(&mut h, &second);
+                let _ = h.root.redraw();
+                let _ = crate::ui::editor::take_trial_restore_count();
+                let start = Instant::now();
+                let stages = select(&mut h, &first);
+                let _ = h.root.redraw();
+                let switch_and_scene_ms = start.elapsed().as_secs_f64() * 1000.0;
+                let actual_reuse = crate::ui::editor::take_trial_restore_count();
+
+                assert!(stages.cache_hit, "Rope cache miss at {kib} KiB");
+                verified_hits += 1;
+                if enabled && iteration > 0 {
+                    assert!(actual_reuse > 0, "Parley candidate never applied at {kib} KiB");
+                    restored += actual_reuse;
+                } else if !enabled {
+                    assert_eq!(actual_reuse, 0, "baseline unexpectedly reused Parley");
+                }
+
+                if iteration > 0 {
+                    (if enabled { &mut candidate } else { &mut baseline }).push(switch_and_scene_ms);
+                }
+            }
+        }
+        assert_eq!(baseline.len(), 24);
+        assert_eq!(candidate.len(), 24);
+        assert!(restored > 0, "no actually reused paragraphs at {kib} KiB");
+
+        let [b50, b95] = percentiles(&baseline, [0.5, 0.95]);
+        let [c50, c95] = percentiles(&candidate, [0.5, 0.95]);
+        eprintln!(
+            "PARLEY_RELEASE_NOTE kib={kib} profile=release samples=24 \
+             baseline_p50_ms={b50:.3} baseline_p95_ms={b95:.3} \
+             candidate_p50_ms={c50:.3} candidate_p95_ms={c95:.3} \
+             p50_ratio={:.4} p95_ratio={:.4} parley_reused={restored} rope_hits={verified_hits}",
+            c50 / b50, c95 / b95
+        );
+        h.app.shutdown();
+    }
+}
