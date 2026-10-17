@@ -12,14 +12,41 @@ fn detected_pair() -> Option<(vello_cpu::Level, vello_cpu::Level)> {
     ))
 }
 
-fn assert_identical(label: &str, old: &[u32], new: &[u32]) {
+fn assert_identical(label: &str, width: u16, old: &[u32], new: &[u32]) {
     assert_eq!(old.len(), new.len(), "{label}: frame size differs");
-    let unequal = old.iter().zip(new).filter(|(a, b)| a != b).count();
-    assert_eq!(
-        unequal, 0,
-        "{label}: SSE4.2 and AVX2 differ in {unequal} pixels out of {}",
-        old.len()
-    );
+    let mut unequal = 0usize;
+    let mut max_channel_delta = 0u8;
+    let mut within_two = 0usize;
+    let mut bbox = (usize::MAX, usize::MAX, 0usize, 0usize);
+    let mut examples = Vec::new();
+    let mut regions = [0usize; 4];
+    for (index, (&a, &b)) in old.iter().zip(new).enumerate() {
+        if a == b {
+            continue;
+        }
+        unequal += 1;
+        let x = index % usize::from(width);
+        let y = index / usize::from(width);
+        bbox.0 = bbox.0.min(x);
+        bbox.1 = bbox.1.min(y);
+        bbox.2 = bbox.2.max(x);
+        bbox.3 = bbox.3.max(y);
+        regions[usize::from(x >= usize::from(width) / 2) + 2 * usize::from(y >= old.len() / usize::from(width) / 2)] += 1;
+        let delta = [0, 8, 16, 24].iter().map(|shift| {
+            ((a >> shift) as u8).abs_diff((b >> shift) as u8)
+        }).max().unwrap_or_default();
+        if delta <= 2 {
+            within_two += 1;
+        }
+        max_channel_delta = max_channel_delta.max(delta);
+        if examples.len() < 16 {
+            examples.push(format!("({x},{y}): {a:08x} vs {b:08x} delta={delta}"));
+        }
+    }
+    if unequal != 0 {
+        eprintln!("DIAG-AVX2-DIFF case={label:?} size={width}x{} changed={unequal} max_channel_delta={max_channel_delta} within_two={within_two} bbox={bbox:?} quadrants={regions:?} examples={examples:?}", old.len() / usize::from(width));
+    }
+    assert_eq!(unequal, 0, "{label}: SSE4.2 and AVX2 differ in {unequal} pixels out of {}", old.len());
 }
 
 fn measured_draw(
@@ -91,7 +118,23 @@ fn scroll_parity(scale: f64, width: u32, height: u32, threads: u16) {
         after.push(a);
         baseline_damage += db;
         candidate_damage += da;
-        assert_identical(&format!("scroll {scale} threads={threads} step={step}"), baseline.frame_pixels(), candidate.frame_pixels());
+        if baseline.frame_pixels() != candidate.frame_pixels() && step == 0 {
+            if let Ok(dir) = std::env::var("AQ_OUT") {
+                let out = std::path::Path::new(&dir);
+                std::fs::create_dir_all(out).unwrap();
+                std::fs::write(out.join(format!("avx2-scroll-{scale}-sse.png")), baseline.png()).unwrap();
+                std::fs::write(out.join(format!("avx2-scroll-{scale}-avx.png")), candidate.png()).unwrap();
+            }
+            for probe_threads in [0u16, 2] {
+                let mut probe_sse = Renderer::with_simd_level_for_test(probe_threads, sse_level);
+                let mut probe_avx = Renderer::with_simd_level_for_test(probe_threads, avx_level);
+                probe_sse.draw_frame(&layers, w, hh, scale, theme::background(), true).unwrap();
+                probe_avx.draw_frame(&layers, w, hh, scale, theme::background(), true).unwrap();
+                let mismatch = probe_sse.frame_pixels().iter().zip(probe_avx.frame_pixels()).filter(|(a,b)| a != b).count();
+                eprintln!("DIAG-AVX2-SINGLE-RENDER scale={scale} threads={probe_threads} pixel_diff={mismatch}");
+            }
+        }
+        assert_identical(&format!("scroll {scale} threads={threads} step={step}"), w, baseline.frame_pixels(), candidate.frame_pixels());
         if step % 6 == 0 {
             let full = render_full(&layers, w, hh, scale);
             assert_eq!(differing_pixels(baseline.frame_pixels(), full.frame_pixels()), 0,
@@ -151,7 +194,7 @@ fn avx2_integrated_live_cover() {
     baseline.draw_frame(&layers, W as u16, H as u16, 1.0, theme::background(), true).unwrap();
     candidate.draw_frame(&layers, W as u16, H as u16, 1.0, theme::background(), true).unwrap();
     assert!(baseline.has_live() && candidate.has_live(), "fixture must contain animated cover");
-    assert_identical("cover first frame", baseline.frame_pixels(), candidate.frame_pixels());
+    assert_identical("cover first frame", W as u16, baseline.frame_pixels(), candidate.frame_pixels());
     let mut previous = baseline.frame_pixels().to_vec();
     let mut changed_frames = 0;
     for step in 1..=8 {
@@ -160,7 +203,7 @@ fn avx2_integrated_live_cover() {
         let touched_avx = candidate.live_frame(&layers).unwrap();
         assert_eq!(touched_sse, touched_avx, "live damage regions mismatch at step {step}");
         assert!(!touched_sse.is_empty(), "live animation produced no damage on step {step}");
-        assert_identical(&format!("cover step={step}"), baseline.frame_pixels(), candidate.frame_pixels());
+        assert_identical(&format!("cover step={step}"), W as u16, baseline.frame_pixels(), candidate.frame_pixels());
         let full = render_full(&layers, W as u16, H as u16, 1.0);
         assert_eq!(differing_pixels(candidate.frame_pixels(), full.frame_pixels()), 0,
             "AVX2 live cover diverged from full redraw at step {step}");
