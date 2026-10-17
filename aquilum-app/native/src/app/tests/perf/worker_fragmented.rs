@@ -1,6 +1,6 @@
 //! Opt-in fragmented damage regression: many small rectangles versus frame load.
 //!
-//! A large invalidation can be split into small independent strips. Switching
+//! A large invalidation can be split into 2, 4, 8 or 16 strips. Switching
 //! based on each strip's size then misclassifies the *aggregate* workload.
 //! Two separate hot Vello contexts are retained by both routed variants.
 //! This is a test, not a production policy.
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 const FRAMES: u32 = 64;
 const ROUTE_THRESHOLD_PX: u64 = 350_000;
-const FULL_STRIPS: u16 = 8;
+const STRIP_COUNTS: [u16; 4] = [2, 4, 8, 16];
 
 fn peak_channel(a: &[u32], b: &[u32]) -> u8 {
     assert_eq!(a.len(), b.len(), "framebuffer length");
@@ -39,7 +39,7 @@ fn draw(
     t.elapsed().as_secs_f64() * 1e6
 }
 
-fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool, full_every: u32) {
+fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool, full_every: u32, strips: u16) {
     let mut h = Harness::with(None, scale);
     h.root.handle_window_event(masonry::core::WindowEvent::Resize(PhysicalSize::new(width, height)));
     h.app.window_resized(&mut h.root, Size::new(f64::from(width) / scale, f64::from(height) / scale));
@@ -70,7 +70,7 @@ fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
         Renderer::new(2),
     ];
     for renderer in &mut renderers {
-        renderer.split_full_frame_for_test(FULL_STRIPS);
+        renderer.split_full_frame_for_test(strips);
     }
     renderers[2].enable_dual_dispatch_for_test(ROUTE_THRESHOLD_PX);
     renderers[3].enable_dual_dispatch_for_test(ROUTE_THRESHOLD_PX);
@@ -125,7 +125,7 @@ fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
             let info = renderers[0].last_stages;
             assert_eq!(
                 info.raster_rects,
-                usize::from(FULL_STRIPS),
+                usize::from(strips),
                 "{case}/step{step}: expected the fragmented full redraw"
             );
             assert_eq!(
@@ -160,7 +160,12 @@ fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
 
     let per_rect_switches = renderers[2].dual_dispatch_switches_for_test();
     let frame_switches = renderers[3].dual_dispatch_switches_for_test();
-    assert!(per_rect_switches <= 2, "{case}: unexpectedly switched per rectangle {per_rect_switches} times");
+    let largest_strip_pixels = u64::from(width) * u64::from((height + u32::from(strips) - 1) / u32::from(strips));
+    if largest_strip_pixels <= ROUTE_THRESHOLD_PX {
+        assert!(per_rect_switches <= 2, "{case}/strips={strips}: per-rect route unexpectedly switched {per_rect_switches} times");
+    } else {
+        assert!(per_rect_switches >= 6, "{case}/strips={strips}: per-rect route should switch on large strips: {per_rect_switches}");
+    }
     assert!(frame_switches >= 6, "{case}: aggregate router did not switch modes: {frame_switches}");
     assert_eq!(full_reference_checks, 6);
 
@@ -172,7 +177,7 @@ fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
             let total: f64 = values.iter().sum();
             eprintln!(
                 "VELLO_FRAGMENTED_ROUTE case={case} full_every={full_every} mode={mode} \
-                 workload={workload} frames={} strips={FULL_STRIPS} per_rect_switches={per_rect_switches} \
+                 workload={workload} frames={} strips={strips} per_rect_switches={per_rect_switches} \
                  frame_switches={frame_switches} p50_us={p50:.2} p95_us={p95:.2} total_us={total:.2}",
                 values.len()
             );
@@ -189,7 +194,9 @@ fn benchmark_vello_fragmented_route() {
         ("cover_175", 1750, 1051, 1.75, true),
     ] {
         for full_every in [8, 3] {
-            fragmented_case(case, width, height, scale, cover, full_every);
+            for strips in STRIP_COUNTS {
+                fragmented_case(case, width, height, scale, cover, full_every, strips);
+            }
         }
     }
 }
