@@ -1,0 +1,78 @@
+name: Native Vello lossless adjacent batching A/B (diagnostic)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-adjacent-batches.yml'
+      - '.github/scripts/summarize-vello-adjacent-batches.py'
+      - 'aquilum-app/native/src/render/renderer/**'
+      - 'aquilum-app/native/src/app/tests/perf/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-adjacent-batches-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  adjacent-batches:
+    name: Exact-pixel adjacent region coalescing and stage cost
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-adjacent-v1
+          cache-workspace-crates: true
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record exact runner and source
+        shell: bash
+        run: |
+          {
+            git rev-parse HEAD
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee vello-adjacent-environment.log
+      - name: Prove exact coverage and rejection of overlap, gaps and overflow
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native adjacent::tests -- --nocapture --test-threads=1
+      - name: Three independent real-editor coalescing A/B trials
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          for trial in 1 2 3; do
+            cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_adjacent_batching -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-adjacent-trial-$trial.log"
+          done
+      - name: Require complete 576-row matrix and report CPU stage attribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/summarize-vello-adjacent-batches.py
+          python3 .github/scripts/summarize-vello-adjacent-batches.py vello-adjacent-trial-1.log vello-adjacent-trial-2.log vello-adjacent-trial-3.log --output vello-adjacent-summary.md
+          cat vello-adjacent-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive raw data and reference environment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-adjacent-batches-${{ github.sha }}
+          path: |
+            vello-adjacent-environment.log
+            vello-adjacent-trial-*.log
+            vello-adjacent-summary.md
+          if-no-files-found: warn
+          retention-days: 14
