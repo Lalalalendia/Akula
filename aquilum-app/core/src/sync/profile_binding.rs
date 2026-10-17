@@ -489,6 +489,126 @@ mod tests {
             operation_id, &journal, &cache, &bindings, &profile, &namespace,
         ).is_err());
         assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
+
+        // The old local-UUID recovery API must still refuse a remote-vault
+        // publication. Matching bytes alone cannot bypass the scope binding.
+        assert!(admission.inspect_local_publication(operation_id, &journal).is_err());
+        assert!(admission.record_local_recovery_evidence(operation_id, &journal).is_err());
+        assert!(journal.read_local_recovery_case(operation_id).unwrap().is_none());
+        assert!(admission.inspect_local_publication_for_registered_s3(
+            operation_id, &journal, &bindings, &wrong_profile, &namespace,
+        ).is_err());
+
+        let observed = admission.inspect_local_publication_for_registered_s3(
+            operation_id, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(observed.assessment,
+            crate::sync::local_recovery::LocalRecoveryAssessment::FinalNameMatchesExpected);
+        let case = admission.record_local_recovery_evidence_for_registered_s3(
+            operation_id, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(case.vault_id, namespace.vault_id());
+        assert_eq!(case.evidence, observed);
+        assert!(admission.record_local_recovery_evidence_for_registered_s3(
+            operation_id, &journal, &bindings, &profile, &namespace,
+        ).is_err(), "forensic evidence is write-once");
+
+        // Archive a COPY of the final bytes, not the vault file. It remains
+        // app-private and does not release the original one-shot claim.
+        let archived = admission.archive_local_recovery_copy_for_registered_s3(
+            operation_id, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(archived.stage_bytes, None);
+        assert_eq!(archived.final_bytes.as_deref(), Some(bytes));
+        let preview = admission.recovery_operator_preview_for_registered_s3(
+            operation_id, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(preview.vault_id, namespace.vault_id());
+        assert_eq!(preview.review_count, 0);
+        assert!(admission.recovery_operator_preview(operation_id, &journal).is_err());
+        let reviewed = admission.record_recovery_operator_review_for_registered_s3(
+            operation_id, &preview.path, &preview.archive_fingerprint,
+            preview.review_count, &preview.latest_event_digest,
+            crate::sync::recovery_review::RecoveryReviewDisposition::KeepBlocked,
+            "Keep blocked until native receipt is independently verified",
+            &mut journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(reviewed.sequence, 1);
+        assert!(admission.record_recovery_operator_review_for_registered_s3(
+            operation_id, &preview.path, &preview.archive_fingerprint,
+            preview.review_count, &preview.latest_event_digest,
+            crate::sync::recovery_review::RecoveryReviewDisposition::KeepBlocked,
+            "Stale confirmation must not replace the review",
+            &mut journal, &bindings, &profile, &namespace,
+        ).is_err());
+
+        // A process may also die BEFORE the no-replace rename. Simulate a
+        // verified, preclaimed stage with no final name. It is an incident,
+        // not permission to replay or silently complete the publication.
+        let unfinished_document = DocumentId::new();
+        let unfinished_op = OperationId::new();
+        let unfinished_path = SyncRelativePath::parse("notes/unfinished.md").unwrap();
+        let unfinished_intent = OperationIntent {
+            operation_id: unfinished_op,
+            vault_id: namespace.vault_id(),
+            document_id: unfinished_document,
+            profile_id: "joined-cloud".into(),
+            revision_id: RevisionId::new(),
+            action: JournalAction::StageDownload,
+            path: unfinished_path.clone(),
+            remote_object_id: namespace.immutable_blob_key(&hash).unwrap(),
+            remote_guard: None,
+            expected_content_hash: hash.clone(),
+            expected_baseline: None,
+        };
+        journal.begin(unfinished_intent.clone()).unwrap();
+        journal.mark_staged(unfinished_op, bytes).unwrap();
+        journal.record_local_publication_attempt_once(&unfinished_intent).unwrap();
+        let stage_path = root.join("notes")
+            .join(format!(".akula-sync-stage-{unfinished_op}"));
+        fs::write(&stage_path, bytes).unwrap();
+        let staged_observation = admission.inspect_local_publication_for_registered_s3(
+            unfinished_op, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(staged_observation.assessment,
+            crate::sync::local_recovery::LocalRecoveryAssessment::StagedOnly);
+        let stage_case = admission.record_local_recovery_evidence_for_registered_s3(
+            unfinished_op, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(stage_case.evidence, staged_observation);
+        let stage_archive = admission.archive_local_recovery_copy_for_registered_s3(
+            unfinished_op, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(stage_archive.stage_bytes.as_deref(), Some(bytes));
+        assert_eq!(stage_archive.final_bytes, None);
+        assert!(!root.join(unfinished_path.as_str()).exists());
+        assert_eq!(fs::read(&stage_path).unwrap(), bytes);
+        assert!(journal.baseline(namespace.vault_id(), unfinished_document).unwrap().is_none());
+
+        // Neither repeated reads nor a recorded operator review are a
+        // File Gate authority, a confirmed baseline or a delete capability.
+        assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
+        assert_eq!(journal.get(operation_id).unwrap().unwrap().phase, JournalPhase::Staged);
+        assert!(journal.baseline(namespace.vault_id(), document).unwrap().is_none());
+
+        drop(admission);
+        drop(bindings);
+        drop(cache);
+        drop(journal);
+        drop(core);
+        let reopened_core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        let guard = RegisteredReadAdmission::open(&reopened_core, &root).unwrap();
+        let recovered_bindings = SqliteRegisteredS3Bindings::open(
+            &guard, &appdata.join("profiles.sqlite"),
+        ).unwrap();
+        let recovered_journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+        let reopened = guard.recovery_operator_preview_for_registered_s3(
+            operation_id, &recovered_journal, &recovered_bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(reopened.review_count, 1);
+        assert_eq!(reopened.vault_id, namespace.vault_id());
+        assert!(recovered_journal.baseline(namespace.vault_id(), document).unwrap().is_none());
+        assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
     }
 
     #[test]

@@ -772,7 +772,15 @@ fn m1db_refuses_appdata_archive_inside_registered_vault() {
     );
     m1c_claim(&journal, op);
     let host = RegisteredReadAdmission::open(&core, &root).unwrap();
-    host.record_local_recovery_evidence(op, &journal).unwrap();
+    // A read-only inspection can describe an incident, but writing either a
+    // forensic case or byte archive to a SQLite file *inside* the vault must
+    // fail closed, even when the bytes themselves were not changed.
+    let _ = host.inspect_local_publication(op, &journal).unwrap();
+    assert!(matches!(
+        host.record_local_recovery_evidence(op, &journal),
+        Err(LocalRecoveryError::Journal(JournalError::UnsafeArchiveLocation))
+    ));
+    assert!(journal.read_local_recovery_case(op).unwrap().is_none());
     assert!(matches!(
         host.archive_local_recovery_copy(op, &journal),
         Err(LocalRecoveryError::Journal(JournalError::UnsafeArchiveLocation))
