@@ -1,5 +1,5 @@
 use crate::documents::{DocumentEvent, DocumentHub, SaveFailed};
-use crate::files::gate::{NoteHistoryChanged, NoteHistorySaveFailed, Relocation};
+use crate::files::gate::{NoteHistoryChanged, NoteHistoryMoveFailed, NoteHistorySaveFailed, Relocation};
 use crate::files::error::FileCommandError;
 use crate::files::watcher::{WatchBatch, WatchScope, WatchSink, WorkspaceWatcher};
 use crate::history::HistoryService;
@@ -31,6 +31,7 @@ pub enum CoreEvent {
     NotesRelocated(Relocation),
     NoteHistoryChanged(NoteHistoryChanged),
     NoteHistorySaveFailed(NoteHistorySaveFailed),
+    NoteHistoryMoveFailed(NoteHistoryMoveFailed),
     WorkspaceChanged(Vec<String>),
     ContentChanged(Vec<String>),
     WorkspaceRescanned,
@@ -48,6 +49,7 @@ impl CoreEvent {
             Self::NotesRelocated(_) => "notes-relocated",
             Self::NoteHistoryChanged(_) => "note-history-changed",
             Self::NoteHistorySaveFailed(_) => "note-history-save-failed",
+            Self::NoteHistoryMoveFailed(_) => "note-history-move-failed",
             Self::WorkspaceChanged(_) => "workspace-changed",
             Self::ContentChanged(_) => "content-changed",
             Self::WorkspaceRescanned => "workspace-rescanned",
