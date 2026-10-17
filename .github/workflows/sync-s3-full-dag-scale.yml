@@ -1,0 +1,78 @@
+name: S3 full 10k revision DAG scale (opt-in)
+
+# This is an expensive, intentionally separate disposable MinIO E2E test.
+# It does NOT run for every application pull request.
+on:
+  push:
+    branches:
+      - 'sync/05d2e-full-dag-scale-20261018'
+    paths:
+      - 'aquilum-app/core/src/sync/s3_transport/scale_probe.rs'
+      - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - '.github/workflows/sync-s3-full-dag-scale.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-s3-dag-scale-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verified-10k-dag:
+    name: Full verified 10000-revision / 10000-blob MinIO DAG
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      AWS_ACCESS_KEY_ID: akula_minio_scale_ci
+      AWS_SECRET_ACCESS_KEY: isolated_akula_scale_ci_only_20261018
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_MAX_ATTEMPTS: '1'
+      AQ_S3_TEST_ENDPOINT: http://127.0.0.1:9000
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore existing Core build cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Launch disposable loopback MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --rm --name akula-s3-full-dag-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs akula-s3-full-dag-minio
+          exit 1
+      - name: Measure complete 10k revision + 10k blob DAG and parent-index IO
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 minio_full_10k_revision_dag_and_blob_readback -- --ignored --test-threads=1 --nocapture
+      - name: Sanitize and stop disposable MinIO
+        if: always()
+        shell: bash
+        run: |
+          docker ps --filter name=akula-s3-full-dag-minio --format 'table {{.Names}}\t{{.Status}}'
+          docker stop akula-s3-full-dag-minio >/dev/null 2>&1 || true
