@@ -57,3 +57,35 @@ fn marks_inside_taken_ranges_are_dropped() {
     assert_eq!(found.len(), 1);
     assert_eq!(&text[found[0].inner.clone()], "да");
 }
+
+
+#[test]
+fn html_fast_path_preserves_offsets_and_does_not_match_plain_text() {
+    use super::atoms::{html_comments, html_pairs};
+
+    assert!(html_pairs("Обычный текст без HTML и с emoji 😀").is_empty());
+    assert!(html_comments("Обычный текст без HTML и с emoji 😀").is_empty());
+
+    let text = "😀<mark>кириллица</mark> и <kbd>Ctrl</kbd>";
+    let spans = html_pairs(text);
+    assert_eq!(spans.len(), 2);
+    assert_eq!(&text[spans[0].inner.clone()], "кириллица");
+    assert_eq!(&text[spans[1].inner.clone()], "Ctrl");
+    assert_eq!(spans[0].whole.start, "😀".len());
+
+    let comments = html_comments("до <!-- скрыто --> после");
+    assert_eq!(comments.len(), 1);
+    assert_eq!(&"до <!-- скрыто --> после"[comments[0].whole.clone()], "<!-- скрыто -->");
+}
+
+#[test]
+fn paired_fast_path_preserves_unclosed_and_adjacent_delimiters() {
+    use super::delimited::paired;
+
+    assert_eq!(paired("без выделения", '=', true), Vec::new());
+    assert_eq!(paired("==текст== %%комментарий%%", '=', true), vec![(0, "==текст".len())]);
+    assert_eq!(paired("==не закрыто", '=', true), Vec::new());
+    assert_eq!(paired("===не пара===", '=', true), Vec::new());
+    assert_eq!(paired("%%заметка%%", '%', false), vec![(0, "%%заметка".len())]);
+    assert_eq!(paired("жжтекстжж", 'ж', false), vec![(0, "жжтекст".len())]);
+}
