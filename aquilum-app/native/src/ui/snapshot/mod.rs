@@ -28,6 +28,7 @@ fn parts(text: &str) -> RootParts<'_> {
             file_name: "Заметка.md",
             title: "Заметка",
             body: crop::Rope::from(text),
+            layout_candidate: None,
             metadata: Some(false),
             can_back: true,
             can_forward: false,
