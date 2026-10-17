@@ -1,4 +1,4 @@
-use super::{announce, paths_changed, Relocation};
+use super::{announce, paths_changed, report_history_move_failure, Relocation};
 use crate::app_core::Core;
 use crate::files::deletions::deletion_files;
 use crate::files::error::FileCommandError;
@@ -69,7 +69,9 @@ fn trash_now(core: &Core, workspace: &Path, path: &Path) -> Result<PathBuf, File
     let notes = note_moves(&moved.files);
     let history = &core.history;
     for (note, trashed_at) in &notes {
-        history.trashed(&|| core.known_roots(), note, trashed_at);
+        if let Err(error) = history.try_trashed(&|| core.known_roots(), note, trashed_at) {
+            report_history_move_failure(core, note, trashed_at, &error);
+        }
     }
     announce(core, removed(notes.iter().map(|(note, _)| note)));
     paths_changed(core, vec![path.to_path_buf(), moved.root.clone()]);
@@ -109,7 +111,9 @@ fn restore_all(
         match attempt {
             Ok(restored) => {
                 for (trashed_note, back) in note_moves(&restored.files) {
-                    history.restored(&|| core.known_roots(), &trashed_note, &back);
+                    if let Err(error) = history.try_restored(&|| core.known_roots(), &trashed_note, &back) {
+                        report_history_move_failure(core, &trashed_note, &back, &error);
+                    }
                 }
                 roots.push(restored.root);
             }

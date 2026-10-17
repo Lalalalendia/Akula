@@ -56,6 +56,17 @@ impl App {
                     // the primary note is unsaved or history is persisted.
                     history_changed |= self.tabs.active().path.as_deref() == Some(Path::new(&failure.path));
                 }
+                CoreEvent::NoteHistoryMoveFailed(failure) => {
+                    report!(
+                        "документ перенесён, но история {} -> {} не перенесена ({}): {}; требуется повтор переноса/проверка",
+                        failure.from, failure.to, failure.action, failure.message
+                    );
+                    // The primary file relocation completed. Do not report a
+                    // failed main move; history can be split across both paths.
+                    history_changed |= self.tabs.active().path.as_deref().is_some_and(|active| {
+                        active == Path::new(&failure.from) || active == Path::new(&failure.to)
+                    });
+                }
                 CoreEvent::NotesRelocated(relocation) => {
                     for moved in &relocation.moves {
                         self.follow_move(root, Path::new(&moved.from), Path::new(&moved.to));

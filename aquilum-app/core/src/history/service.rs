@@ -11,7 +11,7 @@ use std::fmt;
 use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::SystemTime;
 
 const DEVICE_FILE: &str = "device-id";
@@ -20,7 +20,24 @@ const DEVICE_FILE: &str = "device-id";
 // serialize version-store reads and writes with native history maintenance.
 // No code holding this mutex may acquire Core File Gate, emit host callbacks,
 // or perform editor/DocumentHub reconciliation.
-static PROCESS_HISTORY_FILES: Mutex<()> = Mutex::new(());
+#[derive(Default)]
+struct HistoryFilesShared {
+    // A failed rename can leave version files in both trees. Block reads and
+    // writes in every cooperating Core until the SAME transfer is retried.
+    // This is in-memory, not a crash-durable recovery journal.
+    blocked: HashMap<String, HistoryMoveBlock>,
+}
+
+#[derive(Clone)]
+struct HistoryMoveBlock {
+    from: String,
+    to: String,
+    reason: String,
+    affected_roots: Vec<PathBuf>,
+}
+
+static PROCESS_HISTORY_FILES: LazyLock<Mutex<HistoryFilesShared>> =
+    LazyLock::new(|| Mutex::new(HistoryFilesShared::default()));
 
 pub struct HistoryService {
     device: String,
@@ -48,6 +65,27 @@ impl fmt::Display for HistorySaveFailure {
     }
 }
 
+/// A primary note relocation already succeeded, but moving its history
+/// did not. A partially moved history must not be announced as complete.
+#[derive(Debug)]
+pub struct HistoryMoveFailure {
+    pub action: &'static str,
+    pub message: String,
+    pub may_have_partial_files: bool,
+}
+
+impl HistoryMoveFailure {
+    fn new(action: &'static str, error: impl fmt::Display, may_have_partial_files: bool) -> Self {
+        Self { action, message: error.to_string(), may_have_partial_files }
+    }
+}
+
+impl fmt::Display for HistoryMoveFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.action, self.message)
+    }
+}
+
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HistoryFault {
@@ -55,6 +93,8 @@ pub(crate) enum HistoryFault {
     UpdateVersion,
     NameVersion,
     RemoveVersion,
+    MoveBefore,
+    MoveAfterOneFile,
 }
 
 #[derive(Default)]
@@ -67,8 +107,45 @@ struct State {
 // disk_before intentionally uses the per-service mutex alone, so a File Gate
 // write does not wait on a potentially long history-retention scan.
 struct HistoryFilesStateGuard<'a> {
-    _process: MutexGuard<'static, ()>,
+    process: MutexGuard<'static, HistoryFilesShared>,
     state: MutexGuard<'a, State>,
+}
+
+impl HistoryFilesStateGuard<'_> {
+    fn is_blocked(&self, key: &str) -> bool {
+        self.process.blocked.contains_key(key)
+    }
+
+    fn assert_retry_pair(&self, from: &str, to: &str, action: &'static str) -> Result<(), HistoryMoveFailure> {
+        for key in [from, to] {
+            if let Some(block) = self.process.blocked.get(key) {
+                if block.from != from || block.to != to {
+                    return Err(HistoryMoveFailure::new(
+                        action,
+                        format!("history transfer still pending from {} to {}: {}", block.from, block.to, block.reason),
+                        true,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn quarantine(&mut self, from: &str, to: &str, affected_roots: &[&Path], why: &str) {
+        let block = HistoryMoveBlock {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            reason: why.to_owned(),
+            affected_roots: affected_roots.iter().map(|path| path.to_path_buf()).collect(),
+        };
+        self.process.blocked.insert(from.to_owned(), block.clone());
+        self.process.blocked.insert(to.to_owned(), block);
+    }
+
+    fn release_pair(&mut self, from: &str, to: &str) {
+        self.process.blocked.remove(from);
+        self.process.blocked.remove(to);
+    }
 }
 
 impl Deref for HistoryFilesStateGuard<'_> {
@@ -189,6 +266,9 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return Ok(false);
         };
+        if state.is_blocked(&located.key) {
+            return Err(HistorySaveFailure::new("history relocation pending", "history transfer must be retried before recording a new version"));
+        }
         if !allowed_history_directory(&located.vault, &located.dir) {
             return Err(HistorySaveFailure::new("history path", "unsafe history directory"));
         }
@@ -349,7 +429,7 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
-        if !allowed_history_directory(&located.vault, &located.dir) {
+        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
             return None;
         }
         let target = match id {
@@ -377,7 +457,7 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return HistoryPage::default();
         };
-        if !allowed_history_directory(&located.vault, &located.dir) {
+        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
             return HistoryPage::default();
         }
         let current = read_text(note).ok();
@@ -411,7 +491,7 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
-        if !allowed_history_directory(&located.vault, &located.dir) {
+        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
             return None;
         }
         let versions = store::versions(&located.dir);
@@ -426,79 +506,162 @@ impl HistoryService {
         })
     }
 
+    /// Legacy void API; use try_* in File Gate to report history failures
+    /// separately from an already successful primary file relocation.
     pub fn moved(&self, roots: Roots<'_>, from: &Path, to: &Path) {
+        if let Err(error) = self.try_moved(roots, from, to) {
+            report(from, "не перенесена", &error.to_string());
+        }
+    }
+
+    pub fn try_moved(&self, roots: Roots<'_>, from: &Path, to: &Path) -> Result<(), HistoryMoveFailure> {
+        let action = "move history";
         let Some(mut state) = self.files_lock() else {
-            return;
+            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
             locate(&mut state, roots, to),
         ) else {
-            return;
+            return Ok(());
         };
+        state.assert_retry_pair(&source.key, &target.key, action)?;
         if !allowed_history_directory(&source.vault, &source.dir)
             || !allowed_history_directory(&target.vault, &target.dir)
         {
-            return;
+            state.quarantine(&source.key, &target.key, &[source.vault.as_path(), target.vault.as_path()], "unsafe history directory");
+            return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
+        }
+        if let Err(error) = self.move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault) {
+            state.quarantine(&source.key, &target.key, &[source.vault.as_path(), target.vault.as_path()], &error.to_string());
+            return Err(HistoryMoveFailure::new(action, error, true));
         }
         let note = state.notes.remove(&source.key);
         state.notes.remove(&target.key);
-        move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault);
         if let Some(mut note) = note {
             note.dir = target.dir;
-            state.notes.insert(target.key, note);
+            state.notes.insert(target.key.clone(), note);
         }
+        state.release_pair(&source.key, &target.key);
+        Ok(())
     }
 
     pub fn trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) {
-        let Some(mut state) = self.files_lock() else {
-            return;
-        };
-        let Some(located) = locate(&mut state, roots, note) else {
-            return;
-        };
-        let trash = trash_path(&located.vault);
-        let Some(in_trash) = relative_inside(&trash, trashed_at) else {
-            return;
-        };
-        let target = store::history_dir(&trash, &in_trash);
-        if !allowed_history_directory(&located.vault, &located.dir)
-            || !allowed_history_directory(&trash, &target)
-        {
-            return;
-        }
-        let note = state.notes.remove(&located.key);
-        move_history(&located.dir, &target, Placement::Trash, &located.vault);
-        if let Some(mut note) = note {
-            note.dir = target;
-            state.notes.insert(identity(trashed_at), note);
+        if let Err(error) = self.try_trashed(roots, note, trashed_at) {
+            report(note, "не перемещена в корзину", &error.to_string());
         }
     }
 
-    pub fn restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) {
+    pub fn try_trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) -> Result<(), HistoryMoveFailure> {
+        let action = "trash history";
         let Some(mut state) = self.files_lock() else {
-            return;
+            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
-        let Some(located) = locate(&mut state, roots, restored) else {
-            return;
+        let Some(located) = locate(&mut state, roots, note) else {
+            return Ok(());
         };
         let trash = trash_path(&located.vault);
         let Some(in_trash) = relative_inside(&trash, trashed_at) else {
-            return;
+            return Err(HistoryMoveFailure::new(action, "trash destination outside workspace trash root", false));
+        };
+        let target = store::history_dir(&trash, &in_trash);
+        let destination_key = identity(trashed_at);
+        state.assert_retry_pair(&located.key, &destination_key, action)?;
+        if !allowed_history_directory(&located.vault, &located.dir)
+            || !allowed_history_directory(&trash, &target)
+        {
+            state.quarantine(&located.key, &destination_key, &[located.vault.as_path()], "unsafe history directory");
+            return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
+        }
+        if let Err(error) = self.move_history(&located.dir, &target, Placement::Trash, &located.vault) {
+            state.quarantine(&located.key, &destination_key, &[located.vault.as_path()], &error.to_string());
+            return Err(HistoryMoveFailure::new(action, error, true));
+        }
+        let note = state.notes.remove(&located.key);
+        if let Some(mut note) = note {
+            note.dir = target;
+            state.notes.insert(destination_key.clone(), note);
+        }
+        state.release_pair(&located.key, &destination_key);
+        Ok(())
+    }
+
+    pub fn restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) {
+        if let Err(error) = self.try_restored(roots, trashed_at, restored) {
+            report(restored, "не восстановлена из корзины", &error.to_string());
+        }
+    }
+
+    pub fn try_restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) -> Result<(), HistoryMoveFailure> {
+        let action = "restore history";
+        let Some(mut state) = self.files_lock() else {
+            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
+        };
+        let Some(located) = locate(&mut state, roots, restored) else {
+            return Ok(());
+        };
+        let trash = trash_path(&located.vault);
+        let Some(in_trash) = relative_inside(&trash, trashed_at) else {
+            return Err(HistoryMoveFailure::new(action, "trash source outside workspace trash root", false));
         };
         let source = store::history_dir(&trash, &in_trash);
+        let source_key = identity(trashed_at);
+        state.assert_retry_pair(&source_key, &located.key, action)?;
         if !allowed_history_directory(&trash, &source)
             || !allowed_history_directory(&located.vault, &located.dir)
         {
-            return;
+            state.quarantine(&source_key, &located.key, &[located.vault.as_path()], "unsafe history directory");
+            return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
-        let note = state.notes.remove(&identity(trashed_at));
+        if let Err(error) = self.move_history(&source, &located.dir, Placement::Workspace, &trash) {
+            state.quarantine(&source_key, &located.key, &[located.vault.as_path()], &error.to_string());
+            return Err(HistoryMoveFailure::new(action, error, true));
+        }
+        let note = state.notes.remove(&source_key);
         state.notes.remove(&located.key);
-        move_history(&source, &located.dir, Placement::Workspace, &trash);
         if let Some(mut note) = note {
             note.dir = located.dir;
-            state.notes.insert(located.key, note);
+            state.notes.insert(located.key.clone(), note);
         }
+        state.release_pair(&source_key, &located.key);
+        Ok(())
+    }
+
+    /// A deterministic fault test can interrupt after exactly one version
+    /// moved. Failed transfers never advance in-memory note paths.
+    fn move_history(&self, from: &Path, to: &Path, placement: Placement, base: &Path) -> Result<(), FileCommandError> {
+        #[cfg(test)]
+        self.fail_history_relocation_if_requested(from, to)?;
+        move_folder(from, to, placement)?;
+        remove_empty_ancestors(from, base);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn fail_history_relocation_if_requested(&self, from: &Path, to: &Path) -> Result<(), FileCommandError> {
+        let mut pending = self.next_fault.lock().unwrap();
+        let fault = match *pending {
+            Some(HistoryFault::MoveBefore) => Some(HistoryFault::MoveBefore),
+            Some(HistoryFault::MoveAfterOneFile) => Some(HistoryFault::MoveAfterOneFile),
+            _ => None,
+        };
+        if fault.is_none() {
+            return Ok(());
+        }
+        *pending = None;
+        drop(pending);
+        if fault == Some(HistoryFault::MoveAfterOneFile) && from.is_dir() {
+            if let Some(entry) = fs::read_dir(from)?.next() {
+                let entry = entry?;
+                if entry.file_type()?.is_file() {
+                    fs::create_dir_all(to)?;
+                    fs::rename(entry.path(), to.join(entry.file_name()))?;
+                }
+            }
+        }
+        Err(FileCommandError::Io {
+            message: "injected interrupted history transfer".to_owned(),
+        })
     }
 
     /// Serialize history version-store access across all Core instances.
@@ -513,7 +676,7 @@ impl HistoryService {
             }
         };
         let state = self.lock();
-        Some(HistoryFilesStateGuard { _process: process, state })
+        Some(HistoryFilesStateGuard { process, state })
     }
 
     /// Run legacy migration and retention without acquiring Core File Gate.
@@ -522,9 +685,16 @@ impl HistoryService {
     /// Full-tree housekeeping can delay other history operations but cannot
     /// block the ordinary File Gate mutex directly.
     pub fn maintain_retention(&self, workspace: &Path, retention_days: u32) -> Result<u64, &'static str> {
-        let _guard = PROCESS_HISTORY_FILES
+        let guard = PROCESS_HISTORY_FILES
             .lock()
             .map_err(|_| "process history-files lock poisoned; refusing cleanup")?;
+        // A failed transfer in one vault must not stall retention in every
+        // unrelated vault. The global lock is still held only during work.
+        if guard.blocked.values().any(|block| block.affected_roots.iter().any(|root| {
+            root.as_path() == workspace || trash_path(root).as_path() == workspace
+        })) {
+            return Err("history relocation pending in selected workspace; retention deferred");
+        }
         store::adopt_quantum_history(workspace);
         store::adopt_quantum_history(&trash_path(workspace));
         Ok(store::remove_expired(workspace, retention_days))
@@ -580,13 +750,6 @@ fn name_version(device: &str, dir: &Path, id: Option<String>, name: &str) -> Opt
             report(dir, "не записала название версии", &error.to_string());
             None
         }
-    }
-}
-
-fn move_history(from: &Path, to: &Path, placement: Placement, base: &Path) {
-    match move_folder(from, to, placement) {
-        Ok(()) => remove_empty_ancestors(from, base),
-        Err(error) => report(from, "не перенесена", &error.to_string()),
     }
 }
 
@@ -1007,6 +1170,142 @@ mod tests {
             texts(&fixture.history_of("Агент.md")),
             [("от агента".to_owned(), Source::Agent), ("от агента и снова".to_owned(), Source::Agent)]
         );
+    }
+
+    #[test]
+    fn history_move_failure_does_not_retarget_cached_version_path() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let old = fixture.vault.join("Old.md");
+        let new = fixture.vault.join("New.md");
+        fixture.save(&history, &old, "first", Source::Agent);
+        fixture.save(&history, &old, "second", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+        let original = fixture.history_of("Old.md");
+        let target = fixture.history_of("New.md");
+        let source_key = crate::search::paths::identity(&old);
+        let target_key = crate::search::paths::identity(&new);
+
+        history.fail_once(HistoryFault::MoveBefore);
+        let error = history.try_moved(&|| fixture.roots(), &old, &new).unwrap_err();
+        assert_eq!(error.action, "move history");
+        assert!(error.may_have_partial_files);
+        assert!(original.is_dir());
+        assert!(!target.exists());
+        assert_eq!(history.lock().notes.get(&source_key).unwrap().dir, original);
+        assert!(!history.lock().notes.contains_key(&target_key));
+        assert!(history.page(&|| fixture.roots(), &new, 0, 10).versions.is_empty());
+        assert_eq!(history.try_saved(
+            &|| fixture.roots(), &new, write("should not fork", Source::Agent, "hash", None)
+        ).unwrap_err().action, "history relocation pending");
+
+        history.try_moved(&|| fixture.roots(), &old, &new).unwrap();
+        assert!(!original.exists());
+        assert_eq!(texts(&target), [
+            ("first".to_owned(), Source::Agent), ("second".to_owned(), Source::Agent)
+        ]);
+        assert_eq!(history.lock().notes.get(&target_key).unwrap().dir, target);
+        assert!(!history.lock().notes.contains_key(&source_key));
+        assert_eq!(history.page(&|| fixture.roots(), &new, 0, 10).total, 2);
+    }
+
+    #[test]
+    fn history_move_partial_failure_quarantines_both_trees_across_cores() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let first = fixture.service();
+        let second = HistoryService::new(&fixture._directory.path().join("other-data"));
+        let old = fixture.vault.join("Partial.md");
+        let new = fixture.vault.join("Recovered.md");
+        fixture.save(&first, &old, "version one", Source::Agent);
+        fixture.save(&first, &old, "version two", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+        let source = fixture.history_of("Partial.md");
+        let target = fixture.history_of("Recovered.md");
+
+        first.fail_once(HistoryFault::MoveAfterOneFile);
+        let failure = first.try_moved(&|| fixture.roots(), &old, &new).unwrap_err();
+        assert!(failure.may_have_partial_files);
+        assert_eq!(versions(&source).len(), 1);
+        assert_eq!(versions(&target).len(), 1);
+        assert_eq!(first.page(&|| fixture.roots(), &old, 0, 10).total, 0);
+        assert_eq!(second.page(&|| fixture.roots(), &new, 0, 10).total, 0);
+        assert_eq!(second.try_saved(
+            &|| fixture.roots(), &new, write("cannot fork", Source::Agent, "new-hash", None)
+        ).unwrap_err().action, "history relocation pending");
+        assert!(first.try_moved(
+            &|| fixture.roots(), &old, &fixture.vault.join("Unrelated.md")
+        ).is_err());
+        assert!(first.maintain_retention(&fixture.vault, 30).is_err());
+        let unrelated = fixture._directory.path().join("other-workspace");
+        fs::create_dir_all(&unrelated).unwrap();
+        assert_eq!(second.maintain_retention(&unrelated, 0).unwrap(), 0);
+
+        first.try_moved(&|| fixture.roots(), &old, &new).unwrap();
+        assert!(!source.exists());
+        assert_eq!(texts(&target), [
+            ("version one".to_owned(), Source::Agent),
+            ("version two".to_owned(), Source::Agent),
+        ]);
+        assert_eq!(second.page(&|| fixture.roots(), &new, 0, 10).total, 2);
+        assert_eq!(first.maintain_retention(&fixture.vault, 0).unwrap(), 0);
+    }
+
+    #[test]
+    fn history_move_trash_failure_keeps_original_cache_until_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("TrashMe.md");
+        fixture.save(&history, &note, "kept history", Source::Agent);
+        let trashed = move_to_trash_impl(&fixture.vault, &note).unwrap().root;
+        let original = fixture.history_of("TrashMe.md");
+        let target = history_dir(&trash_path(&fixture.vault), Path::new("TrashMe.md"));
+        let source_key = crate::search::paths::identity(&note);
+
+        history.fail_once(HistoryFault::MoveBefore);
+        let err = history.try_trashed(&|| fixture.roots(), &note, &trashed).unwrap_err();
+        assert_eq!(err.action, "trash history");
+        assert!(original.exists());
+        assert!(!target.exists());
+        assert_eq!(history.lock().notes.get(&source_key).unwrap().dir, original);
+        history.try_trashed(&|| fixture.roots(), &note, &trashed).unwrap();
+        assert!(!original.exists());
+        assert_eq!(texts(&target), [("kept history".to_owned(), Source::Agent)]);
+        assert!(history.lock().notes.get(&source_key).is_none());
+        assert_eq!(history.lock().notes.get(&crate::search::paths::identity(&trashed)).unwrap().dir, target);
+    }
+
+    #[test]
+    fn history_move_restore_failure_keeps_trash_cache_until_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("RestoreMe.md");
+        fixture.save(&history, &note, "recover this", Source::Agent);
+        let trashed = move_to_trash_impl(&fixture.vault, &note).unwrap().root;
+        history.try_trashed(&|| fixture.roots(), &note, &trashed).unwrap();
+        let restored = restore_from_trash_impl(&fixture.vault, &trashed).unwrap().root;
+        let trash_dir = history_dir(&trash_path(&fixture.vault), Path::new("RestoreMe.md"));
+        let restored_dir = fixture.history_of("RestoreMe.md");
+        let source_key = crate::search::paths::identity(&trashed);
+
+        history.fail_once(HistoryFault::MoveBefore);
+        let err = history.try_restored(&|| fixture.roots(), &trashed, &restored).unwrap_err();
+        assert_eq!(err.action, "restore history");
+        assert!(trash_dir.exists());
+        assert!(!restored_dir.exists());
+        assert_eq!(history.lock().notes.get(&source_key).unwrap().dir, trash_dir);
+        assert_eq!(history.try_saved(
+            &|| fixture.roots(), &restored, write("must wait", Source::Agent, "hash", None)
+        ).unwrap_err().action, "history relocation pending");
+
+        history.try_restored(&|| fixture.roots(), &trashed, &restored).unwrap();
+        assert!(!trash_dir.exists());
+        assert_eq!(texts(&restored_dir), [("recover this".to_owned(), Source::Agent)]);
+        assert!(history.lock().notes.get(&source_key).is_none());
+        assert_eq!(history.page(&|| fixture.roots(), &restored, 0, 10).total, 1);
     }
 
     #[test]

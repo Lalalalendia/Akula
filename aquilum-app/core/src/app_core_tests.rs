@@ -94,6 +94,51 @@ fn history_failure_after_primary_note_commit_uses_distinct_event_and_recovers() 
 }
 
 #[test]
+fn history_move_failure_after_primary_rename_has_distinct_event_and_retry() {
+    use crate::history::service::HistoryFault;
+
+    let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("data");
+    fs::create_dir_all(&data).unwrap();
+    let events = Arc::new(Recording::default());
+    let core = Core::open(&data, Arc::clone(&events) as Arc<dyn EventSink>);
+    let vault_dir = directory.path().join("vault");
+    fs::create_dir_all(&vault_dir).unwrap();
+    // On macOS the temp directory can be spelled /var/... or /private/var/...
+    // Use the same canonical root for the stored workspace and every note.
+    let vault = fs::canonicalize(&vault_dir).unwrap();
+    core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
+    let original = vault.join("Before.md");
+    let moved = vault.join("After.md");
+    gate::create(&core, &original, "history snapshot", Source::Agent, None).unwrap();
+    assert_eq!(core.history.page(&|| core.known_roots(), &original, 0, 10).total, 1);
+    events.clear();
+
+    core.history.fail_once(HistoryFault::MoveBefore);
+    gate::move_across(&core, &original, &moved).unwrap();
+    assert!(!original.exists(), "primary file must really be moved");
+    assert_eq!(fs::read_to_string(&moved).unwrap(), "history snapshot");
+    let names = events.names();
+    assert!(names.contains(&"notes-relocated"), "{names:?}");
+    assert!(names.contains(&"note-history-move-failed"), "{names:?}");
+    assert!(!names.contains(&"document-save-failed"), "{names:?}");
+    let seen = events.0.lock().unwrap();
+    let failure = seen.iter().find_map(|event| match event {
+        CoreEvent::NoteHistoryMoveFailed(failure) => Some(failure),
+        _ => None,
+    }).unwrap();
+    assert_eq!(failure.from, original.to_string_lossy());
+    assert_eq!(failure.to, moved.to_string_lossy());
+    assert_eq!(failure.action, "move history");
+    assert!(failure.may_have_partial_files);
+    drop(seen);
+
+    assert_eq!(core.history.page(&|| core.known_roots(), &moved, 0, 10).total, 0);
+    core.history.try_moved(&|| core.known_roots(), &original, &moved).unwrap();
+    assert_eq!(core.history.page(&|| core.known_roots(), &moved, 0, 10).total, 1);
+}
+
+#[test]
 fn core_file_gate_serializes_mcp_trash_purge_across_core_instances() {
     use std::sync::mpsc::{channel, RecvTimeoutError};
     use std::thread;
