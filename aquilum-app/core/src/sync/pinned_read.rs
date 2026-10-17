@@ -26,6 +26,26 @@ pub(crate) struct PinnedReadOnlyRoot {
 }
 
 impl PinnedReadOnlyRoot {
+    /// Stable metadata for the live pinned handle, not a later path lookup.
+    /// This supplies host registration checks, never sync write authority.
+    pub(crate) fn root_metadata(&self) -> Result<std::fs::Metadata, VaultPortError> {
+        #[cfg(unix)]
+        {
+            let copy = rustix::io::dup(&self.root)
+                .map_err(|error| VaultPortError::Io(error.to_string()))?;
+            std::fs::File::from(copy).metadata()
+                .map_err(|error| VaultPortError::Io(error.to_string()))
+        }
+        #[cfg(windows)]
+        {
+            self.root.metadata().map_err(|error| VaultPortError::Io(error.to_string()))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(VaultPortError::PermissionDenied)
+        }
+    }
+
     /// Root must originate from a trusted, registered workspace selection.
     /// An untrusted remote path or manifest must never choose this directory.
     pub(crate) fn open(root: &Path) -> Result<Self, VaultPortError> {
