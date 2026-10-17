@@ -12,6 +12,46 @@ fn partial_frames_match_full_frames_at_fractional_size() {
     partial_frames(1.75, 1750, 1051, 24);
 }
 
+/// Regression for the 1.75x hinted-baseline scroll defect: the source scene
+/// is translated by whole physical pixels, but partial glyph scenes use a
+/// different local origin than the fresh full reference.
+#[test]
+fn hinted_fractional_scroll_remains_pixel_stable() {
+    let (scale, width, height) = (1.75, 1750_u32, 1051_u32);
+    let mut h = Harness::with(None, scale);
+    h.root.handle_window_event(masonry::core::WindowEvent::Resize(PhysicalSize::new(width, height)));
+    h.app.window_resized(&mut h.root, Size::new(f64::from(width) / scale, f64::from(height) / scale));
+    let body: String = (0..250)
+        .map(|i| format!(
+            "Абзац {i}: реальный Unicode текст Akula с кириллицей, **жирным**, \\
+             *курсивом*, ссылками [[Akula]] и длинным предложением для переноса \\
+             строк через Parley.\\n\\n"
+        ))
+        .collect();
+    let note = h.write_note("hinted-fractional-scroll.md", &body);
+    h.app.open(&mut h.root, note);
+    let (w, hh) = (width as u16, height as u16);
+    let mut partial = Renderer::new(0);
+
+    for step in 0..32_u32 {
+        if step % 8 == 7 {
+            h.pointer_move(f64::from(70 + step * 8), f64::from(95 + step * 9));
+        } else {
+            let dy = if step < 20 { -29.0 } else { 23.0 };
+            h.scroll((f64::from(width) * 0.6, f64::from(height) * 0.5), scale, (0.0, dy));
+        }
+        h.anim(Duration::from_millis(16));
+        let (layers, _) = h.root.redraw();
+        partial.draw_frame(&layers, w, hh, scale, theme::background(), step == 0).unwrap();
+        let full = render_full(&layers, w, hh, scale);
+        let max_channel = partial.frame_pixels().iter().zip(full.frame_pixels())
+            .flat_map(|(&a, &b)| [0, 8, 16, 24].map(move |shift| ((a >> shift) as u8).abs_diff((b >> shift) as u8)))
+            .max().unwrap_or(0);
+        assert!(max_channel <= 1, "hinted fractional scroll step {step}: max channel difference={max_channel}/255");
+    }
+    assert!(partial.shifts >= 20, "expected real pixel shifts, observed {}", partial.shifts);
+}
+
 fn partial_frames(scale: f64, width: u32, height: u32, steps: u32) {
     let mut h = Harness::with(None, scale);
     h.root.handle_window_event(masonry::core::WindowEvent::Resize(PhysicalSize::new(width, height)));
