@@ -55,6 +55,56 @@ struct NtIoStatusBlock {
     information: usize,
 }
 
+// Stable Win32 file identity by HANDLE. Rust MetadataExt::{file_index,
+// volume_serial_number} requires an unstable feature on stable toolchains.
+// Never use path strings or creation timestamps as a file identity.
+#[repr(C)]
+#[derive(Default)]
+struct WinFileTime {
+    low: u32,
+    high: u32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct WinByHandleFileInformation {
+    attributes: u32,
+    created: WinFileTime,
+    accessed: WinFileTime,
+    written: WinFileTime,
+    volume_serial: u32,
+    size_high: u32,
+    size_low: u32,
+    hard_links: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetFileInformationByHandle(
+        file: *mut c_void,
+        information: *mut WinByHandleFileInformation,
+    ) -> i32;
+}
+
+/// Directory identity for the particular pinned handle, not an ambient path.
+pub(super) fn file_identity(file: &File) -> Result<(u32, u64), VaultPortError> {
+    let mut info = WinByHandleFileInformation::default();
+    // SAFETY: file is live, the output struct is fully initialized, and
+    // the synchronous Win32 call writes into our valid stack allocation.
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
+    if ok == 0 {
+        return Err(io(std::io::Error::last_os_error()));
+    }
+    let index = (u64::from(info.file_index_high) << 32)
+        | u64::from(info.file_index_low);
+    if info.volume_serial == 0 || index == 0 {
+        return Err(VaultPortError::PermissionDenied);
+    }
+    Ok((info.volume_serial, index))
+}
+
 #[link(name = "ntdll")]
 #[allow(non_snake_case)]
 extern "system" {
