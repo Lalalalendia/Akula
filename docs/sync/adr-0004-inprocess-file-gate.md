@@ -19,6 +19,9 @@ filesystem portion of each managed operation, including calls from distinct
 Core instances accessing the same workspace:
 - note and binary creation, note write with expected hash, copy;
 - directory/file rename and link rewrites as one operation;
+- native starter-template parent directory creation (`ensure_folder_tree`),
+  preserving `create_dir_all` semantics; individual template files are
+  still created through `gate::create`, not in one atomic batch;
 - move-to-trash, each restore-from-trash mutation, and the irreversible MCP
   `empty_trash` purge (the latter may block unrelated workspaces for long purges);
 - entire registered-root preimage capture, SQLite persistence and second
