@@ -11,6 +11,8 @@ pub(super) fn snapshots(scene: &Scene) {
             file_name: "Дюна.md",
             title: "Дюна",
             body: crop::Rope::from("Фрэнк Герберт, 1965."),
+            #[cfg(test)]
+            trial_layout: None,
             metadata: Some(false),
             can_back: true,
             can_forward: false,
