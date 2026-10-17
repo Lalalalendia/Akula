@@ -53,6 +53,8 @@ jobs:
       - name: Three independent real-editor coalescing A/B trials
         shell: bash
         working-directory: aquilum-app
+        env:
+          AQ_ADJACENT_DIAG_OUT: ${{ github.workspace }}/vello-adjacent-diagnostics
         run: |
           set -euo pipefail
           for trial in 1 2 3; do
@@ -74,5 +76,6 @@ jobs:
             vello-adjacent-environment.log
             vello-adjacent-trial-*.log
             vello-adjacent-summary.md
+            vello-adjacent-diagnostics/**/*.png
           if-no-files-found: warn
           retention-days: 14
