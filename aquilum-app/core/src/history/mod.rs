@@ -34,3 +34,10 @@ pub mod store;
 pub use milestone::Source;
 pub use service::{HistoryService, NoteWrite};
 pub use store::{version_at, AQUILUM_FOLDER};
+
+/// The recovery marker is checked without acquiring the history-files mutex.
+/// It is a negative admission signal only; callers must not infer write
+/// authority, a completed bilateral prepare, or OS power-loss durability.
+pub(crate) fn pending_history_relocation(root: &std::path::Path) -> std::io::Result<bool> {
+    recovery::pending(root)
+}

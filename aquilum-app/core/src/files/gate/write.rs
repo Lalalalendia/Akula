@@ -18,7 +18,7 @@ pub fn write(
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
     let (before, result) = {
-        let _guard = core.file_mutation_guard()?;
+        let _guard = core.file_mutation_guard_for_write()?;
         let before = core.history.disk_before(path, expected_hash);
         let result = write_file_atomic_impl(path, content, expected_hash)?;
         (before, result)
@@ -39,7 +39,7 @@ pub fn create(
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
     let result = {
-        let _guard = core.file_mutation_guard()?;
+        let _guard = core.file_mutation_guard_for_write()?;
         create_file_impl(path, content)?
     };
     if is_note(path) {
@@ -62,7 +62,7 @@ pub fn create_binary(
     bytes: &[u8],
 ) -> Result<FileWriteResult, FileCommandError> {
     let result = {
-        let _guard = core.file_mutation_guard()?;
+        let _guard = core.file_mutation_guard_for_write()?;
         create_binary_file_impl(path, bytes)?
     };
     paths_changed(core, vec![path.to_path_buf()]);
@@ -71,7 +71,7 @@ pub fn create_binary(
 
 pub fn copy(core: &Core, from: &Path, to: &Path) -> Result<(), FileCommandError> {
     {
-        let _guard = core.file_mutation_guard()?;
+        let _guard = core.file_mutation_guard_for_write()?;
         copy_file_impl(from, to)?;
     }
     paths_changed(core, vec![to.to_path_buf()]);
@@ -96,7 +96,7 @@ pub fn name_version(
 /// This serializes ordinary Akula folder creation; it is not a sync-write API.
 pub fn create_folder(core: &Core, path: &Path) -> Result<(), FileCommandError> {
     use std::io::ErrorKind;
-    let _guard = core.file_mutation_guard()?;
+    let _guard = core.file_mutation_guard_for_write()?;
     match std::fs::create_dir(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == ErrorKind::AlreadyExists =>
@@ -113,7 +113,7 @@ pub fn create_folder(core: &Core, path: &Path) -> Result<(), FileCommandError> {
 /// This is process-local serialization only, not root confinement or a
 /// handle-relative sync mutation authority.
 pub fn ensure_folder_tree(core: &Core, path: &Path) -> Result<(), FileCommandError> {
-    let _guard = core.file_mutation_guard()?;
+    let _guard = core.file_mutation_guard_for_write()?;
     std::fs::create_dir_all(path)?;
     Ok(())
 }
