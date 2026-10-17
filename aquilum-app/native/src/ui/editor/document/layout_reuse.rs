@@ -218,19 +218,40 @@ mod tests {
         let styles = StyleSet::new(16.0);
         let mut baseline = doc(&original);
         shape(&mut baseline, 600.0, &styles);
-        for case in 0..4 {
-            let snapshot = baseline.trial_snapshot(&styles).unwrap();
+        for case in 0..8 {
+            let mut snapshot = baseline.trial_snapshot(&styles).unwrap();
             let changed = if case == 0 { original.replace("обычный", "другой ") } else { original.clone() };
             let mut fresh = doc(&changed);
             if case == 2 {
                 fresh.markdown.as_mut().unwrap().size = 19.0;
             }
+            if case == 5 {
+                snapshot.theme_generation = snapshot.theme_generation.wrapping_add(1);
+            }
+            if case == 6 {
+                snapshot.editor_font.size += 1.0;
+            }
             fresh.trial_offer(snapshot);
             let width = if case == 1 { Some(550.0) } else { Some(600.0) };
             let compose = (case == 3).then_some((0, "превью"));
-            let count = fresh.try_restore_trial(width, &styles, compose, None);
+            let different_style = StyleSet::new(18.0);
+            let current_styles = if case == 4 { &different_style } else { &styles };
+            let caret = (case == 7).then_some(0);
+            let count = fresh.try_restore_trial(width, current_styles, compose, caret);
             assert_eq!(count, 0, "invalidated case {case}");
         }
+    }
+
+    #[test]
+    fn clean_editor_with_edit_reporting_still_captures_plain_lines() {
+        let text = "строка обычного текста\n".repeat(48);
+        let styles = StyleSet::new(16.0);
+        let mut original = doc(&text);
+        original.report_edits();
+        shape(&mut original, 600.0, &styles);
+        assert!(original.trial_snapshot(&styles).is_some(), "Some(empty) is not a dirty document");
+        original.replace(0..0, "правка ");
+        assert!(original.trial_snapshot(&styles).is_none(), "pending changes must block reuse");
     }
 
     #[test]
