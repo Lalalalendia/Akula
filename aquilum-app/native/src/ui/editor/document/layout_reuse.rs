@@ -149,8 +149,13 @@ impl Document {
         // caret is different: the usual Document::measure() invalidates only
         // the caret-bearing line because snapshot decorations have caret=None.
         // Do not throw out dozens of unrelated plain paragraphs for focus.
+        // Plain, non-interactive text glyph shaping is width-independent.
+        // Newly inserted layouts are rebroken by the standard first-layout
+        // width transition below, so we never reuse stale line geometry.
+        // This also handles the initial scrollbar appearing (a transient
+        // ~16px difference) without throwing away correctly shaped text.
         if compose.is_some()
-            || width != Some(snapshot.width) || !self.windowed.eq(&snapshot.windowed)
+            || width.is_none() || !self.windowed.eq(&snapshot.windowed)
             || self.full.byte_len() != snapshot.full_len || self.base != snapshot.base
             || self.text != snapshot.text
             || fonts_key(self.markdown.as_ref()) != snapshot.font_key
@@ -241,7 +246,7 @@ mod tests {
         let styles = StyleSet::new(16.0);
         let mut baseline = doc(&original);
         shape(&mut baseline, 600.0, &styles);
-        for case in 0..7 {
+        for case in [0, 2, 3, 4, 5, 6] {
             let mut snapshot = baseline.trial_snapshot(&styles).unwrap();
             let changed = if case == 0 { original.replace("обычный", "другой ") } else { original.clone() };
             let mut fresh = doc(&changed);
@@ -262,6 +267,27 @@ mod tests {
             let count = fresh.try_restore_trial(width, current_styles, compose, None);
             assert_eq!(count, 0, "invalidated case {case}");
         }
+    }
+
+    #[test]
+    fn width_mismatch_rebreaks_all_cached_plain_line_geometry() {
+        let text = "Много Unicode слов для переноса 😺 и ещё немного текста.\n".repeat(75);
+        let styles = StyleSet::new(16.0);
+        let mut before = doc(&text);
+        shape(&mut before, 600.0, &styles);
+        let snap = before.trial_snapshot(&styles).expect("some ordinary paragraphs shaped");
+        let mut reused = doc(&text);
+        reused.trial_offer(snap);
+        assert!(reused.try_restore_trial(Some(361.0), &styles, None, None) > 0);
+        shape(&mut reused, 361.0, &styles);
+
+        let mut fresh = doc(&text);
+        shape(&mut fresh, 361.0, &styles);
+        assert!((reused.height() - fresh.height()).abs() < 0.001);
+        for i in 0..fresh.lines.count() {
+            assert!((reused.heights.get(i) - fresh.heights.get(i)).abs() < 0.001, "line {i} keeps stale wrapping");
+        }
+        assert!(reused.laid.get(0).is_some());
     }
 
     #[test]
