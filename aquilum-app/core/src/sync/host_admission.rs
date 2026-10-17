@@ -192,12 +192,11 @@ impl<'a> RegisteredReadAdmission<'a> {
         custody_scope: &Path,
     ) -> Result<super::filegate_lock_custody::CustodyObservation, VaultPortError> {
         self.check_root()?;
-        let registered_roots = self.core.ui_state.workspace_roots()
-            .map_err(|_| VaultPortError::PermissionDenied)?;
         super::filegate_lock_custody::inspect_external_scope(
             &self.root_path,
             (self.initial.0, self.initial.1),
-            &registered_roots,
+            || self.core.ui_state.workspace_roots()
+                .map_err(|_| VaultPortError::PermissionDenied),
             custody_scope,
             || self.check_root(),
         )
@@ -1083,7 +1082,13 @@ mod tests {
             fs::set_permissions(&anchor, fs::Permissions::from_mode(0o700)).unwrap();
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         }
-        anchor
+        // macOS /var may itself be a symlink to /private/var.
+        // On Windows keep the ordinary absolute name so icacls can inspect
+        // the fixture without depending on its support for verbatim paths.
+        #[cfg(unix)]
+        { fs::canonicalize(anchor).unwrap() }
+        #[cfg(windows)]
+        { anchor }
     }
 
     #[test]
@@ -1157,6 +1162,87 @@ mod tests {
         assert!(admission.inspect_external_filegate_lock(&scoped).is_err());
         fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         assert!(admission.inspect_external_filegate_lock(&scoped).is_ok());
+    }
+
+
+    #[cfg(unix)]
+    #[test]
+    fn host_admission_external_scope_refuses_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+        let (temp, core, root) = fixture();
+        let scoped = scoped_anchor_fixture(&temp, &root);
+        let base = fs::canonicalize(temp.path()).unwrap();
+        let alias = base.join("redirect-parent");
+        symlink(scoped.parent().unwrap(), &alias).unwrap();
+        let path = alias.join(scoped.file_name().unwrap());
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&path).is_err());
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_ok());
+    }
+
+    #[test]
+    fn host_admission_external_scope_refuses_newly_registered_overlap_during_lock() {
+        use std::cell::Cell;
+        let (temp, _core, root) = fixture();
+        let scoped = scoped_anchor_fixture(&temp, &root);
+        let id = super::super::filegate_lock_probe::PinnedProbeRoot::open(&root)
+            .unwrap().identity();
+        let calls = Cell::new(0usize);
+        // A second registered workspace begins overlapping AFTER the first
+        // registry snapshot. The inspector must query registration AGAIN
+        // while holding the OS lock, not reuse the original list.
+        let outcome = super::super::filegate_lock_custody::inspect_external_scope(
+            &root,
+            id,
+            || {
+                let current = calls.get();
+                calls.set(current + 1);
+                let mut roots = vec![root.clone()];
+                if current > 0 { roots.push(scoped.clone()); }
+                Ok(roots)
+            },
+            &scoped,
+            || Ok(()),
+        );
+        assert!(outcome.is_err());
+        assert!(calls.get() >= 2, "must re-read the registry while locked");
+        assert_eq!(
+            fs::read(scoped.join(super::super::filegate_lock_probe::LOCK_NAME)).unwrap(),
+            b"forensic scope bytes"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn host_admission_external_scope_windows_refuses_everyone_write_ace() {
+        use std::process::Command;
+        let (temp, core, root) = fixture();
+        let scoped = scoped_anchor_fixture(&temp, &root);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_ok());
+
+        // All changes affect only a disposable test fixture. A deliberately
+        // granted WORLD write ACE must invalidate the external custody scope.
+        let command = Command::new("icacls")
+            .arg(&scoped).arg("/grant").arg("*S-1-1-0:(F)")
+            .output().unwrap();
+        assert!(command.status.success(), "icacls: {}", String::from_utf8_lossy(&command.stderr));
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_err());
+
+        // Even with a safe parent, a broad ACL on the lock LEAF must refuse.
+        let clean = scoped_anchor_fixture(&temp, &root);
+        let file = clean.join(super::super::filegate_lock_probe::LOCK_NAME);
+        // Undo the test-only scope ACE before checking the leaf independently.
+        let reset = Command::new("icacls")
+            .arg(&scoped).arg("/remove:g").arg("*S-1-1-0")
+            .output().unwrap();
+        assert!(reset.status.success());
+        assert!(admission.inspect_external_filegate_lock(&clean).is_ok());
+        let granted = Command::new("icacls")
+            .arg(&file).arg("/grant").arg("*S-1-1-0:(F)")
+            .output().unwrap();
+        assert!(granted.status.success());
+        assert!(admission.inspect_external_filegate_lock(&clean).is_err());
     }
 
     #[test]
