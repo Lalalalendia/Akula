@@ -9,16 +9,72 @@ use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
 
+// Test-only instrumentation. The production UI path and API stay unchanged.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct TabSwitchStages {
+    pub leave: std::time::Duration,
+    pub file_read: std::time::Duration,
+    pub page_build: std::time::Duration,
+    pub tree: std::time::Duration,
+    pub tab: std::time::Duration,
+    pub version: std::time::Duration,
+    pub strip: std::time::Duration,
+    pub panel: std::time::Duration,
+}
+
+#[cfg(test)]
+thread_local! {
+    static LAST_TAB_SWITCH: std::cell::Cell<TabSwitchStages> =
+        std::cell::Cell::new(TabSwitchStages::default());
+}
+
+#[cfg(test)]
+pub(crate) fn take_tab_switch_stages() -> TabSwitchStages {
+    LAST_TAB_SWITCH.with(|slot| slot.replace(TabSwitchStages::default()))
+}
+
+#[cfg(test)]
+fn record_stage(update: impl FnOnce(&mut TabSwitchStages)) {
+    LAST_TAB_SWITCH.with(|slot| {
+        let mut current = slot.get();
+        update(&mut current);
+        slot.set(current);
+    });
+}
+
 impl App {
     pub(in crate::app) fn show_active(&mut self, root: &mut RenderRoot) {
+        #[cfg(test)]
+        LAST_TAB_SWITCH.with(|slot| slot.set(TabSwitchStages::default()));
         if let Some((layer, _)) = self.suggest_layer.take() {
             root.remove_layer(layer);
         }
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         self.show_tab(root);
+        #[cfg(test)]
+        record_stage(|s| s.tab = started.elapsed());
+
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         self.version_view = None;
         self.show_version(root);
+        #[cfg(test)]
+        record_stage(|s| s.version = started.elapsed());
+
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         self.refresh_tabs(root);
+        #[cfg(test)]
+        record_stage(|s| s.strip = started.elapsed());
+
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         self.request_panel(root);
+        #[cfg(test)]
+        record_stage(|s| s.panel = started.elapsed());
+
         self.workspace.core.active_note.set(self.note.as_ref().map(|n| n.path.clone()));
     }
 
@@ -44,9 +100,18 @@ impl App {
             self.show_page(root, 0);
             return;
         }
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         self.leave_note();
+        #[cfg(test)]
+        record_stage(|s| s.leave = started.elapsed());
+
         let read = aq_trace::zone("открытие: чтение файла");
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         let opened = Note::open(path.clone());
+        #[cfg(test)]
+        record_stage(|s| s.file_read = started.elapsed());
         drop(read);
         match opened {
             Ok((note, text)) => {
@@ -55,8 +120,12 @@ impl App {
                 self.text = text;
                 self.note = Some(note);
                 let _zone = aq_trace::zone("открытие: страница заметки");
+                #[cfg(test)]
+                let started = std::time::Instant::now();
                 self.render_note(root);
                 self.reveal_pending(root);
+                #[cfg(test)]
+                record_stage(|s| s.page_build = started.elapsed());
             }
             Err(error) => {
                 let err_str = format!("{error}");
@@ -66,8 +135,12 @@ impl App {
             }
         }
         self.hold = Some(std::time::Instant::now() + super::super::HOLD);
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         self.tree.set_active(root, Some(path));
         self.show_page(root, 0);
+        #[cfg(test)]
+        record_stage(|s| s.tree = started.elapsed());
     }
 
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
