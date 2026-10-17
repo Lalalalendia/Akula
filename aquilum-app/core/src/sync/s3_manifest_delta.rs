@@ -432,7 +432,8 @@ mod tests {
     #[test]
     fn bootstrap_never_grants_file_write_authority() {
         let ns = ns();
-        let s = shard(RevisionId::new(), RevisionId::new(), 1);
+        let revision = RevisionId::new();
+        let s = shard(revision, revision, 1);
         let (_, bytes, head) = frame(&ns, 1, None, vec![s.clone()]);
         assert_eq!(
             check(&ns, &head, None, &[bytes]),
