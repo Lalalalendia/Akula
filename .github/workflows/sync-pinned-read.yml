@@ -71,6 +71,9 @@ jobs:
       - name: M1d recovery evidence and native-baseline interlock tests
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1d_ -- --nocapture
+      - name: M1d-b copy-out recovery and SQLite migration gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1db_ -- --nocapture
       - name: Durable local publication recovery and stage exclusion
         working-directory: aquilum-app
         run: |
