@@ -99,7 +99,7 @@ fn native_note_latency_matrix() {
         let mut h = Harness::new();
         let target = kib * 1024;
         let parley_mix = std::env::var("AQ_TEST_PARLEY_MIXED_FIXTURE").as_deref() == Ok("1");
-        let body = if parley_mix { parley_mix_bytes } else { fixture_bytes };
+        let body: fn(char, usize) -> String = if parley_mix { parley_mix_bytes } else { fixture_bytes };
         let first = h.write_note("latency-first.md", &body('A', target));
         let second = h.write_note("latency-second.md", &body('B', target));
 
