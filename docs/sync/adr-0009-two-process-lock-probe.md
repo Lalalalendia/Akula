@@ -10,7 +10,7 @@ PR #124 rejects cross-vault primary moves; #137 exposes persistent source/destin
 
 - Under `#[cfg(test)]` only, `core/src/files/gate/interprocess_probe.rs` creates two disposable `tempfile` vault roots, canonically orders the two paths and calls `std::fs::File::try_lock()` on a persistent empty file per root.
 - An actual child OS process (the compiled Rust unit-test executable) attempts to acquire the same pair in reverse order. A live parent's lock must deny access, and after release the same child probe can acquire both.
-- A collision on the second root must release the already acquired first-root lock. This is a test of partial rollback of lock handles, NOT rollback of data.
+- A collision on the second root must release the already acquired first-root lock **while the declining child process is still alive**. The parent successfully locks that first root before killing the child, so normal process-exit cleanup cannot cause a false positive. This proves release of partial lock handles, NOT rollback of data.
 - A child process holding both handles is killed by the parent. Both handles must become available to the parent afterward without removing the lock files. Lock release after process death does not confirm an interrupted operation was committed.
 - A pair where both names resolve to the same root is rejected. This does not establish trusted root identity against hostile filesystem aliases.
 - A dedicated `oslock_` step is required in the existing Linux/macOS/Windows pinned-read matrix. No new workflow, dependency or production feature flag is introduced.
