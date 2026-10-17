@@ -53,6 +53,52 @@ fn max_pixel_channel_delta(a: &[u32], b: &[u32]) -> u8 {
         .unwrap_or(0)
 }
 
+// Only on a *real* strict parity failure: report the first bad pixels and
+// optionally retain both PNGs for investigation. No changed test tolerance.
+fn diagnose_channel_mismatch(
+    case: &str,
+    workload: &str,
+    step: u32,
+    width: u16,
+    partial: &Renderer,
+    full: &Renderer,
+) {
+    let (mut count, mut worst) = (0usize, 0u8);
+    let mut examples = Vec::new();
+    let (mut x0, mut y0, mut x1, mut y1) =
+        (usize::MAX, usize::MAX, 0usize, 0usize);
+    for (pixel, (&a, &b)) in partial.frame_pixels().iter().zip(full.frame_pixels()).enumerate() {
+        let peak = [0, 8, 16, 24].into_iter().map(|shift| {
+            ((a >> shift) as u8).abs_diff((b >> shift) as u8)
+        }).max().unwrap_or(0);
+        if peak <= 1 { continue; }
+        count += 1;
+        worst = worst.max(peak);
+        let (x, y) = (pixel % usize::from(width), pixel / usize::from(width));
+        x0 = x0.min(x);
+        y0 = y0.min(y);
+        x1 = x1.max(x);
+        y1 = y1.max(y);
+        if examples.len() < 16 {
+            examples.push(format!("({x},{y}):{a:08x}/{b:08x} peak={peak}"));
+        }
+    }
+    eprintln!(
+        "VELLO_GUARD_PARITY_FAILURE case={case} workload={workload} step={step} \
+         mismatched_gt1={count} max_channel={worst} bbox={x0},{y0},{x1},{y1} \
+         moved={:?} rastered={:?} examples={examples:?}",
+        partial.moved, partial.rastered,
+    );
+    if let Some(output) = std::env::var_os("AQ_CROSSOVER_OUT") {
+        let root = std::path::PathBuf::from(output);
+        std::fs::create_dir_all(&root).expect("create parity artifact directory");
+        std::fs::write(root.join(format!("{case}-{workload}-step{step}-partial.png")), partial.png())
+            .expect("write partial parity image");
+        std::fs::write(root.join(format!("{case}-{workload}-step{step}-full.png")), full.png())
+            .expect("write full parity image");
+    }
+}
+
 fn median_and_p95(samples: &[WorkerSample], select: impl Fn(&WorkerSample) -> f64) -> [f64; 2] {
     let values: Vec<f64> = samples.iter().map(select).collect();
     percentiles(&values, [0.50, 0.95])
@@ -156,6 +202,9 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
         if matches!(step, 0 | 10 | 20 | 31) {
             let full = render_full(&layers, w, hh, scale);
             let peak = max_pixel_channel_delta(renderers[0].frame_pixels(), full.frame_pixels());
+            if peak > 1 {
+                diagnose_channel_mismatch(case, workload, step, w, &renderers[0], &full);
+            }
             assert!(
                 peak <= 1,
                 "{case}/{workload}: partial/full channel difference {peak}/255 on frame {step}",
@@ -189,12 +238,19 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
 #[ignore = "opt-in 0/2/4-worker release-mode crossover; production policy unchanged"]
 fn benchmark_vello_worker_crossover() {
     let workload = std::env::var("AQ_CROSSOVER_WORKLOAD").unwrap_or_else(|_| "normal".into());
+    let only = std::env::var("AQ_CROSSOVER_ONLY_CASE").ok();
+    let mut executed = 0usize;
     for (case, width, height, scale, cover) in [
         ("text_1x", 1000, 600, 1.0, false),
         ("text_175", 1750, 1051, 1.75, false),
         ("cover_1x", 1000, 600, 1.0, true),
         ("cover_175", 1750, 1051, 1.75, true),
     ] {
+        if let Some(ref selected) = only {
+            if selected != case { continue; }
+        }
+        executed += 1;
         run_worker_case(case, width, height, scale, cover, &workload);
     }
+    assert!(executed != 0, "AQ_CROSSOVER_ONLY_CASE selected no known scene: {only:?}");
 }
