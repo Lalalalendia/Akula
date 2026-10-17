@@ -90,3 +90,19 @@ pub fn name_version(
     }
     named
 }
+
+/// Create a workspace folder under the same managed File Gate guard as note
+/// creation. Do not add parent directories or overwrite an existing path.
+/// This serializes ordinary Akula folder creation; it is not a sync-write API.
+pub fn create_folder(core: &Core, path: &Path) -> Result<(), FileCommandError> {
+    use std::io::ErrorKind;
+    let _guard = core.file_mutation_guard()?;
+    match std::fs::create_dir(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::AlreadyExists =>
+            Err(FileCommandError::AlreadyExists {
+                path: path.to_string_lossy().into_owned(),
+            }),
+        Err(error) => Err(error.into()),
+    }
+}
