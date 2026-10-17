@@ -136,6 +136,46 @@ screen, operator-guided response to corrupt inventory, trusted
 interprocess admission, and OS-handle-relative mutation remain P0.
 **Local sync write/delete authority is still disabled.**
 
+## Cross-vault fail-closed admission before primary rename (04g-3b-7b-0)
+
+PR #121 writes a **source-workspace** intent before moving version files. A
+Core that has registered **only the destination workspace** cannot see that
+source intent after a process restart. Simply writing two independently
+created markers is not an atomic transaction: an interruption between their
+creation can leave only one visible.
+
+Until a bilateral admission mechanism can prove that **both participating
+workspaces** have safely recorded the operation **before** the primary note
+moves, File Gate now refuses to rename or move a managed path across
+registered workspace boundaries. This includes folder moves and moves between
+a registered workspace and an unregistered destination. The refusal occurs
+**before** filesystem mutation, link rewrites, history calls and
+`NotesRelocated` events, under the ordinary in-process File Gate.
+It deliberately does not acquire `PROCESS_HISTORY_FILES` inside File Gate.
+
+The admission uses both lexical and canonically resolved paths to identify
+the selected registered vault. Ambiguous nested registrations or alias
+disagreements fail closed. A rename that stays inside one unambiguous vault
+continues to work as before. Paths wholly outside registered roots remain
+subject to the existing ordinary File Gate policy, not an inferred sync
+write permission.
+
+Direct `HistoryService::try_moved` calls also refuse cross-vault history
+relocation before generating a source-only intent. They cannot silently
+convert this into an apparently durable cross-vault history transfer.
+
+**Intentional temporary limitation:** moving a document or folder to another
+vault is unavailable even if that item currently has no version history.
+This is a product restriction, not an acceptable permanent replacement for
+cross-vault moves. The next milestone must establish a bilateral,
+crash-recoverable admission phase **before primary mutation**, with two-Core
+source-only/destination-only tests and deterministic process termination
+between each state transition. An explicit human repair path for any
+unfinished transfer is also required.
+
+This change **does not** provide an OS-level interprocess lock, protected
+open directory descriptors, power-loss proof, or authority for sync writes.
+
 ## Tests and limits
 
 - A real FS two-service regression holds the global history mutex while the second service attempts to persist a new history snapshot. Bytes remain untouched until release.

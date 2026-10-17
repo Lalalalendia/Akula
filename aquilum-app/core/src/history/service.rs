@@ -5,7 +5,7 @@ use crate::files::document::read_text;
 use crate::files::error::FileCommandError;
 use crate::files::relocate::{move_folder, remove_empty_ancestors, Placement};
 use crate::files::trash::trash_path;
-use crate::search::paths::{identity, strip_root};
+use crate::search::paths::{identity, same_path, strip_root};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
@@ -527,6 +527,24 @@ impl HistoryService {
             return Ok(());
         };
         state.assert_retry_pair(&source.key, &target.key, action)?;
+        if !same_path(&source.vault, &target.vault) {
+            // The legacy source-only journal cannot protect a second Core
+            // that has registered only the destination workspace.
+            // Normal File Gate preflight rejects this BEFORE the primary
+            // note move; refuse any direct call here without relocating
+            // history or claiming a successful transfer.
+            state.quarantine(
+                &source.key,
+                &target.key,
+                &[source.vault.as_path(), target.vault.as_path()],
+                "cross-vault history transfer requires bilateral admission",
+            );
+            return Err(HistoryMoveFailure::new(
+                action,
+                "cross-vault history transfer refused: source-only recovery is unsafe",
+                false,
+            ));
+        }
         if !allowed_history_directory(&source.vault, &source.dir)
             || !allowed_history_directory(&target.vault, &target.dir)
         {
@@ -1233,6 +1251,33 @@ mod tests {
             texts(&fixture.history_of("Агент.md")),
             [("от агента".to_owned(), Source::Agent), ("от агента и снова".to_owned(), Source::Agent)]
         );
+    }
+
+    #[test]
+    fn history_cross_vault_service_direct_call_cannot_write_source_only_intent() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let source = fixture.vault.join("Direct.md");
+        fixture.save(&history, &source, "keep this version", Source::Agent);
+        let target_vault = fixture._directory.path().join("second-vault");
+        fs::create_dir_all(&target_vault).unwrap();
+        let target_vault = fs::canonicalize(target_vault).unwrap();
+        let target = target_vault.join("Direct.md");
+        let before = fixture.history_of("Direct.md");
+        assert_eq!(versions(&before).len(), 1);
+
+        let err = history.try_moved(
+            &|| vec![fixture.vault.clone(), target_vault.clone()],
+            &source,
+            &target,
+        ).unwrap_err();
+        assert_eq!(err.action, "move history");
+        assert!(!err.may_have_partial_files);
+        assert!(source.exists(), "the primary note was not touched");
+        assert_eq!(versions(&before).len(), 1);
+        assert!(!history_dir(&target_vault, Path::new("Direct.md")).exists());
+        assert!(!crate::history::recovery::marker_path(&fixture.vault).exists());
+        assert!(!crate::history::recovery::marker_path(&target_vault).exists());
     }
 
     #[test]

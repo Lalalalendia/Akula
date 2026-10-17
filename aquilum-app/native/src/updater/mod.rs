@@ -34,7 +34,9 @@ pub struct Updater {
 }
 
 pub fn available() -> bool {
-    cfg!(feature = "installed") && apply::supported()
+    // Akula has no dedicated signed release channel yet. Installed builds must
+    // never offer an upstream Aquilum package as an Akula update.
+    cfg!(feature = "installed") && apply::supported() && release::channel_ready()
 }
 
 impl Updater {

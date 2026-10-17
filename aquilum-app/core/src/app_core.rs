@@ -144,6 +144,45 @@ impl Core {
         })
     }
 
+    /// Mutating File Gate entrypoints must refuse a pending or invalid history
+    /// transfer BEFORE changing the primary bytes. This deliberately checks
+    /// every registered workspace, mirroring HistoryService's conservative
+    /// process-wide recovery hold. The read-only File Gate admission path still
+    /// uses file_mutation_guard() so forensic inspection remains possible.
+    ///
+    /// This is a pathname/SQLite HOLD check under an in-process mutex, NOT
+    /// an OS interprocess lock or permission for a sync overwrite/delete.
+    pub(crate) fn file_mutation_guard_for_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+        let guard = self.file_mutation_guard()?;
+        let roots = self.ui_state.workspace_roots().map_err(|error| FileCommandError::Task {
+            message: format!(
+                "Cannot read registered workspaces before File Gate mutation: {error:?}"
+            ),
+        })?;
+        for root in roots {
+            match crate::history::pending_history_relocation(&root) {
+                Ok(false) => {}
+                Ok(true) => {
+                    return Err(FileCommandError::Task {
+                        message: format!(
+                            "File Gate mutation refused: unfinished history transfer HOLD in {}",
+                            root.display()
+                        ),
+                    });
+                }
+                Err(error) => {
+                    return Err(FileCommandError::Task {
+                        message: format!(
+                            "File Gate mutation refused: unreadable or invalid history recovery state in {}: {error}",
+                            root.display()
+                        ),
+                    });
+                }
+            }
+        }
+        Ok(guard)
+    }
+
     /// MCP permanent trash purge must not race an ordinary File Gate restore
     /// or protected-original capture. This locks only the filesystem purge;
     /// no history/editor callbacks are made while the mutex is held.
@@ -151,7 +190,7 @@ impl Core {
     /// The purge can delay other in-process writes for large trash folders.
     /// It is not a cross-process lock or a trusted sync-delete executor.
     pub fn empty_trash_guarded(&self, workspace: &Path) -> Result<u64, FileCommandError> {
-        let _guard = self.file_mutation_guard()?;
+        let _guard = self.file_mutation_guard_for_write()?;
         crate::files::trash::empty_trash_impl(workspace)
     }
 

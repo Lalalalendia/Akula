@@ -9,7 +9,9 @@ on:
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/local_create.rs"
       - "aquilum-app/core/src/sync/local_recovery.rs"
+      - "aquilum-app/core/src/sync/recovery_dashboard.rs"
       - "aquilum-app/core/src/sync/recovery_review.rs"
+      - "aquilum-app/core/src/sync/sealed_archive.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
       - "aquilum-app/core/src/sync/journal.rs"
       - "aquilum-app/core/src/sync/core_scan.rs"
@@ -30,6 +32,8 @@ on:
       - "aquilum-app/native/src/app/settings/mod.rs"
       - "aquilum-app/native/src/app/templates/starters.rs"
       - "aquilum-app/core/src/files/gate/tests.rs"
+      - "aquilum-app/core/src/files/gate/interprocess_probe.rs"
+      - "aquilum-app/core/src/sync/filegate_lock_probe.rs"
       - "aquilum-app/core/src/documents/hub.rs"
       - "aquilum-app/core/src/documents/hub_tests.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
@@ -78,6 +82,15 @@ jobs:
       - name: M1d-c operator review and retention safety gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1dc_ -- --nocapture
+      - name: M1d-d read-only recovery status and non-mutating SQLite gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1dd_ -- --nocapture
+      - name: M1d-e explicit native review and no-mutation gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1de_ -- --nocapture
+      - name: M1d-f1 sealed archive AEAD integrity and no-plaintext gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1df1_ -- --nocapture
       - name: Durable local publication recovery and stage exclusion
         working-directory: aquilum-app
         run: |
@@ -97,6 +110,9 @@ jobs:
       - name: Core File Gate mutation interlock
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine core_file_gate_serializes -- --nocapture
+      - name: OS two-process File Gate advisory lock probe (test-only)
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine oslock_ -- --nocapture
       - name: Trash symlink and NTFS junction fail-closed checks
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine unsafe_trash_root -- --nocapture
@@ -119,3 +135,6 @@ jobs:
           cargo test --locked -p aquilum-core --features sync-engine history::recovery::tests:: -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine history_recovery_ -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine history_corrupt_recovery_marker -- --nocapture
+      - name: Cross-vault primary move admission and source-only journal denial
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine history_cross_vault_ -- --nocapture

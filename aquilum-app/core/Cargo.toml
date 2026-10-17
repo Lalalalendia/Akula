@@ -11,12 +11,17 @@ workspace = ".."
 default = []
 # Only protocol contracts compile in PR 00; no runtime/network/UI is started.
 sync-engine = []
+# Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
+sync-s3 = ["sync-engine", "dep:aws-config", "dep:aws-sdk-s3", "dep:tokio", "dep:url"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"
 blake3 = "1.8.5"
+# M1d-f1: inert OS-key-provided AEAD archive envelope; no SQLite activation.
+ring = "0.17.14"
+zeroize = "1.9.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 uuid = { version = "1.23.5", features = ["v4", "serde"] }
 tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "lz4-compression", "stemmer"] }
@@ -29,6 +34,12 @@ ureq = "2.12"
 httparse = "1"
 yrs = "0.28"
 memchr = "2"
+
+# Official AWS Rust SDK used only for opt-in S3 provider capability tests.
+aws-config = { version = "1.12.0", optional = true }
+aws-sdk-s3 = { version = "1.152.0", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+url = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

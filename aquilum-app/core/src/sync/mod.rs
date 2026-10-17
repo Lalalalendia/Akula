@@ -5,11 +5,13 @@
 
 mod core_scan;
 mod dag;
+mod delta;
 mod download;
 mod dag_store;
 pub mod fake;
 mod fake_vault;
 mod host_admission;
+pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::PinnedFileIdentity;
 #[cfg(test)]
@@ -19,6 +21,9 @@ mod journal;
 mod local_create;
 mod local_recovery;
 mod recovery_review;
+/// Crypto envelope contract only: no production key custody or archive writer yet.
+pub mod sealed_archive;
+mod recovery_dashboard;
 mod planner;
 mod protection_store;
 mod path;
@@ -28,12 +33,25 @@ mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
+mod s3_manifest;
+mod s3_manifest_delta;
+#[cfg(feature = "sync-s3")]
+mod s3_head_probe;
+#[cfg(feature = "sync-s3")]
+mod s3_transport;
 mod upload;
 mod vault;
 
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
+pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
+pub use recovery_dashboard::{
+    native_recovery_overview, native_recovery_case_preview, native_record_recovery_decision,
+    NativeRecoveryOverview, NativeRecoveryExample, NativeRecoveryCasePreview,
+    NativeRecoveryDecision, NativeRecoveryReviewError, NativeRecoveryReviewReceipt,
+    RECOVERY_JOURNAL_FILENAME,
+};
 pub use download::{stage_remote_download, StageDownloadError, StagedDownload};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
 pub use journal::{
@@ -56,6 +74,32 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+pub use s3_manifest_delta::{
+    inspect_s3_manifest_delta, S3ManifestDeltaBase, S3ManifestDeltaError,
+    S3ManifestDeltaLimits, S3ManifestDeltaOutcome, S3ManifestShardDelta,
+    S3ManifestSnapshotReason,
+};
+pub use s3_manifest::{
+    S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
+    S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
+    MAX_SHARD_ENTRIES, MAX_SHARDS,
+};
+#[cfg(feature = "sync-s3")]
+pub use s3_head_probe::{
+    observe_s3_current_head, read_s3_digest_matched_manifest, S3DigestMatchedManifest,
+    S3HeadReadError, S3ObservedHead,
+};
+#[cfg(feature = "sync-s3")]
+pub use s3_transport::{
+    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
+    S3ObservedObject, S3PutCondition, S3TransportError,
+    S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
+    S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
+    S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
+    S3PinnedRevisionPage, S3PinnedRevisionSnapshot,
+    S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
+};
+
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,

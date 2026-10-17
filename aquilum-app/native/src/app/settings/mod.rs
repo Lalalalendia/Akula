@@ -15,6 +15,7 @@ mod action;
 mod apply;
 mod bindings;
 mod refresh;
+mod recovery;
 
 use crate::system;
 use crate::ui::menu::Menu;
@@ -45,7 +46,7 @@ impl App {
         self.show_settings(root, section);
     }
 
-    fn settings_context(&self, copied: Option<usize>, trash_page: usize) -> Context {
+    fn settings_context(&self, section: Section, copied: Option<usize>, trash_page: usize) -> Context {
         let workspace = self.tree.root().map(Path::to_path_buf);
         let home_page = workspace
             .as_ref()
@@ -55,8 +56,22 @@ impl App {
                 known.into_iter().find(|w| w.path == path).map(|w| w.home_page)
             })
             .unwrap_or_default();
+        // SQLite is opened only for this page, and strictly read-only.
+        // Missing/unsupported journals are NOT described as "synchronized".
+        let sync_recovery = if section == Section::Sync {
+            workspace.as_deref().map(|vault| {
+                aquilum_core::sync::native_recovery_overview(
+                    &self.workspace.core, &self.workspace.data_dir, vault,
+                )
+            })
+        } else {
+            None
+        };
         Context {
             workspace,
+            sync_recovery,
+            sync_selected: None,
+            sync_notice: None,
             scale: self.interface.scale(),
             home_page,
             mcp: Some(self.workspace.core.mcp.status()),
@@ -69,7 +84,7 @@ impl App {
 
     fn show_settings(&mut self, root: &mut RenderRoot, section: Section) {
         let config = self.workspace.core.settings.get_config();
-        let ctx = self.settings_context(None, 0);
+        let ctx = self.settings_context(section, None, 0);
         let (layer, dialog) = settings::dialog(&config, &ctx, section);
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));

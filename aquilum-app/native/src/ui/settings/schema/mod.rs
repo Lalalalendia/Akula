@@ -14,6 +14,7 @@ mod mcp;
 mod section;
 mod support;
 mod system;
+mod sync;
 #[cfg(test)]
 mod tests;
 mod trash;
@@ -30,6 +31,7 @@ use data::*;
 use mcp::*;
 use support::*;
 use system::*;
+use sync::*;
 use trash::*;
 
 pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block> {
@@ -40,6 +42,7 @@ pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block>
         Section::Data => [templates(config, ctx), files(config)].into_iter().flatten().collect(),
         Section::Analysis => analysis(config),
         Section::Mcp => mcp(config, ctx),
+        Section::Sync => sync_recovery(ctx),
         Section::History => history(config),
         Section::Trash => trash(config, ctx),
         Section::System => system(config, ctx),
