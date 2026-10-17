@@ -635,6 +635,61 @@ mod tests {
         assert!(snapshot.page(None, 100).unwrap().revisions.len() == 100);
     }
 
+    /// Real immutable branch with independent blob + revision object. The
+    /// losing client's bytes must remain retrievable after CAS rejection.
+    async fn upload_sibling(
+        client: &AwsS3ProbeClient,
+        ns: &S3Keyspace,
+        base: &RevisionRecord,
+        content: &[u8],
+    ) -> (RevisionRecord, S3RevisionRefV1) {
+        let hash = blake3::hash(content).to_hex().to_string();
+        client.put_conditionally(
+            &ns.immutable_blob_key(&hash).unwrap(),
+            content,
+            S3PutCondition::IfAbsent,
+        ).await.unwrap();
+        let new_revision = RevisionRecord {
+            id: RevisionId::new(),
+            document_id: base.document_id,
+            parents: vec![base.id],
+            operation: RevisionOperation::Content {
+                path: SyncRelativePath::parse("Notes/hello.md").unwrap(),
+                blob_hash: hash,
+            },
+        };
+        let json = serde_json::to_vec(&new_revision).unwrap();
+        client.put_conditionally(
+            &ns.immutable_revision_key(new_revision.id),
+            &json,
+            S3PutCondition::IfAbsent,
+        ).await.unwrap();
+        let reference = S3RevisionRefV1 {
+            revision_id: new_revision.id,
+            document_id: base.document_id,
+            revision_blake3: blake3::hash(&json).to_hex().to_string(),
+            blob_bytes: Some(content.len() as u64),
+        };
+        (new_revision, reference)
+    }
+
+    /// Rebuild a sorted, content-addressed immutable index preserving each
+    /// member's exact hash, never a client-side inferred mtime snapshot.
+    async fn publish_revision_shard(
+        client: &AwsS3ProbeClient,
+        ns: &S3Keyspace,
+        mut references: Vec<S3RevisionRefV1>,
+    ) -> crate::sync::S3ManifestShardRefV1 {
+        references.sort_by_key(|record| record.revision_id);
+        let shard = S3ManifestShardV1::new(
+            ns, OperationId::new(), references,
+        ).unwrap();
+        client.store_manifest_object(
+            shard.shard_id, &shard.encode(ns).unwrap(),
+        ).await.unwrap();
+        shard.reference(ns).unwrap()
+    }
+
     /// Disposable localhost MinIO only. Conflicting clients retain immutable
     /// manifest branches and neither can overwrite the winner's CAS.
     #[tokio::test]
@@ -713,11 +768,25 @@ mod tests {
         assert_eq!(first.read_verified_head().await.unwrap().unwrap().pointer, ptr);
         assert_eq!(j1.phase(dangerous.manifest_id).unwrap(), None);
 
-        // Two independent clients start at same generation/validator.
+        // Two independent clients modify the SAME document while offline.
+        // They each keep the base revision and upload a different immutable
+        // sibling, with different BLAKE3 blobs and independent revision IDs.
+        let (winner_revision, winner_ref) =
+            upload_sibling(&first, &ns, &record, b"alice edits while offline").await;
+        let (loser_revision, loser_ref) =
+            upload_sibling(&second, &ns, &record, b"bob edits while offline").await;
+        let base_ref = shard.revisions[0].clone();
+        let winner_shard = publish_revision_shard(
+            &first, &ns, vec![base_ref.clone(), winner_ref.clone()],
+        ).await;
+        let loser_shard = publish_revision_shard(
+            &second, &ns, vec![base_ref.clone(), loser_ref.clone()],
+        ).await;
+
         let id_winner = OperationId::new();
         let winner = S3ManifestV1::new(&ns, id_winner, 2,
             Some((root.manifest_id, root.digest(&ns).unwrap())),
-            vec![shard.reference(&ns).unwrap()]).unwrap();
+            vec![winner_shard]).unwrap();
         first.store_manifest_object(id_winner, &winner.encode(&ns).unwrap()).await.unwrap();
         let pw = S3HeadPointerV1::new(&ns, 2, id_winner,
             &winner.digest(&ns).unwrap(), Some(root.manifest_id)).unwrap();
@@ -725,7 +794,7 @@ mod tests {
         let id_loser = OperationId::new();
         let loser = S3ManifestV1::new(&ns, id_loser, 2,
             Some((root.manifest_id, root.digest(&ns).unwrap())),
-            vec![shard.reference(&ns).unwrap()]).unwrap();
+            vec![loser_shard]).unwrap();
         second.store_manifest_object(id_loser, &loser.encode(&ns).unwrap()).await.unwrap();
         let pl = S3HeadPointerV1::new(&ns, 2, id_loser,
             &loser.digest(&ns).unwrap(), Some(root.manifest_id)).unwrap();
@@ -740,6 +809,17 @@ mod tests {
         assert!(!second.is_snapshot_current(&pinned_generation_one).await.unwrap());
         assert_eq!(pinned_generation_one.page(None, 1).unwrap().revisions[0].revision_id, rid);
         assert!(second.read_verified_manifest(id_loser, &loser.digest(&ns).unwrap()).await.is_ok());
+        // A rejected CAS must not drop Bob's immutable revision or blob.
+        // Its root is not current, but it can be recovered/reconciled later.
+        let loser_blob = match &loser_revision.operation {
+            RevisionOperation::Content { blob_hash, .. } => ns.immutable_blob_key(blob_hash).unwrap(),
+            _ => unreachable!(),
+        };
+        assert_eq!(second.get_bounded(&loser_blob, 128).await.unwrap().bytes,
+            b"bob edits while offline");
+        assert_eq!(second.get_bounded(
+            &ns.immutable_revision_key(loser_revision.id), 4096,
+        ).await.unwrap().bytes, serde_json::to_vec(&loser_revision).unwrap());
         assert_eq!(j2.phase(id_loser).unwrap(), Some(S3HeadAttemptPhase::Prepared));
         // An uncertain retry of the losing operation cannot publish on top of
         // the winner: caller must explicitly reconcile its proposed branch.
@@ -749,9 +829,14 @@ mod tests {
         // Simulate lost HTTP acknowledgement after successful server PUT but
         // before journal mark_published; recovery must recognize exact root.
         let now = first.read_verified_head().await.unwrap().unwrap();
+        // Reconcile the failed CAS into a later generation. Both sibling
+        // revisions remain heads in the DAG; no silent last-writer-wins.
+        let merged_shard = publish_revision_shard(&first, &ns,
+            vec![base_ref, winner_ref, loser_ref],
+        ).await;
         let final_manifest = S3ManifestV1::new(&ns, OperationId::new(), 3,
             Some((id_winner, winner.digest(&ns).unwrap())),
-            vec![shard.reference(&ns).unwrap()]).unwrap();
+            vec![merged_shard]).unwrap();
         first.store_manifest_object(final_manifest.manifest_id,
             &final_manifest.encode(&ns).unwrap()).await.unwrap();
         let final_ptr = S3HeadPointerV1::new(&ns, 3, final_manifest.manifest_id,
@@ -772,5 +857,20 @@ mod tests {
         let observed = second.read_verified_head().await.unwrap().unwrap();
         assert_eq!(observed.pointer, final_ptr);
         assert_eq!(second.verify_manifest_ancestors(&observed, 100).await.unwrap(), 2);
+        let snapshot = second.pin_revision_snapshot().await.unwrap().unwrap();
+        assert_eq!(snapshot.len(), 3);
+        let revision_ids: BTreeSet<_> = snapshot.page(None, 50).unwrap()
+            .revisions.into_iter().map(|r| r.revision_id).collect();
+        assert_eq!(revision_ids, BTreeSet::from([
+            record.id, winner_revision.id, loser_revision.id,
+        ]));
+        let mut recovered_dag = RevisionDag::new();
+        for revision in [record, winner_revision.clone(), loser_revision.clone()] {
+            recovered_dag.ingest(revision).unwrap();
+        }
+        assert_eq!(recovered_dag.heads(winner_revision.document_id),
+            BTreeSet::from([winner_revision.id, loser_revision.id]));
+        assert_eq!(second.get_bounded(&loser_blob, 128).await.unwrap().bytes,
+            b"bob edits while offline");
     }
 }
