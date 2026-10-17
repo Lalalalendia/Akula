@@ -68,7 +68,7 @@ mod tests {
     fn cancelled_scan_produces_no_checkpoint_batches() {
         let (tx, rx) = channel();
         let cancelled = AtomicBool::new(true);
-        let text = crop::Rope::from("отменить\\n".repeat(100_000));
+        let text = crop::Rope::from("отменить\n".repeat(100_000));
         scan(text, 0, State::default(), tx, &cancelled);
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Disconnected)));
     }
@@ -77,7 +77,7 @@ mod tests {
     fn ordinary_scan_still_reports_checkpoints() {
         let (tx, rx) = channel();
         let cancelled = AtomicBool::new(false);
-        let text = crop::Rope::from("первый\\nвторой\\n");
+        let text = crop::Rope::from("первый\nвторой\n");
         scan(text, 0, State::default(), tx, &cancelled);
         let points: Vec<_> = rx.try_iter().flatten().collect();
         assert_eq!(points.first().map(|point| point.0), Some(0));
