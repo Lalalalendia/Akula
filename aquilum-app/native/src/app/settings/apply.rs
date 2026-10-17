@@ -141,9 +141,9 @@ impl App {
             if let Err(error) = gate::cleanup_retention(&core, &workspace, config.trash.retention_days) {
                 report!("корзина не очищена: {error:?}");
             }
-            aquilum_core::history::store::adopt_quantum_history(&workspace);
-            aquilum_core::history::store::adopt_quantum_history(&aquilum_core::files::trash::trash_path(&workspace));
-            aquilum_core::history::store::remove_expired(&workspace, config.history.retention_days);
+            if let Err(error) = core.history.maintain_retention(&workspace, config.history.retention_days) {
+                report!("обслуживание истории остановлено: {error}");
+            }
             if let Err(error) = core.ui_state.cleanup(config.trash.retention_days, crate::dates::now_ms()) {
                 report!("состояние документов не очищено: {error:?}");
             }
