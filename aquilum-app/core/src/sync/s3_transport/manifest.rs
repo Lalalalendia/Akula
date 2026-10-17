@@ -32,6 +32,8 @@ pub enum S3HeadError {
     RecoveryRequired,
     TooManyAncestors,
     InvalidCursor,
+    /// Preparing the in-memory revision snapshot would exceed its strict cap.
+    SnapshotBudgetExceeded,
 }
 
 impl From<S3ManifestError> for S3HeadError {
