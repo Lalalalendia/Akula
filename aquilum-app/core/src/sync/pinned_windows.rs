@@ -28,6 +28,7 @@ const FILE_CREATE: u32 = 2;
 const FILE_ADD_FILE_OR_WRITE_DATA: u32 = 0x0000_0002;
 const DELETE_ACCESS: u32 = 0x0001_0000;
 const STATUS_OBJECT_NAME_COLLISION: u32 = 0xc000_0035;
+const STATUS_OBJECT_NAME_NOT_FOUND: u32 = 0xc000_0034;
 const FILE_DIRECTORY_FILE: u32 = 0x0000_0001;
 const FILE_NON_DIRECTORY_FILE: u32 = 0x0000_0040;
 const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x0000_0020;
@@ -227,10 +228,31 @@ pub(super) fn create_stage_child(
         | FILE_READ_ATTRIBUTES | DELETE_ACCESS | SYNCHRONIZE, FILE_CREATE)
 }
 
+/// Inspection-only, relative to the pinned directory HANDLE. Only the
+/// native STATUS_OBJECT_NAME_NOT_FOUND status means absent; all other NT
+/// errors and reparse/special-object aliases fail closed.
+pub(super) fn open_optional_child(parent: &File, name: &str)
+    -> Result<Option<File>, VaultPortError>
+{
+    open_child_access_optional(
+        parent, name, true,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+    )
+}
+
 fn open_child_access(
     parent: &File, name: &str, leaf: bool, desired_access: u32,
     disposition: u32,
 ) -> Result<File, VaultPortError> {
+    open_child_access_optional(parent, name, leaf, desired_access, disposition)?
+        .ok_or(VaultPortError::FileChanged)
+}
+
+fn open_child_access_optional(
+    parent: &File, name: &str, leaf: bool, desired_access: u32,
+    disposition: u32,
+) -> Result<Option<File>, VaultPortError> {
     if name.is_empty() || name == "." || name == ".."
         || name.chars().any(|ch| matches!(ch, '/' | '\\' | ':' | '\0'))
     {
@@ -281,6 +303,9 @@ fn open_child_access(
         )
     };
     if status < 0 || raw.is_null() {
+        if status as u32 == STATUS_OBJECT_NAME_NOT_FOUND && disposition == FILE_OPEN {
+            return Ok(None);
+        }
         return if status as u32 == STATUS_OBJECT_NAME_COLLISION {
             Err(VaultPortError::DestinationExists)
         } else {
@@ -297,7 +322,7 @@ fn open_child_access(
     if leaf && !meta.is_file() || !leaf && !meta.is_dir() {
         return Err(VaultPortError::UnsafePath);
     }
-    Ok(file)
+    Ok(Some(file))
 }
 
 /// Rename the fully flushed opened stage HANDLE with an OS-atomic
