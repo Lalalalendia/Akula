@@ -8,14 +8,24 @@ use crate::frontmatter;
 use crate::ui::widgets::Slot;
 
 impl App {
-    pub(super) fn body_edited(&mut self, root: &mut RenderRoot, edits: &[crate::ui::editor::Edit]) {
+    pub(super) fn body_edited(&mut self, root: &mut RenderRoot, _edits: &[crate::ui::editor::Edit]) {
         let had = frontmatter::end_of(&self.text).is_some();
-        for edit in edits {
-            self.text.replace(self.hidden + edit.range.start..self.hidden + edit.range.end, &edit.insert);
-        }
+        // The widget already applied all edits (including multi-cursor changes).
+        // Cloning its persistent rope avoids replaying every edit on a second
+        // large rope and keeps the persisted text identical to the visible text.
+        self.adopt_body(root);
         self.queue_save();
         self.refresh_hero(root);
         self.metadata_changed(root, had);
+    }
+
+    fn adopt_body(&mut self, root: &RenderRoot) {
+        let Some(mut body) = self.note_ids.as_ref().and_then(|ids| ids.body.get(root)).map(|editor| editor.inner().rope()) else { return };
+        if self.hidden > 0 {
+            // Preserve hidden frontmatter, which is not part of the editor widget.
+            body.insert(0, self.text.byte_slice(..crate::rope::floor(&self.text, self.hidden)).to_string());
+        }
+        self.text = body;
     }
 
     pub(in crate::app) fn commit_text(&mut self, root: &mut RenderRoot, text: crop::Rope) {
