@@ -152,10 +152,11 @@ impl Document {
         if reused != 0 {
             #[cfg(test)]
             LAST_APPLIED.with(|v| v.set(v.get() + reused));
-            // Preserve the validated width so that first layout won't
-            // gratuitously rewrap layouts that already use that width.
-            self.width = width;
         }
+        // Do not bypass the usual first-layout width transition: it performs
+        // offscreen height re-estimation, scroll anchoring and composition.
+        // Rebreaking an already shaped line at the same width is cheap, and
+        // preserves the exact cold-page lifecycle.
         reused
     }
 }
