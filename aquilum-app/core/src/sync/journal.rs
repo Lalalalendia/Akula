@@ -9,11 +9,12 @@
 //! DocumentStore and from the immutable sync DAG blob cache.
 
 use super::{DocumentId, OperationId, RevisionId, SyncRelativePath, VaultId};
+use super::local_recovery::{self, ObservedLocalFile, ReadOnlyLocalPublicationEvidence};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,6 +135,18 @@ pub struct ConfirmedBaseline {
     pub operation_id: OperationId,
 }
 
+/// Immutable, diagnostic-only crash observation. Even matching expected
+/// BLAKE3 bytes + a remembered file ID are NOT evidence of a durable Windows
+/// rename, exclusive provenance or permission to mutate a vault.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LocalRecoveryEvidenceCase {
+    pub operation_id: OperationId,
+    pub vault_id: VaultId,
+    pub relative_path: SyncRelativePath,
+    pub expected_content_hash: String,
+    pub evidence: ReadOnlyLocalPublicationEvidence,
+}
+
 /// A durable, read-only inspection ticket for an attempted local publication.
 /// Never treat it as an authorization to retry, remove, quarantine physically,
 /// or confirm a remote baseline.
@@ -177,6 +190,13 @@ pub enum JournalError {
     InvalidTransition,
     ReadbackMismatch,
     CorruptedRecord,
+    /// An unconfirmed local download cannot be promoted into an authoritative
+    /// Applied/Verified/Committed baseline by the generic remote journal API.
+    /// A future native durability/provenance gate needs a separate receipt.
+    LocalDownloadNeedsNativeReceipt,
+    /// Read-only recovery evidence is intentionally write-once. Observing a
+    /// different OS file identity cannot replace a previous incident record.
+    RecoveryEvidenceAlreadyRecorded,
     /// The durable record already claims this operation or portable target.
     /// Never automatically replay an uncertain local publication.
     PublicationAttemptAlreadyRecorded,
@@ -249,7 +269,13 @@ impl SqliteSyncJournal {
                      intent_digest TEXT NOT NULL,
                      UNIQUE (vault_id, path_collision_key)
                  );
-                 PRAGMA user_version = 2;
+                 CREATE TABLE sync_local_recovery_evidence (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     evidence_json BLOB NOT NULL,
+                     evidence_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
                  COMMIT;",
             )?,
             1 => connection.execute_batch(
@@ -264,7 +290,24 @@ impl SqliteSyncJournal {
                      intent_digest TEXT NOT NULL,
                      UNIQUE (vault_id, path_collision_key)
                  );
-                 PRAGMA user_version = 2;
+                 CREATE TABLE sync_local_recovery_evidence (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     evidence_json BLOB NOT NULL,
+                     evidence_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
+                 COMMIT;",
+            )?,
+            2 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sync_local_recovery_evidence (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     evidence_json BLOB NOT NULL,
+                     evidence_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
                  COMMIT;",
             )?,
             SCHEMA_VERSION => {},
