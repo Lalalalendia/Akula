@@ -8,6 +8,7 @@ mod atlas;
 mod big;
 mod cost;
 mod frames;
+mod note_latency;
 #[cfg(feature = "memory-probe")]
 mod open_memory;
 mod sash;
