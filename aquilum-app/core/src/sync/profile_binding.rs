@@ -542,6 +542,49 @@ mod tests {
             &mut journal, &bindings, &profile, &namespace,
         ).is_err());
 
+        // A process may also die BEFORE the no-replace rename. Simulate a
+        // verified, preclaimed stage with no final name. It is an incident,
+        // not permission to replay or silently complete the publication.
+        let unfinished_document = DocumentId::new();
+        let unfinished_op = OperationId::new();
+        let unfinished_path = SyncRelativePath::parse("notes/unfinished.md").unwrap();
+        let unfinished_intent = OperationIntent {
+            operation_id: unfinished_op,
+            vault_id: namespace.vault_id(),
+            document_id: unfinished_document,
+            profile_id: "joined-cloud".into(),
+            revision_id: RevisionId::new(),
+            action: JournalAction::StageDownload,
+            path: unfinished_path.clone(),
+            remote_object_id: namespace.immutable_blob_key(&hash).unwrap(),
+            remote_guard: None,
+            expected_content_hash: hash.clone(),
+            expected_baseline: None,
+        };
+        journal.begin(unfinished_intent.clone()).unwrap();
+        journal.mark_staged(unfinished_op, bytes).unwrap();
+        journal.record_local_publication_attempt_once(&unfinished_intent).unwrap();
+        let stage_path = root.join("notes")
+            .join(format!(".akula-sync-stage-{unfinished_op}"));
+        fs::write(&stage_path, bytes).unwrap();
+        let staged_observation = admission.inspect_local_publication_for_registered_s3(
+            unfinished_op, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(staged_observation.assessment,
+            crate::sync::local_recovery::LocalRecoveryAssessment::StagedOnly);
+        let stage_case = admission.record_local_recovery_evidence_for_registered_s3(
+            unfinished_op, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(stage_case.evidence, staged_observation);
+        let stage_archive = admission.archive_local_recovery_copy_for_registered_s3(
+            unfinished_op, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(stage_archive.stage_bytes.as_deref(), Some(bytes));
+        assert_eq!(stage_archive.final_bytes, None);
+        assert!(!root.join(unfinished_path.as_str()).exists());
+        assert_eq!(fs::read(&stage_path).unwrap(), bytes);
+        assert!(journal.baseline(namespace.vault_id(), unfinished_document).unwrap().is_none());
+
         // Neither repeated reads nor a recorded operator review are a
         // File Gate authority, a confirmed baseline or a delete capability.
         assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
