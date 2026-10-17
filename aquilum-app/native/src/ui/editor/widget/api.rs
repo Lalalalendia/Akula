@@ -17,7 +17,7 @@ impl TextEditor {
     /// across tabs. Reject IME and nonempty selections at the widget boundary.
     #[cfg(test)]
     pub(crate) fn trial_plain_layout_snapshot(&self) -> Option<crate::ui::editor::TrialSnapshot> {
-        if self.compose.is_some() || self.anchor != self.focus || self.extra_cursors.len() != 0 {
+        if self.compose.is_some() || self.anchor != self.focus || !self.extra_cursors.is_empty() {
             return None;
         }
         self.doc.trial_snapshot(&self.styles)
