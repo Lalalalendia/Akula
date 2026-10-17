@@ -965,7 +965,7 @@ mod selective_ab_benchmark {
         assert_eq!(preview.downloaded_revision_json, updates);
         assert_eq!(preview.newly_verified_blobs, updates);
         assert_eq!(preview.reused_revision_json, size);
-        assert_eq!(preview.requires_full_apply_gate, true);
+        assert!(preview.requires_full_apply_gate);
         assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &old_head);
         report("selective_preview", size, updates, selective, selective_ms);
 
