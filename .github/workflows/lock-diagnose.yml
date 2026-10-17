@@ -16,7 +16,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          cargo metadata --format-version=1 --no-deps > /dev/null
+          cargo update -p arboard --precise 3.6.1
           echo '=== cargo lock diff ==='
           git diff -- Cargo.lock
           echo '=== cargo lock status ==='
