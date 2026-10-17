@@ -203,11 +203,8 @@ fn a_hardlink_inside_a_granted_vault_never_exposes_the_outside_inode() {
     fs::hard_link(&outside,f.root.join("alias.md")).unwrap();
     let broker=PermissionBroker::new();
     let reader=HostPluginVaultReader::open_registered(&f.core,&broker,&f.root).unwrap();
-    let handle=reader.bind_host_note("alias.md").unwrap();
-    let inst=plugin(&broker,reader.host_vault_id());
-    broker.grant_host_approved(inst,Capability::NotesRead,GrantScope::WholeVault).unwrap();
-    let ctx=||HostContext::from_host_state(reader.host_vault_id(),None);
-    assert_eq!(reader.read_note_bounded(inst,&handle,100,ctx),Err(PluginReadError::Unavailable));
+    // The trusted binder never issues a handle for a file with >1 hard link.
+    assert_eq!(reader.bind_host_note("alias.md").unwrap_err(),PluginReadError::Unavailable);
     assert_eq!(fs::read(outside).unwrap(),b"private file");
 }
 
@@ -223,12 +220,8 @@ fn symlinked_parents_and_final_targets_are_rejected() {
     symlink(outside.join("private.md"),f.root.join("alias.md")).unwrap();
     let broker=PermissionBroker::new();
     let reader=HostPluginVaultReader::open_registered(&f.core,&broker,&f.root).unwrap();
-    let inst=plugin(&broker,reader.host_vault_id());
-    broker.grant_host_approved(inst,Capability::NotesRead,GrantScope::WholeVault).unwrap();
-    let ctx=||HostContext::from_host_state(reader.host_vault_id(),None);
     for p in ["escape/private.md","alias.md"] {
-        let handle=reader.bind_host_note(p).unwrap();
-        assert_eq!(reader.read_note_bounded(inst,&handle,100,ctx),Err(PluginReadError::Unavailable));
+        assert_eq!(reader.bind_host_note(p).unwrap_err(),PluginReadError::Unavailable);
     }
 }
 
@@ -246,11 +239,7 @@ fn ntfs_junction_escape_is_rejected() {
     assert!(result.status.success(),"cannot create fixture: {}",String::from_utf8_lossy(&result.stderr));
     let broker=PermissionBroker::new();
     let reader=HostPluginVaultReader::open_registered(&f.core,&broker,&f.root).unwrap();
-    let target=reader.bind_host_note("escape/private.md").unwrap();
-    let inst=plugin(&broker,reader.host_vault_id());
-    broker.grant_host_approved(inst,Capability::NotesRead,GrantScope::WholeVault).unwrap();
-    let ctx=||HostContext::from_host_state(reader.host_vault_id(),None);
-    assert_eq!(reader.read_note_bounded(inst,&target,4096,ctx),Err(PluginReadError::Unavailable));
+    assert_eq!(reader.bind_host_note("escape/private.md").unwrap_err(),PluginReadError::Unavailable);
 }
 
 #[test]
