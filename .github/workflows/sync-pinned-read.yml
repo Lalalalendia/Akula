@@ -5,6 +5,11 @@ on:
     paths:
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/host_admission.rs"
+      - "aquilum-app/core/src/app_core.rs"
+      - "aquilum-app/core/src/files/gate/write.rs"
+      - "aquilum-app/core/src/files/gate/moves.rs"
+      - "aquilum-app/core/src/files/gate/trash.rs"
+      - "aquilum-app/core/src/files/gate/tests.rs"
       - "aquilum-app/core/src/documents/hub.rs"
       - "aquilum-app/core/src/documents/hub_tests.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
@@ -40,3 +45,6 @@ jobs:
       - name: Canonical aliases cannot bypass DocumentHub reservations
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine sync_reservation_blocks -- --nocapture
+      - name: Core File Gate mutation interlock
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine core_file_gate_serializes -- --nocapture

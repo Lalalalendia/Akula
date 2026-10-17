@@ -116,6 +116,12 @@ impl<'a> RegisteredReadAdmission<'a> {
         let target = self.root_path.join(relative.as_str());
         let _reservation = self.core.documents.reserve_sync_closed_document(&target)
             .map_err(admission_error)?;
+        // Reservation briefly locks sessions, then releases that mutex.
+        // The File Gate lock is acquired after it, and held through the
+        // second read. Existing editor/shell Gate mutations cannot race the
+        // durability transaction. It does NOT lock external processes.
+        let _file_guard = self.core.file_mutations.lock()
+            .map_err(|_| BoundCaptureError::Admission(VaultPortError::PermissionDenied))?;
         self.check_root()?;
         let original = self.pinned.read_identified_bounded(
             relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
@@ -488,5 +494,26 @@ mod tests {
             Err(BoundCaptureError::Admission(VaultPortError::PermissionDenied))
         ));
         assert!(inside_store.read_preimage(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn protected_preimage_capture_holds_core_file_gate_interlock() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        fs::write(root.join(note().as_str()), b"first").unwrap();
+        let expected = blake3::hash(b"first").to_hex().to_string();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let operation = OperationId::new();
+        assert_eq!(
+            guard.preserve_with_hook(&note(), &expected, operation, &mut store, || {
+                assert!(
+                    core.file_mutations.try_lock().is_err(),
+                    "host provenance must hold the same Core mutex as ordinary Gate writes"
+                );
+            }).unwrap(),
+            ProtectionOutcome::Stored
+        );
+        assert_eq!(store.read_bound_preimage(operation).unwrap().unwrap().original.bytes, b"first");
     }
 }

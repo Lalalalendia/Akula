@@ -1,5 +1,6 @@
 use crate::documents::{DocumentEvent, DocumentHub, SaveFailed};
 use crate::files::gate::{NoteHistoryChanged, Relocation};
+use crate::files::error::FileCommandError;
 use crate::files::watcher::{WatchBatch, WatchScope, WatchSink, WorkspaceWatcher};
 use crate::history::HistoryService;
 use crate::mcp::active::ActiveNote;
@@ -12,7 +13,7 @@ use crate::ui_state::UiStateService;
 use crate::wikixiv::WikixivService;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 /// What the core tells its host.
 #[derive(Clone, Serialize)]
@@ -78,6 +79,10 @@ pub struct Core {
     pub search: SearchService,
     pub history: HistoryService,
     pub documents: DocumentHub,
+    /// In-process serialization shared by ordinary File Gate writes and
+    /// read-only protected-original capture. It is NOT a disk write authority,
+    /// cross-process OS lock, or replacement for identity/hash verification.
+    pub(crate) file_mutations: Mutex<()>,
     pub wikixiv: WikixivService,
     pub watcher: WorkspaceWatcher,
     /// The note open in the UI, reported by the host; MCP tools use it for «эта заметка».
@@ -110,6 +115,7 @@ impl Core {
                 search: SearchService::new(app_data_dir.join("search-v2"), notifier, index_notifier),
                 history: HistoryService::new(app_data_dir),
                 documents: DocumentHub::new(&app_data_dir.join("documents.sqlite3")),
+                file_mutations: Mutex::new(()),
                 wikixiv: WikixivService::new(),
                 watcher: WorkspaceWatcher::new(watch_sink),
                 active_note: ActiveNote::default(),
@@ -119,6 +125,14 @@ impl Core {
         });
         core.documents.start(Arc::downgrade(&core));
         core
+    }
+
+    /// Acquire only around actual File Gate disk operations. Never emit
+    /// callbacks, reconcile the editor or write history while holding this.
+    pub(crate) fn file_mutation_guard(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+        self.file_mutations.lock().map_err(|_| FileCommandError::Task {
+            message: "Core File Gate interlock poisoned; refusing mutation".into(),
+        })
     }
 
     pub fn emit(&self, event: CoreEvent) {

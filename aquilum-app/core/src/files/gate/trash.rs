@@ -15,7 +15,10 @@ pub fn trash(
 }
 
 fn trash_now(core: &Core, workspace: &Path, path: &Path) -> Result<PathBuf, FileCommandError> {
-    let moved = move_to_trash_impl(workspace, path)?;
+    let moved = {
+        let _guard = core.file_mutation_guard()?;
+        move_to_trash_impl(workspace, path)?
+    };
     let notes = note_moves(&moved.files);
     let history = &core.history;
     for (note, trashed_at) in &notes {
@@ -52,7 +55,11 @@ fn restore_all(
     let mut roots = Vec::new();
     let mut failure = None;
     for path in trashed {
-        match restore_from_trash_impl(workspace, path) {
+        let attempt = {
+            let _guard = core.file_mutation_guard()?;
+            restore_from_trash_impl(workspace, path)
+        };
+        match attempt {
             Ok(restored) => {
                 for (trashed_note, back) in note_moves(&restored.files) {
                     history.restored(&|| core.known_roots(), &trashed_note, &back);

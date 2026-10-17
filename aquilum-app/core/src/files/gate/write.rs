@@ -17,8 +17,12 @@ pub fn write(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
-    let before = core.history.disk_before(path, expected_hash);
-    let result = write_file_atomic_impl(path, content, expected_hash)?;
+    let (before, result) = {
+        let _guard = core.file_mutation_guard()?;
+        let before = core.history.disk_before(path, expected_hash);
+        let result = write_file_atomic_impl(path, content, expected_hash)?;
+        (before, result)
+    };
     let write = NoteWrite { disk_before: before, text: content, hash: &result.hash, source, name: version_name };
     record(core, path, write);
     if is_markdown(path) {
@@ -34,7 +38,10 @@ pub fn create(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
-    let result = create_file_impl(path, content)?;
+    let result = {
+        let _guard = core.file_mutation_guard()?;
+        create_file_impl(path, content)?
+    };
     if is_note(path) {
         let write = NoteWrite {
             disk_before: Some((String::new(), SystemTime::now())),
@@ -54,13 +61,19 @@ pub fn create_binary(
     path: &Path,
     bytes: &[u8],
 ) -> Result<FileWriteResult, FileCommandError> {
-    let result = create_binary_file_impl(path, bytes)?;
+    let result = {
+        let _guard = core.file_mutation_guard()?;
+        create_binary_file_impl(path, bytes)?
+    };
     paths_changed(core, vec![path.to_path_buf()]);
     Ok(result)
 }
 
 pub fn copy(core: &Core, from: &Path, to: &Path) -> Result<(), FileCommandError> {
-    copy_file_impl(from, to)?;
+    {
+        let _guard = core.file_mutation_guard()?;
+        copy_file_impl(from, to)?;
+    }
     paths_changed(core, vec![to.to_path_buf()]);
     Ok(())
 }
