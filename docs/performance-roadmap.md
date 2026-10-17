@@ -127,6 +127,35 @@ Deferred experiments still require separate evidence and are **not merged as pro
 
 **Decision gate:** The default x86 SIMD selection remains capped to SSE4.2. Only after end-to-end frame fidelity, Windows testing, representative benchmark gains and safe hardware feature selection should a separately reviewed opt-in be considered. No forced `target-cpu` binary flags or unchecked AVX2 dispatch.
 
+## Real UI rendering and bounded Parley transfer (2026-10-17)
+
+These are separate bottlenecks. Do **not** confuse the speed of damage detection, text shaping, Vello encoding and pixel rasterization, or add independently measured p95 values into an alleged total frame p95.
+
+### Tab switching / Parley
+
+- [PR #114](https://github.com/Lalalalendia/Akula/pull/114) and [PR #115](https://github.com/Lalalalendia/Akula/pull/115), **merged, test-only**: a 4 MiB note's debug/traced tab-switch layout spends approximately 41 ms p95 shaping about 21 new visible paragraphs. This is instrumentation-heavy Linux evidence, not real release UI timing.
+- [PR #116](https://github.com/Lalalalendia/Akula/pull/116), **merged, test-only**: bounded plain-Paragraph Parley snapshot (max 32 paragraphs, 128 KiB text, initial 512 KiB loaded window); raw text, width/font/style and editing/IME guards. [ABBA run](https://github.com/Lalalalendia/Akula/actions/runs/39042913276): baseline **49.840 ms**, candidate **36.869 ms**, **1.352× faster on an isolated 69 KiB fixture**, including snapshot capture. This does **not** enable a production cache or prove full tab switching is faster.
+- [PR #122](https://github.com/Lalalalendia/Akula/pull/122), **draft experiment at checkpoint**: test-only placement of the bounded snapshot into Akula's existing max-two inactive-tab cache **only after raw-file BLAKE3 verification**, with actual live tab-switch ABBA, pixel parity, restored paragraph counters and same-length external-file mutation rejection. No release cache is enabled.
+
+**Next Parley gate:** require reproducible improvement in *whole UI tab-switch latency* on the same host, correct first rendered frame, no mismatched paragraphs after file mutation/resize/font changes, and a credible bound on retained layout memory before separate production wiring.
+
+### Damage Tracker and full-frame rendering
+
+- [PR #120](https://github.com/Lalalalendia/Akula/pull/120), **merged, test-only** (`b189ebe487ac5ac62b2287d72c565eaf7503caf6`). [Linux diagnostic](https://github.com/Lalalalendia/Akula/actions/runs/39045495603): 48 real scroll/pointer frames each at 1000×600@1× and 1750×1051@1.75×, with 41 scroll shifts and exact partial/full pixel parity.
+  - Tracker detection p50 **126.5 / 127.6 µs**, p95 **162.2 / 155.2 µs**.
+  - Scene record p50 **468 / 467 µs**, Vello encoding p50 **1368 / 1286 µs**.
+  - **Rasterization dominates**: p50 **4546 / 7687 µs**, p95 **7452 / 12831 µs**.
+  - The fixture tracked up to 241 draws and about 155–160 initial dirty rects, combined to at most one final render area. The numerical area coverage is **not yet measured**.
+  - These are debug/test CI stage measurements; instrumentation and runner contention affect absolute values. They do not establish typical production FPS or end-to-end latency.
+
+**Next renderer gate:** first measure actual damaged pixel coverage per frame and Vello raster cost under full/partial redrawing, including text, images, scales and covers. Only then experiment with scissor/area merging or buffer reuse in separate A/B PRs. Do not prioritize small temporary `Vec` eliminations in the ~0.13 ms Damage Tracker without evidence that they improve complete frames.
+
+### SIMD decision
+
+- [PR #100](https://github.com/Lalalalendia/Akula/pull/100): full-frame isolated AVX2 benchmark produced 4–21% raster gain on selected Linux scenes.
+- [PR #105](https://github.com/Lalalalendia/Akula/pull/105): real fractional-scale editor test still differs by **240–241 one-channel pixels** on Linux/Windows. [PR #110](https://github.com/Lalalalendia/Akula/pull/110) and [PR #113](https://github.com/Lalalalendia/Akula/pull/113) were **closed without merge** because arithmetic-rounding hypotheses failed their strict tests.
+- Real 1× editor scrolling was only ~0–4% faster in these runs. Keep production SSE4.2; do not change the exact-pixel acceptance requirement to make a benchmark look green.
+
 ## Benchmark commands
 
 From `aquilum-app`:
