@@ -168,3 +168,53 @@ fn core_file_gate_serializes_create_write_copy_rename_trash_and_restore() {
     });
     assert_eq!(fs::read(&renamed).unwrap(), b"changed");
 }
+
+
+/// Two separately configured Core instances may share the same user vault.
+/// Their ordinary File Gate operations must serialize with a capture started
+/// by the other instance, not just with mutations from their own Core.
+#[test]
+fn core_file_gate_lock_is_shared_by_separate_core_instances() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::history::Source;
+    use std::sync::{mpsc, Arc};
+    use std::thread;
+    use std::time::Duration;
+
+    let temp = tempfile::tempdir().unwrap();
+    let vault = temp.path().join("vault");
+    let data_a = temp.path().join("core-a");
+    let data_b = temp.path().join("core-b");
+    fs::create_dir(&vault).unwrap();
+    fs::create_dir(&data_a).unwrap();
+    fs::create_dir(&data_b).unwrap();
+    let a = Core::open(&data_a, Arc::new(|_: CoreEvent| {}));
+    let b = Core::open(&data_b, Arc::new(|_: CoreEvent| {}));
+    for core in [&a, &b] {
+        core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
+    }
+    // An independently constructed Core must share the same in-process
+    // guard. Otherwise a capture under A races an ordinary Gate write via B.
+    assert!(std::ptr::eq(a.file_mutations, b.file_mutations));
+    let held = a.file_mutations.lock().unwrap();
+    let destination = vault.join("created-through-other-core.md");
+    let (started_tx, started_rx) = mpsc::channel();
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let dest = destination.clone();
+    let worker = thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        let result = super::write::create(&b, &dest, "unchanged", Source::Me, None);
+        finished_tx.send(result).unwrap();
+    });
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(matches!(
+        finished_rx.recv_timeout(Duration::from_millis(150)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ), "another Core instance mutated the same vault while the guard was held");
+    assert!(!destination.exists());
+    drop(held);
+    let outcome = finished_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    outcome.unwrap();
+    worker.join().unwrap();
+    assert_eq!(fs::read(destination).unwrap(), b"unchanged");
+}
