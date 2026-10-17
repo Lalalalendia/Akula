@@ -381,12 +381,12 @@ fn run_natural_case(case: &str, width: u32, height: u32, scale: f64, cover: bool
     );
     let body: String = (0..250)
         .map(|i| format!(
-            "Абзац {i}: текст Akula, **жирный**, *курсив* и длинные Unicode \\
-             строки для переноса через Parley.\\n\\n"
+            "Абзац {i}: текст Akula, **жирный**, *курсив* и длинные Unicode \
+             строки для переноса через Parley.\n\n"
         ))
         .collect();
     let frontmatter = if cover {
-        "---\\ncover: true\\ntype: book\\nPage_cover: pattern:polka\\n---\\n"
+        "---\ncover: true\ntype: book\nPage_cover: pattern:polka\n---\n"
     } else {
         ""
     };
@@ -445,7 +445,7 @@ fn run_natural_case(case: &str, width: u32, height: u32, scale: f64, cover: bool
         greatest_delta = greatest_delta.max(peak);
         assert!(
             peak <= if changed_partition { 1 } else { 0 },
-            "{case}/workers={workers}/step={step}: natural coalescing parity {peak}/255; \\
+            "{case}/workers={workers}/step={step}: natural coalescing parity {peak}/255; \
              changed_partition={changed_partition}"
         );
 
@@ -481,11 +481,11 @@ fn run_natural_case(case: &str, width: u32, height: u32, scale: f64, cover: bool
     let baseline_sum: f64 = samples[0].iter().map(|t| t.total).sum();
     let merged_sum: f64 = samples[1].iter().map(|t| t.total).sum();
     eprintln!(
-        "VELLO_NATURAL_ADJACENT case={case} workers={workers} frames={active} \\
-         scroll_frames={scroll} multiple_regions={multiple_regions} \\
-         eligible_frames={eligible} regions_saved={regions_saved} max_channel={greatest_delta} \\
-         baseline_p50_us={baseline_p50:.2} baseline_p95_us={baseline_p95:.2} \\
-         merged_p50_us={merged_p50:.2} merged_p95_us={merged_p95:.2} \\
+        "VELLO_NATURAL_ADJACENT case={case} workers={workers} frames={active} \
+         scroll_frames={scroll} multiple_regions={multiple_regions} \
+         eligible_frames={eligible} regions_saved={regions_saved} max_channel={greatest_delta} \
+         baseline_p50_us={baseline_p50:.2} baseline_p95_us={baseline_p95:.2} \
+         merged_p50_us={merged_p50:.2} merged_p95_us={merged_p95:.2} \
          baseline_sum_us={baseline_sum:.2} merged_sum_us={merged_sum:.2}"
     );
 }
