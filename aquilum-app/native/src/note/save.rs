@@ -50,8 +50,26 @@ fn write(core: &Core, path: &PathBuf, text: &crop::Rope, hash: &Mutex<String>) -
     }
 }
 
+fn guard_save(write: impl FnOnce() -> Outcome) -> Outcome {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(write))
+        .unwrap_or_else(|_| Outcome::Failed("background save panicked".to_owned()))
+}
+
 pub fn queue(core: Arc<Core>, path: PathBuf, text: crop::Rope, hash: Arc<Mutex<String>>, done: Sender<Outcome>) {
     crate::disk::run(move || {
-        let _ = done.send(write(&core, &path, &text, &hash));
+        // Always acknowledge the job, including a panic in a storage adapter.
+        // Otherwise Note::queued never drains and the editor cannot retry.
+        let _ = done.send(guard_save(|| write(&core, &path, &text, &hash)));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{guard_save, Outcome};
+
+    #[test]
+    fn panicking_save_is_reported_as_failure_instead_of_losing_its_acknowledgement() {
+        let outcome = guard_save(|| panic!("intentional failing save"));
+        assert!(matches!(outcome, Outcome::Failed(reason) if reason == "background save panicked"));
+    }
 }
