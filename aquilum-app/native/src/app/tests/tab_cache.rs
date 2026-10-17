@@ -158,3 +158,22 @@ fn active_selection_does_not_escape_into_cached_text_layouts() {
     assert_eq!(stages.layout_reused, 0);
     assert_eq!(h.body_text(), "This paragraph has a selection");
 }
+
+#[test]
+fn secondary_caret_does_not_escape_into_cached_parley_layouts() {
+    let mut h = Harness::new();
+    let first = h.write_note("multi-caret-A.md", "Plain text with a second caret");
+    let second = h.write_note("multi-caret-B.md", "Another clean note");
+    assert!(h.app.open_in(&mut h.root, first.clone(), true));
+    let body = h.app.note_ids.as_ref().unwrap().body;
+    body.edit(&mut h.root, |mut editor| {
+        crate::ui::editor::TextEditor::set_secondary_caret_for_test(&mut editor, 2);
+    });
+    assert!(h.app.open_in(&mut h.root, second, true));
+
+    let stages = select(&mut h, &first);
+    assert!(stages.cache_hit, "multiple cursors must not invalidate the clean Rope");
+    assert!(!stages.layout_offered, "secondary carets forbid reusing prior Parley layouts");
+    assert_eq!(stages.layout_reused, 0);
+    assert_eq!(h.body_text(), "Plain text with a second caret");
+}
