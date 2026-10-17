@@ -11,6 +11,8 @@ impl App {
     }
 
     pub(in crate::app) fn replace_root(&mut self, root: &mut RenderRoot) {
+        // A root replacement can recreate font contexts and widget styles.
+        self.invalidate_inactive_layouts();
         let widget = self.build_ui();
         root.set_default_properties(Arc::new(theme::default_properties()));
         root.edit_widget_with_tag(ROOT_TAG, |mut slot| Slot::set_child(&mut slot, widget));
@@ -18,6 +20,7 @@ impl App {
     }
 
     pub(in crate::app) fn restyle(&mut self, root: &mut RenderRoot, fonts: bool) {
+        self.invalidate_inactive_layouts();
         self.apply_appearance();
         root.restyle(Arc::new(theme::default_properties()), fonts);
     }
