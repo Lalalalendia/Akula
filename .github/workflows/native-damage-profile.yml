@@ -1,0 +1,117 @@
+name: Native Damage Tracker stage profile
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/render/damage/mod.rs'
+      - 'aquilum-app/native/src/render/renderer/mod.rs'
+      - 'aquilum-app/native/src/render/renderer/pass.rs'
+      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - 'aquilum-app/native/src/app/tests/perf/damage_profile.rs'
+      - '.github/workflows/native-damage-profile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-damage-profile-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  profile:
+    name: Real-frame Damage Tracker diagnostic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Capture runner and Rust revisions
+        shell: bash
+        run: |
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            echo "RUNNER=$RUNNER_NAME"
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee damage-profile-env.txt
+      - name: Stage profiling and strict full-frame parity
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-native --bin aquilum-native --locked \
+            benchmark_damage_frame_stages -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/damage-profile.log"
+          test "$(grep -c 'DAMAGE_PROFILE case=' "$GITHUB_WORKSPACE/damage-profile.log")" -eq 2
+          test "$(grep -c 'DAMAGE_PARITY case=' "$GITHUB_WORKSPACE/damage-profile.log")" -eq 2
+      - name: Summarize measured frame stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          rows = []
+          for line in Path("damage-profile.log").read_text().splitlines():
+              if "DAMAGE_PROFILE case=" not in line:
+                  continue
+              tokens = line.split("DAMAGE_PROFILE ", 1)[1].split()
+              values = dict(token.split("=", 1) for token in tokens if "=" in token)
+              rows.append(values)
+          assert len(rows) == 2, rows
+          assert {r["case"] for r in rows} == {"standard_1x", "fractional_1_75x"}
+          fields = ["record", "detect", "sort", "compare", "moves", "merge", "encode", "raster"]
+          out = [
+              "## Damage Tracker stage baseline (diagnostic)",
+              "",
+              "Linux CI **debug/test build**, stage timings in microseconds, p50/p95",
+              "over 48 scrolling/pointer frames for each case. Instrumentation has",
+              "overhead; stage percentiles are not additive. No product speedup is",
+              "claimed. Pixel parity is checked against full redraw on four frames",
+              "per case, **outside** the measured stages.",
+              "",
+              "| Case | Shifts | Max draws / changed / raw rects | " + " | ".join(f"{k} p50/p95 (µs)" for k in fields) + " |",
+              "|---|---:|---:|" + "|".join(["---:"] * len(fields)) + "|",
+          ]
+          for r in rows:
+              field_data = [f"{r[f'{k}_p50_us']}/{r[f'{k}_p95_us']}" for k in fields]
+              out.append(
+                  f"| {r['case']} | {r['shifts']} | "
+                  f"{r['max_draws']} / {r['max_changed']} / {r['max_raw_rects']} | "
+                  + " | ".join(field_data) + " |"
+              )
+          report = "\n".join(out) + "\n"
+          Path("damage-profile-summary.md").write_text(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write(report)
+          print(report)
+          PY
+      - name: Retain raw frame diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-damage-stages-${{ github.sha }}
+          path: |
+            damage-profile-env.txt
+            damage-profile.log
+            damage-profile-summary.md
+          if-no-files-found: warn
+          retention-days: 21
