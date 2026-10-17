@@ -125,9 +125,11 @@ impl Document {
         caret: Option<usize>,
     ) -> usize {
         let Some(snapshot) = self.trial_snapshot.take() else { return 0 };
-        // IME composition and caret-dependent Markdown can change the Parley
-        // shape of a line even if the file bytes remain identical.
-        if compose.is_some() || caret.is_some()
+        // IME preedit text changes shaping and blocks all reuse. A normal
+        // caret is different: the usual Document::measure() invalidates only
+        // the caret-bearing line because snapshot decorations have caret=None.
+        // Do not throw out dozens of unrelated plain paragraphs for focus.
+        if compose.is_some()
             || width != Some(snapshot.width) || !self.windowed.eq(&snapshot.windowed)
             || self.full.byte_len() != snapshot.full_len || self.base != snapshot.base
             || self.text != snapshot.text
@@ -219,7 +221,7 @@ mod tests {
         let styles = StyleSet::new(16.0);
         let mut baseline = doc(&original);
         shape(&mut baseline, 600.0, &styles);
-        for case in 0..8 {
+        for case in 0..7 {
             let mut snapshot = baseline.trial_snapshot(&styles).unwrap();
             let changed = if case == 0 { original.replace("обычный", "другой ") } else { original.clone() };
             let mut fresh = doc(&changed);
@@ -237,10 +239,29 @@ mod tests {
             let compose = (case == 3).then_some((0, "превью"));
             let different_style = StyleSet::new(18.0);
             let current_styles = if case == 4 { &different_style } else { &styles };
-            let caret = (case == 7).then_some(0);
-            let count = fresh.try_restore_trial(width, current_styles, compose, caret);
+            let count = fresh.try_restore_trial(width, current_styles, compose, None);
             assert_eq!(count, 0, "invalidated case {case}");
         }
+    }
+
+    #[test]
+    fn focused_caret_reuses_unrelated_plain_lines_and_keeps_geometry() {
+        let content = "обычная Unicode строка 🐱\n".repeat(120);
+        let styles = StyleSet::new(16.0);
+        let mut previous = doc(&content);
+        shape(&mut previous, 600.0, &styles);
+        let candidate = previous.trial_snapshot(&styles).expect("plain lines shaped");
+
+        let mut reopened = doc(&content);
+        reopened.trial_offer(candidate);
+        let restored = reopened.try_restore_trial(Some(600.0), &styles, None, Some(0));
+        assert!(restored > 0, "focused note should still reuse non-caret paragraphs");
+        reopened.layout(&mut FontContext::default(), &mut LayoutContext::new(), &styles, Some(600.0), None, Some(0));
+        let mut fresh = doc(&content);
+        fresh.layout(&mut FontContext::default(), &mut LayoutContext::new(), &styles, Some(600.0), None, Some(0));
+        assert!((fresh.height() - reopened.height()).abs() < 0.001);
+        assert!(reopened.laid.get(0).is_some_and(|laid| laid.decor.caret == Some(0)),
+            "line containing the active caret must be reshaped, not blindly reused");
     }
 
     #[test]
