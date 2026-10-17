@@ -121,6 +121,16 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
               f.write(summary)
           PY
+      - name: Compare surface word tokenizers within head (targeted diagnostic)
+        if: contains(github.event.pull_request.title, 'surface')
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd aquilum-app
+            cargo test --release --locked -p aquilum-core benchmark_surface_tokenizer -- --ignored --nocapture --test-threads=1
+          ) 2>&1 | tee surface-analyzer.txt
+          grep 'BENCH-SURFACE' surface-analyzer.txt | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload paired raw logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -131,4 +141,5 @@ jobs:
             sqlite-*.txt
             index-*.txt
             rich-index-*.txt
+            surface-analyzer.txt
           retention-days: 30
