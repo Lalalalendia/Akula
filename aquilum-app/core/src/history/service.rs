@@ -849,6 +849,136 @@ mod tests {
     }
 
     #[test]
+    fn history_failure_on_initial_baseline_preserves_original_for_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Первый.md");
+        fs::write(&note, "before primary save").unwrap();
+        let captured = history.disk_before(&note, None);
+        fs::write(&note, "first edit committed").unwrap();
+
+        history.fail_once(HistoryFault::CreateVersion);
+        let failed = history.try_saved(
+            &|| fixture.roots(),
+            &note,
+            NoteWrite {
+                disk_before: captured,
+                text: "first edit committed",
+                hash: "first-hash",
+                source: Source::Me,
+                name: None,
+            },
+        ).unwrap_err();
+        assert_eq!(failed.action, "write baseline");
+        assert!(versions(&fixture.history_of("Первый.md")).is_empty());
+        let key = crate::search::paths::identity(&note);
+        let state = history.lock();
+        let pending = state.notes.get(&key).unwrap();
+        assert!(pending.written_hash.is_none());
+        assert!(pending.last_edit.is_none());
+        assert_eq!(pending.pending_before.as_ref().unwrap().0, "before primary save");
+        drop(state);
+
+        let new_capture = history.disk_before(&note, None);
+        fs::write(&note, "retry after failure").unwrap();
+        assert!(history.try_saved(
+            &|| fixture.roots(),
+            &note,
+            NoteWrite {
+                disk_before: new_capture,
+                text: "retry after failure",
+                hash: "retry-hash",
+                source: Source::Me,
+                name: None,
+            },
+        ).unwrap());
+        assert_eq!(
+            texts(&fixture.history_of("Первый.md")),
+            [
+                ("before primary save".to_owned(), Source::Start),
+                ("retry after failure".to_owned(), Source::Me),
+            ]
+        );
+        assert!(history.lock().notes.get(&key).unwrap().pending_before.is_none());
+    }
+
+    #[test]
+    fn history_failed_update_does_not_advance_hash_or_coalescing_state() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Черновик.md");
+        assert!(history.try_saved(&|| fixture.roots(), &note, write("one", Source::Me, "hash-1", None)).unwrap());
+        let key = crate::search::paths::identity(&note);
+        let original_edit = history.lock().notes.get(&key).unwrap().last_edit;
+        history.fail_once(HistoryFault::UpdateVersion);
+        let error = history.try_saved(
+            &|| fixture.roots(), &note, write("two", Source::Me, "hash-2", None)
+        ).unwrap_err();
+        assert_eq!(error.action, "update version");
+        assert_eq!(texts(&fixture.history_of("Черновик.md")), [("one".to_owned(), Source::Me)]);
+        {
+            let state = history.lock();
+            let note = state.notes.get(&key).unwrap();
+            assert_eq!(note.written_hash.as_deref(), Some("hash-1"));
+            assert_eq!(note.last_edit, original_edit);
+        }
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("three", Source::Me, "hash-3", None)
+        ).unwrap());
+        assert_eq!(texts(&fixture.history_of("Черновик.md")), [("three".to_owned(), Source::Me)]);
+    }
+
+    #[test]
+    fn history_failed_name_write_is_not_reported_as_changed_and_can_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Имена.md");
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("original", Source::Agent, "hash-1", None)
+        ).unwrap());
+        history.fail_once(HistoryFault::NameVersion);
+        let error = history.try_saved(
+            &|| fixture.roots(), &note, write("original", Source::Agent, "hash-1", Some("draft"))
+        ).unwrap_err();
+        assert_eq!(error.action, "write version name");
+        assert!(history.page(&|| fixture.roots(), &note, 0, 10).versions[0].name.is_none());
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("original", Source::Agent, "hash-1", Some("draft"))
+        ).unwrap());
+        assert_eq!(
+            history.page(&|| fixture.roots(), &note, 0, 10).versions[0].name.as_deref(),
+            Some("draft")
+        );
+    }
+
+    #[test]
+    fn history_failed_revert_never_claims_removed_version() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Откат.md");
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("first", Source::Agent, "hash-1", None)
+        ).unwrap());
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("second", Source::Me, "hash-2", None)
+        ).unwrap());
+        history.fail_once(HistoryFault::RemoveVersion);
+        let error = history.try_saved(
+            &|| fixture.roots(), &note, write("first", Source::Me, "hash-3", None)
+        ).unwrap_err();
+        assert_eq!(error.action, "remove version");
+        assert_eq!(texts(&fixture.history_of("Откат.md")).len(), 2);
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("first", Source::Me, "hash-3", None)
+        ).unwrap());
+        assert_eq!(texts(&fixture.history_of("Откат.md")), [("first".to_owned(), Source::Agent)]);
+    }
+
+    #[test]
     fn typing_creates_baseline_and_coalesces_subsequent_typing() {
         let fixture = Fixture::new();
         let history = fixture.service();
