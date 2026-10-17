@@ -1,6 +1,15 @@
 use super::*;
 
 impl TextEditor {
+    /// Capture only already-shaped, clean, non-interactive paragraphs. This
+    /// never captures edit history, IME composition, cursor, or widget state.
+    pub(crate) fn clean_parley_snapshot(&self) -> Option<crate::ui::editor::LayoutSnapshot> {
+        if self.compose.is_some() || self.history.is_dirty() {
+            return None;
+        }
+        self.doc.trial_snapshot(&self.styles)
+    }
+
     pub fn text(&self) -> String {
         self.doc.whole()
     }
