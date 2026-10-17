@@ -3,7 +3,14 @@ fn run_is_double(text: &str, at: usize, symbol: char) -> bool {
 }
 
 pub(super) fn paired(text: &str, symbol: char, flanking: bool) -> Vec<(usize, usize)> {
-    let delimiter: String = [symbol; 2].iter().collect();
+    let delimiter = match symbol {
+        '=' => "==",
+        '%' => "%%",
+        _ => return Vec::new(),
+    };
+    if !text.contains(delimiter) {
+        return Vec::new();
+    }
     let width = delimiter.len();
     let mut found = Vec::new();
     let mut from = 0;
