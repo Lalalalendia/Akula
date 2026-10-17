@@ -10,6 +10,11 @@
 use super::s3::S3Keyspace;
 
 mod multipart;
+mod manifest;
+pub use manifest::{
+    S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
+    S3PinnedRevisionPage, S3PinnedRevisionSnapshot,
+};
 pub use multipart::{
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,

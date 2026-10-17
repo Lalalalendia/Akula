@@ -34,6 +34,7 @@ mod pinned_windows;
 mod protocol;
 mod provider;
 mod s3;
+mod s3_manifest;
 #[cfg(feature = "sync-s3")]
 mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
@@ -73,6 +74,11 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+pub use s3_manifest::{
+    S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
+    S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
+    MAX_SHARD_ENTRIES, MAX_SHARDS,
+};
 #[cfg(feature = "sync-s3")]
 pub use s3_head_probe::{
     observe_s3_current_head, read_s3_digest_matched_manifest, S3DigestMatchedManifest,
@@ -84,6 +90,8 @@ pub use s3_transport::{
     S3ObservedObject, S3PutCondition, S3TransportError,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
+    S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
+    S3PinnedRevisionPage, S3PinnedRevisionSnapshot,
 };
 
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
