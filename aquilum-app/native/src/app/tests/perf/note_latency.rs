@@ -63,6 +63,7 @@ fn rapid_tab_switches_never_adopt_a_previous_notes_background_reload() {
         assert_open_note(&h, &second, "B");
         std::thread::sleep(Duration::from_millis(2));
     }
+    h.app.shutdown(); // stop indexing before deleting temporary vault files
 }
 
 #[test]
@@ -152,5 +153,8 @@ fn native_note_latency_matrix() {
              dispatch_p95_ms={dispatch_p95:.3} dispatch_max_ms={dispatch_max:.3} \
              external_visible_ms={external_visible_ms:.3} stale_overwrites=0"
         );
+        // Cleanup is deliberately excluded from the measured operation times.
+        // Shutdown joins background search/index workers before TempDir removal.
+        h.app.shutdown();
     }
 }
