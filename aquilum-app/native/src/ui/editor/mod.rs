@@ -16,6 +16,8 @@ pub use embed::media::media_line;
 pub use widget::{Search, Smart, Status, TextEditor};
 #[cfg(test)]
 pub(crate) use document::take_document_build_profile;
+#[cfg(test)]
+pub(crate) use document::{LayoutTrialSnapshot, take_trial_restore_count};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Edit {
