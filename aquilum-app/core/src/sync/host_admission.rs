@@ -252,6 +252,9 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(VaultPortError::PermissionDenied.into());
         }
         self.check_root()?;
+        // All forensic records and SQLite sidecars must stay outside the
+        // registered user vault, including when the call is local-only.
+        journal.require_appdata_outside_vault(&self.root_path)?;
         let target = self.root_path.join(relative.as_str());
         let _reservation = self.core.documents.reserve_sync_closed_document(&target)
             .map_err(admission_error)?;
@@ -490,6 +493,32 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(LocalCreateError::PublicationUncertain);
         }
         self.check_root().map_err(|_| LocalCreateError::PublicationUncertain)?;
+
+        // Only the uninterrupted Unix path, after the actual successful
+        // stage-file fsync, atomic rename-no-replace, pinned destination
+        // readback and parent-directory fsync, may append this informational
+        // audit. A crash before it leaves no record and ALWAYS requires HOLD.
+        // SQLite WAL/FULL persists this observation, not an editable file
+        // provenance token or a synchronization baseline.
+        #[cfg(unix)]
+        {
+            if !outcome.native_parent_synced {
+                return Err(LocalCreateError::PublicationUncertain);
+            }
+            let observation = super::journal::NativeLocalPublicationObservation {
+                operation_id: operation,
+                vault_id: record.intent.vault_id,
+                path: relative.clone(),
+                expected_content_hash: record.intent.expected_content_hash.clone(),
+                parent: parent_id,
+                final_file: outcome.file,
+                byte_length: outcome.byte_length,
+            };
+            journal.record_native_local_publication_observation_once(&observation)
+                .map_err(|_| LocalCreateError::PublicationUncertain)?;
+            self.check_root().map_err(|_| LocalCreateError::PublicationUncertain)?;
+        }
+        // No Windows directory durability attestation exists yet.
         Ok(outcome)
     }
 
