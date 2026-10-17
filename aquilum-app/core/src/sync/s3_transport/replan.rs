@@ -12,7 +12,7 @@ use super::{
 use crate::sync::{
     plan_revision_exchange, DagError, DeltaPlanError, DocumentId, RevisionDag,
     RevisionExchangePlan, RevisionId, RevisionInventory, RevisionRecord,
-    RemoteStore, RemoteStoreError, S3HeadPointerV1,
+    RemoteStore, RemoteStoreError, S3HeadPointerV1, S3Keyspace,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -121,6 +121,29 @@ pub fn plan_verified_s3_revision_replay(
     })
 }
 
+/// A caller-supplied S3VerifiedHead is not sufficient evidence unless its
+/// in-memory pointer and manifest agree on the *same* immutable generation,
+/// digest and predecessor. read_verified_manifest then independently checks
+/// those bytes and referenced objects at the provider.
+fn validate_supplied_previous_head(
+    previous: &S3VerifiedHead,
+    keyspace: &S3Keyspace,
+) -> Result<(), S3ReplanError> {
+    let claimed_hash = previous.manifest.digest(keyspace)
+        .map_err(|_| S3ReplanError::PreviousHeadNotVerified)?;
+    if previous.etag.is_empty()
+        || previous.etag.chars().any(char::is_control)
+        || previous.pointer.encode(keyspace).is_err()
+        || previous.manifest.manifest_id != previous.pointer.manifest_id()
+        || previous.manifest.generation != previous.pointer.generation()
+        || previous.manifest.previous_manifest_id != previous.pointer.previous_manifest_id()
+        || claimed_hash != previous.pointer.manifest_blake3()
+    {
+        return Err(S3ReplanError::PreviousHeadNotVerified);
+    }
+    Ok(())
+}
+
 impl AwsS3ProbeClient {
     /// Refresh a root after rejected CAS with no blind retry:
     ///
@@ -141,8 +164,7 @@ impl AwsS3ProbeClient {
         local_inventory: &RevisionInventory,
         max_metadata_bytes: usize,
     ) -> Result<S3CasReplanPreview, S3ReplanError> {
-        previous.pointer.encode(&self.keyspace)
-            .map_err(|_| S3ReplanError::PreviousHeadNotVerified)?;
+        validate_supplied_previous_head(previous, &self.keyspace)?;
         let checked_previous = self.read_verified_manifest(
             previous.pointer.manifest_id(), previous.pointer.manifest_blake3(),
         ).await?;
@@ -217,5 +239,70 @@ impl AwsS3ProbeClient {
             return Err(S3ReplanError::HeadChangedDuringPreview);
         }
         Ok(preview)
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    use crate::sync::{OperationId, S3ManifestV1, VaultId};
+
+    #[test]
+    fn supplied_previous_head_requires_consistent_manifest_and_parent_link() {
+        let keyspace = S3Keyspace::new("akula-sync/replan", VaultId::new()).unwrap();
+        let parent = S3ManifestV1::new(
+            &keyspace, OperationId::new(), 1, None, vec![],
+        ).unwrap();
+        let parent_hash = parent.digest(&keyspace).unwrap();
+        let child = S3ManifestV1::new(
+            &keyspace, OperationId::new(), 2,
+            Some((parent.manifest_id, parent_hash)), vec![],
+        ).unwrap();
+        let head = S3VerifiedHead {
+            pointer: S3HeadPointerV1::new(
+                &keyspace, child.generation, child.manifest_id,
+                &child.digest(&keyspace).unwrap(), child.previous_manifest_id,
+            ).unwrap(),
+            etag: "\"observed-s3-etag\"".into(),
+            manifest: child,
+        };
+        assert!(validate_supplied_previous_head(&head, &keyspace).is_ok());
+
+        // This pointer is independently well-formed, but lies about the
+        // predecessor of the exact hashed manifest. The old implementation
+        // verified manifest bytes without rejecting that contradictory pair.
+        let mut forged_parent = head.clone();
+        forged_parent.pointer = S3HeadPointerV1::new(
+            &keyspace, head.pointer.generation(),
+            head.pointer.manifest_id(), head.pointer.manifest_blake3(),
+            Some(OperationId::new()),
+        ).unwrap();
+        assert!(matches!(
+            validate_supplied_previous_head(&forged_parent, &keyspace),
+            Err(S3ReplanError::PreviousHeadNotVerified)
+        ));
+
+        let mut forged_generation = head.clone();
+        forged_generation.pointer = S3HeadPointerV1::new(
+            &keyspace, 3, head.pointer.manifest_id(),
+            head.pointer.manifest_blake3(), head.pointer.previous_manifest_id(),
+        ).unwrap();
+        assert!(matches!(
+            validate_supplied_previous_head(&forged_generation, &keyspace),
+            Err(S3ReplanError::PreviousHeadNotVerified)
+        ));
+
+        let mut missing_validator = head.clone();
+        missing_validator.etag.clear();
+        assert!(matches!(
+            validate_supplied_previous_head(&missing_validator, &keyspace),
+            Err(S3ReplanError::PreviousHeadNotVerified)
+        ));
+        assert!(matches!(
+            validate_supplied_previous_head(
+                &head, &S3Keyspace::new("akula-sync/replan", VaultId::new()).unwrap(),
+            ),
+            Err(S3ReplanError::PreviousHeadNotVerified)
+        ));
     }
 }
