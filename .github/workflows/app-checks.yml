@@ -5,17 +5,25 @@ name: Application checks
 on:
   pull_request:
     branches: [main]
+  # Caches saved by a PR are isolated to refs/pull/*/merge.
+  # Seed a cache in main so all sibling PRs can restore it.
+  push:
+    branches: [main]
+    paths:
+      - 'aquilum-app/**'
+      - '.github/workflows/app-checks.yml'
 
 permissions:
   contents: read
 
 # Cancel outdated checks for the same PR after a new commit. Other PRs stay independent.
 concurrency:
-  group: main-pr-gate-${{ github.event.pull_request.number }}
+  group: main-pr-gate-${{ github.event_name == 'push' && 'cache-seed' || github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   checks:
+    if: github.event_name == 'pull_request'
     name: Main PR gate
     runs-on: ubuntu-24.04
     steps:
@@ -23,19 +31,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect whether Rust tests are needed
+      - name: Classify Rust test scope
         id: scope
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/pr-changed-paths.txt"
-          if grep -Eq '^(aquilum-app/|\.github/workflows/app-checks\.yml$)' "$RUNNER_TEMP/pr-changed-paths.txt"; then
-            echo 'rust=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'rust=false' >> "$GITHUB_OUTPUT"
-          fi
+          node --test .github/scripts/ci-rust-scope.test.cjs
+          node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
 
       - name: Validate patch whitespace
         shell: bash
@@ -63,26 +67,83 @@ jobs:
           node --test .github/scripts/branch-hygiene.test.cjs
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.scope.outputs.rust == 'true'
+        if: steps.scope.outputs.mode != 'none'
 
-      - uses: swatinem/rust-cache@v2
-        if: steps.scope.outputs.rust == 'true'
+      - name: Restore shared main Rust cache (read-only on PRs)
+        uses: swatinem/rust-cache@v2
+        if: steps.scope.outputs.mode != 'none'
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
 
       - name: Install Linux dependencies
-        if: steps.scope.outputs.rust == 'true'
+        if: steps.scope.outputs.mode == 'workspace'
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
-      - name: Run Rust tests
-        if: steps.scope.outputs.rust == 'true'
+      - name: Run Core tests in both modes (sync-only changes)
+        if: steps.scope.outputs.mode == 'sync'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-core --locked
+          cargo test -p aquilum-core --features sync-engine --locked
+
+      - name: Run full Rust workspace and sync-engine tests
+        if: steps.scope.outputs.mode == 'workspace'
         working-directory: aquilum-app
         shell: bash
         run: |
           set -euo pipefail
           cargo test --workspace --locked
           cargo test -p aquilum-core --features sync-engine --locked
+
+  seed-rust-cache:
+    name: Seed shared Rust cache for future PRs
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore/save default-branch Rust cache
+        id: cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: true
+      - name: Install dependencies only on cache miss
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Compile cached tests without running them
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --workspace --locked --no-run
+          cargo test -p aquilum-core --features sync-engine --locked --no-run
+      - name: Cache observation
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          echo "Shared Rust cache exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Only the main branch can save the shared cache; PRs restore but never upload." >> "$GITHUB_STEP_SUMMARY"
