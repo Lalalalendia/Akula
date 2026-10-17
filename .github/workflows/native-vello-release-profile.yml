@@ -1,0 +1,98 @@
+name: Native Vello release stage profile
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/single_threaded.rs'
+      - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/multi_threaded.rs'
+      - 'aquilum-app/native/src/app/tests/perf/vello_release.rs'
+      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - '.github/scripts/summarize-vello-profile.py'
+      - '.github/workflows/native-vello-release-profile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-vello-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  profile:
+    name: Release Vello coarse/fine attribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache release Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-release-probe-v1
+          cache-workspace-crates: true
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record runner, CPU flags and locked source
+        shell: bash
+        run: |
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            echo "RUNNER_OS=$RUNNER_OS"
+            echo "RUNNER_NAME=$RUNNER_NAME"
+            grep -m1 'model name' /proc/cpuinfo || true
+            grep -m1 'flags' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee vello-release-env.txt
+      - name: Untraced release-mode serial/parallel ABBA and strict pixel parity
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/vello-untraced.log"
+          test "$(grep -c 'VELLO_RELEASE case=' "$GITHUB_WORKSPACE/vello-untraced.log")" -eq 8
+          test "$(grep -c 'VELLO_RELEASE_PARITY case=' "$GITHUB_WORKSPACE/vello-untraced.log")" -eq 4
+      - name: Capture release-mode Vello path phases
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_TRACE: ${{ github.workspace }}/vello-release-trace.json
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/vello-traced.log"
+          test "$(grep -c 'VELLO_RELEASE case=' "$GITHUB_WORKSPACE/vello-traced.log")" -eq 8
+          test "$(grep -c 'VELLO_RELEASE_PARITY case=' "$GITHUB_WORKSPACE/vello-traced.log")" -eq 4
+          test -s "$AQ_TRACE"
+      - name: Summarize nonadditive coarse, glyph and fine wall timing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/summarize-vello-profile.py
+          python3 .github/scripts/summarize-vello-profile.py \
+            vello-release-trace.json vello-untraced.log vello-traced.log \
+            | tee "$GITHUB_STEP_SUMMARY"
+          test -s vello-release-summary.md
+      - name: Retain reproducible trace, stage medians and CPU metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-release-profile-${{ github.sha }}
+          path: |
+            vello-release-env.txt
+            vello-untraced.log
+            vello-traced.log
+            vello-release-trace.json
+            vello-release-summary.md
+          if-no-files-found: warn
+          retention-days: 21
