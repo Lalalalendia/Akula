@@ -27,7 +27,7 @@ pub(crate) struct PinnedReadOnlyRoot {
 
 /// Identity of an opened file descriptor / HANDLE, not a pathname lookup.
 /// Never treat this value alone as an authorization to mutate a document.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct PinnedFileIdentity {
     pub device: u64,
     pub file: u64,
