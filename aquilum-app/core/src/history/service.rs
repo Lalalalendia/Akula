@@ -1236,6 +1236,80 @@ mod tests {
     }
 
     #[test]
+    fn history_recovery_manifest_survives_state_loss_and_verifies_all_version_bytes() {
+        use super::{HistoryFault, PROCESS_HISTORY_FILES};
+        let fixture = Fixture::new();
+        let first = fixture.service();
+        let old = fixture.vault.join("Durable.md");
+        let new = fixture.vault.join("Durable-new.md");
+        fixture.save(&first, &old, "first version", Source::Agent);
+        fixture.save(&first, &old, "second version", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+
+        first.fail_once(HistoryFault::MoveAfterOneFile);
+        assert!(first.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        assert!(crate::history::recovery::pending(&fixture.vault).unwrap());
+
+        // Simulate process restart by discarding only THIS transfer's
+        // process-local quarantine, not other concurrent tests' entries.
+        let mut process = PROCESS_HISTORY_FILES.lock().unwrap();
+        process.blocked.remove(&crate::search::paths::identity(&old));
+        process.blocked.remove(&crate::search::paths::identity(&new));
+        drop(process);
+        let reopened = fixture.service();
+        assert_eq!(reopened.page(&|| fixture.roots(), &new, 0, 10).total, 0);
+        assert_eq!(
+            reopened.try_saved(&|| fixture.roots(), &new, write("forbidden", Source::Agent, "hash", None))
+                .unwrap_err().action,
+            "history relocation pending"
+        );
+        assert!(reopened.maintain_retention(&fixture.vault, 30).is_err());
+
+        let target = fixture.history_of("Durable-new.md");
+        let moved = fs::read_dir(&target).unwrap().next().unwrap().unwrap().path();
+        let saved = fs::read(&moved).unwrap();
+        fs::remove_file(&moved).unwrap();
+
+        // Source may be absent or incomplete: it is NEVER evidence of
+        // completion unless all recorded filenames and BLAKE3 digests match.
+        assert!(reopened.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        assert!(crate::history::recovery::pending(&fixture.vault).unwrap());
+        fs::write(&moved, &saved).unwrap();
+
+        reopened.try_moved(&|| fixture.roots(), &old, &new).unwrap();
+        assert!(!crate::history::recovery::pending(&fixture.vault).unwrap());
+        assert_eq!(reopened.page(&|| fixture.roots(), &new, 0, 10).total, 2);
+        assert!(!fixture.history_of("Durable.md").exists());
+        assert!(reopened.maintain_retention(&fixture.vault, 0).is_ok());
+    }
+
+    #[test]
+    fn history_corrupt_recovery_marker_denies_reopened_core() {
+        use super::{HistoryFault, PROCESS_HISTORY_FILES};
+        let fixture = Fixture::new();
+        let first = fixture.service();
+        let old = fixture.vault.join("Broken.md");
+        let new = fixture.vault.join("Broken-new.md");
+        fixture.save(&first, &old, "version", Source::Agent);
+        fs::rename(&old, &new).unwrap();
+        first.fail_once(HistoryFault::MoveBefore);
+        assert!(first.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        let marker = crate::history::recovery::marker_path(&fixture.vault);
+        fs::write(&marker, b"{not-json").unwrap();
+
+        let mut process = PROCESS_HISTORY_FILES.lock().unwrap();
+        process.blocked.remove(&crate::search::paths::identity(&old));
+        process.blocked.remove(&crate::search::paths::identity(&new));
+        drop(process);
+        let second = fixture.service();
+        assert!(crate::history::recovery::pending(&fixture.vault).is_err());
+        assert!(second.page(&|| fixture.roots(), &new, 0, 10).versions.is_empty());
+        assert!(second.try_saved(&|| fixture.roots(), &new, write("blocked", Source::Agent, "hash", None)).is_err());
+        assert!(second.try_moved(&|| fixture.roots(), &old, &new).is_err());
+        assert!(marker.exists(), "corrupt recovery marker must never be deleted automatically");
+    }
+
+    #[test]
     fn history_move_failure_does_not_retarget_cached_version_path() {
         use super::HistoryFault;
         let fixture = Fixture::new();
