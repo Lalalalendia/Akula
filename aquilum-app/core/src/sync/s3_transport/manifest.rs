@@ -269,6 +269,21 @@ fn accept_verified_revision(
     Ok(())
 }
 
+/// Proof by immutable revision-reference inclusion. Every predecessor entry
+/// (including tombstones and both sides of a conflict) must still appear in
+/// the successor with precisely the same document ID, BLAKE3 JSON digest and
+/// blob size. This check alone does NOT verify content bytes; it is valid only
+/// after the current manifest's full DAG/blob readback has already succeeded.
+fn assert_revision_refs_retained(
+    parent: &BTreeMap<crate::sync::RevisionId, S3RevisionRefV1>,
+    child: &BTreeMap<crate::sync::RevisionId, S3RevisionRefV1>,
+) -> Result<(), S3HeadError> {
+    if !parent.iter().all(|(id, original)| child.get(id) == Some(original)) {
+        return Err(S3HeadError::InvalidManifest);
+    }
+    Ok(())
+}
+
 impl AwsS3ProbeClient {
     async fn fetch_verified_revision(
         &self, reference: S3RevisionRefV1,
@@ -426,14 +441,7 @@ impl AwsS3ProbeClient {
     ) -> Result<(), S3HeadError> {
         let old = self.revision_index(parent).await?;
         let new = self.revision_index(child).await?;
-        for (id, original) in old {
-            if new.get(&id) != Some(&original) {
-                // A missing, modified or duplicate ancestor is a hard hold,
-                // even when the proposed manifest has a valid parent hash.
-                return Err(S3HeadError::InvalidManifest);
-            }
-        }
-        Ok(())
+        assert_revision_refs_retained(&old, &new)
     }
 
     /// Root read is protected by HEAD/GET If-Match/HEAD; referent's exact
@@ -462,7 +470,12 @@ impl AwsS3ProbeClient {
             let (Some(parent_id), Some(parent_hash)) = (
                 manifest.previous_manifest_id, manifest.previous_manifest_blake3.as_deref()
             ) else { return Err(S3HeadError::InvalidManifest); };
-            let previous = self.read_verified_manifest(parent_id, parent_hash).await?;
+            // The CURRENT manifest already passed full JSON/DAG/blob readback.
+            // Re-fetch the immutable predecessor envelope by its pinned BLAKE3,
+            // then verify the exact reference inclusion through strict shard
+            // digests. Re-hashing all predecessor blobs would only repeat the
+            // same proof and makes N generations increasingly expensive.
+            let previous = self.read_manifest_envelope(parent_id, parent_hash).await?;
             if !manifest.is_successor_of(&previous, parent_hash) {
                 return Err(S3HeadError::InvalidManifest);
             }
@@ -492,6 +505,14 @@ impl AwsS3ProbeClient {
             return Err(S3HeadError::TooManyAncestors);
         }
         let mut cursor = head.manifest.clone();
+        // Anchor the caller's pinned manifest to immutable cloud bytes even
+        // when this method is invoked directly with a constructed value.
+        let cursor_digest = cursor.digest(&self.keyspace)?;
+        let root = self.read_manifest_envelope(cursor.manifest_id, &cursor_digest).await?;
+        if root != cursor {
+            return Err(S3HeadError::InvalidManifest);
+        }
+        let mut cursor_refs = self.revision_index(&cursor).await?;
         let mut visited = BTreeSet::new();
         let mut hops = 0;
         while let (Some(id), Some(hash)) = (
@@ -500,12 +521,19 @@ impl AwsS3ProbeClient {
             if hops == max_hops || !visited.insert(id) {
                 return Err(S3HeadError::TooManyAncestors);
             }
-            let parent = self.read_verified_manifest(id, hash).await?;
+            // Authenticate the immutable manifest *envelope* and each shard,
+            // not every previous content blob. The current complete snapshot
+            // was verified upstream and all predecessor refs must survive
+            // unchanged into it. Reuse the child index for the next edge,
+            // fetching each ancestral index only once.
+            let parent = self.read_manifest_envelope(id, hash).await?;
             if !cursor.is_successor_of(&parent, hash) {
                 return Err(S3HeadError::InvalidManifest);
             }
-            self.ensure_ancestor_revisions_retained(&parent, &cursor).await?;
+            let parent_refs = self.revision_index(&parent).await?;
+            assert_revision_refs_retained(&parent_refs, &cursor_refs)?;
             cursor = parent;
+            cursor_refs = parent_refs;
             hops += 1;
         }
         Ok(hops)
