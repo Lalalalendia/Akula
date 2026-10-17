@@ -145,6 +145,14 @@ impl<'a> RegisteredReadAdmission<'a> {
         &self.root_path
     }
 
+    /// Registry roots for negative app-data location checks. Read fresh from
+    /// this Core, and never treat the resulting list as durable authority.
+    pub(crate) fn registered_workspace_roots(&self) -> Result<Vec<PathBuf>, VaultPortError> {
+        self.check_root()?;
+        self.core.ui_state.workspace_roots()
+            .map_err(|_| VaultPortError::PermissionDenied)
+    }
+
     pub(crate) fn recheck_registered_root(&self) -> Result<(), VaultPortError> {
         self.check_root()
     }
