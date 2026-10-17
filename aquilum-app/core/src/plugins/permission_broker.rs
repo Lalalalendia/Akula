@@ -9,6 +9,8 @@ use super::{manifest::valid_domain, Capability, PluginManifest};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Mutex;
+use std::path::Path;
+use super::permission_store::PermissionGrantStore;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -19,6 +21,15 @@ impl VaultId {
     pub fn new_for_host() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Stable identity from trusted host app-data; never from guest code.
+    pub fn from_uuid_for_host(id: Uuid) -> Self {
+        Self(id)
+    }
+
+    pub fn as_uuid(self) -> Uuid {
+        self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -28,6 +39,14 @@ impl NoteId {
     /// The host must bind this ID to its actual vault document registry.
     pub fn new_for_host() -> Self {
         Self(Uuid::new_v4())
+    }
+
+    pub fn from_uuid_for_host(id: Uuid) -> Self {
+        Self(id)
+    }
+
+    pub fn as_uuid(self) -> Uuid {
+        self.0
     }
 }
 
@@ -201,6 +220,11 @@ pub enum BrokerError {
     UndeclaredCapability,
     Denied,
     StaleLease,
+    StoreUnavailable,
+    StoreFailure,
+    CorruptStore,
+    UnsupportedStore,
+    InvalidExpiry,
     RevisionExhausted,
     StatePoisoned,
 }
@@ -214,9 +238,10 @@ impl fmt::Display for BrokerError {
 impl std::error::Error for BrokerError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct Grant {
-    capability: Capability,
-    scope: GrantScope,
+pub(super) struct Grant {
+    pub(super) capability: Capability,
+    pub(super) scope: GrantScope,
+    pub(super) expires_at: Option<i64>,
 }
 
 struct RegisteredInstance {
@@ -228,11 +253,13 @@ struct RegisteredInstance {
     network_domains: Vec<NetworkHost>,
     grants: Vec<Grant>,
     revision: u64,
+    storage_epoch: u64,
 }
 
 #[derive(Default)]
 struct BrokerState {
     instances: HashMap<PluginInstanceHandle, RegisteredInstance>,
+    store: Option<PermissionGrantStore>,
 }
 
 #[derive(Default)]
@@ -256,6 +283,17 @@ pub struct AuthorizationLease {
 impl PermissionBroker {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Opens a dedicated host app-data SQLite store, never inside a synced vault.
+    pub fn open_persistent(path: &Path) -> Result<Self, BrokerError> {
+        let store = PermissionGrantStore::open(path)?;
+        Ok(Self {
+            state: Mutex::new(BrokerState {
+                instances: HashMap::new(),
+                store: Some(store),
+            }),
+        })
     }
 
     /// TRUSTED HOST ONLY. Caller must have validated package origin and supplied
@@ -290,19 +328,34 @@ impl PermissionBroker {
             .iter()
             .map(|s| NetworkHost::parse_declared_host(s))
             .collect::<Result<Vec<_>, _>>()?;
+        let identity = PluginIdentity {
+            plugin_id: manifest.id.clone(),
+            publisher: manifest.publisher.clone(),
+            artifact_digest,
+        };
+        let (storage_epoch, stored_grants) = match state.store.as_ref() {
+            Some(store) => store.load_grants(vault, &identity)?,
+            None => (0, Vec::new()),
+        };
+        // Stored authority must still fit the current, pinned manifest.
+        for grant in &stored_grants {
+            if !declarations.contains(&capability_tag(grant.capability))
+                || !scope_is_valid(grant.capability, &grant.scope)
+                || matches!(&grant.scope, GrantScope::NetworkHost(host) if !network_domains.contains(host))
+            {
+                return Err(BrokerError::CorruptStore);
+            }
+        }
         state.instances.insert(
             handle,
             RegisteredInstance {
                 vault,
-                identity: PluginIdentity {
-                    plugin_id: manifest.id.clone(),
-                    publisher: manifest.publisher.clone(),
-                    artifact_digest,
-                },
+                identity,
                 declarations,
                 network_domains,
-                grants: Vec::new(),
+                grants: stored_grants,
                 revision: 0,
+                storage_epoch,
             },
         );
         Ok(handle)
@@ -339,7 +392,8 @@ impl PermissionBroker {
                 return Err(BrokerError::UndeclaredCapability);
             }
         }
-        let grant = Grant { capability, scope };
+        // Existing host-approved grants are session only.
+        let grant = Grant { capability, scope, expires_at: None };
         if !record.grants.contains(&grant) {
             let next_revision = record
                 .revision
@@ -348,6 +402,50 @@ impl PermissionBroker {
             record.grants.push(grant);
             record.revision = next_revision;
         }
+        Ok(())
+    }
+
+    /// TRUSTED CONSENT PATH. Persists first, then authorizes in memory.
+    /// `expires_at` is optional UTC Unix seconds; this does not verify the
+    /// publisher or obtain user consent (installer and UI are later stages).
+    pub fn grant_host_approved_persistent(
+        &self,
+        handle: PluginInstanceHandle,
+        capability: Capability,
+        scope: GrantScope,
+        expires_at: Option<i64>,
+    ) -> Result<(), BrokerError> {
+        if !scope_is_valid(capability, &scope) {
+            return Err(BrokerError::InvalidScope);
+        }
+        if expires_at.is_some_and(|until| until <= unix_seconds().unwrap_or(i64::MAX)) {
+            return Err(BrokerError::InvalidExpiry);
+        }
+        let mut state = self.state.lock().map_err(|_| BrokerError::StatePoisoned)?;
+        let BrokerState { instances, store } = &mut *state;
+        let record = instances.get_mut(&handle).ok_or(BrokerError::UnknownInstance)?;
+        if !record.declarations.contains(&capability_tag(capability)) {
+            return Err(BrokerError::UndeclaredCapability);
+        }
+        if let GrantScope::NetworkHost(host) = &scope {
+            if !record.network_domains.contains(host) {
+                return Err(BrokerError::UndeclaredCapability);
+            }
+        }
+        let store = store.as_mut().ok_or(BrokerError::StoreUnavailable)?;
+        if store.epoch(record.vault, &record.identity)? != record.storage_epoch {
+            return Err(BrokerError::StaleLease);
+        }
+        let grant = Grant { capability, scope, expires_at };
+        let next_revision = record.revision.checked_add(1).ok_or(BrokerError::RevisionExhausted)?;
+        let next_epoch = store.persist_grant(record.vault, &record.identity, &grant)?;
+        // If the DB rejects the transaction, no in-memory permission changes.
+        record.storage_epoch = next_epoch;
+        record.grants.retain(|prior| {
+            !(prior.capability == grant.capability && prior.scope == grant.scope)
+        });
+        record.grants.push(grant);
+        record.revision = next_revision;
         Ok(())
     }
 
@@ -360,6 +458,7 @@ impl PermissionBroker {
     ) -> Result<AuthorizationLease, BrokerError> {
         let state = self.state.lock().map_err(|_| BrokerError::StatePoisoned)?;
         let record = state.instances.get(&handle).ok_or(BrokerError::UnknownInstance)?;
+        verify_store_epoch(state.store.as_ref(), record)?;
         check_request(record, context, capability, resource)?;
         Ok(AuthorizationLease {
             instance: handle,
@@ -383,6 +482,7 @@ impl PermissionBroker {
             .instances
             .get(&lease.instance)
             .ok_or(BrokerError::UnknownInstance)?;
+        verify_store_epoch(state.store.as_ref(), record)?;
         if lease.context != current_context
             || lease.revision != record.revision
             || lease.artifact_digest != record.identity.artifact_digest
@@ -399,11 +499,18 @@ impl PermissionBroker {
         handle: PluginInstanceHandle,
     ) -> Result<(), BrokerError> {
         let mut state = self.state.lock().map_err(|_| BrokerError::StatePoisoned)?;
-        let record = state.instances.get_mut(&handle).ok_or(BrokerError::UnknownInstance)?;
-        let next_revision = record
-            .revision
-            .checked_add(1)
-            .ok_or(BrokerError::RevisionExhausted)?;
+        let BrokerState { instances, store } = &mut *state;
+        let record = instances.get_mut(&handle).ok_or(BrokerError::UnknownInstance)?;
+        let next_revision = record.revision.checked_add(1).ok_or(BrokerError::RevisionExhausted)?;
+        let next_epoch = if let Some(store) = store.as_mut() {
+            if store.epoch(record.vault, &record.identity)? != record.storage_epoch {
+                return Err(BrokerError::StaleLease);
+            }
+            store.revoke_all(record.vault, &record.identity)?
+        } else {
+            record.storage_epoch
+        };
+        record.storage_epoch = next_epoch;
         record.grants.clear();
         record.revision = next_revision;
         Ok(())
@@ -419,6 +526,26 @@ impl PermissionBroker {
         }
         Ok(())
     }
+}
+
+fn unix_seconds() -> Result<i64, BrokerError> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| BrokerError::InvalidExpiry)?;
+    i64::try_from(elapsed.as_secs()).map_err(|_| BrokerError::InvalidExpiry)
+}
+
+fn verify_store_epoch(
+    store: Option<&PermissionGrantStore>,
+    record: &RegisteredInstance,
+) -> Result<(), BrokerError> {
+    if let Some(store) = store {
+        if store.epoch(record.vault, &record.identity)? != record.storage_epoch {
+            return Err(BrokerError::StaleLease);
+        }
+    }
+    Ok(())
 }
 
 fn check_request(
@@ -439,7 +566,13 @@ fn check_request(
     if !record
         .grants
         .iter()
-        .any(|grant| grant.capability == capability && grant_allows(&grant.scope, resource, context))
+        .any(|grant| {
+            grant.capability == capability
+                && grant.expires_at.is_none_or(|until| {
+                    unix_seconds().is_ok_and(|now| now < until)
+                })
+                && grant_allows(&grant.scope, resource, context)
+        })
     {
         return Err(BrokerError::Denied);
     }

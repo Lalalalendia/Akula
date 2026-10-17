@@ -6,6 +6,7 @@
 
 mod manifest;
 mod permission_broker;
+mod permission_store;
 
 pub use manifest::{
     ApiRequirement, Capability, HostPlatform, ManifestError, PermissionRequests, PluginDependency,
@@ -21,6 +22,9 @@ pub use permission_broker::{
 
 #[cfg(test)]
 mod broker_tests;
+
+#[cfg(test)]
+mod store_tests;
 
 #[cfg(test)]
 mod tests;
