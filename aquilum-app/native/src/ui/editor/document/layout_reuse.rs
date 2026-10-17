@@ -68,7 +68,10 @@ impl Document {
     /// Copy only plain, non-interactive paragraph layouts. Ineligible blocks
     /// are always shaped through the normal Markdown/Parley pipeline.
     pub(crate) fn trial_snapshot(&self, styles: &StyleSet) -> Option<Snapshot> {
-        if !self.placed || self.dirty.is_some() || self.edits.is_some()
+        if !self.placed || self.dirty.is_some()
+            // report_edits() sets Some(Vec::new()) for normal clean editors.
+            // Reject real buffered edits, not an empty reporting queue.
+            || self.edits.as_ref().is_some_and(|edits| !edits.is_empty())
             || self.editing.is_some() || self.text.len() > MAX_WINDOW_BYTES
         {
             return None;
