@@ -1,0 +1,105 @@
+name: Reader weighted-layout ABBA
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/reader/page/layout.rs"
+      - "aquilum-app/native/src/reader/page/tests.rs"
+      - ".github/workflows/reader-weighted-layout-abba.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-weighted-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abba:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Generate copyright-free shape-matched EPUB samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/reader_epub_shape.py --out "$RUNNER_TEMP/reader-epub-shapes" | tee weighted-layout-fixtures.log
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            lscpu | grep -E 'Model name:|CPU\(s\):'
+            rustc --version
+            cargo --version
+          } | tee weighted-layout-environment.log
+
+      - name: Run paired fixed-count versus weighted Rayon layout and fidelity
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_EPUB_SHAPE_DIR: ${{ runner.temp }}/reader-epub-shapes
+        run: |
+          set -euo pipefail
+          cargo test --locked --release -p aquilum-native --bin aquilum-native \
+            weighted_layout_abba_profile -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/weighted-layout-abba.log"
+          test "$(grep -c 'WEIGHTED_LAYOUT_RESULT mode=' "$GITHUB_WORKSPACE/weighted-layout-abba.log")" -eq 3
+
+      - name: Summarize the measured outcome without performance gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, os
+          content = Path("weighted-layout-abba.log").read_text()
+          rows = ["## Real Reader, same-process fixed vs weighted Rayon A/B",
+                  "", "| Shape | Fixed ms | Weighted ms | Old/new |",
+                  "|---|---:|---:|---:|"]
+          found = {}
+          for mode, old, new, factor in re.findall(
+              r"WEIGHTED_LAYOUT_RESULT mode=(\S+) sections=\d+ "
+              r"fixed_ms=([0-9.]+) weighted_ms=([0-9.]+) speedup=([0-9.]+)",
+              content,
+          ):
+              assert mode not in found, f"duplicate mode {mode}"
+              found[mode] = (float(old), float(new), float(factor))
+          assert set(found) == {"single-br", "single-p", "split-br"}, found
+          for mode in ("single-br", "single-p", "split-br"):
+              old, new, factor = found[mode]
+              rows.append(f"| {mode} | {old:.2f} | {new:.2f} | {factor:.3f}x |")
+          rows += ["", "All output line metrics, breaks, image sizes, item order, and page counts",
+                   "are compared for exact equality before A/B sampling.",
+                   "Synthetic EPUB 2 fixture; not GUI first-paint or FPS.",
+                   "Only text-block scheduling changed; no HTML/CFI rewrite.",
+                   "CPU/runner and all 14 samples per version are preserved in the log."]
+          summary = "\n".join(rows) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+      - name: Preserve raw timings and runner identity
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-weighted-layout-${{ github.sha }}
+          path: |
+            weighted-layout-abba.log
+            weighted-layout-fixtures.log
+            weighted-layout-environment.log
+          retention-days: 21
