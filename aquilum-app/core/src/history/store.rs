@@ -75,7 +75,17 @@ pub fn write_version(
     snapshot: &Snapshot,
 ) -> Result<PathBuf, FileCommandError> {
     let label = snapshot.source.file_label();
-    let path = free_name(dir, millis(snapshot.at), |at| {
+    // Distinct source labels can otherwise share a millisecond, causing history
+    // ordering to disagree with the order in which versions were written.
+    let taken = versions(dir)
+        .into_iter()
+        .filter(|version| version.device == device)
+        .map(|version| version.at_ms)
+        .collect::<std::collections::HashSet<_>>();
+    let first_available = (millis(snapshot.at)..)
+        .find(|at| !taken.contains(at))
+        .unwrap_or_else(|| millis(snapshot.at));
+    let path = free_name(dir, first_available, |at| {
         format!("{at:013}_{device}_{label}{VERSION_EXTENSION}")
     });
     fs::create_dir_all(dir)?;
@@ -320,6 +330,22 @@ mod tests {
         assert_eq!(dir.join(&found[2].id), clash);
         assert_eq!(found[2].at_ms, 20_001, "совпавшее имя сдвигает миллисекунду, а не перезаписывает файл");
         assert_eq!(latest_text(&dir).as_deref(), Some("тот же миг"));
+    }
+
+    #[test]
+    fn different_sources_from_one_device_in_one_millisecond_keep_write_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let dir = history_dir(directory.path(), Path::new("same-millisecond.md"));
+        let at = UNIX_EPOCH + Duration::from_millis(5);
+        let make = |text: &str, source| Snapshot { text: text.to_owned(), source, at };
+        let first = write_version(&dir, "dev", &make("first", Source::Agent)).unwrap();
+        let second = write_version(&dir, "dev", &make("second", Source::Me)).unwrap();
+        let found = versions(&dir);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].id, first.file_name().unwrap().to_string_lossy());
+        assert_eq!(found[1].id, second.file_name().unwrap().to_string_lossy());
+        assert_eq!((found[0].at_ms, found[1].at_ms), (5, 6));
+        assert_eq!(latest_text(&dir).as_deref(), Some("second"));
     }
 
     #[test]
