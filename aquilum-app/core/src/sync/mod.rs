@@ -26,6 +26,7 @@ mod pinned_read;
 mod pinned_windows;
 mod protocol;
 mod provider;
+mod s3;
 mod upload;
 mod vault;
 
@@ -53,6 +54,7 @@ pub use provider::{
     collect_verified_listing, ProviderCapabilities, RemoteObject, RemotePage, RemotePrecondition,
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
+pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
