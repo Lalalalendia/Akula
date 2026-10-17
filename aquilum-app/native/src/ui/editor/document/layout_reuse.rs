@@ -9,6 +9,16 @@ use masonry::parley::Layout;
 use super::super::markdown::{Block, Decor, Fonts};
 use super::{Document, Fold};
 
+thread_local! {
+    static TRIAL_RESTORED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Actual layout hits, not merely offered snapshots. Opt-in UI tests reset
+/// this counter before each complete tab switch.
+pub(crate) fn take_trial_restore_count() -> usize {
+    TRIAL_RESTORED.with(|slot| slot.replace(0))
+}
+
 const MAX_WINDOW_BYTES: usize = 512 * 1024;
 const MAX_PARAGRAPHS: usize = 32;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
@@ -132,6 +142,7 @@ impl Document {
             reused += 1;
         }
         if reused != 0 {
+            TRIAL_RESTORED.with(|slot| slot.set(slot.get().saturating_add(reused)));
             // Preserve the validated width so that first layout won't
             // gratuitously rewrap layouts that already use that width.
             self.width = width;
