@@ -869,6 +869,63 @@ mod tests {
     }
 
     #[test]
+    fn immutable_ancestry_rejects_dropped_or_rewritten_history_without_blobs() {
+        let document = DocumentId::new();
+        let root = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            document_id: document,
+            revision_blake3: blake3::hash(b"root json").to_hex().to_string(),
+            blob_bytes: Some(7),
+        };
+        let deletion = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            document_id: document,
+            revision_blake3: blake3::hash(b"tombstone json").to_hex().to_string(),
+            blob_bytes: None,
+        };
+        let added = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            document_id: document,
+            revision_blake3: blake3::hash(b"new json").to_hex().to_string(),
+            blob_bytes: Some(15),
+        };
+        let old: BTreeMap<_, _> = [root.clone(), deletion.clone()]
+            .into_iter().map(|r| (r.revision_id, r)).collect();
+        let valid: BTreeMap<_, _> = [root.clone(), deletion.clone(), added]
+            .into_iter().map(|r| (r.revision_id, r)).collect();
+        assert!(assert_revision_refs_retained(&old, &valid).is_ok());
+
+        let no_tombstone: BTreeMap<_, _> = [root.clone()]
+            .into_iter().map(|r| (r.revision_id, r)).collect();
+        assert!(matches!(
+            assert_revision_refs_retained(&old, &no_tombstone),
+            Err(S3HeadError::InvalidManifest)
+        ));
+        for changed in [
+            S3RevisionRefV1 { document_id: DocumentId::new(), ..root.clone() },
+            S3RevisionRefV1 {
+                revision_blake3: blake3::hash(b"rewritten json").to_hex().to_string(),
+                ..root.clone()
+            },
+            S3RevisionRefV1 { blob_bytes: Some(8), ..root.clone() },
+        ] {
+            let mut child = valid.clone();
+            child.insert(root.revision_id, changed);
+            assert!(matches!(
+                assert_revision_refs_retained(&old, &child),
+                Err(S3HeadError::InvalidManifest)
+            ));
+        }
+        // Historical tombstones must not become content or disappear.
+        let mut rewrote_tombstone = valid;
+        rewrote_tombstone.get_mut(&deletion.revision_id).unwrap().blob_bytes = Some(9);
+        assert!(matches!(
+            assert_revision_refs_retained(&old, &rewrote_tombstone),
+            Err(S3HeadError::InvalidManifest)
+        ));
+    }
+
+    #[test]
     fn pinned_10k_revision_pages_are_stable_and_reject_cross_snapshot_cursors() {
         let doc = DocumentId::new();
         let mut ids: Vec<_> = (0..10_000).map(|_| RevisionId::new()).collect();
@@ -1295,5 +1352,22 @@ mod tests {
             BTreeSet::from([winner_revision.id, loser_revision.id]));
         assert_eq!(second.get_bounded(&loser_blob, 128).await.unwrap().bytes,
             b"bob edits while offline");
+
+        // A current gen3 fully verified snapshot is not evidence that a
+        // rewritten gen2 manifest can still be trusted. Tamper only with
+        // test-bucket immutable gen2 bytes. The root's pinned parent digest
+        // MUST reject even same-length replacement.
+        let original_parent = winner.encode(&ns).unwrap();
+        first.client.put_object()
+            .bucket(&first.bucket)
+            .key(ns.immutable_manifest_key(id_winner))
+            .body(aws_sdk_s3::primitives::ByteStream::from(
+                vec![b'!'; original_parent.len()],
+            ))
+            .send().await.unwrap();
+        assert!(matches!(
+            second.read_verified_head().await,
+            Err(S3HeadError::IntegrityMismatch)
+        ));
     }
 }
