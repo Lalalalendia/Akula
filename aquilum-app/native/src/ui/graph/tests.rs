@@ -84,12 +84,17 @@ fn graph_scene_smoke_across_zoom_and_dpi() {
             assert_eq!(brush.image.height, (view.size.height * dpi).round() as u32);
             let pixels = view.surfaces.snapshot_rgba_for_test().expect("graph surface pixels");
             assert_eq!(pixels.len(), brush.image.width as usize * brush.image.height as usize * 4);
-            if zoom == 1.0 {
-                assert!(
-                    pixels.chunks_exact(4).any(|pixel| pixel != &pixels[0..4]),
-                    "the fitted graph must contain visible nodes and/or edges"
-                );
-            }
+            // Every zoom/DPI frame must contain a meaningful rendered graph,
+            // not just a valid-sized blank surface. A flat-colored or mostly
+            // empty frame cannot accidentally pass the PNG artifact gate.
+            let non_flat_pixels = pixels
+                .chunks_exact(4)
+                .filter(|pixel| *pixel != &pixels[..4])
+                .count();
+            assert!(
+                non_flat_pixels >= 100,
+                "blank or nearly blank graph: dpi={dpi}, zoom={zoom}, non-flat={non_flat_pixels}"
+            );
             if let Some(dir) = std::env::var_os("AQ_GRAPH_SCENE_DIR") {
                 std::fs::create_dir_all(&dir).expect("create screenshot directory");
                 let path = std::path::PathBuf::from(&dir).join(
