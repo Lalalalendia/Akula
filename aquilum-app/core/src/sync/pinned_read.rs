@@ -25,6 +25,20 @@ pub(crate) struct PinnedReadOnlyRoot {
     root: std::fs::File,
 }
 
+/// Identity of an opened file descriptor / HANDLE, not a pathname lookup.
+/// Never treat this value alone as an authorization to mutate a document.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PinnedFileIdentity {
+    pub device: u64,
+    pub file: u64,
+}
+
+pub(super) struct IdentifiedRead {
+    pub snapshot: LocalFileSnapshot,
+    /// None on the existing generic read path; Some only for checked preimages.
+    pub identity: Option<PinnedFileIdentity>,
+}
+
 impl PinnedReadOnlyRoot {
     /// Stable metadata for the live pinned handle, not a later path lookup.
     /// This supplies host registration checks, never sync write authority.
@@ -85,6 +99,26 @@ impl PinnedReadOnlyRoot {
         relative: &SyncRelativePath,
         max_bytes: u64,
     ) -> Result<LocalFileSnapshot, VaultPortError> {
+        Ok(self.read_inner(relative, max_bytes, false)?.snapshot)
+    }
+
+    /// Preimage capture requires a stable opened-file ID and exactly one hard
+    /// link; a second pathname to the same inode must not inherit authority.
+    /// This remains *read-only*, and does not provide an atomic filesystem lock.
+    pub(super) fn read_identified_bounded(
+        &self,
+        relative: &SyncRelativePath,
+        max_bytes: u64,
+    ) -> Result<IdentifiedRead, VaultPortError> {
+        self.read_inner(relative, max_bytes, true)
+    }
+
+    fn read_inner(
+        &self,
+        relative: &SyncRelativePath,
+        max_bytes: u64,
+        require_identity: bool,
+    ) -> Result<IdentifiedRead, VaultPortError> {
         const HARD_LIMIT: u64 = 32 * 1024 * 1024;
         if max_bytes == 0 || max_bytes > HARD_LIMIT {
             return Err(VaultPortError::PermissionDenied);
@@ -114,6 +148,15 @@ impl PinnedReadOnlyRoot {
             if !before.is_file() {
                 return Err(VaultPortError::UnsafePath);
             }
+            use std::os::unix::fs::MetadataExt;
+            let identity = if require_identity {
+                if before.ino() == 0 || before.nlink() != 1 {
+                    return Err(VaultPortError::UnsafePath);
+                }
+                Some(PinnedFileIdentity { device: before.dev(), file: before.ino() })
+            } else {
+                None
+            };
             if before.len() > max_bytes {
                 return Err(VaultPortError::PermissionDenied);
             }
@@ -129,12 +172,17 @@ impl PinnedReadOnlyRoot {
             if !after.is_file() || before.len() != after.len()
                 || before.modified().ok() != after.modified().ok()
                 || after.len() != bytes.len() as u64
+                || identity.is_some_and(|id|
+                    after.dev() != id.device || after.ino() != id.file || after.nlink() != 1)
             {
                 return Err(VaultPortError::FileChanged);
             }
-            Ok(LocalFileSnapshot {
-                content_hash: blake3::hash(&bytes).to_hex().to_string(),
-                bytes,
+            Ok(IdentifiedRead {
+                snapshot: LocalFileSnapshot {
+                    content_hash: blake3::hash(&bytes).to_hex().to_string(),
+                    bytes,
+                },
+                identity,
             })
         }
         #[cfg(windows)]
@@ -151,6 +199,16 @@ impl PinnedReadOnlyRoot {
             if !before.is_file() {
                 return Err(VaultPortError::UnsafePath);
             }
+            let identity = if require_identity {
+                let (device, file, links) =
+                    super::pinned_windows::file_identity_with_links(&parent)?;
+                if links != 1 {
+                    return Err(VaultPortError::UnsafePath);
+                }
+                Some(PinnedFileIdentity { device: u64::from(device), file })
+            } else {
+                None
+            };
             if before.len() > max_bytes {
                 return Err(VaultPortError::PermissionDenied);
             }
@@ -168,14 +226,24 @@ impl PinnedReadOnlyRoot {
             {
                 return Err(VaultPortError::FileChanged);
             }
-            Ok(LocalFileSnapshot {
-                content_hash: blake3::hash(&bytes).to_hex().to_string(),
-                bytes,
+            if let Some(id) = identity {
+                let (device, file, links) =
+                    super::pinned_windows::file_identity_with_links(&parent)?;
+                if u64::from(device) != id.device || file != id.file || links != 1 {
+                    return Err(VaultPortError::FileChanged);
+                }
+            }
+            Ok(IdentifiedRead {
+                snapshot: LocalFileSnapshot {
+                    content_hash: blake3::hash(&bytes).to_hex().to_string(),
+                    bytes,
+                },
+                identity,
             })
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = (self, relative);
+            let _ = (self, relative, require_identity);
             Err(VaultPortError::PermissionDenied)
         }
     }

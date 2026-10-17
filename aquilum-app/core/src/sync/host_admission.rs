@@ -6,13 +6,32 @@
 //! This is NOT a VaultPort, protective receipt, or local mutation authority:
 //! no sync executor can create, replace, rename, delete or commit a baseline.
 
-use super::pinned_read::PinnedReadOnlyRoot;
+use super::pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
+use super::protection_store::{
+    ProtectionOutcome, ProtectionStoreError, SqliteProtectionStore, MAX_PROTECTED_ORIGINAL_BYTES,
+};
+use super::OperationId;
 use super::{LocalFileSnapshot, SyncRelativePath, VaultPortError};
 use crate::app_core::Core;
 use crate::documents::hub::SyncAdmissionError;
 use crate::search::paths::{canonical_path, same_path};
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
+
+/// Errors from a read-only source capture. None grants a write permission.
+#[derive(Debug)]
+pub(crate) enum BoundCaptureError {
+    Admission(VaultPortError),
+    Protection(ProtectionStoreError),
+    OriginalHashMismatch,
+}
+
+impl From<VaultPortError> for BoundCaptureError {
+    fn from(error: VaultPortError) -> Self { Self::Admission(error) }
+}
+impl From<ProtectionStoreError> for BoundCaptureError {
+    fn from(error: ProtectionStoreError) -> Self { Self::Protection(error) }
+}
 
 /// Not externally constructible, and deliberately has no mutation methods.
 #[allow(dead_code)]
@@ -62,6 +81,67 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(VaultPortError::FileChanged);
         }
         Ok(())
+    }
+
+    /// Capture a live, registered original into the durable SQLite store.
+    /// The editor stays reserved until a *second* pinned read proves the same
+    /// source file ID and bytes remain visible. Other processes can still race,
+    /// so this MUST NOT be used as a File Gate or overwrite authorization.
+    pub(crate) fn preserve_closed_original(
+        &self,
+        relative: &SyncRelativePath,
+        expected_hash: &str,
+        operation: OperationId,
+        store: &mut SqliteProtectionStore,
+    ) -> Result<ProtectionOutcome, BoundCaptureError> {
+        self.preserve_with_hook(relative, expected_hash, operation, store, || {})
+    }
+
+    fn preserve_with_hook(
+        &self,
+        relative: &SyncRelativePath,
+        expected_hash: &str,
+        operation: OperationId,
+        store: &mut SqliteProtectionStore,
+        before_store: impl FnOnce(),
+    ) -> Result<ProtectionOutcome, BoundCaptureError> {
+        // The database is provided by the trusted host and must not sit inside
+        // the sync root. This check is a *negative* safety check, not positive
+        // authentication of app-data ownership/permissions.
+        let storage = canonical_path(store.database_path());
+        if storage.starts_with(&self.root_path) {
+            return Err(VaultPortError::PermissionDenied.into());
+        }
+        self.check_root()?;
+        let target = self.root_path.join(relative.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&target)
+            .map_err(admission_error)?;
+        self.check_root()?;
+        let original = self.pinned.read_identified_bounded(
+            relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
+        if original.snapshot.content_hash != expected_hash {
+            return Err(BoundCaptureError::OriginalHashMismatch);
+        }
+        let file_identity = original.identity.ok_or(VaultPortError::PermissionDenied)?;
+        before_store();
+        self.check_root()?;
+        let result = store.store_bound_preimage(
+            operation, relative, expected_hash, &original.snapshot.bytes,
+            PinnedFileIdentity { device: self.initial.0, file: self.initial.1 },
+            file_identity,
+        )?;
+        self.check_root()?;
+        let fresh = self.pinned.read_identified_bounded(
+            relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
+        if fresh.identity != Some(file_identity)
+            || fresh.snapshot.content_hash != original.snapshot.content_hash
+            || fresh.snapshot.bytes != original.snapshot.bytes
+        {
+            // A durable preimage may already exist, but a changed file cannot
+            // receive any implied authorization through this result.
+            return Err(VaultPortError::FileChanged.into());
+        }
+        Ok(result)
     }
 
     /// A preflight only. Reserves a CLOSED editor session while reading, so
@@ -267,5 +347,146 @@ mod tests {
         assert!(guard.read_closed_preflight(
             &SyncRelativePath::parse("jump/private.md").unwrap(), 1024
         ).is_err());
+    }
+
+    fn protection_store(temp: &tempfile::TempDir) -> SqliteProtectionStore {
+        SqliteProtectionStore::open(&temp.path().join("appdata/protected.sqlite")).unwrap()
+    }
+
+    #[test]
+    fn live_preimage_survives_database_restart_with_bound_root_and_file_identity() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let bytes = "Глава 140. Русский текст 😀".as_bytes();
+        let note = note();
+        fs::write(root.join(note.as_str()), bytes).unwrap();
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let original_root = guard.initial;
+        let file_id = guard.pinned.read_identified_bounded(
+            &note, MAX_PROTECTED_ORIGINAL_BYTES as u64).unwrap().identity.unwrap();
+        {
+            let mut store = protection_store(&temp);
+            assert_eq!(
+                guard.preserve_closed_original(&note, &hash, operation, &mut store).unwrap(),
+                ProtectionOutcome::Stored
+            );
+            assert_eq!(
+                guard.preserve_closed_original(&note, &hash, operation, &mut store).unwrap(),
+                ProtectionOutcome::AlreadyStored
+            );
+        }
+        let store = protection_store(&temp);
+        let saved = store.read_bound_preimage(operation).unwrap().unwrap();
+        assert_eq!(saved.original.bytes, bytes);
+        assert_eq!(saved.original.path, note);
+        assert_eq!(saved.original.content_hash, hash);
+        assert_eq!(saved.root.device, original_root.0);
+        assert_eq!(saved.root.file, original_root.1);
+        assert_eq!(saved.file, file_id);
+        assert_eq!(fs::read(root.join(note.as_str())).unwrap(), bytes);
+    }
+
+    #[test]
+    fn preimage_capture_rejects_unexpected_hash_or_open_editor_without_backup() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let note = note();
+        let target = root.join(note.as_str());
+        fs::write(&target, b"original").unwrap();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let op = OperationId::new();
+
+        assert!(matches!(
+            guard.preserve_closed_original(&note, "wrong", op, &mut store),
+            Err(BoundCaptureError::OriginalHashMismatch)
+        ));
+        core.documents.open(&core, &target, 0).unwrap();
+        let digest = blake3::hash(b"original").to_hex().to_string();
+        assert!(matches!(
+            guard.preserve_closed_original(&note, &digest, op, &mut store),
+            Err(BoundCaptureError::Admission(VaultPortError::DirtyEditorBuffer))
+        ));
+        core.documents.release(&core, &target);
+        assert!(store.read_preimage(op).unwrap().is_none());
+        assert_eq!(fs::read(target).unwrap(), b"original");
+    }
+
+    #[test]
+    fn replacing_a_file_with_identical_bytes_does_not_preserve_old_file_identity() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let note = note();
+        let target = root.join(note.as_str());
+        fs::write(&target, b"same text").unwrap();
+        let digest = blake3::hash(b"same text").to_hex().to_string();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let id = OperationId::new();
+
+        let result = guard.preserve_with_hook(&note, &digest, id, &mut store, || {
+            fs::rename(&target, root.join("notes/moved.md")).unwrap();
+            fs::write(&target, b"same text").unwrap();
+        });
+        assert!(matches!(
+            result, Err(BoundCaptureError::Admission(VaultPortError::FileChanged))
+        ));
+        let saved = store.read_bound_preimage(id).unwrap().unwrap();
+        assert_eq!(saved.original.bytes, b"same text");
+        assert_eq!(fs::read(&target).unwrap(), b"same text");
+        // Reusing the same operation ID after the file was swapped must not
+        // silently confer the old file's recorded identity on a new inode.
+        assert!(matches!(
+            guard.preserve_closed_original(&note, &digest, id, &mut store),
+            Err(BoundCaptureError::Protection(ProtectionStoreError::OperationCollision))
+        ));
+    }
+
+    #[test]
+    fn root_replacement_before_persistence_refuses_without_storing_a_backup() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        fs::write(root.join(note().as_str()), b"original").unwrap();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let operation = OperationId::new();
+        let digest = blake3::hash(b"original").to_hex().to_string();
+        let result = guard.preserve_with_hook(&note(), &digest, operation, &mut store, || {
+            fs::rename(&root, temp.path().join("moved-vault")).unwrap();
+            fs::create_dir(&root).unwrap();
+            fs::create_dir(root.join("notes")).unwrap();
+            fs::write(root.join(note().as_str()), b"replacement").unwrap();
+        });
+        assert!(result.is_err());
+        assert!(store.read_preimage(operation).unwrap().is_none());
+        assert_eq!(fs::read(root.join(note().as_str())).unwrap(), b"replacement");
+    }
+
+    #[test]
+    fn hardlink_alias_and_workspace_local_database_cannot_pass_capture() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let target = root.join(note().as_str());
+        fs::write(&target, b"protected source").unwrap();
+        fs::hard_link(&target, root.join("notes/alias.md")).unwrap();
+        let digest = blake3::hash(b"protected source").to_hex().to_string();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut outside_store = protection_store(&temp);
+        let id = OperationId::new();
+        assert!(matches!(
+            guard.preserve_closed_original(&note(), &digest, id, &mut outside_store),
+            Err(BoundCaptureError::Admission(VaultPortError::UnsafePath))
+        ));
+        assert!(outside_store.read_preimage(id).unwrap().is_none());
+
+        fs::remove_file(root.join("notes/alias.md")).unwrap();
+        let mut inside_store = SqliteProtectionStore::open(&root.join("protection.sqlite")).unwrap();
+        assert!(matches!(
+            guard.preserve_closed_original(&note(), &digest, id, &mut inside_store),
+            Err(BoundCaptureError::Admission(VaultPortError::PermissionDenied))
+        ));
+        assert!(inside_store.read_preimage(id).unwrap().is_none());
     }
 }

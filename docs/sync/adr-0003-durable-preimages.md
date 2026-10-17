@@ -20,9 +20,10 @@ is a valid original and is protected too.
 
 ## Deliberate non-goals
 
-- This store is **not yet wired into Core**. It accepts already-verified bytes;
-  it does not read a live host workspace, reserve editors or prove filesystem
-  identity and cannot independently authenticate the remote planner.
+- The store now has an internal, read-only **host admission capture** path.
+  Its generic `store_preimage` still accepts caller-provided bytes and is
+  permanently **unbound**; only the new guarded capture can insert an
+  identity-bound row. Neither path authenticates remote planner decisions.
 - SQLite durability protects the preimage subject to SQLite VFS, OS and storage
   flush guarantees. It is not an independent disk backup or disaster-recovery
   copy. Database path, ownership and access controls MUST be selected and
@@ -53,3 +54,44 @@ is a valid original and is protected too.
    and readback mismatch. Unsupported OS semantics must refuse mutation.
 
 Cross-reference: design PR #1 and read-only root admission PR #58.
+
+
+## Stage 04g-3b-1a: identity-bound *read-only* capture (2026-10-17)
+
+The original v1 SQLite table remains readable. Version 2 adds an atomic
+`bound_preimages` table keyed by the immutable operation ID, with four
+fixed-width hexadecimal u64 values: opened workspace-root device/file ID
+and opened source-file device/file ID. Existing v1 originals remain **unbound**:
+they cannot be promoted to a host-proven copy just because they contain the
+same bytes. The v1→v2 schema migration runs in one transaction and retains
+the original contents. Reusing an operation ID with a new root/file identity
+fails closed, including when the contents have not changed.
+
+`RegisteredReadAdmission::preserve_closed_original` now holds its editor
+reservation during the entire operation: it checks host registration and the
+root descriptor, opens each portable child under a pinned parent, verifies
+a regular-file identity and single hard link, reads up to 32 MiB, verifies
+the caller's expected BLAKE3, commits both backup bytes and source/root IDs
+atomically in SQLite FULL/WAL, and then **reopens** the same portable path
+under the pinned root. A different file identity or different bytes after
+the commit returns an error. Even after an error the old original may remain
+durably preserved; it must never be silently deleted or interpreted as proof
+that replacement is safe. The store path is rejected if it canonically lies
+inside the registered workspace. The store's creation path itself is still
+host-supplied and does not independently verify ACLs/ownership.
+
+Tests inject root and leaf swaps between first read and DB persistence,
+including equal-content inode replacement, editor-open denial, duplicate
+operation ID collisions, hard-link refusal, SQLite metadata corruption,
+v1 migration and cross-process restart of the database. These are deterministic
+race windows and NOT a proof against all concurrent filesystem mutations.
+
+**Still intentionally missing:** exclusive host-wide File Gate, coordination
+with every non-sync writer, persistent authorization of the app-data backup
+database, durable OS-specific atomic mutation, journal readback/commit gate,
+disk power-loss fault testing and a trusted `PreservationReceipt`. A
+`BoundProtectedOriginal` is a checked backup *record*, not a capability.
+Path/file IDs can be reused by the OS and a third-party process can modify
+a file after the final read; therefore no local sync writes are enabled.
+The remaining 04g-3b-1/2 sub-stages must solve these before any destructive
+operation is possible.

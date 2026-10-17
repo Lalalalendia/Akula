@@ -90,6 +90,12 @@ extern "system" {
 
 /// Directory identity for the particular pinned handle, not an ambient path.
 pub(super) fn file_identity(file: &File) -> Result<(u32, u64), VaultPortError> {
+    let (volume, index, _) = file_identity_with_links(file)?;
+    Ok((volume, index))
+}
+
+/// Identity and hard-link count from the same opened HANDLE.
+pub(super) fn file_identity_with_links(file: &File) -> Result<(u32, u64, u32), VaultPortError> {
     let mut info = WinByHandleFileInformation::default();
     // SAFETY: file is live, the output struct is fully initialized, and
     // the synchronous Win32 call writes into our valid stack allocation.
@@ -102,7 +108,7 @@ pub(super) fn file_identity(file: &File) -> Result<(u32, u64), VaultPortError> {
     if info.volume_serial == 0 || index == 0 {
         return Err(VaultPortError::PermissionDenied);
     }
-    Ok((info.volume_serial, index))
+    Ok((info.volume_serial, index, info.hard_links))
 }
 
 #[link(name = "ntdll")]
