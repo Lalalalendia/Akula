@@ -116,6 +116,11 @@ pub struct App {
     text: crop::Rope,
     // At most two clean, hash-verified Rope snapshots from inactive tabs.
     inactive_notes: Vec<tabs::open::CachedNote>,
+    // Test-only probes: never enable live Parley reuse in production builds.
+    #[cfg(test)]
+    inactive_plain_layouts: Vec<tabs::layout_trial::LayoutCandidate>,
+    #[cfg(test)]
+    pending_plain_layout: Option<crate::ui::editor::TrialSnapshot>,
     system_dark: bool,
     tabs: Tabs,
     renaming_tab: Option<Uuid>,
