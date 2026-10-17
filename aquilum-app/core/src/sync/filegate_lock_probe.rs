@@ -201,3 +201,146 @@ impl PinnedProbeRoot {
         }))
     }
 }
+
+#[cfg(test)]
+use std::io::{Read, Seek, SeekFrom, Write};
+
+#[cfg(test)]
+const TEST_BOOTSTRAP_MAGIC: &[u8] = b"AKULA_FILEGATE_LOCK_V1";
+#[cfg(test)]
+const TEST_BOOTSTRAP_RECORD_LEN: usize = TEST_BOOTSTRAP_MAGIC.len() + 16 + 32;
+
+/// A test fixture's observed OS identity and self-checking generation.
+/// This is neither a trusted VaultId nor persistent authorization.
+#[cfg(test)]
+pub(crate) struct TestLockBootstrapEvidence {
+    pub(crate) created: bool,
+    pub(crate) generation: uuid::Uuid,
+    pub(crate) identity: (u64, u64),
+    /// Unix fsync() on parent was attempted and succeeded; this is not a
+    /// blanket power-loss promise on network/virtual/noncompliant filesystems.
+    pub(crate) parent_sync_completed: bool,
+}
+
+#[cfg(test)]
+fn exclusive_test_leaf(root: &PinnedProbeRoot) -> io::Result<Option<File>> {
+    #[cfg(unix)]
+    {
+        let flags = OFlags::RDWR | OFlags::CREATE | OFlags::EXCL
+            | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+        return match openat(
+            &root.handle,
+            LOCK_NAME,
+            flags,
+            Mode::RUSR | Mode::WUSR,
+        ) {
+            Ok(fd) => Ok(Some(File::from(fd))),
+            Err(rustix::io::Errno::EXIST) => Ok(None),
+            Err(error) => Err(converted(error)),
+        };
+    }
+    #[cfg(windows)]
+    {
+        // Windows needs a separately opened parent with ADD_FILE authority.
+        // Verify it names the same physical root we previously pinned.
+        let parent = super::pinned_windows::open_root_for_create(&root.selected_path)
+            .map_err(converted)?;
+        if descriptor_identity(&parent, false)? != root.id {
+            return Err(refused("lock bootstrap parent no longer matches pinned root"));
+        }
+        return match super::pinned_windows::create_probe_lock_child(&parent, LOCK_NAME) {
+            Ok(file) => Ok(Some(file)),
+            Err(super::VaultPortError::DestinationExists) => Ok(None),
+            Err(error) => Err(converted(error)),
+        };
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = root;
+        Err(refused("lock bootstrap experiment unavailable on this OS"))
+    }
+}
+
+#[cfg(test)]
+fn encode_test_bootstrap_record(generation: uuid::Uuid) -> Vec<u8> {
+    let mut record = Vec::with_capacity(TEST_BOOTSTRAP_RECORD_LEN);
+    record.extend_from_slice(TEST_BOOTSTRAP_MAGIC);
+    record.extend_from_slice(generation.as_bytes());
+    let digest = blake3::hash(&record);
+    record.extend_from_slice(digest.as_bytes());
+    record
+}
+
+#[cfg(test)]
+fn read_test_bootstrap_record(file: &mut File) -> io::Result<uuid::Uuid> {
+    // A stale, truncated or future-version file is never rewritten in place.
+    // This checksum detects accidental damage, not malicious forgery.
+    if file.metadata()?.len() != TEST_BOOTSTRAP_RECORD_LEN as u64 {
+        return Err(refused("incomplete or unknown-version lock bootstrap record"));
+    }
+    let mut bytes = vec![0u8; TEST_BOOTSTRAP_RECORD_LEN];
+    file.seek(SeekFrom::Start(0))?;
+    file.read_exact(&mut bytes)?;
+    if !bytes.starts_with(TEST_BOOTSTRAP_MAGIC) {
+        return Err(refused("unexpected lock bootstrap signature"));
+    }
+    let prefix = TEST_BOOTSTRAP_MAGIC.len() + 16;
+    if bytes[prefix..] != blake3::hash(&bytes[..prefix]).as_bytes()[..] {
+        return Err(refused("lock bootstrap checksum mismatch"));
+    }
+    uuid::Uuid::from_slice(&bytes[TEST_BOOTSTRAP_MAGIC.len()..prefix])
+        .map_err(|_| refused("invalid shared lock generation UUID"))
+}
+
+#[cfg(test)]
+impl PinnedProbeRoot {
+    /// Controlled disposable-vault experiment ONLY. No production writer,
+    /// Core File Gate or HistoryService calls this method. The committed
+    /// creation record cannot yet be considered durable on Windows or on
+    /// arbitrary filesystems, and its filename remains externally mutable.
+    pub(crate) fn bootstrap_exclusive_for_test(
+        &self,
+    ) -> io::Result<TestLockBootstrapEvidence> {
+        self.recheck_root()?;
+        let created_file = exclusive_test_leaf(self)?;
+        let created = created_file.is_some();
+        let mut created_id = None;
+        let mut created_generation = None;
+        if let Some(mut file) = created_file {
+            let id = descriptor_identity(&file, true)?;
+            let generation = uuid::Uuid::new_v4();
+            let bytes = encode_test_bootstrap_record(generation);
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            created_id = Some(id);
+            created_generation = Some(generation);
+            // This is metadata evidence only, not portable power-loss proof.
+            #[cfg(unix)]
+            self.handle.sync_all()?;
+        }
+        self.recheck_root()?;
+        // Open the named object again relative to the original pinned root:
+        // never allow an exclusive-created but subsequently swapped name to
+        // become a positive observation.
+        let mut reopened = open_existing_leaf(&self.handle)?;
+        let id = descriptor_identity(&reopened, true)?;
+        if created_id.is_some_and(|original| original != id) {
+            return Err(refused("newly created lock object has been replaced"));
+        }
+        let generation = read_test_bootstrap_record(&mut reopened)?;
+        if created_generation.is_some_and(|original| original != generation) {
+            return Err(refused("newly created lock generation has been substituted"));
+        }
+        self.recheck_root()?;
+        let reread = open_existing_leaf(&self.handle)?;
+        if descriptor_identity(&reread, true)? != id {
+            return Err(refused("lock leaf changed during bootstrap observation"));
+        }
+        Ok(TestLockBootstrapEvidence {
+            created,
+            generation,
+            identity: (id.volume, id.file),
+            parent_sync_completed: cfg!(unix) && created,
+        })
+    }
+}
