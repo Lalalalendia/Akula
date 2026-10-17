@@ -1,0 +1,40 @@
+name: Hint-stable glyph scroll regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
+      - '.github/workflows/glifo-hinted-scroll-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glifo-hint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    name: Hinted baseline translation / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: glifo-hinted-scroll-regression
+          cache-workspace-crates: true
+      - name: Check stable hinted glyph baselines at integer viewport origins
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p glifo --lib hinted_vertical_snap -- --nocapture

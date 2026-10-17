@@ -1267,6 +1267,20 @@ impl GlyphScaleProperties {
     }
 }
 
+/// Snap a hinted baseline in a way that is stable when a scene is translated
+/// by an integral pixel offset for incremental rendering.
+///
+/// `f64::round()` rounds halfway values away from zero, which is not
+/// translation invariant (e.g. round(-0.5) != round(0.5) - 1). Moreover,
+/// fractional-scale scroll transforms can move a mathematical halfway value
+/// by a few floating-point ulps. Prefer a consistent upward tie break and
+/// absorb only near-zero numerical error, not a visible subpixel displacement.
+#[inline]
+fn snap_hinted_baseline(y: f64) -> f64 {
+    const ROUNDING_EPSILON: f64 = 1e-8;
+    (y + 0.5 + ROUNDING_EPSILON).floor()
+}
+
 /// Calculate transform for outline glyphs.
 ///
 /// This computes the final positioning transform for an outline glyph, taking into account:
@@ -1285,7 +1299,7 @@ fn calculate_outline_transform(
         .as_coeffs();
 
     if hinting_instance.is_some() {
-        final_transform[5] = final_transform[5].round();
+        final_transform[5] = snap_hinted_baseline(final_transform[5]);
     }
 
     Affine::new(final_transform)
@@ -2289,3 +2303,35 @@ fn x_y_advances(transform: &Affine) -> (Vec2, Vec2) {
     )
 }
 
+
+#[cfg(test)]
+mod hinted_baseline_tests {
+    use super::snap_hinted_baseline;
+
+    #[test]
+    fn hinted_vertical_snap_is_translation_invariant() {
+        // Full-screen and cropped scene transforms differ by integer pixel
+        // origins. Their hinted glyph baselines must agree in screen space.
+        let baselines = [
+            -198.5, -12.5, -1.5, -0.5, -0.499_999_999_9, 0.0,
+            0.499_999_999_9, 0.5, 1.5, 142.5, 198.5, 227.5,
+        ];
+        for baseline in baselines {
+            for crop_origin in [0.0, 1.0, 29.0, 142.0, 496.0, 1020.0] {
+                assert_eq!(
+                    snap_hinted_baseline(baseline - crop_origin) + crop_origin,
+                    snap_hinted_baseline(baseline),
+                    "baseline={baseline}, crop_origin={crop_origin}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hinted_vertical_snap_resists_roundoff_near_half_pixel() {
+        for n in [-500.0, -1.0, 0.0, 1.0, 500.0] {
+            assert_eq!(snap_hinted_baseline(n + 0.5 - 1e-10), n + 1.0);
+            assert_eq!(snap_hinted_baseline(n + 0.5 + 1e-10), n + 1.0);
+        }
+    }
+}
