@@ -1,0 +1,101 @@
+name: Reader Session first-page profile
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/reader/session/tests.rs"
+      - ".github/workflows/reader-session-first-page.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-first-page-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  profile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Native Linux dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Synthetic fixture and runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/reader_epub_shape.py --out "$RUNNER_TEMP/reader-epub-shapes" | tee reader-session-fixtures.log
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            lscpu | grep -E 'Model name:|CPU\(s\):'
+            rustc --version
+          } | tee reader-session-environment.log
+
+      - name: Measure Session open, ensure, repeated showing and font reflow
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_EPUB_SHAPE_DIR: ${{ runner.temp }}/reader-epub-shapes
+        run: |
+          set -euo pipefail
+          cargo test --locked --release -p aquilum-native --bin aquilum-native \
+            session_synthetic_first_page_profile -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/reader-session-first-page.log"
+          test "$(grep -c 'READER_SESSION_RESULT mode=' "$GITHUB_WORKSPACE/reader-session-first-page.log")" -eq 6
+
+      - name: Summarize all modes and retain raw samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          log = Path("reader-session-first-page.log").read_text()
+          pattern = (r"READER_SESSION_RESULT mode=(\S+) scrolled=(true|false) "
+                     r"retained_layouts=(\d+) visible_entries=(\d+) "
+                     r"open_ms=([\d.]+) first_ensure_ms=([\d.]+) reuse_ms=([\d.]+) "
+                     r"show_only_ms=([\d.]+) next_ms=([\d.]+) reflow_ms=([\d.]+)")
+          matches = re.findall(pattern, log)
+          assert len(matches) == 6, matches
+          assert len({(row[0], row[1]) for row in matches}) == 6
+          rows = ["## Synthetic EPUB: Reader Session first visible layout",
+                  "", "| Mode | Scroll | Open | First ensure | Cached ensure | Visible re-shaping | Next | Font reflow |",
+                  "|---|---|---:|---:|---:|---:|---:|---:|"]
+          for item in matches:
+              mode, scrolled, kept, shown, op, first, reuse, show, nxt, reflow = item
+              assert int(kept) > 0 and int(shown) > 0
+              rows.append(f"| {mode} | {scrolled} | {op} | {first} | {reuse} | {show} | {nxt} | {reflow} |")
+          rows += ["", "Timings are milliseconds, medians of five runs with warm font contexts.",
+                   "This exercises Session::open and ensure, but excludes app startup, window draw, GPU and disk cold cache.",
+                   "The visible-layout rebuild is intentionally forced by evicting retained layouts without changing the book.",
+                   "Measurement only; there is no pass/fail performance threshold."]
+          summary = "\n".join(rows) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-session-first-page-${{ github.sha }}
+          path: |
+            reader-session-fixtures.log
+            reader-session-environment.log
+            reader-session-first-page.log
+          retention-days: 21
