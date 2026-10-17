@@ -183,7 +183,7 @@ pub(super) fn create_with_hook(
     let staged_id = identity(&staged)?;
     staged.rewind().map_err(|error| VaultPortError::Io(error.to_string()))?;
     let mut check = Vec::new();
-    staged.take(bytes.len() as u64 + 1).read_to_end(&mut check)
+    (&mut staged).take(bytes.len() as u64 + 1).read_to_end(&mut check)
         .map_err(|error| VaultPortError::Io(error.to_string()))?;
     if check != bytes {
         return Err(VaultPortError::FileChanged);
