@@ -107,7 +107,8 @@ impl<'a> HostPluginVaultReader<'a> {
         self.read_with_hook(instance, note, max_bytes, live_context, || {})
     }
 
-    fn read_with_hook(
+    #[cfg(test)]
+    pub(super) fn read_with_hook(
         &self,
         instance: PluginInstanceHandle,
         note: &ScopedNoteHandle,
