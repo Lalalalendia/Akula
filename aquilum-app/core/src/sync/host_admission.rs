@@ -1253,6 +1253,151 @@ mod tests {
         assert!(admission.inspect_external_filegate_lock(&clean).is_err());
     }
 
+    fn custody_receipt_db(temp: &tempfile::TempDir, label: &str) -> PathBuf {
+        let data = temp.path().join(label);
+        fs::create_dir_all(&data).unwrap();
+        data.join("custody-identity.sqlite")
+    }
+
+    #[test]
+    fn host_admission_custody_receipt_survives_two_core_restarts_with_one_physical_anchor() {
+        use super::super::{filegate_custody_identity::SqliteCustodyIdentityStore, VaultId};
+        let (temp, first_core, root) = fixture();
+        let second_data = temp.path().join("independent-core");
+        fs::create_dir(&second_data).unwrap();
+        let second_core = Core::open(&second_data, Arc::new(|_: CoreEvent| {}));
+        second_core.ui_state.resolve_workspace(root.to_str().unwrap(), 2).unwrap();
+        let first_db = custody_receipt_db(&temp, "receipt-a");
+        let second_db = custody_receipt_db(&temp, "receipt-b");
+        let anchor = scoped_anchor_fixture(&temp, &root);
+        let shared_vault = VaultId::new();
+        let first_registration = first_core.ui_state.list_workspaces().unwrap()[0].id;
+        let second_registration = second_core.ui_state.list_workspaces().unwrap()[0].id;
+        assert_ne!(first_registration, second_registration);
+        let first_record;
+        {
+            let a = RegisteredReadAdmission::open(&first_core, &root).unwrap();
+            let b = RegisteredReadAdmission::open(&second_core, &root).unwrap();
+            let mut a_store = SqliteCustodyIdentityStore::open(&a, &first_db).unwrap();
+            let mut b_store = SqliteCustodyIdentityStore::open(&b, &second_db).unwrap();
+            first_record = a_store.bind_observed(&a, shared_vault, &anchor).unwrap();
+            let second_record = b_store.bind_observed(&b, shared_vault, &anchor).unwrap();
+            assert_ne!(first_record.workspace_id, second_record.workspace_id);
+            assert_eq!(first_record.vault_id, second_record.vault_id);
+            assert_eq!(first_record.registered_root_file, second_record.registered_root_file);
+            assert_eq!(first_record.custody_scope_file, second_record.custody_scope_file);
+            assert_eq!(first_record.lock_file, second_record.lock_file);
+            assert_eq!(a_store.bind_observed(&a, shared_vault, &anchor).unwrap(), first_record);
+            assert_eq!(b_store.bind_observed(&b, shared_vault, &anchor).unwrap(), second_record);
+        }
+        drop(first_core);
+        drop(second_core);
+        let reopened_a = Core::open(&temp.path().join("appdata"), Arc::new(|_: CoreEvent| {}));
+        let reopened_b = Core::open(&second_data, Arc::new(|_: CoreEvent| {}));
+        for (core, db, id) in [
+            (&reopened_a, &first_db, first_registration),
+            (&reopened_b, &second_db, second_registration),
+        ] {
+            let admission = RegisteredReadAdmission::open(core, &root).unwrap();
+            let store = SqliteCustodyIdentityStore::open(&admission, db).unwrap();
+            let verified = store.verify_observed(&admission, shared_vault, &anchor).unwrap();
+            assert_eq!(verified.workspace_id, id);
+            assert_eq!(verified.lock_file, first_record.lock_file);
+            assert_eq!(verified.custody_scope_file, first_record.custody_scope_file);
+        }
+        assert_eq!(
+            fs::read(anchor.join(super::super::filegate_lock_probe::LOCK_NAME)).unwrap(),
+            b"forensic scope bytes"
+        );
+    }
+
+    #[test]
+    fn host_admission_custody_receipt_refuses_lock_substitution_without_rebinding() {
+        use super::super::{filegate_custody_identity::SqliteCustodyIdentityStore, VaultId};
+        let (temp, core, root) = fixture();
+        let anchor = scoped_anchor_fixture(&temp, &root);
+        let lock = anchor.join(super::super::filegate_lock_probe::LOCK_NAME);
+        let old = anchor.join("original-lock-safely-retained");
+        let database = custody_receipt_db(&temp, "receipt-c");
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = SqliteCustodyIdentityStore::open(&admission, &database).unwrap();
+        let vault = VaultId::new();
+        let accepted = store.bind_observed(&admission, vault, &anchor).unwrap();
+        fs::rename(&lock, &old).unwrap();
+        fs::write(&lock, b"substitute").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert!(store.verify_observed(&admission, vault, &anchor).is_err());
+        assert!(store.bind_observed(&admission, vault, &anchor).is_err());
+        assert_eq!(fs::read(&old).unwrap(), b"forensic scope bytes");
+        assert_eq!(fs::read(&lock).unwrap(), b"substitute");
+        let substituted = anchor.join("substitute-retained");
+        fs::rename(&lock, &substituted).unwrap();
+        fs::rename(&old, &lock).unwrap();
+        assert_eq!(store.verify_observed(&admission, vault, &anchor).unwrap(), accepted);
+    }
+
+    #[test]
+    fn host_admission_custody_receipt_refuses_corruption_and_vault_id_rebinding() {
+        use super::super::{
+            filegate_custody_identity::{CustodyBindingError, SqliteCustodyIdentityStore},
+            VaultId,
+        };
+        let (temp, core, root) = fixture();
+        let anchor = scoped_anchor_fixture(&temp, &root);
+        let database = custody_receipt_db(&temp, "receipt-d");
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = SqliteCustodyIdentityStore::open(&admission, &database).unwrap();
+        let vault = VaultId::new();
+        store.bind_observed(&admission, vault, &anchor).unwrap();
+        assert!(matches!(
+            store.bind_observed(&admission, VaultId::new(), &anchor),
+            Err(CustodyBindingError::ConflictingIdentity)
+        ));
+        let independent = rusqlite::Connection::open(&database).unwrap();
+        independent.execute(
+            "UPDATE custody_anchor_binding SET record_hash = 'invalid' WHERE workspace_id = ?1",
+            [admission.registered_workspace_id().to_string()],
+        ).unwrap();
+        assert!(matches!(
+            store.verify_observed(&admission, vault, &anchor),
+            Err(CustodyBindingError::CorruptedBinding)
+        ));
+        assert!(matches!(
+            store.bind_observed(&admission, vault, &anchor),
+            Err(CustodyBindingError::CorruptedBinding)
+        ));
+        let still_bad: String = independent.query_row(
+            "SELECT record_hash FROM custody_anchor_binding LIMIT 1", [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(still_bad, "invalid", "read must never auto-repair a bad record");
+    }
+
+    #[test]
+    fn host_admission_custody_receipt_refuses_root_replacement_even_after_reopen() {
+        use super::super::{filegate_custody_identity::SqliteCustodyIdentityStore, VaultId};
+        let (temp, core, root) = fixture();
+        let anchor = scoped_anchor_fixture(&temp, &root);
+        let database = custody_receipt_db(&temp, "receipt-e");
+        let vault = VaultId::new();
+        {
+            let original = RegisteredReadAdmission::open(&core, &root).unwrap();
+            let mut store = SqliteCustodyIdentityStore::open(&original, &database).unwrap();
+            store.bind_observed(&original, vault, &anchor).unwrap();
+        }
+        let moved = temp.path().join("original-vault-retained");
+        fs::rename(&root, &moved).unwrap();
+        fs::create_dir(&root).unwrap();
+        let reopened = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let store = SqliteCustodyIdentityStore::open(&reopened, &database).unwrap();
+        assert!(store.verify_observed(&reopened, vault, &anchor).is_err());
+        assert!(root.read_dir().unwrap().next().is_none());
+        assert!(moved.is_dir());
+    }
+
     #[test]
     fn host_admission_external_scope_revocation_does_not_create_any_lock() {
         let (temp, core, root) = fixture();
