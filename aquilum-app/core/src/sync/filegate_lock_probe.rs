@@ -3,7 +3,9 @@
 //! No lock file is ever created or removed here: bootstrap, custody, registry
 //! authentication, reparse swaps and race-free write authority remain P0.
 
-use std::fs::{self, File, TryLockError};
+use std::fs::{File, TryLockError};
+#[cfg(unix)]
+use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
@@ -18,8 +20,8 @@ fn refused(reason: &str) -> io::Error {
     io::Error::new(ErrorKind::PermissionDenied, reason.to_owned())
 }
 
-fn converted(error: impl std::fmt::Display) -> io::Error {
-    io::Error::new(ErrorKind::PermissionDenied, error.to_string())
+fn converted(error: impl std::fmt::Debug) -> io::Error {
+    io::Error::new(ErrorKind::PermissionDenied, format!("{error:?}"))
 }
 
 /// Identity of an opened OS object. A text pathname or timestamp is never
