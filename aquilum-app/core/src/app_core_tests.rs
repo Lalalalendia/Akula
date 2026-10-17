@@ -168,7 +168,7 @@ fn history_cross_vault_primary_move_is_denied_before_any_disk_or_event_change() 
     events.clear();
 
     let err = gate::move_across(&core, &original, &target).unwrap_err();
-    assert!(matches!(err, crate::files::error::FileCommandError::Task { .. }), "{err:?}");
+    assert!(matches!(&err, crate::files::error::FileCommandError::Task { .. }), "{err:?}");
     assert_eq!(fs::read_to_string(&original).unwrap(), "valuable version");
     assert!(!target.exists());
     assert_eq!(core.history.page(&|| core.known_roots(), &original, 0, 10).total, 1);
@@ -197,7 +197,7 @@ fn history_cross_vault_folder_rename_is_denied_before_primary_folder_moves() {
     events.clear();
 
     let err = gate::rename(&core, &old_folder, &target_folder).unwrap_err();
-    assert!(matches!(err, crate::files::error::FileCommandError::Task { .. }), "{err:?}");
+    assert!(matches!(&err, crate::files::error::FileCommandError::Task { .. }), "{err:?}");
     assert_eq!(fs::read_to_string(&note).unwrap(), "version inside folder");
     assert!(!target_folder.exists());
     assert_eq!(core.history.page(&|| core.known_roots(), &note, 0, 10).total, 1);
