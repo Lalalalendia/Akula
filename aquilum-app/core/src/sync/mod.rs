@@ -124,6 +124,7 @@ pub use s3_transport::{
     S3PinnedRevisionPage, S3PinnedRevisionSnapshot,
     S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
     S3SelectiveReadError, S3SelectiveRevisionPreview,
+    S3VerifiedHintsError, S3VerifiedHintsJournal,
     plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError,
 };
 
