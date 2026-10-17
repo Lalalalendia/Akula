@@ -30,6 +30,8 @@ pub(crate) struct LocalRecoveryReviewSnapshot {
     pub path: SyncRelativePath,
     pub assessment: LocalRecoveryAssessment,
     pub archive_fingerprint: String,
+    pub review_count: u32,
+    pub latest_event_digest: String,
     pub retention: &'static str,
 }
 
