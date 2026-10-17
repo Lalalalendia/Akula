@@ -20,7 +20,7 @@ def samples(case: str) -> dict[str, dict[str, str]]:
     for line in text.splitlines():
         if "NOTE_LATENCY kib=" not in line:
             continue
-        pairs = dict(re.findall(r"([a-z_]+)=([^\s]+)", line.split("NOTE_LATENCY ", 1)[1]))
+        pairs = dict(re.findall(r"([a-z0-9_]+)=([^\s]+)", line.split("NOTE_LATENCY ", 1)[1]))
         size = pairs["kib"]
         if size in records:
             raise ValueError(f"Duplicated size {size} in {case}")
