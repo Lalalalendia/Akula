@@ -10,6 +10,7 @@ mod cost;
 mod damage_profile;
 mod frames;
 mod note_latency;
+mod parley_tabs;
 mod window_preload;
 #[cfg(feature = "memory-probe")]
 mod open_memory;

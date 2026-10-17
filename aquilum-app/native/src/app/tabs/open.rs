@@ -19,6 +19,8 @@ pub(in crate::app) struct CachedNote {
     path: PathBuf,
     hash: String,
     text: crop::Rope,
+    #[cfg(test)]
+    layout: Option<crate::ui::editor::LayoutTrialSnapshot>,
 }
 
 // Test-only instrumentation. The production UI path and API stay unchanged.
@@ -120,6 +122,22 @@ impl App {
         }
         #[cfg(test)]
         let started = std::time::Instant::now();
+        #[cfg(test)]
+        {
+            // Reading WidgetRef does not trigger framework edit/rewrite passes.
+            // Test-only: never intercept a production tab switch.
+            self.parley_capture = if self.parley_trial_enabled {
+                self.note_ids
+                    .as_ref()
+                    .and_then(|ids| ids.body.get(root))
+                    .and_then(|widget| widget.parley_trial_snapshot())
+            } else {
+                None
+            };
+            if self.parley_trial_enabled {
+                eprintln!("PARLEY_TAB_TRACE stage=capture found={}", self.parley_capture.is_some());
+            }
+        }
         self.leave_note();
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
@@ -205,7 +223,14 @@ impl App {
         if text.byte_len() > MAX_INACTIVE_BYTES {
             return;
         }
-        self.inactive_notes.push(CachedNote { tab_id, path, hash, text });
+        self.inactive_notes.push(CachedNote {
+            tab_id,
+            path,
+            hash,
+            text,
+            #[cfg(test)]
+            layout: if self.parley_trial_enabled { self.parley_capture.take() } else { None },
+        });
         while self.inactive_notes.len() > MAX_INACTIVE_NOTES
             || self.inactive_notes.iter().map(|entry| entry.text.byte_len()).sum::<usize>() > MAX_INACTIVE_BYTES
         {
@@ -214,6 +239,10 @@ impl App {
     }
 
     fn open_cached_or_read(&mut self, tab_id: uuid::Uuid, path: PathBuf) -> Result<(Note, crop::Rope), aquilum_core::files::error::FileCommandError> {
+        #[cfg(test)]
+        {
+            self.parley_offer = None;
+        }
         if let Some(index) = self.inactive_notes.iter().position(|entry| entry.tab_id == tab_id && entry.path == path) {
             let cached = self.inactive_notes.remove(index);
             // Size and mtime are not a correctness boundary: external writers
@@ -222,7 +251,16 @@ impl App {
                 .is_ok_and(|digest| digest == cached.hash);
             if matches_disk {
                 #[cfg(test)]
-                record_stage(|stage| stage.cache_hit = true);
+                {
+                    record_stage(|stage| stage.cache_hit = true);
+                    if self.parley_trial_enabled {
+                        eprintln!("PARLEY_TAB_TRACE stage=verified_cache candidate={}", cached.layout.is_some());
+                        // The original Rope hash has just been checked against
+                        // disk; an unverified or edited file never receives
+                        // the cached Parley layouts.
+                        self.parley_offer = cached.layout;
+                    }
+                }
                 return Ok(Note::from_verified_cache(path, cached.text, cached.hash));
             }
         }

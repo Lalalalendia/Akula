@@ -4,10 +4,20 @@
 //! state may depend on style, width, caret, resolver and live media. A durable
 //! production cache needs stronger invalidation and paired UI/fidelity tests.
 use masonry::core::{BrushIndex, StyleSet};
-use masonry::parley::Layout;
+use masonry::parley::{Alignment, AlignmentOptions, Layout};
 
 use super::super::markdown::{Block, Decor, Fonts};
 use super::{Document, Fold};
+
+thread_local! {
+    static TRIAL_RESTORED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Actual layout hits, not merely offered snapshots. Opt-in UI tests reset
+/// this counter before each complete tab switch.
+pub(crate) fn take_trial_restore_count() -> usize {
+    TRIAL_RESTORED.with(|slot| slot.replace(0))
+}
 
 const MAX_WINDOW_BYTES: usize = 512 * 1024;
 const MAX_PARAGRAPHS: usize = 32;
@@ -54,12 +64,24 @@ impl Document {
     /// Copy only plain, non-interactive paragraph layouts. Ineligible blocks
     /// are always shaped through the normal Markdown/Parley pipeline.
     pub(crate) fn trial_snapshot(&self, styles: &StyleSet) -> Option<Snapshot> {
-        if !self.placed || self.dirty.is_some() || self.edits.is_some()
+        // report_edits() enables the live editor's reporting sink as Some(Vec::new()).
+        // That is not a pending edit. Reject only actual unconsumed edits,
+        // dirty layout, or an active IME/interactive editing context.
+        let has_pending_edits = self.edits.as_ref().is_some_and(|edits| !edits.is_empty());
+        if !self.placed || self.dirty.is_some() || has_pending_edits
             || self.editing.is_some() || self.text.len() > MAX_WINDOW_BYTES
         {
+            eprintln!(
+                "PARLEY_TAB_TRACE stage=snapshot_reject placed={} dirty={} pending_edits={} editing={} window_bytes={}",
+                self.placed, self.dirty.is_some(), has_pending_edits,
+                self.editing.is_some(), self.text.len()
+            );
             return None;
         }
-        let width = self.width?;
+        let Some(width) = self.width else {
+            eprintln!("PARLEY_TAB_TRACE stage=snapshot_reject reason=no_width");
+            return None;
+        };
         let mut indices: Vec<usize> = self.laid.iter()
             .map(|(i, _)| i)
             .filter(|&i| i < self.lines.count() && *self.blocks.get(i) == Block::Text)
@@ -83,6 +105,7 @@ impl Document {
             bytes += size;
             entries.push(PlainLayout { line: i, layout: laid.layout.clone() });
         }
+        eprintln!("PARLEY_TAB_TRACE stage=snapshot_candidates layouts={}", entries.len());
         (!entries.is_empty()).then(|| Snapshot {
             base: self.base,
             text: self.text.clone(),
@@ -96,7 +119,9 @@ impl Document {
     }
 
     /// Install a candidate; no layouts are reused until the next width-aware
-    /// layout call validates the same content and rendering context.
+    /// layout call validates identical content and rendering context. The
+    /// target width may differ: Parley rebreaks *already-shaped glyphs*
+    /// exactly at that width before exposing them to the new Document.
     pub(crate) fn trial_offer(&mut self, snapshot: Snapshot) {
         self.trial_snapshot = Some(snapshot);
     }
@@ -112,28 +137,57 @@ impl Document {
         // IME composition and caret-dependent Markdown can change the Parley
         // shape of a line even if the file bytes remain identical.
         if compose.is_some() || caret.is_some()
-            || width != Some(snapshot.width) || !self.windowed.eq(&snapshot.windowed)
+            || self.windowed != snapshot.windowed
             || self.full.byte_len() != snapshot.full_len || self.base != snapshot.base
             || self.text != snapshot.text
             || fonts_key(self.markdown.as_ref()) != snapshot.font_key
             || styles_key(styles) != snapshot.style_key
         {
+            eprintln!(
+                "PARLEY_TAB_TRACE stage=restore_reject width_match={} requested_width={width:?} snapshot_width={} current_width={:?} placed={} windowed={} len={} base={} text={} fonts={} styles={} compose={} caret={}",
+                width == Some(snapshot.width), snapshot.width, self.width, self.placed,
+                self.windowed == snapshot.windowed,
+                self.full.byte_len() == snapshot.full_len,
+                self.base == snapshot.base,
+                self.text == snapshot.text,
+                fonts_key(self.markdown.as_ref()) == snapshot.font_key,
+                styles_key(styles) == snapshot.style_key,
+                compose.is_some(),
+                caret.is_some()
+            );
             return 0;
         }
+        let needs_rebreak = width != Some(snapshot.width);
         let mut reused = 0;
         for item in snapshot.entries {
             if item.line >= self.lines.count() || *self.blocks.get(item.line) != Block::Text {
                 continue;
             }
-            let height = f64::from(item.layout.height());
+            let mut layout = item.layout;
+            if needs_rebreak {
+                // Reuse Parley's expensive shaping, never the old line breaks.
+                // This is the identical rebreak+alignment API already used by
+                // Document::measure on ordinary editor width changes.
+                layout.break_all_lines(width);
+                layout.align(Alignment::Start, AlignmentOptions::default());
+            }
+            let height = f64::from(layout.height());
             self.heights.set_text(item.line, height);
             self.heights.set(item.line, height, Fold::None);
-            self.laid.insert(item.line, super::laid::Laid { layout: item.layout, decor: Decor::default() });
+            self.laid.insert(item.line, super::laid::Laid { layout, decor: Decor::default() });
             reused += 1;
         }
+        if needs_rebreak && reused != 0 {
+            eprintln!(
+                "PARLEY_TAB_TRACE stage=rebreak_shaped cached_width={} actual_width={width:?} reused={reused}",
+                snapshot.width
+            );
+        }
         if reused != 0 {
-            // Preserve the validated width so that first layout won't
-            // gratuitously rewrap layouts that already use that width.
+            TRIAL_RESTORED.with(|slot| slot.set(slot.get().saturating_add(reused)));
+            // Preserve the *actual* width. Both unchanged and rebroken
+            // candidates now use it, so the first layout must not rebreak
+            // them a second time.
             self.width = width;
         }
         reused
@@ -198,7 +252,7 @@ mod tests {
         let styles = StyleSet::new(16.0);
         let mut baseline = doc(&original);
         shape(&mut baseline, 600.0, &styles);
-        for case in 0..4 {
+        for case in [0, 2, 3] {
             let snapshot = baseline.trial_snapshot(&styles).unwrap();
             let changed = if case == 0 { original.replace("обычный", "другой ") } else { original.clone() };
             let mut fresh = doc(&changed);
@@ -206,10 +260,37 @@ mod tests {
                 fresh.markdown.as_mut().unwrap().size = 19.0;
             }
             fresh.trial_offer(snapshot);
-            let width = if case == 1 { Some(550.0) } else { Some(600.0) };
             let compose = (case == 3).then_some((0, "превью"));
-            let count = fresh.try_restore_trial(width, &styles, compose, None);
+            let count = fresh.try_restore_trial(Some(600.0), &styles, compose, None);
             assert_eq!(count, 0, "invalidated case {case}");
+        }
+    }
+
+    #[test]
+    fn width_aware_rebreak_matches_fresh_parley_line_geometry() {
+        let content: String = (0..180).map(|i| format!(
+            "Абзац {i}: длинная последовательность слов на русском языке, переносы строк и границы формата важны для точного рендеринга.\n"
+        )).collect();
+        let styles = StyleSet::new(16.0);
+        let mut source = doc(&content);
+        shape(&mut source, 345.0, &styles);
+        for target in [361.0, 345.0, 750.0] {
+            let snapshot = source.trial_snapshot(&styles).expect("eligible plain text");
+            let mut candidate = doc(&content);
+            candidate.trial_offer(snapshot);
+            let reused = candidate.try_restore_trial(Some(target), &styles, None, None);
+            assert!(reused > 0, "width {target} must reuse a shaped paragraph");
+            shape(&mut candidate, target, &styles);
+
+            let mut baseline = doc(&content);
+            shape(&mut baseline, target, &styles);
+            assert_eq!(candidate.loaded(), baseline.loaded());
+            assert!((candidate.height() - baseline.height()).abs() < 0.001,
+                "different document height after rebreak at {target}");
+            for i in 0..baseline.lines.count() {
+                assert!((candidate.heights.get(i) - baseline.heights.get(i)).abs() < 0.001,
+                    "line {i}, rebreak {target}: different paragraph height");
+            }
         }
     }
 
@@ -221,6 +302,21 @@ mod tests {
         shape(&mut original, 600.0, &styles);
         original.replace(0..0, "изменено ");
         assert!(original.trial_snapshot(&styles).is_none());
+    }
+
+    #[test]
+    fn edit_reporting_without_pending_edits_is_safe_to_snapshot() {
+        let styles = StyleSet::new(16.0);
+        let mut original = doc(&"обычный текст\n".repeat(40));
+        original.report_edits();
+        shape(&mut original, 600.0, &styles);
+        assert!(original.trial_snapshot(&styles).is_some(),
+            "report_edits registers an empty sink, not an unsaved modification");
+
+        // Pending edits in the same reporting sink still fail closed.
+        original.report(0..0, "новое");
+        assert!(original.trial_snapshot(&styles).is_none(),
+            "unconsumed edit reports cannot enter the Parley snapshot");
     }
 
     #[test]

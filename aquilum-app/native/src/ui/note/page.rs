@@ -70,6 +70,8 @@ pub struct NoteView<'a> {
     pub file_name: &'a str,
     pub title: &'a str,
     pub body: crop::Rope,
+    #[cfg(test)]
+    pub parley_trial_layout: Option<crate::ui::editor::LayoutTrialSnapshot>,
     pub metadata: Option<bool>,
     pub can_back: bool,
     pub can_forward: bool,
@@ -181,6 +183,11 @@ pub fn page(view: NoteView<'_>) -> (NewWidget<Flex>, NoteIds) {
         .with_resolver(view.resolver.clone())
         .with_wake(std::sync::Arc::clone(&view.wake))
         .with_smart(view.smart);
+    #[cfg(test)]
+    let body_area = match view.parley_trial_layout {
+        Some(snapshot) => body_area.with_parley_trial(snapshot),
+        None => body_area,
+    };
     #[cfg(test)]
     let markdown = started.elapsed();
     let body_area = NewWidget::new(body_area).with_class(style::EDITOR_TEXT);
