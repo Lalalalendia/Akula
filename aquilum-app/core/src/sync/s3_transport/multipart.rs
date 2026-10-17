@@ -582,6 +582,32 @@ mod tests {
         assert!(!journal.begin(&op).unwrap());
     }
 
+
+    /// Allows the preflight BLAKE3 pass, then simulates disk/read failure
+    /// after S3 CreateMultipartUpload has started. No editor/real vault IO.
+    struct FailingSecondPass {
+        reader: Cursor<Vec<u8>>,
+        rewind_count: usize,
+    }
+
+    impl Read for FailingSecondPass {
+        fn read(&mut self, data: &mut [u8]) -> std::io::Result<usize> {
+            if self.rewind_count >= 3 {
+                return Err(std::io::Error::other("synthetic source read failure"));
+            }
+            self.reader.read(data)
+        }
+    }
+
+    impl Seek for FailingSecondPass {
+        fn seek(&mut self, offset: SeekFrom) -> std::io::Result<u64> {
+            if matches!(offset, SeekFrom::Start(0)) {
+                self.rewind_count += 1;
+            }
+            self.reader.seek(offset)
+        }
+    }
+
     /// Run only against disposable loopback MinIO with fresh bucket credentials.
     #[tokio::test]
     #[ignore = "requires the isolated MinIO service in sync-s3-minio.yml"]
@@ -762,6 +788,25 @@ mod tests {
         assert_eq!(recovered.status(cancelled.operation_id).unwrap().unwrap().phase,
             S3MultipartPhase::Aborted);
         assert_eq!(transport.head(&cancelled.blob_key).await,
+            Err(S3TransportError::NotFound));
+        // Inject actual source read failure AFTER CreateMultipartUpload.
+        // The service must abort that session, leave no completed object,
+        // and durably record Aborted, not count bytes as synchronized.
+        let failed_bytes = vec![0x55_u8; SMALL_PUT_BYTES as usize + 1];
+        let failed = intent(&failed_bytes, &ns);
+        let mut failed_source = FailingSecondPass {
+            reader: Cursor::new(failed_bytes),
+            rewind_count: 0,
+        };
+        assert!(matches!(
+            transport.upload_immutable_multipart(
+                &mut recovered, failed.clone(), &mut failed_source,
+            ).await,
+            Err(S3MultipartError::Source(_))
+        ));
+        assert_eq!(recovered.status(failed.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Aborted);
+        assert_eq!(transport.head(&failed.blob_key).await,
             Err(S3TransportError::NotFound));
     }
 }
