@@ -12,7 +12,7 @@
 
 use super::{
     AwsS3ProbeClient, S3BoundedObject, S3HeadError, S3TransportError,
-    S3VerifiedRevisionMetadataStore, MAX_PROBE_BYTES,
+    S3VerifiedRevisionMetadataStore, MAX_CORE_STAGE_BLOB_BYTES,
 };
 use crate::sync::{
     DagStoreError, JournalAction, JournalError, JournalPhase, OperationIntent,
@@ -119,8 +119,9 @@ impl AwsS3ProbeClient {
     /// Only the existing host-admitted additive local create may later consume
     /// these staged bytes; its successful return is still not a baseline.
     ///
-    /// This first adapter is deliberately limited to the transport's 1-MiB
-    /// bounded GET. Larger blobs need the independent streaming reader.
+    /// Stage immutable Markdown/attachments up to the native no-replace
+    /// File Gate limit (32 MiB), with HEAD / guarded GET / HEAD + BLAKE3.
+    /// A larger object requires a future direct-to-staging streaming path.
     pub async fn stage_verified_s3_content_for_core(
         &self,
         verified: &S3VerifiedRevisionMetadataStore,
@@ -129,7 +130,7 @@ impl AwsS3ProbeClient {
         intent: OperationIntent,
         max_blob_bytes: u64,
     ) -> Result<StagedDownload, S3CoreStageError> {
-        if max_blob_bytes == 0 || max_blob_bytes > MAX_PROBE_BYTES {
+        if max_blob_bytes == 0 || max_blob_bytes > MAX_CORE_STAGE_BLOB_BYTES {
             return Err(S3CoreStageError::InvalidIntent);
         }
         let inventory = verified.verified_revision_inventory()?;
@@ -152,7 +153,9 @@ impl AwsS3ProbeClient {
         // transfer. A new head causes HOLD, not a silent fallback to a stale
         // pointer. These checks are staging evidence, not a global OS lease.
         let before = self.core_stage_current_head(verified).await?;
-        let payload = self.get_bounded(&intent.remote_object_id, max_blob_bytes).await?;
+        let payload = self.get_immutable_blob_for_core_stage(
+            &intent.expected_content_hash, max_blob_bytes,
+        ).await?;
         if payload.blake3 != intent.expected_content_hash {
             return Err(S3CoreStageError::IntegrityMismatch);
         }
@@ -269,6 +272,19 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires isolated loopback MinIO"]
     async fn live_minio_two_core_verified_stage_and_no_replace() {
+        verify_live_core_roundtrip("Проверенный S3-текст\n".as_bytes(), 4096).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires isolated loopback MinIO"]
+    async fn live_minio_large_blob_through_verified_two_core_stage_and_no_replace() {
+        // Intentionally larger than the metadata/diagnostic 1 MiB ceiling.
+        // Deterministic content and a partial final SDK chunk exercise bounds.
+        let bytes = vec![b'A'; 3 * 1024 * 1024 + 17];
+        verify_live_core_roundtrip(&bytes, bytes.len() as u64).await;
+    }
+
+    async fn verify_live_core_roundtrip(bytes: &[u8], max_blob_bytes: u64) {
         use crate::app_core::{Core, CoreEvent};
         use crate::sync::{JournalError, RegisteredReadAdmission};
         use crate::sync::profile_binding::SqliteRegisteredS3Bindings;
@@ -299,12 +315,11 @@ mod tests {
         assert_ne!(source_id, target_id, "two independent local Core registrations");
 
         let relative = SyncRelativePath::parse("notes/remote.md").unwrap();
-        let bytes = "Проверенный S3-текст\n".as_bytes();
         fs::write(root_a.join(relative.as_str()), bytes).unwrap();
         // Only a read-only preflight for the source fixture; a production
         // uploader must separately prove its guarded mutation/source grant.
         let captured = RegisteredReadAdmission::open(&first_core, &root_a)
-            .unwrap().read_closed_preflight(&relative, 4096).unwrap();
+            .unwrap().read_closed_preflight(&relative, max_blob_bytes).unwrap();
         assert_eq!(captured.bytes, bytes);
 
         // The shared cloud UUID must differ from both independent machine-
@@ -334,8 +349,18 @@ mod tests {
 
         let blob_hash = captured.content_hash;
         let blob_key = ns.immutable_blob_key(&blob_hash).unwrap();
-        writer.put_conditionally(&blob_key, &captured.bytes, S3PutCondition::IfAbsent)
-            .await.unwrap();
+        if captured.bytes.len() as u64 <= super::super::MAX_PROBE_BYTES {
+            writer.put_conditionally(&blob_key, &captured.bytes, S3PutCondition::IfAbsent)
+                .await.unwrap();
+        } else {
+            // Test fixture provisioning only: exercise the PRODUCTION large
+            // download path below, not the already separately tested multipart
+            // uploader. The canonical immutable BLAKE3 key remains unchanged.
+            writer.client.put_object().bucket(&profile.bucket).key(&blob_key)
+                .if_none_match("*")
+                .body(aws_sdk_s3::primitives::ByteStream::from(captured.bytes.clone()))
+                .send().await.unwrap();
+        }
         let record = RevisionRecord {
             id: RevisionId::new(),
             document_id: DocumentId::new(),
@@ -392,7 +417,7 @@ mod tests {
             revision_id: record.id,
             action: JournalAction::StageDownload,
             path: relative.clone(),
-            remote_object_id: blob_key,
+            remote_object_id: blob_key.clone(),
             remote_guard: None,
             expected_content_hash: blob_hash.clone(),
             expected_baseline: None,
@@ -400,8 +425,34 @@ mod tests {
         let mut journal = SqliteSyncJournal::open(&app_b.join("ops.sqlite")).unwrap();
         let mut cache = SqliteDagStore::open(&app_b.join("blobs.sqlite")).unwrap();
         assert!(!root_b.join(relative.as_str()).exists());
+        // An over-budget request must fail before the journal is changed,
+        // regardless of any provider-reported Content-Length.
+        assert!(matches!(
+            reader.stage_verified_s3_content_for_core(
+                &verified, &mut journal, &mut cache,
+                intent.clone(), MAX_CORE_STAGE_BLOB_BYTES + 1,
+            ).await,
+            Err(S3CoreStageError::InvalidIntent)
+        ));
+        assert!(journal.get(operation_id).unwrap().is_none());
+        if bytes.len() as u64 > super::super::MAX_PROBE_BYTES {
+            // The small pointer/metadata transport MUST NOT become an
+            // unbounded download just because the Core needs a large blob.
+            assert!(matches!(
+                reader.get_bounded(&blob_key, max_blob_bytes).await,
+                Err(S3TransportError::ObjectTooLarge)
+            ));
+            assert!(matches!(
+                reader.stage_verified_s3_content_for_core(
+                    &verified, &mut journal, &mut cache,
+                    intent.clone(), super::super::MAX_PROBE_BYTES,
+                ).await,
+                Err(S3CoreStageError::Transport(S3TransportError::ObjectTooLarge))
+            ));
+            assert!(journal.get(operation_id).unwrap().is_none());
+        }
         let receipt = reader.stage_verified_s3_content_for_core(
-            &verified, &mut journal, &mut cache, intent.clone(), 4096,
+            &verified, &mut journal, &mut cache, intent.clone(), max_blob_bytes,
         ).await.unwrap();
         assert_eq!(receipt.content_hash, blob_hash);
         assert_eq!(cache.verified_blob(&receipt.content_hash).unwrap(), bytes);
