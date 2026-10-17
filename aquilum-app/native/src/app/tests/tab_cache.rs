@@ -17,9 +17,13 @@ fn clean_tabs_reopen_from_bounded_rope_cache_after_byte_hash_verification() {
     assert_eq!(h.app.inactive_notes.len(), 1);
     let stages = select(&mut h, &first);
     assert!(stages.cache_hit, "clean tab may reuse Rope after disk hash matches");
+    assert!(stages.layout_offered, "clean UI should offer an already shaped paragraph");
+    assert!(stages.layout_reused > 0, "Parley must actually accept the candidate, not simply receive it");
     assert_eq!(h.body_text(), "A: текст");
     let stages = select(&mut h, &second);
     assert!(stages.cache_hit);
+    assert!(stages.layout_offered);
+    assert!(stages.layout_reused > 0);
     assert_eq!(h.body_text(), "B: текст");
 }
 
@@ -41,6 +45,8 @@ fn cached_tab_rejects_same_length_same_mtime_external_changes() {
 
     let stages = select(&mut h, &first);
     assert!(!stages.cache_hit, "changed raw bytes must invalidate cached Rope");
+    assert!(!stages.layout_offered);
+    assert_eq!(stages.layout_reused, 0);
     assert_eq!(h.body_text(), "два");
 }
 
@@ -59,6 +65,8 @@ fn pending_local_edits_are_never_cached_and_survive_fast_tab_switches() {
 
     let stages = select(&mut h, &first);
     assert!(!stages.cache_hit, "unclean tab must be loaded from disk");
+    assert!(!stages.layout_offered);
+    assert_eq!(stages.layout_reused, 0);
     assert_eq!(h.body_text(), "локальная версия");
 }
 
@@ -89,5 +97,46 @@ fn deleted_file_never_reopens_stale_cached_bytes() {
 
     let stages = select(&mut h, &first);
     assert!(!stages.cache_hit);
+    assert!(!stages.layout_offered);
+    assert_eq!(stages.layout_reused, 0);
     assert!(h.app.open_error.is_some(), "missing file must surface open error, not cached text");
+}
+
+#[test]
+fn layout_context_invalidation_keeps_verified_rope_but_discards_parley() {
+    let mut h = Harness::new();
+    let first = h.write_note("style-A.md", "Обычный текст до смены стиля");
+    let second = h.write_note("style-B.md", "Обычный текст другой вкладки");
+    assert!(h.app.open_in(&mut h.root, first.clone(), true));
+    assert!(h.app.open_in(&mut h.root, second.clone(), true));
+
+    // Fonts/theme/root changes clear layouts without throwing out safe
+    // BLAKE3-verified bytes, which remain useful across appearance changes.
+    h.app.invalidate_inactive_layouts();
+    let stages = select(&mut h, &first);
+    assert!(stages.cache_hit, "existing Rope cache should survive style invalidation");
+    assert!(!stages.layout_offered, "stale Parley candidates must be discarded");
+    assert_eq!(stages.layout_reused, 0);
+    assert_eq!(h.body_text(), "Обычный текст до смены стиля");
+
+    let stages = select(&mut h, &second);
+    assert!(stages.cache_hit);
+    assert!(stages.layout_offered, "new clean page can capture current valid styles");
+    assert!(stages.layout_reused > 0);
+}
+
+#[test]
+fn user_zoom_invalidates_cached_layouts_without_disabling_safe_file_cache() {
+    let mut h = Harness::new();
+    let first = h.write_note("dpi-A.md", "Текст через другой масштаб");
+    let second = h.write_note("dpi-B.md", "Другой текст");
+    assert!(h.app.open_in(&mut h.root, first.clone(), true));
+    assert!(h.app.open_in(&mut h.root, second.clone(), true));
+
+    assert!(h.app.zoom(true));
+    let stages = select(&mut h, &first);
+    assert!(stages.cache_hit);
+    assert!(!stages.layout_offered);
+    assert_eq!(stages.layout_reused, 0);
+    assert_eq!(h.body_text(), "Текст через другой масштаб");
 }
