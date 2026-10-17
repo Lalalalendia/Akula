@@ -9,6 +9,20 @@ use masonry::parley::Layout;
 use super::super::markdown::{Block, Decor, Fonts};
 use super::{Document, Fold};
 
+thread_local! {
+    static UI_RESTORED_PARAGRAPHS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// Cleared between test-only tab selections; never compiled in release builds.
+pub(crate) fn take_ui_restore_hits() -> usize {
+    UI_RESTORED_PARAGRAPHS.with(|v| v.replace(0))
+}
+
+pub(crate) fn record_ui_restore_hits(count: usize) {
+    UI_RESTORED_PARAGRAPHS.with(|v| v.set(v.get() + count));
+}
+
 const MAX_WINDOW_BYTES: usize = 512 * 1024;
 const MAX_PARAGRAPHS: usize = 32;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
