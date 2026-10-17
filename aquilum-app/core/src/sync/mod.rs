@@ -32,6 +32,8 @@ mod provider;
 mod s3;
 mod s3_manifest;
 #[cfg(feature = "sync-s3")]
+mod s3_head_probe;
+#[cfg(feature = "sync-s3")]
 mod s3_transport;
 mod upload;
 mod vault;
@@ -40,7 +42,12 @@ pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimi
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
-pub use recovery_dashboard::{native_recovery_overview, NativeRecoveryOverview, RECOVERY_JOURNAL_FILENAME};
+pub use recovery_dashboard::{
+    native_recovery_overview, native_recovery_case_preview, native_record_recovery_decision,
+    NativeRecoveryOverview, NativeRecoveryExample, NativeRecoveryCasePreview,
+    NativeRecoveryDecision, NativeRecoveryReviewError, NativeRecoveryReviewReceipt,
+    RECOVERY_JOURNAL_FILENAME,
+};
 pub use download::{stage_remote_download, StageDownloadError, StagedDownload};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
 pub use journal::{
@@ -67,6 +74,11 @@ pub use s3_manifest::{
     S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
     S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
     MAX_SHARD_ENTRIES, MAX_SHARDS,
+};
+#[cfg(feature = "sync-s3")]
+pub use s3_head_probe::{
+    observe_s3_current_head, read_s3_digest_matched_manifest, S3DigestMatchedManifest,
+    S3HeadReadError, S3ObservedHead,
 };
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
