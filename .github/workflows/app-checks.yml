@@ -154,3 +154,48 @@ jobs:
         run: |
           echo "Shared Rust cache exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
           echo "Only the main branch can save the shared cache; PRs restore but never upload." >> "$GITHUB_STEP_SUMMARY"
+
+  # Temporary measurement only: the protected Main PR gate above remains
+  # unchanged. Runs ONLY in a clearly named experiment PR.
+  native-shard-profile:
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'ci/native-visual-split-experiment-')
+    name: Profile native fidelity / ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [frames, remainder]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Profile native test group without reducing assertion counts
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          if [ "$SHARD" = frames ]; then
+            cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
+          else
+            cargo test --locked -p aquilum-native --bin aquilum-native -- --skip app::tests::perf::frames::
+          fi
+          duration=$((SECONDS - start))
+          printf 'Native %s shard completed in %s seconds; see test logs for executed and ignored test counts.\n' "$SHARD" "$duration" | tee -a "$GITHUB_STEP_SUMMARY"
