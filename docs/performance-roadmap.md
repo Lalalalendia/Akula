@@ -1,6 +1,6 @@
 # Akula performance roadmap
 
-This document tracks measured performance work for the **Lalalalendia/Akula** fork. Follow the actual PR and Actions state; the checkboxes describe the plan as of 2026-10-16.
+This document tracks measured performance work for the **Lalalalendia/Akula** fork. Follow the actual PR and Actions state; the checkboxes describe the plan as of 2026-10-17.
 
 ## Release rules
 1. Each performance change is isolated in its own PR.
@@ -99,6 +99,17 @@ The second Argon audit covered text hyphenation, reader page layout, graph raste
 
 Potential next experiments from the audit, **not yet accepted**: graph `Band::disc` solid-interior fast path, separable 3×3 dilation, chunked rope common-prefix matching, and no-allocation reader session visibility. Require visual pixel-level equality or bounded explained diffs for raster changes, unchanged text position/selection for reader changes, and same-runner paired timings. Avoid adding extra buffers to dilation unless the total memory and latency trade-off wins.
 
+## Third optimization audit: inline parser, search hits, and surface labels (2026-10-17)
+
+The third Argon audit suggested large multipliers for several hot functions. The multipliers were **hypotheses** and were never accepted as whole-app speedups. Only behavior-preserving changes with reproducible measurements entered `main`.
+
+- [PR #85](https://github.com/Lalalalendia/Akula/pull/85), **merged** (`087fde0243f5910f06f09c15d7a9880d9bd5e523`): avoid `format!` calls when preparing 12 HTML tag pairs, skip HTML scans for paragraphs without `<`, and eliminate heap allocation for the common `==` / `%%` delimiters. Preserve Unicode byte offsets and alternative delimiters. [Same-runner source ABBA benchmark](https://github.com/Lalalalendia/Akula/actions/runs/39033186675): ~19.41× isolated ordinary-text marks, 14.23× long plain text, 2.62× delimiter marks, 1.36× tagged HTML and 1.18× mixed text. **No full-editor redraw gain has been measured.**
+- [PR #89](https://github.com/Lalalalendia/Akula/pull/89), **merged** (`347ae6f43cec960610d8152796927f5db6ab1c50`): `stem_surface_labels` uses a lightweight analyzer on already-extracted alphanumeric words, retaining the same sequence of lowercase, folding, stemming and exclusion filters. Analyzer/schema version unchanged. [Same-binary ABBA](https://github.com/Lalalalendia/Akula/actions/runs/39034613648) measured **53.544 → 39.769 ms, 1.346× isolated speedup**. A separate index benchmark reported ~+2.2–2.4% elapsed time and SQLite +7.5%; these are **not** performance wins and no product-level or indexing speedup is claimed. The reusable ABBA CI now pins the exact PR base and uses separate Cargo targets for base/head (no repeated `cargo clean` on every sample).
+- [PR #94](https://github.com/Lalalalendia/Akula/pull/94), **merged** (`928007ef0a00a27eee37e7ff19512c0191ddc82a`): generate global-search snippets through a single file handle. Early matches are one forward pass; distant matches rewind the same handle for heading-context prefix, and stale-index misses keep a bounded opening snippet rather than accumulating the entire file. Query-term filename matchers are reused. UTF-16 offsets, LF/CRLF normalization and headings have differential tests. [Same-process paired run](https://github.com/Lalalalendia/Akula/actions/runs/39034470033): **11.444 → 7.260 µs (1.576×)** for early matches; ~1.00× for distant hits and stale-index misses. **No whole-search latency improvement is claimed.**
+- [PR #97](https://github.com/Lalalalendia/Akula/pull/97), **draft at this checkpoint**: reuse the already-computed raw BLAKE3 digest when LF-only content normalizes to identical bytes. CR and CRLF still require separate normalized hashes. Does **not** change `write_file_atomic_impl` or expected-hash/CAS ordering. Accept only after full CI and paired LF/CRLF measurements.
+
+Deferred experiments require separate evidence and are **not merged as part of this audit**: AVX2 versus the current vello_cpu SSE4.2 cap (pixel-fidelity checks and real frame timing required); live-cover pixel-buffer reuse (never reinterpret `Vec<u32>` as `Vec<u8>` via `Vec::from_raw_parts` because allocator layout/alignment invariants differ); MCP title resolution through the index (stale/missing files must not authorize writes); and bounded concurrent Wikixiv HTTP (timeouts, rate limiting and cancellation). Moving a file's expected-hash check earlier is not a security fix and must undergo separate File Gate/TOCTOU review.
+
 ## Benchmark commands
 
 From `aquilum-app`:
@@ -113,6 +124,9 @@ cargo test --release --locked -p aquilum-core benchmark_save_breakdown -- --igno
 cargo test --release --locked -p aquilum-core benchmark_commit_batch_scaling -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_quiet_window -- --ignored --nocapture --test-threads=1
 AQUILUM_BENCH_RICH=1 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
+cargo test --release --locked -p aquilum-core benchmark_search_hit_window -- --ignored --nocapture --test-threads=1
+cargo test --release --locked -p aquilum-core benchmark_surface_tokenizer -- --ignored --nocapture --test-threads=1
+cargo test --release --locked -p aquilum-core benchmark_snapshot_hash_reuse -- --ignored --nocapture --test-threads=1
 ```
 
 The SQLite-specific benchmark and both CI workflows are now available in `main`. Compare exact heads on the same CPU; runner-to-runner numbers alone are not sufficient.
