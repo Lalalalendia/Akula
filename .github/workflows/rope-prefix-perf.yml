@@ -60,17 +60,17 @@ jobs:
             fi
             cargo test --release --manifest-path "$RUNNER_TEMP/rope-probe/Cargo.toml" -- --test-threads=1
             cargo build --release --manifest-path "$RUNNER_TEMP/rope-probe/Cargo.toml"
-            cp "$RUNNER_TEMP/rope-probe/target/release/rope-prefix-probe" "$RUNNER_TEMP/rope-$variant"
+            cp "$RUNNER_TEMP/rope-probe/target/release/rope-prefix-probe" "$RUNNER_TEMP/rope-bin-$variant"
           done
 
       - name: Paired ABBA elapsed-time measurements
         shell: bash
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/rope-base" | tee base-1.txt
-          "$RUNNER_TEMP/rope-head" | tee head-1.txt
-          "$RUNNER_TEMP/rope-head" | tee head-2.txt
-          "$RUNNER_TEMP/rope-base" | tee base-2.txt
+          "$RUNNER_TEMP/rope-bin-base" | tee base-1.txt
+          "$RUNNER_TEMP/rope-bin-head" | tee head-1.txt
+          "$RUNNER_TEMP/rope-bin-head" | tee head-2.txt
+          "$RUNNER_TEMP/rope-bin-base" | tee base-2.txt
 
       - name: Summarize all workloads including regressions
         shell: bash
