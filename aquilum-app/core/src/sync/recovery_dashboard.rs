@@ -323,6 +323,142 @@ mod tests {
         id
     }
 
+    fn m1de_archived_incident(
+        core: &Core,
+        root: &Path,
+        appdata: &Path,
+        path: &str,
+    ) -> (OperationId, std::path::PathBuf, std::path::PathBuf) {
+        fs::create_dir_all(root.join("notes")).unwrap();
+        let op = {
+            let mut journal = SqliteSyncJournal::open(
+                &appdata.join(RECOVERY_JOURNAL_FILENAME)
+            ).unwrap();
+            let op = claim(core, &mut journal, path);
+            let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+            fs::write(&stage, b"fixture from remote").unwrap();
+            let final_file = root.join(path);
+            fs::write(&final_file, b"other user version").unwrap();
+            let host = RegisteredReadAdmission::open(core, root).unwrap();
+            host.record_local_recovery_evidence(op, &journal).unwrap();
+            host.archive_local_recovery_copy(op, &journal).unwrap();
+            op
+        };
+        (op, root.join("notes").join(format!(".akula-sync-stage-{op}")), root.join(path))
+    }
+
+    #[test]
+    fn m1de_explicit_review_keeps_both_conflicting_files_and_baseline_unconfirmed() {
+        let (_temp, core, root, appdata) = fixture();
+        let (op, stage, final_file) = m1de_archived_incident(
+            &core, &root, &appdata, "notes/competing.md",
+        );
+        let preview = native_recovery_case_preview(
+            &core, &appdata, &root, &op.to_string(),
+        ).unwrap();
+        assert_eq!(preview.operation_id, op.to_string());
+        assert_eq!(preview.review_count, 0);
+        assert_eq!(preview.latest_event_digest, "genesis");
+        assert_eq!(preview.assessment, "DifferentFinalFile");
+        let first = native_record_recovery_decision(
+            &core, &appdata, &root, &preview,
+            NativeRecoveryDecision::KeepBlocked, "Keep both user versions",
+        ).unwrap();
+        assert_eq!(first.sequence, 1);
+        assert_eq!(first.decision, NativeRecoveryDecision::KeepBlocked);
+        assert_eq!(fs::read(&stage).unwrap(), b"fixture from remote");
+        assert_eq!(fs::read(&final_file).unwrap(), b"other user version");
+        assert_eq!(native_record_recovery_decision(
+            &core, &appdata, &root, &preview,
+            NativeRecoveryDecision::EscalateManualReview, "Stale second review",
+        ), Err(NativeRecoveryReviewError::Stale));
+        let next = native_recovery_case_preview(
+            &core, &appdata, &root, &op.to_string(),
+        ).unwrap();
+        assert_eq!(next.review_count, 1);
+        assert_ne!(next.latest_event_digest, "genesis");
+        let second = native_record_recovery_decision(
+            &core, &appdata, &root, &next,
+            NativeRecoveryDecision::EscalateManualReview, "Require manual inspection",
+        ).unwrap();
+        assert_eq!(second.sequence, 2);
+        let db = appdata.join(RECOVERY_JOURNAL_FILENAME);
+        let j = SqliteSyncJournal::open_existing_read_only(&db).unwrap();
+        assert_eq!(j.recovery_review_history(op).unwrap().len(), 2);
+        assert_eq!(j.local_publication_review_queue().unwrap().len(), 1);
+        let intent = j.get(op).unwrap().unwrap().intent;
+        assert!(j.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+        assert_eq!(fs::read(&stage).unwrap(), b"fixture from remote");
+        assert_eq!(fs::read(&final_file).unwrap(), b"other user version");
+    }
+
+    #[test]
+    fn m1de_missing_archived_evidence_never_allows_native_confirmation() {
+        let (_temp, core, root, appdata) = fixture();
+        let mut journal = SqliteSyncJournal::open(
+            &appdata.join(RECOVERY_JOURNAL_FILENAME)
+        ).unwrap();
+        let op = claim(&core, &mut journal, "notes/missing.md");
+        assert_eq!(native_recovery_case_preview(
+            &core, &appdata, &root, &op.to_string(),
+        ), Err(NativeRecoveryReviewError::NotReady));
+        assert_eq!(native_recovery_case_preview(
+            &core, &appdata, &root, &OperationId::new().to_string(),
+        ), Err(NativeRecoveryReviewError::Refused));
+        assert!(journal.recovery_review_snapshot(op).is_err());
+        assert_eq!(journal.local_publication_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn m1de_cross_vault_and_forged_snapshot_cannot_append_review() {
+        let (temp, core, root, appdata) = fixture();
+        let (op, _stage, _final_file) = m1de_archived_incident(
+            &core, &root, &appdata, "notes/integrity.md",
+        );
+        let preview = native_recovery_case_preview(
+            &core, &appdata, &root, &op.to_string(),
+        ).unwrap();
+        let other = temp.path().join("other-vault");
+        fs::create_dir(&other).unwrap();
+        core.ui_state.resolve_workspace(other.to_str().unwrap(), 2).unwrap();
+        assert!(native_recovery_case_preview(
+            &core, &appdata, &other, &op.to_string(),
+        ).is_err());
+        assert!(native_record_recovery_decision(
+            &core, &appdata, &other, &preview,
+            NativeRecoveryDecision::KeepBlocked, "Wrong vault",
+        ).is_err());
+        let mut forged = preview.clone();
+        forged.archive_fingerprint = "f".repeat(64);
+        assert_eq!(native_record_recovery_decision(
+            &core, &appdata, &root, &forged,
+            NativeRecoveryDecision::KeepBlocked, "Forged snapshot",
+        ), Err(NativeRecoveryReviewError::Stale));
+        let j = SqliteSyncJournal::open_existing_read_only(
+            &appdata.join(RECOVERY_JOURNAL_FILENAME)
+        ).unwrap();
+        assert!(j.recovery_review_history(op).unwrap().is_empty());
+    }
+
+    #[test]
+    fn m1de_review_writer_never_initializes_or_migrates_database() {
+        let (_temp, core, root, appdata) = fixture();
+        let db = appdata.join(RECOVERY_JOURNAL_FILENAME);
+        assert!(SqliteSyncJournal::open_existing_review_writer(&db).is_err());
+        assert!(!db.exists());
+        let j = SqliteSyncJournal::open(&db).unwrap();
+        drop(j);
+        let direct = rusqlite::Connection::open(&db).unwrap();
+        direct.execute_batch("PRAGMA user_version = 4;").unwrap();
+        assert!(SqliteSyncJournal::open_existing_review_writer(&db).is_err());
+        let version: i64 = direct.query_row(
+            "PRAGMA user_version", [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(version, 4);
+        assert_eq!(native_recovery_overview(&core, &appdata, &root),
+            NativeRecoveryOverview::InspectionUnavailable);
+    }
+
     #[test]
     fn m1dd_settings_never_creates_a_missing_recovery_journal() {
         let (_temp, core, root, appdata) = fixture();
