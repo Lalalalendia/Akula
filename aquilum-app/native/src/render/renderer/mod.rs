@@ -1,4 +1,6 @@
 mod pass;
+#[cfg(test)]
+mod adjacent;
 
 use masonry::app::{VisualLayerKind, VisualLayerPlan};
 use masonry::imaging::record::{Scene, replay_transformed};
@@ -46,6 +48,12 @@ pub(crate) struct FrameStages {
     pub record: std::time::Duration,
     pub detect: std::time::Duration,
     pub encode: std::time::Duration,
+    /// Includes RenderContext reset_and_resize + worker broadcast/barrier and local setup.
+    pub reset: std::time::Duration,
+    /// Replaying recorded Masonry layers into Vello on the CPU.
+    pub replay: std::time::Duration,
+    /// Vello flush, including the completion of queued worker operations.
+    pub flush: std::time::Duration,
     pub raster: std::time::Duration,
     /// Pixels scheduled for rasterization after merging and live-layer updates.
     /// Areas may overlap, so this is workload area, not distinct-screen coverage.
@@ -78,6 +86,8 @@ pub struct Renderer {
     pub(crate) last_stages: FrameStages,
     #[cfg(test)]
     pub(crate) split_full_frame_strips: Option<u16>,
+    #[cfg(test)]
+    pub(crate) coalesce_adjacent_for_test: bool,
     #[cfg(test)]
     pub shifts: usize,
     #[cfg(test)]
@@ -112,6 +122,8 @@ impl Renderer {
             last_stages: FrameStages::default(),
             #[cfg(test)]
             split_full_frame_strips: None,
+            #[cfg(test)]
+            coalesce_adjacent_for_test: false,
             #[cfg(test)]
             shifts: 0,
             #[cfg(test)]
@@ -155,6 +167,13 @@ impl Renderer {
     #[cfg(test)]
     pub(crate) fn enable_frame_budget_for_test(&mut self) {
         self.painter.enable_frame_budget_for_test();
+    }
+
+    /// Opt-in test-only batching of full-edge adjacent disjoint regions.
+    /// Never changes production damage or its pixel footprint.
+    #[cfg(test)]
+    pub(crate) fn enable_adjacent_coalescing_for_test(&mut self) {
+        self.coalesce_adjacent_for_test = true;
     }
 
     pub fn toggle_overlay(&mut self) {
