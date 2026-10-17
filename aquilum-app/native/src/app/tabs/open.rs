@@ -14,12 +14,32 @@ impl App {
         if let Some((layer, _)) = self.suggest_layer.take() {
             root.remove_layer(layer);
         }
+        #[cfg(test)]
+        let phase_start = std::time::Instant::now();
         self.show_tab(root);
+        #[cfg(test)]
+        let tab_end = std::time::Instant::now();
         self.version_view = None;
         self.show_version(root);
+        #[cfg(test)]
+        let version_end = std::time::Instant::now();
         self.refresh_tabs(root);
+        #[cfg(test)]
+        let tabs_end = std::time::Instant::now();
         self.request_panel(root);
+        #[cfg(test)]
+        let panel_end = std::time::Instant::now();
         self.workspace.core.active_note.set(self.note.as_ref().map(|n| n.path.clone()));
+        #[cfg(test)]
+        if std::env::var_os("AQ_TAB_PHASES").is_some() {
+            let finished = std::time::Instant::now();
+            let ms = |from: std::time::Instant, to: std::time::Instant| to.duration_since(from).as_secs_f64() * 1000.0;
+            eprintln!(
+                "NOTE_CHROME_PHASE show_tab_ms={:.3} version_ms={:.3} tabs_ms={:.3} panel_ms={:.3} active_ms={:.3} total_ms={:.3}",
+                ms(phase_start, tab_end), ms(tab_end, version_end), ms(version_end, tabs_end),
+                ms(tabs_end, panel_end), ms(panel_end, finished), ms(phase_start, finished),
+            );
+        }
     }
 
     fn show_tab(&mut self, root: &mut RenderRoot) {
@@ -44,10 +64,18 @@ impl App {
             self.show_page(root, 0);
             return;
         }
+        #[cfg(test)]
+        let phase_start = std::time::Instant::now();
         self.leave_note();
+        #[cfg(test)]
+        let leave_end = std::time::Instant::now();
         let read = aq_trace::zone("открытие: чтение файла");
         let opened = Note::open(path.clone());
         drop(read);
+        #[cfg(test)]
+        let read_end = std::time::Instant::now();
+        #[cfg(test)]
+        let mut render_end = read_end;
         match opened {
             Ok((note, text)) => {
                 self.open_error = None;
@@ -56,6 +84,10 @@ impl App {
                 self.note = Some(note);
                 let _zone = aq_trace::zone("открытие: страница заметки");
                 self.render_note(root);
+                #[cfg(test)]
+                {
+                    render_end = std::time::Instant::now();
+                }
                 self.reveal_pending(root);
             }
             Err(error) => {
@@ -68,6 +100,16 @@ impl App {
         self.hold = Some(std::time::Instant::now() + super::super::HOLD);
         self.tree.set_active(root, Some(path));
         self.show_page(root, 0);
+        #[cfg(test)]
+        if std::env::var_os("AQ_TAB_PHASES").is_some() {
+            let finished = std::time::Instant::now();
+            let ms = |from: std::time::Instant, to: std::time::Instant| to.duration_since(from).as_secs_f64() * 1000.0;
+            eprintln!(
+                "NOTE_TAB_PHASE leave_ms={:.3} read_ms={:.3} render_ms={:.3} final_ms={:.3} total_ms={:.3}",
+                ms(phase_start, leave_end), ms(leave_end, read_end), ms(read_end, render_end),
+                ms(render_end, finished), ms(phase_start, finished),
+            );
+        }
     }
 
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
