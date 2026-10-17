@@ -43,6 +43,8 @@ pub struct Painter {
     #[cfg(test)]
     test_route_limit_px: Option<u64>,
     #[cfg(test)]
+    test_route_frame_budget: bool,
+    #[cfg(test)]
     pub(super) test_route_switches: usize,
 }
 
@@ -68,6 +70,8 @@ impl Painter {
             test_serial_active: false,
             #[cfg(test)]
             test_route_limit_px: None,
+            #[cfg(test)]
+            test_route_frame_budget: false,
             #[cfg(test)]
             test_route_switches: 0,
         }
@@ -113,9 +117,19 @@ impl Painter {
     /// Select the persistent dispatcher *before* encoding a fresh damage rect.
     /// RenderContext is always flushed in finish() before this can be called.
     #[cfg(test)]
-    pub(crate) fn route_for_test(&mut self, width: u16, height: u16) {
+    pub(crate) fn enable_frame_budget_for_test(&mut self) {
+        assert!(self.test_route_limit_px.is_some(), "enable dual dispatcher first");
+        self.test_route_frame_budget = true;
+    }
+
+    pub(crate) fn route_for_test(&mut self, width: u16, height: u16, total_frame_pixels: u64) {
         let Some(limit) = self.test_route_limit_px else { return };
-        let use_serial = u64::from(width) * u64::from(height) <= limit;
+        let routed_pixels = if self.test_route_frame_budget {
+            total_frame_pixels
+        } else {
+            u64::from(width) * u64::from(height)
+        };
+        let use_serial = routed_pixels <= limit;
         if use_serial != self.test_serial_active {
             let alternate = self.test_serial_ctx.as_mut().expect("route companion context");
             std::mem::swap(&mut self.ctx, alternate);
