@@ -903,9 +903,13 @@ mod tests {
             fs::set_permissions(&anchor, fs::Permissions::from_mode(0o700)).unwrap();
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         }
-        // The caller must supply a fully resolved host scope: macOS
-        // /var may itself be a symlink to /private/var.
-        fs::canonicalize(anchor).unwrap()
+        // macOS /var may itself be a symlink to /private/var.
+        // On Windows keep the ordinary absolute name so icacls can inspect
+        // the fixture without depending on its support for verbatim paths.
+        #[cfg(unix)]
+        { fs::canonicalize(anchor).unwrap() }
+        #[cfg(windows)]
+        { anchor }
     }
 
     #[test]
