@@ -36,13 +36,15 @@ fn history_root(base: &Path) -> PathBuf {
 /// Strict pathname *preflight* for housekeeping, not an OS-handle-pinned
 /// authorization. Never silently follow .quantum/.aquilum/junction aliases.
 fn plain_entry(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
-    let mut linked = metadata.file_type().is_symlink();
     #[cfg(windows)]
-    {
+    let linked = {
         use std::os::windows::fs::MetadataExt;
         const REPARSE_POINT: u32 = 0x0000_0400;
-        linked |= metadata.file_attributes() & REPARSE_POINT != 0;
-    }
+        metadata.file_type().is_symlink()
+            || metadata.file_attributes() & REPARSE_POINT != 0
+    };
+    #[cfg(not(windows))]
+    let linked = metadata.file_type().is_symlink();
     if linked || (!metadata.is_dir() && !metadata.is_file()) {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
