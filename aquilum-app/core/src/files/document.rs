@@ -66,11 +66,14 @@ pub fn read_text(path: &Path) -> std::io::Result<String> {
 }
 
 fn snapshot_of(bytes: Vec<u8>) -> Result<FileSnapshot, FileCommandError> {
+    // Without CR, text_from_bytes validates UTF-8 but never modifies bytes.
+    // The raw-file hash is therefore also the editor's normalized text hash.
+    let has_cr = memchr::memchr(b'\r', &bytes).is_some();
     let hash = hash_bytes(&bytes);
     let content = text_from_bytes(bytes).map_err(|error| FileCommandError::InvalidUtf8 {
         message: error.to_string(),
     })?;
-    let text_hash = hash_bytes(content.as_bytes());
+    let text_hash = if has_cr { hash_bytes(content.as_bytes()) } else { hash.clone() };
 
     Ok(FileSnapshot {
         content,
@@ -133,4 +136,74 @@ pub fn write_file_atomic_impl(
 pub fn ensure_directory_impl(path: &Path) -> Result<(), FileCommandError> {
     fs::create_dir_all(path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod snapshot_hash_reuse_tests {
+    use super::{hash_bytes, snapshot_of, text_from_bytes, FileSnapshot};
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    // Exact former snapshot implementation: keep as an in-process baseline
+    // instead of comparing two different runners, CPUs or compiler revisions.
+    fn legacy(mut bytes: Vec<u8>) -> FileSnapshot {
+        let hash = hash_bytes(&bytes);
+        let content = text_from_bytes(std::mem::take(&mut bytes)).unwrap();
+        let text_hash = hash_bytes(content.as_bytes());
+        FileSnapshot { content, hash, text_hash }
+    }
+
+    #[test]
+    fn lf_hash_reuse_matches_previous_raw_and_normalized_hashes() {
+        let cases = [
+            String::new(),
+            "Простая строка без переноса".to_owned(),
+            "Русский текст 😀\nEnglish content\n".repeat(100),
+            "Смешанные переносы\r\nстрока\rдругая\nконец".to_owned(),
+            "Одиночный CR\rвместо LF".to_owned(),
+            "\r\r\n\r\n\r".to_owned(),
+        ];
+        for input in cases {
+            let baseline = legacy(input.as_bytes().to_vec());
+            let fast = snapshot_of(input.as_bytes().to_vec()).unwrap();
+            assert_eq!(fast.content, baseline.content);
+            assert_eq!(fast.hash, baseline.hash);
+            assert_eq!(fast.text_hash, baseline.text_hash);
+        }
+    }
+
+    #[test]
+    #[ignore = "diagnostic paired release benchmark; run with --ignored --nocapture"]
+    fn benchmark_snapshot_hash_reuse() {
+        fn sample(bytes: &[u8], old: bool) -> f64 {
+            let start = Instant::now();
+            for _ in 0..30 {
+                let owned = black_box(bytes.to_vec());
+                let output = if old { legacy(owned) } else { snapshot_of(owned).unwrap() };
+                black_box((output.hash, output.text_hash, output.content.len()));
+            }
+            start.elapsed().as_secs_f64() * 1_000.0 / 30.0
+        }
+
+        let lf = "Строка текста 😀 with Unicode and ASCII\n".repeat(20_000);
+        let crlf = "Строка текста 😀 with Unicode and ASCII\r\n".repeat(20_000);
+        for (name, bytes) in [("lf", lf.as_bytes()), ("crlf", crlf.as_bytes())] {
+            let mut old = Vec::new();
+            let mut new = Vec::new();
+            for _ in 0..5 {
+                old.push(sample(bytes, true));
+                new.push(sample(bytes, false));
+                new.push(sample(bytes, false));
+                old.push(sample(bytes, true));
+            }
+            old.sort_by(f64::total_cmp);
+            new.sort_by(f64::total_cmp);
+            let baseline_ms = (old[4] + old[5]) / 2.0;
+            let candidate_ms = (new[4] + new[5]) / 2.0;
+            println!(
+                "BENCH-SNAPSHOT case={name} baseline_ms={baseline_ms:.4} candidate_ms={candidate_ms:.4} speedup={:.3}x",
+                baseline_ms / candidate_ms
+            );
+        }
+    }
 }
