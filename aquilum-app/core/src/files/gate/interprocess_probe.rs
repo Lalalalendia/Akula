@@ -154,6 +154,27 @@ mod tests {
                     thread::park_timeout(Duration::from_secs(60));
                 }
             }
+            "hold-and-recheck-after-namespace-swap" => {
+                // A real, independently running process keeps an OS lock on
+                // the OLD inode/file ID while another process replaces the
+                // pathname. A pinned descriptor is not a protected name.
+                let root = PinnedProbeRoot::open(&left).unwrap();
+                let held = root.try_lock().unwrap().expect("child holds original lock");
+                fs::write(report.with_extension("ready"), b"held").unwrap();
+                let proceed = report.with_extension("go");
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while !proceed.exists() {
+                    assert!(Instant::now() < deadline, "swap signal timed out");
+                    thread::sleep(Duration::from_millis(10));
+                }
+                let refused = held.recheck_held_name(&root).is_err();
+                fs::write(&report, if refused { b"refused" } else { b"unsafe" }).unwrap();
+                // Stay ALIVE with old handle: the parent must observe that
+                // both distinct lock objects can be held simultaneously.
+                loop {
+                    thread::park_timeout(Duration::from_secs(60));
+                }
+            }
             "bootstrap-on-signal" => {
                 // Both child *processes* advertise readiness, then the parent
                 // releases a shared barrier. Never create outside temp vaults.
@@ -429,6 +450,69 @@ mod tests {
         assert_eq!(third.generation.to_string(), creator_tokens[1]);
         assert_eq!(format!("{}:{}", third.identity.0, third.identity.1), creator_tokens[2]);
         assert!(left.join(TEST_LOCK_NAME).is_file());
+    }
+
+    fn demonstrate_live_split_lock_detected(clone_valid_record: bool) {
+        let (temp, left, right) = fixture();
+        let original = left.join(TEST_LOCK_NAME);
+        fs::remove_file(&original).unwrap();
+        let seed = PinnedProbeRoot::open(&left).unwrap();
+        let expected = seed.bootstrap_exclusive_for_test().unwrap();
+        assert!(expected.created);
+        let original_bytes = fs::read(&original).unwrap();
+
+        let report = temp.path().join("held-process-report.txt");
+        let child = child_command("hold-and-recheck-after-namespace-swap", &left, &right, &report)
+            .spawn()
+            .unwrap();
+        let mut child = KillChild(child);
+        wait_for_report(&mut child, &report.with_extension("ready"), b"held");
+        assert!(child.0.try_wait().unwrap().is_none());
+
+        // The OLD lock remains open (and exclusively locked) in the child,
+        // but a privileged/hostile namespace writer can rename its name.
+        // Neither File::try_lock nor a BLAKE3 checksum prevents this.
+        let orphaned = temp.path().join("old-held-lock-renamed-outside-vault");
+        fs::rename(&original, &orphaned).unwrap();
+        if clone_valid_record {
+            // Forge a BYTE-IDENTICAL record with the SAME generation UUID:
+            // only physical file identity can distinguish the objects.
+            fs::write(&original, &original_bytes).unwrap();
+        } else {
+            let fresh = PinnedProbeRoot::open(&left).unwrap();
+            let replacement = fresh.bootstrap_exclusive_for_test().unwrap();
+            assert!(replacement.created);
+            assert_ne!(expected.generation, replacement.generation);
+            assert_ne!(expected.identity, replacement.identity);
+        }
+        let new_bytes = fs::read(&original).unwrap();
+        assert_eq!(fs::read(&orphaned).unwrap(), original_bytes);
+        let fresh = PinnedProbeRoot::open(&left).unwrap();
+        // THIS SUCCESS IS EVIDENCE OF A SPLIT LOCK, NOT A SAFE ADMISSION.
+        // A new file ID has a separate OS lock although the child is alive.
+        let new_lock = fresh.try_lock().unwrap().expect(
+            "a replaced pathname can be locked despite a live old holder"
+        );
+        assert_ne!(new_lock.identity(), expected.identity);
+        assert!(child.0.try_wait().unwrap().is_none());
+
+        fs::write(report.with_extension("go"), b"go").unwrap();
+        wait_for_report(&mut child, &report, b"refused");
+        assert!(child.0.try_wait().unwrap().is_none());
+        assert_eq!(fs::read(&orphaned).unwrap(), original_bytes);
+        assert_eq!(fs::read(&original).unwrap(), new_bytes);
+        drop(new_lock);
+        child.terminate();
+    }
+
+    #[test]
+    fn oslock_live_split_lock_after_rename_and_rebootstrap_is_detected() {
+        demonstrate_live_split_lock_detected(false);
+    }
+
+    #[test]
+    fn oslock_live_split_lock_with_cloned_valid_generation_is_detected() {
+        demonstrate_live_split_lock_detected(true);
     }
 
     #[test]
