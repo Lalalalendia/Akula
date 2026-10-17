@@ -38,6 +38,7 @@ pub(crate) struct RestoreGateCounts {
     pub ime: usize,
     pub caret: usize,
     pub passed: usize,
+    pub deferred_initial_width: usize,
 }
 thread_local! {
     static RESTORE_GATES: std::cell::Cell<RestoreGateCounts> =
@@ -150,6 +151,25 @@ impl Document {
         caret: Option<usize>,
     ) -> usize {
         let Some(snapshot) = self.trial_snapshot.take() else { return 0 };
+        // During Masonry's first vertical measurement, the editor may be
+        // measured at a provisional width before the real layout size is
+        // assigned. Defer ONLY that first-width mismatch. Never apply a layout
+        // without validating its final, exact width and entire context.
+        let same_content_context = self.full.byte_len() == snapshot.full_len
+            && self.base == snapshot.base && self.text == snapshot.text
+            && self.windowed == snapshot.windowed
+            && fonts_key(self.markdown.as_ref()) == snapshot.font_key
+            && styles_key(styles) == snapshot.style_key
+            && compose.is_none() && caret.is_none();
+        if self.width.is_none() && width != Some(snapshot.width) && same_content_context {
+            RESTORE_GATES.with(|slot| {
+                let mut counts = slot.get();
+                counts.deferred_initial_width += 1;
+                slot.set(counts);
+            });
+            self.trial_snapshot = Some(snapshot);
+            return 0;
+        }
         // IME composition and caret-dependent Markdown can change the Parley
         // shape of a line even if the file bytes remain identical.
         let blocked = RESTORE_GATES.with(|slot| {
@@ -281,6 +301,46 @@ mod tests {
         assert!(doc.trial_snapshot(&styles).is_some(), "clean note has an empty edit-reporting queue");
         doc.report(0..0, "inserted");
         assert!(doc.trial_snapshot(&styles).is_none(), "actual unconsumed edits must disable transfer");
+    }
+
+    #[test]
+    fn provisional_measure_width_defers_once_then_real_width_restores_plain_paragraphs() {
+        let text = "обычный текст и русский абзац\\n".replace("\\n", "\n").repeat(80);
+        let styles = StyleSet::new(16.0);
+        let mut source = doc(&text);
+        shape(&mut source, 600.0, &styles);
+        let snapshot = source.trial_snapshot(&styles).expect("test requires layouts");
+        let mut target = doc(&text);
+        target.trial_offer(snapshot);
+        // An initial measure at a provisional width must not consume an
+        // otherwise-correct snapshot for the subsequent full-width layout.
+        shape(&mut target, 350.0, &styles);
+        assert!(target.trial_snapshot.is_some(), "first width mismatch is deferred");
+        let applied = target.try_restore_trial(Some(600.0), &styles, None, None);
+        assert!(applied > 0, "exact final wrap width can use the snapshot");
+        shape(&mut target, 600.0, &styles);
+        let mut fresh = doc(&text);
+        shape(&mut fresh, 600.0, &styles);
+        assert_eq!(fresh.loaded(), target.loaded());
+        assert!((fresh.height() - target.height()).abs() < 0.001);
+    }
+
+    #[test]
+    fn genuinely_different_final_width_drops_candidate() {
+        let text = "длинная обычная строка для переноса\\n".replace("\\n", "\n").repeat(80);
+        let styles = StyleSet::new(16.0);
+        let mut source = doc(&text);
+        shape(&mut source, 600.0, &styles);
+        let snapshot = source.trial_snapshot(&styles).expect("expected plain layouts");
+        let mut target = doc(&text);
+        target.trial_offer(snapshot);
+        shape(&mut target, 350.0, &styles);
+        assert!(target.trial_snapshot.is_some());
+        // A second layout at the *same* incompatible width is treated as
+        // the actual width, consumes the pending snapshot and rejects reuse.
+        shape(&mut target, 350.0, &styles);
+        assert!(target.trial_snapshot.is_none(), "different final width never retains stale shapes");
+        assert_eq!(target.try_restore_trial(Some(600.0), &styles, None, None), 0);
     }
 
     #[test]
