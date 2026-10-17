@@ -438,7 +438,7 @@ impl PermissionBroker {
         }
         let grant = Grant { capability, scope, expires_at };
         let next_revision = record.revision.checked_add(1).ok_or(BrokerError::RevisionExhausted)?;
-        let next_epoch = store.persist_grant(record.vault, &record.identity, &grant)?;
+        let next_epoch = store.persist_grant(record.vault, &record.identity, &grant, record.storage_epoch)?;
         // If the DB rejects the transaction, no in-memory permission changes.
         record.storage_epoch = next_epoch;
         record.grants.retain(|prior| {
@@ -506,7 +506,7 @@ impl PermissionBroker {
             if store.epoch(record.vault, &record.identity)? != record.storage_epoch {
                 return Err(BrokerError::StaleLease);
             }
-            store.revoke_all(record.vault, &record.identity)?
+            store.revoke_all(record.vault, &record.identity, record.storage_epoch)?
         } else {
             record.storage_epoch
         };

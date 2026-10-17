@@ -166,6 +166,7 @@ impl PermissionGrantStore {
         vault: VaultId,
         identity: &PluginIdentity,
         grant: &Grant,
+        expected_epoch: u64,
     ) -> Result<u64, BrokerError> {
         let capability =
             serde_json::to_string(&grant.capability).map_err(|_| BrokerError::CorruptStore)?;
@@ -175,6 +176,9 @@ impl PermissionGrantStore {
         let transaction = self.connection.transaction().map_err(|_| BrokerError::StoreFailure)?;
         ensure_principal(&transaction, &vault, identity)?;
         let current = query_epoch(&transaction, &vault, identity)?;
+        if u64::try_from(current).map_err(|_| BrokerError::CorruptStore)? != expected_epoch {
+            return Err(BrokerError::StaleLease);
+        }
         let changed = transaction
             .execute(
                 "INSERT INTO plugin_grants
@@ -216,12 +220,16 @@ impl PermissionGrantStore {
         &mut self,
         vault: VaultId,
         identity: &PluginIdentity,
+        expected_epoch: u64,
     ) -> Result<u64, BrokerError> {
         let vault = vault.as_uuid().to_string();
         let digest = identity.artifact_digest();
         let transaction = self.connection.transaction().map_err(|_| BrokerError::StoreFailure)?;
         ensure_principal(&transaction, &vault, identity)?;
         let current = query_epoch(&transaction, &vault, identity)?;
+        if u64::try_from(current).map_err(|_| BrokerError::CorruptStore)? != expected_epoch {
+            return Err(BrokerError::StaleLease);
+        }
         let next = current.checked_add(1).ok_or(BrokerError::RevisionExhausted)?;
         transaction
             .execute(
