@@ -16,7 +16,7 @@ struct WorkerSample {
     encode_us: f64,
     raster_us: f64,
     raster_pct: f64,
-    scroll_moves: usize,
+    scroll_candidates: usize,
 }
 
 fn draw_worker(
@@ -37,7 +37,7 @@ fn draw_worker(
         encode_us: stages.encode.as_secs_f64() * 1e6,
         raster_us: stages.raster.as_secs_f64() * 1e6,
         raster_pct: 100.0 * stages.raster_pixels as f64 / stages.screen_pixels as f64,
-        scroll_moves: stages.damage.shifts,
+        scroll_candidates: stages.damage.shifts,
     }
 }
 
@@ -56,6 +56,27 @@ fn max_pixel_channel_delta(a: &[u32], b: &[u32]) -> u8 {
 fn median_and_p95(samples: &[WorkerSample], select: impl Fn(&WorkerSample) -> f64) -> [f64; 2] {
     let values: Vec<f64> = samples.iter().map(select).collect();
     percentiles(&values, [0.50, 0.95])
+}
+
+// The tracker reports scroll *candidates* before test-only redraw
+// overrides are applied. In viewport/full modes no row copy should occur.
+fn assert_selected_damage_mode(workload: &str, case: &str, step: u32, area_pct: f64, actual_moves: usize) {
+    let (min_pct, max_pct, expect_moves) = match workload {
+        "normal" => (0.5, 5.0, true),
+        "guard96" => (5.0, 20.0, true),
+        "viewport" => (20.0, 50.0, false),
+        "full" => (99.0, 101.0, false),
+        other => panic!("unknown Vello workload {other}"),
+    };
+    assert!(
+        area_pct >= min_pct && area_pct <= max_pct,
+        "{case}/{workload}/frame{step}: wrong raster workload {area_pct:.2}% (expected {min_pct:.1}–{max_pct:.1}%)",
+    );
+    assert_eq!(
+        actual_moves > 0,
+        expect_moves,
+        "{case}/{workload}/frame{step}: unexpected physical row-copy behavior (moves={actual_moves})",
+    );
 }
 
 fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool, workload: &str) {
@@ -115,9 +136,11 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
         };
         for index in order {
             let sample = draw_worker(&mut renderers[index], &layers, w, hh, scale, step == 0);
-            // Pointer-only frames have no scroll workload in the forced-full
-            // scenario. Exclude them consistently across the three modes.
-            if step != 0 && sample.scroll_moves > 0 {
+            // Sample scroll-candidate frames only. The tracker records the
+            // candidate before the viewport/full test mode suppresses copies.
+            // Verify each mode actually exercises its intended raster area.
+            if step != 0 && sample.scroll_candidates > 0 {
+                assert_selected_damage_mode(workload, case, step, sample.raster_pct, renderers[index].moved.len());
                 samples[index].push(sample);
             }
         }
@@ -144,7 +167,7 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
         let selected = &samples[index];
         assert!(
             selected.len() >= 20,
-            "{case}/{workload}/{thread_count}: too few actual scroll frames ({})",
+            "{case}/{workload}/{thread_count}: too few scroll-candidate frames ({})",
             selected.len()
         );
         let [total_p50, total_p95] = median_and_p95(selected, |s| s.total_us);
