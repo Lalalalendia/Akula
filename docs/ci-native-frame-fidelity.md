@@ -30,3 +30,11 @@ Important: sharding accelerates wall-clock latency at the cost of an additional 
 4. Run a sync-only PR through the same aggregator; the native fidelity job must be skipped, not required.
 
 Example diagnostic source: https://github.com/Lalalalendia/Akula/actions/runs/38992862841
+
+## Production validation
+
+On [PR #66](https://github.com/Lalalalendia/Akula/pull/66), both required lanes and the final fail-closed `Main PR gate` completed successfully in [run 38993219815](https://github.com/Lalalalendia/Akula/actions/runs/38993219815). The full workflow elapsed **290 seconds (4m50s)**, compared with **387 seconds (6m27s)** for the recent warmed unsharded run [38992330822](https://github.com/Lalalalendia/Akula/actions/runs/38992330822), about 25% less wall time. The runs were on different revisions; keep this as a preliminary comparison until repeated measurements are available.
+
+The native remainder job passed 416 and ignored 43 tests, with 7 filtered. The separate frame-fidelity job passed all 7. Together they cover all 466 native tests at this revision. The workspace and sync-engine tests also passed. The full CI remains necessary on non-sync changes, and the additional runner may increase billed minutes.
+
+This documentation-only follow-up PR intentionally probes `mode=none`: `Classify required CI lanes` and `Required Rust tests and policy checks` must pass, `Native frame fidelity` must be skipped, and the final `Main PR gate` must succeed without running Rust tests.
