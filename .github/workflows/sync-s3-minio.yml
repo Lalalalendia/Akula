@@ -150,6 +150,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 minio_two_clients_manifest_cas_and_lost_ack -- --ignored --test-threads=1 --nocapture
+      - name: Prove bounded parallel DAG verification and reject corrupted S3 blobs
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 bounded_parallel_verifier_keeps_out_of_order_parent_closure_and_blob_lengths
+          cargo test --locked -p aquilum-core --features sync-s3 minio_verified_384_revision_dag_parallel_and_corruption -- --ignored --test-threads=1 --nocapture
       - name: Stress 10k actual S3 objects and 1000-key pagination
         shell: bash
         working-directory: aquilum-app

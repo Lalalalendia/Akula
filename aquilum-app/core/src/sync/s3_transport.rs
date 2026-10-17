@@ -142,6 +142,7 @@ impl S3PutCondition {
 /// An authenticated SDK client scoped to one Akula vault prefix.
 /// Credentials come from the caller-controlled AWS provider chain, not from
 /// the vault, local journal, ordinary settings JSON, logs or object names.
+#[derive(Clone)]
 pub struct AwsS3ProbeClient {
     client: aws_sdk_s3::Client,
     bucket: String,
