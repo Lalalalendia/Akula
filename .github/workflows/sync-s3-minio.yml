@@ -124,6 +124,15 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 replan::identity_tests
           cargo test --locked -p aquilum-core --features sync-s3 cas_replay_plans_both_offline_siblings_without_rewriting_either_head
+      - name: Validate Core-to-S3 identity guards (offline)
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 additive_gate_rejects_cross_vault_and_wrong_revision_or_path
+          # live_minio_two_core_verified_stage_and_no_replace already runs in
+          # the earlier live_minio_ filter. Running it again without resetting
+          # the same bucket incorrectly produces BucketAlreadyOwnedByYou.
       - name: Two independent S3 clients CAS, conflicts and lost ACK
         shell: bash
         working-directory: aquilum-app

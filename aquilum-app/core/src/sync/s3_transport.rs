@@ -12,6 +12,7 @@ use super::s3::S3Keyspace;
 mod multipart;
 mod manifest;
 mod replan;
+mod core_stage;
 pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError};
 mod snapshot_store;
 pub use snapshot_store::{
