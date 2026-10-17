@@ -197,19 +197,38 @@ impl Note {
 mod tests {
     use super::*;
 
+    fn waker() -> Arc<dyn Fn() + Send + Sync> {
+        Arc::new(|| {})
+    }
+
+    fn wait_reload(note: &mut Note, wake: &Arc<dyn Fn() + Send + Sync>) -> Option<crop::Rope> {
+        for _ in 0..400 {
+            let text = note.take_reload(wake);
+            if note.reload_job.is_none() {
+                return text;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("background note reload did not finish");
+    }
+
     #[test]
     fn reload_ignores_own_write_and_sees_external_one() {
         let dir = crate::test_dir::tempdir();
         let path = dir.path().join("a.md");
         std::fs::write(&path, "раз").unwrap();
         let (mut note, text) = Note::open(path.clone()).unwrap();
+        let wake = waker();
         assert_eq!(text, "раз");
-        assert_eq!(note.reload(), None);
+        note.request_reload(Arc::clone(&wake));
+        assert!(wait_reload(&mut note, &wake).is_none());
         std::fs::write(&path, "два").unwrap();
-        assert_eq!(note.reload().map(|text| text.to_string()).as_deref(), Some("два"));
+        note.request_reload(Arc::clone(&wake));
+        assert_eq!(wait_reload(&mut note, &wake).map(|text| text.to_string()).as_deref(), Some("два"));
         note.edit(Duration::ZERO);
         assert!(note.deadline().is_some());
-        assert_eq!(note.reload(), None, "несохранённая правка не затирается");
+        note.request_reload(Arc::clone(&wake));
+        assert!(note.reload_job.is_none(), "unsaved text must not be overwritten");
     }
 
     #[test]
@@ -224,11 +243,14 @@ mod tests {
         std::fs::File::open(&path).unwrap().set_modified(modified).unwrap();
 
         let restored = std::fs::metadata(&path).unwrap();
-        assert_eq!(restored.len(), previous.len(), "same byte length is essential");
-        assert_eq!(restored.modified().unwrap(), modified, "timestamp must not signal a change");
+        assert_eq!(restored.len(), previous.len());
+        assert_eq!(restored.modified().unwrap(), modified);
         assert_eq!(original.to_string(), "раз");
-        assert_eq!(note.reload().map(|rope| rope.to_string()).as_deref(), Some("два"));
-        assert!(note.reload().is_none(), "unchanged bytes must not replace the Rope again");
+        let wake = waker();
+        note.request_reload(Arc::clone(&wake));
+        assert_eq!(wait_reload(&mut note, &wake).map(|rope| rope.to_string()).as_deref(), Some("два"));
+        note.request_reload(Arc::clone(&wake));
+        assert!(wait_reload(&mut note, &wake).is_none(), "unchanged bytes are a no-op");
     }
 
     #[test]
@@ -238,9 +260,70 @@ mod tests {
         std::fs::write(&path, "текст").unwrap();
         let (mut note, _) = Note::open(path.clone()).unwrap();
         std::fs::write(&path, "текст").unwrap();
-        assert!(note.reload().is_none(), "byte-identical external rewrite is a no-op");
+        let wake = waker();
+        note.request_reload(Arc::clone(&wake));
+        assert!(wait_reload(&mut note, &wake).is_none());
         note.edit(Duration::ZERO);
         std::fs::write(&path, "иначе").unwrap();
-        assert!(note.reload().is_none(), "pending edits must never be replaced");
+        note.request_reload(Arc::clone(&wake));
+        assert!(note.reload_job.is_none(), "pending edits block external reload");
+    }
+
+    #[test]
+    fn late_result_cannot_overwrite_an_edit_even_after_debounce_is_cleared() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("late.md");
+        std::fs::write(&path, "исходно").unwrap();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        let original = note.hash.lock().unwrap().clone();
+        let (tx, done) = channel();
+        note.reload_job = Some(ReloadJob {
+            done, revision: note.revision, path, again: false, cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        note.edit(Duration::ZERO);
+        // Even if saving completed and the pending flag cleared, revision is stale.
+        note.pending = None;
+        tx.send(Some(read::Loaded { text: crop::Rope::from("не принимать"), hash: "старый результат".into() })).unwrap();
+        assert!(note.take_reload(&waker()).is_none());
+        assert_eq!(*note.hash.lock().unwrap(), original);
+    }
+
+    #[test]
+    fn repeated_events_coalesce_and_reprobe_before_publishing() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("burst.md");
+        std::fs::write(&path, "первый").unwrap();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        let original = note.hash.lock().unwrap().clone();
+        let wake = waker();
+        let (tx, done) = channel();
+        note.reload_job = Some(ReloadJob {
+            done, revision: note.revision, path: path.clone(), again: false, cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        for _ in 0..30 {
+            note.request_reload(Arc::clone(&wake));
+        }
+        assert!(note.reload_job.as_ref().unwrap().again, "burst must coalesce");
+        std::fs::write(&path, "второй").unwrap();
+        tx.send(Some(read::Loaded { text: crop::Rope::from("устарело"), hash: "вчера".into() })).unwrap();
+        assert!(note.take_reload(&wake).is_none(), "stale intermediate result must be ignored");
+        assert_eq!(*note.hash.lock().unwrap(), original);
+        assert!(note.reload_job.is_some(), "one new background probe should be started");
+        assert_eq!(wait_reload(&mut note, &wake).map(|r| r.to_string()).as_deref(), Some("второй"));
+    }
+
+    #[test]
+    fn reload_result_for_renamed_path_is_discarded() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("before.md");
+        std::fs::write(&path, "before").unwrap();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        let (tx, done) = channel();
+        note.reload_job = Some(ReloadJob {
+            done, revision: note.revision, path: path.clone(), again: false, cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        note.path = dir.path().join("after.md");
+        tx.send(Some(read::Loaded { text: crop::Rope::from("stale"), hash: "stale".into() })).unwrap();
+        assert!(note.take_reload(&waker()).is_none(), "renamed note must not receive old-path bytes");
     }
 }
