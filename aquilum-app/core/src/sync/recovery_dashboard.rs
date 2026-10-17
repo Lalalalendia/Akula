@@ -86,10 +86,16 @@ pub fn native_recovery_overview(
     if journal.require_appdata_outside_vault(&vault).is_err() {
         return InspectionUnavailable;
     }
+    let Ok(known_count) = journal.local_publication_count() else {
+        return InspectionUnavailable;
+    };
+    if known_count > MAX_JOURNAL_TICKETS_FOR_UI as u64 {
+        return InspectionUnavailable;
+    }
     let Ok(entries) = journal.local_publication_review_queue() else {
         return InspectionUnavailable;
     };
-    if entries.len() > MAX_JOURNAL_TICKETS_FOR_UI {
+    if entries.len() as u64 != known_count {
         return InspectionUnavailable;
     }
     let workspace_id = VaultId::from_uuid(host.registered_workspace_id());
