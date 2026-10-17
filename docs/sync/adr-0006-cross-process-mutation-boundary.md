@@ -102,4 +102,3 @@ No production `VaultPort` implementation, no OS file-writing API, no `Preservati
 - Verify exact parent-directory rename persistence over real Windows storage crash/power loss or conservatively refuse to claim durable publication on unverified filesystems. A clean process exit, NtSetInformationFile success or Flushing a stage file are insufficient.
 - Validate genuine interprocess adversarial races after inspection, recover orphan stage/final conflicts without overwriting, preserve immutable revision history, and emit host History/Search events only after proven admission.
 - Keep the existing one-shot publication and audit records until a separately reviewed, durable, operator-authorized recovery protocol can retire them. No automatic claim clearance or retry.
-
