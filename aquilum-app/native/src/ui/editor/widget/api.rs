@@ -6,7 +6,7 @@ impl TextEditor {
     pub(crate) fn clean_parley_snapshot(&self) -> Option<crate::ui::editor::LayoutSnapshot> {
         // Selection-dependent decorations (and IME preedit) are never
         // transferred. The receiving editor will rebuild them from source.
-        if self.compose.is_some() || self.anchor != self.focus {
+        if self.compose.is_some() || self.anchor != self.focus || !self.extra_cursors.is_empty() {
             return None;
         }
         self.doc.trial_snapshot(&self.styles)
