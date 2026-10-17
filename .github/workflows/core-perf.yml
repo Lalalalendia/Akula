@@ -2,6 +2,7 @@ name: Core performance baseline
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, edited]
     paths:
       - "aquilum-app/core/**"
       - ".github/workflows/core-perf.yml"
@@ -21,6 +22,14 @@ concurrency:
 
 jobs:
   benchmark:
+    # Skip routine core/sync PRs. Opt in via a perf/* branch, perf: / perf(...) title,
+    # or the perf-ci PR label. workflow_dispatch stays available for manual baselines.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.head_ref, 'perf/') ||
+      startsWith(github.event.pull_request.title, 'perf(') ||
+      startsWith(github.event.pull_request.title, 'perf:') ||
+      contains(github.event.pull_request.labels.*.name, 'perf-ci')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -81,6 +90,13 @@ jobs:
           set -o pipefail
           cargo test --locked --release -p aquilum-core benchmark_save_breakdown -- --ignored --nocapture --test-threads=1 2>&1 | tee ../save.txt
 
+      - name: Benchmark Yrs editor update staging
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --release -p aquilum-core benchmark_editor_staging -- --ignored --nocapture --test-threads=1 2>&1 | tee ../editor.txt
+
       - name: Summarize machine-readable benchmark lines
         if: always()
         shell: bash
@@ -91,9 +107,9 @@ jobs:
             echo "Corpus: ${{ inputs.documents || '1000' }} notes"
             echo ""
             echo "\`\`\`text"
-            for file in indexing.txt search.txt links.txt sqlite.txt save.txt; do
+            for file in indexing.txt search.txt links.txt sqlite.txt save.txt editor.txt; do
               if [ -f "$file" ]; then
-                grep -E 'BENCH-(INDEX|SEARCH|LINKS|SQLITE|SAVE) ' "$file" || true
+                grep -E 'BENCH-(INDEX|SEARCH|LINKS|SQLITE|SAVE|EDITOR) ' "$file" || true
               fi
             done
             echo "\`\`\`"
@@ -111,4 +127,5 @@ jobs:
             links.txt
             sqlite.txt
             save.txt
+            editor.txt
           retention-days: 30

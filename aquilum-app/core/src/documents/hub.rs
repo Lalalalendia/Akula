@@ -6,7 +6,7 @@ use crate::search::paths::identity;
 use super::resolve::SyncPoint;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -22,6 +22,9 @@ const MAX_DELAY_MS: u64 = 5_000;
 pub enum HubError {
     NotOpen,
     Stale,
+    /// Sync has reserved the closed document: opening it now would allow the
+    /// host editor to compete with a future guarded sync mutation.
+    SyncReserved,
     Session(SessionError),
 }
 
@@ -70,9 +73,37 @@ fn inside(key: &str, folder_key: &str) -> bool {
     key == folder_key || key.strip_prefix(folder_key).is_some_and(|rest| rest.starts_with('/'))
 }
 
+/// A conservative host-editor interlock. It does NOT grant any filesystem
+/// authority: a future File Gate adapter still needs pinned OS directory
+/// handles, a fresh expected hash, a durable protection copy, and explicit
+/// tracking of unsent native/JS editor buffers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyncAdmissionError {
+    DocumentOpen,
+    AlreadyReserved,
+    LockUnavailable,
+}
+
+/// Admission is scoped to the exact normalized DocumentHub path identity.
+/// Holding the reservation prevents *DocumentHub::open* until it is dropped;
+/// it cannot stop other processes or standalone File Gate actions.
+pub struct SyncReservation<'a> {
+    hub: &'a DocumentHub,
+    key: String,
+}
+
+impl Drop for SyncReservation<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut held) = self.hub.sync_reservations.lock() {
+            held.remove(&self.key);
+        }
+    }
+}
+
 pub struct DocumentHub {
     store: Mutex<Option<DocumentStore>>,
     sessions: Mutex<HashMap<String, Entry>>,
+    sync_reservations: Mutex<HashSet<String>>,
     writes: Mutex<Option<Sender<(String, Instant)>>>,
     offset_seconds: AtomicI64,
 }
@@ -85,9 +116,36 @@ impl DocumentHub {
         Self {
             store: Mutex::new(store),
             sessions: Mutex::new(HashMap::new()),
+            sync_reservations: Mutex::new(HashSet::new()),
             writes: Mutex::new(None),
             offset_seconds: AtomicI64::new(0),
         }
+    }
+
+    /// Reserve an editor-closed document identity for a future sync File Gate
+    /// critical section. Admission refuses any open session, including one
+    /// that appears clean, as its UI may still have unsubmitted keystrokes.
+    ///
+    /// Lock order is always sessions -> sync_reservations, including in open().
+    /// The reservation alone is NOT permission to access local files.
+    pub fn reserve_sync_closed_document(
+        &self,
+        path: &Path,
+    ) -> Result<SyncReservation<'_>, SyncAdmissionError> {
+        let key = identity(path);
+        let sessions = self.sessions.lock()
+            .map_err(|_| SyncAdmissionError::LockUnavailable)?;
+        if sessions.contains_key(&key) {
+            return Err(SyncAdmissionError::DocumentOpen);
+        }
+        let mut reservations = self.sync_reservations.lock()
+            .map_err(|_| SyncAdmissionError::LockUnavailable)?;
+        if !reservations.insert(key.clone()) {
+            return Err(SyncAdmissionError::AlreadyReserved);
+        }
+        drop(reservations);
+        drop(sessions);
+        Ok(SyncReservation { hub: self, key })
     }
 
     pub fn start(&self, core: Weak<Core>) {
@@ -117,6 +175,9 @@ impl DocumentHub {
         self.offset_seconds.store(offset_minutes * 60, Ordering::Relaxed);
         let key = identity(path);
         let mut sessions = self.sessions.lock().expect("document sessions");
+        if self.sync_reservations.lock().expect("sync editor reservations").contains(&key) {
+            return Err(HubError::SyncReserved);
+        }
         if let Some(entry) = sessions.get_mut(&key) {
             entry.holders += 1;
             let path = entry.path.clone();
@@ -196,7 +257,7 @@ impl DocumentHub {
             }
             let entry_path = entry.path.clone();
             let before = entry.session.version();
-            entry.session.replace_text(text, client, &self.io(core, &entry_path, key));
+            entry.session.replace_text(text, client, &self.io(core, &entry_path, key))?;
             if entry.session.version() != before {
                 announce_change(core, &entry_path, entry.session.version());
             }
@@ -377,12 +438,22 @@ impl DocumentHub {
         if entry.session.version() != before {
             announce_change(core, &path, entry.session.version());
         }
+        // A failed sync-point persist can follow a successfully written file.
+        // Retry metadata confirmation later; do not report a confirmed save or
+        // blindly overwrite the file without a fresh content-hash check.
+        let retry_metadata = matches!(
+            &result,
+            Err(SessionError::Disk { code: "remember_failed", .. })
+        ) && entry.session.dirty();
         let path_text = path.to_string_lossy().into_owned();
         core.emit(match result {
             Ok(()) => CoreEvent::DocumentSaved(DocumentEvent { path: path_text, version: entry.session.version() }),
             Err(SessionError::Missing) => CoreEvent::DocumentMissing(DocumentEvent { path: path_text, version: 0 }),
             Err(error) => CoreEvent::DocumentSaveFailed(SaveFailed { path: path_text, reason: error.to_string() }),
         });
+        if retry_metadata {
+            self.schedule(key, Duration::from_secs(2));
+        }
     }
 
     fn load(&self, key: &str) -> Vec<Vec<u8>> {

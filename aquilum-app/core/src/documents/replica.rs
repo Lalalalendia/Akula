@@ -69,6 +69,32 @@ impl Replica {
         transaction.encode_update_v1()
     }
 
+    /// Calculate an atomic Yrs delta without mutating the live editor replica.
+    ///
+    /// The temporary document uses the same client ID, but never edits in
+    /// parallel with the live document. This prevents a new CRDT client
+    /// identity from being introduced on every keystroke. The caller must
+    /// persist the resulting delta before invoking apply_update on the live doc.
+    /// This snapshot-based staging is correctness-first: benchmark/optimize
+    /// large documents before the cloud sync executor is enabled.
+    pub fn stage_edits(&self, batches: &[Vec<TextEdit>]) -> Result<Vec<u8>, ReplicaError> {
+        let baseline = self.doc.transact().state_vector();
+        let options = Options {
+            client_id: self.doc.client_id(),
+            offset_kind: OffsetKind::Utf16,
+            ..Options::default()
+        };
+        let doc = Doc::with_options(options);
+        let text = doc.get_or_insert_text(TEXT_NAME);
+        let candidate = Self { doc, text };
+        candidate.apply_update(&self.state(), "stage")?;
+        for edits in batches {
+            candidate.apply_edits(edits, "stage");
+        }
+        let update = candidate.doc.transact().encode_state_as_update_v1(&baseline);
+        Ok(update)
+    }
+
     pub fn encode_position(&self, index: usize) -> Option<Vec<u8>> {
         let transaction = self.doc.transact();
         let index = index.min(self.text.len(&transaction) as usize) as u32;

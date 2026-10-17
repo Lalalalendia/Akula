@@ -55,11 +55,18 @@ pub fn common_prefix(a: &Rope, b: &Rope) -> usize {
             continue;
         }
         let n = x.len().min(y.len());
-        let equal = x[..n].iter().zip(&y[..n]).take_while(|(p, q)| p == q).count();
-        same += equal;
-        if equal < n {
-            return same;
+        // Most incremental edits share entire rope chunks. Equality of slices
+        // uses the optimized byte-compare path for those chunks; only a
+        // differing chunk needs a scalar search for its exact byte offset.
+        if x[..n] != y[..n] {
+            let offset = x[..n]
+                .iter()
+                .zip(&y[..n])
+                .position(|(a, b)| a != b)
+                .expect("unequal slices must contain a different byte");
+            return same + offset;
         }
+        same += n;
         (x, y) = (&x[n..], &y[n..]);
     }
 }
@@ -77,6 +84,41 @@ mod tests {
         b.insert(30_000, "x");
         assert_eq!(common_prefix(&a, &b), 30_000);
         assert_eq!(common_prefix(&a, &Rope::new()), 0);
+    }
+
+    #[test]
+    fn common_prefix_reports_raw_byte_offsets_for_multibyte_codepoints() {
+        let a = Rope::from("a😀z");
+        let b = Rope::from("a😃z");
+        let flat = "a😀z".as_bytes().iter().zip("a😃z".as_bytes())
+            .take_while(|(x, y)| x == y).count();
+        assert_eq!(common_prefix(&a, &b), flat);
+        assert_eq!(common_prefix(&b, &a), flat);
+    }
+
+    #[test]
+    fn common_prefix_matches_flat_bytes_for_chunk_boundaries_and_edits() {
+        let source = "ASCII Русский 漢字 😀!\n".repeat(2400);
+        let a = Rope::from(source.as_str());
+        let positions = [
+            0, 1, 7, 30, 127, 1024, 4096, source.len() / 2,
+            source.len().saturating_sub(40), source.len(),
+        ];
+        for position in positions {
+            if !source.is_char_boundary(position) {
+                continue;
+            }
+            let mut changed = source.clone();
+            changed.insert_str(position, "Z");
+            let b = Rope::from(changed.as_str());
+            let expected = source.bytes().zip(changed.bytes())
+                .take_while(|(left, right)| left == right).count();
+            assert_eq!(common_prefix(&a, &b), expected, "insertion at {position}");
+            assert_eq!(common_prefix(&b, &a), expected, "reverse insertion at {position}");
+        }
+        let short = &source[..source.char_indices().nth(100).unwrap().0];
+        assert_eq!(common_prefix(&a, &Rope::from(short)), short.len());
+        assert_eq!(common_prefix(&a, &Rope::from(source.as_str())), source.len());
     }
 
     #[test]

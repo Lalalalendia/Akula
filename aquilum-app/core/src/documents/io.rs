@@ -104,11 +104,17 @@ impl SessionIo for HubIo<'_> {
         preserve_copy(self.core, self.path, body, report, self.offset_seconds).map(|_| ())
     }
 
-    fn append(&self, update: &[u8]) {
+    fn append(&self, update: &[u8]) -> Result<(), DiskError> {
         match self.with_store(|store| store.append(self.key, update)) {
-            Some(Err(error)) => eprintln!("[aquilum:documents] правка не сохранена в локальную копию: {error}"),
-            None => eprintln!("[aquilum:documents] локальная копия документов недоступна"),
-            Some(Ok(())) => {}
+            Some(Ok(())) => Ok(()),
+            Some(Err(error)) => Err(DiskError::Other {
+                code: "append_failed",
+                message: format!("document update not persisted: {error}"),
+            }),
+            None => Err(DiskError::Other {
+                code: "append_failed",
+                message: "document store unavailable; refusing unjournaled edit".into(),
+            }),
         }
     }
 
@@ -116,9 +122,17 @@ impl SessionIo for HubIo<'_> {
         self.with_store(|store| store.sync_point(self.key)).unwrap_or(SyncPointLookup::Unavailable)
     }
 
-    fn remember(&self, point: SyncPoint) {
-        if let Some(Err(error)) = self.with_store(|store| store.remember_sync_point(self.key, &point)) {
-            eprintln!("[aquilum:documents] точка синхронизации не сохранена: {error}");
+    fn remember(&self, point: SyncPoint) -> Result<(), DiskError> {
+        match self.with_store(|store| store.remember_sync_point(self.key, &point)) {
+            Some(Ok(())) => Ok(()),
+            Some(Err(error)) => Err(DiskError::Other {
+                code: "remember_failed",
+                message: format!("sync point not persisted in document store: {error}"),
+            }),
+            None => Err(DiskError::Other {
+                code: "remember_failed",
+                message: "document store unavailable; sync point cannot be confirmed".into(),
+            }),
         }
     }
 }

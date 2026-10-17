@@ -24,7 +24,26 @@ fn line_end(item: &Item, y: f64) -> usize {
 
 impl Session {
     pub fn needs_layout(&self) -> bool {
-        self.laid.is_none() || self.on_screen().into_iter().any(|item| !self.shown(item))
+        let Some(laid) = &self.laid else { return true };
+        let bottom = self.view.height;
+        // Look through only the visible column pieces. The previous on_screen()
+        // path allocated a Vec of column descriptors and another Vec of item
+        // indices on every call; this check only needs a short-circuiting scan.
+        let missing = |column: &page::Column, y0: f64| {
+            column.pieces.iter().any(|piece| {
+                let top = y0 + piece.y;
+                top + (piece.to - piece.from) >= 0.0
+                    && top <= bottom
+                    && !self.shown(piece.item)
+            })
+        };
+        if self.scrolled() {
+            return laid.columns.first().is_some_and(|column| missing(column, self.padding() - self.scroll));
+        }
+        let first = self.page * self.geometry.columns;
+        (0..self.geometry.columns)
+            .filter_map(|i| laid.columns.get(first + i))
+            .any(|column| missing(column, self.geometry.top))
     }
 
     pub fn ensure(&mut self, view: Size, settings: &Settings, fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>) {

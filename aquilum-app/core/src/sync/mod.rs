@@ -3,17 +3,35 @@
 //! The existing local note history is not the distributed revision graph.
 //! Later stages must use the File Gate for writes and protect dirty editor buffers.
 
+mod core_scan;
 mod dag;
+mod download;
+mod dag_store;
 pub mod fake;
+mod fake_vault;
+#[cfg(test)]
+mod fault_matrix;
 mod identity;
+mod journal;
 mod planner;
 mod path;
+mod pinned_read;
+#[cfg(windows)]
+mod pinned_windows;
 mod protocol;
 mod provider;
+mod upload;
 mod vault;
 
+pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
+pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
+pub use download::{stage_remote_download, StageDownloadError, StagedDownload};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
+pub use journal::{
+    ConfirmedBaseline, JournalAction, JournalError, JournalPhase, JournalRecord, JournalResult,
+    OperationIntent, RecoveryAction, RecoveryItem, RemoteGuard, SqliteSyncJournal,
+};
 pub use planner::{
     plan_snapshot, HoldReason, ObservedObject, PlannedAction, SafetyPolicy, SnapshotDiff,
 };
@@ -24,10 +42,12 @@ pub use protocol::{
 };
 
 pub use fake::FakeRemoteStore;
+pub use fake_vault::FakeVaultPort;
 pub use provider::{
     collect_verified_listing, ProviderCapabilities, RemoteObject, RemotePage, RemotePrecondition,
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
+pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
     VaultPortError,

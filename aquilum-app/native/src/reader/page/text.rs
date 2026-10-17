@@ -113,14 +113,8 @@ pub(super) fn wrapped(
             break ends;
         }
     };
-    let positions: Vec<usize> = layout.lines().map(|l| l.text_range().end).collect();
-    let marks: Vec<bool> = breaks.iter().map(|b| positions.iter().zip(&ends).any(|(&p, &e)| e && p == hyphen::to_layout(&breaks, b.0))).collect();
-    if marks.iter().any(|&m| m) {
-        for (entry, mark) in breaks.iter_mut().zip(marks) {
-            if mark {
-                entry.1 = '-';
-            }
-        }
+    let positions: Vec<usize> = layout.lines().zip(&ends).filter_map(|(line, &end)| end.then_some(line.text_range().end)).collect();
+    if hyphen::mark_line_endings(&mut breaks, &positions) {
         layout = build_text(fcx, lcx, text, spans, &breaks, style);
         break_with(&mut layout, wrap, |i| if !flag(&ends, i) && flag(&narrow, i) { wrap - dash } else { wrap });
     }

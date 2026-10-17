@@ -1,0 +1,73 @@
+name: Graph scene visual smoke
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/graph/raster/**"
+      - "aquilum-app/native/src/ui/graph/tests.rs"
+      - "aquilum-app/native/src/render/surface.rs"
+      - ".github/workflows/graph-scene-visual.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: graph-scene-visual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scene:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: graph-scene-visual
+
+      - name: Install Linux native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Render real GraphView scenes at zoom and DPI variants
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_GRAPH_SCENE_DIR: ${{ github.workspace }}/shots
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native graph_scene_smoke_across_zoom_and_dpi -- --nocapture
+
+      - name: Record scene PNG evidence and dimensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find shots -maxdepth 1 -type f -name 'graph-dpi-*.png' | wc -l)" -eq 6
+          sha256sum shots/graph-dpi-*.png | tee scene-sha256.txt
+          file shots/graph-dpi-*.png | tee scene-dimensions.txt
+          {
+            echo "## Real GraphView scenes"
+            echo
+            echo "Six screenshots from GraphView.scene() using the synthetic linked-note fixture."
+            echo "DPI: 1.0 and 1.5; zoom: 1, 5, 12. Each PNG captures the actual"
+            echo "published raster surface, not the empty ImageBrush Blob handle."
+            echo
+            echo "Pixel equality with the scalar raster reference is separately"
+            echo "enforced by the graph-raster-perf workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: graph-scene-png-${{ github.sha }}
+          path: |
+            shots/
+            scene-sha256.txt
+            scene-dimensions.txt
+          retention-days: 14

@@ -1,0 +1,90 @@
+name: Reader needs_layout microbenchmark
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/reader/session/layout.rs"
+      - "aquilum-app/native/src/reader/session/tests.rs"
+      - ".github/workflows/reader-layout-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: reader-layout-release
+          cache-on-failure: true
+
+      - name: Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Compare the exact legacy and optimized Session on real sample book
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "HEAD=$GITHUB_SHA"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } > "$GITHUB_WORKSPACE/environment.txt"
+          cargo test --release --locked -p aquilum-native \
+            needs_layout_reference_vs_fast_microbenchmark -- --ignored --nocapture \
+            2>&1 | tee "$GITHUB_WORKSPACE/needs-layout-bench.log"
+          grep -q 'BENCH-NEEDS-LAYOUT mode=pages' "$GITHUB_WORKSPACE/needs-layout-bench.log"
+          grep -q 'BENCH-NEEDS-LAYOUT mode=scroll' "$GITHUB_WORKSPACE/needs-layout-bench.log"
+
+      - name: Summarize without discarding regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          log = Path("needs-layout-bench.log").read_text()
+          pattern = re.compile(
+              r"BENCH-NEEDS-LAYOUT mode=(pages|scroll) baseline_ns=([0-9.]+) "
+              r"optimized_ns=([0-9.]+) change_pct=([+-]?[0-9.]+)"
+          )
+          found = {name: (float(base), float(new), float(delta))
+                   for name, base, new, delta in pattern.findall(log)}
+          assert set(found) == {"pages", "scroll"}, found
+          rows = ["## Real Session::needs_layout A/B (same process, ABBA)",
+                  "", "| Mode | Old ns/call | New ns/call | Change |",
+                  "|---|---:|---:|---:|"]
+          for key in ("pages", "scroll"):
+              base, new, delta = found[key]
+              rows.append(f"| {key} | {base:.1f} | {new:.1f} | {delta:+.1f}% |")
+          rows += ["", "Negative means lower elapsed time. This is one sample",
+                   "book on one runner, not a claim about full-reader FPS."]
+          result = "\n".join(rows) + "\n"
+          print(result)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(result)
+          PY
+
+      - name: Preserve timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reader-layout-perf-${{ github.sha }}
+          path: |
+            environment.txt
+            needs-layout-bench.log
+          retention-days: 30
