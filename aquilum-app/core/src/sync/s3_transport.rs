@@ -8,6 +8,7 @@
 //! Run these async calls in a dedicated Core worker; never from native UI.
 
 use super::s3::S3Keyspace;
+use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod manifest;
@@ -66,6 +67,7 @@ struct S3TestIoCounters {
 }
 
 const MAX_PROBE_BYTES: u64 = 1024 * 1024;
+const MAX_CORE_STAGE_BLOB_BYTES: u64 = MAX_PROTECTED_ORIGINAL_BYTES as u64;
 const MAX_S3_PAGE_SIZE: i32 = 1000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -270,14 +272,44 @@ impl AwsS3ProbeClient {
         Ok(S3ObservedObject { etag: etag.to_owned(), byte_length: length as u64 })
     }
 
-    /// Bound allocation by a caller-defined limit AND an immutable stage-05b
-    /// ceiling. A dishonest Content-Length cannot bypass streaming bounds.
-    /// HEAD/GET(If-Match)/HEAD detects replacement during download.
+    /// Legacy stage-05b pointer, metadata and diagnostic reads keep their
+    /// original 1 MiB ceiling. This method never accepts large blob content.
     pub async fn get_bounded(
         &self, key: &str, max_bytes: u64,
     ) -> Result<S3BoundedObject, S3TransportError> {
+        self.get_bounded_with_ceiling(key, max_bytes, MAX_PROBE_BYTES).await
+    }
+
+    /// Only immutable content-addressed blobs can use the larger capped read.
+    /// HEAD / If-Match GET / HEAD and BLAKE3 must all agree before any bytes
+    /// are handed to the Core cache; S3 ETag is NEVER the content digest.
+    /// The hard cap equals the existing native additive File Gate limit.
+    pub(crate) async fn get_immutable_blob_for_core_stage(
+        &self, expected_blake3: &str, max_bytes: u64,
+    ) -> Result<S3BoundedObject, S3TransportError> {
+        if max_bytes == 0 || max_bytes > MAX_CORE_STAGE_BLOB_BYTES {
+            return Err(S3TransportError::ObjectTooLarge);
+        }
+        let key = self.keyspace.immutable_blob_key(expected_blake3)
+            .map_err(|_| S3TransportError::InvalidProfile)?;
+        let object = self.get_bounded_with_ceiling(
+            &key, max_bytes, MAX_CORE_STAGE_BLOB_BYTES,
+        ).await?;
+        if object.blake3 != expected_blake3 {
+            return Err(S3TransportError::ChangedDuringRead);
+        }
+        Ok(object)
+    }
+
+    /// Stream in SDK chunks and keep a fixed caller-checked in-memory ceiling.
+    /// The Content-Length is checked BEFORE allocation, each received chunk is
+    /// checked independently, and final size/ETag is rechecked after download.
+    /// No S3 provider response is trusted as proof of local file publication.
+    async fn get_bounded_with_ceiling(
+        &self, key: &str, max_bytes: u64, ceiling: u64,
+    ) -> Result<S3BoundedObject, S3TransportError> {
         self.checked_key(key)?;
-        if max_bytes > MAX_PROBE_BYTES {
+        if max_bytes > ceiling {
             return Err(S3TransportError::ObjectTooLarge);
         }
         let before = self.head(key).await?;
