@@ -71,12 +71,19 @@ impl Painter {
         let atlas_cache = *TEST_GLYPH_ATLAS;
         #[cfg(not(test))]
         let atlas_cache = true;
+        // Test-only A/B: font hinting may snap fractional glyph positions
+        // differently in cropped raster targets. Both the incremental path
+        // and independent full reference use the same mode.
+        #[cfg(test)]
+        let hint = run.hint && std::env::var_os("AQ_TEST_DISABLE_GLYPH_HINTING").is_none();
+        #[cfg(not(test))]
+        let hint = run.hint;
         let builder = self
             .ctx
             .glyph_run(&mut self.resources, run.font)
             .font_size(run.font_size)
             .atlas_cache(atlas_cache)
-            .hint(run.hint)
+            .hint(hint)
             .normalized_coords(run.normalized_coords);
         let builder = match run.glyph_transform {
             Some(transform) => builder.glyph_transform(transform),
