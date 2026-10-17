@@ -23,6 +23,7 @@ mod worker_crossover;
 mod worker_router;
 mod worker_fragmented;
 mod worker_adjacent;
+mod worker_crop_edge;
 
 use crate::stats::percentiles;
 
