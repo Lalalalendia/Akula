@@ -140,3 +140,21 @@ fn user_zoom_invalidates_cached_layouts_without_disabling_safe_file_cache() {
     assert_eq!(stages.layout_reused, 0);
     assert_eq!(h.body_text(), "Текст через другой масштаб");
 }
+
+#[test]
+fn active_selection_does_not_escape_into_cached_text_layouts() {
+    let mut h = Harness::new();
+    let first = h.write_note("selection-A.md", "This paragraph has a selection");
+    let second = h.write_note("selection-B.md", "Other clean paragraph");
+    assert!(h.app.open_in(&mut h.root, first.clone(), true));
+    let body = h.app.note_ids.as_ref().unwrap().body;
+    body.edit(&mut h.root, |mut editor| {
+        crate::ui::editor::TextEditor::select_byte_range(&mut editor, 0, 4);
+    });
+    assert!(h.app.open_in(&mut h.root, second.clone(), true));
+    let stages = select(&mut h, &first);
+    assert!(stages.cache_hit, "selection must not discard safe Rope bytes");
+    assert!(!stages.layout_offered, "selected text layouts must not be transferred");
+    assert_eq!(stages.layout_reused, 0);
+    assert_eq!(h.body_text(), "This paragraph has a selection");
+}
