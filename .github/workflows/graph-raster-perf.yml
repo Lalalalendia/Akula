@@ -1,0 +1,141 @@
+name: Graph raster byte parity and paired performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/graph/raster/**"
+      - ".github/bench/graph-raster.rs"
+      - ".github/workflows/graph-raster-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: graph-raster-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare base and PR head at exact commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/raster-base" "${{ github.event.pull_request.base.sha }}"
+          git worktree add --detach "$RUNNER_TEMP/raster-head" "${{ github.event.pull_request.head.sha }}"
+          {
+            echo "BASE=$(git -C "$RUNNER_TEMP/raster-base" rev-parse HEAD)"
+            echo "HEAD=$(git -C "$RUNNER_TEMP/raster-head" rev-parse HEAD)"
+            echo "RUNNER=$RUNNER_NAME"
+            echo "ARCH=$(uname -m)"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } | tee environment.txt
+
+      - name: Build identical no-dependency raster harnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          for side in base head; do
+            mkdir -p "$RUNNER_TEMP/$side/raster"
+            cp "$RUNNER_TEMP/raster-$side/aquilum-app/native/src/graph/raster/mod.rs" "$RUNNER_TEMP/$side/raster/mod.rs"
+            cp "$RUNNER_TEMP/raster-$side/aquilum-app/native/src/graph/raster/shapes.rs" "$RUNNER_TEMP/$side/raster/shapes.rs"
+            cp "$RUNNER_TEMP/raster-$side/aquilum-app/native/src/graph/raster/tests.rs" "$RUNNER_TEMP/$side/raster/tests.rs"
+            cp ".github/bench/graph-raster.rs" "$RUNNER_TEMP/$side/main.rs"
+            # Replace only Rayon scheduling with a serial iterator in both versions.
+            # The per-pixel kernels and blending routines are left untouched.
+            python3 - "$RUNNER_TEMP/$side/raster/mod.rs" <<'PY'
+          import pathlib
+          import sys
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
+          assert "use rayon::prelude::*;" in text
+          assert ".par_chunks_mut(" in text
+          text = text.replace("use rayon::prelude::*;", "")
+          text = text.replace(".par_chunks_mut(", ".chunks_mut(")
+          path.write_text(text)
+          PY
+            rustc --edition=2024 -O --test "$RUNNER_TEMP/$side/main.rs" -o "$RUNNER_TEMP/tests-$side" -Awarnings
+            rustc --edition=2024 -O "$RUNNER_TEMP/$side/main.rs" -o "$RUNNER_TEMP/bench-$side" -Awarnings
+          done
+
+      - name: Compare all RGBA bytes against frozen original reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/tests-base" --test-threads=1 | tee raster-tests-base.log
+          "$RUNNER_TEMP/tests-head" --test-threads=1 | tee raster-tests-head.log
+
+      - name: Benchmark kernels ABBA on the same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/bench-base" | tee raster-base-1.log
+          "$RUNNER_TEMP/bench-head" | tee raster-head-1.log
+          "$RUNNER_TEMP/bench-head" | tee raster-head-2.log
+          "$RUNNER_TEMP/bench-base" | tee raster-base-2.log
+
+      - name: Validate output checksums and summarize paired medians
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import statistics
+
+          names = ("mostly_solid_discs", "medium_rim_discs", "thin_body_discs", "halo_dilate")
+          pattern = re.compile(r"BENCH-RASTER name=(\w+) median_ms=([0-9.]+) checksum=(\d+)")
+          values = {}
+          for side in ("base", "head"):
+              for trial in (1, 2):
+                  path = Path(f"raster-{side}-{trial}.log")
+                  values[side, trial] = {
+                      name: (float(ms), checksum)
+                      for name, ms, checksum in pattern.findall(path.read_text())
+                  }
+                  assert set(values[side, trial]) == set(names), f"Missing benchmark outputs in {path}"
+          output = [
+              "## Graph raster, identical single-thread kernel harness, ABBA",
+              "",
+              "| Kernel | Base ms | PR ms | Change |",
+              "|---|---:|---:|---:|",
+          ]
+          for name in names:
+              checksums = {values[side, trial][name][1]
+                           for side in ("base", "head") for trial in (1, 2)}
+              assert len(checksums) == 1, f"Output difference detected: {name}: {checksums}"
+              base = statistics.median(values["base", i][name][0] for i in (1, 2))
+              head = statistics.median(values["head", i][name][0] for i in (1, 2))
+              change = 100.0 * (head / base - 1)
+              output.append(f"| {name} | {base:.4f} | {head:.4f} | {change:+.1f}% |")
+          output.extend([
+              "",
+              "Negative percentages mean less elapsed time. Isolated serial raster kernels only;",
+              "not full graph redraw or UI frame time. Keep PR draft until real app tests pass.",
+          ])
+          summary = "\n".join(output) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+
+      - name: Preserve baseline/candidate tests and raw timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-raster-paired-${{ github.sha }}
+          path: |
+            environment.txt
+            raster-tests-*.log
+            raster-base-*.log
+            raster-head-*.log
+          retention-days: 30

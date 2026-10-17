@@ -65,3 +65,53 @@ fn million_notes_frame() {
         aq_trace::write(std::path::Path::new(&out)).unwrap();
     }
 }
+
+#[test]
+fn graph_scene_smoke_across_zoom_and_dpi() {
+    // Exercise the real GraphView.scene -> Frame.draw -> Band::disc path, not
+    // only the standalone raster benchmark. Keep the fixture cheap in CI.
+    let graph = Arc::new(synthetic(640));
+    let mut view = GraphView::build(Some(graph), Status::Ready, Display::default(), None, None);
+    view.size = Size::new(720.0, 480.0);
+    for dpi in [1.0f64, 1.5] {
+        view.scale_factor = dpi;
+        view.camera.jump_to(view.bounds(), view.size.width, view.size.height);
+        for zoom in [1.0, 5.0, 12.0] {
+            view.camera.move_to(view.camera.center_x, view.camera.center_y, view.camera.scale * zoom);
+            let (brush, scale) = view.scene().expect("graph frame should render");
+            assert_eq!(scale, dpi);
+            assert_eq!(brush.image.width, (view.size.width * dpi).round() as u32);
+            assert_eq!(brush.image.height, (view.size.height * dpi).round() as u32);
+            let pixels = view.surfaces.snapshot_rgba_for_test().expect("graph surface pixels");
+            assert_eq!(pixels.len(), brush.image.width as usize * brush.image.height as usize * 4);
+            // Every zoom/DPI frame must contain a meaningful rendered graph,
+            // not just a valid-sized blank surface. A flat-colored or mostly
+            // empty frame cannot accidentally pass the PNG artifact gate.
+            let non_flat_pixels = pixels
+                .chunks_exact(4)
+                .filter(|pixel| *pixel != &pixels[..4])
+                .count();
+            assert!(
+                non_flat_pixels >= 100,
+                "blank or nearly blank graph: dpi={dpi}, zoom={zoom}, non-flat={non_flat_pixels}"
+            );
+            if let Some(dir) = std::env::var_os("AQ_GRAPH_SCENE_DIR") {
+                std::fs::create_dir_all(&dir).expect("create screenshot directory");
+                let path = std::path::PathBuf::from(&dir).join(
+                    format!("graph-dpi-{dpi:.1}-zoom-{zoom:.0}.png")
+                );
+                image::save_buffer(
+                    &path, &pixels, brush.image.width, brush.image.height,
+                    image::ColorType::Rgba8,
+                )
+                .expect("write graph scene screenshot");
+            }
+        }
+        // Exercise the reduced-resolution frame path used while interacting.
+        view.draft = true;
+        let (brush, scale) = view.scene().expect("draft graph frame should render");
+        assert_eq!(scale, dpi * DRAFT_SCALE);
+        assert_eq!(brush.image.width, (view.size.width * scale).round() as u32);
+        view.draft = false;
+    }
+}

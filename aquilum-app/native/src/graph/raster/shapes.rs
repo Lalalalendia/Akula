@@ -48,6 +48,82 @@ impl Band<'_> {
     }
 
     pub fn disc(&mut self, d: &Disc) {
+        // A thin interior or tiny disc does not amortize the fast-span checks.
+        // Keep its original scalar loop, preserving both pixels and throughput.
+        if d.radius >= 1.0 && (d.radius < 7.0 || d.inner < d.radius * 0.5) {
+            self.disc_scalar(d);
+            return;
+        }
+        let [cx, cy] = d.center;
+        if d.radius < 1.0 {
+            let area = (std::f32::consts::PI * d.radius * d.radius).min(1.0) * d.alpha;
+            let (x, y) = (cx - 0.5, cy - 0.5);
+            let (bx, by) = (x.floor(), y.floor());
+            let (fx, fy) = (x - bx, y - by);
+            let (bx, by) = (bx as i32, by as i32);
+            self.plot(bx, by, d.body, area * (1.0 - fx) * (1.0 - fy));
+            self.plot(bx + 1, by, d.body, area * fx * (1.0 - fy));
+            self.plot(bx, by + 1, d.body, area * (1.0 - fx) * fy);
+            self.plot(bx + 1, by + 1, d.body, area * fx * fy);
+            return;
+        }
+        let r = d.radius;
+        let first = ((cy - r - 1.0).floor() as i64).max(self.rows.start as i64);
+        let last = ((cy + r + 1.0).ceil() as i64).min(self.rows.end as i64 - 1);
+        let outer = r + 0.5;
+        // Only optimize pixels safely inside both fully opaque coverage and body.
+        // The extra half-pixel retreat keeps all antialias/rounding boundaries on
+        // the original per-pixel path, preserving the exact blend sequence.
+        let solid_radius = (d.inner.min(r) - 1.0).max(0.0);
+        let solid_sq = solid_radius * solid_radius;
+        for y in first..=last {
+            let dy = y as f32 + 0.5 - cy;
+            if dy.abs() > outer {
+                continue;
+            }
+            let span = (outer * outer - dy * dy).max(0.0).sqrt();
+            let x_from = ((cx - span).floor() as i64).max(0);
+            let x_to = ((cx + span).ceil() as i64).min(self.width as i64 - 1);
+            let row = (y as usize - self.rows.start) * self.width;
+            // Determine the guaranteed-solid horizontal run just once per row.
+            // All pixels outside this interval retain the old rasterization path.
+            let (solid_from, solid_to) = if dy.abs() < solid_radius {
+                let solid_span = (solid_sq - dy * dy).sqrt();
+                (
+                    ((cx - solid_span - 0.5).ceil() as i64).max(x_from),
+                    ((cx + solid_span - 0.5).floor() as i64).min(x_to),
+                )
+            } else {
+                (1, 0)
+            };
+            for x in x_from..=x_to {
+                if (solid_from..=solid_to).contains(&x) {
+                    let at = (row + x as usize) * 4;
+                    blend(&mut self.pixels[at..at + 4], d.body, d.alpha);
+                    continue;
+                }
+                let dx = x as f32 + 0.5 - cx;
+                let distance = (dx * dx + dy * dy).sqrt();
+                let coverage = (outer - distance).clamp(0.0, 1.0);
+                if coverage <= 0.0 {
+                    continue;
+                }
+                let at = (row + x as usize) * 4;
+                let px = &mut self.pixels[at..at + 4];
+                if d.inner < r {
+                    let body = (d.inner + 0.5 - distance).clamp(0.0, 1.0);
+                    if body < 1.0 {
+                        blend(px, d.rim, coverage * d.alpha);
+                    }
+                    blend(px, d.body, body * coverage * d.alpha);
+                } else {
+                    blend(px, d.body, coverage * d.alpha);
+                }
+            }
+        }
+    }
+
+    fn disc_scalar(&mut self, d: &Disc) {
         let [cx, cy] = d.center;
         if d.radius < 1.0 {
             let area = (std::f32::consts::PI * d.radius * d.radius).min(1.0) * d.alpha;
