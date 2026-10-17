@@ -1821,6 +1821,162 @@ mod tests {
         assert!(journal.baseline(staged.vault_id, staged.document_id).unwrap().is_none());
     }
 
+    fn m1dc_fixture(db: &Path) -> (SqliteSyncJournal, OperationIntent) {
+        let mut journal = SqliteSyncJournal::open(db).unwrap();
+        let intent = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/crash-review.md", b"payload");
+        journal.begin(intent.clone()).unwrap();
+        journal.mark_staged(intent.operation_id, b"payload").unwrap();
+        journal.record_local_publication_attempt_once(&intent).unwrap();
+        journal.record_local_recovery_case_once(&m1d_test_evidence(&intent)).unwrap();
+        journal.record_local_recovery_copy_once(
+            intent.operation_id, Some(b"payload"), None,
+        ).unwrap();
+        (journal, intent)
+    }
+
+    #[test]
+    fn m1dc_schema_four_upgrades_preserving_archive_and_review_eligibility() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("sync.sqlite");
+        let (journal, intent) = m1dc_fixture(&db);
+        journal.connection.execute_batch(
+            "DROP TABLE sync_local_recovery_reviews;
+             PRAGMA user_version = 4;",
+        ).unwrap();
+        drop(journal);
+        let mut upgraded = SqliteSyncJournal::open(&db).unwrap();
+        let version: i64 = upgraded.connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(upgraded.read_local_recovery_case(intent.operation_id).unwrap()
+            .unwrap().operation_id, intent.operation_id);
+        assert_eq!(upgraded.read_local_recovery_copy(intent.operation_id).unwrap()
+            .unwrap().stage_bytes, Some(b"payload".to_vec()));
+        assert_eq!(upgraded.local_publication_review_queue().unwrap().len(), 1);
+        let screen = upgraded.recovery_review_snapshot(intent.operation_id).unwrap();
+        assert_eq!(screen.review_count, 0);
+        let event = upgraded.append_recovery_review(
+            intent.operation_id, intent.vault_id, &intent.path,
+            &screen.archive_fingerprint, 0, "genesis",
+            RecoveryReviewDisposition::KeepBlocked, "Hold forensic evidence",
+        ).unwrap();
+        assert_eq!(event.sequence, 1);
+        assert!(upgraded.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+        drop(upgraded);
+        let opened = SqliteSyncJournal::open(&db).unwrap();
+        assert_eq!(opened.recovery_review_history(intent.operation_id).unwrap(), vec![event]);
+        assert!(opened.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+        assert!(matches!(
+            opened.get(intent.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged
+        ));
+    }
+
+    #[test]
+    fn m1dc_two_connections_refuse_stale_revision_and_preserve_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("sync.sqlite");
+        let (first, intent) = m1dc_fixture(&db);
+        drop(first);
+        let mut one = SqliteSyncJournal::open(&db).unwrap();
+        let mut two = SqliteSyncJournal::open(&db).unwrap();
+        let screen = one.recovery_review_snapshot(intent.operation_id).unwrap();
+        let first_event = one.append_recovery_review(
+            intent.operation_id, intent.vault_id, &intent.path,
+            &screen.archive_fingerprint, screen.review_count,
+            &screen.latest_event_digest,
+            RecoveryReviewDisposition::KeepBlocked, "Investigation pending",
+        ).unwrap();
+        assert!(matches!(
+            two.append_recovery_review(
+                intent.operation_id, intent.vault_id, &intent.path,
+                &screen.archive_fingerprint, screen.review_count,
+                &screen.latest_event_digest,
+                RecoveryReviewDisposition::EscalateManualReview,
+                "Race with previous decision",
+            ),
+            Err(JournalError::StaleRecoveryReview)
+        ));
+        let refreshed = two.recovery_review_snapshot(intent.operation_id).unwrap();
+        let second_event = two.append_recovery_review(
+            intent.operation_id, intent.vault_id, &intent.path,
+            &refreshed.archive_fingerprint, refreshed.review_count,
+            &refreshed.latest_event_digest,
+            RecoveryReviewDisposition::EscalateManualReview,
+            "Needs independent operator approval",
+        ).unwrap();
+        assert_eq!(second_event.sequence, 2);
+        assert_eq!(second_event.previous_event_digest,
+            refreshed.latest_event_digest);
+        assert_eq!(two.recovery_review_history(intent.operation_id).unwrap(),
+            vec![first_event.clone(), second_event]);
+        assert_eq!(one.recovery_review_history(intent.operation_id).unwrap().len(), 2);
+        assert_eq!(one.local_publication_review_queue().unwrap().len(), 1);
+        assert!(one.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn m1dc_corrupted_review_row_or_broken_sequence_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("sync.sqlite");
+        let (mut j, intent) = m1dc_fixture(&db);
+        let screen = j.recovery_review_snapshot(intent.operation_id).unwrap();
+        j.append_recovery_review(
+            intent.operation_id, intent.vault_id, &intent.path,
+            &screen.archive_fingerprint, 0, "genesis",
+            RecoveryReviewDisposition::KeepBlocked, "Retain content",
+        ).unwrap();
+        j.connection.execute(
+            "UPDATE sync_local_recovery_reviews
+             SET review_digest='tampered'
+             WHERE operation_id=?1 AND sequence=1",
+            [intent.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            j.recovery_review_history(intent.operation_id),
+            Err(JournalError::CorruptedRecord)
+        ));
+        j.connection.execute(
+            "DELETE FROM sync_local_recovery_reviews WHERE operation_id=?1",
+            [intent.operation_id.to_string()],
+        ).unwrap();
+        let screen = j.recovery_review_snapshot(intent.operation_id).unwrap();
+        j.append_recovery_review(
+            intent.operation_id, intent.vault_id, &intent.path,
+            &screen.archive_fingerprint, 0, "genesis",
+            RecoveryReviewDisposition::KeepBlocked, "Retain content",
+        ).unwrap();
+        j.connection.execute(
+            "UPDATE sync_local_recovery_reviews
+             SET sequence=3
+             WHERE operation_id=?1 AND sequence=1",
+            [intent.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            j.recovery_review_history(intent.operation_id),
+            Err(JournalError::CorruptedRecord)
+        ));
+        assert!(j.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn m1dc_missing_or_damaged_archive_is_not_eligible_for_review() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("sync.sqlite");
+        let (j, intent) = m1dc_fixture(&db);
+        j.connection.execute(
+            "DELETE FROM sync_local_recovery_copies WHERE operation_id=?1",
+            [intent.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            j.recovery_review_snapshot(intent.operation_id),
+            Err(JournalError::MissingRecoveryArchive)
+        ));
+        assert!(j.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+    }
+
     #[test]
     fn newer_schema_must_never_be_overwritten() {
         let conn = Connection::open_in_memory().unwrap();
