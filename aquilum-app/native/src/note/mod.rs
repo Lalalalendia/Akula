@@ -49,8 +49,23 @@ pub struct Note {
 impl Note {
     pub fn open(path: PathBuf) -> Result<(Note, crop::Rope), FileCommandError> {
         let loaded = read(&path)?;
-        let note = Note { path, hash: Arc::new(Mutex::new(loaded.hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel(), revision: 0, reload_job: None };
-        Ok((note, loaded.text))
+        Ok(Self::from_verified_cache(path, loaded.text, loaded.hash))
+    }
+
+    /// Construct an ordinary clean note only after a raw on-disk BLAKE3 match.
+    /// The caller must compare the cached digest to the *current* file bytes.
+    pub(crate) fn from_verified_cache(path: PathBuf, text: crop::Rope, hash: String) -> (Note, crop::Rope) {
+        let note = Note { path, hash: Arc::new(Mutex::new(hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel(), revision: 0, reload_job: None };
+        (note, text)
+    }
+
+    /// Do not retain a snapshot that could still be saved, conflicted or
+    /// replaced. File freshness is checked again on every cache lookup.
+    pub(crate) fn clean_cache_hash(&self) -> Option<String> {
+        if self.pending.is_some() || self.queued > 0 || self.save_error.is_some() || self.replaced.is_some() {
+            return None;
+        }
+        Some(self.hash.lock().unwrap_or_else(PoisonError::into_inner).clone())
     }
 
     pub fn edit(&mut self, debounce: Duration) {
