@@ -5,6 +5,9 @@ impl App {
         let core = &self.workspace.core;
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
+            // This handler is reached only for ordinary settings buttons.
+            // Review actions require the separately confirmed modal flow.
+            Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
             Action::OpenTrash => {
                 if let Some(workspace) = workspace {
                     match gate::ensure_trash(core, &workspace) {

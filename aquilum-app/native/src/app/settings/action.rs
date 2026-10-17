@@ -7,7 +7,7 @@ use crate::ui::dialog::DialogAnswer;
 use crate::ui::menu::MenuChoice;
 use crate::ui::settings::Binding;
 use crate::ui::settings::controls::{Changed, DropdownButton, Picked};
-use crate::ui::settings::schema::Value;
+use crate::ui::settings::schema::{Action, Value};
 use crate::ui::widgets::Pressed;
 
 impl App {
@@ -15,6 +15,21 @@ impl App {
         self.typing = None;
         let Some(Popup::Settings { mut dialog, menu }) = self.popup.take() else { return Outcome::default() };
         let mut effect = Effect::None;
+        // A confirmation dialog is a distinct focus-trapped interaction;
+        // cancel/escape is ALWAYS inert. Never interpret a click behind the
+        // active confirmation as permission to mutate journal metadata.
+        if let Some((confirmation, decision)) = dialog.sync_confirm.take() {
+            if let Some(answer) = confirmation.answer(id, action) {
+                crate::ui::dialog::close(root, confirmation.layer);
+                if answer == DialogAnswer::Confirm {
+                    effect = self.confirm_sync_review(&mut dialog, decision);
+                }
+            } else {
+                dialog.sync_confirm = Some((confirmation, decision));
+            }
+            return self.keep(dialog, None, effect, root);
+        }
+
 
         if let Some(picked) = action.downcast_ref::<Picked>() {
             let Some(menu) = menu else {
@@ -103,7 +118,14 @@ impl App {
             && let Some(Binding::Button(button)) = dialog.bindings.get(&id)
         {
             let button = button.clone();
-            effect = self.press(&mut dialog, button);
+            effect = match button {
+                Action::InspectRecovery(operation_id) if dialog.section == super::Section::Sync =>
+                    self.inspect_sync_incident(&mut dialog, &operation_id),
+                Action::RequestRecoveryReview(decision) if dialog.section == super::Section::Sync =>
+                    self.request_sync_review(root, &mut dialog, decision),
+                Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
+                other => self.press(&mut dialog, other),
+            };
         }
         self.keep(dialog, menu, effect, root)
     }
