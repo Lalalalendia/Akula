@@ -76,7 +76,7 @@ fn matching_vaults(roots: &[PathBuf], candidate: &Path) -> Vec<String> {
 fn admit_vault_relocation(core: &Core, from: &Path, to: &Path) -> Result<(), FileCommandError> {
     let roots = core.ui_state.workspace_roots().map_err(|error| FileCommandError::Task {
         message: format!(
-            "Workspace registry cannot be read; refusing to move a primary file before validating history ownership: {error}"
+            "Workspace registry cannot be read; refusing to move a primary file before validating history ownership: {error:?}"
         ),
     })?;
     let source = matching_vaults(&roots, from);
