@@ -56,7 +56,7 @@ jobs:
           failures=0
           for attempt in $(seq 1 20); do
             echo "GUARD96_ATTEMPT_BEGIN=$attempt"
-            if cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-guard96-attempt-$attempt.log"; then
+            if AQ_CROSSOVER_OUT="$GITHUB_WORKSPACE/vello-guard96-frames/attempt-$attempt" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-guard96-attempt-$attempt.log"; then
               echo "GUARD96_ATTEMPT_OK=$attempt"
             else
               echo "GUARD96_ATTEMPT_FAILED=$attempt"
@@ -74,6 +74,6 @@ jobs:
           path: |
             vello-guard96-environment.log
             vello-guard96-attempt-*.log
-            vello-guard96-frames/*.png
+            vello-guard96-frames/**/*.png
           if-no-files-found: warn
           retention-days: 14
