@@ -9,7 +9,7 @@ use super::{AwsS3ProbeClient, S3PutCondition, S3TransportError};
 use crate::sync::{
     DagError, OperationId, RevisionDag, RevisionOperation, RevisionRecord,
     S3HeadPointerV1, S3ManifestError, S3ManifestShardV1, S3ManifestV1,
-    S3Keyspace, VaultId, MAX_MANIFEST_BYTES, MAX_SHARD_BYTES, MAX_REVISIONS,
+    S3RevisionRefV1, VaultId, MAX_MANIFEST_BYTES, MAX_SHARD_BYTES, MAX_REVISIONS,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
@@ -244,6 +244,56 @@ impl AwsS3ProbeClient {
         Ok(manifest)
     }
 
+    /// Construct an exact revision identity map pinned to immutable shard
+    /// digests. A successor MUST preserve every previously referenced DAG
+    /// revision (including tombstones and both sides of a conflict). A lone
+    /// correct-looking parent hash does not prevent destructive omission.
+    async fn revision_index(
+        &self, manifest: &S3ManifestV1,
+    ) -> Result<BTreeMap<crate::sync::RevisionId, S3RevisionRefV1>, S3HeadError> {
+        let mut result = BTreeMap::new();
+        for reference in &manifest.shards {
+            let bytes = self.get_bounded(
+                &self.keyspace.immutable_manifest_key(reference.shard_id),
+                MAX_SHARD_BYTES as u64,
+            ).await?;
+            if bytes.blake3 != reference.shard_blake3 {
+                return Err(S3HeadError::IntegrityMismatch);
+            }
+            let shard = S3ManifestShardV1::decode(
+                &self.keyspace, reference.shard_id, &bytes.bytes,
+            )?;
+            if shard.revisions.len() != reference.count as usize
+                || shard.revisions.first().map(|r| r.revision_id) != Some(reference.first_revision)
+                || shard.revisions.last().map(|r| r.revision_id) != Some(reference.last_revision)
+            { return Err(S3HeadError::InvalidManifest); }
+            for revision in shard.revisions {
+                if result.insert(revision.revision_id, revision).is_some() {
+                    return Err(S3HeadError::InvalidRevision);
+                }
+            }
+        }
+        if result.len() != manifest.total_revisions as usize {
+            return Err(S3HeadError::InvalidManifest);
+        }
+        Ok(result)
+    }
+
+    async fn ensure_ancestor_revisions_retained(
+        &self, parent: &S3ManifestV1, child: &S3ManifestV1,
+    ) -> Result<(), S3HeadError> {
+        let old = self.revision_index(parent).await?;
+        let new = self.revision_index(child).await?;
+        for (id, original) in old {
+            if new.get(&id) != Some(&original) {
+                // A missing, modified or duplicate ancestor is a hard hold,
+                // even when the proposed manifest has a valid parent hash.
+                return Err(S3HeadError::InvalidManifest);
+            }
+        }
+        Ok(())
+    }
+
     /// Root read is protected by HEAD/GET If-Match/HEAD; referent's exact
     /// immutable bytes and every listed DAG dependency are checked, too.
     pub async fn read_verified_head(&self)
@@ -370,6 +420,9 @@ impl AwsS3ProbeClient {
                     ) => {}
             _ => return Err(S3HeadError::InvalidManifest),
         }
+        if let Some(parent) = previous {
+            self.ensure_ancestor_revisions_retained(&parent.manifest, &manifest).await?;
+        }
         let expected_etag = previous.map(|head| head.etag.as_str());
         let key = self.keyspace.current_head_key();
         let payload = proposed.encode(&self.keyspace)
@@ -421,8 +474,10 @@ impl AwsS3ProbeClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::{DocumentId, S3ConnectionProfile, S3ManifestShardRefV1, S3RevisionRefV1, SyncRelativePath, RevisionId, VaultId};
-    use crate::sync::S3ManifestShardV1;
+    use crate::sync::{
+        DocumentId, S3ConnectionProfile, S3Keyspace, S3RevisionRefV1, SyncRelativePath,
+        RevisionId, VaultId,
+    };
 
     #[test]
     fn durable_root_intent_rejects_operation_id_reuse_and_recovers_after_restart() {
@@ -502,6 +557,22 @@ mod tests {
         assert_eq!(second.read_verified_head().await.unwrap().unwrap().pointer, ptr);
         let before = first.read_verified_head().await.unwrap().unwrap();
         assert_eq!(first.verify_manifest_ancestors(&before, 100).await.unwrap(), 0);
+
+        // A correctly linked successor must not silently drop earlier
+        // revisions. Neither an intact root hash nor a CAS guard makes
+        // omission safe: the remote head must remain unchanged.
+        let dangerous = S3ManifestV1::new(&ns, OperationId::new(), 2,
+            Some((root.manifest_id, root.digest(&ns).unwrap())), vec![]).unwrap();
+        first.store_manifest_object(
+            dangerous.manifest_id, &dangerous.encode(&ns).unwrap(),
+        ).await.unwrap();
+        let unsafe_head = S3HeadPointerV1::new(&ns, 2, dangerous.manifest_id,
+            &dangerous.digest(&ns).unwrap(), Some(root.manifest_id)).unwrap();
+        assert!(matches!(first.publish_head_cas(
+            &mut j1, dangerous.manifest_id, unsafe_head, Some(&before),
+        ).await, Err(S3HeadError::InvalidManifest)));
+        assert_eq!(first.read_verified_head().await.unwrap().unwrap().pointer, ptr);
+        assert_eq!(j1.phase(dangerous.manifest_id).unwrap(), None);
 
         // Two independent clients start at same generation/validator.
         let id_winner = OperationId::new();
