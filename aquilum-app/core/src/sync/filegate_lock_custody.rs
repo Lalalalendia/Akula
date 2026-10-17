@@ -2,7 +2,8 @@
 //!
 //! The caller must provide an external custody scope. A private owner-only
 //! Unix mode is a useful negative check, but NOT protection from same-UID
-//! processes or a verified host ACL. Windows DACL verification remains P0.
+//! processes. Windows now inspects owner/DACL on live handles, but this is
+//! not a complete ACL/effective-access or immutable-custody proof.
 //! Neither this module nor its callers may enable File Gate writes.
 
 use super::filegate_lock_probe::PinnedProbeRoot;
