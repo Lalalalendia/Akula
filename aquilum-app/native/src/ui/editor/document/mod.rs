@@ -9,8 +9,8 @@ mod geometry;
 mod heights;
 mod laid;
 mod layout;
-#[cfg(test)]
 mod layout_reuse;
+pub(crate) use layout_reuse::Snapshot as LayoutSnapshot;
 mod lines;
 mod paragraph;
 #[cfg(feature = "memory-probe")]
@@ -87,8 +87,7 @@ pub struct Document {
     blocks: classify::Blocks,
     heights: heights::Heights,
     laid: sparse::Sparse<laid::Laid>,
-    #[cfg(test)]
-    trial_snapshot: Option<layout_reuse::Snapshot>,
+    trial_snapshot: Option<LayoutSnapshot>,
     embeds: sparse::Sparse<Embed>,
     width: Option<f32>,
     pub markdown: Option<Fonts>,
@@ -140,7 +139,6 @@ impl Document {
             blocks: classify::Blocks::new(1),
             heights: heights::Heights::new(1),
             laid: Default::default(),
-            #[cfg(test)]
             trial_snapshot: None,
             embeds: Default::default(),
             width: None,
