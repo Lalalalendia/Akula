@@ -1,8 +1,7 @@
-//! Test-only proof of bounded Parley layout transfer across distinct Documents.
-//!
-//! This is intentionally *not* enabled for normal Akula builds. Parley layout
-//! state may depend on style, width, caret, resolver and live media. A durable
-//! production cache needs stronger invalidation and paired UI/fidelity tests.
+//! Bounded, conservative transfer of plain Parley layouts between clean tabs.
+//! Snapshot candidates become usable only after the separate file-hash gate
+//! and exact rendering-context verification in the new Document. Rich Markdown,
+//! caret/IME, media and resolver-dependent decorations are never transferred.
 use masonry::core::{BrushIndex, StyleSet};
 use masonry::parley::Layout;
 
@@ -11,8 +10,8 @@ use super::{Document, Fold};
 
 const MAX_WINDOW_BYTES: usize = 512 * 1024;
 const MAX_PARAGRAPHS: usize = 32;
-const MAX_TEXT_BYTES: usize = 128 * 1024;
-const MAX_SINGLE_LINE_BYTES: usize = 16 * 1024;
+const MAX_TEXT_BYTES: usize = 16 * 1024;
+const MAX_SINGLE_LINE_BYTES: usize = 1024;
 
 struct PlainLayout {
     line: usize,
@@ -27,6 +26,8 @@ pub(crate) struct Snapshot {
     width: f32,
     font_key: Option<(u32, String, bool, bool)>,
     style_key: Vec<String>,
+    theme_generation: usize,
+    editor_font: crate::ui::theme::EditorFont,
     entries: Vec<PlainLayout>,
 }
 
@@ -91,6 +92,8 @@ impl Document {
             width,
             font_key: fonts_key(self.markdown.as_ref()),
             style_key: styles_key(styles),
+            theme_generation: crate::ui::theme::generation(),
+            editor_font: (*crate::ui::theme::editor_font_settings()).clone(),
             entries,
         })
     }
@@ -117,6 +120,8 @@ impl Document {
             || self.text != snapshot.text
             || fonts_key(self.markdown.as_ref()) != snapshot.font_key
             || styles_key(styles) != snapshot.style_key
+            || snapshot.theme_generation != crate::ui::theme::generation()
+            || snapshot.editor_font != *crate::ui::theme::editor_font_settings()
         {
             return 0;
         }
