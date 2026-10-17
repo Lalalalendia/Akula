@@ -85,7 +85,7 @@ pub async fn walk_s3_manifest_delta(
     walk_with(client, keyspace, checkpoint, limits).await
 }
 
-async fn walk_with<R: BoundedReader>(
+pub(super) async fn walk_with<R: BoundedReader>(
     reader: &R,
     keyspace: &S3Keyspace,
     checkpoint: Option<S3DeltaWalkCheckpoint<'_>>,
