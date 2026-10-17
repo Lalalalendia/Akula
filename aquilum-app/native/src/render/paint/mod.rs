@@ -131,6 +131,12 @@ impl Painter {
         } else {
             self.ctx.reset();
         }
+        #[cfg(test)]
+        if std::env::var_os("AQ_TEST_COLD_GLYPH_ATLAS_PER_CROP").is_some() {
+            // Keep glyph preparation, image registry, and other resources hot;
+            // only force an atlas cold miss for each raster crop.
+            self.resources.discard_glyph_atlas_for_diagnostics();
+        }
         self.images.next_frame();
         self.frame = Rect::new(f64::from(x), f64::from(y), f64::from(x) + f64::from(width), f64::from(y) + f64::from(height));
         self.shift = Affine::translate((-f64::from(x), -f64::from(y)));

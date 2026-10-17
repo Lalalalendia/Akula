@@ -1,0 +1,118 @@
+name: Native Vello guard96 pixel parity reproduction
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-guard96-repro.yml'
+      - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
+      - 'aquilum-app/native/src/render/paint/mod.rs'
+      - 'aquilum-app/native/vendor/vello_cpu/src/text.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-guard96-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard96:
+    name: Repeat strict cover@1x guard96 parity (20 processes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-guard96-repro
+          cache-workspace-crates: true
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record exact CI environment
+        shell: bash
+        run: |
+          {
+            git rev-parse HEAD
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee vello-guard96-environment.log
+      - name: Build benchmark once, then repeat 20 independent strict parity runs
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+          AQ_CROSSOVER_OUT: ${{ github.workspace }}/vello-guard96-frames
+        run: |
+          set -uo pipefail
+          failures=0
+          for attempt in $(seq 1 20); do
+            echo "GUARD96_ATTEMPT_BEGIN=$attempt"
+            if AQ_CROSSOVER_OUT="$GITHUB_WORKSPACE/vello-guard96-frames/attempt-$attempt" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-guard96-attempt-$attempt.log"; then
+              echo "GUARD96_ATTEMPT_OK=$attempt"
+            else
+              echo "GUARD96_ATTEMPT_FAILED=$attempt"
+              failures=$((failures + 1))
+            fi
+          done
+          echo "GUARD96_FAILURES=$failures / 20" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -h 'VELLO_GUARD_PARITY_FAILURE' "$GITHUB_WORKSPACE"/vello-guard96-attempt-*.log >> "$GITHUB_STEP_SUMMARY" || true
+          test "$failures" -eq 0
+      - name: Isolate glyph hinting, atlas and glyph-run visibility (20 fresh processes each)
+        if: always()
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -uo pipefail
+          unexpected=0
+          for mode in hint-off atlas-off full-glyph-visibility cold-atlas; do
+            case "$mode" in
+              hint-off) flag=AQ_TEST_DISABLE_GLYPH_HINTING ;;
+              atlas-off) flag=AQ_TEST_DISABLE_GLYPH_ATLAS ;;
+              full-glyph-visibility) flag=AQ_TEST_FULL_GLYPH_RUN_VISIBILITY ;;
+              cold-atlas) flag=AQ_TEST_COLD_GLYPH_ATLAS_PER_CROP ;;
+            esac
+            failures=0
+            for attempt in $(seq 1 20); do
+              log="$GITHUB_WORKSPACE/vello-guard96-$mode-attempt-$attempt.log"
+              if env "$flag=1" AQ_CROSSOVER_OUT="$GITHUB_WORKSPACE/vello-guard96-frames/$mode-attempt-$attempt" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                :
+              elif grep -q 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
+                failures=$((failures + 1))
+              else
+                echo "GUARD96_DIAG_UNEXPECTED=$mode/$attempt (not a pixel-parity failure)"
+                tail -n 25 "$log"
+                unexpected=1
+              fi
+            done
+            echo "GUARD96_DIAG mode=$mode failures=$failures/20" | tee -a "$GITHUB_STEP_SUMMARY"
+            grep -h 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$GITHUB_WORKSPACE"/vello-guard96-"$mode"-attempt-*.log >> "$GITHUB_STEP_SUMMARY" || true
+          done
+          test "$unexpected" -eq 0
+      - name: Preserve exact failing pixels and full-reference PNGs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-guard96-parity-${{ github.sha }}
+          path: |
+            vello-guard96-environment.log
+            vello-guard96-attempt-*.log
+            vello-guard96-*-attempt-*.log
+            vello-guard96-frames/**/*.png
+          if-no-files-found: warn
+          retention-days: 14

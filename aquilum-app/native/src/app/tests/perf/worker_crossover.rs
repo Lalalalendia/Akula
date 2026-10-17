@@ -53,6 +53,82 @@ fn max_pixel_channel_delta(a: &[u32], b: &[u32]) -> u8 {
         .unwrap_or(0)
 }
 
+// Only on a *real* strict parity failure: report the first bad pixels and
+// optionally retain both PNGs for investigation. No changed test tolerance.
+fn diagnose_channel_mismatch(
+    case: &str,
+    workload: &str,
+    step: u32,
+    width: u16,
+    partial: &Renderer,
+    full: &Renderer,
+    previous_full: Option<&[u32]>,
+    previous_partial: Option<&[u32]>,
+) {
+    let (mut count, mut worst) = (0usize, 0u8);
+    let mut examples = Vec::new();
+    let (mut x0, mut y0, mut x1, mut y1) =
+        (usize::MAX, usize::MAX, 0usize, 0usize);
+    for (pixel, (&a, &b)) in partial.frame_pixels().iter().zip(full.frame_pixels()).enumerate() {
+        let peak = [0, 8, 16, 24].into_iter().map(|shift| {
+            ((a >> shift) as u8).abs_diff((b >> shift) as u8)
+        }).max().unwrap_or(0);
+        if peak <= 1 { continue; }
+        count += 1;
+        worst = worst.max(peak);
+        let (x, y) = (pixel % usize::from(width), pixel / usize::from(width));
+        x0 = x0.min(x);
+        y0 = y0.min(y);
+        x1 = x1.max(x);
+        y1 = y1.max(y);
+        if examples.len() < 16 {
+            let shifted_from = partial.moved.iter().find_map(|&(mx, my, mw, mh, dy)| {
+                let within_x = x >= usize::from(mx) && x < usize::from(mx) + usize::from(mw);
+                let within_y = y >= usize::from(my) && y < usize::from(my) + usize::from(mh);
+                if !within_x || !within_y {
+                    return None;
+                }
+                let source_y = usize::try_from(i64::try_from(y).ok()? - i64::from(dy)).ok()?;
+                let offset = source_y.checked_mul(usize::from(width))?.checked_add(x)?;
+                let prior_full_color = previous_full
+                    .and_then(|pixels| pixels.get(offset))
+                    .map(|color| format!("{color:08x}"));
+                let prior_partial_color = previous_partial
+                    .and_then(|pixels| pixels.get(offset))
+                    .map(|color| format!("{color:08x}"));
+                let prior_partial_vs_full = previous_partial
+                    .and_then(|pixels| pixels.get(offset))
+                    .zip(previous_full.and_then(|pixels| pixels.get(offset)))
+                    .map(|(&p, &f)| [0, 8, 16, 24].into_iter()
+                        .map(|bits| ((p >> bits) as u8).abs_diff((f >> bits) as u8))
+                        .max().unwrap_or(0));
+                Some((source_y, prior_full_color, prior_partial_color, prior_partial_vs_full))
+            });
+            let rerastered = partial.rastered.iter().any(|&(rx, ry, rw, rh)| {
+                x >= usize::from(rx) && x < usize::from(rx) + usize::from(rw)
+                    && y >= usize::from(ry) && y < usize::from(ry) + usize::from(rh)
+            });
+            examples.push(format!(
+                "({x},{y}):{a:08x}/{b:08x} peak={peak} shifted_from={shifted_from:?} rerastered={rerastered}"
+            ));
+        }
+    }
+    eprintln!(
+        "VELLO_GUARD_PARITY_FAILURE case={case} workload={workload} step={step} \
+         mismatched_gt1={count} max_channel={worst} bbox={x0},{y0},{x1},{y1} \
+         moved={:?} rastered={:?} examples={examples:?}",
+        partial.moved, partial.rastered,
+    );
+    if let Some(output) = std::env::var_os("AQ_CROSSOVER_OUT") {
+        let root = std::path::PathBuf::from(output);
+        std::fs::create_dir_all(&root).expect("create parity artifact directory");
+        std::fs::write(root.join(format!("{case}-{workload}-step{step}-partial.png")), partial.png())
+            .expect("write partial parity image");
+        std::fs::write(root.join(format!("{case}-{workload}-step{step}-full.png")), full.png())
+            .expect("write full parity image");
+    }
+}
+
 fn median_and_p95(samples: &[WorkerSample], select: impl Fn(&WorkerSample) -> f64) -> [f64; 2] {
     let values: Vec<f64> = samples.iter().map(select).collect();
     percentiles(&values, [0.50, 0.95])
@@ -113,6 +189,8 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
     ];
     let mut samples: [Vec<WorkerSample>; 3] =
         std::array::from_fn(|_| Vec::with_capacity((STEPS - 1) as usize));
+    let mut previous_full: Option<(u32, Vec<u32>)> = None;
+    let mut previous_partial: Option<(u32, Vec<u32>)> = None;
 
     for step in 0..STEPS {
         if step % 8 == 7 {
@@ -153,14 +231,35 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
                 WORKERS[index],
             );
         }
-        if matches!(step, 0 | 10 | 20 | 31) {
+        if matches!(step, 0 | 10 | 20 | 31) || std::env::var_os("AQ_CROSSOVER_EVERY_FRAME").is_some() {
             let full = render_full(&layers, w, hh, scale);
             let peak = max_pixel_channel_delta(renderers[0].frame_pixels(), full.frame_pixels());
+            if peak > 1 {
+                let previous = previous_full.as_ref().and_then(|(previous_step, pixels)| {
+                    (*previous_step + 1 == step).then_some(pixels.as_slice())
+                });
+                let previous_part = previous_partial.as_ref().and_then(|(previous_step, pixels)| {
+                    (*previous_step + 1 == step).then_some(pixels.as_slice())
+                });
+                diagnose_channel_mismatch(
+                    case, workload, step, w, &renderers[0], &full, previous, previous_part,
+                );
+                let repeated = render_full(&layers, w, hh, scale);
+                let repeated_peak =
+                    max_pixel_channel_delta(full.frame_pixels(), repeated.frame_pixels());
+                eprintln!(
+                    "VELLO_GUARD_FULL_REPEAT case={case} workload={workload} step={step} max_channel={repeated_peak}"
+                );
+            }
+            previous_full = Some((step, full.frame_pixels().to_vec()));
             assert!(
                 peak <= 1,
                 "{case}/{workload}: partial/full channel difference {peak}/255 on frame {step}",
             );
         }
+        // Preserve the actually displayed partial result, not just its fresh
+        // reference: each scroll shift copies the prior partial framebuffer.
+        previous_partial = Some((step, renderers[0].frame_pixels().to_vec()));
     }
 
     for (index, thread_count) in WORKERS.into_iter().enumerate() {
@@ -189,12 +288,19 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
 #[ignore = "opt-in 0/2/4-worker release-mode crossover; production policy unchanged"]
 fn benchmark_vello_worker_crossover() {
     let workload = std::env::var("AQ_CROSSOVER_WORKLOAD").unwrap_or_else(|_| "normal".into());
+    let only = std::env::var("AQ_CROSSOVER_ONLY_CASE").ok();
+    let mut executed = 0usize;
     for (case, width, height, scale, cover) in [
         ("text_1x", 1000, 600, 1.0, false),
         ("text_175", 1750, 1051, 1.75, false),
         ("cover_1x", 1000, 600, 1.0, true),
         ("cover_175", 1750, 1051, 1.75, true),
     ] {
+        if let Some(ref selected) = only {
+            if selected != case { continue; }
+        }
+        executed += 1;
         run_worker_case(case, width, height, scale, cover, &workload);
     }
+    assert!(executed != 0, "AQ_CROSSOVER_ONLY_CASE selected no known scene: {only:?}");
 }

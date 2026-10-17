@@ -160,6 +160,19 @@ impl Resources {
         Some((pages, bytes, glyphs))
     }
 
+    /// Diagnostic escape hatch: discard only glyph atlas pages before the
+    /// next cropped raster operation. Normal image resources and the outline
+    /// preparation cache stay intact. This is called from cfg(test)-only Akula
+    /// instrumentation; shipping render behavior is unaffected.
+    #[doc(hidden)]
+    pub fn discard_glyph_atlas_for_diagnostics(&mut self) {
+        if let Some(glyph) = self.glyph_resources.take() {
+            for page_index in 0..glyph.pixmaps.len() {
+                self.image_registry.destroy_atlas_page(page_index as u32);
+            }
+        }
+    }
+
     pub(crate) fn prepare_glyph_cache(&mut self) {
         if self.glyph_resources.is_some() {
             self.sync_glyph_cache();
