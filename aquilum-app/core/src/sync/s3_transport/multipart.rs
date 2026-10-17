@@ -561,7 +561,8 @@ mod tests {
         transport.client.create_bucket().bucket("akula-multipart-test")
             .send().await.unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let mut reader = std::fs::File::create(dir.path().join("staged.bin")).unwrap();
+        let mut reader = std::fs::OpenOptions::new().read(true).write(true).create_new(true)
+            .open(dir.path().join("staged.bin")).unwrap();
         let block = vec![0xB7_u8; 1024 * 1024];
         for i in 0..65 {
             let mut part = block.clone();
