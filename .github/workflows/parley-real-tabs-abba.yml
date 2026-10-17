@@ -51,18 +51,21 @@ jobs:
             rustc --version
             cargo --version
           } | tee parley-tabs-env.txt
-      - name: Compare real tab switches and reject stale cached layouts
+      - name: Compare real tab switches, DPI parity and stale cached layouts
         shell: bash
         working-directory: aquilum-app
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-native --bin aquilum-native \
-            benchmark_parley_real_tabs_abba -- --ignored --nocapture --test-threads=1 \
+            benchmark_parley_real_tabs -- --ignored --nocapture --test-threads=1 \
             2>&1 | tee "$GITHUB_WORKSPACE/parley-real-tabs.log"
           grep -F "PARLEY_TAB_ABBA " "$GITHUB_WORKSPACE/parley-real-tabs.log" \
             | tee -a "$GITHUB_STEP_SUMMARY"
           grep -F "PARLEY_TAB_FRESHNESS stale_hash_rejected=true restored=0" \
             "$GITHUB_WORKSPACE/parley-real-tabs.log" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$(grep -c "^PARLEY_TAB_MULTISCALE scale=" "$GITHUB_WORKSPACE/parley-real-tabs.log")" -eq 4
+          grep -F "PARLEY_TAB_MULTISCALE " "$GITHUB_WORKSPACE/parley-real-tabs.log" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Preserve baseline, candidate and hash-freshness diagnostics
         if: always()
         uses: actions/upload-artifact@v4

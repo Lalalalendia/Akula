@@ -136,3 +136,78 @@ fn benchmark_parley_real_tabs_abba() {
     assert_eq!(hits, 0, "stale external bytes must not restore Parley layout");
     eprintln!("PARLEY_TAB_FRESHNESS stale_hash_rejected=true restored=0");
 }
+
+#[test]
+#[ignore = "opt-in native pixel parity at two DPI scales and two editor wrap widths"]
+fn benchmark_parley_real_tabs_multiscale_fidelity() {
+    let mut scenarios = 0usize;
+    // Both the actual Masonry root and the software renderer receive the
+    // physical DPI-scaled viewport. Scaling only the PNG would not test the
+    // editor's text layout and scrollbar transitions.
+    for scale in [1.0, 1.75] {
+        let mut h = Harness::with(None, scale);
+        let first = h.write_note("parley-scale-A.md", &dense_body(4_000));
+        let second = h.write_note("parley-scale-B.md", &dense_body(80));
+        assert!(h.app.open_in(&mut h.root, first.clone(), true));
+        assert!(h.app.open_in(&mut h.root, second.clone(), true));
+        let _ = h.root.redraw();
+
+        for width in [1000u32, 860] {
+            let height = 600u32;
+            let physical_width = (f64::from(width) * scale).round() as u32;
+            let physical_height = (f64::from(height) * scale).round() as u32;
+            h.root.handle_window_event(masonry::core::WindowEvent::Resize(
+                PhysicalSize::new(physical_width, physical_height),
+            ));
+            h.app.window_resized(
+                &mut h.root,
+                Size::new(f64::from(width), f64::from(height)),
+            );
+            let _ = h.root.redraw();
+
+            let mut baseline: Option<Vec<u32>> = None;
+            let mut accepted = 0usize;
+            // Do not compare merely offered snapshots. A real redraw must
+            // apply Parley glyphs and produce identical entire UI pixels.
+            for enabled in [false, true, true, false] {
+                h.app.parley_trial_enabled = enabled;
+                let _ = select(&mut h, &second);
+                let _ = h.root.redraw();
+                let _ = crate::ui::editor::take_trial_restore_count();
+                let stages = select(&mut h, &first);
+                let (layers, _) = h.root.redraw();
+                let hits = crate::ui::editor::take_trial_restore_count();
+                assert!(stages.cache_hit, "clean Rope must hit at scale {scale}, width {width}");
+                if enabled {
+                    assert!(hits > 0, "offered but no Parley was restored at scale {scale}, width {width}");
+                    accepted += hits;
+                } else {
+                    assert_eq!(hits, 0, "baseline reused Parley at scale {scale}, width {width}");
+                }
+                let rendered = render_full(
+                    &layers,
+                    physical_width as u16,
+                    physical_height as u16,
+                    scale,
+                );
+                let pixels = rendered.frame_pixels();
+                if let Some(original) = &baseline {
+                    assert_eq!(
+                        differing_pixels(original, pixels),
+                        0,
+                        "cached UI differs at DPI {scale}, logical width {width}",
+                    );
+                } else {
+                    baseline = Some(pixels.to_vec());
+                }
+            }
+            assert!(accepted > 0);
+            scenarios += 1;
+            eprintln!(
+                "PARLEY_TAB_MULTISCALE scale={scale} width={width} actual_reused={accepted} differing_pixels=0"
+            );
+        }
+        h.app.shutdown();
+    }
+    assert_eq!(scenarios, 4, "both DPI factors and both widths must be checked");
+}
