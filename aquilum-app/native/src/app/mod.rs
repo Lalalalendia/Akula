@@ -116,6 +116,9 @@ pub struct App {
     text: crop::Rope,
     // At most two clean, hash-verified Rope snapshots from inactive tabs.
     inactive_notes: Vec<tabs::open::CachedNote>,
+    // A layout candidate travels only with a BLAKE3-verified Rope cache hit.
+    // It is consumed by the very next note page and never globally shared.
+    pending_parley: Option<crate::ui::editor::LayoutSnapshot>,
     system_dark: bool,
     tabs: Tabs,
     renaming_tab: Option<Uuid>,
