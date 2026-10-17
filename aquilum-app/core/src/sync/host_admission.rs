@@ -347,12 +347,60 @@ impl<'a> RegisteredReadAdmission<'a> {
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         cache: &SqliteDagStore, before_publish: impl FnOnce(),
     ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
+        // Preserve the original M1 local-identity contract. Remote S3 vaults
+        // use the separate explicitly bound entrypoint, never this one.
+        self.create_staged_with_bound_vault_and_hook(
+            operation, journal, cache,
+            super::VaultId::from_uuid(self.workspace_id), None, before_publish,
+        )
+    }
+
+    /// SYNC-05e-2: additive-only target publish for one durably registered S3
+    /// profile. It is deliberately NOT an overwrite/right-to-commit or a
+    /// proof of verified remote content. The caller must have staged exact
+    /// S3 bytes through the verified remote transport first.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn create_staged_if_absent_for_registered_s3(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        cache: &SqliteDagStore,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
+        // Every lookup rechecks the Core registration and pinned root IDs.
+        // A newly constructed struct or an unverified manifest cannot replace
+        // this SQLite-backed binding check.
+        let binding = bindings.load_for_registered(self)
+            .map_err(|_| LocalCreateError::Admission(VaultPortError::PermissionDenied))?
+            .ok_or(LocalCreateError::InvalidStagedIntent)?;
+        if !binding.matches_remote(profile, keyspace) {
+            return Err(LocalCreateError::InvalidStagedIntent);
+        }
+        let intent = journal.get(operation)?
+            .ok_or(LocalCreateError::InvalidStagedIntent)?.intent;
+        let expected_key = keyspace.immutable_blob_key(&intent.expected_content_hash)
+            .map_err(|_| LocalCreateError::InvalidStagedIntent)?;
+        if intent.remote_object_id != expected_key {
+            return Err(LocalCreateError::InvalidStagedIntent);
+        }
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        self.create_staged_with_bound_vault_and_hook(
+            operation, journal, cache, binding.vault_id,
+            Some(binding.profile_id.as_str()), || {},
+        )
+    }
+
+    fn create_staged_with_bound_vault_and_hook(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        cache: &SqliteDagStore, expected_vault: super::VaultId,
+        expected_profile_id: Option<&str>, before_publish: impl FnOnce(),
+    ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
         let record = journal.get(operation)?
             .ok_or(LocalCreateError::InvalidStagedIntent)?;
         if record.phase != JournalPhase::Staged
             || record.intent.action != JournalAction::StageDownload
             || record.intent.remote_guard.is_some()
-            || record.intent.vault_id.as_uuid() != self.workspace_id
+            || record.intent.vault_id != expected_vault
+            || expected_profile_id.is_some_and(|id| id != record.intent.profile_id)
             || record.intent.expected_baseline.is_some()
             || record.staged_hash.as_deref()
                 != Some(record.intent.expected_content_hash.as_str())
