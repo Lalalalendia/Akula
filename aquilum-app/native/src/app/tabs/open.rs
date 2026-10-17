@@ -9,6 +9,13 @@ use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
 
+
+#[cfg(test)]
+fn parley_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("AQ_PARLEY_DIAG_TRACE").is_some())
+}
+
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -135,7 +142,9 @@ impl App {
                 None
             };
             if self.parley_trial_enabled {
+                if parley_trace_enabled() {
                 eprintln!("PARLEY_TAB_TRACE stage=capture found={}", self.parley_capture.is_some());
+                }
             }
         }
         self.leave_note();
@@ -254,7 +263,9 @@ impl App {
                 {
                     record_stage(|stage| stage.cache_hit = true);
                     if self.parley_trial_enabled {
+                        if parley_trace_enabled() {
                         eprintln!("PARLEY_TAB_TRACE stage=verified_cache candidate={}", cached.layout.is_some());
+                        }
                         // The original Rope hash has just been checked against
                         // disk; an unverified or edited file never receives
                         // the cached Parley layouts.
