@@ -9,6 +9,7 @@ on:
       - 'aquilum-app/native/src/ui/editor/document/mod.rs'
       - 'aquilum-app/native/src/ui/editor/mod.rs'
       - 'aquilum-app/native/src/app/note_page/mod.rs'
+      - 'aquilum-app/native/src/ui/widgets/layout/slot.rs'
       - '.github/workflows/native-note-latency.yml'
   workflow_dispatch:
 
@@ -53,7 +54,8 @@ jobs:
             -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/note-latency.log"
           if [ "$(grep -c '^.*NOTE_LATENCY kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ] || \
              [ "$(grep -c '^.*TAB_STAGE kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ] || \
-             [ "$(grep -c '^.*EDITOR_PAGE kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ]; then
+             [ "$(grep -c '^.*EDITOR_PAGE kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ] || \
+             [ "$(grep -c '^.*EDITOR_MOUNT kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ]; then
             echo "::error::Expected three complete tab and editor-page profiles"
             exit 1
           fi
@@ -69,6 +71,7 @@ jobs:
           rows = []
           stages = {}
           editor = {}
+          mount = {}
           for line in Path("note-latency.log").read_text().splitlines():
               if "NOTE_LATENCY kib=" in line:
                   pairs = line.split("NOTE_LATENCY ", 1)[1].split()
@@ -81,7 +84,11 @@ jobs:
                   pairs = line.split("EDITOR_PAGE ", 1)[1].split()
                   row = dict(part.split("=", 1) for part in pairs if "=" in part)
                   editor[row["kib"]] = row
-          assert len(rows) == len(stages) == len(editor) == 3, (rows, stages, editor)
+              elif "EDITOR_MOUNT kib=" in line:
+                  pairs = line.split("EDITOR_MOUNT ", 1)[1].split()
+                  row = dict(part.split("=", 1) for part in pairs if "=" in part)
+                  mount[row["kib"]] = row
+          assert len(rows) == len(stages) == len(editor) == len(mount) == 3, (rows, stages, editor, mount)
           text = [
               "## Native note UI latency",
               "",
@@ -126,6 +133,20 @@ jobs:
                   f"| {r['kib']} KiB | {e['rescan_p95_ms']} | {e['initial_window_p95_ms']} | "
                   f"{e['constructor_p95_ms']} | {e['markdown_p95_ms']} | "
                   f"{e['page_total_p95_ms']} | {e['install_p95_ms']} |"
+              )
+          text.extend([
+              "",
+              "### Widget replacement and framework overhead p95 (ms)",
+              "",
+              "| Size | New pod | Remove previous | Notify children change | RenderRoot/edit remainder | Save-error refresh and surrounding work |",
+              "|---|---:|---:|---:|---:|---:|",
+          ])
+          for r in rows:
+              m = mount[r["kib"]]
+              text.append(
+                  f"| {r['kib']} KiB | {m['slot_pod_p95_ms']} | "
+                  f"{m['slot_remove_p95_ms']} | {m['slot_notify_p95_ms']} | "
+                  f"{m['framework_p95_ms']} | {m['save_error_refresh_p95_ms']} |"
               )
           text.extend([
               "",

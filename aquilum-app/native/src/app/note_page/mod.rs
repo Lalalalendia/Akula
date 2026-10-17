@@ -79,12 +79,18 @@ impl App {
         let page = self.note_widget();
         #[cfg(test)]
         let started = std::time::Instant::now();
+        #[cfg(test)]
+        let _ = Slot::take_replace_timings();
         if let Some(chrome) = &self.chrome {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page));
         }
+        #[cfg(test)]
+        let edit_elapsed = started.elapsed();
+        #[cfg(test)]
+        let phases = Slot::take_replace_timings();
         self.refresh_save_error(root);
         #[cfg(test)]
-        note::page::record_page_install(started.elapsed());
+        note::page::record_page_install(started.elapsed(), edit_elapsed, phases);
     }
 
     pub(in crate::app) fn refresh_save_error(&mut self, root: &mut RenderRoot) {

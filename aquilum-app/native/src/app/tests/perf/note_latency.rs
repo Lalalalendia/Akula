@@ -170,6 +170,11 @@ fn native_note_latency_matrix() {
         let markdown_p95 = p95_editor(|p| p.markdown);
         let page_total_p95 = p95_editor(|p| p.page_total);
         let install_p95 = p95_editor(|p| p.install);
+        let slot_pod_p95 = p95_editor(|p| p.slot_pod);
+        let slot_remove_p95 = p95_editor(|p| p.slot_remove);
+        let slot_notify_p95 = p95_editor(|p| p.slot_notify);
+        let slot_framework_p95 = p95_editor(|p| p.slot_framework);
+        let save_error_refresh_p95 = p95_editor(|p| p.save_error_refresh);
         let [switch_p50, switch_p95, switch_max] = percentiles(&switches, [0.5, 0.95, 1.0]);
         let [_, scene_p95, scene_max] = percentiles(&scenes, [0.5, 0.95, 1.0]);
         let [_, dispatch_p95, dispatch_max] = percentiles(&dispatches, [0.5, 0.95, 1.0]);
@@ -190,6 +195,11 @@ fn native_note_latency_matrix() {
              rescan_p95_ms={rescan_p95:.3} initial_window_p95_ms={initial_window_p95:.3} \
              markdown_p95_ms={markdown_p95:.3} page_total_p95_ms={page_total_p95:.3} \
              install_p95_ms={install_p95:.3}"
+        );
+        eprintln!(
+            "EDITOR_MOUNT kib={kib} cycles={cycles} slot_pod_p95_ms={slot_pod_p95:.3} \
+             slot_remove_p95_ms={slot_remove_p95:.3} slot_notify_p95_ms={slot_notify_p95:.3} \
+             framework_p95_ms={slot_framework_p95:.3} save_error_refresh_p95_ms={save_error_refresh_p95:.3}"
         );
         // Cleanup is deliberately excluded from the measured operation times.
         // Shutdown joins background search/index workers before TempDir removal.

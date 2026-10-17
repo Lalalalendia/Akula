@@ -1,4 +1,11 @@
 use masonry::accesskit::{Node, Role};
+
+#[cfg(test)]
+thread_local! {
+    // Only the most recent slot replacement matters for the note-page probe.
+    static LAST_REPLACE: std::cell::Cell<Option<(std::time::Duration, std::time::Duration, std::time::Duration)>> =
+        const { std::cell::Cell::new(None) };
+}
 use masonry::core::{AccessCtx, ChildrenIds, LayoutCtx, MeasureCtx, NewWidget, PaintCtx, PropertiesRef, RegisterCtx, Widget, WidgetMut, WidgetPod};
 use masonry::imaging::Painter;
 use masonry::kurbo::{Axis, Point, Size};
@@ -18,9 +25,24 @@ impl Slot {
         NewWidget::new(Slot { child: child.to_pod(), fit: true })
     }
 
+    #[cfg(test)]
+    pub(crate) fn take_replace_timings() -> Option<(std::time::Duration, std::time::Duration, std::time::Duration)> {
+        LAST_REPLACE.with(|last| last.replace(None))
+    }
+
     pub fn set_child(this: &mut WidgetMut<'_, Self>, child: NewWidget<dyn Widget>) {
-        this.ctx.remove_child(std::mem::replace(&mut this.widget.child, child.to_pod()));
+        #[cfg(test)]
+        let before = std::time::Instant::now();
+        let pod = child.to_pod();
+        #[cfg(test)]
+        let converted = std::time::Instant::now();
+        let previous = std::mem::replace(&mut this.widget.child, pod);
+        this.ctx.remove_child(previous);
+        #[cfg(test)]
+        let removed = std::time::Instant::now();
         this.ctx.children_changed();
+        #[cfg(test)]
+        LAST_REPLACE.with(|last| last.set(Some((converted - before, removed - converted, removed.elapsed()))));
     }
 }
 
