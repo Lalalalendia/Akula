@@ -1,0 +1,68 @@
+name: Parley release-profile real tab A/B (diagnostic)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/app/tests/perf/parley_tabs.rs'
+      - 'aquilum-app/native/src/app/tabs/open.rs'
+      - 'aquilum-app/native/src/ui/editor/document/layout_reuse.rs'
+      - 'scripts/benchmarks/summarize-parley-release-tabs.py'
+      - '.github/workflows/parley-release-tab-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parley-release-matrix-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-release-matrix:
+    name: Three-run release UI ABBA (no product enablement)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record exact source, CPU and toolchain
+        shell: bash
+        run: |
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee parley-release-env.txt
+      - name: Run three repeated release-profile tab-switch ABBA matrices
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          : > "$GITHUB_WORKSPACE/parley-release-tab-matrix.log"
+          for pass in 1 2 3; do
+            echo "PARLEY_RELEASE_PASS=$pass" | tee -a "$GITHUB_WORKSPACE/parley-release-tab-matrix.log"
+            cargo test --release --locked -p aquilum-native --bin aquilum-native \
+              benchmark_parley_release_tabs_matrix -- --ignored --nocapture --test-threads=1 \
+              2>&1 | tee -a "$GITHUB_WORKSPACE/parley-release-tab-matrix.log"
+          done
+          python3 "$GITHUB_WORKSPACE/scripts/benchmarks/summarize-parley-release-tabs.py" \
+            "$GITHUB_WORKSPACE/parley-release-tab-matrix.log" \
+            | tee "$GITHUB_WORKSPACE/parley-release-summary.md" "$GITHUB_STEP_SUMMARY"
+      - name: Preserve release-profile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parley-release-matrix-${{ github.sha }}
+          path: |
+            parley-release-env.txt
+            parley-release-tab-matrix.log
+            parley-release-summary.md
+          retention-days: 21
