@@ -66,7 +66,7 @@ impl Document {
             .collect();
         indices.sort_unstable();
         let mut entries = Vec::new();
-        let mut bytes = 0;
+        let mut bytes: usize = 0;
         for i in indices {
             if entries.len() == MAX_PARAGRAPHS {
                 break;
@@ -180,6 +180,8 @@ mod tests {
 
         let mut restored = doc(&content);
         restored.trial_offer(snap);
+        let reused = restored.try_restore_trial(Some(600.0), &styles, None, None);
+        assert!(reused > 0, "test must prove a real snapshot hit, not just equal fresh output");
         shape(&mut restored, 600.0, &styles);
         let mut fresh = doc(&content);
         shape(&mut fresh, 600.0, &styles);
