@@ -678,7 +678,10 @@ impl<'a> RegisteredReadAdmission<'a> {
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         expected_vault: super::VaultId,
     ) -> Result<LocalRecoveryEvidenceCase, LocalRecoveryError> {
-        journal.require_appdata_outside_vault(&self.root_path)?;
+        // Legacy M1d-a records read-only evidence even when its journal path
+        // is unsafe for byte archives. The S3-bound wrapper already requires
+        // app-private journal location via checked_registered_s3_recovery_scope;
+        // archive_local_recovery_copy retains its own strict location gate.
         let evidence = self.inspect_local_publication_for_vault_with_hook(
             operation, journal, expected_vault, || {},
         )?;
