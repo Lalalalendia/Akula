@@ -2,7 +2,7 @@ use super::super::vault::Vault;
 use super::workspace::requested_vault;
 use super::{limit, offset, require_write, text, tool, workspace_property};
 use crate::files::gate;
-use crate::files::trash::{empty_trash_impl, list_trash_impl, trash_page_impl, trash_path, TRASH_FOLDER};
+use crate::files::trash::{list_trash_impl, trash_page_impl, trash_path, TRASH_FOLDER};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use crate::app_core::Core;
@@ -85,7 +85,7 @@ fn restore_note(core: &Core, arguments: &Value) -> Result<Value, String> {
 fn empty_trash(core: &Core, arguments: &Value) -> Result<Value, String> {
     require_write(core)?;
     let vault = requested_vault(core, arguments)?;
-    let removed = empty_trash_impl(&vault.root).map_err(|error| error.to_string())?;
+    let removed = core.empty_trash_guarded(&vault.root).map_err(|error| error.to_string())?;
     Ok(json!({ "removed": removed }))
 }
 
