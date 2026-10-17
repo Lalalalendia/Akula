@@ -41,6 +41,7 @@ jobs:
         working-directory: aquilum-app
         env:
           AQ_LATENCY_SWITCHES: '16'
+          AQ_TEST_PARLEY_MIXED_FIXTURE: '1'
         run: |
           set -euo pipefail
           for case in baseline-1 candidate-1 candidate-2 baseline-2; do
