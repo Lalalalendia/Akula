@@ -1,0 +1,275 @@
+{
+  "schema": "akula.plugin-architecture/0",
+  "status": "design-only",
+  "sourceCommit": "939d5109f19a990e69cc2cbfbc1f046d941e9766",
+  "invariants": [
+    {
+      "id": "INV-01",
+      "rule": "No ambient filesystem/network/process/FFI grants to community guests",
+      "firstGate": "PLUGIN-05"
+    },
+    {
+      "id": "INV-02",
+      "rule": "Identity is verified by host; grants are per installed plugin instance and per vault",
+      "firstGate": "PLUGIN-02"
+    },
+    {
+      "id": "INV-03",
+      "rule": "All metadata, search and event payloads use content-read scopes",
+      "firstGate": "PLUGIN-07"
+    },
+    {
+      "id": "INV-04",
+      "rule": "All guest writes are revision-guarded via DocumentHub and File Gate",
+      "firstGate": "PLUGIN-09"
+    },
+    {
+      "id": "INV-05",
+      "rule": "Rendered Markdown/assets are checked for unintended network side effects",
+      "firstGate": "PLUGIN-10"
+    },
+    {
+      "id": "INV-06",
+      "rule": "Guests do not bypass permission broker via MCP/IPC/clipboard",
+      "firstGate": "PLUGIN-16"
+    },
+    {
+      "id": "INV-07",
+      "rule": "Built-in sync stays independent, no copied plugin code/grants auto activate",
+      "firstGate": "PLUGIN-12"
+    },
+    {
+      "id": "INV-08",
+      "rule": "Local Markdown remains usable offline with plugins disabled",
+      "firstGate": "PLUGIN-12"
+    },
+    {
+      "id": "INV-09",
+      "rule": "Updates cannot silently expand grants or swap publisher identity",
+      "firstGate": "PLUGIN-19"
+    },
+    {
+      "id": "INV-10",
+      "rule": "Guest resource quotas and crashes cannot freeze native editor",
+      "firstGate": "PLUGIN-06"
+    }
+  ],
+  "trustZones": [
+    "trusted-host",
+    "trusted-ui",
+    "trusted-entry",
+    "built-in",
+    "verification",
+    "untrusted-guest",
+    "untrusted-bundle",
+    "untrusted-vault",
+    "external-service"
+  ],
+  "forbiddenGuestImports": [
+    "filesystem",
+    "network",
+    "process",
+    "environment",
+    "ffi"
+  ],
+  "surfaces": [
+    {
+      "id": "core-composition",
+      "path": "aquilum-app/core/src/app_core.rs",
+      "expectedSymbols": [
+        "pub enum CoreEvent",
+        "pub trait EventSink",
+        "pub struct Core"
+      ],
+      "zone": "trusted-host",
+      "boundary": "Never expose Core or call it reentrantly from untrusted guest."
+    },
+    {
+      "id": "core-root",
+      "path": "aquilum-app/core/src/lib.rs",
+      "expectedSymbols": [
+        "pub mod documents",
+        "pub mod mcp",
+        "pub mod sync"
+      ],
+      "zone": "trusted-host",
+      "boundary": "Expose only versioned plugin facade."
+    },
+    {
+      "id": "document-hub",
+      "path": "aquilum-app/core/src/documents/hub.rs",
+      "expectedSymbols": [
+        "pub enum HubError",
+        "pub struct DocumentEvent"
+      ],
+      "zone": "trusted-host",
+      "boundary": "Dirty editor sessions and conflict-aware admission."
+    },
+    {
+      "id": "file-gate",
+      "path": "aquilum-app/core/src/files/gate/write.rs",
+      "expectedSymbols": [
+        "pub fn write(",
+        "expected_hash:"
+      ],
+      "zone": "trusted-host",
+      "boundary": "Grant and resource validation before atomic write."
+    },
+    {
+      "id": "search-index",
+      "path": "aquilum-app/core/src/search/mod.rs",
+      "expectedSymbols": [],
+      "zone": "trusted-host",
+      "boundary": "Derived metadata/search require scoped read."
+    },
+    {
+      "id": "local-history",
+      "path": "aquilum-app/core/src/history/mod.rs",
+      "expectedSymbols": [],
+      "zone": "trusted-host",
+      "boundary": "Never reveal other vault history or mutate bypassing gate."
+    },
+    {
+      "id": "mcp-server",
+      "path": "aquilum-app/core/src/mcp/mod.rs",
+      "expectedSymbols": [
+        "pub struct McpServer"
+      ],
+      "zone": "trusted-entry",
+      "boundary": "MCP token is not a plugin grant."
+    },
+    {
+      "id": "built-in-sync",
+      "path": "aquilum-app/core/src/sync/mod.rs",
+      "expectedSymbols": [
+        "pub const SYNC_ENGINE_FEATURE_ENABLED"
+      ],
+      "zone": "built-in",
+      "boundary": "Independent SYNC PR 00-11; not dynamic guest."
+    },
+    {
+      "id": "native-ui",
+      "path": "aquilum-app/native/Cargo.toml",
+      "expectedSymbols": [
+        "no WebView"
+      ],
+      "zone": "trusted-ui",
+      "boundary": "Declarative plugin views rendered by host."
+    },
+    {
+      "id": "main-pr-gate",
+      "path": ".github/workflows/app-checks.yml",
+      "expectedSymbols": [
+        "name: Main PR gate",
+        "cargo test --workspace --locked"
+      ],
+      "zone": "verification",
+      "boundary": "Reuse single required status; test both workspace and sync-engine."
+    }
+  ],
+  "threats": [
+    {
+      "id": "T01",
+      "scenario": "foreign vault resource",
+      "firstGate": "PLUGIN-04",
+      "falsifier": "foreign-vault read/write denied"
+    },
+    {
+      "id": "T02",
+      "scenario": "traversal or symlink/junction race",
+      "firstGate": "PLUGIN-04",
+      "falsifier": "handle-relative open/commit cannot escape"
+    },
+    {
+      "id": "T03",
+      "scenario": "metadata, graph and event side channels",
+      "firstGate": "PLUGIN-07",
+      "falsifier": "search snippets and subscriptions scoped"
+    },
+    {
+      "id": "T04",
+      "scenario": "read and network composed exfiltration",
+      "firstGate": "PLUGIN-15",
+      "falsifier": "warn on high-risk grants and control egress"
+    },
+    {
+      "id": "T05",
+      "scenario": "rich output external resource exfiltration",
+      "firstGate": "PLUGIN-10",
+      "falsifier": "render-resource network denied"
+    },
+    {
+      "id": "T06",
+      "scenario": "write-to-later-executable artifact",
+      "firstGate": "PLUGIN-09",
+      "falsifier": "content never auto-executes"
+    },
+    {
+      "id": "T07",
+      "scenario": "native process or FFI escape",
+      "firstGate": "PLUGIN-05",
+      "falsifier": "no guest process/FFI imports"
+    },
+    {
+      "id": "T08",
+      "scenario": "SSRF, redirect, DNS rebinding, proxy",
+      "firstGate": "PLUGIN-15",
+      "falsifier": "connection enforces destination policy"
+    },
+    {
+      "id": "T09",
+      "scenario": "forged plugin identity/foreign handle",
+      "firstGate": "PLUGIN-02",
+      "falsifier": "host authenticates instance/resource"
+    },
+    {
+      "id": "T10",
+      "scenario": "revocation during async side effect",
+      "firstGate": "PLUGIN-03",
+      "falsifier": "revalidate before commit"
+    },
+    {
+      "id": "T11",
+      "scenario": "dirty editor conflict, stale history",
+      "firstGate": "PLUGIN-09",
+      "falsifier": "no stale overwrite"
+    },
+    {
+      "id": "T12",
+      "scenario": "resource exhaustion in guest/host RPC",
+      "firstGate": "PLUGIN-06",
+      "falsifier": "quota and cancel without frozen host"
+    },
+    {
+      "id": "T13",
+      "scenario": "silent permissions expansion",
+      "firstGate": "PLUGIN-11",
+      "falsifier": "update permission diff requires consent"
+    },
+    {
+      "id": "T14",
+      "scenario": "publisher compromise/rollback",
+      "firstGate": "PLUGIN-19",
+      "falsifier": "signed provenance and anti-rollback"
+    },
+    {
+      "id": "T15",
+      "scenario": "synced vault plugin auto-run",
+      "firstGate": "PLUGIN-12",
+      "falsifier": "no executable activation via sync"
+    },
+    {
+      "id": "T16",
+      "scenario": "MCP/IPC confused deputy",
+      "firstGate": "PLUGIN-16",
+      "falsifier": "same scoped authorization at entry points"
+    }
+  ],
+  "separatePrograms": [
+    {
+      "id": "SYNC",
+      "url": "https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11",
+      "implementation": "built-in, not a dynamically loaded plugin"
+    }
+  ]
+}

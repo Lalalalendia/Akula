@@ -54,6 +54,13 @@ jobs:
           node --test .github/scripts/architecture-budget.test.cjs
           node .github/scripts/architecture-budget.cjs --base="$BASE_SHA" --head=HEAD --summary="$GITHUB_STEP_SUMMARY"
 
+      # PLUGIN-00: documentation/source-boundary inventory only; no runtime or new status check.
+      - name: Plugin architecture contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/plugin-architecture.test.cjs
+
       - name: Check installers and branch cleanup safety
         shell: bash
         run: |
