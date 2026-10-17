@@ -5,6 +5,8 @@ on:
     paths:
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/host_admission.rs"
+      - "aquilum-app/core/src/documents/hub.rs"
+      - "aquilum-app/core/src/documents/hub_tests.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
       - "aquilum-app/core/src/sync/mod.rs"
       - "aquilum-app/core/Cargo.toml"
@@ -35,3 +37,6 @@ jobs:
       - name: Registered Core root and editor admission
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine host_admission -- --nocapture
+      - name: Canonical aliases cannot bypass DocumentHub reservations
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine sync_reservation_blocks -- --nocapture
