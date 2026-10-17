@@ -25,6 +25,7 @@ Source baseline: GitHub `main` commit `939d5109f19a990e69cc2cbfbc1f046d941e9766`
 ## Current non-goals
 
 - No community plugin loading in current `main`. No marketplace, permission grants, sideloading or WASM/JS runtime.
+- Sync is not a dynamically loaded plugin; it remains a built-in Rust Core module with an independent roadmap.
 - No modification of the [canonical built-in sync roadmap](https://telawiki.com/spaces/456/pages/7479/akula-pr-00-11).
 - No change in native editing semantics or branch protection.
 - No promise that existing Obsidian JS plugin packages will run in Akula.
