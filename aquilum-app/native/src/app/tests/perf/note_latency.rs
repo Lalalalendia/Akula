@@ -183,6 +183,8 @@ fn native_note_latency_matrix() {
         let strip_p95 = p95_stage(|s| s.strip);
         let panel_p95 = p95_stage(|s| s.panel);
         let cache_hits = stages.iter().filter(|stage| stage.cache_hit).count();
+        let parley_offered = stages.iter().filter(|stage| stage.layout_offered).count();
+        let parley_reused: usize = stages.iter().map(|stage| stage.layout_reused).sum();
         let p95_editor = |field: fn(&crate::ui::note::page::EditorPageProfile) -> Duration| {
             let samples: Vec<f64> = editor_profiles.iter().map(|profile| milliseconds(field(profile))).collect();
             percentiles(&samples, [0.95])[0]
@@ -206,7 +208,7 @@ fn native_note_latency_matrix() {
              switch_p50_ms={switch_p50:.3} switch_p95_ms={switch_p95:.3} switch_max_ms={switch_max:.3} \
              scene_p95_ms={scene_p95:.3} scene_max_ms={scene_max:.3} \
              dispatch_p95_ms={dispatch_p95:.3} dispatch_max_ms={dispatch_max:.3} \
-             external_visible_ms={external_visible_ms:.3} cache_hits={cache_hits} stale_overwrites=0"
+             external_visible_ms={external_visible_ms:.3} cache_hits={cache_hits} parley_offered={parley_offered} parley_reused={parley_reused} stale_overwrites=0"
         );
         eprintln!(
             "TAB_STAGE kib={kib} cycles={cycles} leave_p95_ms={leave_p95:.3} read_p95_ms={read_p95:.3} \
