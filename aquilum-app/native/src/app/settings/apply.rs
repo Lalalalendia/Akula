@@ -138,7 +138,7 @@ impl App {
         let (done, wake) = (std::sync::Arc::clone(&self.retention_done), std::sync::Arc::clone(&self.workspace.wake));
         std::thread::spawn(move || {
             let config = core.settings.get_config();
-            if let Err(error) = cleanup_trash_impl(&workspace, config.trash.retention_days) {
+            if let Err(error) = gate::cleanup_retention(&core, &workspace, config.trash.retention_days) {
                 report!("корзина не очищена: {error:?}");
             }
             aquilum_core::history::store::adopt_quantum_history(&workspace);

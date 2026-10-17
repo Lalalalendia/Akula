@@ -101,6 +101,130 @@ pub fn cleanup_trash_impl(
     Ok(removed)
 }
 
+// Retention candidate enumeration runs outside the process-wide File Gate.
+// Candidates are untrusted hints: every deletion rechecks age and root type
+// only after acquiring the shared Core lock.
+pub(crate) fn retention_expired_candidates(
+    workspace: &Path,
+    retention_days: u32,
+) -> Result<Vec<PathBuf>, FileCommandError> {
+    let trash = trash_path(workspace);
+    if retention_days == 0 || !checked_trash_root(&trash)? {
+        return Ok(Vec::new());
+    }
+    let lifetime = Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
+    let now = SystemTime::now();
+    Ok(trashed_files(&trash)
+        .filter(|(_, metadata)| {
+            metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age > lifetime)
+        })
+        .map(|(path, _)| path)
+        .collect())
+}
+
+// Caller MUST hold the process File Gate lock. Re-check a stale scan entry
+// after waiting for restores or new trash arrivals, rather than blindly
+// deleting the pathname selected by the earlier scan.
+pub(crate) fn remove_still_expired_trash_candidate(
+    workspace: &Path,
+    candidate: &Path,
+    retention_days: u32,
+) -> Result<bool, FileCommandError> {
+    if retention_days == 0 {
+        return Ok(false);
+    }
+    let trash = trash_path(workspace);
+    if !candidate.starts_with(&trash) || candidate == trash {
+        return Err(FileCommandError::Io {
+            message: format!("trash retention candidate outside selected root: {}", candidate.display()),
+        });
+    }
+    if !checked_trash_root(&trash)? {
+        return Ok(false);
+    }
+    let metadata = match fs::symlink_metadata(candidate) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.file_type().is_file() {
+        return Ok(false);
+    }
+    let lifetime = Duration::from_secs(u64::from(retention_days) * 24 * 60 * 60);
+    let expired = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .is_some_and(|age| age > lifetime);
+    if !expired {
+        return Ok(false);
+    }
+    match fs::remove_file(candidate) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => {
+            eprintln!("[aquilum:files] retention candidate not removed {}: {error}", candidate.display());
+            Ok(false)
+        }
+    }
+}
+
+// Directory enumeration is also read-only; each empty-directory removal is
+// separately checked under the File Gate, so a concurrent restore wins cleanly.
+pub(crate) fn retention_directory_candidates(workspace: &Path) -> Result<Vec<PathBuf>, FileCommandError> {
+    let trash = trash_path(workspace);
+    if !checked_trash_root(&trash)? {
+        return Ok(Vec::new());
+    }
+    Ok(WalkDir::new(&trash)
+        .min_depth(1)
+        .contents_first(true)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_dir())
+        .map(|entry| entry.into_path())
+        .collect())
+}
+
+// Caller MUST hold the process File Gate lock. Do not remove the .trash
+// container itself. This does not defend against external process path swaps.
+pub(crate) fn remove_still_empty_trash_directory(
+    workspace: &Path,
+    directory: &Path,
+) -> Result<(), FileCommandError> {
+    let trash = trash_path(workspace);
+    if directory == trash || !directory.starts_with(&trash) {
+        return Err(FileCommandError::Io {
+            message: format!("trash retention directory outside selected root: {}", directory.display()),
+        });
+    }
+    if !checked_trash_root(&trash)? {
+        return Ok(());
+    }
+    let metadata = match fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if std::os::windows::fs::MetadataExt::file_attributes(&metadata) & 0x0000_0400 != 0 {
+        return Ok(());
+    }
+    if fs::read_dir(directory).is_ok_and(|mut entries| entries.next().is_none()) {
+        if let Err(error) = fs::remove_dir(directory) {
+            eprintln!("[aquilum:files] empty retention directory not removed {}: {error}", directory.display());
+        }
+    }
+    Ok(())
+}
+
 pub fn empty_trash_impl(workspace: &Path) -> Result<u64, FileCommandError> {
     let trash = trash_path(workspace);
     if !checked_trash_root(&trash)? {
@@ -301,6 +425,25 @@ mod tests {
         assert!(list_trash_impl(workspace.path()).is_err());
         assert!(ensure_trash_impl(workspace.path()).is_err());
         assert!(original.is_file());
+    }
+
+
+    #[test]
+    fn retention_rechecks_expiry_after_candidate_path_is_reused() {
+        let workspace = workspace();
+        let trash = trash_path(workspace.path());
+        fs::create_dir_all(&trash).unwrap();
+        let candidate = trash.join("Reused.md");
+        aged_file(&candidate, 45);
+        assert_eq!(
+            super::retention_expired_candidates(workspace.path(), 30).unwrap(),
+            vec![candidate.clone()]
+        );
+
+        fs::remove_file(&candidate).unwrap();
+        fs::write(&candidate, b"new occupant").unwrap();
+        assert!(!super::remove_still_expired_trash_candidate(workspace.path(), &candidate, 30).unwrap());
+        assert_eq!(fs::read(&candidate).unwrap(), b"new occupant");
     }
 
     #[test]
