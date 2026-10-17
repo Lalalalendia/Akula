@@ -6,13 +6,32 @@
 //! This is NOT a VaultPort, protective receipt, or local mutation authority:
 //! no sync executor can create, replace, rename, delete or commit a baseline.
 
-use super::pinned_read::PinnedReadOnlyRoot;
+use super::pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
+use super::protection_store::{
+    ProtectionOutcome, ProtectionStoreError, SqliteProtectionStore, MAX_PROTECTED_ORIGINAL_BYTES,
+};
+use super::OperationId;
 use super::{LocalFileSnapshot, SyncRelativePath, VaultPortError};
 use crate::app_core::Core;
 use crate::documents::hub::SyncAdmissionError;
 use crate::search::paths::{canonical_path, same_path};
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
+
+/// Errors from a read-only source capture. None grants a write permission.
+#[derive(Debug)]
+pub(crate) enum BoundCaptureError {
+    Admission(VaultPortError),
+    Protection(ProtectionStoreError),
+    OriginalHashMismatch,
+}
+
+impl From<VaultPortError> for BoundCaptureError {
+    fn from(error: VaultPortError) -> Self { Self::Admission(error) }
+}
+impl From<ProtectionStoreError> for BoundCaptureError {
+    fn from(error: ProtectionStoreError) -> Self { Self::Protection(error) }
+}
 
 /// Not externally constructible, and deliberately has no mutation methods.
 #[allow(dead_code)]
@@ -62,6 +81,67 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(VaultPortError::FileChanged);
         }
         Ok(())
+    }
+
+    /// Capture a live, registered original into the durable SQLite store.
+    /// The editor stays reserved until a *second* pinned read proves the same
+    /// source file ID and bytes remain visible. Other processes can still race,
+    /// so this MUST NOT be used as a File Gate or overwrite authorization.
+    pub(crate) fn preserve_closed_original(
+        &self,
+        relative: &SyncRelativePath,
+        expected_hash: &str,
+        operation: OperationId,
+        store: &mut SqliteProtectionStore,
+    ) -> Result<ProtectionOutcome, BoundCaptureError> {
+        self.preserve_with_hook(relative, expected_hash, operation, store, || {})
+    }
+
+    fn preserve_with_hook(
+        &self,
+        relative: &SyncRelativePath,
+        expected_hash: &str,
+        operation: OperationId,
+        store: &mut SqliteProtectionStore,
+        before_store: impl FnOnce(),
+    ) -> Result<ProtectionOutcome, BoundCaptureError> {
+        // The database is provided by the trusted host and must not sit inside
+        // the sync root. This check is a *negative* safety check, not positive
+        // authentication of app-data ownership/permissions.
+        let storage = canonical_path(store.database_path());
+        if storage.starts_with(&self.root_path) {
+            return Err(VaultPortError::PermissionDenied.into());
+        }
+        self.check_root()?;
+        let target = self.root_path.join(relative.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&target)
+            .map_err(admission_error)?;
+        self.check_root()?;
+        let original = self.pinned.read_identified_bounded(
+            relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
+        if original.snapshot.content_hash != expected_hash {
+            return Err(BoundCaptureError::OriginalHashMismatch);
+        }
+        let file_identity = original.identity.ok_or(VaultPortError::PermissionDenied)?;
+        before_store();
+        self.check_root()?;
+        let result = store.store_bound_preimage(
+            operation, relative, expected_hash, &original.snapshot.bytes,
+            PinnedFileIdentity { device: self.initial.0, file: self.initial.1 },
+            file_identity,
+        )?;
+        self.check_root()?;
+        let fresh = self.pinned.read_identified_bounded(
+            relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
+        if fresh.identity != Some(file_identity)
+            || fresh.snapshot.content_hash != original.snapshot.content_hash
+            || fresh.snapshot.bytes != original.snapshot.bytes
+        {
+            // A durable preimage may already exist, but a changed file cannot
+            // receive any implied authorization through this result.
+            return Err(VaultPortError::FileChanged.into());
+        }
+        Ok(result)
     }
 
     /// A preflight only. Reserves a CLOSED editor session while reading, so
