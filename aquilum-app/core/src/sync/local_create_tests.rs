@@ -142,6 +142,58 @@ fn m1_rejects_symlinked_intermediate_directory_without_escape() {
     assert!(!outside.join("outside.md").exists());
 }
 
+#[cfg(windows)]
+#[test]
+fn m1_rejects_preexisting_ntfs_junction_parent() {
+    use std::process::Command;
+    let (temp, core, root) = fixture();
+    let outside = temp.path().join("external");
+    fs::create_dir(&outside).unwrap();
+    let parent = root.join("notes");
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&parent)
+        .arg(&outside)
+        .status().unwrap();
+    assert!(status.success(), "junction fixture must exist for this security test");
+    let id = OperationId::new();
+    let (journal, cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), "notes/remote.md", b"new", id,
+    );
+    let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+    assert!(admission.create_staged_if_absent(id, &journal, &cache).is_err());
+    assert!(!outside.join("remote.md").exists());
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn m1_parent_swapped_to_symlink_before_publish_never_writes_outside() {
+    use std::os::unix::fs::symlink;
+    let (temp, core, root) = fixture();
+    let original = root.join("notes");
+    fs::create_dir(&original).unwrap();
+    let outside = temp.path().join("external");
+    fs::create_dir(&outside).unwrap();
+    let id = OperationId::new();
+    let bytes = b"safe staged";
+    let (journal, cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), "notes/remote.md", bytes, id,
+    );
+    let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let moved = temp.path().join("moved-parent");
+    let result = admission.create_staged_with_hook(id, &journal, &cache, || {
+        fs::rename(&original, &moved).unwrap();
+        symlink(&outside, &original).unwrap();
+    });
+    assert!(matches!(result, Err(LocalCreateError::PublicationUncertain)));
+    // Publication was relative to the ORIGINAL opened directory, never the
+    // path later redirected to an external directory by another process.
+    assert_eq!(fs::read(moved.join("remote.md")).unwrap(), bytes);
+    assert!(!outside.join("remote.md").exists());
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
 /// Runs ONLY in a child test process; accepts the same source-level contracts
 /// but authenticates a separate Core and SQLite journal.
 #[test]
