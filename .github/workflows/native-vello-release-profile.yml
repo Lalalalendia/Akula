@@ -6,6 +6,7 @@ on:
       - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/single_threaded.rs'
       - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/multi_threaded.rs'
       - 'aquilum-app/native/src/app/tests/perf/vello_release.rs'
+      - 'aquilum-app/native/src/render/paint/runs.rs'
       - 'aquilum-app/native/src/app/tests/perf/mod.rs'
       - '.github/scripts/summarize-vello-profile.py'
       - '.github/workflows/native-vello-release-profile.yml'
