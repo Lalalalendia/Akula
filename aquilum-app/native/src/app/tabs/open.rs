@@ -9,6 +9,11 @@ use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
 
+fn is_structured_file(path: &Path) -> bool {
+    path.extension().and_then(|value| value.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas") || ext.eq_ignore_ascii_case("base"))
+}
+
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -115,6 +120,13 @@ impl App {
             self.show_page(root, if self.tree.root().is_some() { 1 } else { 3 });
             return;
         };
+        if is_structured_file(&path) {
+            self.leave_note();
+            self.show_structured_readonly(root, &path);
+            self.tree.set_active(root, Some(path));
+            self.show_page(root, 0);
+            return;
+        }
         if self.note.as_ref().is_some_and(|n| n.is(&path)) {
             self.reveal_pending(root);
             self.show_page(root, 0);
@@ -177,6 +189,47 @@ impl App {
         self.show_page(root, 0);
         #[cfg(test)]
         record_stage(|s| s.tree = started.elapsed());
+    }
+
+    /// First-stage format view: no TextEditor and no save path for structured files.
+    /// Reopening always reparses from disk rather than reusing a stale tab cache.
+    fn show_structured_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
+        use aquilum_core::files::structured::{Format, StructuredDocument};
+        use masonry::core::NewWidget;
+        use masonry::widgets::Flex;
+        self.note = None;
+        self.note_ids = None;
+        self.embeds = None;
+        self.open_error = None;
+        self.open_error_ids = None;
+        let result = StructuredDocument::open(path).and_then(|doc| {
+            let header = match doc.format() {
+                Format::Canvas => {
+                    let canvas = doc.canvas()?;
+                    let nodes = canvas["nodes"].as_array().map_or(0, Vec::len);
+                    let edges = canvas["edges"].as_array().map_or(0, Vec::len);
+                    format!("JSON Canvas — {nodes} objects, {edges} connections")
+                }
+                Format::Base => "Obsidian Bases — YAML source".to_owned(),
+            };
+            Ok((header, doc.text().chars().take(2048).collect::<String>()))
+        });
+        match result {
+            Ok((heading, preview)) => {
+                let page = NewWidget::new(
+                    Flex::column()
+                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(
+                            "Read-only preview — editing is not available yet",
+                        )))
+                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&heading)))
+                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&preview))),
+                );
+                if let Some(chrome) = &self.chrome {
+                    chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
+                }
+            }
+            Err(error) => self.show_open_error(root, path, &error.to_string()),
+        }
     }
 
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
@@ -295,7 +348,7 @@ impl App {
     }
 
     pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
-        if !is_markdown(&path) && !is_plain_text(&path) {
+        if !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
             return false;
         }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
@@ -322,5 +375,21 @@ impl App {
         self.tabs.close(self.tabs.active_id());
         self.show_active(root);
         Outcome { title: true, ..Outcome::default() }
+    }
+}
+
+#[cfg(test)]
+mod structured_tab_tests {
+    use super::is_structured_file;
+    use std::path::Path;
+
+    #[test]
+    fn structured_files_are_routed_separately_from_markdown() {
+        assert!(is_structured_file(Path::new("board.canvas")));
+        assert!(is_structured_file(Path::new("board.CANVAS")));
+        assert!(is_structured_file(Path::new("items.base")));
+        assert!(is_structured_file(Path::new("items.BASE")));
+        assert!(!is_structured_file(Path::new("note.md")));
+        assert!(!is_structured_file(Path::new("report.pdf")));
     }
 }
