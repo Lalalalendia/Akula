@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/src/sync/profile_binding.rs'
+      - 'aquilum-app/core/src/sync/host_admission.rs'
+      - 'aquilum-app/core/src/sync/local_create.rs'
       - 'aquilum-app/core/src/sync/s3_transport/**'
       - 'aquilum-app/core/src/sync/s3.rs'
       - 'aquilum-app/core/src/sync/s3_manifest.rs'
@@ -135,6 +138,12 @@ jobs:
           # live_minio_two_core_verified_stage_and_no_replace already runs in
           # the earlier live_minio_ filter. Running it again without resetting
           # the same bucket incorrectly produces BucketAlreadyOwnedByYou.
+      - name: Verify separate local workspace and shared cloud vault profile binding
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 profile_binding::tests
       - name: Two independent S3 clients CAS, conflicts and lost ACK
         shell: bash
         working-directory: aquilum-app

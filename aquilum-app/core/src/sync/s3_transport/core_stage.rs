@@ -271,6 +271,7 @@ mod tests {
     async fn live_minio_two_core_verified_stage_and_no_replace() {
         use crate::app_core::{Core, CoreEvent};
         use crate::sync::{JournalError, RegisteredReadAdmission};
+        use crate::sync::profile_binding::SqliteRegisteredS3Bindings;
         use aws_sdk_s3::error::ProvideErrorMetadata;
         use std::fs;
         use std::sync::Arc;
@@ -306,10 +307,11 @@ mod tests {
             .unwrap().read_closed_preflight(&relative, 4096).unwrap();
         assert_eq!(captured.bytes, bytes);
 
-        // The remote sync identity is currently tied to the receiver Core's
-        // registered workspace ID for additive publication. This fixture
-        // expressly does NOT prove shared-VaultId onboarding across devices.
-        let vault = VaultId::from_uuid(target_id);
+        // The shared cloud UUID must differ from both independent machine-
+        // local workspace registrations. No aliasing is permitted.
+        let vault = VaultId::new();
+        assert_ne!(vault.as_uuid(), source_id);
+        assert_ne!(vault.as_uuid(), target_id);
         let ns = S3Keyspace::new("akula-sync/core-stage-ci", vault).unwrap();
         let profile = S3ConnectionProfile {
             bucket: "akula-core-stage-test".into(),
@@ -318,7 +320,7 @@ mod tests {
             force_path_style: true,
         };
         let writer = AwsS3ProbeClient::connect(profile.clone(), ns.clone()).await.unwrap();
-        let reader = AwsS3ProbeClient::connect(profile, ns.clone()).await.unwrap();
+        let reader = AwsS3ProbeClient::connect(profile.clone(), ns.clone()).await.unwrap();
         // The MinIO workflow runs several live tests against one server.
         // A bucket already owned by these isolated test credentials is fine:
         // each fixture uses a fresh random vault keyspace. Any other S3
@@ -407,15 +409,32 @@ mod tests {
         assert_eq!(journal.get(operation_id).unwrap().unwrap().phase, JournalPhase::Staged);
         assert!(journal.baseline(vault, record.document_id).unwrap().is_none());
 
-        // A genuine second Core handles the local operation, under its native
-        // registered-root admission and atomic no-replace File Gate.
+        // A second independent Core must bind its LOCAL registration to the
+        // verified SHARED S3 vault explicitly. A staged journal and BLAKE3
+        // cache alone are not permission to bypass that durable association.
         let admission = RegisteredReadAdmission::open(&second_core, &root_b).unwrap();
-        let published = admission.create_staged_if_absent(operation_id, &journal, &cache)
-            .unwrap();
+        assert!(matches!(
+            admission.create_staged_if_absent(operation_id, &journal, &cache),
+            Err(crate::sync::host_admission::LocalCreateError::InvalidStagedIntent)
+        ));
+        let verified_head = reader.read_verified_head().await.unwrap().unwrap();
+        let mut bindings = SqliteRegisteredS3Bindings::open(
+            &admission, &app_b.join("s3-profiles.sqlite"),
+        ).unwrap();
+        let bound = bindings.bind_existing_verified_s3(
+            &admission, "real-minio-test-profile", &profile, &ns, &verified_head,
+        ).unwrap();
+        assert_eq!(bound.workspace_id, target_id);
+        assert_eq!(bound.vault_id, vault);
+        let published = admission.create_staged_if_absent_for_registered_s3(
+            operation_id, &journal, &cache, &bindings, &profile, &ns,
+        ).unwrap();
         assert_eq!(published.byte_length, bytes.len() as u64);
         assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
         assert!(matches!(
-            admission.create_staged_if_absent(operation_id, &journal, &cache),
+            admission.create_staged_if_absent_for_registered_s3(
+                operation_id, &journal, &cache, &bindings, &profile, &ns,
+            ),
             Err(crate::sync::host_admission::LocalCreateError::Admission(
                 VaultPortError::DestinationExists
             ))
@@ -437,7 +456,9 @@ mod tests {
         let journal = SqliteSyncJournal::open(&app_b.join("ops.sqlite")).unwrap();
         let cache = SqliteDagStore::open(&app_b.join("blobs.sqlite")).unwrap();
         assert!(RegisteredReadAdmission::open(&second_core, &root_b).unwrap()
-            .create_staged_if_absent(operation_id, &journal, &cache).is_err());
+            .create_staged_if_absent_for_registered_s3(
+                operation_id, &journal, &cache, &bindings, &profile, &ns,
+            ).is_err());
         assert!(journal.baseline(vault, record.document_id).unwrap().is_none());
         assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
     }

@@ -27,6 +27,8 @@ pub mod sealed_archive;
 mod recovery_dashboard;
 mod planner;
 mod protection_store;
+#[cfg(feature = "sync-s3")]
+mod profile_binding;
 mod path;
 mod pinned_read;
 #[cfg(windows)]
