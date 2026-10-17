@@ -500,79 +500,162 @@ impl HistoryService {
         })
     }
 
+    /// Legacy void API; use try_* in File Gate to report history failures
+    /// separately from an already successful primary file relocation.
     pub fn moved(&self, roots: Roots<'_>, from: &Path, to: &Path) {
+        if let Err(error) = self.try_moved(roots, from, to) {
+            report(from, "не перенесена", &error.to_string());
+        }
+    }
+
+    pub fn try_moved(&self, roots: Roots<'_>, from: &Path, to: &Path) -> Result<(), HistoryMoveFailure> {
+        let action = "move history";
         let Some(mut state) = self.files_lock() else {
-            return;
+            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
             locate(&mut state, roots, to),
         ) else {
-            return;
+            return Ok(());
         };
+        state.assert_retry_pair(&source.key, &target.key, action)?;
         if !allowed_history_directory(&source.vault, &source.dir)
             || !allowed_history_directory(&target.vault, &target.dir)
         {
-            return;
+            state.quarantine(&source.key, &target.key, "unsafe history directory");
+            return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
+        }
+        if let Err(error) = self.move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault) {
+            state.quarantine(&source.key, &target.key, &error.to_string());
+            return Err(HistoryMoveFailure::new(action, error, true));
         }
         let note = state.notes.remove(&source.key);
         state.notes.remove(&target.key);
-        move_history(&source.dir, &target.dir, Placement::Workspace, &source.vault);
         if let Some(mut note) = note {
             note.dir = target.dir;
-            state.notes.insert(target.key, note);
+            state.notes.insert(target.key.clone(), note);
         }
+        state.release_pair(&source.key, &target.key);
+        Ok(())
     }
 
     pub fn trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) {
-        let Some(mut state) = self.files_lock() else {
-            return;
-        };
-        let Some(located) = locate(&mut state, roots, note) else {
-            return;
-        };
-        let trash = trash_path(&located.vault);
-        let Some(in_trash) = relative_inside(&trash, trashed_at) else {
-            return;
-        };
-        let target = store::history_dir(&trash, &in_trash);
-        if !allowed_history_directory(&located.vault, &located.dir)
-            || !allowed_history_directory(&trash, &target)
-        {
-            return;
-        }
-        let note = state.notes.remove(&located.key);
-        move_history(&located.dir, &target, Placement::Trash, &located.vault);
-        if let Some(mut note) = note {
-            note.dir = target;
-            state.notes.insert(identity(trashed_at), note);
+        if let Err(error) = self.try_trashed(roots, note, trashed_at) {
+            report(note, "не перемещена в корзину", &error.to_string());
         }
     }
 
-    pub fn restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) {
+    pub fn try_trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) -> Result<(), HistoryMoveFailure> {
+        let action = "trash history";
         let Some(mut state) = self.files_lock() else {
-            return;
+            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
-        let Some(located) = locate(&mut state, roots, restored) else {
-            return;
+        let Some(located) = locate(&mut state, roots, note) else {
+            return Ok(());
         };
         let trash = trash_path(&located.vault);
         let Some(in_trash) = relative_inside(&trash, trashed_at) else {
-            return;
+            return Err(HistoryMoveFailure::new(action, "trash destination outside workspace trash root", false));
+        };
+        let target = store::history_dir(&trash, &in_trash);
+        let destination_key = identity(trashed_at);
+        state.assert_retry_pair(&located.key, &destination_key, action)?;
+        if !allowed_history_directory(&located.vault, &located.dir)
+            || !allowed_history_directory(&trash, &target)
+        {
+            state.quarantine(&located.key, &destination_key, "unsafe history directory");
+            return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
+        }
+        if let Err(error) = self.move_history(&located.dir, &target, Placement::Trash, &located.vault) {
+            state.quarantine(&located.key, &destination_key, &error.to_string());
+            return Err(HistoryMoveFailure::new(action, error, true));
+        }
+        let note = state.notes.remove(&located.key);
+        if let Some(mut note) = note {
+            note.dir = target;
+            state.notes.insert(destination_key.clone(), note);
+        }
+        state.release_pair(&located.key, &destination_key);
+        Ok(())
+    }
+
+    pub fn restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) {
+        if let Err(error) = self.try_restored(roots, trashed_at, restored) {
+            report(restored, "не восстановлена из корзины", &error.to_string());
+        }
+    }
+
+    pub fn try_restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) -> Result<(), HistoryMoveFailure> {
+        let action = "restore history";
+        let Some(mut state) = self.files_lock() else {
+            return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
+        };
+        let Some(located) = locate(&mut state, roots, restored) else {
+            return Ok(());
+        };
+        let trash = trash_path(&located.vault);
+        let Some(in_trash) = relative_inside(&trash, trashed_at) else {
+            return Err(HistoryMoveFailure::new(action, "trash source outside workspace trash root", false));
         };
         let source = store::history_dir(&trash, &in_trash);
+        let source_key = identity(trashed_at);
+        state.assert_retry_pair(&source_key, &located.key, action)?;
         if !allowed_history_directory(&trash, &source)
             || !allowed_history_directory(&located.vault, &located.dir)
         {
-            return;
+            state.quarantine(&source_key, &located.key, "unsafe history directory");
+            return Err(HistoryMoveFailure::new(action, "unsafe history directory", false));
         }
-        let note = state.notes.remove(&identity(trashed_at));
+        if let Err(error) = self.move_history(&source, &located.dir, Placement::Workspace, &trash) {
+            state.quarantine(&source_key, &located.key, &error.to_string());
+            return Err(HistoryMoveFailure::new(action, error, true));
+        }
+        let note = state.notes.remove(&source_key);
         state.notes.remove(&located.key);
-        move_history(&source, &located.dir, Placement::Workspace, &trash);
         if let Some(mut note) = note {
             note.dir = located.dir;
-            state.notes.insert(located.key, note);
+            state.notes.insert(located.key.clone(), note);
         }
+        state.release_pair(&source_key, &located.key);
+        Ok(())
+    }
+
+    /// A deterministic fault test can interrupt after exactly one version
+    /// moved. Failed transfers never advance in-memory note paths.
+    fn move_history(&self, from: &Path, to: &Path, placement: Placement, base: &Path) -> Result<(), FileCommandError> {
+        #[cfg(test)]
+        self.fail_history_relocation_if_requested(from, to)?;
+        move_folder(from, to, placement)?;
+        remove_empty_ancestors(from, base);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn fail_history_relocation_if_requested(&self, from: &Path, to: &Path) -> Result<(), FileCommandError> {
+        let mut pending = self.next_fault.lock().unwrap();
+        let fault = match *pending {
+            Some(HistoryFault::MoveBefore) => Some(HistoryFault::MoveBefore),
+            Some(HistoryFault::MoveAfterOneFile) => Some(HistoryFault::MoveAfterOneFile),
+            _ => None,
+        };
+        if fault.is_none() {
+            return Ok(());
+        }
+        *pending = None;
+        drop(pending);
+        if fault == Some(HistoryFault::MoveAfterOneFile) && from.is_dir() {
+            if let Some(entry) = fs::read_dir(from)?.next() {
+                let entry = entry?;
+                if entry.file_type()?.is_file() {
+                    fs::create_dir_all(to)?;
+                    fs::rename(entry.path(), to.join(entry.file_name()))?;
+                }
+            }
+        }
+        Err(FileCommandError::Io {
+            message: "injected interrupted history transfer".to_owned(),
+        })
     }
 
     /// Serialize history version-store access across all Core instances.
@@ -657,13 +740,6 @@ fn name_version(device: &str, dir: &Path, id: Option<String>, name: &str) -> Opt
             report(dir, "не записала название версии", &error.to_string());
             None
         }
-    }
-}
-
-fn move_history(from: &Path, to: &Path, placement: Placement, base: &Path) {
-    match move_folder(from, to, placement) {
-        Ok(()) => remove_empty_ancestors(from, base),
-        Err(error) => report(from, "не перенесена", &error.to_string()),
     }
 }
 
