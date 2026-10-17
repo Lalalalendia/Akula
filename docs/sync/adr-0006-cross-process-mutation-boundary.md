@@ -45,3 +45,23 @@ After M1/M2 admission passes: independent Akula processes, shared MinIO, clean a
 ## Hard non-goals of this PR
 
 No production `VaultPort` implementation, no OS file-writing API, no `PreservationReceipt`, no remote baseline change, no cloud provider and no Sync settings UI. Tests here are regression evidence for a dangerous boundary, not evidence of a completed sync engine.
+
+
+## SYNC-04g-M1 experimental implementation checkpoint (PR #101)
+
+**Status:** Draft / cross-platform CI required. This is a private method, not an activated sync executor.
+
+- Implementation files: core/sync/local_create.rs, core/sync/local_create_tests.rs, core/sync/pinned_read.rs, core/sync/pinned_windows.rs, core/sync/host_admission.rs.
+- Gate: require a Core-registered workspace UUID matching the STAGED journal intent, immutable content in SqliteDagStore reverified by BLAKE3, no confirmed baseline, DocumentHub closed-document reservation, then Core process-wide File Gate. All paths are SyncRelativePath values.
+- Stage bytes as an operation-named, exclusively created temporary file in the OS-handle-pinned parent. Sync the stage; only then publish with Linux renameat2 RENAME_NOREPLACE, macOS renameatx_np RENAME_EXCL, or Windows NtSetInformationFile(FileRenameInformation) from the opened stage HANDLE with ReplaceIfExists=FALSE and RootDirectory pinned.
+- Reopen and verify published OS file ID and all bytes, recheck parent ID and workspace. On any ambiguity leave the journal at STAGED and never acknowledge a baseline.
+- A process kill before no-replace publication leaves a recognizable temporary stage; on retry creation refuses that stage rather than deleting or silently reusing it. Recovery currently requires an explicit future reconciler. If the process dies after successful publish but before acknowledgment, the final file remains and the STAGED journal cannot drive another overwrite.
+- Testing must prove: ordinary and Unicode creation, destination/case/NFC collisions, symlink/junction ancestors, foreign process wins no-replace race, and real child process exit after staging while journal stays unconfirmed.
+
+### Unresolved safety/release restrictions
+
+1. Windows directory metadata durability is not asserted merely from flushing a regular stage file. No confirmed baseline is set until a separate Windows crash/recovery audit proves this.
+2. A hostile process with write access to the same staging directory can race the stage name; post-publication identity/hash verification detects many swaps but is not a transaction against hostile same-user writes. Do not use this as an authorization for replacement/rename/delete.
+3. Path alias/case-fold preflight scans cannot eliminate active rename races; only kernel no-replace can guarantee a pre-existing destination is not overwritten.
+4. Orphan stages are intentionally retained on ambiguous errors. A separate, provably non-destructive recovery/quarantine policy and stage exclusion from ordinary sync scans are mandatory before any production activation.
+5. No normal Core files/HistoryService/Search events are emitted by this prototype, and it does not call VaultPort. S3/MinIO, Yandex, Google, Sync settings and automatic apply remain disabled.
