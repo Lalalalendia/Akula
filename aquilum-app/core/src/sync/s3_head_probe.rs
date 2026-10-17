@@ -93,7 +93,7 @@ pub async fn read_s3_digest_matched_manifest(
     manifest_with(client, keyspace, observed).await
 }
 
-fn check_readback(
+pub(super) fn check_readback(
     object: &S3BoundedObject,
     max_bytes: u64,
 ) -> Result<(), S3HeadReadError> {
@@ -108,7 +108,7 @@ fn check_readback(
 }
 
 #[allow(async_fn_in_trait)]
-trait BoundedReader {
+pub(super) trait BoundedReader {
     async fn read_bounded(
         &self,
         key: &str,
@@ -126,7 +126,7 @@ impl BoundedReader for AwsS3ProbeClient {
     }
 }
 
-async fn observe_with<R: BoundedReader>(
+pub(super) async fn observe_with<R: BoundedReader>(
     reader: &R,
     keyspace: &S3Keyspace,
 ) -> Result<S3ObservedHead, S3HeadReadError> {

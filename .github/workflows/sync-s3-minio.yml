@@ -7,6 +7,9 @@ on:
       - 'aquilum-app/core/src/sync/s3_transport/**'
       - 'aquilum-app/core/src/sync/s3.rs'
       - 'aquilum-app/core/src/sync/s3_manifest.rs'
+      - 'aquilum-app/core/src/sync/s3_manifest_delta.rs'
+      - 'aquilum-app/core/src/sync/s3_head_probe.rs'
+      - 'aquilum-app/core/src/sync/s3_delta_walker.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
@@ -105,6 +108,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 snapshot_store::tests
+      - name: Validate held CAS replan and both immutable DAG branches
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 replan::identity_tests
+          cargo test --locked -p aquilum-core --features sync-s3 cas_replay_plans_both_offline_siblings_without_rewriting_either_head
       - name: Two independent S3 clients CAS, conflicts and lost ACK
         shell: bash
         working-directory: aquilum-app

@@ -36,6 +36,8 @@ mod s3;
 mod s3_manifest;
 mod s3_manifest_delta;
 #[cfg(feature = "sync-s3")]
+mod s3_delta_walker;
+#[cfg(feature = "sync-s3")]
 mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
 mod s3_transport;
@@ -74,6 +76,10 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+#[cfg(feature = "sync-s3")]
+pub use s3_delta_walker::{
+    walk_s3_manifest_delta, S3DeltaWalkCheckpoint, S3DeltaWalkError, S3DeltaWalkPreview,
+};
 pub use s3_manifest_delta::{
     inspect_s3_manifest_delta, S3ManifestDeltaBase, S3ManifestDeltaError,
     S3ManifestDeltaLimits, S3ManifestDeltaOutcome, S3ManifestShardDelta,
@@ -98,6 +104,7 @@ pub use s3_transport::{
     S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
     S3PinnedRevisionPage, S3PinnedRevisionSnapshot,
     S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
+    plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError,
 };
 
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
