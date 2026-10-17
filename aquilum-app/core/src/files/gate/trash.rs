@@ -117,10 +117,8 @@ mod ensure_trash_gate_tests {
         for path in [&workspace, &app_a, &app_b] {
             fs::create_dir(path).unwrap();
         }
-        let emitter: Arc<dyn crate::app_core::EventSink> =
-            Arc::new(|_: CoreEvent| {});
-        let first = Core::open(&app_a, Arc::clone(&emitter));
-        let second = Core::open(&app_b, emitter);
+        let first = Core::open(&app_a, Arc::new(|_: CoreEvent| {}));
+        let second = Core::open(&app_b, Arc::new(|_: CoreEvent| {}));
         let held = first.file_mutations.lock().unwrap();
 
         let (started_tx, started_rx) = mpsc::channel();
