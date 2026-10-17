@@ -463,7 +463,8 @@ fn m1c_both_names_present_remain_ambiguous_even_with_matching_bytes() {
 #[cfg(unix)]
 #[test]
 fn m1c_symlinked_stage_and_hardlinked_final_fail_closed() {
-    use std::os::unix::fs::{hard_link, symlink};
+    use std::fs::hard_link;
+    use std::os::unix::fs::symlink;
     let (temp, core, root) = fixture();
     fs::create_dir(root.join("notes")).unwrap();
     let external = temp.path().join("external");
