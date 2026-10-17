@@ -1254,6 +1254,33 @@ mod tests {
     }
 
     #[test]
+    fn history_cross_vault_service_direct_call_cannot_write_source_only_intent() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let source = fixture.vault.join("Direct.md");
+        fixture.save(&history, &source, "keep this version", Source::Agent);
+        let target_vault = fixture._directory.path().join("second-vault");
+        fs::create_dir_all(&target_vault).unwrap();
+        let target_vault = fs::canonicalize(target_vault).unwrap();
+        let target = target_vault.join("Direct.md");
+        let before = fixture.history_of("Direct.md");
+        assert_eq!(versions(&before).len(), 1);
+
+        let err = history.try_moved(
+            &|| vec![fixture.vault.clone(), target_vault.clone()],
+            &source,
+            &target,
+        ).unwrap_err();
+        assert_eq!(err.action, "move history");
+        assert!(!err.may_have_partial_files);
+        assert!(source.exists(), "the primary note was not touched");
+        assert_eq!(versions(&before).len(), 1);
+        assert!(!history_dir(&target_vault, Path::new("Direct.md")).exists());
+        assert!(!crate::history::recovery::marker_path(&fixture.vault).exists());
+        assert!(!crate::history::recovery::marker_path(&target_vault).exists());
+    }
+
+    #[test]
     fn history_recovery_manifest_survives_state_loss_and_verifies_all_version_bytes() {
         use super::{HistoryFault, PROCESS_HISTORY_FILES};
         let fixture = Fixture::new();
