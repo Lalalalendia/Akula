@@ -77,6 +77,9 @@ impl App {
     pub(in crate::app) fn render_note(&mut self, root: &mut RenderRoot) {
         self.find = None;
         let page = self.note_widget();
+        // The new page already contains an empty save-error slot. Handles
+        // from the previous page are invalid after its tree is replaced.
+        self.save_error_ids = None;
         #[cfg(test)]
         let started = std::time::Instant::now();
         #[cfg(test)]
@@ -101,8 +104,9 @@ impl App {
             let (banner, save_ids) = note::save_error_banner(err);
             self.save_error_ids = Some(save_ids);
             ids.error_slot.edit(root, |mut slot| Slot::set_child(&mut slot, banner.erased()));
-        } else {
-            self.save_error_ids = None;
+        } else if self.save_error_ids.take().is_some() {
+            // Replace a real, previously visible error banner. An already
+            // empty slot needs no widget removal or RenderRoot::edit pass.
             ids.error_slot.edit(root, |mut slot| Slot::set_child(&mut slot, NewWidget::new(SizedBox::empty()).erased()));
         }
     }

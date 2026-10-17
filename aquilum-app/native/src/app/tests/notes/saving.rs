@@ -1,6 +1,50 @@
 use super::*;
 
 #[test]
+fn save_error_slot_only_rebuilds_when_a_banner_changes() {
+    use crate::ui::widgets::Slot;
+
+    let mut h = Harness::new();
+    let first = h.write_note("save-error-a.md", "first note");
+    let second = h.write_note("save-error-b.md", "second note");
+    assert!(h.app.open(&mut h.root, first));
+    assert!(h.app.save_error_ids.is_none());
+
+    // A clean page already has an empty error Slot: repeated refresh must
+    // not cause an unrelated widget subtree replacement.
+    let _ = Slot::take_replace_timings();
+    h.app.refresh_save_error(&mut h.root);
+    assert!(Slot::take_replace_timings().is_none());
+    assert!(h.app.save_error_ids.is_none());
+
+    // An actual failure still installs the banner and its retry action.
+    h.app.note.as_mut().unwrap().save_error = Some("disk unavailable".into());
+    h.app.refresh_save_error(&mut h.root);
+    assert!(Slot::take_replace_timings().is_some());
+    assert!(h.app.save_error_ids.is_some());
+
+    // Clearing the failure removes the visible banner exactly once.
+    h.app.note.as_mut().unwrap().save_error = None;
+    h.app.refresh_save_error(&mut h.root);
+    assert!(Slot::take_replace_timings().is_some());
+    assert!(h.app.save_error_ids.is_none());
+
+    h.app.refresh_save_error(&mut h.root);
+    assert!(Slot::take_replace_timings().is_none());
+
+    // The next note begins with a fresh Slot and must never retain the
+    // previous page's retry widget ID.
+    h.app.note.as_mut().unwrap().save_error = Some("previous-page error".into());
+    h.app.refresh_save_error(&mut h.root);
+    assert!(h.app.save_error_ids.is_some());
+    assert!(h.app.open(&mut h.root, second));
+    assert!(h.app.save_error_ids.is_none());
+    assert_eq!(h.body_text(), "second note");
+    let _ = h.root.redraw();
+}
+
+
+#[test]
 fn conflicting_edit_is_kept_as_a_copy() {
     let mut h = Harness::new();
     let path = h.vault.path().join("a.md");
