@@ -613,6 +613,26 @@ mod tests {
         assert!(!root.join(path.as_str()).exists());
         drop(child); // kernel drops the child's held OS-lock handles.
 
+        // An existing SQLite custody checksum cannot authorize a NEW file
+        // object that replaced the trusted OS lock pathname. Never rebind it
+        // implicitly and never consume the one-shot local publication ticket.
+        let preserved_lock = anchor.join("original-lock-retained");
+        fs::rename(&lock_file, &preserved_lock).unwrap();
+        fs::write(&lock_file, b"new physical inode, same familiar name").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&lock_file, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert!(admission.create_staged_if_absent_for_registered_s3(
+            operation_id, &journal, &cache, &bindings, &profile, &namespace,
+            &custody, &anchor,
+        ).is_err());
+        assert!(journal.local_publication_review_queue().unwrap().is_empty());
+        assert!(!root.join(path.as_str()).exists());
+        fs::remove_file(&lock_file).unwrap();
+        fs::rename(&preserved_lock, &lock_file).unwrap();
+
         // Only the exact registered profile + immutable blob key and the
         // pinned, held external lock can enter the native no-replace path.
         let published = admission.create_staged_if_absent_for_registered_s3(
