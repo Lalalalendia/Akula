@@ -56,7 +56,7 @@ impl<'a> RegisteredReadAdmission<'a> {
         let registered = core.ui_state.list_workspaces()
             .map_err(|_| VaultPortError::PermissionDenied)?;
         let mut matches = registered.iter()
-            .filter(|item| same_path(Path::new(&item.path), &root_path));
+            .filter(|item| same_path(&canonical_path(Path::new(&item.path)), &root_path));
         let workspace_id = matches.next()
             .ok_or(VaultPortError::PermissionDenied)?.id;
         if matches.next().is_some() {
@@ -87,7 +87,7 @@ impl<'a> RegisteredReadAdmission<'a> {
             .map_err(|_| VaultPortError::PermissionDenied)?;
         if !configured.iter().any(|item| {
             item.id == self.workspace_id
-                && same_path(Path::new(&item.path), &self.root_path)
+                && same_path(&canonical_path(Path::new(&item.path)), &self.root_path)
         }) {
             return Err(VaultPortError::PermissionDenied);
         }
