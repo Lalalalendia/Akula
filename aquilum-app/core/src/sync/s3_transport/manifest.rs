@@ -320,10 +320,11 @@ impl AwsS3ProbeClient {
             let (Some(parent_id), Some(parent_hash)) = (
                 manifest.previous_manifest_id, manifest.previous_manifest_blake3.as_deref()
             ) else { return Err(S3HeadError::InvalidManifest); };
-            let previous = self.read_manifest_envelope(parent_id, parent_hash).await?;
+            let previous = self.read_verified_manifest(parent_id, parent_hash).await?;
             if !manifest.is_successor_of(&previous, parent_hash) {
                 return Err(S3HeadError::InvalidManifest);
             }
+            self.ensure_ancestor_revisions_retained(&previous, &manifest).await?;
         }
         Ok(Some(S3VerifiedHead {
             pointer, etag: current.object.etag, manifest,
@@ -357,10 +358,11 @@ impl AwsS3ProbeClient {
             if hops == max_hops || !visited.insert(id) {
                 return Err(S3HeadError::TooManyAncestors);
             }
-            let parent = self.read_manifest_envelope(id, hash).await?;
+            let parent = self.read_verified_manifest(id, hash).await?;
             if !cursor.is_successor_of(&parent, hash) {
                 return Err(S3HeadError::InvalidManifest);
             }
+            self.ensure_ancestor_revisions_retained(&parent, &cursor).await?;
             cursor = parent;
             hops += 1;
         }
