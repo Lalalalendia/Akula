@@ -17,9 +17,7 @@ impl Document {
             fonts.ch = text::measure_ch(fcx, lcx, fonts);
         }
         #[cfg(test)]
-        if std::env::var_os("AQ_PARLEY_REUSE_TRIAL").is_some() {
-            let _ = self.try_restore_trial(width, styles, compose, caret);
-        }
+        let _ = self.try_restore_trial(width, styles, compose, caret);
         let rebreak = self.width != width;
         self.width = width;
         self.rebroke |= rebreak;
