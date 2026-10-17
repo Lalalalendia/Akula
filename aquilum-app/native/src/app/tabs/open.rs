@@ -58,6 +58,11 @@ fn record_stage(update: impl FnOnce(&mut TabSwitchStages)) {
 
 impl App {
     pub(in crate::app) fn show_active(&mut self, root: &mut RenderRoot) {
+        #[cfg(test)]
+        {
+            self.pending_plain_layout = None;
+            self.trial_prune_closed();
+        }
         // Closing/renaming a tab also invalidates any cached text associated
         // with its old identity; workspace switches clear the cache outright.
         self.inactive_notes.retain(|entry| {
@@ -120,6 +125,8 @@ impl App {
         }
         #[cfg(test)]
         let started = std::time::Instant::now();
+        #[cfg(test)]
+        self.trial_capture_inactive(root);
         self.leave_note();
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
@@ -214,6 +221,10 @@ impl App {
     }
 
     fn open_cached_or_read(&mut self, tab_id: uuid::Uuid, path: PathBuf) -> Result<(Note, crop::Rope), aquilum_core::files::error::FileCommandError> {
+        #[cfg(test)]
+        {
+            self.pending_plain_layout = None;
+        }
         if let Some(index) = self.inactive_notes.iter().position(|entry| entry.tab_id == tab_id && entry.path == path) {
             let cached = self.inactive_notes.remove(index);
             // Size and mtime are not a correctness boundary: external writers
@@ -222,7 +233,10 @@ impl App {
                 .is_ok_and(|digest| digest == cached.hash);
             if matches_disk {
                 #[cfg(test)]
-                record_stage(|stage| stage.cache_hit = true);
+                {
+                    record_stage(|stage| stage.cache_hit = true);
+                    self.pending_plain_layout = self.trial_take_verified(tab_id, &path);
+                }
                 return Ok(Note::from_verified_cache(path, cached.text, cached.hash));
             }
         }
