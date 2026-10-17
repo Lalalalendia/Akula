@@ -13,7 +13,6 @@ on:
       - "aquilum-app/core/src/files/trash.rs"
       - "aquilum-app/core/src/history/store.rs"
       - "aquilum-app/native/src/app/settings/apply.rs"
-      - "aquilum-app/native/src/app/settings/apply.rs"
       - "aquilum-app/native/src/app/settings/mod.rs"
       - "aquilum-app/core/src/files/gate/tests.rs"
       - "aquilum-app/core/src/documents/hub.rs"
@@ -59,4 +58,5 @@ jobs:
         run: cargo test --locked -p aquilum-core --features sync-engine unsafe_trash_root -- --nocapture
       - name: History retention and migration alias checks
         working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-core --features sync-engine history::store::tests:: -- --nocapture
+        run: |
+          cargo test --locked -p aquilum-core --features sync-engine history::store::tests:: -- --nocapture
