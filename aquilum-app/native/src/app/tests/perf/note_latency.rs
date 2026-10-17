@@ -22,6 +22,23 @@ fn fixture_bytes(marker: char, target: usize) -> String {
     content
 }
 
+/// Mixed Markdown and *plain* paragraphs exercise the conservative Parley
+/// transfer gate. Keep the historical note fixture unchanged for standard CI.
+fn parley_mix_bytes(marker: char, target: usize) -> String {
+    let rich = "Заметка с **жирным** текстом, ссылкой [пример](https://example.org) и Markdown.\n";
+    let plain = "Обычный абзац без выделения, со словами на кириллице и emoji 🐱.\n";
+    let mut content = String::with_capacity(target);
+    content.push(marker);
+    let mut count = 0usize;
+    while content.len() + rich.len().max(plain.len()) <= target {
+        content.push_str(if count % 4 == 0 { rich } else { plain });
+        count += 1;
+    }
+    content.push_str(&" ".repeat(target - content.len()));
+    assert_eq!(content.len(), target);
+    content
+}
+
 fn replace_first_byte(path: &std::path::Path, letter: u8) {
     let mut file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
     file.seek(SeekFrom::Start(0)).unwrap();
@@ -81,8 +98,10 @@ fn native_note_latency_matrix() {
     for kib in [64, 512, 4096] {
         let mut h = Harness::new();
         let target = kib * 1024;
-        let first = h.write_note("latency-first.md", &fixture_bytes('A', target));
-        let second = h.write_note("latency-second.md", &fixture_bytes('B', target));
+        let parley_mix = std::env::var("AQ_TEST_PARLEY_MIXED_FIXTURE").as_deref() == Ok("1");
+        let body = if parley_mix { parley_mix_bytes } else { fixture_bytes };
+        let first = h.write_note("latency-first.md", &body('A', target));
+        let second = h.write_note("latency-second.md", &body('B', target));
 
         let timer = Instant::now();
         assert!(h.app.open_in(&mut h.root, first.clone(), true));
