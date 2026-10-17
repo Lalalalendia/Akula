@@ -64,12 +64,16 @@ impl Document {
     /// Copy only plain, non-interactive paragraph layouts. Ineligible blocks
     /// are always shaped through the normal Markdown/Parley pipeline.
     pub(crate) fn trial_snapshot(&self, styles: &StyleSet) -> Option<Snapshot> {
-        if !self.placed || self.dirty.is_some() || self.edits.is_some()
+        // report_edits() enables the live editor's reporting sink as Some(Vec::new()).
+        // That is not a pending edit. Reject only actual unconsumed edits,
+        // dirty layout, or an active IME/interactive editing context.
+        let has_pending_edits = self.edits.as_ref().is_some_and(|edits| !edits.is_empty());
+        if !self.placed || self.dirty.is_some() || has_pending_edits
             || self.editing.is_some() || self.text.len() > MAX_WINDOW_BYTES
         {
             eprintln!(
-                "PARLEY_TAB_TRACE stage=snapshot_reject placed={} dirty={} edits={} editing={} window_bytes={}",
-                self.placed, self.dirty.is_some(), self.edits.is_some(),
+                "PARLEY_TAB_TRACE stage=snapshot_reject placed={} dirty={} pending_edits={} editing={} window_bytes={}",
+                self.placed, self.dirty.is_some(), has_pending_edits,
                 self.editing.is_some(), self.text.len()
             );
             return None;
@@ -253,6 +257,21 @@ mod tests {
         shape(&mut original, 600.0, &styles);
         original.replace(0..0, "изменено ");
         assert!(original.trial_snapshot(&styles).is_none());
+    }
+
+    #[test]
+    fn edit_reporting_without_pending_edits_is_safe_to_snapshot() {
+        let styles = StyleSet::new(16.0);
+        let mut original = doc(&"обычный текст\n".repeat(40));
+        original.report_edits();
+        shape(&mut original, 600.0, &styles);
+        assert!(original.trial_snapshot(&styles).is_some(),
+            "report_edits registers an empty sink, not an unsaved modification");
+
+        // Pending edits in the same reporting sink still fail closed.
+        original.report(0..0, "новое");
+        assert!(original.trial_snapshot(&styles).is_none(),
+            "unconsumed edit reports cannot enter the Parley snapshot");
     }
 
     #[test]
