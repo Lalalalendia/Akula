@@ -2,7 +2,7 @@ use super::io::HubIo;
 use super::session::{DocumentSession, LoggedChange, Pull, SessionError, SYSTEM_CLIENT};
 use super::store::DocumentStore;
 use crate::history::Source;
-use crate::search::paths::identity;
+use crate::search::paths::{canonical_path, identity};
 use super::resolve::SyncPoint;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -84,9 +84,17 @@ pub enum SyncAdmissionError {
     LockUnavailable,
 }
 
-/// Admission is scoped to the exact normalized DocumentHub path identity.
+/// Admission compares the canonical filesystem spelling of a file so /var
+/// and /private/var aliases (or a symlinked parent) cannot bypass the guard.
 /// Holding the reservation prevents *DocumentHub::open* until it is dropped;
 /// it cannot stop other processes or standalone File Gate actions.
+fn sync_admission_key(path: &Path) -> String {
+    // This interlock complements, but does not replace, descriptor-based
+    // authorization. Canonicalize existing paths and resolved parents; hard
+    // links and concurrent OS filesystem rewrites are still out of scope.
+    identity(&canonical_path(path))
+}
+
 pub struct SyncReservation<'a> {
     hub: &'a DocumentHub,
     key: String,
@@ -132,10 +140,10 @@ impl DocumentHub {
         &self,
         path: &Path,
     ) -> Result<SyncReservation<'_>, SyncAdmissionError> {
-        let key = identity(path);
+        let key = sync_admission_key(path);
         let sessions = self.sessions.lock()
             .map_err(|_| SyncAdmissionError::LockUnavailable)?;
-        if sessions.contains_key(&key) {
+        if sessions.values().any(|entry| sync_admission_key(&entry.path) == key) {
             return Err(SyncAdmissionError::DocumentOpen);
         }
         let mut reservations = self.sync_reservations.lock()
@@ -174,8 +182,9 @@ impl DocumentHub {
     pub fn open(&self, core: &Core, path: &Path, offset_minutes: i64) -> Result<OpenedDocument, HubError> {
         self.offset_seconds.store(offset_minutes * 60, Ordering::Relaxed);
         let key = identity(path);
+        let admission_key = sync_admission_key(path);
         let mut sessions = self.sessions.lock().expect("document sessions");
-        if self.sync_reservations.lock().expect("sync editor reservations").contains(&key) {
+        if self.sync_reservations.lock().expect("sync editor reservations").contains(&admission_key) {
             return Err(HubError::SyncReserved);
         }
         if let Some(entry) = sessions.get_mut(&key) {

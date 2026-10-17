@@ -44,3 +44,75 @@ fn skips_a_note_that_no_longer_exists() {
     assert!(!import_one(&store, &replica(&path, None)));
     assert!(!store.has_replica(&identity(&path)).expect("query"));
 }
+
+
+#[cfg(unix)]
+#[test]
+fn sync_reservation_blocks_canonical_aliases_in_both_directions() {
+    use crate::app_core::{Core, CoreEvent};
+    use std::os::unix::fs::symlink;
+    use std::sync::Arc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let actual_root = temp.path().join("real");
+    let alias_root = temp.path().join("alias");
+    std::fs::create_dir(&actual_root).unwrap();
+    symlink(&actual_root, &alias_root).unwrap();
+    let actual = actual_root.join("text.md");
+    let alias = alias_root.join("text.md");
+    std::fs::write(&actual, b"content\n").unwrap();
+
+    let appdata = temp.path().join("appdata");
+    std::fs::create_dir(&appdata).unwrap();
+    let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+
+    core.documents.open(&core, &alias, 0).unwrap();
+    assert!(matches!(
+        core.documents.reserve_sync_closed_document(&actual),
+        Err(SyncAdmissionError::DocumentOpen)
+    ));
+    core.documents.release(&core, &alias);
+
+    let reservation = core.documents.reserve_sync_closed_document(&actual).unwrap();
+    assert!(matches!(
+        core.documents.open(&core, &alias, 0),
+        Err(HubError::SyncReserved)
+    ));
+    drop(reservation);
+    core.documents.open(&core, &alias, 0).unwrap();
+    core.documents.release(&core, &alias);
+}
+
+#[cfg(windows)]
+#[test]
+fn sync_reservation_blocks_windows_junction_alias() {
+    use crate::app_core::{Core, CoreEvent};
+    use std::process::Command;
+    use std::sync::Arc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let actual_root = temp.path().join("real");
+    let alias_root = temp.path().join("alias");
+    std::fs::create_dir(&actual_root).unwrap();
+    let output = Command::new("cmd")
+        .arg("/C").arg("mklink").arg("/J")
+        .arg(&alias_root).arg(&actual_root)
+        .output().unwrap();
+    assert!(output.status.success(), "mklink /J: {}", String::from_utf8_lossy(&output.stderr));
+    let actual = actual_root.join("text.md");
+    let alias = alias_root.join("text.md");
+    std::fs::write(&actual, b"content\n").unwrap();
+
+    let appdata = temp.path().join("appdata");
+    std::fs::create_dir(&appdata).unwrap();
+    let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    core.documents.open(&core, &alias, 0).unwrap();
+    assert!(matches!(
+        core.documents.reserve_sync_closed_document(&actual),
+        Err(SyncAdmissionError::DocumentOpen)
+    ));
+    core.documents.release(&core, &alias);
+    let reservation = core.documents.reserve_sync_closed_document(&actual).unwrap();
+    assert!(matches!(core.documents.open(&core, &alias, 0), Err(HubError::SyncReserved)));
+    drop(reservation);
+}
