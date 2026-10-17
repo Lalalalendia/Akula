@@ -122,6 +122,7 @@ fn native_note_latency_matrix() {
         let mut editor_profiles = Vec::with_capacity(cycles);
         let mut parley_restored = 0usize;
         let _ = crate::ui::editor::take_ui_restore_hits();
+        let _ = crate::app::tabs::layout_trial::take_counts();
         if trace_output.is_some() {
             aq_trace::mark(match kib {
                 64 => "akula: matrix 64 begin",
@@ -205,6 +206,7 @@ fn native_note_latency_matrix() {
         let strip_p95 = p95_stage(|s| s.strip);
         let panel_p95 = p95_stage(|s| s.panel);
         let cache_hits = stages.iter().filter(|stage| stage.cache_hit).count();
+        let trial = crate::app::tabs::layout_trial::take_counts();
         let p95_editor = |field: fn(&crate::ui::note::page::EditorPageProfile) -> Duration| {
             let samples: Vec<f64> = editor_profiles.iter().map(|profile| milliseconds(field(profile))).collect();
             percentiles(&samples, [0.95])[0]
@@ -229,6 +231,10 @@ fn native_note_latency_matrix() {
              scene_p95_ms={scene_p95:.3} scene_max_ms={scene_max:.3} \
              dispatch_p95_ms={dispatch_p95:.3} dispatch_max_ms={dispatch_max:.3} \
              external_visible_ms={external_visible_ms:.3} cache_hits={cache_hits} parley_restored={parley_restored} stale_overwrites=0"
+        );
+        eprintln!(
+            "PARLEY_CAPTURE kib={kib} attempted={} clean={} widget_found={} snapshots={} offered={} restored={parley_restored}",
+            trial.attempted, trial.clean, trial.widget_found, trial.snapshots, trial.offered,
         );
         eprintln!(
             "TAB_STAGE kib={kib} cycles={cycles} leave_p95_ms={leave_p95:.3} read_p95_ms={read_p95:.3} \
