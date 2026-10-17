@@ -16,7 +16,8 @@ impl Document {
         {
             fonts.ch = text::measure_ch(fcx, lcx, fonts);
         }
-        #[cfg(test)]
+        // A snapshot only becomes usable after final width, styles, theme,
+        // font and composition are verified at the actual layout call.
         let _ = self.try_restore_trial(width, styles, compose, caret);
         let rebreak = self.width != width;
         self.width = width;
