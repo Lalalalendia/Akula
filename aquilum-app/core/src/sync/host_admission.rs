@@ -715,6 +715,126 @@ mod tests {
         assert_eq!(fs::read(old_root.join(note().as_str())).unwrap(), b"original");
     }
 
+
+    // The current Rust test binary is also our minimal cross-platform child.
+    // The parent passes paths through environment values so Unicode and spaces
+    // are not parsed by a shell. The child's direct std::fs calls deliberately
+    // DO NOT participate in Akula's process-wide Core File Gate.
+    #[test]
+    fn external_process_path_swap_fixture() {
+        let Some(mode) = std::env::var_os("AKULA_SYNC_TEST_SWAP_MODE") else {
+            return;
+        };
+        let target = PathBuf::from(std::env::var_os("AKULA_SYNC_TEST_TARGET").unwrap());
+        let marker = PathBuf::from(std::env::var_os("AKULA_SYNC_TEST_MARKER").unwrap());
+        match mode.to_str().unwrap() {
+            "file" => {
+                let moved = target.with_extension("saved-pre-swap");
+                fs::rename(&target, &moved).unwrap();
+                // Same bytes, different inode/NTFS file ID. Holding on to the
+                // old renamed file prevents file ID reuse in this fixture.
+                fs::write(&target, b"same bytes").unwrap();
+            }
+            #[cfg(unix)]
+            "directory" => {
+                use std::os::unix::fs::symlink;
+                let moved = PathBuf::from(std::env::var_os("AKULA_SYNC_TEST_MOVED").unwrap());
+                let outside = PathBuf::from(std::env::var_os("AKULA_SYNC_TEST_OUTSIDE").unwrap());
+                fs::rename(&target, &moved).unwrap();
+                symlink(&outside, &target).unwrap();
+            }
+            other => panic!("unsupported child operation: {other}"),
+        }
+        fs::write(marker, b"child-swapped").unwrap();
+    }
+
+    fn run_external_swap(
+        mode: &str,
+        target: &Path,
+        marker: &Path,
+        moved: Option<&Path>,
+        outside: Option<&Path>,
+    ) {
+        use std::process::Command;
+        let mut child = Command::new(std::env::current_exe().unwrap());
+        child.arg("external_process_path_swap_fixture")
+            .arg("--nocapture")
+            .env("AKULA_SYNC_TEST_SWAP_MODE", mode)
+            .env("AKULA_SYNC_TEST_TARGET", target)
+            .env("AKULA_SYNC_TEST_MARKER", marker);
+        if let Some(path) = moved {
+            child.env("AKULA_SYNC_TEST_MOVED", path);
+        }
+        if let Some(path) = outside {
+            child.env("AKULA_SYNC_TEST_OUTSIDE", path);
+        }
+        let status = child.status().unwrap();
+        assert!(status.success(), "external test process failed: {status:?}");
+        assert_eq!(fs::read(marker).unwrap(), b"child-swapped",
+            "test runner must actually execute the child fixture");
+    }
+
+    #[test]
+    fn host_admission_detects_foreign_process_swap_while_core_gate_is_held() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let relative = note();
+        let target = root.join(relative.as_str());
+        fs::write(&target, b"same bytes").unwrap();
+        let digest = blake3::hash(b"same bytes").to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        guard.preserve_closed_original(&relative, &digest, operation, &mut store).unwrap();
+
+        // An ordinary file editor in another process does not acquire this
+        // mutex. This is a deterministic interprocess replacement, not a
+        // claim that revalidation prevents swaps immediately after it returns.
+        let held = core.file_mutations.lock().unwrap();
+        let marker = temp.path().join("foreign-file-swapped");
+        run_external_swap("file", &target, &marker, None, None);
+        assert_eq!(fs::read(&target).unwrap(), b"same bytes");
+        drop(held);
+
+        assert!(matches!(
+            guard.revalidate_bound_preimage(&relative, &digest, operation, &store),
+            Err(BoundCaptureError::Admission(VaultPortError::FileChanged))
+        ));
+        assert_eq!(store.read_bound_preimage(operation).unwrap().unwrap().original.bytes,
+            b"same bytes");
+        assert_eq!(fs::read(target.with_extension("saved-pre-swap")).unwrap(),
+            b"same bytes");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_admission_detects_foreign_process_symlink_parent_swap() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let relative = note();
+        fs::write(root.join(relative.as_str()), b"original").unwrap();
+        let digest = blake3::hash(b"original").to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        guard.preserve_closed_original(&relative, &digest, operation, &mut store).unwrap();
+
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("café.md"), b"external secret").unwrap();
+        let moved = temp.path().join("old-notes");
+        let marker = temp.path().join("foreign-directory-swapped");
+        let held = core.file_mutations.lock().unwrap();
+        run_external_swap("directory", &root.join("notes"), &marker, Some(&moved), Some(&outside));
+        drop(held);
+
+        assert!(guard.revalidate_bound_preimage(&relative, &digest, operation, &store).is_err());
+        assert_eq!(fs::read(outside.join("café.md")).unwrap(), b"external secret");
+        assert_eq!(fs::read(moved.join("café.md")).unwrap(), b"original");
+        assert_eq!(store.read_bound_preimage(operation).unwrap().unwrap().original.bytes,
+            b"original");
+    }
+
     #[test]
     fn protected_preimage_capture_holds_core_file_gate_interlock() {
         let (temp, core, root) = fixture();
