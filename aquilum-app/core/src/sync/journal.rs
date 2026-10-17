@@ -243,6 +243,29 @@ impl SqliteSyncJournal {
         Self::prepare(Connection::open(path)?)
     }
 
+    /// Never create or migrate a Sync database merely because the user
+    /// opened Settings. An older or unknown schema is unavailable, not
+    /// evidence that synchronization or recovery is healthy.
+    pub(crate) fn open_existing_read_only(path: &Path) -> JournalResult<Self> {
+        let connection = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 250;",
+        )?;
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        )?;
+        if version != SCHEMA_VERSION {
+            return Err(JournalError::UnsupportedSchema(version));
+        }
+        Ok(Self { connection })
+    }
+
     #[cfg(test)]
     fn memory() -> JournalResult<Self> {
         Self::prepare(Connection::open_in_memory()?)
