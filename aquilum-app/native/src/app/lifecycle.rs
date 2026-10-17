@@ -33,7 +33,11 @@ impl App {
 
     pub fn zoom(&mut self, up: bool) -> bool {
         let step = if up { SCALE_STEP } else { -SCALE_STEP };
-        self.interface.set_scale(self.interface.scale() + step)
+        let changed = self.interface.set_scale(self.interface.scale() + step);
+        if changed {
+            self.invalidate_inactive_layouts();
+        }
+        changed
     }
 
     pub fn shutdown(&mut self) {
