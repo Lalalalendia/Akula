@@ -11,7 +11,7 @@ use std::fmt;
 use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::SystemTime;
 
 const DEVICE_FILE: &str = "device-id";
@@ -20,7 +20,23 @@ const DEVICE_FILE: &str = "device-id";
 // serialize version-store reads and writes with native history maintenance.
 // No code holding this mutex may acquire Core File Gate, emit host callbacks,
 // or perform editor/DocumentHub reconciliation.
-static PROCESS_HISTORY_FILES: Mutex<()> = Mutex::new(());
+#[derive(Default)]
+struct HistoryFilesShared {
+    // A failed rename can leave version files in both trees. Block reads and
+    // writes in every cooperating Core until the SAME transfer is retried.
+    // This is in-memory, not a crash-durable recovery journal.
+    blocked: HashMap<String, HistoryMoveBlock>,
+}
+
+#[derive(Clone)]
+struct HistoryMoveBlock {
+    from: String,
+    to: String,
+    reason: String,
+}
+
+static PROCESS_HISTORY_FILES: LazyLock<Mutex<HistoryFilesShared>> =
+    LazyLock::new(|| Mutex::new(HistoryFilesShared::default()));
 
 pub struct HistoryService {
     device: String,
@@ -48,6 +64,27 @@ impl fmt::Display for HistorySaveFailure {
     }
 }
 
+/// A primary note relocation already succeeded, but moving its history
+/// did not. A partially moved history must not be announced as complete.
+#[derive(Debug)]
+pub struct HistoryMoveFailure {
+    pub action: &'static str,
+    pub message: String,
+    pub may_have_partial_files: bool,
+}
+
+impl HistoryMoveFailure {
+    fn new(action: &'static str, error: impl fmt::Display, may_have_partial_files: bool) -> Self {
+        Self { action, message: error.to_string(), may_have_partial_files }
+    }
+}
+
+impl fmt::Display for HistoryMoveFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.action, self.message)
+    }
+}
+
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HistoryFault {
@@ -55,6 +92,8 @@ pub(crate) enum HistoryFault {
     UpdateVersion,
     NameVersion,
     RemoveVersion,
+    MoveBefore,
+    MoveAfterOneFile,
 }
 
 #[derive(Default)]
@@ -67,8 +106,40 @@ struct State {
 // disk_before intentionally uses the per-service mutex alone, so a File Gate
 // write does not wait on a potentially long history-retention scan.
 struct HistoryFilesStateGuard<'a> {
-    _process: MutexGuard<'static, ()>,
+    process: MutexGuard<'static, HistoryFilesShared>,
     state: MutexGuard<'a, State>,
+}
+
+impl HistoryFilesStateGuard<'_> {
+    fn is_blocked(&self, key: &str) -> bool {
+        self.process.blocked.contains_key(key)
+    }
+
+    fn assert_retry_pair(&self, from: &str, to: &str, action: &'static str) -> Result<(), HistoryMoveFailure> {
+        for key in [from, to] {
+            if let Some(block) = self.process.blocked.get(key) {
+                if block.from != from || block.to != to {
+                    return Err(HistoryMoveFailure::new(
+                        action,
+                        format!("history transfer still pending from {} to {}: {}", block.from, block.to, block.reason),
+                        true,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn quarantine(&mut self, from: &str, to: &str, why: &str) {
+        let block = HistoryMoveBlock { from: from.to_owned(), to: to.to_owned(), reason: why.to_owned() };
+        self.process.blocked.insert(from.to_owned(), block.clone());
+        self.process.blocked.insert(to.to_owned(), block);
+    }
+
+    fn release_pair(&mut self, from: &str, to: &str) {
+        self.process.blocked.remove(from);
+        self.process.blocked.remove(to);
+    }
 }
 
 impl Deref for HistoryFilesStateGuard<'_> {
@@ -189,6 +260,9 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return Ok(false);
         };
+        if state.is_blocked(&located.key) {
+            return Err(HistorySaveFailure::new("history relocation pending", "history transfer must be retried before recording a new version"));
+        }
         if !allowed_history_directory(&located.vault, &located.dir) {
             return Err(HistorySaveFailure::new("history path", "unsafe history directory"));
         }
@@ -349,7 +423,7 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
-        if !allowed_history_directory(&located.vault, &located.dir) {
+        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
             return None;
         }
         let target = match id {
@@ -377,7 +451,7 @@ impl HistoryService {
         let Some(located) = locate(&mut state, roots, note) else {
             return HistoryPage::default();
         };
-        if !allowed_history_directory(&located.vault, &located.dir) {
+        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
             return HistoryPage::default();
         }
         let current = read_text(note).ok();
@@ -411,7 +485,7 @@ impl HistoryService {
             return None;
         };
         let located = locate(&mut state, roots, note)?;
-        if !allowed_history_directory(&located.vault, &located.dir) {
+        if state.is_blocked(&located.key) || !allowed_history_directory(&located.vault, &located.dir) {
             return None;
         }
         let versions = store::versions(&located.dir);
@@ -513,7 +587,7 @@ impl HistoryService {
             }
         };
         let state = self.lock();
-        Some(HistoryFilesStateGuard { _process: process, state })
+        Some(HistoryFilesStateGuard { process, state })
     }
 
     /// Run legacy migration and retention without acquiring Core File Gate.
@@ -522,9 +596,12 @@ impl HistoryService {
     /// Full-tree housekeeping can delay other history operations but cannot
     /// block the ordinary File Gate mutex directly.
     pub fn maintain_retention(&self, workspace: &Path, retention_days: u32) -> Result<u64, &'static str> {
-        let _guard = PROCESS_HISTORY_FILES
+        let guard = PROCESS_HISTORY_FILES
             .lock()
             .map_err(|_| "process history-files lock poisoned; refusing cleanup")?;
+        if !guard.blocked.is_empty() {
+            return Err("history relocation pending; retention deferred");
+        }
         store::adopt_quantum_history(workspace);
         store::adopt_quantum_history(&trash_path(workspace));
         Ok(store::remove_expired(workspace, retention_days))
