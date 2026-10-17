@@ -77,6 +77,8 @@ pub struct Renderer {
     #[cfg(test)]
     pub(crate) last_stages: FrameStages,
     #[cfg(test)]
+    pub(crate) split_full_frame_strips: Option<u16>,
+    #[cfg(test)]
     pub shifts: usize,
     #[cfg(test)]
     pub rastered: Vec<(u16, u16, u16, u16)>,
@@ -109,6 +111,8 @@ impl Renderer {
             #[cfg(test)]
             last_stages: FrameStages::default(),
             #[cfg(test)]
+            split_full_frame_strips: None,
+            #[cfg(test)]
             shifts: 0,
             #[cfg(test)]
             rastered: Vec::new(),
@@ -137,6 +141,20 @@ impl Renderer {
     #[cfg(test)]
     pub(crate) fn dual_dispatch_switches_for_test(&self) -> usize {
         self.painter.test_route_switches
+    }
+
+    /// Split an otherwise full redraw into nonoverlapping strips. This is a
+    /// test-only falsifier for rectangle-local worker routing, not UI behavior.
+    #[cfg(test)]
+    pub(crate) fn split_full_frame_for_test(&mut self, strips: u16) {
+        assert!((2..=16).contains(&strips), "supported full-frame strip counts: 2..16");
+        self.split_full_frame_strips = Some(strips);
+    }
+
+    /// Route all rectangles of a frame by their *aggregate* scheduled pixels.
+    #[cfg(test)]
+    pub(crate) fn enable_frame_budget_for_test(&mut self) {
+        self.painter.enable_frame_budget_for_test();
     }
 
     pub fn toggle_overlay(&mut self) {
