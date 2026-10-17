@@ -527,7 +527,7 @@ mod tests {
         let vault = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let foreign_dir = outside.path().join("history/Имя.md");
+        let foreign_dir = outside.path().join("history/Idea.md");
         fs::create_dir_all(&foreign_dir).unwrap();
         let foreign_file = write_version(
             &foreign_dir, "win", &snapshot("external", Source::Me, now - 40 * DAY.as_secs())
@@ -546,15 +546,15 @@ mod tests {
 
         let target_history = history_root(vault.path());
         fs::create_dir_all(&target_history).unwrap();
-        let internal_legacy = vault.path().join(".quantum/history/Имя.md");
+        let internal_legacy = vault.path().join(".quantum/history/Idea.md");
         fs::create_dir_all(&internal_legacy).unwrap();
         let internal_file = internal_legacy.join("1_win_me.md");
         fs::write(&internal_file, "local").unwrap();
-        junction(&target_history.join("Имя.md"), &foreign_dir);
+        junction(&target_history.join("Idea.md"), &foreign_dir);
         adopt_quantum_history(vault.path());
         assert!(internal_file.exists(), "junctions in destination must block migration");
         assert_eq!(fs::read_to_string(&foreign_file).unwrap(), "external");
-        fs::remove_dir(target_history.join("Имя.md")).unwrap();
+        fs::remove_dir(target_history.join("Idea.md")).unwrap();
     }
 
     #[test]
