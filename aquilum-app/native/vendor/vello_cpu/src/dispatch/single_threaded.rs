@@ -126,6 +126,9 @@ impl SingleThreadedDispatcher {
         encoded_paints: &[EncodedPaint],
         image_resolver: &dyn ImageResolver,
     ) {
+        // Existing optional aq_trace timer; disabled unless an explicit profiler
+        // starts tracing. Separates coarse bucketing from fine pixel work.
+        let coarse_zone = aq_trace::zone("vello: coarse bucket");
         let mut bucketer = self.bucketer.borrow_mut();
         bucketer.reset(viewport);
         bucketer.bucket_commands(
@@ -137,6 +140,8 @@ impl SingleThreadedDispatcher {
             filter_ctx,
         );
 
+        drop(coarse_zone);
+        let _fine_wall = aq_trace::zone("vello: fine wall");
         let alpha_buffers = &[self.strip_storage.alphas.as_slice()];
         let resources = FineResources {
             alpha_buffers,
