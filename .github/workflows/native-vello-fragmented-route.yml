@@ -53,7 +53,7 @@ jobs:
           for trial in 1 2 3; do
             cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_fragmented_route -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-fragmented-trial-$trial.log"
           done
-      - name: Require all 144 rows and summarize repeated routing effect
+      - name: Require 576 rows across four fragmentation levels and three trials
         shell: bash
         run: |
           set -euo pipefail
