@@ -128,4 +128,3 @@ A private Core host first rejects journal locations under the registered vault, 
 - A power-cut recovery test is distinct from child-process exit. Windows parent-directory / NT rename durability under a real power failure remains **unverified**. No new user-facing Sync features are authorized by this ledger.
 
 **Cross-platform acceptance:** exact-head core tests, migrations from v4 and legacy v1–v3, two independent SQLite connections rejecting stale revision, corrupt digest / missing archive / wrong-vault tests, plus Windows/macOS/Linux review safety matrix. No mutation-based recovery until separately reviewed.
-
