@@ -11,6 +11,17 @@ This document tracks measured performance work for the **Lalalalendia/Akula** fo
 6. Compare medians (multiple trials); do not claim end-to-end speedup from a local microbenchmark.
 7. Merge one PR at a time, followed by main-branch verification. Keep upstream contributions separate.
 
+## Parley clean-tab layout cache: explicit hold (2026-10-18)
+
+[Decision and reproduced A/B measurements](parley-cache-acceptance.md):
+three paired release-profile runs rejected general production enablement.
+The proposed candidate was slower on 64 KiB notes, only inconsistently
+better on large notes and offered no credible whole-UI median p95 gain
+at 4 MiB. **PRs #117 and #135 were closed unmerged.**
+The test-only safety/parity probes in #122/#130/#134 remain available.
+Do not conflate those experiments with the BLAKE3-verified Rope cache
+already shipped in PR #96.
+
 ## Work queue
 
 | Step | Work | PR / evidence | Acceptance |
