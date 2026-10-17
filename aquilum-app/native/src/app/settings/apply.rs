@@ -57,7 +57,12 @@ impl App {
         match setter {
             Setter::Scale => {
                 let Value::Number(percent) = value else { return Effect::None };
-                if self.interface.set_scale(percent / 100.0) { Effect::Rescale } else { Effect::None }
+                if self.interface.set_scale(percent / 100.0) {
+                    self.invalidate_inactive_layouts();
+                    Effect::Rescale
+                } else {
+                    Effect::None
+                }
             }
             Setter::Autostart => {
                 let Value::Bool(on) = value else { return Effect::None };
