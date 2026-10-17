@@ -128,6 +128,17 @@ impl Renderer {
         renderer
     }
 
+    /// Test-only dual-dispatch prototype; production renderer is unchanged.
+    #[cfg(test)]
+    pub(crate) fn enable_dual_dispatch_for_test(&mut self, max_serial_pixels: u64) {
+        self.painter.enable_dual_dispatch_for_test(max_serial_pixels);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dual_dispatch_switches_for_test(&self) -> usize {
+        self.painter.test_route_switches
+    }
+
     pub fn toggle_overlay(&mut self) {
         self.overlay.on = !self.overlay.on;
         self.overlay.pending = true;
