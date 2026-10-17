@@ -69,6 +69,11 @@ impl PinnedReadOnlyRoot {
         }
     }
 
+    #[cfg(windows)]
+    pub(crate) fn root_win_identity(&self) -> Result<(u32, u64), VaultPortError> {
+        super::pinned_windows::file_identity(&self.root)
+    }
+
     /// Opens each path component relative to its pinned parent FD, without
     /// following symlinks at any level. The final FD is checked as a regular
     /// file *before* bounded reading. No caller gets write rights.
