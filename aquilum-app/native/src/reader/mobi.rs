@@ -113,9 +113,14 @@ fn decompress_palmdoc(src: &[u8]) -> Vec<u8> {
                     let len = (pair & 7) + 3;
                     if dist > 0 && dist <= out.len() {
                         let start = out.len() - dist;
-                        for j in 0..len {
-                            let byte = out[start + (j % dist)];
-                            out.push(byte);
+                        if dist >= len {
+                            out.extend_from_within(start..start + len);
+                        } else {
+                            // Overlapping references repeat bytes from their own output.
+                            for j in 0..len {
+                                let byte = out[start + (j % dist)];
+                                out.push(byte);
+                            }
                         }
                     }
                 }
@@ -141,5 +146,36 @@ mod tests {
         assert_eq!(super::strip_trailing(b"text\x01\x02\x83", 0b10), b"text");
         assert_eq!(super::strip_trailing(b"text\x09\x02\x83", 0b11), b"tex");
         assert_eq!(super::strip_trailing(b"text", 0), b"text");
+    }
+
+    #[test]
+    fn palmdoc_all_back_reference_distances_and_lengths() {
+        for distance in 1usize..=2047 {
+            let seed: Vec<u8> = (0..distance).map(|i| b'A' + (i % 26) as u8).collect();
+            for length in 3usize..=10 {
+                let pair = 0x8000 | (distance << 3) | (length - 3);
+                let mut input = seed.clone();
+                input.extend_from_slice(&[(pair >> 8) as u8, pair as u8]);
+                let mut expected = seed.clone();
+                expected.extend(seed.iter().copied().cycle().take(length));
+                assert_eq!(super::decompress_palmdoc(&input), expected, "distance={distance}, length={length}");
+            }
+        }
+    }
+
+    #[test]
+    fn palmdoc_reference_uses_tail_and_supports_chained_overlap() {
+        // Copy the last three bytes, then repeat the last byte ten times.
+        assert_eq!(super::decompress_palmdoc(b"abcdef\x80\x18\x80\x0f"), b"abcdefdefffffffffff");
+    }
+
+    #[test]
+    fn palmdoc_preserves_invalid_reference_and_truncated_input_behavior() {
+        // Invalid references are skipped, not a reason to discard the remaining text.
+        assert_eq!(super::decompress_palmdoc(b"abc\x80\x00Z"), b"abcZ");
+        assert_eq!(super::decompress_palmdoc(b"abc\x80\x20Z"), b"abcZ");
+        assert_eq!(super::decompress_palmdoc(b"abc\x80"), b"abc");
+        assert_eq!(super::decompress_palmdoc(&[8, b'a', b'b']), b"ab");
+        assert_eq!(super::decompress_palmdoc(&[0, 0xc1, 0xff]), &[0, b' ', b'A', b' ', 0x7f]);
     }
 }
