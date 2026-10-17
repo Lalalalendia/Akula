@@ -4,7 +4,7 @@
 //! Files are created only in private tempfile vaults. Path-based open is NOT
 //! a trusted root-relative, no-follow OS capability.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
@@ -24,8 +24,8 @@ fn try_one(root: &Path) -> io::Result<Option<File>> {
         .open(root.join(TEST_LOCK_NAME))?;
     match file.try_lock() {
         Ok(()) => Ok(Some(file)),
-        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(None),
-        Err(error) => Err(error),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(error)) => Err(error),
     }
 }
 
