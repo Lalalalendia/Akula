@@ -156,3 +156,99 @@ fn needs_layout_reference_vs_fast_microbenchmark() {
         );
     }
 }
+
+
+#[test]
+#[ignore = "opt-in synthetic EPUB Session::ensure / first-visible-layout benchmark"]
+fn session_synthetic_first_page_profile() {
+    use std::hint::black_box;
+    use std::path::Path;
+    use std::time::Instant;
+
+    fn milliseconds(start: Instant) -> f64 {
+        start.elapsed().as_secs_f64() * 1000.0
+    }
+    fn middle(samples: &mut [f64]) -> f64 {
+        samples.sort_by(f64::total_cmp);
+        samples[samples.len() / 2]
+    }
+
+    let source = std::env::var("AQ_EPUB_SHAPE_DIR").expect("set AQ_EPUB_SHAPE_DIR to synthetic EPUB fixtures");
+    for mode in ["single-br", "single-p", "split-br"] {
+        let path = Path::new(&source).join(format!("{mode}.epub"));
+        for scrolled in [false, true] {
+            let initial = settings(18.0, scrolled);
+            let changed = settings(19.5, scrolled);
+            let (mut fcx, mut lcx) = (FontContext::new(), LayoutContext::new());
+            let mut open_times = Vec::new();
+            let mut first_times = Vec::new();
+            let mut reuse_times = Vec::new();
+            let mut show_times = Vec::new();
+            let mut next_times = Vec::new();
+            let mut reflow_times = Vec::new();
+            let mut first_layouts = 0usize;
+            let mut first_visible = 0usize;
+            for _ in 0..5 {
+                let started = Instant::now();
+                let mut session = Session::open(&path, Target::Start).expect("open synthetic EPUB");
+                open_times.push(milliseconds(started));
+                assert_eq!(session.book.sections.len(), if mode == "split-br" { 18 } else { 1 });
+
+                let started = Instant::now();
+                session.ensure(VIEW, &initial, &mut fcx, &mut lcx);
+                first_times.push(milliseconds(started));
+                assert!(!session.needs_layout());
+                let old_visible = session.on_screen();
+                assert!(!old_visible.is_empty());
+                first_layouts = session.layouts.len();
+                first_visible = old_visible.len();
+                assert!(first_layouts > 0, "expected retained on-screen Parley layouts");
+
+                let started = Instant::now();
+                session.ensure(VIEW, &initial, &mut fcx, &mut lcx);
+                reuse_times.push(milliseconds(started));
+
+                // Isolate the double-layout cost: the first ensure already
+                // discarded its temporary full-section Parley layouts and
+                // retained only the visible layouts. Evict those and rebuild
+                // without recomputing the full section geometry.
+                session.layouts.clear();
+                assert!(session.needs_layout());
+                let started = Instant::now();
+                session.ensure(VIEW, &initial, &mut fcx, &mut lcx);
+                show_times.push(milliseconds(started));
+                assert_eq!(session.on_screen(), old_visible);
+                assert!(!session.needs_layout());
+
+                if scrolled {
+                    session.scroll_by(400.0);
+                } else {
+                    session.next();
+                }
+                let started = Instant::now();
+                session.ensure(VIEW, &initial, &mut fcx, &mut lcx);
+                next_times.push(milliseconds(started));
+                assert!(!session.needs_layout());
+
+                let started = Instant::now();
+                session.ensure(VIEW, &changed, &mut fcx, &mut lcx);
+                reflow_times.push(milliseconds(started));
+                assert!(!session.needs_layout());
+                black_box(session.pages());
+            }
+
+            println!(
+                "READER_SESSION_RAW mode={mode} scrolled={scrolled} open_ms={open_times:?} first_ensure_ms={first_times:?} reuse_ms={reuse_times:?} show_only_ms={show_times:?} next_ms={next_times:?} reflow_ms={reflow_times:?}",
+            );
+            println!(
+                "READER_SESSION_RESULT mode={mode} scrolled={scrolled} retained_layouts={first_layouts} visible_entries={first_visible} open_ms={:.3} first_ensure_ms={:.3} reuse_ms={:.3} show_only_ms={:.3} next_ms={:.3} reflow_ms={:.3}",
+                middle(&mut open_times),
+                middle(&mut first_times),
+                middle(&mut reuse_times),
+                middle(&mut show_times),
+                middle(&mut next_times),
+                middle(&mut reflow_times),
+            );
+        }
+    }
+}
