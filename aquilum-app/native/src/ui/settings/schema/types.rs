@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use aquilum_core::mcp::McpStatus;
 use aquilum_core::settings::models::AppConfig;
+use aquilum_core::sync::NativeRecoveryOverview;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -24,6 +25,7 @@ pub struct Context {
     pub scale: f64,
     pub home_page: String,
     pub mcp: Option<McpStatus>,
+    pub sync_recovery: Option<NativeRecoveryOverview>,
     pub copied: Option<usize>,
     pub trash_page: usize,
     pub autostart: Option<bool>,
@@ -33,7 +35,7 @@ pub struct Context {
 impl Context {
     #[cfg(test)]
     pub fn new(scale: f64) -> Self {
-        Context { workspace: None, scale, home_page: String::new(), mcp: None, copied: None, trash_page: 0, autostart: None, update: None }
+        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, copied: None, trash_page: 0, autostart: None, update: None }
     }
 }
 

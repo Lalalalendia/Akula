@@ -243,6 +243,29 @@ impl SqliteSyncJournal {
         Self::prepare(Connection::open(path)?)
     }
 
+    /// Never create or migrate a Sync database merely because the user
+    /// opened Settings. An older or unknown schema is unavailable, not
+    /// evidence that synchronization or recovery is healthy.
+    pub(crate) fn open_existing_read_only(path: &Path) -> JournalResult<Self> {
+        let connection = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 250;",
+        )?;
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        )?;
+        if version != SCHEMA_VERSION {
+            return Err(JournalError::UnsupportedSchema(version));
+        }
+        Ok(Self { connection })
+    }
+
     #[cfg(test)]
     fn memory() -> JournalResult<Self> {
         Self::prepare(Connection::open_in_memory()?)
@@ -489,6 +512,16 @@ impl SqliteSyncJournal {
     /// Treat every returned entry as requiring human/host investigation.
     /// In particular, a missing stage or a same-hash destination is NOT
     /// proof a lost acknowledgment was safe to replay or commit.
+    /// Cheap, bounded-dashboard preflight: decline to enumerate an enormous
+    /// or unexpectedly populated journal in a synchronous Settings render.
+    pub(crate) fn local_publication_count(&self) -> JournalResult<u64> {
+        let count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM sync_local_publication_attempts",
+            [], |row| row.get(0),
+        )?;
+        u64::try_from(count).map_err(|_| JournalError::CorruptedRecord)
+    }
+
     pub fn local_publication_review_queue(
         &self,
     ) -> JournalResult<Vec<LocalPublicationReview>> {
@@ -1975,6 +2008,31 @@ mod tests {
             Err(JournalError::MissingRecoveryArchive)
         ));
         assert!(j.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn m1dd_existing_journal_inspector_is_strictly_sqlite_read_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("existing.sqlite3");
+        let mut original = SqliteSyncJournal::open(&path).unwrap();
+        let pending = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/safe.md", b"byte content");
+        original.begin(pending.clone()).unwrap();
+        original.mark_staged(pending.operation_id, b"byte content").unwrap();
+        original.record_local_publication_attempt_once(&pending).unwrap();
+        drop(original);
+        let readonly = SqliteSyncJournal::open_existing_read_only(&path).unwrap();
+        assert_eq!(readonly.local_publication_count().unwrap(), 1);
+        assert_eq!(readonly.local_publication_review_queue().unwrap().len(), 1);
+        assert!(readonly.connection.execute(
+            "UPDATE sync_operations SET phase = 4 WHERE operation_id = ?1",
+            [pending.operation_id.to_string()],
+        ).is_err());
+        assert!(readonly.connection.execute(
+            "DELETE FROM sync_local_publication_attempts", [],
+        ).is_err());
+        assert!(readonly.baseline(pending.vault_id, pending.document_id)
+            .unwrap().is_none());
     }
 
     #[test]

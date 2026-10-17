@@ -9,6 +9,7 @@ on:
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/local_create.rs"
       - "aquilum-app/core/src/sync/local_recovery.rs"
+      - "aquilum-app/core/src/sync/recovery_dashboard.rs"
       - "aquilum-app/core/src/sync/recovery_review.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
       - "aquilum-app/core/src/sync/journal.rs"
@@ -78,6 +79,9 @@ jobs:
       - name: M1d-c operator review and retention safety gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1dc_ -- --nocapture
+      - name: M1d-d read-only recovery status and non-mutating SQLite gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1dd_ -- --nocapture
       - name: Durable local publication recovery and stage exclusion
         working-directory: aquilum-app
         run: |
