@@ -1,7 +1,27 @@
 use super::{Document, classify, heights, lines};
 
-const MARGIN: usize = 3000;
+// Keep a bounded but generous initial scroll lookahead. The old 3000-line
+// preload eagerly classified and mounted far-offscreen Markdown on every tab
+// selection; 1536 preserves the existing incremental load/reach strategy.
+const MARGIN: usize = 1536;
 const JUMP: usize = 256;
+
+#[cfg(not(test))]
+#[inline]
+const fn window_margin() -> usize {
+    MARGIN
+}
+
+// Controlled diagnostic A/B runs can use the previous margin in cargo test
+// without changing any production setting or silently affecting real users.
+#[cfg(test)]
+fn window_margin() -> usize {
+    std::env::var("AQ_TEST_WINDOW_MARGIN")
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .filter(|&value| (512..=4096).contains(&value))
+        .unwrap_or(MARGIN)
+}
 const SPAN_BYTES: usize = 512 * 1024;
 
 impl Document {
@@ -59,9 +79,10 @@ impl Document {
             return;
         }
         let (first, last, count) = (self.at_y(top), self.at_y(bottom), self.lines.count());
-        if !self.grew && (first < MARGIN / 2 && self.base > 0 || count - 1 - last < MARGIN / 2 && self.end() < self.len()) {
-            let a = self.back(self.start(first), MARGIN).max(self.back(self.base, JUMP));
-            let b = self.forth(self.start(last), MARGIN).min(self.forth(self.end(), JUMP));
+        let margin = window_margin();
+        if !self.grew && (first < margin / 2 && self.base > 0 || count - 1 - last < margin / 2 && self.end() < self.len()) {
+            let a = self.back(self.start(first), margin).max(self.back(self.base, JUMP));
+            let b = self.forth(self.start(last), margin).min(self.forth(self.end(), JUMP));
             self.reach(a, b);
             self.grew = true;
         }
@@ -77,7 +98,7 @@ impl Document {
 
     pub(super) fn load(&mut self, byte: usize, align: Option<f64>) {
         let start = self.line_start(self.line_of(byte.min(self.len())));
-        let reach = if align.is_some() { JUMP } else { MARGIN };
+        let reach = if align.is_some() { JUMP } else { window_margin() };
         let (a, b) = if self.windowed { (self.back(start, reach), self.forth(start, reach)) } else { (0, self.len()) };
         let total = self.height();
         self.base = a;

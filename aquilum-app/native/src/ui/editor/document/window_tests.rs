@@ -77,3 +77,35 @@ fn lines_in_view_stay_laid_when_the_window_starts_below_the_top() {
     assert!(doc.above > 0.0, "окно не ушло от начала заметки");
     assert!(doc.laid.get(line).is_some(), "видимая строка выброшена из раскладки: keep в координатах заметки, высоты — в координатах окна");
 }
+
+#[test]
+fn initial_window_is_bounded_but_far_jumps_keep_the_complete_document() {
+    let text = lines(50_000);
+    let mut doc = windowed(&text);
+    let first = doc.line_count();
+    assert!(
+        (1024..=1600).contains(&first),
+        "initial Markdown window should retain lookahead without parsing 3000 lines: {first}"
+    );
+    agrees(&doc, &text);
+    for byte in [text.len() / 3, text.len() - 2000, text.len() / 2, 0, text.len() - 1] {
+        doc.include(byte);
+        let (start, end) = doc.loaded_range();
+        assert!(start <= byte && byte <= end, "far byte {byte} outside {start}..{end}");
+        agrees(&doc, &text);
+    }
+}
+
+#[test]
+fn long_code_fence_remains_a_code_block_after_a_jump_with_smaller_window() {
+    let text = format!("```rust\n{}\n```\n# после блока\n", lines(30_000));
+    let mut doc = windowed(&text);
+    doc.include(text.len() / 2);
+    let reached = (0..300).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        doc.track((0.0, 0.0));
+        doc.block(0).is_code()
+    });
+    assert!(reached, "the middle of a huge code fence must classify as code");
+    agrees(&doc, &text);
+}

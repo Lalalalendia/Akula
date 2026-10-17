@@ -1,0 +1,123 @@
+name: Editor window A/B
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/ui/editor/document/window.rs'
+      - '.github/workflows/editor-window-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: editor-window-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Editor window 3000 vs 1536 (diagnostic)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Measure former 3000-line preload
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_TEST_WINDOW_MARGIN: '3000'
+          AQ_LATENCY_SWITCHES: '16'
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native native_note_latency_matrix \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/window-3000.log"
+      - name: Measure new 1536-line preload
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_TEST_WINDOW_MARGIN: '1536'
+          AQ_LATENCY_SWITCHES: '16'
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native native_note_latency_matrix \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/window-1536.log"
+      - name: Summarize paired measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          def parse(path):
+              editor, overall = {}, {}
+              for line in Path(path).read_text().splitlines():
+                  for prefix, target in (("EDITOR_PAGE kib=", editor), ("NOTE_LATENCY kib=", overall)):
+                      if prefix not in line:
+                          continue
+                      data = line.split(prefix.split(" kib=")[0] + " ", 1)[1].split()
+                      row = dict(part.split("=", 1) for part in data if "=" in part)
+                      target[row["kib"]] = row
+              assert sorted(editor) == sorted(overall) == ["4096", "512", "64"], (path, editor, overall)
+              assert all(row.get("stale_overwrites") == "0" for row in overall.values())
+              assert all(int(row.get("cache_hits", -1)) == int(row["cycles"]) for row in overall.values())
+              return editor, overall
+
+          old_e, old_o = parse("window-3000.log")
+          new_e, new_o = parse("window-1536.log")
+          lines = [
+              "## Editor window A/B: 3000 vs 1536 lines",
+              "",
+              "Same Ubuntu GitHub runner, sequential debug/test-profile runs. Baseline was",
+              "measured first, so warm caches and runner contention can bias results.",
+              "The A/B is diagnostic and does not impose a timing-based CI threshold.",
+              "",
+              "| Note size | Switch p95 old/new (ms) | Markdown p95 old/new (ms) | Editor mount p95 old/new (ms) |",
+              "|---|---:|---:|---:|",
+          ]
+          for kib in ["64", "512", "4096"]:
+              a, b = old_e[kib], new_e[kib]
+              lines.append(
+                  f"| {kib} KiB | {old_o[kib]['switch_p95_ms']} / {new_o[kib]['switch_p95_ms']} | "
+                  f"{a['markdown_p95_ms']} / {b['markdown_p95_ms']} | "
+                  f"{a['install_p95_ms']} / {b['install_p95_ms']} |"
+              )
+          lines.extend([
+              "",
+              "All runs must complete and pass the stale-worker/tab safety assertions.",
+              "The unchanged file-hash gate and full app tests remain mandatory.",
+              "",
+          ])
+          report = "\n".join(lines)
+          Path("window-ab.md").write_text(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(report)
+          print(report)
+          PY
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-window-ab-${{ github.sha }}
+          path: |
+            window-3000.log
+            window-1536.log
+            window-ab.md
+          if-no-files-found: warn
+          retention-days: 14
