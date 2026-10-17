@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn width_aware_rebreak_matches_fresh_parley_line_geometry() {
         let content: String = (0..180).map(|i| format!(
-            "Абзац {i}: длинная последовательность слов на русском языке,              переносы строк и границы формата важны для точного рендеринга.\\n"
+            "Абзац {i}: длинная последовательность слов на русском языке, переносы строк и границы формата важны для точного рендеринга.\n"
         )).collect();
         let styles = StyleSet::new(16.0);
         let mut source = doc(&content);
