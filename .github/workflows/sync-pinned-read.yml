@@ -82,6 +82,9 @@ jobs:
       - name: M1d-d read-only recovery status and non-mutating SQLite gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1dd_ -- --nocapture
+      - name: M1d-e explicit native review and no-mutation gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1de_ -- --nocapture
       - name: Durable local publication recovery and stage exclusion
         working-directory: aquilum-app
         run: |
