@@ -119,6 +119,7 @@ jobs:
           cargo test --locked -p aquilum-core --features sync-s3 s3_anchored_delta::tests
           cargo test --locked -p aquilum-core --features sync-s3 selective_snapshot::tests -- --skip live_minio_
           cargo test --locked -p aquilum-core --features sync-s3 verified_cache_disk::tests
+          cargo test --locked -p aquilum-core --features sync-s3 offline_retention::tests
           cargo test --locked -p aquilum-core --features sync-s3 s3_delta_walker::tests -- --skip live_minio_
 
       - name: Validate bounded read-only RemoteStore snapshot projection
