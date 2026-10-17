@@ -126,7 +126,9 @@ impl HistoryService {
 
     pub fn saved(&self, roots: Roots<'_>, note: &Path, write: NoteWrite<'_>) -> bool {
         let now = SystemTime::now();
-        let Some(mut state) = self.files_lock() else { return false };
+        let Some(mut state) = self.files_lock() else {
+            return false;
+        };
         let Some(located) = locate(&mut state, roots, note) else {
             return false;
         };
@@ -220,7 +222,9 @@ impl HistoryService {
         id: Option<&str>,
         name: &str,
     ) -> Option<String> {
-        let Some(mut state) = self.files_lock() else { return None };
+        let Some(mut state) = self.files_lock() else {
+            return None;
+        };
         let located = locate(&mut state, roots, note)?;
         let target = match id {
             Some(id) => Some(
@@ -241,7 +245,9 @@ impl HistoryService {
         offset: usize,
         limit: usize,
     ) -> HistoryPage {
-        let Some(mut state) = self.files_lock() else { return HistoryPage::default() };
+        let Some(mut state) = self.files_lock() else {
+            return HistoryPage::default();
+        };
         let Some(located) = locate(&mut state, roots, note) else {
             return HistoryPage::default();
         };
@@ -272,7 +278,9 @@ impl HistoryService {
         note: &Path,
         id: Option<&str>,
     ) -> Option<VersionTexts> {
-        let Some(mut state) = self.files_lock() else { return None };
+        let Some(mut state) = self.files_lock() else {
+            return None;
+        };
         let located = locate(&mut state, roots, note)?;
         let versions = store::versions(&located.dir);
         let id = id?;
@@ -287,7 +295,9 @@ impl HistoryService {
     }
 
     pub fn moved(&self, roots: Roots<'_>, from: &Path, to: &Path) {
-        let Some(mut state) = self.files_lock() else { return };
+        let Some(mut state) = self.files_lock() else {
+            return;
+        };
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
             locate(&mut state, roots, to),
@@ -304,7 +314,9 @@ impl HistoryService {
     }
 
     pub fn trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) {
-        let Some(mut state) = self.files_lock() else { return };
+        let Some(mut state) = self.files_lock() else {
+            return;
+        };
         let Some(located) = locate(&mut state, roots, note) else {
             return;
         };
@@ -322,7 +334,9 @@ impl HistoryService {
     }
 
     pub fn restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) {
-        let Some(mut state) = self.files_lock() else { return };
+        let Some(mut state) = self.files_lock() else {
+            return;
+        };
         let Some(located) = locate(&mut state, roots, restored) else {
             return;
         };
@@ -523,7 +537,7 @@ mod tests {
         let worker = thread::spawn(move || {
             ready_tx.send(()).unwrap();
             let saved = second.saved(
-                &|| vec![vault],
+                &|| vec![vault.clone()],
                 &note,
                 NoteWrite {
                     disk_before: None,
