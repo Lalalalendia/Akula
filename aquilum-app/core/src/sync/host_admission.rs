@@ -132,6 +132,19 @@ impl<'a> RegisteredReadAdmission<'a> {
         self.workspace_id
     }
 
+    /// Checked local registration identity for a configuration binding.
+    /// This observation does not grant File Gate or write authority.
+    pub(crate) fn registered_root_identity_for_profile(
+        &self,
+    ) -> Result<(u64, u64), VaultPortError> {
+        self.check_root()?;
+        Ok((self.initial.0, self.initial.1))
+    }
+
+    pub(crate) fn registered_root_path(&self) -> &Path {
+        &self.root_path
+    }
+
     pub(crate) fn recheck_registered_root(&self) -> Result<(), VaultPortError> {
         self.check_root()
     }
@@ -169,6 +182,26 @@ impl<'a> RegisteredReadAdmission<'a> {
         })
     }
 
+
+    /// Observe a shared existing lock OUTSIDE all registered vaults, using
+    /// the physical OS root identity (not the local Core SQLite UUID) to
+    /// select its scope. Neither a host-owned path nor mode 0700 attests
+    /// hostile same-user custody. No file mutation authority is returned.
+    pub(crate) fn inspect_external_filegate_lock(
+        &self,
+        custody_scope: &Path,
+    ) -> Result<super::filegate_lock_custody::CustodyObservation, VaultPortError> {
+        self.check_root()?;
+        let registered_roots = self.core.ui_state.workspace_roots()
+            .map_err(|_| VaultPortError::PermissionDenied)?;
+        super::filegate_lock_custody::inspect_external_scope(
+            &self.root_path,
+            (self.initial.0, self.initial.1),
+            &registered_roots,
+            custody_scope,
+            || self.check_root(),
+        )
+    }
 
     fn check_root(&self) -> Result<(), VaultPortError> {
         let configured = self.core.ui_state.list_workspaces()
@@ -334,12 +367,60 @@ impl<'a> RegisteredReadAdmission<'a> {
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         cache: &SqliteDagStore, before_publish: impl FnOnce(),
     ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
+        // Preserve the original M1 local-identity contract. Remote S3 vaults
+        // use the separate explicitly bound entrypoint, never this one.
+        self.create_staged_with_bound_vault_and_hook(
+            operation, journal, cache,
+            super::VaultId::from_uuid(self.workspace_id), None, before_publish,
+        )
+    }
+
+    /// SYNC-05e-2: additive-only target publish for one durably registered S3
+    /// profile. It is deliberately NOT an overwrite/right-to-commit or a
+    /// proof of verified remote content. The caller must have staged exact
+    /// S3 bytes through the verified remote transport first.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn create_staged_if_absent_for_registered_s3(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        cache: &SqliteDagStore,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
+        // Every lookup rechecks the Core registration and pinned root IDs.
+        // A newly constructed struct or an unverified manifest cannot replace
+        // this SQLite-backed binding check.
+        let binding = bindings.load_for_registered(self)
+            .map_err(|_| LocalCreateError::Admission(VaultPortError::PermissionDenied))?
+            .ok_or(LocalCreateError::InvalidStagedIntent)?;
+        if !binding.matches_remote(profile, keyspace) {
+            return Err(LocalCreateError::InvalidStagedIntent);
+        }
+        let intent = journal.get(operation)?
+            .ok_or(LocalCreateError::InvalidStagedIntent)?.intent;
+        let expected_key = keyspace.immutable_blob_key(&intent.expected_content_hash)
+            .map_err(|_| LocalCreateError::InvalidStagedIntent)?;
+        if intent.remote_object_id != expected_key {
+            return Err(LocalCreateError::InvalidStagedIntent);
+        }
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        self.create_staged_with_bound_vault_and_hook(
+            operation, journal, cache, binding.vault_id,
+            Some(binding.profile_id.as_str()), || {},
+        )
+    }
+
+    fn create_staged_with_bound_vault_and_hook(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        cache: &SqliteDagStore, expected_vault: super::VaultId,
+        expected_profile_id: Option<&str>, before_publish: impl FnOnce(),
+    ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
         let record = journal.get(operation)?
             .ok_or(LocalCreateError::InvalidStagedIntent)?;
         if record.phase != JournalPhase::Staged
             || record.intent.action != JournalAction::StageDownload
             || record.intent.remote_guard.is_some()
-            || record.intent.vault_id.as_uuid() != self.workspace_id
+            || record.intent.vault_id != expected_vault
+            || expected_profile_id.is_some_and(|id| id != record.intent.profile_id)
             || record.intent.expected_baseline.is_some()
             || record.staged_hash.as_deref()
                 != Some(record.intent.expected_content_hash.as_str())
@@ -807,6 +888,110 @@ mod tests {
         let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
         core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
         (temp, core, root)
+    }
+
+    fn scoped_anchor_fixture(temp: &tempfile::TempDir, root: &Path) -> PathBuf {
+        let pin = super::super::filegate_lock_probe::PinnedProbeRoot::open(root).unwrap();
+        let anchor = temp.path()
+            .join("external-host-locks")
+            .join(super::super::filegate_lock_custody::scoped_leaf(pin.identity()));
+        fs::create_dir_all(&anchor).unwrap();
+        let lock = anchor.join(super::super::filegate_lock_probe::LOCK_NAME);
+        fs::write(&lock, b"forensic scope bytes").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&anchor, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        anchor
+    }
+
+    #[test]
+    fn host_admission_external_scope_shared_across_independent_core_registries() {
+        let (temp, core, root) = fixture();
+        let scoped = scoped_anchor_fixture(&temp, &root);
+        let lock = scoped.join(super::super::filegate_lock_probe::LOCK_NAME);
+        let first = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let observed = first.inspect_external_filegate_lock(&scoped).unwrap();
+        assert_ne!(observed.registered_root, observed.custody_scope);
+        assert_ne!(observed.registered_root, observed.lock_object);
+
+        let db_path = temp.path().join("other-core-data");
+        fs::create_dir(&db_path).unwrap();
+        let second_core = Core::open(&db_path, Arc::new(|_: CoreEvent| {}));
+        assert!(matches!(
+            RegisteredReadAdmission::open(&second_core, &root),
+            Err(VaultPortError::PermissionDenied)
+        ));
+        second_core.ui_state.resolve_workspace(root.to_str().unwrap(), 2).unwrap();
+        let second = RegisteredReadAdmission::open(&second_core, &root).unwrap();
+        assert_ne!(first.registered_workspace_id(), second.registered_workspace_id());
+        let again = second.inspect_external_filegate_lock(&scoped).unwrap();
+        assert_eq!(observed, again, "separate Core DB must find identical OS lock");
+        assert_eq!(fs::read(&lock).unwrap(), b"forensic scope bytes");
+        assert!(!root.join(super::super::filegate_lock_probe::LOCK_NAME).exists());
+    }
+
+    #[test]
+    fn host_admission_external_scope_denies_missing_lock_bad_scope_and_nested_vault() {
+        let (temp, core, root) = fixture();
+        let scoped = scoped_anchor_fixture(&temp, &root);
+        let lock = scoped.join(super::super::filegate_lock_probe::LOCK_NAME);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        fs::remove_file(&lock).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_err());
+        assert!(!lock.exists(), "observation never creates or repairs locks");
+
+        fs::write(&lock, b"unchanged").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let wrong = temp.path().join("external-host-locks").join("vault-unrelated");
+        fs::create_dir(&wrong).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&wrong).is_err());
+
+        let nested = root.join(super::super::filegate_lock_custody::scoped_leaf(
+            super::super::filegate_lock_probe::PinnedProbeRoot::open(&root).unwrap().identity()
+        ));
+        fs::create_dir(&nested).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&nested).is_err());
+        assert_eq!(fs::read(lock).unwrap(), b"unchanged");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_admission_external_scope_requires_private_owner_and_file_modes() {
+        use std::os::unix::fs::PermissionsExt;
+        let (temp, core, root) = fixture();
+        let scoped = scoped_anchor_fixture(&temp, &root);
+        let lock = scoped.join(super::super::filegate_lock_probe::LOCK_NAME);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_ok());
+
+        fs::set_permissions(&scoped, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_err());
+        fs::set_permissions(&scoped, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_err());
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_ok());
+    }
+
+    #[test]
+    fn host_admission_external_scope_revocation_does_not_create_any_lock() {
+        let (temp, core, root) = fixture();
+        let scoped = scoped_anchor_fixture(&temp, &root);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let old = core.ui_state.list_workspaces().unwrap()[0].id;
+        core.ui_state.forget_workspace(old).unwrap();
+        assert!(admission.inspect_external_filegate_lock(&scoped).is_err());
+        assert_eq!(
+            fs::read(scoped.join(super::super::filegate_lock_probe::LOCK_NAME)).unwrap(),
+            b"forensic scope bytes"
+        );
     }
 
     fn note() -> SyncRelativePath {

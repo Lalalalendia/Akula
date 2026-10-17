@@ -276,3 +276,47 @@ fn a_session_without_a_graph_camera_reports_none() {
 
     assert_eq!(reopened.graph_camera, None);
 }
+
+#[test]
+fn repeated_multi_row_batches_rebind_every_tab_and_view() {
+    let (mut database, workspace_id, document_id, epoch) = setup();
+    let other = database.resolve_document(workspace_id, "other.md").expect("other");
+    for sequence in 1..=3 {
+        let mut input = batch(workspace_id, document_id, epoch, sequence, sequence * 10);
+        input.session.as_mut().unwrap().tabs.as_mut().unwrap().push(TabState {
+            tab_id: Uuid::new_v4(),
+            document_id: Some(other),
+            kind: TabKind::Document,
+            position: 1,
+        });
+        input.views.push(view(other, sequence * 100));
+        assert!(database.save_batch(&input).expect("save"));
+        let loaded = database.load_session(workspace_id, "main").expect("load");
+        assert_eq!(loaded.tabs.len(), 2);
+        assert_eq!(loaded.tabs[0].document_id, Some(document_id));
+        assert_eq!(loaded.tabs[1].document_id, Some(other));
+        assert_eq!(loaded.views.len(), 2);
+        let mut positions: Vec<_> = loaded.views.iter().map(|v| v.fallback_anchor).collect();
+        positions.sort();
+        assert_eq!(positions, [sequence * 10, sequence * 100]);
+    }
+}
+
+#[test]
+fn failed_second_view_rolls_back_tabs_first_view_and_sequence() {
+    let (mut database, workspace_id, document_id, epoch) = setup();
+    let initial = batch(workspace_id, document_id, epoch, 1, 10);
+    let initial_active = initial.session.as_ref().unwrap().active_tab_id;
+    assert!(database.save_batch(&initial).expect("initial"));
+    let mut failed = batch(workspace_id, document_id, epoch, 2, 20);
+    failed.views.push(view(Uuid::new_v4(), 99));
+    assert!(database.save_batch(&failed).is_err());
+    let loaded = database.load_session(workspace_id, "main").expect("load");
+    assert_eq!(loaded.active_tab_id, initial_active);
+    assert_eq!(loaded.tabs.len(), 1);
+    assert_eq!(loaded.views.len(), 1);
+    assert_eq!(loaded.views[0].fallback_anchor, 10);
+    failed.views.pop();
+    assert!(database.save_batch(&failed).expect("retry same sequence"));
+    assert_eq!(database.load_session(workspace_id, "main").expect("load").views[0].fallback_anchor, 20);
+}

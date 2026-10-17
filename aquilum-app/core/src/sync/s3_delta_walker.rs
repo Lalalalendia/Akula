@@ -85,7 +85,7 @@ pub async fn walk_s3_manifest_delta(
     walk_with(client, keyspace, checkpoint, limits).await
 }
 
-async fn walk_with<R: BoundedReader>(
+pub(super) async fn walk_with<R: BoundedReader>(
     reader: &R,
     keyspace: &S3Keyspace,
     checkpoint: Option<S3DeltaWalkCheckpoint<'_>>,
@@ -549,13 +549,14 @@ mod tests {
         sdk.create_bucket().bucket(bucket.clone()).send().await.unwrap();
 
         let layout = ns();
+        let profile = S3ConnectionProfile {
+            bucket: bucket.clone(),
+            region: region.into(),
+            endpoint: Some(endpoint),
+            force_path_style: true,
+        };
         let client = AwsS3ProbeClient::connect(
-            S3ConnectionProfile {
-                bucket: bucket.clone(),
-                region: region.into(),
-                endpoint: Some(endpoint),
-                force_path_style: true,
-            },
+            profile.clone(),
             layout.clone(),
         )
         .await
@@ -599,6 +600,35 @@ mod tests {
         assert_eq!(unchanged.outcome, S3ManifestDeltaOutcome::HeadUnchanged);
         assert_eq!(unchanged.immutable_manifests_read, 0);
 
+        // Fully pin the remote genesis with the existing verification path,
+        // then persist only the remote observation anchor in private SQLite.
+        // The bridge must *not* create or advance a document ConfirmedBaseline.
+        let private_dir = tempfile::tempdir().unwrap();
+        let anchor_db = private_dir.path().join("test-s3-anchor.sqlite");
+        let scope = super::super::s3_remote_anchor::S3RemoteAnchorScope::new(
+            "minio-demo",
+            "verified-disposable-ci-deployment",
+            &profile,
+            &layout,
+        ).unwrap();
+        let verified = client.read_verified_head().await.unwrap().unwrap();
+        let pinned = client.pin_revision_snapshot().await.unwrap().unwrap();
+        let mut journal = super::super::s3_remote_anchor::S3RemoteAnchorJournal::open(
+            &anchor_db,
+        ).unwrap();
+        journal.record_verified_remote(
+            &scope, &verified, &pinned, &[b1.clone()],
+        ).unwrap();
+        drop(journal);
+        let journal = super::super::s3_remote_anchor::S3RemoteAnchorJournal::open(
+            &anchor_db,
+        ).unwrap();
+        let from_sqlite = super::super::s3_anchored_delta::walk_s3_delta_from_saved_anchor(
+            &client, &scope, &journal, S3ManifestDeltaLimits::default(),
+        ).await.unwrap();
+        assert_eq!(from_sqlite.outcome, S3ManifestDeltaOutcome::HeadUnchanged);
+        assert_eq!(from_sqlite.immutable_manifests_read, 0);
+
         let p2 = client
             .put_conditionally(
                 &layout.current_head_key(),
@@ -630,6 +660,13 @@ mod tests {
 
         assert_eq!(result.observed_head.pointer(), &h3);
         assert_eq!(result.immutable_manifests_read, 2);
+        let anchored_after_offline = super::super::s3_anchored_delta::walk_s3_delta_from_saved_anchor(
+            &client, &scope, &journal, S3ManifestDeltaLimits::default(),
+        ).await.unwrap();
+        assert_eq!(anchored_after_offline.observed_head.pointer(), &h3);
+        assert_eq!(anchored_after_offline.immutable_manifests_read, 2);
+        // This API is read-only: the durable SQLite anchor stays on genesis.
+        assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &h1);
         assert_eq!(
             result.outcome,
             S3ManifestDeltaOutcome::Complete {

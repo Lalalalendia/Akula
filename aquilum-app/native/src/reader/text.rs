@@ -41,9 +41,62 @@ pub fn parse_xml(text: &str) -> Option<roxmltree::Document<'_>> {
 }
 
 pub fn numeric_entities(text: &str) -> String {
-    let mut out = text.to_owned();
-    for (name, code) in ENTITIES {
-        out = out.replace(&format!("&{name};"), &format!("&#{code};"));
+    use std::fmt::Write;
+
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    // The longest supported name has six ASCII bytes. Bound lookahead even
+    // for malformed input containing many ampersands without a semicolon.
+    for (at, _) in text.match_indices('&') {
+        let tail = &text.as_bytes()[at + 1..];
+        let Some(end) = tail.iter().take(7).position(|&byte| byte == b';') else { continue };
+        let name = &tail[..end];
+        if let Some((_, code)) = ENTITIES.iter().find(|(known, _)| known.as_bytes() == name) {
+            out.push_str(&text[copied..at]);
+            write!(out, "&#{code};").expect("writing to a String");
+            copied = at + end + 2;
+        }
     }
+    out.push_str(&text[copied..]);
     out
+}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::{ENTITIES, numeric_entities};
+
+    fn previous(text: &str) -> String {
+        let mut out = text.to_owned();
+        for (name, code) in ENTITIES {
+            out = out.replace(&format!("&{name};"), &format!("&#{code};"));
+        }
+        out
+    }
+
+    #[test]
+    fn all_existing_entities_keep_their_numeric_values() {
+        for (name, code) in ENTITIES {
+            assert!(name.len() <= 6);
+            assert_eq!(numeric_entities(&format!("&{name};")), format!("&#{code};"));
+        }
+    }
+
+    #[test]
+    fn entity_scanner_matches_previous_on_mixed_and_malformed_text() {
+        let mut fragments = vec![
+            String::new(), "Привет 🦈".into(), "&".into(), "&&".into(),
+            "&amp;nbsp;".into(), "&#160; &#xA0;".into(), "&unknown;".into(),
+            "&nbsp".into(), "&NBSP;".into(), "&;".into(), "&🦈;".into(),
+            "&abcdefghi;".into(), "<p title=\"&quot;\">&lt;</p>".into(),
+        ];
+        fragments.extend(ENTITIES.iter().map(|(name, _)| format!("&{name};")));
+        for left in &fragments {
+            for right in &fragments {
+                let input = format!("{left}{right}");
+                assert_eq!(numeric_entities(&input), previous(&input), "{input:?}");
+            }
+        }
+        let input = format!("{}&thinsp;{}", "&".repeat(100_000), "Ж".repeat(10_000));
+        assert_eq!(numeric_entities(&input), previous(&input));
+    }
 }

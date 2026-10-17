@@ -4,12 +4,17 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/src/sync/profile_binding.rs'
+      - 'aquilum-app/core/src/sync/host_admission.rs'
+      - 'aquilum-app/core/src/sync/local_create.rs'
       - 'aquilum-app/core/src/sync/s3_transport/**'
       - 'aquilum-app/core/src/sync/s3.rs'
       - 'aquilum-app/core/src/sync/s3_manifest.rs'
       - 'aquilum-app/core/src/sync/s3_manifest_delta.rs'
       - 'aquilum-app/core/src/sync/s3_head_probe.rs'
       - 'aquilum-app/core/src/sync/s3_delta_walker.rs'
+      - 'aquilum-app/core/src/sync/s3_remote_anchor.rs'
+      - 'aquilum-app/core/src/sync/s3_anchored_delta.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
@@ -102,6 +107,15 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_manifest::tests
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::manifest::tests -- --skip minio_
+      - name: Verify durable profile-bound remote anchors and delta lineage
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 s3_remote_anchor::tests
+          cargo test --locked -p aquilum-core --features sync-s3 s3_anchored_delta::tests
+          cargo test --locked -p aquilum-core --features sync-s3 s3_delta_walker::tests -- --skip live_minio_
+
       - name: Validate bounded read-only RemoteStore snapshot projection
         shell: bash
         working-directory: aquilum-app
@@ -115,6 +129,21 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 replan::identity_tests
           cargo test --locked -p aquilum-core --features sync-s3 cas_replay_plans_both_offline_siblings_without_rewriting_either_head
+      - name: Validate Core-to-S3 identity guards (offline)
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 additive_gate_rejects_cross_vault_and_wrong_revision_or_path
+          # live_minio_two_core_verified_stage_and_no_replace already runs in
+          # the earlier live_minio_ filter. Running it again without resetting
+          # the same bucket incorrectly produces BucketAlreadyOwnedByYou.
+      - name: Verify separate local workspace and shared cloud vault profile binding
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 profile_binding::tests
       - name: Two independent S3 clients CAS, conflicts and lost ACK
         shell: bash
         working-directory: aquilum-app

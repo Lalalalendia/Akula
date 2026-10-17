@@ -11,6 +11,7 @@ mod dag_store;
 pub mod fake;
 mod fake_vault;
 mod host_admission;
+mod filegate_lock_custody;
 pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::PinnedFileIdentity;
@@ -26,6 +27,8 @@ pub mod sealed_archive;
 mod recovery_dashboard;
 mod planner;
 mod protection_store;
+#[cfg(feature = "sync-s3")]
+mod profile_binding;
 mod path;
 mod pinned_read;
 #[cfg(windows)]
@@ -36,7 +39,11 @@ mod s3;
 mod s3_manifest;
 mod s3_manifest_delta;
 #[cfg(feature = "sync-s3")]
+mod s3_anchored_delta;
+#[cfg(feature = "sync-s3")]
 mod s3_delta_walker;
+#[cfg(feature = "sync-s3")]
+mod s3_remote_anchor;
 #[cfg(feature = "sync-s3")]
 mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
@@ -76,6 +83,15 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+#[cfg(feature = "sync-s3")]
+pub use s3_anchored_delta::{
+    walk_s3_delta_from_saved_anchor, S3AnchoredWalkError,
+};
+#[cfg(feature = "sync-s3")]
+pub use s3_remote_anchor::{
+    S3RemoteAnchor, S3RemoteAnchorError, S3RemoteAnchorJournal,
+    S3RemoteAnchorOutcome, S3RemoteAnchorScope,
+};
 #[cfg(feature = "sync-s3")]
 pub use s3_delta_walker::{
     walk_s3_manifest_delta, S3DeltaWalkCheckpoint, S3DeltaWalkError, S3DeltaWalkPreview,
