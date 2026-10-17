@@ -15,6 +15,7 @@ mod identity;
 mod journal;
 mod planner;
 mod path;
+mod pinned_read;
 mod protocol;
 mod provider;
 mod upload;
