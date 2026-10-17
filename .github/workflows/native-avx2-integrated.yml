@@ -5,6 +5,7 @@ on:
     paths:
       - "aquilum-app/native/src/app/tests/perf/avx2.rs"
       - "aquilum-app/native/src/app/tests/perf/mod.rs"
+      - "aquilum-app/native/vendor/vello_cpu/src/fine/mod.rs"
       - ".github/workflows/native-avx2-integrated.yml"
 
 permissions:
