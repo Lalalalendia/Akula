@@ -10,6 +10,11 @@
 //! dedicated full-DAG scale workflow using disposable localhost MinIO.
 
 use super::{AwsS3ProbeClient, S3ConnectionProfile, S3PutCondition};
+use super::pack_probe::{
+    ingest_verified_pack, PackBuilder, PackDescriptor, PackProbeError,
+    MAX_PACK_BYTES, MAX_PACK_MEMBERS,
+};
+use std::collections::{BTreeMap, BTreeSet};
 use crate::sync::{
     DocumentId, OperationId, RevisionId, RevisionOperation, RevisionRecord,
     S3HeadPointerV1, S3Keyspace, S3ManifestShardV1, S3ManifestV1,
@@ -22,6 +27,9 @@ const REVISIONS_PER_DOCUMENT: usize = 4;
 const REVISION_COUNT: usize = DOCUMENTS * REVISIONS_PER_DOCUMENT;
 const PAYLOAD_BYTES: usize = 1_024;
 const MAX_PARALLEL_UPLOADS: usize = 32;
+const MAX_PARALLEL_PACK_READS: usize = 8;
+const MAX_PARALLEL_PACK_UPLOADS: usize = 8;
+const MAX_TEST_FIXTURE_PACK_BYTES: usize = 24 * 1024 * 1024;
 
 /// 2,500 documents, each with one root, two sibling offline edits, and
 /// either an explicit merge or a third concurrent edit. All revision JSONs
@@ -57,6 +65,12 @@ async fn minio_full_10k_revision_dag_and_blob_readback() {
     let upload_started = Instant::now();
     let mut tasks = tokio::task::JoinSet::new();
     let mut references = Vec::with_capacity(REVISION_COUNT);
+    // Sidecar pack fixture is purely experimental. Bounded 24 MiB test
+    // materialization keeps raw upload and packed upload timings separate.
+    // No object in this sidecar is referenced by the production manifest.
+    let mut pack_builder = PackBuilder::new();
+    let mut packed_fixture: Vec<(PackDescriptor, Vec<u8>)> = Vec::with_capacity(79);
+    let mut fixture_pack_bytes = 0_usize;
     let mut sibling_example: Option<(DocumentId, [RevisionId; 4])> = None;
     for doc_index in 0..DOCUMENTS {
         let document_id = DocumentId::new();
@@ -93,13 +107,22 @@ async fn minio_full_10k_revision_dag_and_blob_readback() {
                 },
             };
             let revision_json = serde_json::to_vec(&record).unwrap();
-            references.push(S3RevisionRefV1 {
+            let reference = S3RevisionRefV1 {
                 revision_id: record.id,
                 document_id,
                 revision_blake3: blake3::hash(&revision_json)
                     .to_hex().to_string(),
                 blob_bytes: Some(blob.len() as u64),
-            });
+            };
+            pack_builder.push(reference.clone(), &revision_json, &blob).unwrap();
+            if pack_builder.len() == MAX_PACK_MEMBERS {
+                let sealed = std::mem::replace(&mut pack_builder, PackBuilder::new())
+                    .seal(&ns).unwrap();
+                fixture_pack_bytes += sealed.1.len();
+                assert!(fixture_pack_bytes <= MAX_TEST_FIXTURE_PACK_BYTES);
+                packed_fixture.push(sealed);
+            }
+            references.push(reference);
             let worker = client.clone();
             let blob_key = ns.immutable_blob_key(&blob_hash).unwrap();
             let revision_key = ns.immutable_revision_key(record.id);
@@ -119,8 +142,41 @@ async fn minio_full_10k_revision_dag_and_blob_readback() {
     while let Some(done) = tasks.join_next().await {
         done.unwrap();
     }
-    let upload_elapsed = upload_started.elapsed();
+    let raw_upload_elapsed = upload_started.elapsed();
+    if !pack_builder.is_empty() {
+        let sealed = pack_builder.seal(&ns).unwrap();
+        fixture_pack_bytes += sealed.1.len();
+        assert!(fixture_pack_bytes <= MAX_TEST_FIXTURE_PACK_BYTES);
+        packed_fixture.push(sealed);
+    }
     assert_eq!(references.len(), REVISION_COUNT);
+    assert_eq!(packed_fixture.len(), 79);
+    assert!(fixture_pack_bytes <= MAX_TEST_FIXTURE_PACK_BYTES);
+
+    // Pack experiment uses the existing S3 blob keyspace ONLY inside a
+    // disposable test vault; the production revision manifest remains v1.
+    // These extra immutable objects do not affect the timed raw readback.
+    let pack_seed_started = Instant::now();
+    let mut pack_uploads = tokio::task::JoinSet::new();
+    let mut descriptors = Vec::with_capacity(packed_fixture.len());
+    for (descriptor, bytes) in packed_fixture {
+        let worker = client.clone();
+        let key = descriptor.key.clone();
+        descriptors.push(descriptor);
+        pack_uploads.spawn(async move {
+            let observed = worker.put_conditionally(
+                &key, &bytes, S3PutCondition::IfAbsent,
+            ).await.unwrap();
+            assert_eq!(observed.byte_length, bytes.len() as u64);
+        });
+        if pack_uploads.len() >= MAX_PARALLEL_PACK_UPLOADS {
+            pack_uploads.join_next().await.unwrap().unwrap();
+        }
+    }
+    while let Some(completed) = pack_uploads.join_next().await {
+        completed.unwrap();
+    }
+    let pack_seed_ms = pack_seed_started.elapsed().as_millis();
     references.sort_by_key(|reference| reference.revision_id);
 
     let mut shards = Vec::new();
@@ -187,7 +243,7 @@ async fn minio_full_10k_revision_dag_and_blob_readback() {
     assert!(io.payload_bytes >= (REVISION_COUNT * PAYLOAD_BYTES) as u64);
     eprintln!(
         "AKULA_S3_FULL_DAG_10K upload_ms={} verify_ms={} documents={}          revisions={} blobs={} shard_count=79 sdk_head={} sdk_get={}          sdk_payload_bytes={} (SDK calls, not wire traffic)",
-        upload_elapsed.as_millis(), verify_elapsed.as_millis(),
+        raw_upload_elapsed.as_millis(), verify_elapsed.as_millis(),
         DOCUMENTS, REVISION_COUNT, REVISION_COUNT,
         io.head, io.get, io.payload_bytes,
     );
@@ -207,6 +263,101 @@ async fn minio_full_10k_revision_dag_and_blob_readback() {
         "AKULA_S3_FULL_DAG_10K ancestry_ms={} ancestry_hops={}          sdk_ancestry_get={} sdk_ancestry_head={}",
         ancestry_ms, hops, ancestry.get, ancestry.head,
     );
+
+    // Binding the pack sidecar's entire member identity to the already
+    // verified raw manifest is stricter than comparing UUIDs alone.
+    // Otherwise a test-generated descriptor could silently alter the
+    // document, JSON BLAKE3, or blob-length under the same revision ID.
+    let expected_refs: BTreeMap<_, _> = references.iter()
+        .map(|reference| (reference.revision_id, reference.clone()))
+        .collect();
+    let packed_refs: BTreeMap<_, _> = descriptors.iter()
+        .flat_map(|descriptor| descriptor.references.iter())
+        .map(|reference| (reference.revision_id, reference.clone()))
+        .collect();
+    assert_eq!(expected_refs.len(), REVISION_COUNT);
+    assert_eq!(packed_refs.len(), REVISION_COUNT);
+    assert_eq!(packed_refs, expected_refs);
+
+    // Read-only packed sidecar A/B, after the original full S3 manifest has
+    // independently passed its canonical integrity and ancestry checks.
+    // The descriptor is test-generated in memory and is NOT a signed or
+    // committed future pack index. Therefore this is an optimistic
+    // "trusted-index" cold-pack cost, NOT a production sync latency claim.
+    let pack_io_before = client.test_io_snapshot();
+    let pack_read_started = Instant::now();
+    let mut read_tasks = tokio::task::JoinSet::new();
+    let mut pack_dag = crate::sync::RevisionDag::new();
+    let mut received = BTreeSet::new();
+    let mut verified_member_bytes = 0_u64;
+    let pack_count = descriptors.len();
+    for descriptor in descriptors.iter().cloned() {
+        let worker = client.clone();
+        read_tasks.spawn(async move {
+            let received = worker.get_bounded(
+                &descriptor.key, MAX_PACK_BYTES as u64,
+            ).await.unwrap();
+            (descriptor, received)
+        });
+        if read_tasks.len() >= MAX_PARALLEL_PACK_READS {
+            let (descriptor, downloaded) = read_tasks.join_next().await
+                .unwrap().unwrap();
+            assert_eq!(downloaded.blake3, descriptor.digest);
+            verified_member_bytes += ingest_verified_pack(
+                &downloaded.bytes, &descriptor, &mut pack_dag, &mut received,
+            ).unwrap();
+        }
+    }
+    while let Some(completed) = read_tasks.join_next().await {
+        let (descriptor, downloaded) = completed.unwrap();
+        assert_eq!(downloaded.blake3, descriptor.digest);
+        verified_member_bytes += ingest_verified_pack(
+            &downloaded.bytes, &descriptor, &mut pack_dag, &mut received,
+        ).unwrap();
+    }
+    let pack_read_ms = pack_read_started.elapsed().as_millis();
+    let pack_io = client.test_io_snapshot().since(pack_io_before);
+    // A complete pack set must be exactly the proven manifest set. A missing,
+    // repeated or foreign revision is a failure, never a deletion signal.
+    let expected: BTreeSet<_> = references.iter().map(|r| r.revision_id).collect();
+    assert_eq!(received, expected);
+    assert_eq!(pack_dag.active_len(), REVISION_COUNT);
+    assert_eq!(pack_dag.pending_len(), 0);
+    assert_eq!(pack_io.get, pack_count as u64);
+    assert_eq!(pack_io.head, 2 * pack_io.get);
+    assert!(pack_io.payload_bytes >= verified_member_bytes);
+    assert!(verified_member_bytes >= (REVISION_COUNT * PAYLOAD_BYTES) as u64);
+    let (sample_document_id, sample_ids) = sibling_example.as_ref().unwrap();
+    assert_eq!(
+        pack_dag.heads(*sample_document_id),
+        [sample_ids[1], sample_ids[2], sample_ids[3]]
+            .into_iter().collect(),
+    );
+    eprintln!(
+        "AKULA_S3_PACK_AB_10K raw_verify_ms={} raw_get={} raw_head={} packed_read_ms={} packed_get={} packed_head={} packed_bytes={} pack_count={} pack_seed_ms={} trusted_index_only=true",
+        verify_elapsed.as_millis(), io.get, io.head,
+        pack_read_ms, pack_io.get, pack_io.head, pack_io.payload_bytes,
+        pack_count, pack_seed_ms,
+    );
+
+    // Test-only server corruption of an opaque *pack* blob after successful
+    // measurement. The same-length overwritten object must never pass its
+    // original digest or the individual member verification.
+    let target = descriptors.first().unwrap();
+    let before = client.get_bounded(&target.key, MAX_PACK_BYTES as u64)
+        .await.unwrap();
+    client.client.put_object().bucket(&client.bucket)
+        .key(&target.key)
+        .body(aws_sdk_s3::primitives::ByteStream::from(
+            vec![b'!'; before.bytes.len()],
+        )).send().await.unwrap();
+    let corrupted = client.get_bounded(&target.key, MAX_PACK_BYTES as u64)
+        .await.unwrap();
+    assert_ne!(corrupted.blake3, target.digest);
+    assert_eq!(ingest_verified_pack(
+        &corrupted.bytes, target, &mut crate::sync::RevisionDag::new(),
+        &mut BTreeSet::new(),
+    ), Err(PackProbeError::IntegrityMismatch));
 
     // Real sample of the unmerged sibling family: current S3 verification
     // must not silently collapse the three concurrent heads.

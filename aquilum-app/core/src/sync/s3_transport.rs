@@ -12,6 +12,9 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod manifest;
+// Strict pack framing is experimental and available to tests only.
+#[cfg(test)]
+mod pack_probe;
 // Heavy full-DAG benchmark is ignored unless explicitly run with MinIO.
 #[cfg(test)]
 mod scale_probe;
