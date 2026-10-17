@@ -69,6 +69,16 @@ fn m1_create_is_complete_no_replace_and_leaves_baseline_unconfirmed() {
     assert_eq!(fs::read(root.join(relative)).unwrap(), bytes);
     assert_eq!(journal.get(id).unwrap().unwrap().phase, JournalPhase::Staged);
     assert!(journal.baseline(vault, doc).unwrap().is_none());
+    assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+    // Even if an external user deletes the published file, replaying the
+    // same operation is prohibited by its durable SQLite admission record.
+    fs::remove_file(root.join(relative)).unwrap();
+    assert!(matches!(
+        admission.create_staged_if_absent(id, &journal, &cache),
+        Err(LocalCreateError::Journal(
+            JournalError::PublicationAttemptAlreadyRecorded))
+    ));
+    assert!(!root.join(relative).exists());
 }
 
 #[test]
@@ -203,23 +213,28 @@ fn m1_external_process_fixture() {
     let appdata = PathBuf::from(std::env::var_os("AKULA_M1_CHILD_APPDATA").unwrap());
     let relative = std::env::var("AKULA_M1_CHILD_RELATIVE").unwrap();
     let operation = std::env::var("AKULA_M1_CHILD_OP").unwrap().parse().unwrap();
+    let action = std::env::var("AKULA_M1_CHILD_ACTION").unwrap();
+    if action == "compete" {
+        // This foreign process intentionally ignores Akula's in-process
+        // File Gate and journal; it atomically creates the competing name.
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true)
+            .open(root.join(relative)).unwrap();
+        file.write_all(b"child won atomically").unwrap();
+        file.sync_all().unwrap();
+        let marker = std::env::var_os("AKULA_M1_CHILD_MARKER").unwrap();
+        fs::write(marker, b"child completed").unwrap();
+        return;
+    }
+    assert_eq!(action, "crash");
     let core = core_at(&root, &appdata);
-    let bytes: &[u8] = match std::env::var("AKULA_M1_CHILD_ACTION").unwrap().as_str() {
-        "compete" => b"child won atomically",
-        "crash" => b"staged before process exit",
-        _ => panic!("unknown child action"),
-    };
+    let bytes = b"staged before process exit";
     let (journal, cache, _, _) = staged(&core, &appdata, &relative, bytes, operation);
     let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
-    if std::env::var("AKULA_M1_CHILD_ACTION").unwrap() == "crash" {
-        admission.create_staged_with_hook(operation, &journal, &cache, || {
-            std::process::exit(87);
-        }).unwrap();
-        unreachable!("child must terminate before publishing");
-    }
-    admission.create_staged_if_absent(operation, &journal, &cache).unwrap();
-    let marker = std::env::var_os("AKULA_M1_CHILD_MARKER").unwrap();
-    fs::write(marker, b"child completed").unwrap();
+    admission.create_staged_with_hook(operation, &journal, &cache, || {
+        std::process::exit(87);
+    }).unwrap();
+    unreachable!("child must terminate before publishing");
 }
 
 fn run_child(
@@ -284,4 +299,20 @@ fn m1_real_process_exit_after_staging_recovers_without_false_ack() {
     assert_eq!(record.phase, JournalPhase::Staged);
     assert!(journal.baseline(record.intent.vault_id, record.intent.document_id)
         .unwrap().is_none());
+    let pending = journal.local_publication_review_queue().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].operation_id, id);
+    // A distinct Core instance after restart cannot accidentally replay,
+    // even when a user manually moved away the orphan stage file.
+    let cache = SqliteDagStore::open(&db.join("blobs.sqlite")).unwrap();
+    let stage_path = root.join("notes").join(format!(".akula-sync-stage-{id}"));
+    fs::remove_file(stage_path).unwrap();
+    let reopened_core = core_at(&root, &db);
+    let admission = RegisteredReadAdmission::open(&reopened_core, &root).unwrap();
+    assert!(matches!(
+        admission.create_staged_if_absent(id, &journal, &cache),
+        Err(LocalCreateError::Journal(
+            JournalError::PublicationAttemptAlreadyRecorded))
+    ));
+    assert!(!root.join(relative).exists());
 }
