@@ -1,0 +1,26 @@
+name: Inline marks ABBA benchmark
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/ui/editor/markdown/inline/marks/**"
+      - "scripts/benchmarks/inline_marks_abba.rs"
+      - "scripts/benchmarks/run-inline-marks-abba.sh"
+      - ".github/workflows/inline-marks-abba.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  same-runner-abba:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compare actual baseline and candidate Markdown mark kernels
+        shell: bash
+        run: bash scripts/benchmarks/run-inline-marks-abba.sh
