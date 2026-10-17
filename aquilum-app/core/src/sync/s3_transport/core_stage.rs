@@ -288,6 +288,9 @@ mod tests {
         use crate::app_core::{Core, CoreEvent};
         use crate::sync::{JournalError, RegisteredReadAdmission};
         use crate::sync::profile_binding::SqliteRegisteredS3Bindings;
+        use crate::sync::filegate_custody_identity::SqliteCustodyIdentityStore;
+        use crate::sync::filegate_lock_custody::scoped_leaf;
+        use crate::sync::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
         use aws_sdk_s3::error::ProvideErrorMetadata;
         use std::fs;
         use std::sync::Arc;
@@ -477,14 +480,38 @@ mod tests {
         ).unwrap();
         assert_eq!(bound.workspace_id, target_id);
         assert_eq!(bound.vault_id, vault);
+
+        // A verified S3 head/profile alone is not an OS write interlock.
+        // Provision one EXTERNAL, pre-existing lock fixture and separately
+        // persist its exact OS identity before any File Gate publication.
+        let custody_scope = dir.path().join("host-owned-custody")
+            .join(scoped_leaf(PinnedProbeRoot::open(&root_b).unwrap().identity()));
+        fs::create_dir_all(&custody_scope).unwrap();
+        let custody_file = custody_scope.join(LOCK_NAME);
+        fs::write(&custody_file, b"pre-existing external lock").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&custody_scope, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&custody_file, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        #[cfg(unix)]
+        let custody_scope = fs::canonicalize(custody_scope).unwrap();
+        let mut custody = SqliteCustodyIdentityStore::open(
+            &admission, &app_b.join("s3-custody.sqlite"),
+        ).unwrap();
+        custody.bind_registered_s3(&admission, &bindings, &custody_scope).unwrap();
+
         let published = admission.create_staged_if_absent_for_registered_s3(
             operation_id, &journal, &cache, &bindings, &profile, &ns,
+            &custody, &custody_scope,
         ).unwrap();
         assert_eq!(published.byte_length, bytes.len() as u64);
         assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
         assert!(matches!(
             admission.create_staged_if_absent_for_registered_s3(
                 operation_id, &journal, &cache, &bindings, &profile, &ns,
+                &custody, &custody_scope,
             ),
             Err(crate::sync::host_admission::LocalCreateError::Admission(
                 VaultPortError::DestinationExists
@@ -509,6 +536,7 @@ mod tests {
         assert!(RegisteredReadAdmission::open(&second_core, &root_b).unwrap()
             .create_staged_if_absent_for_registered_s3(
                 operation_id, &journal, &cache, &bindings, &profile, &ns,
+                &custody, &custody_scope,
             ).is_err());
         assert!(journal.baseline(vault, record.document_id).unwrap().is_none());
         assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
