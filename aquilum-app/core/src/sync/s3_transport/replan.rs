@@ -167,9 +167,13 @@ impl AwsS3ProbeClient {
         let mut found_old_root = false;
         for _ in 0..=MAX_REPLAN_ANCESTORS {
             if cursor.manifest_id == previous.pointer.manifest_id() {
-                found_old_root = cursor.generation == previous.pointer.generation()
-                    && cursor.digest(&self.keyspace)
-                        .map_err(S3HeadError::from)? == previous.pointer.manifest_blake3();
+                if cursor.generation != previous.pointer.generation()
+                    || cursor.digest(&self.keyspace)
+                        .map_err(S3HeadError::from)? != previous.pointer.manifest_blake3()
+                {
+                    return Err(S3ReplanError::DisconnectedHeadHistory);
+                }
+                found_old_root = true;
                 break;
             }
             let (Some(parent_id), Some(parent_hash)) = (
