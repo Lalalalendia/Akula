@@ -10,6 +10,35 @@ use crate::ui::editor::{TextEditor, TrialSnapshot};
 
 const MAX_LAYOUT_CANDIDATES: usize = 2;
 
+// Test-only observability to distinguish an ineligible document from a
+// rejected cache context. No diagnostics are built into release binaries.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TrialCounts {
+    pub attempted: usize,
+    pub clean: usize,
+    pub widget_found: usize,
+    pub snapshots: usize,
+    pub offered: usize,
+}
+
+thread_local! {
+    static COUNTS: std::cell::Cell<TrialCounts> = const { std::cell::Cell::new(TrialCounts {
+        attempted: 0, clean: 0, widget_found: 0, snapshots: 0, offered: 0
+    }) };
+}
+
+fn count(update: impl FnOnce(&mut TrialCounts)) {
+    COUNTS.with(|slot| {
+        let mut counts = slot.get();
+        update(&mut counts);
+        slot.set(counts);
+    });
+}
+
+pub(super) fn take_counts() -> TrialCounts {
+    COUNTS.with(|slot| slot.replace(TrialCounts::default()))
+}
+
 pub(in crate::app) struct LayoutCandidate {
     tab_id: Uuid,
     path: PathBuf,
@@ -27,17 +56,21 @@ impl App {
         if !enabled() {
             return;
         }
+        count(|c| c.attempted += 1);
         let Some(note) = &self.note else { return };
         if note.clean_cache_hash().is_none() {
             return;
         }
+        count(|c| c.clean += 1);
         let Some(tab_id) = self.tabs.tabs().iter()
             .find(|tab| tab.path.as_deref() == Some(note.path.as_path()))
             .map(|tab| tab.id)
         else { return };
         let Some(ids) = &self.note_ids else { return };
         let Some(widget) = root.get_widget(ids.body.id()).and_then(|w| w.downcast::<TextEditor>()) else { return };
+        count(|c| c.widget_found += 1);
         let Some(snapshot) = widget.inner().trial_plain_layout_snapshot() else { return };
+        count(|c| c.snapshots += 1);
         self.inactive_plain_layouts.retain(|entry| entry.tab_id != tab_id);
         self.inactive_plain_layouts.push(LayoutCandidate { tab_id, path: note.path.clone(), snapshot });
         if self.inactive_plain_layouts.len() > MAX_LAYOUT_CANDIDATES {
@@ -53,6 +86,7 @@ impl App {
         }
         let index = self.inactive_plain_layouts.iter()
             .position(|candidate| candidate.tab_id == tab_id && candidate.path == path)?;
+        count(|c| c.offered += 1);
         Some(self.inactive_plain_layouts.remove(index).snapshot)
     }
 
