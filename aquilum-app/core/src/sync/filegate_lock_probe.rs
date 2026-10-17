@@ -306,7 +306,10 @@ impl PinnedProbeRoot {
         let created = created_file.is_some();
         let mut created_id = None;
         let mut created_generation = None;
+        #[cfg(unix)]
         let mut parent_sync_completed = false;
+        #[cfg(not(unix))]
+        let parent_sync_completed = false;
         if let Some(mut file) = created_file {
             let id = descriptor_identity(&file, true)?;
             let generation = uuid::Uuid::new_v4();
