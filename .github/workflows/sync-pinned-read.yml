@@ -11,6 +11,7 @@ on:
       - "aquilum-app/core/src/sync/local_recovery.rs"
       - "aquilum-app/core/src/sync/recovery_dashboard.rs"
       - "aquilum-app/core/src/sync/recovery_review.rs"
+      - "aquilum-app/core/src/sync/sealed_archive.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
       - "aquilum-app/core/src/sync/journal.rs"
       - "aquilum-app/core/src/sync/core_scan.rs"
@@ -86,6 +87,9 @@ jobs:
       - name: M1d-e explicit native review and no-mutation gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1de_ -- --nocapture
+      - name: M1d-f1 sealed archive AEAD integrity and no-plaintext gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1df1_ -- --nocapture
       - name: Durable local publication recovery and stage exclusion
         working-directory: aquilum-app
         run: |
