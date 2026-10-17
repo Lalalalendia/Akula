@@ -5,7 +5,7 @@ use crate::files::error::FileCommandError;
 use crate::files::models::FileRenameResult;
 use crate::files::rename::rename_with_links;
 use crate::history::{NoteWrite, Source};
-use crate::search::paths::is_note;
+use crate::search::paths::{canonical_path, identity, is_note, strip_root};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
@@ -50,6 +50,47 @@ fn move_across_now(core: &Core, from: &Path, to: &Path) -> Result<(), FileComman
     Ok(())
 }
 
+/// Select a registered workspace conservatively. Aliases resolved by the
+/// filesystem must agree with the lexical path: never infer a safe same-vault
+/// transfer through a junction, symlink or a nested ambiguous registration.
+/// This is a gate admission check, NOT pinned-directory OS authorization.
+fn matching_vaults(roots: &[PathBuf], candidate: &Path) -> Vec<String> {
+    let resolved = canonical_path(candidate);
+    let mut matches: Vec<String> = roots
+        .iter()
+        .filter(|root| {
+            strip_root(root, candidate).is_some() || strip_root(root, &resolved).is_some()
+        })
+        .map(|root| identity(root))
+        .collect();
+    matches.sort();
+    matches.dedup();
+    matches
+}
+
+/// PR 04g-3b-7b-0: do not move the PRIMARY file until durable recovery
+/// admission is available at BOTH source and destination workspaces.
+/// A source-only history marker cannot protect a destination-only Core.
+/// Two marker creations in different vaults are NOT one atomic commit.
+/// This must be called under the ordinary File Gate, BEFORE 'run()'.
+fn admit_vault_relocation(core: &Core, from: &Path, to: &Path) -> Result<(), FileCommandError> {
+    let roots = core.known_roots();
+    let source = matching_vaults(&roots, from);
+    let destination = matching_vaults(&roots, to);
+    if (source.is_empty() && destination.is_empty())
+        || (source.len() == 1 && destination.len() == 1 && source == destination)
+    {
+        return Ok(());
+    }
+    Err(FileCommandError::Task {
+        message: format!(
+            "Cross-workspace rename/move is disabled before changing files: history recovery              has only a source-vault journal, not a verified bilateral admission protocol              (source: {}; destination: {}). Files and version history were not changed.",
+            from.display(),
+            to.display(),
+        ),
+    })
+}
+
 fn relocating<T>(
     core: &Core,
     from: &Path,
@@ -61,6 +102,9 @@ fn relocating<T>(
         // in-process filesystem critical section. History and UI callbacks
         // run only after releasing the lock.
         let _guard = core.file_mutation_guard()?;
+        // Deny before the primary file rename, including directory moves.
+        // Never acquire the HistoryService mutex while File Gate is held.
+        admit_vault_relocation(core, from, to)?;
         let notes = notes_under(from);
         let done = run()?;
         (done, relocated(&notes, from, to))
