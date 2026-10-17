@@ -23,9 +23,9 @@ fn hinted_fractional_scroll_remains_pixel_stable() {
     h.app.window_resized(&mut h.root, Size::new(f64::from(width) / scale, f64::from(height) / scale));
     let body: String = (0..250)
         .map(|i| format!(
-            "Абзац {i}: реальный Unicode текст Akula с кириллицей, **жирным**, \\
-             *курсивом*, ссылками [[Akula]] и длинным предложением для переноса \\
-             строк через Parley.\\n\\n"
+            "Абзац {i}: реальный Unicode текст Akula с кириллицей, \
+             **жирным**, *курсивом*, ссылками [[Akula]] и длинным \
+             предложением для переноса строк через Parley.\n\n"
         ))
         .collect();
     let note = h.write_note("hinted-fractional-scroll.md", &body);
