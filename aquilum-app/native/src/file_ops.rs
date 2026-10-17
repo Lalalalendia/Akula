@@ -108,13 +108,10 @@ pub fn create_note(core: &Core, workspace: &Path, title: Option<&str>) -> Result
     first_free(|i| workspace.join(if i == 0 { format!("{base}.md") } else { format!("{base} {i}.md") }), |path| gate::create(core, path, "", Source::Me, None))
 }
 
-pub fn create_folder(parent: &Path) -> Result<PathBuf, FileCommandError> {
+pub fn create_folder(core: &Core, parent: &Path) -> Result<PathBuf, FileCommandError> {
     first_free(
         |i| parent.join(if i == 0 { UNTITLED_NOTE.to_owned() } else { format!("{UNTITLED_NOTE} {i}") }),
-        |path| match std::fs::create_dir(path) {
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(FileCommandError::AlreadyExists { path: path.to_string_lossy().into_owned() }),
-            result => result.map_err(FileCommandError::from),
-        },
+        |path| gate::create_folder(core, path),
     )
 }
 
