@@ -4,47 +4,44 @@
 //! Files are created only in private tempfile vaults. Path-based open is NOT
 //! a trusted root-relative, no-follow OS capability.
 
-use std::fs::{self, File, OpenOptions, TryLockError};
+use crate::sync::filegate_lock_probe::{
+    HeldProbeLock, PinnedProbeRoot, LOCK_NAME as TEST_LOCK_NAME,
+};
+use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
-const TEST_LOCK_NAME: &str = ".akula-filegate-oslock-probe";
 const CHILD_NAME: &str = "files::gate::interprocess_probe::tests::oslock_child_entrypoint";
 
 struct HeldPair {
-    // OS advisory locks are held until all owning handles are closed.
-    _handles: Vec<File>,
+    _handles: Vec<HeldProbeLock>,
 }
 
-fn try_one(root: &Path) -> io::Result<Option<File>> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(root.join(TEST_LOCK_NAME))?;
-    match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
-        Err(TryLockError::WouldBlock) => Ok(None),
-        Err(TryLockError::Error(error)) => Err(error),
-    }
+fn try_one(root: &Path) -> io::Result<Option<HeldProbeLock>> {
+    PinnedProbeRoot::open(root)?.try_lock()
 }
 
-/// Ordering prevents cooperative two-vault deadlock but does NOT validate
-/// root identity, hostile aliases or ownership. Strictly test-only.
+/// Two workspace identities and their pre-existing lock objects are
+/// inspected through pinned OS handles, never opened by ambient leaf paths.
+/// Sorting prevents deadlock among cooperating processes. No positive
+/// result authorizes a real File Gate mutation or distributed commit.
 fn try_both(left: &Path, right: &Path) -> io::Result<Option<HeldPair>> {
-    let mut roots = [fs::canonicalize(left)?, fs::canonicalize(right)?];
-    if roots[0] == roots[1] {
+    let mut roots = [
+        (fs::canonicalize(left)?, PinnedProbeRoot::open(left)?),
+        (fs::canonicalize(right)?, PinnedProbeRoot::open(right)?),
+    ];
+    if roots[0].1.identity() == roots[1].1.identity() {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
-            "two distinct probe vaults required",
+            "two distinct pinned vault IDs required",
         ));
     }
-    roots.sort_unstable();
+    roots.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let mut handles = Vec::with_capacity(2);
-    for root in &roots {
-        match try_one(root)? {
-            Some(file) => handles.push(file),
-            None => return Ok(None), // Drop any partially acquired handles.
+    for (_, root) in &roots {
+        match root.try_lock()? {
+            Some(lock) => handles.push(lock),
+            None => return Ok(None),
         }
     }
     Ok(Some(HeldPair { _handles: handles }))
@@ -77,6 +74,10 @@ mod tests {
         let second = temp.path().join("destination-vault");
         fs::create_dir(&first).unwrap();
         fs::create_dir(&second).unwrap();
+        // Bootstrap is intentionally isolated in the tempfile fixture.
+        // The lock opener MUST fail if the file is missing at runtime.
+        fs::write(first.join(TEST_LOCK_NAME), b"").unwrap();
+        fs::write(second.join(TEST_LOCK_NAME), b"").unwrap();
         (temp, first, second)
     }
 
@@ -205,11 +206,71 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn oslock_missing_lock_object_fails_closed_without_recreation() {
+        let (_temp, left, _right) = fixture();
+        let lock = left.join(TEST_LOCK_NAME);
+        fs::remove_file(&lock).unwrap();
+        assert!(try_one(&left).is_err(), "missing lock must not get replaced");
+        assert!(!lock.exists(), "test opener must not create a new lock");
+    }
+
+    #[test]
+    fn oslock_hardlink_alias_is_rejected_even_if_both_names_refer_to_same_inode() {
+        let (_temp, left, _right) = fixture();
+        let lock = left.join(TEST_LOCK_NAME);
+        let alias = left.join("second-hardlink-to-lock");
+        fs::hard_link(&lock, &alias).unwrap();
+        assert!(try_one(&left).is_err(), "linked lock object must be refused");
+        assert!(alias.is_file(), "unsafe aliases must not be cleaned up blindly");
+        assert!(lock.is_file());
+    }
+
+    #[test]
+    fn oslock_pinned_root_replacement_is_detected_before_lock() {
+        let (temp, left, _right) = fixture();
+        let pinned = PinnedProbeRoot::open(&left).unwrap();
+        let moved = temp.path().join("moved-original-root");
+        fs::rename(&left, &moved).unwrap();
+        fs::create_dir(&left).unwrap();
+        fs::write(left.join(TEST_LOCK_NAME), b"replacement").unwrap();
+        assert!(pinned.recheck_root().is_err());
+        assert!(pinned.try_lock().is_err(), "root substitution must not get lock");
+        assert_eq!(fs::read(left.join(TEST_LOCK_NAME)).unwrap(), b"replacement");
+        assert!(moved.join(TEST_LOCK_NAME).is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oslock_symlink_leaf_never_follows_a_different_file() {
+        use std::os::unix::fs::symlink;
+        let (temp, left, _right) = fixture();
+        let lock = left.join(TEST_LOCK_NAME);
+        let external = temp.path().join("outside-original");
+        fs::rename(&lock, &external).unwrap();
+        symlink(&external, &lock).unwrap();
+        assert!(try_one(&left).is_err());
+        assert_eq!(fs::read(&external).unwrap(), b"");
+        assert!(fs::symlink_metadata(&lock).unwrap().file_type().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oslock_symlink_root_is_not_silently_canonicalized_to_vault() {
+        use std::os::unix::fs::symlink;
+        let (temp, left, _right) = fixture();
+        let alias = temp.path().join("alias-root");
+        symlink(&left, &alias).unwrap();
+        assert!(try_one(&alias).is_err());
+        assert!(try_one(&left).unwrap().is_some());
+    }
+
     #[test]
     fn oslock_two_paths_resolving_to_same_vault_are_not_distinct_participants() {
         let (_temp, left, _right) = fixture();
         let alias = left.join(".");
         assert_eq!(try_both(&left, &alias).err().unwrap().kind(), ErrorKind::InvalidInput);
-        assert!(!left.join(TEST_LOCK_NAME).exists());
+        assert!(left.join(TEST_LOCK_NAME).is_file());
     }
 }
