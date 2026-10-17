@@ -456,7 +456,14 @@ impl AwsS3ProbeClient {
 
         // The server MUST enforce atomic create-if-absent at COMPLETE, not
         // HEAD-before-COMPLETE. Never retry a lost completion ACK blindly.
-        journal.mark_finalizing(intent.operation_id, true)?;
+        if let Err(error) = journal.mark_finalizing(intent.operation_id, true) {
+            // We have not called Complete: the MPU can still be aborted.
+            // Never publish after failing to durably record Finalizing.
+            self.abort_unfinished(
+                journal, intent.operation_id, &intent.blob_key, &upload_id,
+            ).await;
+            return Err(error);
+        }
         let completed = CompletedMultipartUpload::builder().set_parts(Some(parts)).build();
         let _completion = self.client.complete_multipart_upload()
             .bucket(&self.bucket).key(&intent.blob_key).upload_id(&upload_id)
