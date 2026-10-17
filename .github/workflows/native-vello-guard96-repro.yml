@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/native-vello-guard96-repro.yml'
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
+      - 'aquilum-app/native/src/render/paint/mod.rs'
+      - 'aquilum-app/native/vendor/vello_cpu/src/text.rs'
   workflow_dispatch:
 
 permissions:
@@ -78,11 +80,12 @@ jobs:
         run: |
           set -uo pipefail
           unexpected=0
-          for mode in hint-off atlas-off full-glyph-visibility; do
+          for mode in hint-off atlas-off full-glyph-visibility cold-atlas; do
             case "$mode" in
               hint-off) flag=AQ_TEST_DISABLE_GLYPH_HINTING ;;
               atlas-off) flag=AQ_TEST_DISABLE_GLYPH_ATLAS ;;
               full-glyph-visibility) flag=AQ_TEST_FULL_GLYPH_RUN_VISIBILITY ;;
+              cold-atlas) flag=AQ_TEST_COLD_GLYPH_ATLAS_PER_CROP ;;
             esac
             failures=0
             for attempt in $(seq 1 20); do
