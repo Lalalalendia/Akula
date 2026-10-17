@@ -252,9 +252,6 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(VaultPortError::PermissionDenied.into());
         }
         self.check_root()?;
-        // All forensic records and SQLite sidecars must stay outside the
-        // registered user vault, including when the call is local-only.
-        journal.require_appdata_outside_vault(&self.root_path)?;
         let target = self.root_path.join(relative.as_str());
         let _reservation = self.core.documents.reserve_sync_closed_document(&target)
             .map_err(admission_error)?;
@@ -437,6 +434,9 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(LocalCreateError::InvalidStagedIntent);
         }
         self.check_root()?;
+        // All native WAL evidence and journal sidecars must stay outside the
+        // registered vault even for the existing local-only creation path.
+        journal.require_appdata_outside_vault(&self.root_path)?;
         let target = self.root_path.join(relative.as_str());
         let _reservation = self.core.documents.reserve_sync_closed_document(&target)
             .map_err(admission_error)?;
