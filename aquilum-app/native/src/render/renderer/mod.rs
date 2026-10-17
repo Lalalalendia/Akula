@@ -38,6 +38,18 @@ impl Frame<'_> {
     }
 }
 
+/// Test-only wall-clock breakdown of an actual Akula frame. It is not emitted
+/// in release builds and does not alter rasterizer or damage behavior.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct FrameStages {
+    pub record: std::time::Duration,
+    pub detect: std::time::Duration,
+    pub encode: std::time::Duration,
+    pub raster: std::time::Duration,
+    pub damage: super::damage::DamageStats,
+}
+
 pub struct Renderer {
     pub(super) painter: Painter,
     pub(super) scratch: Vec<u32>,
@@ -56,6 +68,8 @@ pub struct Renderer {
     shifted: Vec<Area>,
     #[cfg(test)]
     pub(super) frame: (u16, u16, Vec<u32>),
+    #[cfg(test)]
+    pub(crate) last_stages: FrameStages,
     #[cfg(test)]
     pub shifts: usize,
     #[cfg(test)]
@@ -86,6 +100,8 @@ impl Renderer {
             shifted: Vec::new(),
             #[cfg(test)]
             frame: (0, 0, Vec::new()),
+            #[cfg(test)]
+            last_stages: FrameStages::default(),
             #[cfg(test)]
             shifts: 0,
             #[cfg(test)]

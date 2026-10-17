@@ -8,6 +8,9 @@ mod stack;
 
 use masonry::kurbo::{Affine, Rect, RoundedRect, Vec2};
 
+#[cfg(test)]
+use std::time::{Duration, Instant};
+
 use super::scroll::{self, close};
 use super::sprite::Sprite;
 use region::{Past, Region};
@@ -79,6 +82,23 @@ pub struct Damage {
     pub moves: Vec<Move>,
 }
 
+/// Test-only breakdown of the non-raster damage detector. Timings exclude
+/// scene recording, vello scene encoding and rasterization.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct DamageStats {
+    pub sort: Duration,
+    pub compare: Duration,
+    pub moves: Duration,
+    pub merge: Duration,
+    pub draws: usize,
+    pub changed: usize,
+    pub raw_rects: usize,
+    pub final_areas: usize,
+    pub shifts: usize,
+    pub regions: usize,
+}
+
 pub struct Tracker {
     frame: Rect,
     stack: Vec<Level>,
@@ -91,12 +111,14 @@ pub struct Tracker {
     pub sprites: Vec<Sprite>,
     covered: Vec<Rect>,
     #[cfg(test)]
+    pub(crate) last_stats: DamageStats,
+    #[cfg(test)]
     pub causes: Vec<Rect>,
 }
 
 impl Tracker {
     pub fn new() -> Self {
-        Tracker { frame: Rect::ZERO, stack: Vec::new(), draws: Vec::new(), previous: Vec::new(), forced: None, regions: Vec::new(), past: Vec::new(), live: Vec::new(), sprites: Vec::new(), covered: Vec::new(), #[cfg(test)] causes: Vec::new() }
+        Tracker { frame: Rect::ZERO, stack: Vec::new(), draws: Vec::new(), previous: Vec::new(), forced: None, regions: Vec::new(), past: Vec::new(), live: Vec::new(), sprites: Vec::new(), covered: Vec::new(), #[cfg(test)] last_stats: DamageStats::default(), #[cfg(test)] causes: Vec::new() }
     }
 
     pub fn forget(&mut self) {
@@ -123,7 +145,13 @@ impl Tracker {
     }
 
     pub fn damage(&mut self) -> Damage {
+        #[cfg(test)]
+        let sorting = Instant::now();
         self.draws.sort_unstable_by_key(|d| d.hash);
+        #[cfg(test)]
+        let sort = sorting.elapsed();
+        #[cfg(test)]
+        let comparing = Instant::now();
         let shifts: Vec<Option<f64>> = self.regions.iter().map(|r| self.shift(r)).collect();
         let mut rects = Vec::new();
         rects.extend(self.forced);
@@ -153,6 +181,8 @@ impl Tracker {
                 (None, None) => unreachable!(),
             }
         }
+        #[cfg(test)]
+        let changed = added.len() + gone.len();
         let calm = shifts.iter().all(Option::is_none);
         let (mut solids, rest): (Vec<Draw>, Vec<Draw>) = gone.into_iter().partition(|d| calm && d.solid.is_some());
         for draw in added {
@@ -169,10 +199,40 @@ impl Tracker {
         {
             self.causes = rects.clone();
         }
+        #[cfg(test)]
+        let compare = comparing.elapsed();
+        #[cfg(test)]
+        let moving = Instant::now();
         let moves = self.moves(&shifts, &mut rects);
+        #[cfg(test)]
+        let moves_elapsed = moving.elapsed();
+        #[cfg(test)]
+        let regions = self.regions.len();
+        #[cfg(test)]
+        let draws = self.draws.len();
+        #[cfg(test)]
+        let raw_rects = rects.len();
         std::mem::swap(&mut self.draws, &mut self.previous);
         self.past = self.regions.drain(..).filter(|r| r.started).map(|r| Past { id: r.id, offset: r.offset, above: r.above }).collect();
-        Damage { areas: self.areas(rects), moves }
+        #[cfg(test)]
+        let merging = Instant::now();
+        let areas = self.areas(rects);
+        #[cfg(test)]
+        {
+            self.last_stats = DamageStats {
+                sort,
+                compare,
+                moves: moves_elapsed,
+                merge: merging.elapsed(),
+                draws,
+                changed,
+                raw_rects,
+                final_areas: areas.len(),
+                shifts: moves.len(),
+                regions,
+            };
+        }
+        Damage { areas, moves }
     }
 
     fn vanished(&self, draw: Draw, shifts: &[Option<f64>], rects: &mut Vec<Rect>) {
