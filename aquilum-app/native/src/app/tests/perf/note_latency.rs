@@ -92,6 +92,9 @@ fn native_note_latency_matrix() {
 
         let mut switches = Vec::with_capacity(cycles);
         let mut scenes = Vec::with_capacity(cycles);
+        if std::env::var_os("AQ_TAB_PHASES").is_some() {
+            eprintln!("NOTE_PHASE_BEGIN kib={kib} cycles={cycles}");
+        }
         for i in 0..cycles {
             let (id, path, letter) = if i % 2 == 0 { (first_id, &first, "A") } else { (second_id, &second, "B") };
             let timer = Instant::now();
@@ -104,6 +107,9 @@ fn native_note_latency_matrix() {
             switches.push(switched_ms);
             scenes.push(scene_ms);
             h.app.on_core_events(&mut h.root);
+        }
+        if std::env::var_os("AQ_TAB_PHASES").is_some() {
+            eprintln!("NOTE_PHASE_END kib={kib} cycles={cycles}");
         }
 
         // Event burst from an unchanged file: time only the UI-thread
