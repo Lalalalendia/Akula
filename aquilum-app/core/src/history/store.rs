@@ -5,7 +5,8 @@ use crate::files::relocate::{remove_empty_folders, remove_files};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::io::{self, ErrorKind};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
@@ -32,34 +33,173 @@ fn history_root(base: &Path) -> PathBuf {
     base.join(AQUILUM_FOLDER).join(HISTORY_FOLDER)
 }
 
+/// Strict pathname *preflight* for housekeeping, not an OS-handle-pinned
+/// authorization. Never silently follow .quantum/.aquilum/junction aliases.
+fn plain_entry(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    let mut linked = metadata.file_type().is_symlink();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const REPARSE_POINT: u32 = 0x0000_0400;
+        linked |= metadata.file_attributes() & REPARSE_POINT != 0;
+    }
+    if linked || (!metadata.is_dir() && !metadata.is_file()) {
+        return Err(io::Error::new(
+            ErrorKind::PermissionDenied,
+            format!("unsafe history alias or file type: {}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+fn plain_directory(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            plain_entry(path, &metadata)?;
+            if !metadata.is_dir() {
+                return Err(io::Error::new(
+                    ErrorKind::NotADirectory,
+                    format!("not a history directory: {}", path.display()),
+                ));
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Every existing ancestor from the chosen workspace root to a history
+/// directory must be a real directory. Missing descendants are okay only
+/// for the *destination* of an upcoming migration; callers check the source.
+fn checked_history_prefix(base: &Path, directory: &Path) -> io::Result<()> {
+    let relative = directory.strip_prefix(base).map_err(|_| {
+        io::Error::new(ErrorKind::PermissionDenied, "history path outside the selected base")
+    })?;
+    if !plain_directory(base)? {
+        return Err(io::Error::new(ErrorKind::NotFound, "history workspace root is missing"));
+    }
+    let mut current = base.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(ErrorKind::PermissionDenied, "invalid history component"));
+        };
+        current.push(name);
+        plain_directory(&current)?;
+    }
+    Ok(())
+}
+
+/// WalkDir's default no-follow setting alone is not enough when the root
+/// itself is an alias, on Windows junctions, or if traversal errors get
+/// discarded by filter_map(Result::ok). Refuse the entire maintenance pass.
+fn collect_plain_history_files(root: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.map_err(io::Error::other)?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(path)?;
+        plain_entry(path, &metadata)?;
+        if metadata.is_file() {
+            files.push(path.to_path_buf());
+        }
+    }
+    Ok(files)
+}
+
+fn history_preflight_error(action: &str, base: &Path, error: &io::Error) {
+    eprintln!(
+        "[aquilum:history] {action} refused for {}: {error}",
+        base.display()
+    );
+}
+
 pub fn adopt_quantum_history(base: &Path) {
     let legacy = base.join(QUANTUM_FOLDER);
     let legacy_history = legacy.join(HISTORY_FOLDER);
-    if !legacy_history.is_dir() {
-        return;
-    }
     let target = history_root(base);
-    let files = WalkDir::new(&legacy_history)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
-        .collect::<Vec<_>>();
+    let prepare = || -> io::Result<Option<Vec<PathBuf>>> {
+        checked_history_prefix(base, &legacy_history)?;
+        if !plain_directory(&legacy_history)? {
+            return Ok(None);
+        }
+        checked_history_prefix(base, &target)?;
+        let source_files = collect_plain_history_files(&legacy_history)?;
+        // Existing destination aliases must not cause a partial migration,
+        // even if the link is in a different note's history subdirectory.
+        if plain_directory(&target)? {
+            collect_plain_history_files(&target)?;
+        }
+        for source in &source_files {
+            let relative = source.strip_prefix(&legacy_history).map_err(io::Error::other)?;
+            let destination = target.join(relative);
+            checked_history_prefix(base, source.parent().ok_or_else(|| {
+                io::Error::new(ErrorKind::InvalidInput, "history source has no parent")
+            })?)?;
+            checked_history_prefix(base, destination.parent().ok_or_else(|| {
+                io::Error::new(ErrorKind::InvalidInput, "history destination has no parent")
+            })?)?;
+        }
+        Ok(Some(source_files))
+    };
+    let files = match prepare() {
+        Ok(Some(files)) => files,
+        Ok(None) => return,
+        Err(error) => {
+            history_preflight_error("migration", base, &error);
+            return;
+        }
+    };
     for file in files {
         let Ok(relative) = file.strip_prefix(&legacy_history) else {
-            continue;
+            return;
         };
         let destination = target.join(relative);
-        if destination.exists() {
-            continue;
+        let parent = match destination.parent() {
+            Some(parent) => parent,
+            None => return,
+        };
+        // Re-check existing ancestors before each individual rename.
+        if let Err(error) = checked_history_prefix(base, parent)
+            .and_then(|()| checked_history_prefix(base, file.parent().unwrap_or(&legacy_history)))
+            .and_then(|()| {
+                let metadata = fs::symlink_metadata(&file)?;
+                plain_entry(&file, &metadata)?;
+                if !metadata.is_file() {
+                    return Err(io::Error::new(ErrorKind::PermissionDenied, "source is not a file"));
+                }
+                Ok(())
+            })
+        {
+            history_preflight_error("migration", base, &error);
+            return;
         }
-        let moved = destination
-            .parent()
-            .map_or(Ok(()), fs::create_dir_all)
+        // symlink_metadata, not exists(), must detect even dangling links.
+        match fs::symlink_metadata(&destination) {
+            Ok(metadata) => {
+                if let Err(error) = plain_entry(&destination, &metadata) {
+                    history_preflight_error("migration", base, &error);
+                    return;
+                }
+                continue; // Existing versions are never overwritten.
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => (),
+            Err(error) => {
+                history_preflight_error("migration", base, &error);
+                return;
+            }
+        };
+        let moved = fs::create_dir_all(parent)
+            .and_then(|()| checked_history_prefix(base, parent))
             .and_then(|()| fs::rename(&file, &destination));
         if let Err(error) = moved {
             eprintln!("[aquilum:history] версия не перенесена из {}: {error}", file.display());
+            return; // Avoid subsequent partial operations on an unsafe tree.
         }
+    }
+    if let Err(error) = checked_history_prefix(base, &legacy_history) {
+        history_preflight_error("migration cleanup", base, &error);
+        return;
     }
     remove_empty_folders(&legacy);
     let _ = fs::remove_dir(&legacy);
@@ -181,23 +321,42 @@ pub fn names(dir: &Path) -> HashMap<String, String> {
 
 pub fn remove_expired(vault: &Path, retention_days: u32) -> u64 {
     let root = history_root(vault);
-    if retention_days == 0 || !root.is_dir() {
+    if retention_days == 0 {
         return 0;
     }
+    let files = match checked_history_prefix(vault, &root).and_then(|()| {
+        if !plain_directory(&root)? {
+            return Ok(None);
+        }
+        collect_plain_history_files(&root).map(Some)
+    }) {
+        Ok(Some(files)) => files,
+        Ok(None) => return 0,
+        Err(error) => {
+            history_preflight_error("retention", vault, &error);
+            return 0;
+        }
+    };
     let cutoff = millis(SystemTime::now()).saturating_sub(millis(UNIX_EPOCH + DAY * retention_days));
     let mut named = HashMap::<PathBuf, HashMap<String, String>>::new();
-    let expired = WalkDir::new(&root)
+    let expired = files
         .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .filter_map(|entry| {
-            let version = parse_version(entry.file_name().to_string_lossy().into_owned())?;
+        .filter_map(|file| {
+            let version = parse_version(file.file_name()?.to_string_lossy().into_owned())?;
             let labels = named
-                .entry(entry.path().parent()?.to_path_buf())
+                .entry(file.parent()?.to_path_buf())
                 .or_insert_with_key(|dir| names(dir));
-            (version.at_ms < cutoff && !labels.contains_key(&version.id)).then(|| entry.into_path())
+            (version.at_ms < cutoff && !labels.contains_key(&version.id)).then_some(file)
         })
         .collect::<Vec<_>>();
+    // Revalidate before the destructive phase; this remains a pathname
+    // preflight and does NOT close races against independent OS processes.
+    if let Err(error) = checked_history_prefix(vault, &root)
+        .and_then(|()| collect_plain_history_files(&root).map(|_| ()))
+    {
+        history_preflight_error("retention delete", vault, &error);
+        return 0;
+    }
     let removed = remove_files(&expired);
     let orphans = named.keys().flat_map(|dir| orphan_names(dir)).collect::<Vec<_>>();
     remove_files(&orphans);
