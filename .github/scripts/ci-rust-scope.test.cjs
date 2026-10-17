@@ -40,7 +40,7 @@ test('deleted/renamed files also select the appropriate scope using real Git',()
     const to=path.join(dir,'aquilum-app/core/src/sync/renamed.rs');
     fs.renameSync(from,to);
     git('add','-A');git('commit','-qm','rename');
-    assert.equal(classify(changed(base,'HEAD')),'sync');
+    assert.equal(classify(changed(base,'HEAD',dir)),'sync');
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('missing Git refs do not silently skip mandatory checks',()=>{
