@@ -307,6 +307,14 @@ fn validate_appdata_location(
                 if metadata.file_attributes() & 0x0000_0400 != 0 {
                     return Err(S3BindingError::InvalidStoreLocation);
                 }
+                // A hardlink outside the vault can still name the same NTFS
+                // file object inside it. Reject multiple links, not just
+                // reparse points and pathname aliases.
+                let handle = fs::OpenOptions::new().read(true).open(database_path)?;
+                let (_, _, links) = super::pinned_windows::file_identity_with_links(&handle)?;
+                if links != 1 {
+                    return Err(S3BindingError::InvalidStoreLocation);
+                }
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
