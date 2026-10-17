@@ -182,6 +182,7 @@ fn synthetic_epub_shape_pipeline_profile() {
     let mut layout_ms = 0.0;
     let mut paginate_ms = 0.0;
     let mut blocks_total = 0;
+    let mut blocks_over_64k = 0;
     let mut first_section_ms = 0.0;
     let mut max_block_bytes = 0;
     let mut headings = 0;
@@ -201,6 +202,7 @@ fn synthetic_epub_shape_pipeline_profile() {
         for block in &blocks {
             if let flow::Block::Text { text, role, .. } = block {
                 max_block_bytes = max_block_bytes.max(text.len());
+                blocks_over_64k += usize::from(text.len() > 64 * 1024);
                 headings += usize::from(matches!(role, flow::Role::Heading(_)));
                 collected.push_str(text);
                 collected.push(' ');
@@ -221,6 +223,11 @@ fn synthetic_epub_shape_pipeline_profile() {
         }
     }
     assert_eq!(headings, 18, "recover all chapter headings");
+    assert_eq!(blocks_total, if mode == "single-p" { 5352 } else { 51 }, "fixture shape changed");
+    assert_eq!(blocks_over_64k, if mode == "single-p" { 0 } else { 10 }, "fixture lost large-block skew");
+    if mode != "single-p" {
+        assert!((100_000..150_000).contains(&max_block_bytes), "largest block must resemble the real book");
+    }
     assert_eq!(collected.matches('~').count(), 2 * 5324, "retain all line tokens");
     assert!(collected.contains("~00000~") && collected.contains("~05323~"));
     let normalized = collected.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -238,7 +245,7 @@ fn synthetic_epub_shape_pipeline_profile() {
         })
         .unwrap_or(0);
     println!(
-        "READER_EPUB_SHAPE mode={mode} sections={} xhtml_bytes={xhtml_bytes} blocks={blocks_total} headings={headings} max_block_bytes={max_block_bytes} pages={pages} first_section_ms={first_section_ms:.3} open_ms={open_ms:.3} parse_ms={parse_ms:.3} flow_ms={flow_ms:.3} layout_ms={layout_ms:.3} paginate_ms={paginate_ms:.3} rss_kib={peak_rss_kib} digest={digest:016x}",
+        "READER_EPUB_SHAPE mode={mode} sections={} xhtml_bytes={xhtml_bytes} blocks={blocks_total} headings={headings} max_block_bytes={max_block_bytes} blocks_over_64k={blocks_over_64k} pages={pages} first_section_ms={first_section_ms:.3} open_ms={open_ms:.3} parse_ms={parse_ms:.3} flow_ms={flow_ms:.3} layout_ms={layout_ms:.3} paginate_ms={paginate_ms:.3} rss_kib={peak_rss_kib} digest={digest:016x}",
         book.sections.len(),
     );
 }
