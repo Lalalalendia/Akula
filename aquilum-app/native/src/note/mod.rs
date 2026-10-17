@@ -105,7 +105,7 @@ impl Note {
         // Workspace events can refer to our own save or metadata-only updates.
         // Verify actual bytes first, without parsing/rebuilding a large Rope.
         // Do not trust (size, mtime) alone: external writers can preserve both.
-        if read::hash_raw(&self.path).ok()? == *self.hash.lock().unwrap_or_else(PoisonError::into_inner) {
+        if aquilum_core::files::document::read_file_hash_impl(&self.path).ok()? == *self.hash.lock().unwrap_or_else(PoisonError::into_inner) {
             return None;
         }
         let loaded = read(&self.path).ok()?;
