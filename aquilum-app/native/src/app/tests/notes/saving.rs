@@ -55,3 +55,30 @@ fn typed_edits_reach_the_file_behind_hidden_frontmatter() {
     h.save_now();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "---\ntags: [a]\n---\nЖпривет мир!");
 }
+
+#[test]
+fn large_note_typing_keeps_widget_and_saved_text_identical_with_hidden_unicode_frontmatter() {
+    let mut h = Harness::new();
+    let header = "---\ntags: [тест]\n---\n";
+    let body = "Кириллица 😀 и длинная строка редактирования.\n".repeat(3_200);
+    let original = format!("{header}{body}");
+    let path = h.write_note("Длинная заметка.md", &original);
+    h.app.open(&mut h.root, path.clone());
+    assert!(h.app.hidden > 0, "frontmatter should be hidden");
+
+    let editor = h.app.note_ids.as_ref().unwrap().body;
+    // A direct selection outside the virtualized viewport does not itself
+    // scroll/lay out that region. Insert via the widget API, which applies the
+    // edit and emits the same Edited action used by the interactive editor.
+    editor.edit(&mut h.root, |mut widget| {
+        crate::ui::editor::TextEditor::select_byte_range(&mut widget, body.len(), body.len());
+        crate::ui::editor::TextEditor::insert_text(&mut widget, "Ж");
+    });
+    h.deliver();
+
+    let expected = format!("{original}Ж");
+    assert_eq!(h.body_text(), format!("{body}Ж"));
+    assert_eq!(h.app.text.to_string(), expected);
+    h.save_now();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
+}
