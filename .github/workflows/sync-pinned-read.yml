@@ -22,6 +22,8 @@ on:
       - "aquilum-app/core/src/files/trash.rs"
       - "aquilum-app/core/src/history/store.rs"
       - "aquilum-app/core/src/history/service.rs"
+      - "aquilum-app/core/src/history/recovery.rs"
+      - "aquilum-app/core/src/history/mod.rs"
       - "aquilum-app/native/src/app/settings/apply.rs"
       - "aquilum-app/native/src/app/settings/mod.rs"
       - "aquilum-app/native/src/app/templates/starters.rs"
@@ -97,3 +99,9 @@ jobs:
       - name: Interrupted history relocation and cross-Core quarantine
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine history_move_ -- --nocapture
+      - name: Persistent history journal and restart recovery
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --features sync-engine history::recovery::tests:: -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine history_recovery_ -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine history_corrupt_recovery_marker -- --nocapture
