@@ -27,6 +27,15 @@ pub struct NoteHistoryChanged {
     pub path: String,
 }
 
+/// The note was committed, but its history snapshot or label did not persist.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteHistorySaveFailed {
+    pub path: String,
+    pub action: String,
+    pub message: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct NoteMove {
     pub from: String,
@@ -34,8 +43,17 @@ pub struct NoteMove {
 }
 
 fn record(core: &Core, note: &Path, write: NoteWrite<'_>) {
-    if core.history.saved(&|| core.known_roots(), note, write) {
-        announce_history(core, note);
+    match core.history.try_saved(&|| core.known_roots(), note, write) {
+        Ok(true) => announce_history(core, note),
+        Ok(false) => {}
+        Err(error) => {
+            eprintln!("[aquilum:history] {}: {error}", note.display());
+            core.emit(CoreEvent::NoteHistorySaveFailed(NoteHistorySaveFailed {
+                path: note.to_string_lossy().into_owned(),
+                action: error.action.to_owned(),
+                message: error.message,
+            }));
+        }
     }
 }
 
