@@ -49,11 +49,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The former upstream Quay image has required authentication since
+          # September 2026; use a maintained, public Chainguard build instead.
+          # It runs as non-root uid 65532: give only /data a writable tmpfs.
           docker run -d --rm --name akula-s3-minio \
             -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
             -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
             -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
-            quay.io/minio/minio:latest server /data
+            cgr.dev/chainguard/minio:latest server /data
           for i in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
