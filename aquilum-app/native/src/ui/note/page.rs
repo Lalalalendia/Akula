@@ -26,6 +26,11 @@ pub(crate) struct EditorPageProfile {
     pub markdown: std::time::Duration,
     pub page_total: std::time::Duration,
     pub install: std::time::Duration,
+    pub slot_pod: std::time::Duration,
+    pub slot_remove: std::time::Duration,
+    pub slot_notify: std::time::Duration,
+    pub slot_framework: std::time::Duration,
+    pub save_error_refresh: std::time::Duration,
 }
 
 #[cfg(test)]
@@ -40,10 +45,23 @@ pub(crate) fn take_page_profile() -> EditorPageProfile {
 }
 
 #[cfg(test)]
-pub(crate) fn record_page_install(duration: std::time::Duration) {
+pub(crate) fn record_page_install(
+    duration: std::time::Duration,
+    edit_elapsed: std::time::Duration,
+    phases: Option<(std::time::Duration, std::time::Duration, std::time::Duration)>,
+) {
     LAST_PAGE.with(|slot| {
         let mut profile = slot.get();
+        let (pod, remove, notify) = phases.unwrap_or_default();
         profile.install = duration;
+        profile.slot_pod = pod;
+        profile.slot_remove = remove;
+        profile.slot_notify = notify;
+        // Remainder of the RenderRoot::edit call: framework work not timed
+        // inside our Slot method, rather than falsely attributing it to a
+        // single widget operation.
+        profile.slot_framework = edit_elapsed.saturating_sub(pod + remove + notify);
+        profile.save_error_refresh = duration.saturating_sub(edit_elapsed);
         slot.set(profile);
     });
 }
@@ -231,6 +249,11 @@ pub fn page(view: NoteView<'_>) -> (NewWidget<Flex>, NoteIds) {
         markdown,
         page_total: page_started.elapsed(),
         install: std::time::Duration::ZERO,
+        slot_pod: std::time::Duration::ZERO,
+        slot_remove: std::time::Duration::ZERO,
+        slot_notify: std::time::Duration::ZERO,
+        slot_framework: std::time::Duration::ZERO,
+        save_error_refresh: std::time::Duration::ZERO,
     }));
     (page, ids)
 }
