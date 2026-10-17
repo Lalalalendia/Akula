@@ -64,11 +64,11 @@ impl From<DagStoreError> for S3CoreStageError {
 /// revision and BLAKE3 object. Rename and tombstone proposals are not creates.
 /// This check never decides whether the destination path is absent.
 fn validate_additive_intent(
-    client: &AwsS3ProbeClient,
+    keyspace: &crate::sync::S3Keyspace,
     intent: &OperationIntent,
     revision: &RevisionRecord,
 ) -> Result<(), S3CoreStageError> {
-    if intent.vault_id != client.keyspace.vault_id()
+    if intent.vault_id != keyspace.vault_id()
         || intent.action != JournalAction::StageDownload
         || intent.remote_guard.is_some()
         || intent.expected_baseline.is_some()
@@ -83,7 +83,7 @@ fn validate_additive_intent(
     if *path != intent.path || *blob_hash != intent.expected_content_hash {
         return Err(S3CoreStageError::InvalidIntent);
     }
-    let expected_key = client.keyspace
+    let expected_key = keyspace
         .immutable_blob_key(blob_hash)
         .map_err(|_| S3CoreStageError::InvalidIntent)?;
     if intent.remote_object_id != expected_key {
@@ -145,7 +145,7 @@ impl AwsS3ProbeClient {
         let metadata = verified.read_bounded(&revision_key, 64 * 1024)?;
         let revision: RevisionRecord = serde_json::from_slice(&metadata)
             .map_err(|_| S3CoreStageError::InvalidRevision)?;
-        validate_additive_intent(self, &intent, &revision)?;
+        validate_additive_intent(&self.keyspace, &intent, &revision)?;
 
         // Each verified S3 read uses an SDK-enforced If-Match condition and
         // bounded streaming, and the root is also rechecked across the blob
@@ -226,48 +226,33 @@ mod tests {
         (ns, intent, revision)
     }
 
-    // The pure guard is exercised without credentials, SDK calls, or a server.
-    // It cannot itself grant write authority to an arbitrary local Core.
-    fn client_for_guard(ns: S3Keyspace) -> AwsS3ProbeClient {
-        use aws_sdk_s3::config::Builder;
-        let shared = aws_sdk_s3::config::Credentials::new(
-            "test", "test", None, None, "local-only",
-        );
-        let config = Builder::new()
-            .region(aws_sdk_s3::config::Region::new("us-east-1"))
-            .credentials_provider(shared)
-            .build();
-        AwsS3ProbeClient {
-            client: aws_sdk_s3::Client::from_conf(config),
-            bucket: "test-bucket".into(),
-            keyspace: ns,
-        }
-    }
+    // Pure validation must not construct a network client or need credentials.
+    // A value-only check is independent from AWS SDK behavior versions.
 
     #[test]
     fn additive_gate_rejects_cross_vault_and_wrong_revision_or_path() {
         let (ns, intent, record) = content_fixture();
-        let client = client_for_guard(ns);
-        assert!(validate_additive_intent(&client, &intent, &record).is_ok());
+        let keyspace = ns;
+        assert!(validate_additive_intent(&keyspace, &intent, &record).is_ok());
 
         let mut foreign = intent.clone();
         foreign.vault_id = VaultId::new();
         assert!(matches!(
-            validate_additive_intent(&client, &foreign, &record),
+            validate_additive_intent(&keyspace, &foreign, &record),
             Err(S3CoreStageError::InvalidIntent)
         ));
         let mut wrong_path = intent.clone();
         wrong_path.path = SyncRelativePath::parse("notes/other.md").unwrap();
-        assert!(validate_additive_intent(&client, &wrong_path, &record).is_err());
+        assert!(validate_additive_intent(&keyspace, &wrong_path, &record).is_err());
         let mut wrong_revision = intent.clone();
         wrong_revision.revision_id = RevisionId::new();
-        assert!(validate_additive_intent(&client, &wrong_revision, &record).is_err());
+        assert!(validate_additive_intent(&keyspace, &wrong_revision, &record).is_err());
         let mut wrong_blob_key = intent.clone();
-        wrong_blob_key.remote_object_id = client.keyspace.current_head_key();
-        assert!(validate_additive_intent(&client, &wrong_blob_key, &record).is_err());
+        wrong_blob_key.remote_object_id = keyspace.current_head_key();
+        assert!(validate_additive_intent(&keyspace, &wrong_blob_key, &record).is_err());
         let mut with_baseline = intent.clone();
         with_baseline.expected_baseline = Some(RevisionId::new());
-        assert!(validate_additive_intent(&client, &with_baseline, &record).is_err());
+        assert!(validate_additive_intent(&keyspace, &with_baseline, &record).is_err());
 
         let mut rename = record.clone();
         rename.operation = RevisionOperation::Rename {
@@ -275,10 +260,10 @@ mod tests {
             to: intent.path.clone(),
             blob_hash: intent.expected_content_hash.clone(),
         };
-        assert!(validate_additive_intent(&client, &intent, &rename).is_err());
+        assert!(validate_additive_intent(&keyspace, &intent, &rename).is_err());
         let mut tombstone = record;
         tombstone.operation = RevisionOperation::Tombstone { path: intent.path.clone() };
-        assert!(validate_additive_intent(&client, &intent, &tombstone).is_err());
+        assert!(validate_additive_intent(&keyspace, &intent, &tombstone).is_err());
     }
 
     #[tokio::test]
