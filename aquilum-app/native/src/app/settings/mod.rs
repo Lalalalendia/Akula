@@ -15,6 +15,7 @@ mod action;
 mod apply;
 mod bindings;
 mod refresh;
+mod recovery;
 
 use crate::system;
 use crate::ui::menu::Menu;
@@ -69,6 +70,8 @@ impl App {
         Context {
             workspace,
             sync_recovery,
+            sync_selected: None,
+            sync_notice: None,
             scale: self.interface.scale(),
             home_page,
             mcp: Some(self.workspace.core.mcp.status()),

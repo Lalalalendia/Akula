@@ -1,5 +1,5 @@
 use super::*;
-use aquilum_core::sync::NativeRecoveryOverview;
+use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryDecision};
 
 /// A read-only native safety surface. In particular, DO NOT add generic
 /// Action::Restore, cleanup, "retry sync" or stage-delete controls here:
@@ -41,30 +41,69 @@ pub(super) fn sync_recovery(ctx: &Context) -> Vec<Block> {
         info(label, Some(description),
             Control::Status { text: value, tone }),
     ];
-    if let Some(NativeRecoveryOverview::RequiresReview { example_paths, total_claims }) =
+    if let Some(NativeRecoveryOverview::RequiresReview { examples, total_claims }) =
         ctx.sync_recovery.as_ref()
     {
-        rows.extend(example_paths.iter().take(5).map(|path| {
+        rows.extend(examples.iter().take(5).map(|example| {
             info(
-                path.clone(),
+                example.historical_path.clone(),
                 Some(t("settings.sync.historicalPathHint")),
-                Control::Status {
-                    text: t("settings.sync.hold"),
-                    tone: Tone::Secondary,
-                },
+                Control::Buttons(vec![
+                    Button::new(t("settings.sync.inspect"),
+                        Action::InspectRecovery(example.operation_id.clone())),
+                ]),
             )
         }));
-        if *total_claims > example_paths.len() {
+        if *total_claims > examples.len() {
             rows.push(info(
                 t("settings.sync.more"),
                 Some(t_with("settings.sync.moreHint",
-                    &[("count", &(*total_claims - example_paths.len()).to_string())])),
+                    &[("count", &(*total_claims - examples.len()).to_string())])),
                 Control::Status {
                     text: t("settings.sync.hold"),
                     tone: Tone::Secondary,
                 },
             ));
         }
+        if let Some(preview) = ctx.sync_selected.as_ref().filter(|preview| {
+            examples.iter().any(|entry| entry.operation_id == preview.operation_id
+                && entry.historical_path == preview.historical_path)
+        }) {
+            rows.push(info(
+                t("settings.sync.selected"),
+                Some(preview.historical_path.clone()),
+                Control::Status { text: preview.operation_id.clone(), tone: Tone::Secondary },
+            ));
+            rows.push(info(
+                t("settings.sync.assessment"),
+                Some(t("settings.sync.assessmentHint")),
+                Control::Status { text: preview.assessment.clone(), tone: Tone::Danger },
+            ));
+            rows.push(info(
+                t("settings.sync.fingerprint"),
+                Some(t("settings.sync.fingerprintHint")),
+                Control::Status { text: preview.archive_fingerprint.clone(), tone: Tone::Secondary },
+            ));
+            rows.push(info(
+                t("settings.sync.reviewCount"),
+                Some(t("settings.sync.reviewCountHint")),
+                Control::Status { text: preview.review_count.to_string(), tone: Tone::Secondary },
+            ));
+            rows.push(info(
+                t("settings.sync.reviewAction"),
+                Some(t("settings.sync.reviewActionHint")),
+                Control::Buttons(vec![
+                    Button::new(t("settings.sync.keepBlocked"),
+                        Action::RequestRecoveryReview(NativeRecoveryDecision::KeepBlocked)),
+                    Button::new(t("settings.sync.escalate"),
+                        Action::RequestRecoveryReview(NativeRecoveryDecision::EscalateManualReview)),
+                ]),
+            ));
+        }
+    }
+    if let Some(notice) = &ctx.sync_notice {
+        rows.push(info(t("settings.sync.reviewResult"), None,
+            Control::Status { text: notice.clone(), tone: Tone::Secondary }));
     }
     rows.push(info(
         t("settings.sync.retention"),

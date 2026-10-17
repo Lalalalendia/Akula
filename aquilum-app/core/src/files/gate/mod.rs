@@ -4,6 +4,8 @@ mod write;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod interprocess_probe;
 
 pub use moves::{move_across, rename};
 pub use trash::{cleanup_retention, ensure_trash, restore, restore_deletion, trash};

@@ -266,6 +266,30 @@ impl SqliteSyncJournal {
         Ok(Self { connection })
     }
 
+    /// Open ONLY an existing current-schema journal for a human-confirmed
+    /// non-destructive review event. Never create or migrate on a UI click.
+    /// The caller has already validated the host-controlled file location;
+    /// cross-process path replacement is not an OS-level security boundary.
+    pub(crate) fn open_existing_review_writer(path: &Path) -> JournalResult<Self> {
+        let connection = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.execute_batch(
+            "PRAGMA synchronous = FULL;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 5000;",
+        )?;
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        )?;
+        if version != SCHEMA_VERSION {
+            return Err(JournalError::UnsupportedSchema(version));
+        }
+        Ok(Self { connection })
+    }
+
     #[cfg(test)]
     fn memory() -> JournalResult<Self> {
         Self::prepare(Connection::open_in_memory()?)
