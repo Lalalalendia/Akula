@@ -90,6 +90,7 @@ pub struct S3RemoteAnchorScope {
     vault_id: VaultId,
     fingerprint: String,
     keyspace: S3Keyspace,
+    profile: S3ConnectionProfile,
 }
 
 impl S3RemoteAnchorScope {
@@ -119,11 +120,23 @@ impl S3RemoteAnchorScope {
             vault_id: keyspace.vault_id(),
             fingerprint: blake3::hash(&bytes).to_hex().to_string(),
             keyspace: keyspace.clone(),
+            profile: profile.clone(),
         })
     }
 
     pub fn keyspace(&self) -> &S3Keyspace { &self.keyspace }
     pub fn profile_id(&self) -> &str { &self.profile_id }
+
+    /// Both the exact vault namespace and the actual AWS SDK connection must
+    /// match. This compares non-secret transport identity only; the caller
+    /// still must obtain the account/deployment binding from a trusted source.
+    pub(super) fn matches_connection(
+        &self,
+        connected_profile: &S3ConnectionProfile,
+        connected_keyspace: &S3Keyspace,
+    ) -> bool {
+        self.profile == *connected_profile && self.keyspace == *connected_keyspace
+    }
 }
 
 /// An internally checked, durable, immutable remote head and manifest pair.
