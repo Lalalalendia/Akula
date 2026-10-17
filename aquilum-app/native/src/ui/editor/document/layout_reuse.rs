@@ -5,6 +5,16 @@
 use masonry::core::{BrushIndex, StyleSet};
 use masonry::parley::Layout;
 
+#[cfg(test)]
+thread_local! {
+    static LAST_APPLIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_applied() -> usize {
+    LAST_APPLIED.with(|v| v.replace(0))
+}
+
 use super::super::markdown::{Block, Decor, Fonts};
 use super::{Document, Fold};
 
@@ -137,6 +147,8 @@ impl Document {
             reused += 1;
         }
         if reused != 0 {
+            #[cfg(test)]
+            LAST_APPLIED.with(|v| v.set(v.get() + reused));
             // Preserve the validated width so that first layout won't
             // gratuitously rewrap layouts that already use that width.
             self.width = width;
