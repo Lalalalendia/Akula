@@ -1080,7 +1080,8 @@ mod tests {
             journal.mark_staged(staged.operation_id, b"persist").unwrap();
             // Emulate the exact existing V1 tables/data, without the new table.
             journal.connection.execute_batch(
-                "DROP TABLE sync_local_publication_attempts;
+                "DROP TABLE sync_local_recovery_evidence;
+                 DROP TABLE sync_local_publication_attempts;
                  PRAGMA user_version = 1;",
             ).unwrap();
         }
@@ -1142,6 +1143,173 @@ mod tests {
             Err(JournalError::PublicationAttemptAlreadyRecorded)
         ));
         assert_eq!(second.local_publication_review_queue().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn m1d_local_download_cannot_promote_to_confirmed_baseline() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let vault = VaultId::new();
+        let document = DocumentId::new();
+        let staged = local_stage_intent(vault, document, "notes/remote.md", b"payload");
+        journal.begin(staged.clone()).unwrap();
+        journal.mark_staged(staged.operation_id, b"payload").unwrap();
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+        assert!(matches!(
+            journal.mark_applied(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert!(matches!(
+            journal.mark_verified(staged.operation_id, b"payload", "fake-rev"),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert!(matches!(
+            journal.commit(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert_eq!(journal.get(staged.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(journal.baseline(vault, document).unwrap().is_none());
+
+        // Older or damaged databases might already contain a false Verified
+        // state. The generic commit API must STILL refuse and the recovery
+        // queue must not describe it as a safe RetryCommit.
+        journal.connection.execute(
+            "UPDATE sync_operations
+             SET phase = 3, readback_hash = ?1, provider_revision = 'obsolete'
+             WHERE operation_id = ?2",
+            params![staged.expected_content_hash, staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            journal.commit(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert_eq!(journal.recovery_queue().unwrap()[0].action,
+            RecoveryAction::InspectBeforeRetry);
+        assert!(journal.baseline(vault, document).unwrap().is_none());
+    }
+
+    fn m1d_test_evidence(staged: &OperationIntent) -> LocalRecoveryEvidenceCase {
+        LocalRecoveryEvidenceCase {
+            operation_id: staged.operation_id,
+            vault_id: staged.vault_id,
+            relative_path: staged.path.clone(),
+            expected_content_hash: staged.expected_content_hash.clone(),
+            evidence: ReadOnlyLocalPublicationEvidence {
+                operation_id: staged.operation_id,
+                parent_identity: super::super::PinnedFileIdentity { device: 1, file: 123 },
+                stage: ObservedLocalFile::Present {
+                    identity: super::super::PinnedFileIdentity { device: 1, file: 456 },
+                    byte_length: 7,
+                    matches_expected_hash: true,
+                },
+                final_name: ObservedLocalFile::Absent,
+                assessment: local_recovery::LocalRecoveryAssessment::StagedOnly,
+            },
+        }
+    }
+
+    #[test]
+    fn m1d_recovery_evidence_is_write_once_and_corruption_checked_after_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/recover.md", b"payload");
+        let original = m1d_test_evidence(&staged);
+        {
+            let mut journal = SqliteSyncJournal::open(&path).unwrap();
+            journal.begin(staged.clone()).unwrap();
+            journal.mark_staged(staged.operation_id, b"payload").unwrap();
+            journal.record_local_publication_attempt_once(&staged).unwrap();
+            journal.record_local_recovery_case_once(&original).unwrap();
+        }
+        let reopened = SqliteSyncJournal::open(&path).unwrap();
+        assert_eq!(reopened.read_local_recovery_case(staged.operation_id).unwrap(),
+            Some(original.clone()));
+        assert!(matches!(
+            reopened.record_local_recovery_case_once(&original),
+            Err(JournalError::RecoveryEvidenceAlreadyRecorded)
+        ));
+        let mut changed = original.clone();
+        changed.evidence.stage = ObservedLocalFile::Absent;
+        changed.evidence.assessment = local_recovery::LocalRecoveryAssessment::NoVisibleNames;
+        assert!(matches!(
+            reopened.record_local_recovery_case_once(&changed),
+            Err(JournalError::RecoveryEvidenceAlreadyRecorded)
+        ));
+        assert_eq!(reopened.read_local_recovery_case(staged.operation_id).unwrap(),
+            Some(original));
+        reopened.connection.execute(
+            "UPDATE sync_local_recovery_evidence SET evidence_digest='tampered'
+             WHERE operation_id = ?1",
+            [staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            reopened.read_local_recovery_case(staged.operation_id),
+            Err(JournalError::CorruptedRecord)
+        ));
+        assert!(reopened.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[test]
+    fn m1d_recovery_evidence_requires_consistent_classification_and_ticket() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/recover.md", b"payload");
+        journal.begin(staged.clone()).unwrap();
+        journal.mark_staged(staged.operation_id, b"payload").unwrap();
+        let evidence = m1d_test_evidence(&staged);
+        assert!(matches!(
+            journal.record_local_recovery_case_once(&evidence),
+            Err(JournalError::CorruptedRecord)
+        ));
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+        let mut forged = evidence.clone();
+        forged.evidence.assessment = local_recovery::LocalRecoveryAssessment::NoVisibleNames;
+        assert!(matches!(
+            journal.record_local_recovery_case_once(&forged),
+            Err(JournalError::CorruptedRecord)
+        ));
+        journal.record_local_recovery_case_once(&evidence).unwrap();
+        assert!(journal.read_local_recovery_case(staged.operation_id).unwrap().is_some());
+        assert!(journal.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[test]
+    fn m1d_schema_two_migrates_without_losing_original_publication_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/old-claim.md", b"payload");
+        {
+            let mut j = SqliteSyncJournal::open(&path).unwrap();
+            j.begin(staged.clone()).unwrap();
+            j.mark_staged(staged.operation_id, b"payload").unwrap();
+            j.record_local_publication_attempt_once(&staged).unwrap();
+            j.connection.execute_batch(
+                "DROP TABLE sync_local_recovery_evidence;
+                 PRAGMA user_version = 2;",
+            ).unwrap();
+        }
+        let upgraded = SqliteSyncJournal::open(&path).unwrap();
+        assert_eq!(
+            upgraded.connection.query_row::<i64,_,_>(
+                "PRAGMA user_version", [], |row| row.get(0)
+            ).unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(upgraded.local_publication_review_queue().unwrap().len(), 1);
+        assert!(matches!(
+            upgraded.record_local_publication_attempt_once(&staged),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        let evidence = m1d_test_evidence(&staged);
+        upgraded.record_local_recovery_case_once(&evidence).unwrap();
+        assert_eq!(upgraded.read_local_recovery_case(staged.operation_id).unwrap(),
+            Some(evidence));
+        assert!(upgraded.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
     }
 
     #[test]
