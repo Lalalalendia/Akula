@@ -1,16 +1,32 @@
-use super::indexing_tokenizer;
+use super::filters::ExclusionFilter;
+use super::morphology::StemFilter;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use tantivy::tokenizer::{TextAnalyzer, TokenStream};
+use tantivy::tokenizer::{AsciiFoldingFilter, LowerCaser, RawTokenizer, RemoveLongFilter, TextAnalyzer, TokenStream};
+
+fn surface_word_tokenizer() -> TextAnalyzer {
+    // WordSpans already produces a single alphanumeric word. Running the
+    // document sanitizer for every surface form only copies that word twice.
+    TextAnalyzer::builder(RawTokenizer::default())
+        .filter(RemoveLongFilter::limit(120))
+        .filter(LowerCaser)
+        .filter(AsciiFoldingFilter)
+        .filter(StemFilter)
+        .filter(ExclusionFilter)
+        .build()
+}
 
 pub fn stem_surface_labels(title: &str, body: &str) -> HashMap<String, String> {
+    stem_surface_labels_with_tokenizer(title, body, surface_word_tokenizer())
+}
+
+fn stem_surface_labels_with_tokenizer(title: &str, body: &str, mut analyzer: TextAnalyzer) -> HashMap<String, String> {
     let mut surfaces = HashMap::<&str, u32>::new();
     for text in [title, body] {
         for surface in alphanumeric_words(text).filter(|surface| surface.chars().nth(1).is_some()) {
             *surfaces.entry(surface).or_insert(0) += 1;
         }
     }
-    let mut analyzer = indexing_tokenizer();
     let mut best = HashMap::<String, (&str, u32)>::new();
     for (surface, count) in surfaces {
         let Some(stem) = stem_token(&mut analyzer, surface).filter(|stem| stem.chars().nth(1).is_some()) else {
