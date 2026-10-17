@@ -61,7 +61,7 @@ fn overlaps(a: &Path, b: &Path) -> bool {
 /// ancestor of the candidate. This is a PRECONDITION check on a canonical,
 /// absolute host path, NOT a race-free namespace pin (ancestor replacement
 /// by a hostile same-user actor remains possible immediately afterward).
-fn require_no_alias_ancestors(scope: &Path) -> Result<(), VaultPortError> {
+pub(super) fn require_no_alias_ancestors(scope: &Path) -> Result<(), VaultPortError> {
     if !scope.is_absolute() {
         return Err(reject());
     }
@@ -79,7 +79,7 @@ fn require_no_alias_ancestors(scope: &Path) -> Result<(), VaultPortError> {
     Ok(())
 }
 
-fn require_outside_registered_roots(
+pub(super) fn require_outside_registered_roots(
     scope: &Path,
     registered_roots: &[PathBuf],
 ) -> Result<(), VaultPortError> {
