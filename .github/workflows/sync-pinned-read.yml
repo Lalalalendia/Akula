@@ -68,6 +68,9 @@ jobs:
       - name: Read-only M1c recovery race and provenance gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1c_ -- --nocapture
+      - name: M1d recovery evidence and native-baseline interlock tests
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine m1d_ -- --nocapture
       - name: Durable local publication recovery and stage exclusion
         working-directory: aquilum-app
         run: |

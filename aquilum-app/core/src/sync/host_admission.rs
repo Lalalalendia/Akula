@@ -13,6 +13,7 @@ use super::protection_store::{
 use super::OperationId;
 use super::local_create::{self, UnconfirmedLocalCreate};
 use super::local_recovery::{self, ReadOnlyLocalPublicationEvidence};
+use super::journal::LocalRecoveryEvidenceCase;
 use super::{DagStoreError, JournalAction, JournalError, JournalPhase, LocalFileSnapshot,
     SqliteDagStore, SqliteSyncJournal, SyncRelativePath, VaultPortError};
 use crate::app_core::Core;
@@ -454,6 +455,35 @@ impl<'a> RegisteredReadAdmission<'a> {
             operation_id: operation, parent_identity,
             stage, final_name, assessment,
         })
+    }
+
+    /// M1d-a: durably record the FIRST read-only recovery observation.
+    ///
+    /// The OS descriptors, closed-document reservation and File Gate are held
+    /// during inspect_local_publication. The record below is explicitly a
+    /// historical snapshot: external writers can race after that inspection.
+    /// This API has no way to release the claim, move/delete a stage,
+    /// approve provenance or commit a confirmed cloud baseline.
+    pub(crate) fn record_local_recovery_evidence(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+    ) -> Result<LocalRecoveryEvidenceCase, LocalRecoveryError> {
+        let evidence = self.inspect_local_publication(operation, journal)?;
+        self.check_root()?;
+        let ticket = journal.local_publication_review_queue()?
+            .into_iter().find(|entry| entry.operation_id == operation)
+            .ok_or(LocalRecoveryError::MissingTicket)?;
+        if ticket.vault_id.as_uuid() != self.workspace_id {
+            return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+        }
+        let case = LocalRecoveryEvidenceCase {
+            operation_id: operation,
+            vault_id: ticket.vault_id,
+            relative_path: ticket.path,
+            expected_content_hash: ticket.expected_content_hash,
+            evidence,
+        };
+        journal.record_local_recovery_case_once(&case)?;
+        Ok(case)
     }
 
     /// Bind file identity by pinned handles without reading bytes or taking

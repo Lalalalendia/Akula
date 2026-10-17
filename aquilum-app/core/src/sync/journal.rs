@@ -9,11 +9,12 @@
 //! DocumentStore and from the immutable sync DAG blob cache.
 
 use super::{DocumentId, OperationId, RevisionId, SyncRelativePath, VaultId};
+use super::local_recovery::{self, ObservedLocalFile, ReadOnlyLocalPublicationEvidence};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,6 +135,18 @@ pub struct ConfirmedBaseline {
     pub operation_id: OperationId,
 }
 
+/// Immutable, diagnostic-only crash observation. Even matching expected
+/// BLAKE3 bytes + a remembered file ID are NOT evidence of a durable Windows
+/// rename, exclusive provenance or permission to mutate a vault.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LocalRecoveryEvidenceCase {
+    pub operation_id: OperationId,
+    pub vault_id: VaultId,
+    pub relative_path: SyncRelativePath,
+    pub expected_content_hash: String,
+    pub evidence: ReadOnlyLocalPublicationEvidence,
+}
+
 /// A durable, read-only inspection ticket for an attempted local publication.
 /// Never treat it as an authorization to retry, remove, quarantine physically,
 /// or confirm a remote baseline.
@@ -177,6 +190,13 @@ pub enum JournalError {
     InvalidTransition,
     ReadbackMismatch,
     CorruptedRecord,
+    /// An unconfirmed local download cannot be promoted into an authoritative
+    /// Applied/Verified/Committed baseline by the generic remote journal API.
+    /// A future native durability/provenance gate needs a separate receipt.
+    LocalDownloadNeedsNativeReceipt,
+    /// Read-only recovery evidence is intentionally write-once. Observing a
+    /// different OS file identity cannot replace a previous incident record.
+    RecoveryEvidenceAlreadyRecorded,
     /// The durable record already claims this operation or portable target.
     /// Never automatically replay an uncertain local publication.
     PublicationAttemptAlreadyRecorded,
@@ -249,7 +269,13 @@ impl SqliteSyncJournal {
                      intent_digest TEXT NOT NULL,
                      UNIQUE (vault_id, path_collision_key)
                  );
-                 PRAGMA user_version = 2;
+                 CREATE TABLE sync_local_recovery_evidence (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     evidence_json BLOB NOT NULL,
+                     evidence_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
                  COMMIT;",
             )?,
             1 => connection.execute_batch(
@@ -264,7 +290,24 @@ impl SqliteSyncJournal {
                      intent_digest TEXT NOT NULL,
                      UNIQUE (vault_id, path_collision_key)
                  );
-                 PRAGMA user_version = 2;
+                 CREATE TABLE sync_local_recovery_evidence (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     evidence_json BLOB NOT NULL,
+                     evidence_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
+                 COMMIT;",
+            )?,
+            2 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sync_local_recovery_evidence (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_local_publication_attempts(operation_id),
+                     evidence_json BLOB NOT NULL,
+                     evidence_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
                  COMMIT;",
             )?,
             SCHEMA_VERSION => {},
@@ -391,6 +434,93 @@ impl SqliteSyncJournal {
         Ok(result)
     }
 
+    /// Compare a proposed non-authoritative incident snapshot with the
+    /// immutable STAGED publication claim. No user file or Sync baseline is
+    /// modified. This does not certify who created a matching file.
+    fn check_local_recovery_case(&self, case: &LocalRecoveryEvidenceCase)
+        -> JournalResult<()>
+    {
+        let claim = self.local_publication_review_queue()?.into_iter()
+            .find(|entry| entry.operation_id == case.operation_id)
+            .ok_or(JournalError::CorruptedRecord)?;
+        if case.vault_id != claim.vault_id
+            || case.relative_path != claim.path
+            || case.expected_content_hash != claim.expected_content_hash
+            || case.evidence.operation_id != case.operation_id
+            || case.evidence.assessment != local_recovery::classify(
+                &case.evidence.stage, &case.evidence.final_name,
+            )
+            || case.evidence.parent_identity.file == 0
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        // This cap also protects deserialized, tampered evidence records
+        // from being represented as verified, bounded local observations.
+        for observed in [&case.evidence.stage, &case.evidence.final_name] {
+            if let ObservedLocalFile::Present { identity, byte_length, .. } = observed {
+                if identity.file == 0 || *byte_length > 32 * 1024 * 1024 {
+                    return Err(JournalError::CorruptedRecord);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Make the FIRST observed recovery state durable in the *existing*
+    /// app-data WAL/FULL SQLite journal. A later same-byte/different-OS-ID
+    /// observation cannot overwrite it. No cleanup, replay or CAS receipt.
+    pub(crate) fn record_local_recovery_case_once(
+        &self, case: &LocalRecoveryEvidenceCase,
+    ) -> JournalResult<()> {
+        self.check_local_recovery_case(case)?;
+        let payload = serde_json::to_vec(case)?;
+        let digest = blake3::hash(&payload).to_hex().to_string();
+        let count = self.connection.execute(
+            "INSERT OR IGNORE INTO sync_local_recovery_evidence
+                 (operation_id, evidence_json, evidence_digest)
+             SELECT ?1, ?2, ?3 FROM sync_local_publication_attempts AS claim
+             JOIN sync_operations AS operation
+               ON claim.operation_id = operation.operation_id
+             WHERE claim.operation_id = ?1 AND operation.phase = 1",
+            params![case.operation_id.to_string(), &payload, &digest],
+        )?;
+        if count != 1 {
+            return Err(JournalError::RecoveryEvidenceAlreadyRecorded);
+        }
+        let loaded = self.read_local_recovery_case(case.operation_id)?
+            .ok_or(JournalError::CorruptedRecord)?;
+        if loaded != *case {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(())
+    }
+
+    /// Read back exact durable audit evidence. It remains a historical
+    /// observation, not evidence that the filesystem still looks this way.
+    pub(crate) fn read_local_recovery_case(
+        &self, operation: OperationId,
+    ) -> JournalResult<Option<LocalRecoveryEvidenceCase>> {
+        let row: Option<(Vec<u8>, String)> = self.connection.query_row(
+            "SELECT evidence_json, evidence_digest
+             FROM sync_local_recovery_evidence WHERE operation_id = ?1",
+            [operation.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        let Some((payload, expected_digest)) = row else {
+            return Ok(None);
+        };
+        if expected_digest != blake3::hash(&payload).to_hex().as_str() {
+            return Err(JournalError::CorruptedRecord);
+        }
+        let case: LocalRecoveryEvidenceCase = serde_json::from_slice(&payload)
+            .map_err(|_| JournalError::CorruptedRecord)?;
+        if case.operation_id != operation {
+            return Err(JournalError::CorruptedRecord);
+        }
+        self.check_local_recovery_case(&case)?;
+        Ok(Some(case))
+    }
+
     /// Same operation ID and intent is idempotent; reusing the UUID for a
     /// different action is rejected. One in-flight operation per document
     /// prevents two workers from publishing incompatible baselines.
@@ -472,6 +602,11 @@ impl SqliteSyncJournal {
     pub fn mark_applied(&mut self, id: OperationId) -> JournalResult<JournalPhase> {
         let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
+        // A remote download has no native, crash-durable local apply receipt.
+        // Generic provider readback/hash must never turn it into a baseline.
+        if record.intent.action == JournalAction::StageDownload {
+            return Err(JournalError::LocalDownloadNeedsNativeReceipt);
+        }
         match record.phase {
             JournalPhase::Staged if record.staged_hash.as_deref()
                 == Some(record.intent.expected_content_hash.as_str()) => {
@@ -496,6 +631,11 @@ impl SqliteSyncJournal {
     {
         let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
+        // A remote download has no native, crash-durable local apply receipt.
+        // Generic provider readback/hash must never turn it into a baseline.
+        if record.intent.action == JournalAction::StageDownload {
+            return Err(JournalError::LocalDownloadNeedsNativeReceipt);
+        }
         let digest = blake3::hash(observed_bytes).to_hex().to_string();
         if digest != record.intent.expected_content_hash || provider_revision.is_empty() {
             return Err(JournalError::ReadbackMismatch);
@@ -523,6 +663,11 @@ impl SqliteSyncJournal {
     pub fn commit(&mut self, id: OperationId) -> JournalResult<JournalPhase> {
         let transaction = self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record = read_operation(&transaction, id)?.ok_or(JournalError::MissingOperation)?;
+        // A remote download has no native, crash-durable local apply receipt.
+        // Generic provider readback/hash must never turn it into a baseline.
+        if record.intent.action == JournalAction::StageDownload {
+            return Err(JournalError::LocalDownloadNeedsNativeReceipt);
+        }
         if record.phase == JournalPhase::Committed {
             return Ok(JournalPhase::Committed);
         }
@@ -579,11 +724,23 @@ impl SqliteSyncJournal {
             let id = raw?.parse().map_err(|_| JournalError::CorruptedRecord)?;
             let record = read_operation(&self.connection, id)?
                 .ok_or(JournalError::CorruptedRecord)?;
-            let action = match record.phase {
-                JournalPhase::Pending => RecoveryAction::ResumeStaging,
-                JournalPhase::Staged | JournalPhase::Applied => RecoveryAction::InspectBeforeRetry,
-                JournalPhase::Verified => RecoveryAction::RetryCommit,
-                JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
+            let action = if record.intent.action == JournalAction::StageDownload {
+                // Local files may have changed outside Akula's in-process
+                // File Gate; no retry or commit based on a prior hash.
+                match record.phase {
+                    JournalPhase::Pending => RecoveryAction::ResumeStaging,
+                    JournalPhase::Staged | JournalPhase::Applied | JournalPhase::Verified =>
+                        RecoveryAction::InspectBeforeRetry,
+                    JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
+                }
+            } else {
+                match record.phase {
+                    JournalPhase::Pending => RecoveryAction::ResumeStaging,
+                    JournalPhase::Staged | JournalPhase::Applied =>
+                        RecoveryAction::InspectBeforeRetry,
+                    JournalPhase::Verified => RecoveryAction::RetryCommit,
+                    JournalPhase::Committed => return Err(JournalError::CorruptedRecord),
+                }
             };
             result.push(RecoveryItem { record, action });
         }
@@ -923,7 +1080,8 @@ mod tests {
             journal.mark_staged(staged.operation_id, b"persist").unwrap();
             // Emulate the exact existing V1 tables/data, without the new table.
             journal.connection.execute_batch(
-                "DROP TABLE sync_local_publication_attempts;
+                "DROP TABLE sync_local_recovery_evidence;
+                 DROP TABLE sync_local_publication_attempts;
                  PRAGMA user_version = 1;",
             ).unwrap();
         }
@@ -985,6 +1143,173 @@ mod tests {
             Err(JournalError::PublicationAttemptAlreadyRecorded)
         ));
         assert_eq!(second.local_publication_review_queue().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn m1d_local_download_cannot_promote_to_confirmed_baseline() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let vault = VaultId::new();
+        let document = DocumentId::new();
+        let staged = local_stage_intent(vault, document, "notes/remote.md", b"payload");
+        journal.begin(staged.clone()).unwrap();
+        journal.mark_staged(staged.operation_id, b"payload").unwrap();
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+        assert!(matches!(
+            journal.mark_applied(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert!(matches!(
+            journal.mark_verified(staged.operation_id, b"payload", "fake-rev"),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert!(matches!(
+            journal.commit(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert_eq!(journal.get(staged.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(journal.baseline(vault, document).unwrap().is_none());
+
+        // Older or damaged databases might already contain a false Verified
+        // state. The generic commit API must STILL refuse and the recovery
+        // queue must not describe it as a safe RetryCommit.
+        journal.connection.execute(
+            "UPDATE sync_operations
+             SET phase = 3, readback_hash = ?1, provider_revision = 'obsolete'
+             WHERE operation_id = ?2",
+            params![staged.expected_content_hash, staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            journal.commit(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert_eq!(journal.recovery_queue().unwrap()[0].action,
+            RecoveryAction::InspectBeforeRetry);
+        assert!(journal.baseline(vault, document).unwrap().is_none());
+    }
+
+    fn m1d_test_evidence(staged: &OperationIntent) -> LocalRecoveryEvidenceCase {
+        LocalRecoveryEvidenceCase {
+            operation_id: staged.operation_id,
+            vault_id: staged.vault_id,
+            relative_path: staged.path.clone(),
+            expected_content_hash: staged.expected_content_hash.clone(),
+            evidence: ReadOnlyLocalPublicationEvidence {
+                operation_id: staged.operation_id,
+                parent_identity: super::super::PinnedFileIdentity { device: 1, file: 123 },
+                stage: ObservedLocalFile::Present {
+                    identity: super::super::PinnedFileIdentity { device: 1, file: 456 },
+                    byte_length: 7,
+                    matches_expected_hash: true,
+                },
+                final_name: ObservedLocalFile::Absent,
+                assessment: local_recovery::LocalRecoveryAssessment::StagedOnly,
+            },
+        }
+    }
+
+    #[test]
+    fn m1d_recovery_evidence_is_write_once_and_corruption_checked_after_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/recover.md", b"payload");
+        let original = m1d_test_evidence(&staged);
+        {
+            let mut journal = SqliteSyncJournal::open(&path).unwrap();
+            journal.begin(staged.clone()).unwrap();
+            journal.mark_staged(staged.operation_id, b"payload").unwrap();
+            journal.record_local_publication_attempt_once(&staged).unwrap();
+            journal.record_local_recovery_case_once(&original).unwrap();
+        }
+        let reopened = SqliteSyncJournal::open(&path).unwrap();
+        assert_eq!(reopened.read_local_recovery_case(staged.operation_id).unwrap(),
+            Some(original.clone()));
+        assert!(matches!(
+            reopened.record_local_recovery_case_once(&original),
+            Err(JournalError::RecoveryEvidenceAlreadyRecorded)
+        ));
+        let mut changed = original.clone();
+        changed.evidence.stage = ObservedLocalFile::Absent;
+        changed.evidence.assessment = local_recovery::LocalRecoveryAssessment::NoVisibleNames;
+        assert!(matches!(
+            reopened.record_local_recovery_case_once(&changed),
+            Err(JournalError::RecoveryEvidenceAlreadyRecorded)
+        ));
+        assert_eq!(reopened.read_local_recovery_case(staged.operation_id).unwrap(),
+            Some(original));
+        reopened.connection.execute(
+            "UPDATE sync_local_recovery_evidence SET evidence_digest='tampered'
+             WHERE operation_id = ?1",
+            [staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            reopened.read_local_recovery_case(staged.operation_id),
+            Err(JournalError::CorruptedRecord)
+        ));
+        assert!(reopened.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[test]
+    fn m1d_recovery_evidence_requires_consistent_classification_and_ticket() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/recover.md", b"payload");
+        journal.begin(staged.clone()).unwrap();
+        journal.mark_staged(staged.operation_id, b"payload").unwrap();
+        let evidence = m1d_test_evidence(&staged);
+        assert!(matches!(
+            journal.record_local_recovery_case_once(&evidence),
+            Err(JournalError::CorruptedRecord)
+        ));
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+        let mut forged = evidence.clone();
+        forged.evidence.assessment = local_recovery::LocalRecoveryAssessment::NoVisibleNames;
+        assert!(matches!(
+            journal.record_local_recovery_case_once(&forged),
+            Err(JournalError::CorruptedRecord)
+        ));
+        journal.record_local_recovery_case_once(&evidence).unwrap();
+        assert!(journal.read_local_recovery_case(staged.operation_id).unwrap().is_some());
+        assert!(journal.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[test]
+    fn m1d_schema_two_migrates_without_losing_original_publication_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/old-claim.md", b"payload");
+        {
+            let mut j = SqliteSyncJournal::open(&path).unwrap();
+            j.begin(staged.clone()).unwrap();
+            j.mark_staged(staged.operation_id, b"payload").unwrap();
+            j.record_local_publication_attempt_once(&staged).unwrap();
+            j.connection.execute_batch(
+                "DROP TABLE sync_local_recovery_evidence;
+                 PRAGMA user_version = 2;",
+            ).unwrap();
+        }
+        let upgraded = SqliteSyncJournal::open(&path).unwrap();
+        assert_eq!(
+            upgraded.connection.query_row::<i64,_,_>(
+                "PRAGMA user_version", [], |row| row.get(0)
+            ).unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(upgraded.local_publication_review_queue().unwrap().len(), 1);
+        assert!(matches!(
+            upgraded.record_local_publication_attempt_once(&staged),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        let evidence = m1d_test_evidence(&staged);
+        upgraded.record_local_recovery_case_once(&evidence).unwrap();
+        assert_eq!(upgraded.read_local_recovery_case(staged.operation_id).unwrap(),
+            Some(evidence));
+        assert!(upgraded.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
     }
 
     #[test]
