@@ -39,7 +39,11 @@ fn open_core() -> (tempfile::TempDir, Arc<Core>, Arc<Recording>) {
 fn history_failure_after_primary_note_commit_uses_distinct_event_and_recovers() {
     use crate::history::service::HistoryFault;
 
-    let (directory, core, events) = open_core();
+    let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("data");
+    fs::create_dir_all(&data).unwrap();
+    let events = Arc::new(Recording::default());
+    let core = Core::open(&data, Arc::clone(&events) as Arc<dyn EventSink>);
     let vault = directory.path().join("vault");
     fs::create_dir_all(&vault).unwrap();
     core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
