@@ -19,6 +19,7 @@ const SE_FILE_OBJECT: u32 = 1;
 const OWNER_AND_DACL: u32 = 0x0000_0001 | 0x0000_0004;
 const TOKEN_QUERY: u32 = 0x0000_0008;
 const TOKEN_USER_CLASS: u32 = 1;
+const TOKEN_OWNER_CLASS: u32 = 4;
 const ACL_SIZE_INFORMATION: u32 = 2;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 const ACCESS_DENIED_ACE_TYPE: u8 = 1;
@@ -43,6 +44,11 @@ struct SidAndAttributes {
 #[repr(C)]
 struct TokenUser {
     user: SidAndAttributes,
+}
+
+#[repr(C)]
+struct TokenOwner {
+    owner: *mut c_void,
 }
 
 #[repr(C)]
@@ -177,6 +183,40 @@ pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
         return Err(refuse());
     }
 
+    // In elevated tokens a newly created directory may be owned by the
+    // token's DEFAULT owner group (e.g. BUILTIN\\Administrators), not the
+    // TokenUser SID. Both identifiers must come from this live token.
+    let mut owner_needed = 0u32;
+    unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(), TOKEN_OWNER_CLASS,
+            ptr::null_mut(), 0, &mut owner_needed,
+        );
+    }
+    if owner_needed < size_of::<TokenOwner>() as u32 || owner_needed > 4096 {
+        return Err(refuse());
+    }
+    let mut owner_data =
+        vec![0u64; (owner_needed as usize).div_ceil(size_of::<u64>())];
+    // SAFETY: the aligned buffer contains the fixed TOKEN_OWNER pointer and
+    // its SID data only after GetTokenInformation succeeds.
+    if unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(), TOKEN_OWNER_CLASS,
+            owner_data.as_mut_ptr().cast(),
+            size_of_val(owner_data.as_slice()) as u32,
+            &mut owner_needed,
+        )
+    } == 0
+    {
+        return Err(os_error("GetTokenInformation(TokenOwner)"));
+    }
+    // SAFETY: initialized TOKEN_OWNER layout has its Owner pointer at offset 0.
+    let default_owner = unsafe { (*(owner_data.as_ptr().cast::<TokenOwner>())).owner };
+    if default_owner.is_null() || unsafe { IsValidSid(default_owner) } == 0 {
+        return Err(refuse());
+    }
+
     let mut owner = ptr::null_mut();
     let mut dacl = ptr::null_mut();
     let mut descriptor = ptr::null_mut();
@@ -197,7 +237,8 @@ pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
     // NULL DACL grants unrestricted access; a missing owner cannot be bound.
     if descriptor.is_null() || owner.is_null() || dacl.is_null()
         || unsafe { IsValidSid(owner) } == 0
-        || unsafe { EqualSid(owner, user_sid) } == 0
+        || (unsafe { EqualSid(owner, user_sid) } == 0
+            && unsafe { EqualSid(owner, default_owner) } == 0)
     {
         return Err(refuse());
     }
