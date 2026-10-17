@@ -71,6 +71,7 @@ jobs:
         env:
           AQ_PIXEL_DIAG: "1"
           AQ_TEST_DISABLE_GLYPH_ATLAS: "1"
+          AQ_OUT: ${{ github.workspace }}/vello-no-atlas-frames
         run: |
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
@@ -123,5 +124,6 @@ jobs:
             vello-release-trace.json
             vello-release-summary.md
             vello-failed-frames/*.png
+            vello-no-atlas-frames/*.png
           if-no-files-found: warn
           retention-days: 21
