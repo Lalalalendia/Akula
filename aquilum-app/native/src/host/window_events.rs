@@ -69,6 +69,9 @@ impl Host {
             WindowEvent::SurfaceResized(_) if window.is_minimized() == Some(true) => {}
             WindowEvent::SurfaceResized(size) => self.surface_resized(&*window, size),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // Physical DPI can change even when the logical wrap width is
+                // unchanged. Never reuse layouts across a rescale event.
+                self.app.invalidate_inactive_layouts();
                 let scale = scale_factor * self.app.scale();
                 if let Some(root) = &mut self.root {
                     ui::rescale(root, scale);
