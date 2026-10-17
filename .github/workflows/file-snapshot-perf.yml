@@ -1,0 +1,51 @@
+name: File snapshot hash performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/files/document.rs"
+      - ".github/workflows/file-snapshot-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapshot-perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot-paired:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: snapshot-perf
+      - name: Paired old/new BLAKE3 snapshot cost (LF and CRLF)
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+            cargo --version
+          } | tee snapshot-env.txt
+          cargo test --release --locked -p aquilum-core benchmark_snapshot_hash_reuse \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee snapshot-perf.log
+          grep 'BENCH-SNAPSHOT' snapshot-perf.log | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload reproducibility data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-perf-${{ github.sha }}
+          path: |
+            aquilum-app/snapshot-env.txt
+            aquilum-app/snapshot-perf.log
+          retention-days: 30
