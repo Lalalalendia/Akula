@@ -710,5 +710,58 @@ mod tests {
         ).await.unwrap(), S3MultipartOutcome::RecoveredVerified);
         assert_eq!(recovered.status(independent.operation_id).unwrap().unwrap().phase,
             S3MultipartPhase::Verified);
+        // A provider may advertise conditional PUT while silently ignoring
+        // multipart conditions. Prove If-None-Match:* is honored by COMPLETE,
+        // and that the existing object cannot be overwritten.
+        let guarded_key = ns.immutable_blob_key(
+            &blake3::hash(b"original-guarded").to_hex().to_string(),
+        ).unwrap();
+        transport.put_conditionally(
+            &guarded_key, b"original-guarded", S3PutCondition::IfAbsent,
+        ).await.unwrap();
+        let started = transport.client.create_multipart_upload()
+            .bucket(&transport.bucket).key(&guarded_key).send().await.unwrap();
+        let guarded_upload_id = started.upload_id().unwrap();
+        let uploaded = transport.client.upload_part()
+            .bucket(&transport.bucket).key(&guarded_key)
+            .upload_id(guarded_upload_id).part_number(1)
+            .body(ByteStream::from(b"untrusted replacement".to_vec()))
+            .send().await.unwrap();
+        let guarded_parts = CompletedMultipartUpload::builder().set_parts(Some(vec![
+            CompletedPart::builder().part_number(1)
+                .e_tag(uploaded.e_tag().unwrap()).build(),
+        ])).build();
+        let guarded_result = transport.client.complete_multipart_upload()
+            .bucket(&transport.bucket).key(&guarded_key)
+            .upload_id(guarded_upload_id).multipart_upload(guarded_parts)
+            .if_none_match("*").send().await;
+        let guard_error = guarded_result.err()
+            .expect("MinIO must atomically refuse replacing an existing key");
+        assert_eq!(guard_error.as_service_error().and_then(|e| e.code()),
+            Some("PreconditionFailed"));
+        assert_eq!(transport.get_bounded(&guarded_key, 128).await.unwrap().bytes,
+            b"original-guarded");
+        // A failed conditional Complete may leave an MPU session behind.
+        // Abort the disposable session; never issue DeleteObject.
+        let _ = transport.client.abort_multipart_upload()
+            .bucket(&transport.bucket).key(&guarded_key)
+            .upload_id(guarded_upload_id).send().await;
+
+        // Exercise the transport's explicit abort path, including its
+        // durable state transition. The object itself must remain absent.
+        let cancelled = intent(b"cancelled-multipart", &ns);
+        assert!(recovered.begin(&cancelled).unwrap());
+        let begun = transport.client.create_multipart_upload()
+            .bucket(&transport.bucket).key(&cancelled.blob_key).send().await.unwrap();
+        let cancelled_upload_id = begun.upload_id().unwrap();
+        recovered.mark_started(cancelled.operation_id, cancelled_upload_id).unwrap();
+        transport.abort_unfinished(
+            &mut recovered, cancelled.operation_id, &cancelled.blob_key,
+            cancelled_upload_id,
+        ).await;
+        assert_eq!(recovered.status(cancelled.operation_id).unwrap().unwrap().phase,
+            S3MultipartPhase::Aborted);
+        assert_eq!(transport.head(&cancelled.blob_key).await,
+            Err(S3TransportError::NotFound));
     }
 }
