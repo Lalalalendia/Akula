@@ -1,0 +1,123 @@
+name: Paired crop rope-prefix performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/rope.rs"
+      - ".github/bench/rope-prefix.rs"
+      - ".github/workflows/rope-prefix-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rope-prefix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Record pinned baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/rope-base" "${{ github.event.pull_request.base.sha }}"
+          {
+            echo "BASE=$(git -C "$RUNNER_TEMP/rope-base" rev-parse HEAD)"
+            echo "HEAD=${{ github.event.pull_request.head.sha }}"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+            cargo --version
+          } | tee environment.txt
+
+      - name: Build one fixture with the real crop Rope dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rope-probe/src"
+          cp .github/bench/rope-prefix.rs "$RUNNER_TEMP/rope-probe/src/main.rs"
+          cat > "$RUNNER_TEMP/rope-probe/Cargo.toml" <<'TOML'
+          [package]
+          name = "rope-prefix-probe"
+          version = "0.0.1"
+          edition = "2024"
+
+          [dependencies]
+          crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
+          TOML
+
+          for variant in base head; do
+            if [ "$variant" = base ]; then
+              cp "$RUNNER_TEMP/rope-base/aquilum-app/native/src/rope.rs" "$RUNNER_TEMP/rope-probe/src/rope.rs"
+            else
+              cp "$GITHUB_WORKSPACE/aquilum-app/native/src/rope.rs" "$RUNNER_TEMP/rope-probe/src/rope.rs"
+            fi
+            cargo test --release --manifest-path "$RUNNER_TEMP/rope-probe/Cargo.toml" -- --test-threads=1
+            cargo build --release --manifest-path "$RUNNER_TEMP/rope-probe/Cargo.toml"
+            cp "$RUNNER_TEMP/rope-probe/target/release/rope-prefix-probe" "$RUNNER_TEMP/rope-$variant"
+          done
+
+      - name: Paired ABBA elapsed-time measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/rope-base" | tee base-1.txt
+          "$RUNNER_TEMP/rope-head" | tee head-1.txt
+          "$RUNNER_TEMP/rope-head" | tee head-2.txt
+          "$RUNNER_TEMP/rope-base" | tee base-2.txt
+
+      - name: Summarize all workloads including regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re, statistics
+          cases = ("identical-unicode", "identical-ascii", "short-equal", "near-start",
+                   "middle-edit", "near-tail", "ascii-tail-edit", "prefix-shorter")
+          pattern = re.compile(r"BENCH-ROPE case=([\w-]+) bytes=(\d+) matched=(\d+) median_us=([0-9.]+)")
+          parsed = {}
+          for side in ("base", "head"):
+              for iteration in (1, 2):
+                  filename = Path(f"{side}-{iteration}.txt")
+                  rows = {name: (int(size), int(matched), float(us))
+                          for name, size, matched, us in pattern.findall(filename.read_text())}
+                  assert set(rows) == set(cases), f"missing cases in {filename}: {set(cases) - set(rows)}"
+                  parsed[side, iteration] = rows
+          output = [
+              "## crop::Rope common_prefix — paired same-runner ABBA",
+              "",
+              "| Case | Bytes | Matching bytes | Base us | PR us | Change |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          for case in cases:
+              all_rows = [parsed[side, sample][case]
+                          for side in ("base", "head") for sample in (1, 2)]
+              assert len({row[:2] for row in all_rows}) == 1, f"test fixture changed: {case}"
+              base = statistics.median(parsed["base", i][case][2] for i in (1, 2))
+              head = statistics.median(parsed["head", i][case][2] for i in (1, 2))
+              size, matched, _ = all_rows[0]
+              output.append(f"| {case} | {size} | {matched} | {base:.4f} | {head:.4f} | {100*(head/base-1):+.1f}% |")
+          output += ["", "Negative means faster; isolated crop::Rope prefix kernel only.",
+                     "Decide on merging from the full workload matrix, not a cherry-picked case."]
+          summary = "\n".join(output) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rope-prefix-paired-${{ github.sha }}
+          path: |
+            environment.txt
+            base-*.txt
+            head-*.txt
+          retention-days: 30
