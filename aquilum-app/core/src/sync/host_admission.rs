@@ -532,15 +532,66 @@ impl<'a> RegisteredReadAdmission<'a> {
         self.inspect_local_publication_with_hook(operation, journal, || {})
     }
 
+    /// Read-only inspection for a durably bound shared S3 vault after the
+    /// existing no-replace local create. Neither an S3 profile nor this result
+    /// authorizes publication, retry, deleting files or confirming baselines.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn inspect_local_publication_for_registered_s3(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        bindings: &super::profile_binding::SqliteRegisteredS3Bindings,
+        profile: &super::S3ConnectionProfile, keyspace: &super::S3Keyspace,
+    ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
+        let denied = || LocalRecoveryError::Admission(VaultPortError::PermissionDenied);
+        let binding = bindings.load_for_registered(self)
+            .map_err(|_| denied())?.ok_or_else(denied)?;
+        if !binding.matches_remote(profile, keyspace) {
+            return Err(denied());
+        }
+        journal.require_appdata_outside_vault(&self.root_path)?;
+        let evidence = self.inspect_local_publication_with_bound_vault_and_hook(
+            operation, journal, binding.vault_id,
+            Some(binding.profile_id.as_str()), || {},
+        )?;
+        // This does not eliminate external races, but a changed app-private
+        // binding or detached registered root must never look like evidence
+        // from the originally requested remote vault.
+        if bindings.load_for_registered(self).map_err(|_| denied())?.as_ref()
+            != Some(&binding)
+        {
+            return Err(denied());
+        }
+        Ok(evidence)
+    }
+
     fn inspect_local_publication_with_hook(
         &self, operation: OperationId, journal: &SqliteSyncJournal,
+        before_second: impl FnOnce(),
+    ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
+        // Preserve the legacy local-only UUID boundary.
+        self.inspect_local_publication_with_bound_vault_and_hook(
+            operation, journal, super::VaultId::from_uuid(self.workspace_id),
+            None, before_second,
+        )
+    }
+
+    fn inspect_local_publication_with_bound_vault_and_hook(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        expected_vault: super::VaultId,
+        expected_profile_id: Option<&str>,
         before_second: impl FnOnce(),
     ) -> Result<ReadOnlyLocalPublicationEvidence, LocalRecoveryError> {
         let ticket = journal.local_publication_review_queue()?
             .into_iter().find(|entry| entry.operation_id == operation)
             .ok_or(LocalRecoveryError::MissingTicket)?;
-        if ticket.vault_id.as_uuid() != self.workspace_id {
+        if ticket.vault_id != expected_vault {
             return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+        }
+        if let Some(profile_id) = expected_profile_id {
+            let record = journal.get(operation)?
+                .ok_or(LocalRecoveryError::MissingTicket)?;
+            if record.intent.profile_id != profile_id {
+                return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
+            }
         }
         let relative = &ticket.path;
         self.check_root()?;
