@@ -51,6 +51,8 @@ impl App {
             hero: self.hero_view(),
             smart: crate::ui::editor::Smart::from_config(&self.workspace.core.settings.get_config()),
             wake: std::sync::Arc::clone(&self.workspace.wake),
+            #[cfg(test)]
+            trial_layout: self.pending_plain_layout.take(),
         };
         self.hero_shown = self.hero_key();
         let (page, ids) = note::page(view);
