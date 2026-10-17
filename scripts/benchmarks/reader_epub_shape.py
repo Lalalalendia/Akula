@@ -41,27 +41,38 @@ CONTAINER = ('<?xml version="1.0"?><container version="1.0" '
              'media-type="application/oebps-package+xml"/></rootfiles></container>')
 
 
+# Extracted *shape* of the user-supplied book, not its words.
+# Ten of the first sixteen blocks exceed ~64 KiB at 225 UTF-8 bytes/line.
+# The actual book also contains much smaller text blocks between titles.
+GROUP_LINES = [500, 7, 470, 430, 6, 410, 400, 5, 395, 390, 4,
+               350, 320, 4, 290, 270, 4, 255, 240, 4, 225, 220, 125]
+assert len(GROUP_LINES) == 23 and sum(GROUP_LINES) == LINES
+
+
 def chapters(kind: str) -> list[str]:
-    all_chapters = []
+    groups = []
     first = 0
-    for chapter in range(CHAPTERS):
-        count = LINES // CHAPTERS + (chapter < LINES % CHAPTERS)
-        groups = 2 if chapter < 15 else 1
-        body = [f'<title><b>Глава {chapter + 1}</b><br/>Метка {chapter + 1}</title>']
-        for part in range(groups):
-            start = first + count * part // groups
-            end = first + count * (part + 1) // groups
-            body.append('<div>')
-            for number in range(start, end):
-                line = LINE_TEXTS[number]
-                if kind == 'single-p':
-                    body.append(f'<p>{line}</p>')
-                else:
-                    body.append(f'{line}<br/>')
-            body.append('</div>')
+    for count in GROUP_LINES:
+        group = ['<div>']
+        for number in range(first, first + count):
+            line = LINE_TEXTS[number]
+            group.append(f'<p>{line}</p>' if kind == 'single-p' else f'{line}<br/>')
+        group.append('</div>')
+        groups.append(''.join(group))
         first += count
-        all_chapters.append(''.join(body))
     assert first == LINES
+    all_chapters = []
+    offset = 0
+    for chapter in range(CHAPTERS):
+        # 5 double-group chapters plus 13 single-group chapters = 23 divs.
+        count = 2 if chapter < 5 else 1
+        body = [f'<title><b>Глава {chapter + 1}</b><br/>Метка {chapter + 1}</title>']
+        body.extend(groups[offset:offset + count])
+        offset += count
+        if 4 <= chapter < 14:
+            body.append(f'<p>Краткое пояснение {chapter + 1}</p>')
+        all_chapters.append(''.join(body))
+    assert offset == len(groups)
     return all_chapters
 
 
