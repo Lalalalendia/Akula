@@ -134,7 +134,7 @@ fn history_preflight_error(action: &str, base: &Path, error: &io::Error) {
     );
 }
 
-pub fn adopt_quantum_history(base: &Path) {
+pub(super) fn adopt_quantum_history(base: &Path) {
     let legacy = base.join(QUANTUM_FOLDER);
     let legacy_history = legacy.join(HISTORY_FOLDER);
     let target = history_root(base);
@@ -229,7 +229,7 @@ pub fn history_dir(base: &Path, relative: &Path) -> PathBuf {
     history_root(base).join(relative)
 }
 
-pub fn write_version(
+pub(super) fn write_version(
     dir: &Path,
     device: &str,
     snapshot: &Snapshot,
@@ -293,7 +293,7 @@ pub fn version_at(id: &str) -> Option<u64> {
     parse_version(id.to_owned()).map(|version| version.at_ms)
 }
 
-pub fn update_version_text(
+pub(super) fn update_version_text(
     dir: &Path,
     version_id: &str,
     text: &str,
@@ -301,7 +301,7 @@ pub fn update_version_text(
     write_file_atomic_impl(&dir.join(version_id), text, None).map(|_| ())
 }
 
-pub fn remove_version_and_names(dir: &Path, version_id: &str) {
+pub(super) fn remove_version_and_names(dir: &Path, version_id: &str) {
     let _ = fs::remove_file(dir.join(version_id));
     for (file_name, path) in files(dir) {
         if let Some((version, _, _)) = name_mark(&file_name) {
@@ -316,7 +316,7 @@ pub fn system_time_from_ms(millis: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(millis)
 }
 
-pub fn write_name(
+pub(super) fn write_name(
     dir: &Path,
     device: &str,
     version_id: &str,
@@ -349,7 +349,7 @@ pub fn names(dir: &Path) -> HashMap<String, String> {
         .collect()
 }
 
-pub fn remove_expired(vault: &Path, retention_days: u32) -> u64 {
+pub(super) fn remove_expired(vault: &Path, retention_days: u32) -> u64 {
     let root = history_root(vault);
     if retention_days == 0 {
         return 0;
