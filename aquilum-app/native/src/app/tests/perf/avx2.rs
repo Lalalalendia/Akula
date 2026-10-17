@@ -114,6 +114,23 @@ fn scroll_parity(scale: f64, width: u32, height: u32, threads: u16) {
             let b = measured_draw(&mut baseline, &layers, w, hh, scale, step == 0);
             (b, a)
         };
+        // The SSE4.2 reference line was captured from the previous
+        // unmodified renderer on both Linux and Windows in #105 CI.
+        // Prevent a seemingly successful cross-SIMD comparison from silently
+        // changing both implementations away from the original output.
+        if scale == 1.75 && step == 0 {
+            let pixels = baseline.frame_pixels();
+            let mut hash: u64 = 0xcbf29ce484222325;
+            for x in 880..1120 {
+                let pixel = pixels[183 * usize::from(w) + x];
+                for shift in [16, 8, 0] {
+                    hash ^= u64::from((pixel >> shift) as u8);
+                    hash = hash.wrapping_mul(0x100000001b3);
+                }
+            }
+            assert_eq!(hash, 0xecdf3e74d9971c8b,
+                "SSE4.2 CTA baseline changed: scale=1.75 row=183 x=880..1119, rgb_fnv1a={hash:016x}");
+        }
         before.push(b);
         after.push(a);
         baseline_damage += db;
