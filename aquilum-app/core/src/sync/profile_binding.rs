@@ -360,6 +360,56 @@ mod tests {
     }
 
     #[test]
+    fn verified_s3_vault_id_is_persistently_linked_to_existing_external_lock() {
+        use super::super::filegate_custody_identity::SqliteCustodyIdentityStore;
+        use super::super::filegate_lock_custody::scoped_leaf;
+        use super::super::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("local-vault");
+        let appdata = temp.path().join("host-data");
+        let core = core(&root, &appdata);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let anchor = temp.path().join("external-locks")
+            .join(scoped_leaf(PinnedProbeRoot::open(&root).unwrap().identity()));
+        fs::create_dir_all(&anchor).unwrap();
+        let lock = anchor.join(LOCK_NAME);
+        fs::write(&lock, b"pre-existing-lock-bytes").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&anchor, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        #[cfg(unix)]
+        let anchor = fs::canonicalize(&anchor).unwrap();
+
+        let (profile, keyspace, head) = s3();
+        let profiles_db = appdata.join("registered-s3.sqlite");
+        let custody_db = appdata.join("custody-binding.sqlite");
+        {
+            let mut profiles = SqliteRegisteredS3Bindings::open(&admission, &profiles_db).unwrap();
+            let joined = profiles.bind_existing_verified_s3(
+                &admission, "my-s3-profile", &profile, &keyspace, &head,
+            ).unwrap();
+            let mut custody = SqliteCustodyIdentityStore::open(&admission, &custody_db).unwrap();
+            let recorded = custody.bind_registered_s3(&admission, &profiles, &anchor).unwrap();
+            assert_eq!(recorded.vault_id, joined.vault_id);
+            assert_eq!(recorded.vault_id, keyspace.vault_id());
+            assert_ne!(recorded.workspace_id, recorded.vault_id.as_uuid());
+        }
+
+        drop(admission);
+        drop(core);
+        let restarted = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        let admission = RegisteredReadAdmission::open(&restarted, &root).unwrap();
+        let profiles = SqliteRegisteredS3Bindings::open(&admission, &profiles_db).unwrap();
+        let custody = SqliteCustodyIdentityStore::open(&admission, &custody_db).unwrap();
+        let verified = custody.verify_registered_s3(&admission, &profiles, &anchor).unwrap();
+        assert_eq!(verified.vault_id, keyspace.vault_id());
+        assert_eq!(fs::read(lock).unwrap(), b"pre-existing-lock-bytes");
+    }
+
+    #[test]
     fn two_independent_local_registrations_bind_same_remote_vault_without_id_alias() {
         let temp = tempfile::tempdir().unwrap();
         let root_a = temp.path().join("one");
