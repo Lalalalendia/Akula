@@ -3,7 +3,6 @@
 //! rendering, and it never treats isolated hot-path time as end-to-end latency.
 
 use super::*;
-use crate::stats::percentiles;
 use std::time::Duration;
 
 fn run_damage_profile(name: &str, scale: f64, width: u32, height: u32) {
