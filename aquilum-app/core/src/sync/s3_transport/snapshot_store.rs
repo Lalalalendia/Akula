@@ -9,7 +9,7 @@
 
 use super::{AwsS3ProbeClient, S3HeadError, S3TransportError};
 use crate::sync::{
-    collect_verified_listing, ProviderCapabilities, RemoteObject, RemotePage,
+    ProviderCapabilities, RemoteObject, RemotePage,
     RemotePrecondition, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
     RevisionDag, RevisionOperation, RevisionRecord, S3HeadPointerV1,
     S3RevisionRefV1,
@@ -274,7 +274,7 @@ impl AwsS3ProbeClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::{DocumentId, RevisionId, SyncRelativePath};
+    use crate::sync::{collect_verified_listing, DocumentId, RevisionId, SyncRelativePath};
 
     fn fixture(
         document: DocumentId,
@@ -387,8 +387,7 @@ mod tests {
         store.accept(missing.0, missing.1).unwrap();
         assert!(matches!(store.validate_complete_dag(),
             Err(S3HeadError::InvalidManifest)));
-        assert!(matches!(store.accept(root.clone(), bytes),
-            Err(S3HeadError::SnapshotBudgetExceeded)) == false);
+        assert!(store.accept(root.clone(), bytes).is_ok());
         assert!(matches!(S3VerifiedRevisionMetadataStore::new("root".into(), 0),
             Err(S3HeadError::SnapshotBudgetExceeded)));
         assert!(matches!(S3VerifiedRevisionMetadataStore::new("root".into(),
