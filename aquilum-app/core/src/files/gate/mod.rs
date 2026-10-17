@@ -7,7 +7,7 @@ mod tests;
 
 pub use moves::{move_across, rename};
 pub use trash::{ensure_trash, restore, restore_deletion, trash};
-pub use write::{copy, create, create_binary, create_folder, name_version, write};
+pub use write::{copy, create, create_binary, create_folder, ensure_folder_tree, name_version, write};
 
 use super::attachments::forget_attachments_if_touched;
 use crate::app_core::{Core, CoreEvent};
