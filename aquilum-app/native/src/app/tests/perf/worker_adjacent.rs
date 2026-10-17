@@ -203,12 +203,21 @@ fn run_batch_case(
         }
         let times = frame.map(|v| v.expect("all four renderers drew this frame"));
 
-        for index in 1..4 {
+        // Same-region-plan serial/parallel paths must be byte-identical.
+        // Changing crop geometry can legitimately change at most one 8-bit
+        // channel step; the existing Akula full-redraw gate is <=1/255.
+        // Never use the looser threshold for identical partitioning.
+        for (left, right, exact) in [
+            (0usize, 1usize, true),
+            (2, 3, true),
+            (0, 2, false),
+            (0, 3, false),
+        ] {
             let (changed, severe, peak) = describe_diff(
-                case, step, strips, MODES[index], w,
-                renderers[0].frame_pixels(), renderers[index].frame_pixels(),
+                case, step, strips, MODES[right], w,
+                renderers[left].frame_pixels(), renderers[right].frame_pixels(),
             );
-            if changed > 0 {
+            if severe > 0 || (exact && changed > 0) {
                 let reference = render_full(&layers, w, hh, scale);
                 describe_diff(
                     case, step, strips, "baseline_vs_full", w,
@@ -216,22 +225,25 @@ fn run_batch_case(
                 );
                 describe_diff(
                     case, step, strips, "variant_vs_full", w,
-                    renderers[index].frame_pixels(), reference.frame_pixels(),
+                    renderers[right].frame_pixels(), reference.frame_pixels(),
                 );
                 if let Some(path) = std::env::var_os("AQ_ADJACENT_DIAG_OUT") {
                     let dir = std::path::PathBuf::from(path);
                     std::fs::create_dir_all(&dir).expect("create diagnostic artifact directory");
                     let stem = format!("{case}-strips{strips}-step{step}");
                     std::fs::write(dir.join(format!("{stem}-baseline.png")), renderers[0].png()).expect("baseline png");
-                    std::fs::write(dir.join(format!("{stem}-{}.png", MODES[index])), renderers[index].png()).expect("variant png");
+                    std::fs::write(dir.join(format!("{stem}-{}.png", MODES[right])), renderers[right].png()).expect("variant png");
                     std::fs::write(dir.join(format!("{stem}-full.png")), reference.png()).expect("reference png");
                 }
             }
             assert!(
-                changed == 0,
-                "{case}/strips={strips}/step={step}/mode={}: byte parity                  changed={changed}, severe_gt1={severe}, peak={peak}/255",
-                MODES[index],
+                severe == 0 && (!exact || changed == 0),
+                "{case}/strips={strips}/step={step}: {} vs {} \
+                 exact={exact} changed={changed} severe_gt1={severe} peak={peak}/255",
+                MODES[left], MODES[right],
             );
+        }
+        for index in 1..4 {
             assert_eq!(
                 times[0].pixels,
                 times[index].pixels,
