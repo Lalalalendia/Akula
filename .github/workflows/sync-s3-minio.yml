@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/src/sync/profile_binding.rs'
+      - 'aquilum-app/core/src/sync/host_admission.rs'
+      - 'aquilum-app/core/src/sync/local_create.rs'
       - 'aquilum-app/core/src/sync/s3_transport/**'
       - 'aquilum-app/core/src/sync/s3.rs'
       - 'aquilum-app/core/src/sync/s3_manifest.rs'
