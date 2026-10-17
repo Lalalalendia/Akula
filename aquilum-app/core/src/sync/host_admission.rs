@@ -416,56 +416,46 @@ impl<'a> RegisteredReadAdmission<'a> {
         }
         journal.require_appdata_outside_vault(&self.root_path)?;
 
-        // This initial scope verification releases its diagnostic probe lock.
-        // Acquire a NEW held lock and keep it throughout the actual operation.
-        let record = custody.verify_registered_s3(self, bindings, custody_scope)
-            .map_err(|_| denied())?;
-        if record.vault_id != binding.vault_id
-            || record.workspace_id != self.workspace_id
-            || (record.registered_root_volume, record.registered_root_file)
-                != (self.initial.0, self.initial.1)
-        {
-            return Err(denied());
-        }
-        let scope = super::filegate_lock_probe::PinnedProbeRoot::open(custody_scope)
-            .map_err(|_| denied())?;
-        if scope.identity() != (record.custody_scope_volume, record.custody_scope_file) {
-            return Err(denied());
-        }
-        let held = scope.try_lock().map_err(|_| denied())?
-            .ok_or_else(denied)?;
-        if held.identity() != (record.lock_volume, record.lock_file) {
-            return Err(denied());
-        }
-        held.recheck_held_name(&scope).map_err(|_| denied())?;
-        self.check_root()?;
-        if bindings.load_for_registered(self).map_err(|_| denied())?
-            .as_ref() != Some(&binding)
-        {
-            return Err(denied());
-        }
-
-        // The OS handle remains exclusively locked during journal's one-shot
-        // claim, native no-replace, pinned final readback, fsync and audit.
-        // Cooperative second processes sharing this lock cannot interleave.
-        let result = self.create_staged_with_bound_vault_and_hook(
-            operation, journal, cache, binding.vault_id,
-            Some(binding.profile_id.as_str()), || {},
+        // Use the same validated lock *lifetime* as the already merged
+        // cooperative File Gate + HistoryService experiment (#193). It
+        // checks exact persisted physical custody IDs, registered root and
+        // external namespace/owner/DACL both before and after the callback.
+        // Do not take a second OS lock inside native File Gate.
+        //
+        // If any *post*-check fails, publication may already have happened.
+        // The caller MUST report an ambiguous HOLD instead of blind replay.
+        let mut entered = false;
+        let outcome = custody.with_cooperative_writer_lifetime(
+            self, binding.vault_id, custody_scope, || {
+                entered = true;
+                // Revalidate the S3 configuration WHILE the OS lock is held.
+                if bindings.load_for_registered(self).map_err(|_| denied())?
+                    .as_ref() != Some(&binding)
+                {
+                    return Err(denied());
+                }
+                let published = self.create_staged_with_bound_vault_and_hook(
+                    operation, journal, cache, binding.vault_id,
+                    Some(binding.profile_id.as_str()), || {},
+                );
+                if published.is_ok() {
+                    if bindings.load_for_registered(self)
+                        .map_err(|_| LocalCreateError::PublicationUncertain)?
+                        .as_ref() != Some(&binding)
+                    {
+                        return Err(LocalCreateError::PublicationUncertain);
+                    }
+                }
+                published
+            },
         );
-        if result.is_ok() {
-            // Post-publish substitution must produce HOLD, not a false ACK.
-            held.recheck_held_name(&scope)
-                .map_err(|_| LocalCreateError::PublicationUncertain)?;
-            self.check_root()
-                .map_err(|_| LocalCreateError::PublicationUncertain)?;
-            if bindings.load_for_registered(self)
-                .map_err(|_| LocalCreateError::PublicationUncertain)?
-                .as_ref() != Some(&binding)
-            {
-                return Err(LocalCreateError::PublicationUncertain);
-            }
+        match outcome {
+            Ok(published) => published,
+            // Even if the filesystem publish finished, a revoked lock or
+            // altered root/ACL during postflight is never reported as ACK.
+            Err(_) if entered => Err(LocalCreateError::PublicationUncertain),
+            Err(_) => Err(denied()),
         }
-        result
     }
 
     fn create_staged_with_bound_vault_and_hook(
