@@ -1,0 +1,101 @@
+name: Native Vello worker crossover (diagnostic)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
+      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - 'aquilum-app/native/src/render/renderer/pass.rs'
+      - '.github/scripts/summarize-vello-worker-crossover.py'
+      - '.github/workflows/native-vello-worker-crossover.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-worker-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  crossover:
+    name: Real-editor worker-count crossover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-worker-crossover-v1
+          cache-workspace-crates: true
+      - name: Install native Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record exact runner CPU and locked Rust version
+        shell: bash
+        run: |
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            grep -m1 'model name' /proc/cpuinfo || true
+            grep -m1 'flags' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee vello-worker-env.txt
+      - name: Baseline scroll damage (roughly 1–2 percent of frame)
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_WORKLOAD: normal
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-worker-normal.log"
+      - name: Scroll edges redrawn with 96-pixel guard
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-worker-guard96.log"
+      - name: Entire scroll viewport rerasterized, row moves disabled
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_WORKLOAD: viewport
+          AQ_TEST_REDRAW_SCROLL_VIEWPORT: '1'
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-worker-viewport.log"
+      - name: Whole-screen raster on scroll
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_WORKLOAD: full
+          AQ_TEST_FORCE_FULL_ON_SCROLL: '1'
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-worker-full.log"
+      - name: Validate complete worker matrix and summarize crossover
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/summarize-vello-worker-crossover.py
+          python3 .github/scripts/summarize-vello-worker-crossover.py vello-worker-normal.log vello-worker-guard96.log vello-worker-viewport.log vello-worker-full.log --output vello-worker-crossover-summary.md
+          cat vello-worker-crossover-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain raw timings and exact runner metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-worker-crossover-${{ github.sha }}
+          path: |
+            vello-worker-env.txt
+            vello-worker-*.log
+            vello-worker-crossover-summary.md
+          if-no-files-found: warn
+          retention-days: 14
