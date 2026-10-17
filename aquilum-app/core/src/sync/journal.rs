@@ -147,6 +147,15 @@ pub(crate) struct LocalRecoveryEvidenceCase {
     pub evidence: ReadOnlyLocalPublicationEvidence,
 }
 
+/// Private app-data only. This is an immutable *copy*, NOT an OS quarantine
+/// move or permission to remove the stage/final name in the user vault.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct LocalRecoveryArchivedCopy {
+    pub operation_id: OperationId,
+    pub stage_bytes: Option<Vec<u8>>,
+    pub final_bytes: Option<Vec<u8>>,
+}
+
 /// A durable, read-only inspection ticket for an attempted local publication.
 /// Never treat it as an authorization to retry, remove, quarantine physically,
 /// or confirm a remote baseline.
@@ -560,6 +569,145 @@ impl SqliteSyncJournal {
         }
         self.check_local_recovery_case(&case)?;
         Ok(Some(case))
+    }
+
+    /// Refuse to persist evidence bytes in an arbitrary database that might
+    /// live under the registered user's sync root. The caller still needs a
+    /// trusted, private app-data directory (including all SQLite sidecars).
+    /// Canonical path checks complement, but do not replace, host authority.
+    pub(crate) fn require_appdata_outside_vault(&self, root: &Path)
+        -> JournalResult<()>
+    {
+        let mut statement = self.connection.prepare("PRAGMA database_list")?;
+        let mut rows = statement.query([])?;
+        let mut path = None;
+        while let Some(row) = rows.next()? {
+            if row.get::<_, String>(1)? == "main" {
+                path = Some(row.get::<_, String>(2)?);
+                break;
+            }
+        }
+        let raw = path.ok_or(JournalError::UnsafeArchiveLocation)?;
+        if raw.is_empty() {
+            return Err(JournalError::UnsafeArchiveLocation);
+        }
+        let file = std::fs::canonicalize(raw)
+            .map_err(|_| JournalError::UnsafeArchiveLocation)?;
+        let root = std::fs::canonicalize(root)
+            .map_err(|_| JournalError::UnsafeArchiveLocation)?;
+        if file.starts_with(&root) {
+            return Err(JournalError::UnsafeArchiveLocation);
+        }
+        let metadata = std::fs::metadata(&file)
+            .map_err(|_| JournalError::UnsafeArchiveLocation)?;
+        if !metadata.is_file() {
+            return Err(JournalError::UnsafeArchiveLocation);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if metadata.nlink() != 1 {
+                return Err(JournalError::UnsafeArchiveLocation);
+            }
+        }
+        Ok(())
+    }
+
+    fn validated_forensic_digest(
+        observed: &ObservedLocalFile, source: Option<&[u8]>,
+        expected_hash: &str,
+    ) -> JournalResult<Option<String>> {
+        match (observed, source) {
+            (ObservedLocalFile::Absent, None) => Ok(None),
+            (
+                ObservedLocalFile::Present {
+                    byte_length, matches_expected_hash, ..
+                },
+                Some(bytes),
+            ) if *byte_length <= 32 * 1024 * 1024
+                && *byte_length == bytes.len() as u64 =>
+            {
+                let digest = blake3::hash(bytes).to_hex().to_string();
+                if (digest == expected_hash) != *matches_expected_hash {
+                    return Err(JournalError::CorruptedRecord);
+                }
+                Ok(Some(digest))
+            }
+            _ => Err(JournalError::CorruptedRecord),
+        }
+    }
+
+    /// Copy bytes into existing app-data SQLite WAL/FULL without changing
+    /// the vault. The first complete copy is permanent and integrity-checked.
+    /// A known *different* final file can also be copied for human review,
+    /// but may never be installed or deleted based on this archive alone.
+    pub(crate) fn record_local_recovery_copy_once(
+        &self, operation: OperationId, stage_bytes: Option<&[u8]>,
+        final_bytes: Option<&[u8]>,
+    ) -> JournalResult<LocalRecoveryArchivedCopy> {
+        let case = self.read_local_recovery_case(operation)?
+            .ok_or(JournalError::CorruptedRecord)?;
+        let stage_hash = Self::validated_forensic_digest(
+            &case.evidence.stage, stage_bytes, &case.expected_content_hash,
+        )?;
+        let final_hash = Self::validated_forensic_digest(
+            &case.evidence.final_name, final_bytes, &case.expected_content_hash,
+        )?;
+        let changed = self.connection.execute(
+            "INSERT OR IGNORE INTO sync_local_recovery_copies
+                 (operation_id, stage_bytes, stage_hash, final_bytes, final_hash)
+             SELECT ?1, ?2, ?3, ?4, ?5
+             FROM sync_local_recovery_evidence WHERE operation_id = ?1",
+            params![
+                operation.to_string(), stage_bytes, stage_hash,
+                final_bytes, final_hash,
+            ],
+        )?;
+        if changed != 1 {
+            return Err(JournalError::RecoveryCopyAlreadyRecorded);
+        }
+        let loaded = self.read_local_recovery_copy(operation)?
+            .ok_or(JournalError::CorruptedRecord)?;
+        if loaded.stage_bytes.as_deref() != stage_bytes
+            || loaded.final_bytes.as_deref() != final_bytes
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(loaded)
+    }
+
+    /// Return durable copied bytes only if their contents and the immutable
+    /// recorded file identities / classifications remain internally consistent.
+    /// This is *historical forensic data*, not a replay or cleanup authority.
+    pub(crate) fn read_local_recovery_copy(
+        &self, operation: OperationId,
+    ) -> JournalResult<Option<LocalRecoveryArchivedCopy>> {
+        let row: Option<(Option<Vec<u8>>, Option<String>, Option<Vec<u8>>, Option<String>)> =
+            self.connection.query_row(
+                "SELECT stage_bytes, stage_hash, final_bytes, final_hash
+                 FROM sync_local_recovery_copies WHERE operation_id = ?1",
+                [operation.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            ).optional()?;
+        let Some((stage, stage_hash, final_name, final_hash)) = row else {
+            return Ok(None);
+        };
+        let case = self.read_local_recovery_case(operation)?
+            .ok_or(JournalError::CorruptedRecord)?;
+        let observed_stage = Self::validated_forensic_digest(
+            &case.evidence.stage, stage.as_deref(), &case.expected_content_hash,
+        )?;
+        let observed_final = Self::validated_forensic_digest(
+            &case.evidence.final_name, final_name.as_deref(), &case.expected_content_hash,
+        )?;
+        if stage_hash != observed_stage || final_hash != observed_final {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(Some(LocalRecoveryArchivedCopy {
+            operation_id: operation,
+            stage_bytes: stage,
+            final_bytes: final_name,
+        }))
     }
 
     /// Same operation ID and intent is idempotent; reusing the UUID for a
