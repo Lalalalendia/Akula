@@ -830,9 +830,9 @@ mod selective_ab_benchmark {
                 "attempted_s3_head": counts.head,
                 "attempted_s3_get": counts.get,
                 "downloaded_payload_bytes": counts.payload_bytes,
-                "security_scope": if label == "selective_preview" {
-                    "advisory-verified-new-only"
-                } else { "full-current-availability-pin" },
+                "security_scope": if label == "full_verified_pin" {
+                    "full-current-availability-pin"
+                } else { "advisory-verified-new-only" },
             })
         );
     }
@@ -928,6 +928,14 @@ mod selective_ab_benchmark {
         drop(journal);
         let journal = S3RemoteAnchorJournal::open(&dbpath).unwrap();
 
+        // Persist only this already fully checked metadata and immediately
+        // close the cache DB. Its source S3 observation remains the original
+        // immutable generation, and the preparation cost is NOT benchmarked.
+        let hints_path = tmp.path().join("previously-verified-metadata.sqlite");
+        let mut hints = crate::sync::S3VerifiedHintsJournal::open(&hints_path).unwrap();
+        hints.persist_after_full_pin(&scope, &journal, &cache).unwrap();
+        drop(hints);
+
         if updates != 0 {
             let mut new_refs = Vec::with_capacity(updates);
             let mut upload = Vec::with_capacity(updates * 2);
@@ -983,15 +991,50 @@ mod selective_ab_benchmark {
         assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &old_head);
         report("selective_preview", size, updates, selective, selective_ms);
 
-        let before_full = client.test_io_snapshot();
+        // Simulate the next application instance: discard the entire old
+        // in-memory verified cache and SDK client. Reopen both private SQLite
+        // files, and create an independent transport with an empty connection
+        // pool. Connection construction itself is outside the network-read
+        // measurement, which includes SQLite recovery and the selective S3
+        // requests. This is NOT a benchmark of whole-app process startup.
+        drop(cache);
+        drop(journal);
+        drop(client);
+        let cold_client = AwsS3ProbeClient::connect(
+            profile.clone(), ns.clone(),
+        ).await.unwrap();
+        let cold_journal = S3RemoteAnchorJournal::open(&dbpath).unwrap();
+        let cold_hints = crate::sync::S3VerifiedHintsJournal::open(
+            &hints_path,
+        ).unwrap();
+        let before_cold = cold_client.test_io_snapshot();
+        let started_cold = Instant::now();
+        let cold_preview = cold_client.inspect_selective_from_persisted_hints(
+            &scope, &cold_journal, &cold_hints,
+            S3ManifestDeltaLimits::default(),
+        ).await.unwrap();
+        let cold_ms = started_cold.elapsed().as_millis();
+        let cold = cold_client.test_io_snapshot().since(before_cold);
+        assert_eq!(cold_preview.total_revisions, size + updates);
+        assert_eq!(cold_preview.downloaded_revision_json, updates);
+        assert_eq!(cold_preview.newly_verified_blobs, updates);
+        assert_eq!(cold_preview.reused_revision_json, size);
+        assert!(cold_preview.requires_full_apply_gate);
+        assert_eq!(
+            cold_journal.load(&scope).unwrap().unwrap().pointer(), &old_head,
+        );
+        report("cold_disk_selective_preview", size, updates, cold, cold_ms);
+
+        let before_full = cold_client.test_io_snapshot();
         let started_full = Instant::now();
-        let pinned_now = client.pin_revision_snapshot().await.unwrap().unwrap();
+        let pinned_now = cold_client.pin_revision_snapshot().await.unwrap().unwrap();
         let full_ms = started_full.elapsed().as_millis();
-        let full = client.test_io_snapshot().since(before_full);
+        let full = cold_client.test_io_snapshot().since(before_full);
         assert_eq!(pinned_now.len(), size + updates);
         report("full_verified_pin", size, updates, full, full_ms);
-        // These differ in assurance; this is NOT an apples-to-apples
-        // benchmark for permission to apply or delete user files.
+        // All selective operations are advisory hints and are deliberately
+        // not comparable in blob-availability guarantees to a fresh full pin.
         assert!(selective.get < full.get);
+        assert!(cold.get < full.get);
     }
 }
