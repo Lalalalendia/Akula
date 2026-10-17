@@ -133,6 +133,16 @@ impl RemoteStore for FakeRemoteStore {
             .ok_or(RemoteStoreError::NotFound)
     }
 
+    fn read_bounded(&self, object_id: &str, max_bytes: u64)
+        -> Result<Vec<u8>, RemoteStoreError>
+    {
+        let record = self.objects.get(object_id).ok_or(RemoteStoreError::NotFound)?;
+        if record.bytes.len() as u64 > max_bytes {
+            return Err(RemoteStoreError::ObjectTooLarge);
+        }
+        Ok(record.bytes.clone())
+    }
+
     fn head(&self, object_id: &str) -> Result<RemoteObject, RemoteStoreError> {
         self.objects
             .get(object_id)
