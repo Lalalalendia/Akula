@@ -5,6 +5,10 @@ on:
     paths:
       - 'aquilum-app/native/src/app/tests/perf/note_latency.rs'
       - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - 'aquilum-app/native/src/ui/note/page.rs'
+      - 'aquilum-app/native/src/ui/editor/document/mod.rs'
+      - 'aquilum-app/native/src/ui/editor/mod.rs'
+      - 'aquilum-app/native/src/app/note_page/mod.rs'
       - '.github/workflows/native-note-latency.yml'
   workflow_dispatch:
 
@@ -47,8 +51,10 @@ jobs:
           set -euo pipefail
           cargo test -p aquilum-native --bin aquilum-native --locked native_note_latency_matrix \
             -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/note-latency.log"
-          if [ "$(grep -c 'NOTE_LATENCY kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ] ||              [ "$(grep -c 'TAB_STAGE kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ]; then
-            echo "::error::Expected three complete note-size and tab-stage profiles"
+          if [ "$(grep -c '^.*NOTE_LATENCY kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ] || \
+             [ "$(grep -c '^.*TAB_STAGE kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ] || \
+             [ "$(grep -c '^.*EDITOR_PAGE kib=' "$GITHUB_WORKSPACE/note-latency.log")" -ne 3 ]; then
+            echo "::error::Expected three complete tab and editor-page profiles"
             exit 1
           fi
       - name: Summarize comparable measurements
@@ -62,6 +68,7 @@ jobs:
 
           rows = []
           stages = {}
+          editor = {}
           for line in Path("note-latency.log").read_text().splitlines():
               if "NOTE_LATENCY kib=" in line:
                   pairs = line.split("NOTE_LATENCY ", 1)[1].split()
@@ -70,7 +77,11 @@ jobs:
                   pairs = line.split("TAB_STAGE ", 1)[1].split()
                   row = dict(part.split("=", 1) for part in pairs if "=" in part)
                   stages[row["kib"]] = row
-          assert len(rows) == len(stages) == 3, (rows, stages)
+              elif "EDITOR_PAGE kib=" in line:
+                  pairs = line.split("EDITOR_PAGE ", 1)[1].split()
+                  row = dict(part.split("=", 1) for part in pairs if "=" in part)
+                  editor[row["kib"]] = row
+          assert len(rows) == len(stages) == len(editor) == 3, (rows, stages, editor)
           text = [
               "## Native note UI latency",
               "",
@@ -101,6 +112,20 @@ jobs:
                   f"| {r['kib']} KiB | {s['leave_p95_ms']} | "
                   f"{s['read_p95_ms']} | {s['page_p95_ms']} | {s['tree_p95_ms']} | "
                   f"{s['tab_p95_ms']} | {s['strip_p95_ms']} | {s['panel_p95_ms']} |"
+              )
+          text.extend([
+              "",
+              "### Editor page construction stage p95 (ms)",
+              "",
+              "| Size | Document rescan | Initial window | Constructor total | Markdown/setup | Page assembly total | Widget install |",
+              "|---|---:|---:|---:|---:|---:|---:|",
+          ])
+          for r in rows:
+              e = editor[r["kib"]]
+              text.append(
+                  f"| {r['kib']} KiB | {e['rescan_p95_ms']} | {e['initial_window_p95_ms']} | "
+                  f"{e['constructor_p95_ms']} | {e['markdown_p95_ms']} | "
+                  f"{e['page_total_p95_ms']} | {e['install_p95_ms']} |"
               )
           text.extend([
               "",
