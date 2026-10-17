@@ -12,13 +12,13 @@ function classify(changedPaths) {
     ||p==='aquilum-app/core/tests/sync_contract.rs');
   return syncOnly?'sync':'workspace';
 }
-function changed(base,head='HEAD') {
+function changed(base,head='HEAD',cwd=process.cwd()) {
   if(!base||!head||!/^[-.\w/]+$/.test(base)||!/^[-.\w/]+$/.test(head))
     throw Error('Invalid --base or --head');
   // NUL delimiters preserve arbitrary Git filenames. File deletions, renames
   // and type changes must all be considered for CI scope.
   const raw=execFileSync('git',['diff','--name-only','-z','--find-renames',
-    base,head,'--'],{encoding:'utf8',maxBuffer:32*1024*1024});
+    base,head,'--'],{encoding:'utf8',maxBuffer:32*1024*1024,cwd});
   return raw.split('\0').filter(Boolean);
 }
 function main(argv) {
