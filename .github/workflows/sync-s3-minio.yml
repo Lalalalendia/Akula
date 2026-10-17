@@ -105,6 +105,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 minio_two_clients_manifest_cas_and_lost_ack -- --ignored --test-threads=1 --nocapture
+      - name: Stress 10k actual S3 objects and 1000-key pagination
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 minio_10k_cloud_objects_pagination -- --ignored --test-threads=1 --nocapture
       - name: Shutdown MinIO and print sanitized diagnostics
         if: always()
         shell: bash
