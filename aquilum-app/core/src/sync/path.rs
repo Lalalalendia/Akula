@@ -54,10 +54,21 @@ impl SyncRelativePath {
             }
             let normalized: String = part.nfc().collect();
             let base = normalized.split('.').next().unwrap_or("").to_ascii_uppercase();
+            // Windows treats ISO-8859-1 superscript 1/2/3 as serial-port
+            // digits too: COM¹ and LPT³ are device names, including when
+            // followed by an extension. These are multi-byte in UTF-8.
+            let serial_device = base
+                .strip_prefix("COM")
+                .or_else(|| base.strip_prefix("LPT"))
+                .is_some_and(|suffix| {
+                    let mut chars = suffix.chars();
+                    matches!(
+                        (chars.next(), chars.next()),
+                        (Some('1'..='9' | '¹' | '²' | '³'), None)
+                    )
+                });
             if matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-                || (base.len() == 4
-                    && (base.starts_with("COM") || base.starts_with("LPT"))
-                    && matches!(base.as_bytes()[3], b'1'..=b'9'))
+                || serial_device
             {
                 return Err(SyncPathError::ReservedName);
             }
@@ -134,6 +145,32 @@ mod tests {
         for invalid in ["CON", "aux.txt", "com1.md", "LPT9", "NUL.tmp"] {
             assert_eq!(SyncRelativePath::parse(invalid), Err(SyncPathError::ReservedName));
         }
+    }
+
+    #[test]
+    fn rejects_superscript_windows_device_aliases_in_nested_and_wire_paths() {
+        // Windows reserves these device aliases in every directory, and
+        // NUL.tar.gz is a device alias even with multiple extensions.
+        for component in ["COM¹", "COM².md", "COM³.tar.gz",
+            "LPT¹", "LPT².txt", "LPT³.backup", "con.md", "NUL.tar.gz"]
+        {
+            let path = format!("nested/{component}");
+            assert_eq!(
+                SyncRelativePath::parse(&path),
+                Err(SyncPathError::ReservedName),
+                "{path:?}"
+            );
+            let wire = serde_json::to_string(&path).unwrap();
+            assert!(
+                serde_json::from_str::<SyncRelativePath>(&wire).is_err(),
+                "{wire:?}"
+            );
+        }
+        // COM10 is not the legacy COM1 device alias.
+        assert_eq!(
+            SyncRelativePath::parse("nested/COM10.md").unwrap().as_str(),
+            "nested/COM10.md"
+        );
     }
 
     #[test]
