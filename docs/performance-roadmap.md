@@ -126,7 +126,6 @@ cargo test --release --locked -p aquilum-core benchmark_quiet_window -- --ignore
 AQUILUM_BENCH_RICH=1 AQUILUM_BENCH_SIZES=1000 cargo test --release --locked -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_search_hit_window -- --ignored --nocapture --test-threads=1
 cargo test --release --locked -p aquilum-core benchmark_surface_tokenizer -- --ignored --nocapture --test-threads=1
-cargo test --release --locked -p aquilum-core benchmark_snapshot_hash_reuse -- --ignored --nocapture --test-threads=1
 ```
 
 The SQLite-specific benchmark and both CI workflows are now available in `main`. Compare exact heads on the same CPU; runner-to-runner numbers alone are not sufficient.
