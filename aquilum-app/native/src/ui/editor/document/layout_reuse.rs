@@ -272,10 +272,8 @@ mod tests {
 
         // Both paths use the same rendered Unicode note and a shared Parley
         // font/layout context. Include snapshot creation in the cached path.
-        let text = (
-            "Короткий обычный абзац с кириллицей, emoji 🐱 и поиском.\n".repeat(700)
-                + &"**выделение** и [ссылка](https://example.org)\n".repeat(12)
-        );
+        let text = "Короткий обычный абзац с кириллицей, emoji 🐱 и поиском.\n".repeat(700)
+            + &"**выделение** и [ссылка](https://example.org)\n".repeat(12);
         let styles = StyleSet::new(16.0);
         let mut fcx = FontContext::default();
         let mut lcx = LayoutContext::new();
