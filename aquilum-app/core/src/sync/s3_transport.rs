@@ -392,7 +392,7 @@ mod tests {
             transport.put_conditionally(&a, b"stale", S3PutCondition::IfMatch("\"wrong\"".into())).await,
             Err(S3TransportError::PreconditionFailed)
         );
-        let second = transport.put_conditionally(&a, b"second", S3PutCondition::IfMatch(first.etag)).await.unwrap();
+        let second = transport.put_conditionally(&a, b"second", S3PutCondition::IfMatch(first.etag.clone())).await.unwrap();
         assert_ne!(second.etag, first.etag);
         assert_eq!(transport.get_bounded(&a, 10).await.unwrap().bytes, b"second");
         assert_eq!(transport.get_bounded(&a, 5).await, Err(S3TransportError::ObjectTooLarge));
