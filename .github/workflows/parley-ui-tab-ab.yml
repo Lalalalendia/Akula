@@ -1,0 +1,145 @@
+name: Parley UI tab-switch A/B
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/ui/editor/document/layout_reuse.rs'
+      - 'aquilum-app/native/src/app/tabs/layout_trial.rs'
+      - 'aquilum-app/native/src/app/tests/perf/note_latency.rs'
+      - '.github/workflows/parley-ui-tab-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parley-ui-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostic:
+    name: Parley real tab-switch trial (test-only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore main Rust cache (read-only)
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Baseline real tab switching without Parley transfer
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_TEST_PARLEY_UI_REUSE: '0'
+          AQ_LATENCY_SWITCHES: '16'
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native native_note_latency_matrix \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/parley-ui-baseline.log"
+      - name: Real tab switching with trial Parley transfer
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_TEST_PARLEY_UI_REUSE: '1'
+          AQ_LATENCY_SWITCHES: '16'
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --bin aquilum-native native_note_latency_matrix \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/parley-ui-candidate.log"
+      - name: Check eligibility and summarize measured differences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          def read(path):
+              metrics = {}
+              for line in Path(path).read_text().splitlines():
+                  if "NOTE_LATENCY kib=" not in line:
+                      continue
+                  data = line.split("NOTE_LATENCY ", 1)[1].split()
+                  row = dict(part.split("=", 1) for part in data if "=" in part)
+                  metrics[row["kib"]] = row
+              assert set(metrics) == {"64", "512", "4096"}, metrics
+              for row in metrics.values():
+                  assert row.get("stale_overwrites") == "0", row
+                  assert int(row.get("cache_hits", -1)) == int(row["cycles"]), row
+              return metrics
+
+          baseline = read("parley-ui-baseline.log")
+          candidate = read("parley-ui-candidate.log")
+          assert all(int(row["parley_restored"]) == 0 for row in baseline.values()), baseline
+          # Measure *actual* eligibility and hits; never imply a faster UI
+          # when a test-only trial had no matching paragraphs to restore.
+          restored = sum(int(row["parley_restored"]) for row in candidate.values())
+          assert restored > 0, "trial did not reuse any real UI layouts"
+          lines = [
+              "## Parley tab-switch trial (real Masonry UI, test-only)",
+              "",
+              "Ubuntu GitHub runner, same test binary, sequential debug/test-profile",
+              "baseline and candidate runs. Both are affected by warm caches and",
+              "shared-runner scheduling; no release-profile speedup is claimed.",
+              "",
+              "| Note | Switch p95 baseline / trial (ms) | Restore hits | Page p95 baseline / trial (ms) |",
+              "|---|---:|---:|---:|",
+          ]
+          def stages(path):
+              result = {}
+              for line in Path(path).read_text().splitlines():
+                  if "TAB_STAGE kib=" not in line:
+                      continue
+                  data = line.split("TAB_STAGE ", 1)[1].split()
+                  row = dict(part.split("=", 1) for part in data if "=" in part)
+                  result[row["kib"]] = row
+              assert set(result) == set(baseline)
+              return result
+
+          base_stages = stages("parley-ui-baseline.log")
+          trial_stages = stages("parley-ui-candidate.log")
+          for kib in ("64", "512", "4096"):
+              b, c = baseline[kib], candidate[kib]
+              lines.append(
+                  f"| {kib} KiB | {b['switch_p95_ms']} / {c['switch_p95_ms']} | "
+                  f"{c['parley_restored']} | "
+                  f"{base_stages[kib]['page_p95_ms']} / {trial_stages[kib]['page_p95_ms']} |"
+              )
+          lines.extend([
+              "",
+              f"**Actual restored paragraphs:** {restored}. Both arms passed byte",
+              "freshness, external edit, previous-tab and no-stale-overwrite checks.",
+              "Visual/pixel parity and complete editor state safety remain prerequisites",
+              "for enabling this optimization in normal builds.",
+              "",
+          ])
+          report = "\n".join(lines)
+          Path("parley-ui-ab.md").write_text(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write(report)
+          print(report)
+          PY
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parley-ui-ab-${{ github.sha }}
+          path: |
+            parley-ui-baseline.log
+            parley-ui-candidate.log
+            parley-ui-ab.md
+          if-no-files-found: warn
+          retention-days: 14
