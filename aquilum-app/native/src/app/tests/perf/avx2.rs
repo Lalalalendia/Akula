@@ -1,5 +1,5 @@
 //! Test-only comparison of the real Akula editor frames under SSE4.2 and AVX2.
- //! No production SIMD selection is changed by these tests.
+//! No production SIMD selection is changed by these tests.
 
 use super::*;
 use std::time::{Duration, Instant};
