@@ -98,7 +98,7 @@ fn m1dd_native_recovery_settings_are_read_only_for_every_state() {
         assert!(rows.len() >= 3);
         assert!(rows.iter().all(|row| row.setter.is_none()));
         assert!(rows.iter().all(|row| matches!(
-            row.control, Control::Status { .. }
+            &row.control, Control::Status { .. }
         )), "Recovery view must not render a clickable action or writable control");
         let snapshot = format!("{:?}", rows.iter().map(|r| &r.label).collect::<Vec<_>>());
         assert!(!snapshot.contains("Button"));
