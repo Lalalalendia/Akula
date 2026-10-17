@@ -19,6 +19,8 @@ pub(in crate::app) struct CachedNote {
     path: PathBuf,
     hash: String,
     text: crop::Rope,
+    layout: Option<crate::ui::editor::LayoutSnapshot>,
+    ui_scale: f64,
 }
 
 // Test-only instrumentation. The production UI path and API stay unchanged.
@@ -99,7 +101,7 @@ impl App {
     fn show_tab(&mut self, root: &mut RenderRoot) {
         let tab = self.tabs.active().clone();
         if tab.graph && self.tree.root().is_some() {
-            self.leave_note();
+            self.leave_note_with_root(root);
             self.drop_note_page(root);
             self.tree.set_active(root, None);
             self.show_graph(root);
@@ -107,7 +109,7 @@ impl App {
             return;
         }
         let Some(path) = tab.path else {
-            self.leave_note();
+            self.leave_note_with_root(root);
             self.drop_note_page(root);
             self.tree.set_active(root, None);
             self.show_page(root, if self.tree.root().is_some() { 1 } else { 3 });
@@ -120,19 +122,22 @@ impl App {
         }
         #[cfg(test)]
         let started = std::time::Instant::now();
-        self.leave_note();
+        self.leave_note_with_root(root);
         #[cfg(test)]
         record_stage(|s| s.leave = started.elapsed());
 
         let read = aq_trace::zone("открытие: чтение файла");
         #[cfg(test)]
         let started = std::time::Instant::now();
+        // Never allow a candidate from another tab or failed open to survive.
+        self.pending_parley = None;
         let opened = self.open_cached_or_read(tab.id, path.clone());
         #[cfg(test)]
         record_stage(|s| s.file_read = started.elapsed());
         drop(read);
         match opened {
-            Ok((note, text)) => {
+            Ok((note, text, layout)) => {
+                self.pending_parley = layout;
                 self.open_error = None;
                 self.open_error_ids = None;
                 self.text = text;
@@ -183,7 +188,32 @@ impl App {
         }
     }
 
+    /// Invalidate rendered-line candidates when appearance, DPI, root widget
+    /// identity or interface scaling changes. Keep separately hash-verified
+    /// Rope snapshots: no need to evict safe file bytes for a font change.
+    pub(crate) fn invalidate_inactive_layouts(&mut self) {
+        for note in &mut self.inactive_notes {
+            note.layout = None;
+        }
+        self.pending_parley = None;
+    }
+
     pub(in crate::app) fn leave_note(&mut self) {
+        self.leave_note_with_layout(None);
+    }
+
+    fn leave_note_with_root(&mut self, root: &RenderRoot) {
+        // The authoritative cleanliness gate lives in Note, not the widget's
+        // editing history. Capture while the old Masonry subtree still exists.
+        let layout = self.note.as_ref()
+            .filter(|note| note.clean_cache_hash().is_some())
+            .and_then(|_| self.note_ids.as_ref())
+            .and_then(|ids| ids.body.get(root))
+            .and_then(|body| body.inner().clean_parley_snapshot());
+        self.leave_note_with_layout(layout);
+    }
+
+    fn leave_note_with_layout(&mut self, layout: Option<crate::ui::editor::LayoutSnapshot>) {
         self.flush_view();
         self.view = None;
         self.restore = None;
@@ -194,18 +224,18 @@ impl App {
                     .map(|tab| (tab.id, hash))
             });
             if let Some((tab_id, hash)) = snapshot {
-                self.remember_clean_note(tab_id, note.path.clone(), hash, self.text.clone());
+                self.remember_clean_note(tab_id, note.path.clone(), hash, self.text.clone(), layout);
             }
             note.leave(&self.workspace.core, &self.text);
         }
     }
 
-    fn remember_clean_note(&mut self, tab_id: uuid::Uuid, path: PathBuf, hash: String, text: crop::Rope) {
+    fn remember_clean_note(&mut self, tab_id: uuid::Uuid, path: PathBuf, hash: String, text: crop::Rope, layout: Option<crate::ui::editor::LayoutSnapshot>) {
         self.inactive_notes.retain(|entry| entry.tab_id != tab_id);
         if text.byte_len() > MAX_INACTIVE_BYTES {
             return;
         }
-        self.inactive_notes.push(CachedNote { tab_id, path, hash, text });
+        self.inactive_notes.push(CachedNote { tab_id, path, hash, text, layout, ui_scale: self.interface.scale() });
         while self.inactive_notes.len() > MAX_INACTIVE_NOTES
             || self.inactive_notes.iter().map(|entry| entry.text.byte_len()).sum::<usize>() > MAX_INACTIVE_BYTES
         {
@@ -213,7 +243,7 @@ impl App {
         }
     }
 
-    fn open_cached_or_read(&mut self, tab_id: uuid::Uuid, path: PathBuf) -> Result<(Note, crop::Rope), aquilum_core::files::error::FileCommandError> {
+    fn open_cached_or_read(&mut self, tab_id: uuid::Uuid, path: PathBuf) -> Result<(Note, crop::Rope, Option<crate::ui::editor::LayoutSnapshot>), aquilum_core::files::error::FileCommandError> {
         if let Some(index) = self.inactive_notes.iter().position(|entry| entry.tab_id == tab_id && entry.path == path) {
             let cached = self.inactive_notes.remove(index);
             // Size and mtime are not a correctness boundary: external writers
@@ -223,10 +253,12 @@ impl App {
             if matches_disk {
                 #[cfg(test)]
                 record_stage(|stage| stage.cache_hit = true);
-                return Ok(Note::from_verified_cache(path, cached.text, cached.hash));
+                let layout = (cached.ui_scale == self.interface.scale()).then_some(cached.layout).flatten();
+                let (note, text) = Note::from_verified_cache(path, cached.text, cached.hash);
+                return Ok((note, text, layout));
             }
         }
-        Note::open(path)
+        Note::open(path).map(|(note, text)| (note, text, None))
     }
 
     pub(in crate::app) fn show_page(&self, root: &mut RenderRoot, index: usize) {
