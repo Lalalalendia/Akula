@@ -58,7 +58,7 @@ pub(super) fn sync_recovery(ctx: &Context) -> Vec<Block> {
             rows.push(info(
                 t("settings.sync.more"),
                 Some(t_with("settings.sync.moreHint",
-                    &[("count", &(total_claims - example_paths.len()).to_string())])),
+                    &[("count", &(*total_claims - example_paths.len()).to_string())])),
                 Control::Status {
                     text: t("settings.sync.hold"),
                     tone: Tone::Secondary,
