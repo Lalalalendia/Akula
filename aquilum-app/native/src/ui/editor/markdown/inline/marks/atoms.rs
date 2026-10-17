@@ -3,19 +3,19 @@ use std::ops::Range;
 use super::super::{Kind, Span};
 use super::span;
 
-const TAGS: [(&str, Kind); 12] = [
-    ("sub", Kind::Sub),
-    ("sup", Kind::Sup),
-    ("mark", Kind::Highlight),
-    ("kbd", Kind::Code),
-    ("u", Kind::Underline),
-    ("ins", Kind::Underline),
-    ("del", Kind::Strike),
-    ("s", Kind::Strike),
-    ("b", Kind::Strong),
-    ("strong", Kind::Strong),
-    ("i", Kind::Emphasis),
-    ("em", Kind::Emphasis),
+const TAGS: [(&str, &str, Kind); 12] = [
+    ("<sub>", "</sub>", Kind::Sub),
+    ("<sup>", "</sup>", Kind::Sup),
+    ("<mark>", "</mark>", Kind::Highlight),
+    ("<kbd>", "</kbd>", Kind::Code),
+    ("<u>", "</u>", Kind::Underline),
+    ("<ins>", "</ins>", Kind::Underline),
+    ("<del>", "</del>", Kind::Strike),
+    ("<s>", "</s>", Kind::Strike),
+    ("<b>", "</b>", Kind::Strong),
+    ("<strong>", "</strong>", Kind::Strong),
+    ("<i>", "</i>", Kind::Emphasis),
+    ("<em>", "</em>", Kind::Emphasis),
 ];
 
 pub(super) fn scripts(text: &str, symbol: char, kind: Kind) -> Vec<Span> {
@@ -41,6 +41,9 @@ pub(super) fn scripts(text: &str, symbol: char, kind: Kind) -> Vec<Span> {
 }
 
 pub(super) fn html_comments(text: &str) -> Vec<Span> {
+    if !text.as_bytes().contains(&b'<') {
+        return Vec::new();
+    }
     let mut found = Vec::new();
     let mut from = 0;
     while let Some(open) = text[from..].find("<!--").map(|i| from + i) {
@@ -52,9 +55,11 @@ pub(super) fn html_comments(text: &str) -> Vec<Span> {
 }
 
 pub(super) fn html_pairs(text: &str) -> Vec<Span> {
+    if !text.as_bytes().contains(&b'<') {
+        return Vec::new();
+    }
     let mut found = Vec::new();
-    for (name, kind) in TAGS {
-        let (open, close) = (format!("<{name}>"), format!("</{name}>"));
+    for (open, close, kind) in TAGS {
         let mut from = 0;
         while let Some(start) = text[from..].find(&open).map(|i| from + i) {
             let inner = start + open.len();
