@@ -1,0 +1,52 @@
+name: Search hit single-handle performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/hits/**"
+      - "aquilum-app/core/src/search/index_tests.rs"
+      - ".github/workflows/search-hits-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-hit-perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  paired-search-hits:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: search-hit-perf
+      - name: Compare legacy and candidate on the same file corpus and runner
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+            cargo --version
+          } | tee hits-perf-env.txt
+          cargo test --release --locked -p aquilum-core benchmark_search_hit_window \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee hits-perf.log
+          grep 'BENCH-HITS' hits-perf.log | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload paired measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-hits-perf-${{ github.sha }}
+          path: |
+            aquilum-app/hits-perf-env.txt
+            aquilum-app/hits-perf.log
+          retention-days: 30
