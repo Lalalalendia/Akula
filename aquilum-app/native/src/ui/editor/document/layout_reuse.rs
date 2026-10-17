@@ -222,4 +222,66 @@ mod tests {
         original.replace(0..0, "изменено ");
         assert!(original.trial_snapshot(&styles).is_none());
     }
+
+    #[test]
+    #[ignore = "opt-in paired same-process diagnostic, not a CI speed threshold"]
+    fn benchmark_parley_plain_reuse_abba() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        // Both paths use the same rendered Unicode note and a shared Parley
+        // font/layout context. Include snapshot creation in the cached path.
+        let text = (
+            "Короткий обычный абзац с кириллицей, emoji 🐱 и поиском.\n".repeat(700)
+                + &"**выделение** и [ссылка](https://example.org)\n".repeat(12)
+        );
+        let styles = StyleSet::new(16.0);
+        let mut fcx = FontContext::default();
+        let mut lcx = LayoutContext::new();
+        let mut original = doc(&text);
+        original.layout(&mut fcx, &mut lcx, &styles, Some(600.0), None, None);
+        let baseline_snapshot = original.trial_snapshot(&styles).expect("candidate paragraphs exist");
+        assert!(!baseline_snapshot.entries.is_empty());
+        drop(baseline_snapshot);
+
+        // Warm up font loading and both paths before measured samples.
+        for reuse in [false, true, true, false] {
+            let mut d = doc(&text);
+            if reuse {
+                d.trial_offer(original.trial_snapshot(&styles).unwrap());
+            }
+            d.layout(&mut fcx, &mut lcx, &styles, Some(600.0), None, None);
+            black_box(d.height());
+        }
+
+        fn median(values: &mut [f64]) -> f64 {
+            values.sort_by(|a, b| a.total_cmp(b));
+            let n = values.len();
+            (values[n / 2 - 1] + values[n / 2]) / 2.0
+        }
+        let mut baseline = Vec::new();
+        let mut cached = Vec::new();
+        for _ in 0..6 {
+            for reuse in [false, true, true, false] {
+                let start = Instant::now();
+                for _ in 0..6 {
+                    let mut d = doc(&text);
+                    if reuse {
+                        d.trial_offer(original.trial_snapshot(&styles).unwrap());
+                    }
+                    d.layout(&mut fcx, &mut lcx, &styles, Some(600.0), None, None);
+                    black_box(d.height());
+                }
+                let mean_ns = start.elapsed().as_nanos() as f64 / 6.0;
+                (if reuse { &mut cached } else { &mut baseline }).push(mean_ns);
+            }
+        }
+        let normal = median(&mut baseline);
+        let reused = median(&mut cached);
+        println!(
+            "PARLEY_REUSE_ABBA baseline_ns={normal:.1} candidate_ns={reused:.1} baseline_over_candidate={:.3} repeats={} note_bytes={}",
+            normal / reused, baseline.len(), text.len()
+        );
+        assert!(normal.is_finite() && reused.is_finite() && normal > 0.0 && reused > 0.0);
+    }
 }
