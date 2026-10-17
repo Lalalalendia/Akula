@@ -2,7 +2,7 @@ use super::{
     BrokerError, Capability, GrantScope, HostContext, NoteId, NoteResource,
     PermissionBroker, PluginManifest, Resource, VaultId,
 };
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::path::Path;
 use tempfile::tempdir;
