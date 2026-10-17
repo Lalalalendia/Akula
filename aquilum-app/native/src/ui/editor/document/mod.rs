@@ -11,6 +11,8 @@ mod laid;
 mod layout;
 #[cfg(test)]
 mod layout_reuse;
+#[cfg(test)]
+pub(crate) use layout_reuse::Snapshot as TrialSnapshot;
 mod lines;
 mod paragraph;
 #[cfg(feature = "memory-probe")]
