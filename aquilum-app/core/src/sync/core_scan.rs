@@ -8,6 +8,7 @@
 
 use super::{reject_path_collisions, resolve_no_symlinks, LocalFileEntry, LocalFileSnapshot,
     SyncRelativePath, VaultFileKind, VaultPortError};
+use super::path::is_internal_stage_name;
 use crate::app_core::Core;
 use std::fs::{self, File};
 use std::io::Read;
@@ -155,6 +156,13 @@ impl<'a> CoreVaultScanner<'a> {
         for next in WalkDir::new(&self.root).follow_links(false).sort_by_file_name().into_iter() {
             let item = next.map_err(|error| VaultPortError::Io(error.to_string()))?;
             if item.path() == self.root { continue; }
+            // Incomplete local publications are not ordinary attachments.
+            // Refuse the ENTIRE preview (never return a falsely complete
+            // snapshot) until a separate recovery process has inspected them.
+            // This includes stage-named directories and case aliases.
+            if is_internal_stage_name(&item.file_name().to_string_lossy()) {
+                return Err(VaultPortError::UnsafePath);
+            }
             if item.file_type().is_symlink() {
                 return Err(VaultPortError::UnsafePath);
             }
@@ -247,6 +255,37 @@ mod tests {
             Err(VaultPortError::PermissionDenied)
         ));
         assert!(CoreVaultScanner::new(&core, &root, ScanLimits::default()).is_ok());
+    }
+
+    #[test]
+    fn orphan_create_stage_is_never_imported_as_an_attachment() {
+        let (_temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let original = root.join("notes/legitimate.md");
+        fs::write(&original, b"unchanged").unwrap();
+        let orphan = root.join("notes/.akula-sync-stage-11111111-1111-4111-8111-111111111111");
+        fs::write(&orphan, b"not a document").unwrap();
+        let scanner = CoreVaultScanner::new(&core, &root, ScanLimits::default()).unwrap();
+
+        // A partial local listing must not be usable as deletion authority.
+        assert!(matches!(scanner.scan_preflight(), Err(VaultPortError::UnsafePath)));
+        assert_eq!(fs::read(&orphan).unwrap(), b"not a document");
+        assert_eq!(fs::read(&original).unwrap(), b"unchanged");
+
+        fs::remove_file(&orphan).unwrap();
+        let normal = scanner.scan_preflight().unwrap();
+        assert_eq!(normal.entries.len(), 1);
+        assert_eq!(normal.entries[0].path.as_str(), "notes/legitimate.md");
+    }
+
+    #[test]
+    fn stage_name_directory_blocks_preflight_instead_of_being_skipped() {
+        let (_temp, core, root) = fixture();
+        let reserved = root.join(".AKULA-SYNC-STAGE-not-a-uuid");
+        fs::create_dir(&reserved).unwrap();
+        fs::write(reserved.join("unsafe.txt"), b"not a user attachment").unwrap();
+        let scanner = CoreVaultScanner::new(&core, &root, ScanLimits::default()).unwrap();
+        assert!(matches!(scanner.scan_preflight(), Err(VaultPortError::UnsafePath)));
     }
 
     #[test]

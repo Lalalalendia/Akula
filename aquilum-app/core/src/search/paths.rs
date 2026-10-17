@@ -163,6 +163,20 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_sync_stages_are_not_indexed_as_markdown_documents() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.md"), b"good").unwrap();
+        std::fs::write(
+            dir.path().join(".akula-sync-stage-11111111-1111-4111-8111-111111111111.md"),
+            b"untrusted partial publication",
+        ).unwrap();
+        let files: Vec<_> = super::markdown_files(dir.path()).collect();
+        assert_eq!(files, vec![dir.path().join("note.md")]);
+        let stage = dir.path().join(".AKULA-SYNC-STAGE-synthetic.md");
+        assert!(super::is_hidden(dir.path(), &stage));
+    }
+
+    #[test]
     fn note_history_versions_never_reach_search() {
         let root = Path::new("C:/vault");
         let version = "1790000000000_aaaaaaaa_agent.md";

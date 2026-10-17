@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,6 +134,17 @@ pub struct ConfirmedBaseline {
     pub operation_id: OperationId,
 }
 
+/// A durable, read-only inspection ticket for an attempted local publication.
+/// Never treat it as an authorization to retry, remove, quarantine physically,
+/// or confirm a remote baseline.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalPublicationReview {
+    pub operation_id: OperationId,
+    pub vault_id: VaultId,
+    pub path: SyncRelativePath,
+    pub expected_content_hash: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecoveryAction {
     /// No remote/local side-effect permitted before staging evidence exists.
@@ -166,6 +177,9 @@ pub enum JournalError {
     InvalidTransition,
     ReadbackMismatch,
     CorruptedRecord,
+    /// The durable record already claims this operation or portable target.
+    /// Never automatically replay an uncertain local publication.
+    PublicationAttemptAlreadyRecorded,
 }
 
 impl From<rusqlite::Error> for JournalError {
@@ -225,7 +239,32 @@ impl SqliteSyncJournal {
                     operation_id TEXT NOT NULL,
                     PRIMARY KEY(vault_id, document_id)
                  );
-                 PRAGMA user_version = 1;
+                 CREATE TABLE sync_local_publication_attempts (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_operations(operation_id),
+                     vault_id TEXT NOT NULL,
+                     path_collision_key TEXT NOT NULL,
+                     relative_path TEXT NOT NULL,
+                     expected_hash TEXT NOT NULL,
+                     intent_digest TEXT NOT NULL,
+                     UNIQUE (vault_id, path_collision_key)
+                 );
+                 PRAGMA user_version = 2;
+                 COMMIT;",
+            )?,
+            1 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sync_local_publication_attempts (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_operations(operation_id),
+                     vault_id TEXT NOT NULL,
+                     path_collision_key TEXT NOT NULL,
+                     relative_path TEXT NOT NULL,
+                     expected_hash TEXT NOT NULL,
+                     intent_digest TEXT NOT NULL,
+                     UNIQUE (vault_id, path_collision_key)
+                 );
+                 PRAGMA user_version = 2;
                  COMMIT;",
             )?,
             SCHEMA_VERSION => {},
@@ -242,6 +281,114 @@ impl SqliteSyncJournal {
         -> JournalResult<Option<ConfirmedBaseline>>
     {
         load_baseline(&self.connection, vault, document)
+    }
+
+    /// Claim a STAGED local-create attempt exactly once, durably BEFORE any
+    /// filesystem stage/create/rename can begin. SQLite WAL + FULL and a
+    /// single conditional INSERT provide a cross-process, no-replay fence.
+    /// An earlier attempt on this UUID OR on the same portable vault path
+    /// fails closed, even if its process died before touching the filesystem.
+    ///
+    /// Do not turn a successful insert into a "preserved" or baseline receipt.
+    pub fn record_local_publication_attempt_once(
+        &self, intent: &OperationIntent,
+    ) -> JournalResult<()> {
+        let existing = self.get(intent.operation_id)?
+            .ok_or(JournalError::MissingOperation)?;
+        if existing.intent != *intent {
+            return Err(JournalError::IntentCollision);
+        }
+        if existing.phase != JournalPhase::Staged
+            || existing.staged_hash.as_deref()
+                != Some(intent.expected_content_hash.as_str())
+            || intent.action != JournalAction::StageDownload
+            || intent.remote_guard.is_some()
+            || intent.expected_baseline.is_some()
+            || self.baseline(intent.vault_id, intent.document_id)?.is_some()
+        {
+            return Err(JournalError::InvalidTransition);
+        }
+        let digest = blake3::hash(&serde_json::to_vec(intent)?).to_hex().to_string();
+        // The WHERE clause revalidates phase, digest and staged hash at the
+        // moment of durable publication admission, not only in an earlier GET.
+        let changed = self.connection.execute(
+            "INSERT OR IGNORE INTO sync_local_publication_attempts
+             (operation_id,vault_id,path_collision_key,relative_path,expected_hash,intent_digest)
+             SELECT ?1,?2,?3,?4,?5,?6 FROM sync_operations
+             WHERE operation_id = ?1 AND phase = 1
+               AND staged_hash = ?5 AND digest = ?6",
+            params![
+                intent.operation_id.to_string(), intent.vault_id.to_string(),
+                intent.path.collision_key(), intent.path.as_str(),
+                &intent.expected_content_hash, digest,
+            ],
+        )?;
+        if changed != 1 {
+            // Could be another worker, a previous crash, a name collision,
+            // or a raced phase change. None justifies a retry.
+            return Err(JournalError::PublicationAttemptAlreadyRecorded);
+        }
+        if !self.local_publication_review_queue()?.iter().any(|entry| {
+            entry.operation_id == intent.operation_id
+                && entry.vault_id == intent.vault_id
+                && entry.path == intent.path
+                && entry.expected_content_hash == intent.expected_content_hash
+        }) {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(())
+    }
+
+    /// Persisted recovery/quarantine *queue*, not a cleanup executor.
+    /// Treat every returned entry as requiring human/host investigation.
+    /// In particular, a missing stage or a same-hash destination is NOT
+    /// proof a lost acknowledgment was safe to replay or commit.
+    pub fn local_publication_review_queue(
+        &self,
+    ) -> JournalResult<Vec<LocalPublicationReview>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT operation_id, vault_id, path_collision_key, relative_path,
+                    expected_hash, intent_digest
+             FROM sync_local_publication_attempts
+             ORDER BY vault_id, path_collision_key, operation_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+            ))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            let (raw_id, raw_vault, key, raw_path, hash, digest) = row?;
+            let id: OperationId = raw_id.parse()
+                .map_err(|_| JournalError::CorruptedRecord)?;
+            let stored_vault: VaultId = raw_vault.parse()
+                .map_err(|_| JournalError::CorruptedRecord)?;
+            let record = self.get(id)?.ok_or(JournalError::CorruptedRecord)?;
+            let parsed_path = SyncRelativePath::parse(&raw_path)
+                .map_err(|_| JournalError::CorruptedRecord)?;
+            if record.intent.vault_id != stored_vault
+                || record.intent.path != parsed_path
+                || record.intent.path.as_str() != raw_path
+                || record.intent.path.collision_key() != key
+                || record.intent.expected_content_hash != hash
+                || blake3::hash(&serde_json::to_vec(&record.intent)?)
+                    .to_hex().as_str() != digest
+                || record.intent.action != JournalAction::StageDownload
+                || record.phase != JournalPhase::Staged
+            {
+                return Err(JournalError::CorruptedRecord);
+            }
+            result.push(LocalPublicationReview {
+                operation_id: id,
+                vault_id: stored_vault,
+                path: parsed_path,
+                expected_content_hash: hash,
+            });
+        }
+        Ok(result)
     }
 
     /// Same operation ID and intent is idempotent; reusing the UUID for a
@@ -699,6 +846,145 @@ mod tests {
             intent(vault, document, RevisionId::new(), Some(first.revision_id), b"two");
         different_profile.profile_id = "google-drive-different-root".into();
         assert!(matches!(j.begin(different_profile), Err(JournalError::ProfileChanged)));
+    }
+
+    fn local_stage_intent(vault: VaultId, document: DocumentId, path: &str, bytes: &[u8])
+        -> OperationIntent
+    {
+        let mut item = intent(vault, document, RevisionId::new(), None, bytes);
+        item.action = JournalAction::StageDownload;
+        item.remote_guard = None;
+        item.path = SyncRelativePath::parse(path).unwrap();
+        item
+    }
+
+    #[test]
+    fn local_publication_claim_is_once_per_operation_and_portable_name() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let vault = VaultId::new();
+        let first = local_stage_intent(vault, DocumentId::new(), "notes/Café.md", b"one");
+        let second = local_stage_intent(vault, DocumentId::new(),
+            "notes/cafe\u{301}.md", b"two");
+        journal.begin(first.clone()).unwrap();
+        journal.begin(second.clone()).unwrap();
+        journal.mark_staged(first.operation_id, b"one").unwrap();
+        journal.mark_staged(second.operation_id, b"two").unwrap();
+
+        journal.record_local_publication_attempt_once(&first).unwrap();
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&first),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&second),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        let queue = journal.local_publication_review_queue().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].operation_id, first.operation_id);
+        assert_eq!(queue[0].path.as_str(), "notes/Café.md");
+        assert!(journal.baseline(vault, first.document_id).unwrap().is_none());
+        assert!(journal.baseline(vault, second.document_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn local_publication_claim_requires_a_verified_staged_intent() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/new.md", b"verified");
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&staged),
+            Err(JournalError::MissingOperation)
+        ));
+        journal.begin(staged.clone()).unwrap();
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&staged),
+            Err(JournalError::InvalidTransition)
+        ));
+        journal.mark_staged(staged.operation_id, b"verified").unwrap();
+        let mut collision = staged.clone();
+        collision.expected_content_hash = blake3::hash(b"other").to_hex().to_string();
+        assert!(matches!(
+            journal.record_local_publication_attempt_once(&collision),
+            Err(JournalError::IntentCollision)
+        ));
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+    }
+
+    #[test]
+    fn legacy_schema_one_migrates_without_losing_staged_operations() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/legacy.md", b"persist");
+        {
+            let mut journal = SqliteSyncJournal::open(&path).unwrap();
+            journal.begin(staged.clone()).unwrap();
+            journal.mark_staged(staged.operation_id, b"persist").unwrap();
+            // Emulate the exact existing V1 tables/data, without the new table.
+            journal.connection.execute_batch(
+                "DROP TABLE sync_local_publication_attempts;
+                 PRAGMA user_version = 1;",
+            ).unwrap();
+        }
+        let migrated = SqliteSyncJournal::open(&path).unwrap();
+        let version: i64 = migrated.connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(migrated.get(staged.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        migrated.record_local_publication_attempt_once(&staged).unwrap();
+        drop(migrated);
+        let reopened = SqliteSyncJournal::open(&path).unwrap();
+        assert!(matches!(
+            reopened.record_local_publication_attempt_once(&staged),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        let queue = reopened.local_publication_review_queue().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].expected_content_hash, staged.expected_content_hash);
+        assert!(reopened.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[test]
+    fn local_publication_ledger_corruption_fails_closed() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/new.md", b"payload");
+        journal.begin(staged.clone()).unwrap();
+        journal.mark_staged(staged.operation_id, b"payload").unwrap();
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+        journal.connection.execute(
+            "UPDATE sync_local_publication_attempts
+             SET expected_hash = 'corrupted' WHERE operation_id = ?1",
+            [staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            journal.local_publication_review_queue(),
+            Err(JournalError::CorruptedRecord)
+        ));
+    }
+
+    #[test]
+    fn separate_sqlite_connections_cannot_claim_the_same_local_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("sync.sqlite");
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/two-processes.md", b"claim");
+        {
+            let mut journal = SqliteSyncJournal::open(&path).unwrap();
+            journal.begin(staged.clone()).unwrap();
+            journal.mark_staged(staged.operation_id, b"claim").unwrap();
+        }
+        let first = SqliteSyncJournal::open(&path).unwrap();
+        let second = SqliteSyncJournal::open(&path).unwrap();
+        first.record_local_publication_attempt_once(&staged).unwrap();
+        assert!(matches!(
+            second.record_local_publication_attempt_once(&staged),
+            Err(JournalError::PublicationAttemptAlreadyRecorded)
+        ));
+        assert_eq!(second.local_publication_review_queue().unwrap().len(), 1);
     }
 
     #[test]

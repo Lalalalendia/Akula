@@ -35,7 +35,7 @@ pub use download::{stage_remote_download, StageDownloadError, StagedDownload};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
 pub use journal::{
     ConfirmedBaseline, JournalAction, JournalError, JournalPhase, JournalRecord, JournalResult,
-    OperationIntent, RecoveryAction, RecoveryItem, RemoteGuard, SqliteSyncJournal,
+    OperationIntent, LocalPublicationReview, RecoveryAction, RecoveryItem, RemoteGuard, SqliteSyncJournal,
 };
 pub use planner::{
     plan_snapshot, HoldReason, ObservedObject, PlannedAction, SafetyPolicy, SnapshotDiff,
