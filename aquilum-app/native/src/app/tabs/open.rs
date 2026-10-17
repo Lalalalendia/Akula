@@ -263,6 +263,10 @@ impl App {
                 #[cfg(test)]
                 record_stage(|stage| stage.cache_hit = true);
                 let layout = (cached.ui_scale == self.interface.scale()).then_some(cached.layout).flatten();
+                // Opt-in test baseline for paired end-to-end comparisons.
+                // There is no production environment toggle or code path.
+                #[cfg(test)]
+                let layout = if std::env::var_os("AQ_TEST_DISABLE_PARLEY_LAYOUTS").is_some() { None } else { layout };
                 let (note, text) = Note::from_verified_cache(path, cached.text, cached.hash);
                 return Ok((note, text, layout));
             }
