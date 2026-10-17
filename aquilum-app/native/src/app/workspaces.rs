@@ -170,6 +170,11 @@ impl App {
         // No document content from the previous workspace survives the switch,
         // even if the same relative pathname exists in the next vault.
         self.inactive_notes.clear();
+        #[cfg(test)]
+        {
+            self.inactive_plain_layouts.clear();
+            self.pending_plain_layout = None;
+        }
         if let Some(session) = &mut self.session {
             session.save(&self.workspace.core, &mut self.tabs);
         }
