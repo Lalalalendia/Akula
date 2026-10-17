@@ -1,0 +1,429 @@
+//! SYNC-05b: isolated, opt-in AWS S3 transport and conditional-write probe.
+//!
+//! This is NOT a RemoteStore implementation: ordinary ListObjectsV2 cannot
+//! satisfy the manifest-backed, stable snapshot contract in provider.rs.
+//! There is no scheduler, credential persistence, local file operation, remote
+//! deletion, plaintext mirror or multipart upload in this slice.
+//!
+//! Run these async calls in a dedicated Core worker; never from native UI.
+
+use super::s3::S3Keyspace;
+use aws_sdk_s3::error::ProvideErrorMetadata;
+use aws_sdk_s3::primitives::ByteStream;
+use std::time::Duration;
+
+const MAX_PROBE_BYTES: u64 = 1024 * 1024;
+const MAX_S3_PAGE_SIZE: i32 = 1000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum S3TransportError {
+    InvalidProfile,
+    UnsafeEndpoint,
+    OutsideVaultNamespace,
+    NotFound,
+    PermissionDenied,
+    PreconditionFailed,
+    CommitUncertain,
+    Unavailable,
+    MalformedResponse,
+    ObjectTooLarge,
+    ChangedDuringRead,
+    IncompleteListing,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3ConnectionProfile {
+    pub bucket: String,
+    pub region: String,
+    /// None selects the standard AWS endpoint for the configured region.
+    pub endpoint: Option<String>,
+    pub force_path_style: bool,
+}
+
+impl S3ConnectionProfile {
+    pub fn validate(&self) -> Result<(), S3TransportError> {
+        let name = self.bucket.as_bytes();
+        if !(3..=63).contains(&name.len())
+            || !name.first().is_some_and(u8::is_ascii_lowercase)
+                && !name.first().is_some_and(u8::is_ascii_digit)
+            || !name.last().is_some_and(u8::is_ascii_lowercase)
+                && !name.last().is_some_and(u8::is_ascii_digit)
+            || !name.iter().all(|ch| ch.is_ascii_lowercase()
+                || ch.is_ascii_digit() || *ch == b'-' || *ch == b'.')
+            || self.bucket.contains("..")
+        {
+            return Err(S3TransportError::InvalidProfile);
+        }
+        if self.region.is_empty() || self.region.len() > 64
+            || !self.region.bytes().all(|ch| ch.is_ascii_lowercase()
+                || ch.is_ascii_digit() || ch == b'-')
+        {
+            return Err(S3TransportError::InvalidProfile);
+        }
+        if let Some(endpoint) = &self.endpoint {
+            let url = url::Url::parse(endpoint).map_err(|_| S3TransportError::UnsafeEndpoint)?;
+            if url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.path() != "/"
+                || url.query().is_some()
+                || url.fragment().is_some()
+            {
+                return Err(S3TransportError::UnsafeEndpoint);
+            }
+            match url.scheme() {
+                "https" => {}
+                "http" if self.force_path_style
+                    && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1")) => {}
+                _ => return Err(S3TransportError::UnsafeEndpoint),
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3ObservedObject {
+    pub etag: String,
+    pub byte_length: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3BoundedObject {
+    pub object: S3ObservedObject,
+    pub bytes: Vec<u8>,
+    pub blake3: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3DiagnosticPage {
+    pub keys: Vec<String>,
+    pub next_cursor: Option<String>,
+    pub complete: bool,
+}
+
+/// Transport-level condition. The server MUST enforce this atomically.
+/// An unguarded GET/HEAD followed by PUT is never acceptable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum S3PutCondition {
+    IfAbsent,
+    IfMatch(String),
+}
+
+impl S3PutCondition {
+    fn validate(&self) -> Result<(), S3TransportError> {
+        match self {
+            Self::IfAbsent => Ok(()),
+            Self::IfMatch(etag) if etag.len() <= 256 && !etag.is_empty()
+                && !etag.bytes().any(|ch| ch.is_ascii_control()) => Ok(()),
+            _ => Err(S3TransportError::InvalidProfile),
+        }
+    }
+}
+
+/// An authenticated SDK client scoped to one Akula vault prefix.
+/// Credentials come from the caller-controlled AWS provider chain, not from
+/// the vault, local journal, ordinary settings JSON, logs or object names.
+pub struct AwsS3ProbeClient {
+    client: aws_sdk_s3::Client,
+    bucket: String,
+    keyspace: S3Keyspace,
+}
+
+impl AwsS3ProbeClient {
+    pub async fn connect(
+        profile: S3ConnectionProfile,
+        keyspace: S3Keyspace,
+    ) -> Result<Self, S3TransportError> {
+        profile.validate()?;
+        let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(profile.region))
+            .timeout_config(
+                aws_config::timeout::TimeoutConfig::builder()
+                    .connect_timeout(Duration::from_secs(5))
+                    .operation_timeout(Duration::from_secs(20))
+                    .build(),
+            )
+            .load()
+            .await;
+        let mut config = aws_sdk_s3::config::Builder::from(&shared)
+            .force_path_style(profile.force_path_style);
+        if let Some(endpoint) = profile.endpoint {
+            config = config.endpoint_url(endpoint);
+        }
+        Ok(Self {
+            client: aws_sdk_s3::Client::from_conf(config.build()),
+            bucket: profile.bucket,
+            keyspace,
+        })
+    }
+
+    fn checked_key(&self, key: &str) -> Result<(), S3TransportError> {
+        // All operations, including read-only probes, are restricted to the
+        // user's configured Akula object namespace.
+        if !self.keyspace.contains_key(key) {
+            return Err(S3TransportError::OutsideVaultNamespace);
+        }
+        Ok(())
+    }
+
+    pub async fn head(&self, key: &str) -> Result<S3ObservedObject, S3TransportError> {
+        self.checked_key(key)?;
+        let response = self.client.head_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send().await
+            .map_err(|error| classify(error.as_service_error().and_then(|e| e.code())))?;
+        let length = response.content_length()
+            .ok_or(S3TransportError::MalformedResponse)?;
+        let etag = response.e_tag()
+            .filter(|v| !v.is_empty())
+            .ok_or(S3TransportError::MalformedResponse)?;
+        if length < 0 {
+            return Err(S3TransportError::MalformedResponse);
+        }
+        Ok(S3ObservedObject { etag: etag.to_owned(), byte_length: length as u64 })
+    }
+
+    /// Bound allocation by a caller-defined limit AND an immutable stage-05b
+    /// ceiling. A dishonest Content-Length cannot bypass streaming bounds.
+    /// HEAD/GET(If-Match)/HEAD detects replacement during download.
+    pub async fn get_bounded(
+        &self, key: &str, max_bytes: u64,
+    ) -> Result<S3BoundedObject, S3TransportError> {
+        self.checked_key(key)?;
+        if max_bytes > MAX_PROBE_BYTES {
+            return Err(S3TransportError::ObjectTooLarge);
+        }
+        let before = self.head(key).await?;
+        if before.byte_length > max_bytes {
+            return Err(S3TransportError::ObjectTooLarge);
+        }
+        let response = self.client.get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .if_match(&before.etag)
+            .send().await
+            .map_err(|error| classify(error.as_service_error().and_then(|e| e.code())))?;
+        let mut stream = response.body;
+        let mut bytes = Vec::with_capacity(before.byte_length as usize);
+        while let Some(chunk) = stream.try_next().await
+            .map_err(|_| S3TransportError::Unavailable)?
+        {
+            if chunk.len() as u64 > max_bytes.saturating_sub(bytes.len() as u64) {
+                return Err(S3TransportError::ObjectTooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let after = self.head(key).await?;
+        if before != after || bytes.len() as u64 != after.byte_length {
+            return Err(S3TransportError::ChangedDuringRead);
+        }
+        let blake3 = blake3::hash(&bytes).to_hex().to_string();
+        Ok(S3BoundedObject { object: after, bytes, blake3 })
+    }
+
+    /// Only small, test/pointer-sized guarded PUTs. Large immutable binary
+    /// blobs and their multipart state machine remain stage 05c.
+    pub async fn put_conditionally(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        condition: S3PutCondition,
+    ) -> Result<S3ObservedObject, S3TransportError> {
+        self.checked_key(key)?;
+        condition.validate()?;
+        if bytes.len() as u64 > MAX_PROBE_BYTES {
+            return Err(S3TransportError::ObjectTooLarge);
+        }
+        let mut put = self.client.put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .body(ByteStream::from(bytes.to_vec()));
+        put = match condition {
+            S3PutCondition::IfAbsent => put.if_none_match("*"),
+            S3PutCondition::IfMatch(etag) => put.if_match(etag),
+        };
+        let response = put.send().await
+            .map_err(|error| classify(error.as_service_error().and_then(|e| e.code())))?;
+        // Receipt alone is not a durable baseline. Callers MUST read back,
+        // verify BLAKE3 and journal prior to acknowledging publication.
+        let etag = response.e_tag()
+            .filter(|value| !value.is_empty())
+            .ok_or(S3TransportError::CommitUncertain)?;
+        Ok(S3ObservedObject { etag: etag.to_owned(), byte_length: bytes.len() as u64 })
+    }
+
+    /// Diagnostic listing only! These raw pages do not comprise a stable S3
+    /// snapshot; this method must never implement collect_verified_listing.
+    pub async fn diagnostic_list_page(
+        &self,
+        cursor: Option<&str>,
+        page_limit: i32,
+    ) -> Result<S3DiagnosticPage, S3TransportError> {
+        if !(1..=MAX_S3_PAGE_SIZE).contains(&page_limit)
+            || cursor.is_some_and(|value| value.is_empty() || value.len() > 8192)
+        {
+            return Err(S3TransportError::MalformedResponse);
+        }
+        let prefix = self.keyspace.vault_prefix();
+        let result = self.client.list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(&prefix)
+            .max_keys(page_limit)
+            .set_continuation_token(cursor.map(str::to_owned))
+            .send().await
+            .map_err(|error| classify(error.as_service_error().and_then(|e| e.code())))?;
+        let truncated = result.is_truncated()
+            .ok_or(S3TransportError::IncompleteListing)?;
+        let keys: Vec<String> = result.contents().iter().map(|object| {
+            object.key().ok_or(S3TransportError::MalformedResponse)
+                .and_then(|key| {
+                    self.checked_key(key)?;
+                    Ok(key.to_owned())
+                })
+        }).collect::<Result<_,_>>()?;
+        if keys.len() > page_limit as usize {
+            return Err(S3TransportError::MalformedResponse);
+        }
+        let next = result.next_continuation_token().map(str::to_owned);
+        if (truncated && next.as_deref().is_none_or(str::is_empty))
+            || (!truncated && next.is_some())
+        {
+            return Err(S3TransportError::IncompleteListing);
+        }
+        Ok(S3DiagnosticPage { keys, next_cursor: next, complete: !truncated })
+    }
+}
+
+fn classify(code: Option<&str>) -> S3TransportError {
+    match code {
+        Some("NoSuchKey" | "NotFound" | "NoSuchBucket") => S3TransportError::NotFound,
+        Some("AccessDenied" | "InvalidAccessKeyId" | "SignatureDoesNotMatch") =>
+            S3TransportError::PermissionDenied,
+        Some("PreconditionFailed") => S3TransportError::PreconditionFailed,
+        Some("ConditionalRequestConflict" | "OperationAborted") =>
+            S3TransportError::CommitUncertain,
+        // For transport drops/timeouts, a mutation can have succeeded: the
+        // caller must use head+readback and never blindly retry a PUT.
+        _ => S3TransportError::CommitUncertain,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::VaultId;
+
+    fn profile(endpoint: Option<&str>) -> S3ConnectionProfile {
+        S3ConnectionProfile {
+            bucket: "akula-test-bucket".into(),
+            region: "us-east-1".into(),
+            endpoint: endpoint.map(str::to_owned),
+            force_path_style: true,
+        }
+    }
+
+    #[test]
+    fn endpoint_guard_blocks_credential_injection_and_external_plaintext() {
+        for endpoint in [
+            "http://example.com:9000", "http://127.0.0.1.evil.org:9000",
+            "http://10.0.0.1:9000", "https://me:password@example.com",
+            "https://example.com/evil", "https://example.com?token=secret",
+            "https://example.com/#frag", "file:///tmp/minio",
+        ] {
+            assert_eq!(profile(Some(endpoint)).validate(), Err(S3TransportError::UnsafeEndpoint), "{endpoint}");
+        }
+        for endpoint in [
+            "https://s3.us-east-1.amazonaws.com",
+            "http://127.0.0.1:9000",
+            "http://localhost:9000",
+        ] {
+            assert_eq!(profile(Some(endpoint)).validate(), Ok(()), "{endpoint}");
+        }
+        let mut unsafe_profile = profile(Some("http://localhost:9000"));
+        unsafe_profile.force_path_style = false;
+        assert_eq!(unsafe_profile.validate(), Err(S3TransportError::UnsafeEndpoint));
+    }
+
+    #[test]
+    fn rejects_invalid_buckets_regions_and_guards() {
+        for bucket in ["AA", "CAPITAL", "a", "a..b", "bucket/name", "a_b"] {
+            let mut invalid = profile(None);
+            invalid.bucket = bucket.into();
+            assert_eq!(invalid.validate(), Err(S3TransportError::InvalidProfile));
+        }
+        for region in ["", "../west", "WEST", "r/3", "a b"] {
+            let mut invalid = profile(None);
+            invalid.region = region.into();
+            assert_eq!(invalid.validate(), Err(S3TransportError::InvalidProfile));
+        }
+        assert_eq!(S3PutCondition::IfMatch(String::new()).validate(), Err(S3TransportError::InvalidProfile));
+        assert_eq!(S3PutCondition::IfMatch("\r\n".into()).validate(), Err(S3TransportError::InvalidProfile));
+        assert!(S3PutCondition::IfAbsent.validate().is_ok());
+    }
+
+    /// Requires an isolated ephemeral MinIO bucket. Never runs on main CI
+    /// without explicit opt-in and an externally supplied loopback endpoint.
+    #[tokio::test]
+    #[ignore = "requires a local, disposable MinIO Docker server"]
+    async fn live_minio_conditional_write_and_bounded_read() {
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").expect("isolated MinIO endpoint required");
+        assert!(endpoint.starts_with("http://127.0.0.1:")
+            || endpoint.starts_with("http://localhost:"));
+        let ns = S3Keyspace::new("akula-sync/ci", VaultId::new()).unwrap();
+        let transport = AwsS3ProbeClient::connect(profile(Some(&endpoint)), ns.clone())
+            .await.unwrap();
+
+        // This test bucket is ephemeral and disposable; no production S3
+        // credentials are ever used in PR CI.
+        transport.client.create_bucket().bucket("akula-test-bucket").send().await.unwrap();
+        let a = ns.immutable_manifest_key(super::super::OperationId::new());
+        let first = transport.put_conditionally(&a, b"first", S3PutCondition::IfAbsent).await.unwrap();
+        let checked = transport.get_bounded(&a, 128).await.unwrap();
+        assert_eq!(checked.bytes, b"first");
+        assert_eq!(checked.object, first);
+        assert_eq!(checked.blake3, blake3::hash(b"first").to_hex().to_string());
+        assert_eq!(
+            transport.put_conditionally(&a, b"collision", S3PutCondition::IfAbsent).await,
+            Err(S3TransportError::PreconditionFailed)
+        );
+        assert_eq!(
+            transport.put_conditionally(&a, b"stale", S3PutCondition::IfMatch("\"wrong\"".into())).await,
+            Err(S3TransportError::PreconditionFailed)
+        );
+        let second = transport.put_conditionally(&a, b"second", S3PutCondition::IfMatch(first.etag)).await.unwrap();
+        assert_ne!(second.etag, first.etag);
+        assert_eq!(transport.get_bounded(&a, 10).await.unwrap().bytes, b"second");
+        assert_eq!(transport.get_bounded(&a, 5).await, Err(S3TransportError::ObjectTooLarge));
+        assert_eq!(transport.head(&ns.immutable_manifest_key(super::super::OperationId::new())).await,
+            Err(S3TransportError::NotFound));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local MinIO Docker and disposable credentials"]
+    async fn live_minio_diagnostic_pagination_is_not_a_remote_snapshot() {
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").unwrap();
+        assert!(endpoint.starts_with("http://127.0.0.1:")
+            || endpoint.starts_with("http://localhost:"));
+        let ns = S3Keyspace::new("akula-sync/paging", VaultId::new()).unwrap();
+        let transport = AwsS3ProbeClient::connect(profile(Some(&endpoint)), ns.clone())
+            .await.unwrap();
+        // Bucket created by the first test, when this case is run on the
+        // same runner with --test-threads=1.
+        for _ in 0..13 {
+            let key = ns.immutable_manifest_key(super::super::OperationId::new());
+            transport.put_conditionally(&key, b"data", S3PutCondition::IfAbsent).await.unwrap();
+        }
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = transport.diagnostic_list_page(cursor.as_deref(), 5).await.unwrap();
+            seen.extend(page.keys);
+            if page.complete { break; }
+            cursor = page.next_cursor;
+        }
+        assert_eq!(seen.len(), 13);
+        assert_eq!(seen.iter().collect::<std::collections::BTreeSet<_>>().len(), 13);
+    }
+}
