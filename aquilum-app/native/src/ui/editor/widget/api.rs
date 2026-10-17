@@ -13,6 +13,21 @@ impl TextEditor {
         self.doc.rope()
     }
 
+    /// Diagnostic-only trial; production editor state is never retained
+    /// across tabs. Reject IME and nonempty selections at the widget boundary.
+    #[cfg(test)]
+    pub(crate) fn trial_plain_layout_snapshot(&self) -> Option<crate::ui::editor::TrialSnapshot> {
+        if self.compose.is_some() || self.anchor != self.focus || self.extra_cursors.len() != 0 {
+            return None;
+        }
+        self.doc.trial_snapshot(&self.styles)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn offer_plain_layout_trial(&mut self, snapshot: crate::ui::editor::TrialSnapshot) {
+        self.doc.trial_offer(snapshot);
+    }
+
     #[cfg(test)]
     pub fn caret_rect(&self) -> masonry::kurbo::Rect {
         self.caret()
