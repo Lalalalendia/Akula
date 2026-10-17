@@ -43,7 +43,13 @@ impl Tracker {
     pub(super) fn track_glyphs(&mut self, draw: GlyphRunRef<'_>, glyphs: &mut dyn Iterator<Item = Glyph>) {
         let Some(first) = glyphs.next() else { return };
         let level = self.top();
-        if !level.clip.overlaps(convert::line_bounds(first.y, draw.font_size, draw.glyph_transform, draw.transform)) {
+        let outside_first = !level.clip.overlaps(convert::line_bounds(
+            first.y, draw.font_size, draw.glyph_transform, draw.transform,
+        ));
+        #[cfg(test)]
+        let outside_first = outside_first
+            && std::env::var_os("AQ_TEST_FULL_GLYPH_RUN_VISIBILITY").is_none();
+        if outside_first {
             return;
         }
         let mut h = H::new(3);

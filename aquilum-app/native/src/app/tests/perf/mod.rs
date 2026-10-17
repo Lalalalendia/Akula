@@ -18,6 +18,7 @@ mod sash;
 #[cfg(feature = "memory-probe")]
 mod search;
 mod timing;
+mod vello_release;
 
 use crate::stats::percentiles;
 

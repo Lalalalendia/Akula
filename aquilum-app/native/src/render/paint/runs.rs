@@ -8,6 +8,10 @@ use super::Painter;
 use super::convert;
 use crate::render::live;
 
+#[cfg(test)]
+static TEST_GLYPH_ATLAS: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("AQ_TEST_DISABLE_GLYPH_ATLAS").is_none());
+
 impl Painter {
     pub(in crate::render) fn paint_live(&mut self, transform: Affine, shape: &GeometryRef<'_>, motion: live::Motion) {
         let Some(rounded) = live::shape(shape) else { return };
@@ -29,7 +33,14 @@ impl Painter {
 
     pub(in crate::render) fn draw_glyph_run(&mut self, run: GlyphRunRef<'_>, glyphs: &mut dyn Iterator<Item = SceneGlyph>) {
         let Some(first) = glyphs.next() else { return };
-        if self.offscreen(convert::line_bounds(first.y, run.font_size, run.glyph_transform, run.transform)) {
+        let outside_first = self.offscreen(convert::line_bounds(
+            first.y, run.font_size, run.glyph_transform, run.transform,
+        ));
+        #[cfg(test)]
+        let outside_first = outside_first
+            && (self.culled > 0
+                || std::env::var_os("AQ_TEST_FULL_GLYPH_RUN_VISIBILITY").is_none());
+        if outside_first {
             return;
         }
         let paint = convert::brush_to_paint(run.brush, run.composite, &mut self.images);
@@ -53,12 +64,26 @@ impl Painter {
             Style::Fill(fill_rule) => self.ctx.set_fill_rule(*fill_rule),
             Style::Stroke(stroke) => self.ctx.set_stroke(stroke.clone()),
         }
+        // Experimental A/B switch applies equally to the incremental
+        // renderer and the independent fresh-full reference in test binaries.
+        // Release application builds always keep the current atlas setting.
+        #[cfg(test)]
+        let atlas_cache = *TEST_GLYPH_ATLAS;
+        #[cfg(not(test))]
+        let atlas_cache = true;
+        // Test-only A/B: font hinting may snap fractional glyph positions
+        // differently in cropped raster targets. Both the incremental path
+        // and independent full reference use the same mode.
+        #[cfg(test)]
+        let hint = run.hint && std::env::var_os("AQ_TEST_DISABLE_GLYPH_HINTING").is_none();
+        #[cfg(not(test))]
+        let hint = run.hint;
         let builder = self
             .ctx
             .glyph_run(&mut self.resources, run.font)
             .font_size(run.font_size)
-            .atlas_cache(true)
-            .hint(run.hint)
+            .atlas_cache(atlas_cache)
+            .hint(hint)
             .normalized_coords(run.normalized_coords);
         let builder = match run.glyph_transform {
             Some(transform) => builder.glyph_transform(transform),
