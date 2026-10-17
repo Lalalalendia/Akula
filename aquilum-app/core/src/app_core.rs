@@ -15,6 +15,11 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
+// Conservatively serialize all Core-managed mutations and protected original
+// captures within this process, even when two distinct Core instances use
+// the same workspace. External processes still require an OS-level guard.
+static PROCESS_FILE_MUTATIONS: Mutex<()> = Mutex::new(());
+
 /// What the core tells its host.
 #[derive(Clone, Serialize)]
 #[serde(untagged)]
@@ -79,10 +84,10 @@ pub struct Core {
     pub search: SearchService,
     pub history: HistoryService,
     pub documents: DocumentHub,
-    /// In-process serialization shared by ordinary File Gate writes and
-    /// read-only protected-original capture. It is NOT a disk write authority,
-    /// cross-process OS lock, or replacement for identity/hash verification.
-    pub(crate) file_mutations: Mutex<()>,
+    /// Process-wide serialization shared by all Core instances, ordinary
+    /// File Gate writes and read-only protected-original capture. It is NOT a
+    /// cross-process OS lock or trusted write authorization.
+    pub(crate) file_mutations: &'static Mutex<()>,
     pub wikixiv: WikixivService,
     pub watcher: WorkspaceWatcher,
     /// The note open in the UI, reported by the host; MCP tools use it for «эта заметка».
@@ -115,7 +120,7 @@ impl Core {
                 search: SearchService::new(app_data_dir.join("search-v2"), notifier, index_notifier),
                 history: HistoryService::new(app_data_dir),
                 documents: DocumentHub::new(&app_data_dir.join("documents.sqlite3")),
-                file_mutations: Mutex::new(()),
+                file_mutations: &PROCESS_FILE_MUTATIONS,
                 wikixiv: WikixivService::new(),
                 watcher: WorkspaceWatcher::new(watch_sink),
                 active_note: ActiveNote::default(),
