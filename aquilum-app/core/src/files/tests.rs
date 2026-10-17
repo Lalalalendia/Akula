@@ -1,5 +1,5 @@
 use super::document::{
-    hash_bytes, normalize_line_endings, read_file_snapshot_impl, read_file_stat_impl, write_file_atomic_impl,
+    hash_bytes, normalize_line_endings, read_file_hash_impl, read_file_snapshot_impl, read_file_stat_impl, write_file_atomic_impl,
 };
 use super::entries::{create_file_impl, rename_file_impl};
 use super::error::FileCommandError;
@@ -198,4 +198,34 @@ fn a_lone_carriage_return_is_normalised_too() {
     assert_eq!(normalize_line_endings("одна\rдве".to_owned()), "одна\nдве");
     assert_eq!(normalize_line_endings("без переносов".to_owned()), "без переносов");
     assert_eq!(normalize_line_endings("\r\rа\r\nб\r\r\nв\n\r".to_owned()), "\n\nа\nб\n\nв\n\n");
+}
+
+#[test]
+fn raw_hash_is_streamed_without_changing_conflict_or_crlf_semantics() {
+    let directory = tempfile::tempdir().expect("workspace");
+    let path = directory.path().join("большая заметка.md");
+    let raw = "Unicode 😀 и строка\r\n".repeat(40_000) + "завершение\rхвост";
+    fs::write(&path, &raw).expect("fixture");
+
+    let fingerprint = read_file_hash_impl(&path).expect("streamed hash");
+    assert_eq!(fingerprint, hash_bytes(raw.as_bytes()), "raw CRLF bytes must be hashed");
+    assert_eq!(fingerprint, read_file_snapshot_impl(&path).unwrap().hash);
+
+    let saved = write_file_atomic_impl(&path, "наша правка", Some(&fingerprint)).expect("fresh expected hash");
+    assert_eq!(saved.hash, hash_bytes("наша правка".as_bytes()));
+    fs::write(&path, "чужая правка").expect("external writer");
+    let error = write_file_atomic_impl(&path, "не затирать", Some(&saved.hash)).unwrap_err();
+    assert!(matches!(error, FileCommandError::Conflict { .. }));
+    assert_eq!(fs::read_to_string(&path).unwrap(), "чужая правка");
+}
+
+#[test]
+fn streamed_hash_of_empty_and_binary_files_matches_byte_hash() {
+    let directory = tempfile::tempdir().expect("workspace");
+    let path = directory.path().join("bytes");
+    fs::write(&path, b"").expect("empty fixture");
+    assert_eq!(read_file_hash_impl(&path).unwrap(), hash_bytes(b""));
+    let bytes = [0, 255, 128, 13, 10, 0, 7];
+    fs::write(&path, bytes).expect("binary fixture");
+    assert_eq!(read_file_hash_impl(&path).unwrap(), hash_bytes(&bytes));
 }

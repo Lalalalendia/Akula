@@ -2,16 +2,33 @@ use super::error::FileCommandError;
 use super::models::{FileSnapshot, FileWriteResult};
 use atomic_write_file::AtomicWriteFile;
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
 }
 
+const HASH_CHUNK: usize = 64 << 10;
+
+/// Hash file bytes incrementally; do not allocate a full-file Vec merely to
+/// check a revision or verify a conflict before an atomic write.
+fn hash_reader(mut reader: impl Read) -> Result<String, FileCommandError> {
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0u8; HASH_CHUNK];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
 fn read_hash_if_exists(path: &Path) -> Result<Option<String>, FileCommandError> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(hash_bytes(&bytes))),
+    match fs::File::open(path) {
+        Ok(file) => hash_reader(file).map(Some),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
     }
@@ -67,7 +84,7 @@ pub fn read_file_snapshot_impl(path: &Path) -> Result<FileSnapshot, FileCommandE
 }
 
 pub fn read_file_hash_impl(path: &Path) -> Result<String, FileCommandError> {
-    Ok(hash_bytes(&fs::read(path)?))
+    hash_reader(fs::File::open(path)?)
 }
 
 pub fn read_file_stat_impl(

@@ -95,3 +95,17 @@ fn deleting_a_text_file_from_the_tree_closes_its_tab() {
     );
     assert!(!path.exists());
 }
+
+#[test]
+fn rescanned_workspace_reload_detects_same_size_rewrite_with_restored_mtime() {
+    let mut h = Harness::new();
+    let path = h.write_note("с той же датой.md", "раз");
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&path));
+    assert!(h.app.open(&mut h.root, path.clone()));
+    let old_modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, "два").unwrap();
+    std::fs::File::open(&path).unwrap().set_modified(old_modified).unwrap();
+    h.app.workspace.core.emit(aquilum_core::CoreEvent::WorkspaceRescanned);
+    h.app.on_core_events(&mut h.root);
+    assert_eq!(h.body_text(), "два", "workspace rescan must not rely on mtime or size");
+}

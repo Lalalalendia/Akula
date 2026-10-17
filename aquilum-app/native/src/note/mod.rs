@@ -102,8 +102,15 @@ impl Note {
         if self.pending.is_some() || self.queued > 0 {
             return None;
         }
+        // Workspace events can refer to our own save or metadata-only updates.
+        // Verify actual bytes first, without parsing/rebuilding a large Rope.
+        // Do not trust (size, mtime) alone: external writers can preserve both.
+        if aquilum_core::files::document::read_file_hash_impl(&self.path).ok()? == *self.hash.lock().unwrap_or_else(PoisonError::into_inner) {
+            return None;
+        }
         let loaded = read(&self.path).ok()?;
         let mut hash = self.hash.lock().unwrap_or_else(PoisonError::into_inner);
+        // The file may change between the hash probe and the full read.
         if loaded.hash == *hash {
             return None;
         }
@@ -133,5 +140,37 @@ mod tests {
         note.edit(Duration::ZERO);
         assert!(note.deadline().is_some());
         assert_eq!(note.reload(), None, "несохранённая правка не затирается");
+    }
+
+    #[test]
+    fn reload_detects_same_size_external_edit_with_restored_mtime() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("same-stat.md");
+        std::fs::write(&path, "раз").unwrap();
+        let (mut note, original) = Note::open(path.clone()).unwrap();
+        let previous = std::fs::metadata(&path).unwrap();
+        let modified = previous.modified().unwrap();
+        std::fs::write(&path, "два").unwrap();
+        std::fs::File::open(&path).unwrap().set_modified(modified).unwrap();
+
+        let restored = std::fs::metadata(&path).unwrap();
+        assert_eq!(restored.len(), previous.len(), "same byte length is essential");
+        assert_eq!(restored.modified().unwrap(), modified, "timestamp must not signal a change");
+        assert_eq!(original.to_string(), "раз");
+        assert_eq!(note.reload().map(|rope| rope.to_string()).as_deref(), Some("два"));
+        assert!(note.reload().is_none(), "unchanged bytes must not replace the Rope again");
+    }
+
+    #[test]
+    fn identical_external_rewrite_does_not_reload_or_override_pending_changes() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("unchanged.md");
+        std::fs::write(&path, "текст").unwrap();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        std::fs::write(&path, "текст").unwrap();
+        assert!(note.reload().is_none(), "byte-identical external rewrite is a no-op");
+        note.edit(Duration::ZERO);
+        std::fs::write(&path, "иначе").unwrap();
+        assert!(note.reload().is_none(), "pending edits must never be replaced");
     }
 }
