@@ -400,7 +400,8 @@ mod tests {
     #[test]
     fn offline_generations_request_exact_missing_ancestor_and_reuse_stable_shards() {
         let ns = ns();
-        let base_shard = shard(RevisionId::new(), RevisionId::new(), 1);
+        let base_revision = RevisionId::new();
+        let base_shard = shard(base_revision, base_revision, 1);
         // One independent revision ref; its content is deliberately opaque.
         let (_, cpbytes, cphead) = frame(&ns, 1, None, vec![base_shard.clone()]);
         let (_, b2, h2) = frame(&ns, 2, Some(&cphead), vec![base_shard.clone()]);
@@ -474,7 +475,8 @@ mod tests {
     #[test]
     fn same_immutable_shard_id_with_different_digest_is_rejected() {
         let ns = ns();
-        let s = shard(RevisionId::new(), RevisionId::new(), 1);
+        let revision = RevisionId::new();
+        let s = shard(revision, revision, 1);
         let mut edited = s.clone();
         edited.shard_blake3 = digest(b"changed");
         let (_, cpbytes, cphead) = frame(&ns, 1, None, vec![s]);
@@ -513,7 +515,7 @@ mod tests {
             check(&ns, &cphead, Some((&head, &bytes)), &[]),
             Err(S3ManifestDeltaError::RootRollbackOrFork)
         );
-        let (_, fork_bytes, fork_head) = frame(&ns, 1, None, vec![]);
+        let (_, _fork_bytes, fork_head) = frame(&ns, 1, None, vec![]);
         assert_eq!(
             check(&ns, &fork_head, Some((&cphead, &cpbytes)), &[]),
             Err(S3ManifestDeltaError::RootRollbackOrFork)
