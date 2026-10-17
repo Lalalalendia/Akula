@@ -437,6 +437,124 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn retention_refuses_linked_aquilum_root_and_nested_history_aliases() {
+        use std::os::unix::fs::symlink;
+        let vault = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let history = outside.path().join("history");
+        let outside_note = history.join("Приватная.md");
+        fs::create_dir_all(&outside_note).unwrap();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let version = write_version(
+            &outside_note, "test", &snapshot("must survive", Source::Me, now - 40 * DAY.as_secs())
+        ).unwrap();
+        symlink(outside.path(), vault.path().join(".aquilum")).unwrap();
+        assert_eq!(remove_expired(vault.path(), 30), 0);
+        assert!(version.is_file());
+        fs::remove_file(vault.path().join(".aquilum")).unwrap();
+
+        let inner = vault.path().join(".aquilum");
+        fs::create_dir(&inner).unwrap();
+        symlink(&history, inner.join("history")).unwrap();
+        assert_eq!(remove_expired(vault.path(), 30), 0);
+        assert!(version.is_file());
+        fs::remove_file(inner.join("history")).unwrap();
+
+        let genuine = history_root(vault.path());
+        fs::create_dir_all(&genuine).unwrap();
+        let good = genuine.join("Нормальная.md");
+        fs::create_dir(&good).unwrap();
+        let good_version = write_version(
+            &good, "test", &snapshot("should remain on failed scan", Source::Me, now - 40 * DAY.as_secs())
+        ).unwrap();
+        symlink(&outside_note, genuine.join("Ссылка.md")).unwrap();
+        assert_eq!(remove_expired(vault.path(), 30), 0);
+        assert!(version.is_file());
+        assert!(good_version.is_file(), "no partial retention on unsafe tree");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migration_refuses_legacy_and_destination_aliases_without_moving_bytes() {
+        use std::os::unix::fs::symlink;
+        let vault = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let source_dir = outside.path().join("history").join("Имя.md");
+        fs::create_dir_all(&source_dir).unwrap();
+        let source = source_dir.join("1_test_me.md");
+        fs::write(&source, "original content").unwrap();
+
+        symlink(outside.path(), vault.path().join(".quantum")).unwrap();
+        adopt_quantum_history(vault.path());
+        assert!(source.exists());
+        assert!(!vault.path().join(".aquilum").exists());
+        fs::remove_file(vault.path().join(".quantum")).unwrap();
+
+        let legacy_dir = vault.path().join(".quantum/history/Имя.md");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        let local_source = legacy_dir.join("1_test_me.md");
+        fs::write(&local_source, "local original").unwrap();
+        symlink(outside.path(), vault.path().join(".aquilum")).unwrap();
+        adopt_quantum_history(vault.path());
+        assert_eq!(fs::read_to_string(&local_source).unwrap(), "local original");
+        assert_eq!(fs::read_to_string(&source).unwrap(), "original content");
+        fs::remove_file(vault.path().join(".aquilum")).unwrap();
+
+        let target_root = history_root(vault.path());
+        fs::create_dir_all(&target_root).unwrap();
+        symlink(&source_dir, target_root.join("Имя.md")).unwrap();
+        adopt_quantum_history(vault.path());
+        assert!(local_source.exists(), "migration must abort at nested target aliases");
+        assert_eq!(fs::read_to_string(&source).unwrap(), "original content");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_retention_and_migration_refuse_ntfs_junction_roots() {
+        use std::process::Command;
+        fn junction(link: &Path, destination: &Path) {
+            let output = Command::new("cmd")
+                .arg("/C").arg("mklink").arg("/J").arg(link).arg(destination)
+                .output().unwrap();
+            assert!(output.status.success(), "mklink /J failed: {}",
+                String::from_utf8_lossy(&output.stderr));
+        }
+
+        let vault = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let foreign_dir = outside.path().join("history/Имя.md");
+        fs::create_dir_all(&foreign_dir).unwrap();
+        let foreign_file = write_version(
+            &foreign_dir, "win", &snapshot("external", Source::Me, now - 40 * DAY.as_secs())
+        ).unwrap();
+
+        junction(&vault.path().join(".aquilum"), outside.path());
+        assert_eq!(remove_expired(vault.path(), 30), 0);
+        assert!(foreign_file.exists());
+        fs::remove_dir(vault.path().join(".aquilum")).unwrap();
+
+        junction(&vault.path().join(".quantum"), outside.path());
+        adopt_quantum_history(vault.path());
+        assert!(foreign_file.exists());
+        assert!(!vault.path().join(".aquilum").exists());
+        fs::remove_dir(vault.path().join(".quantum")).unwrap();
+
+        let target_history = history_root(vault.path());
+        fs::create_dir_all(&target_history).unwrap();
+        let internal_legacy = vault.path().join(".quantum/history/Имя.md");
+        fs::create_dir_all(&internal_legacy).unwrap();
+        let internal_file = internal_legacy.join("1_win_me.md");
+        fs::write(&internal_file, "local").unwrap();
+        junction(&target_history.join("Имя.md"), &foreign_dir);
+        adopt_quantum_history(vault.path());
+        assert!(internal_file.exists(), "junctions in destination must block migration");
+        assert_eq!(fs::read_to_string(&foreign_file).unwrap(), "external");
+        fs::remove_dir(target_history.join("Имя.md")).unwrap();
+    }
+
     #[test]
     fn history_kept_under_the_quantum_name_moves_to_aquilum_without_overwriting() {
         let vault = tempfile::tempdir().unwrap();
