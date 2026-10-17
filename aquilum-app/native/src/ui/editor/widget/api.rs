@@ -4,7 +4,9 @@ impl TextEditor {
     /// Capture only already-shaped, clean, non-interactive paragraphs. This
     /// never captures edit history, IME composition, cursor, or widget state.
     pub(crate) fn clean_parley_snapshot(&self) -> Option<crate::ui::editor::LayoutSnapshot> {
-        if self.compose.is_some() {
+        // Selection-dependent decorations (and IME preedit) are never
+        // transferred. The receiving editor will rebuild them from source.
+        if self.compose.is_some() || self.anchor != self.focus {
             return None;
         }
         self.doc.trial_snapshot(&self.styles)
