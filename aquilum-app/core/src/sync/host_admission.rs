@@ -116,6 +116,12 @@ impl<'a> RegisteredReadAdmission<'a> {
         let target = self.root_path.join(relative.as_str());
         let _reservation = self.core.documents.reserve_sync_closed_document(&target)
             .map_err(admission_error)?;
+        // Reservation briefly locks sessions, then releases that mutex.
+        // The File Gate lock is acquired after it, and held through the
+        // second read. Existing editor/shell Gate mutations cannot race the
+        // durability transaction. It does NOT lock external processes.
+        let _file_guard = self.core.file_mutations.lock()
+            .map_err(|_| BoundCaptureError::Admission(VaultPortError::PermissionDenied))?;
         self.check_root()?;
         let original = self.pinned.read_identified_bounded(
             relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
