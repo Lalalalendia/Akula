@@ -7,11 +7,18 @@ use crate::search::paths::{identity, strip_root};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::SystemTime;
 
 const DEVICE_FILE: &str = "device-id";
+
+// Separate from Core File Gate. All HistoryService instances in one process
+// serialize version-store reads and writes with native history maintenance.
+// No code holding this mutex may acquire Core File Gate, emit host callbacks,
+// or perform editor/DocumentHub reconciliation.
+static PROCESS_HISTORY_FILES: Mutex<()> = Mutex::new(());
 
 pub struct HistoryService {
     device: String,
@@ -22,6 +29,28 @@ pub struct HistoryService {
 struct State {
     roots: Vec<PathBuf>,
     notes: HashMap<String, Note>,
+}
+
+// Always acquire PROCESS_HISTORY_FILES before the per-service state mutex.
+// disk_before intentionally uses the per-service mutex alone, so a File Gate
+// write does not wait on a potentially long history-retention scan.
+struct HistoryFilesStateGuard<'a> {
+    _process: MutexGuard<'static, ()>,
+    state: MutexGuard<'a, State>,
+}
+
+impl Deref for HistoryFilesStateGuard<'_> {
+    type Target = State;
+
+    fn deref(&self) -> &State {
+        &self.state
+    }
+}
+
+impl DerefMut for HistoryFilesStateGuard<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        &mut self.state
+    }
 }
 
 struct Note {
@@ -97,7 +126,7 @@ impl HistoryService {
 
     pub fn saved(&self, roots: Roots<'_>, note: &Path, write: NoteWrite<'_>) -> bool {
         let now = SystemTime::now();
-        let mut state = self.lock();
+        let Some(mut state) = self.files_lock() else { return false };
         let Some(located) = locate(&mut state, roots, note) else {
             return false;
         };
@@ -191,7 +220,7 @@ impl HistoryService {
         id: Option<&str>,
         name: &str,
     ) -> Option<String> {
-        let mut state = self.lock();
+        let Some(mut state) = self.files_lock() else { return None };
         let located = locate(&mut state, roots, note)?;
         let target = match id {
             Some(id) => Some(
@@ -212,7 +241,7 @@ impl HistoryService {
         offset: usize,
         limit: usize,
     ) -> HistoryPage {
-        let mut state = self.lock();
+        let Some(mut state) = self.files_lock() else { return HistoryPage::default() };
         let Some(located) = locate(&mut state, roots, note) else {
             return HistoryPage::default();
         };
@@ -243,7 +272,7 @@ impl HistoryService {
         note: &Path,
         id: Option<&str>,
     ) -> Option<VersionTexts> {
-        let mut state = self.lock();
+        let Some(mut state) = self.files_lock() else { return None };
         let located = locate(&mut state, roots, note)?;
         let versions = store::versions(&located.dir);
         let id = id?;
@@ -258,7 +287,7 @@ impl HistoryService {
     }
 
     pub fn moved(&self, roots: Roots<'_>, from: &Path, to: &Path) {
-        let mut state = self.lock();
+        let Some(mut state) = self.files_lock() else { return };
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
             locate(&mut state, roots, to),
@@ -275,7 +304,7 @@ impl HistoryService {
     }
 
     pub fn trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) {
-        let mut state = self.lock();
+        let Some(mut state) = self.files_lock() else { return };
         let Some(located) = locate(&mut state, roots, note) else {
             return;
         };
@@ -293,7 +322,7 @@ impl HistoryService {
     }
 
     pub fn restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) {
-        let mut state = self.lock();
+        let Some(mut state) = self.files_lock() else { return };
         let Some(located) = locate(&mut state, roots, restored) else {
             return;
         };
@@ -311,7 +340,36 @@ impl HistoryService {
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+    /// Serialize history version-store access across all Core instances.
+    /// If the process-wide interlock was poisoned, fail closed instead of
+    /// continuing to mutate possibly inconsistent history bytes.
+    fn files_lock(&self) -> Option<HistoryFilesStateGuard<'_>> {
+        let process = match PROCESS_HISTORY_FILES.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                eprintln!("[aquilum:history] process history-files lock poisoned; access refused");
+                return None;
+            }
+        };
+        let state = self.lock();
+        Some(HistoryFilesStateGuard { _process: process, state })
+    }
+
+    /// Run legacy migration and retention without acquiring Core File Gate.
+    /// This takes the history-files mutex only, never the per-service state
+    /// mutex; disk_before (which can run under File Gate) stays responsive.
+    /// Full-tree housekeeping can delay other history operations but cannot
+    /// block the ordinary File Gate mutex directly.
+    pub fn maintain_retention(&self, workspace: &Path, retention_days: u32) -> Result<u64, &'static str> {
+        let _guard = PROCESS_HISTORY_FILES
+            .lock()
+            .map_err(|_| "process history-files lock poisoned; refusing cleanup")?;
+        store::adopt_quantum_history(workspace);
+        store::adopt_quantum_history(&trash_path(workspace));
+        Ok(store::remove_expired(workspace, retention_days))
+    }
+
+    fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
@@ -441,6 +499,93 @@ mod tests {
         fs::create_dir_all(to.parent().unwrap()).unwrap();
         fs::rename(from, to).unwrap();
         history.moved(&|| fixture.roots(), from, to);
+    }
+
+    #[test]
+    fn history_service_serializes_saved_across_distinct_instances() {
+        use super::PROCESS_HISTORY_FILES;
+        use std::sync::{mpsc, Arc};
+        use std::thread;
+        use std::time::Duration;
+
+        let fixture = Fixture::new();
+        let note = fixture.vault.join("Shared.md");
+        fs::write(&note, "existing file").unwrap();
+        let vault = fixture.vault.clone();
+        let app_data = fixture._directory.path().join("other-app-data");
+        let first = Arc::new(fixture.service());
+        let second = Arc::new(HistoryService::new(&app_data));
+        let recorded = fixture.history_of("Shared.md");
+
+        let held = PROCESS_HISTORY_FILES.lock().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let saved = second.saved(
+                &|| vec![vault],
+                &note,
+                NoteWrite {
+                    disk_before: None,
+                    text: "new version",
+                    hash: "test-hash",
+                    source: Source::Agent,
+                    name: None,
+                },
+            );
+            done_tx.send(saved).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "a second history service wrote without the process history lock");
+        assert!(!recorded.exists(), "history bytes changed while the mutex was held");
+        drop(held);
+
+        assert!(done_rx.recv_timeout(Duration::from_secs(30)).unwrap());
+        worker.join().unwrap();
+        assert_eq!(versions(&recorded).len(), 1);
+        drop(first);
+    }
+
+    #[test]
+    fn history_service_serializes_legacy_migration_and_retention() {
+        use super::PROCESS_HISTORY_FILES;
+        use std::sync::{mpsc, Arc};
+        use std::thread;
+        use std::time::Duration;
+
+        let fixture = Fixture::new();
+        let old = fixture.vault.join(".quantum/history/Legacy.md/1_device_me.md");
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::write(&old, "legacy bytes").unwrap();
+        let expected = fixture.history_of("Legacy.md").join("1_device_me.md");
+        let vault = fixture.vault.clone();
+        let first = Arc::new(fixture.service());
+        let second = Arc::new(HistoryService::new(&fixture._directory.path().join("other-app-data")));
+
+        let held = PROCESS_HISTORY_FILES.lock().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            done_tx.send(second.maintain_retention(&vault, 0)).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "migration ignored the shared history lock");
+        assert!(old.exists());
+        assert!(!expected.exists());
+        drop(held);
+
+        assert_eq!(done_rx.recv_timeout(Duration::from_secs(30)).unwrap().unwrap(), 0);
+        worker.join().unwrap();
+        assert_eq!(fs::read(&expected).unwrap(), b"legacy bytes");
+        assert!(!old.exists());
+        drop(first);
     }
 
     #[test]
