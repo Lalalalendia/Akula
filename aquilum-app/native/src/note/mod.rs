@@ -188,6 +188,24 @@ impl Note {
         Some(loaded.text)
     }
 
+    /// Explicit history restore/revert is a user-initiated operation that
+    /// must update the visible text immediately after a successful disk write.
+    /// It is not a watcher notification; bypass the async hash-only probe.
+    pub fn reload_after_restore(&mut self) -> Option<crop::Rope> {
+        if self.pending.is_some() || self.queued > 0 {
+            return None;
+        }
+        self.revision = self.revision.wrapping_add(1);
+        self.reload_job = None; // discard and cancel any older watcher result
+        let loaded = read(&self.path).ok()?;
+        let mut hash = self.hash.lock().unwrap_or_else(PoisonError::into_inner);
+        if loaded.hash == *hash {
+            return None;
+        }
+        *hash = loaded.hash;
+        Some(loaded.text)
+    }
+
     pub fn is(&self, path: &Path) -> bool {
         aquilum_core::search::paths::same_path(&self.path, path)
     }
