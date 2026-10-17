@@ -690,6 +690,78 @@ mod tests {
         shard.reference(ns).unwrap()
     }
 
+    /// Deliberately expensive live provider stress: 10,000 actual S3 objects,
+    /// 32 in-flight conditional PUTs, 10 diagnostic listing pages and bounded
+    /// sample readback. The S3 LIST itself is NOT a consistent DAG snapshot.
+    /// Keep this ignored and run only on an isolated disposable MinIO bucket.
+    #[tokio::test]
+    #[ignore = "explicit 10k-object stress on disposable MinIO only"]
+    async fn minio_10k_cloud_objects_pagination() {
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").unwrap();
+        assert!(endpoint.starts_with("http://127.0.0.1:")
+            || endpoint.starts_with("http://localhost:"));
+        let ns = S3Keyspace::new("akula-sync/stress10k", VaultId::new()).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-stress-ten-thousand".into(),
+            region: "us-east-1".into(),
+            endpoint: Some(endpoint),
+            force_path_style: true,
+        };
+        let transport = AwsS3ProbeClient::connect(profile, ns.clone()).await.unwrap();
+        transport.client.create_bucket().bucket(&transport.bucket).send().await.unwrap();
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for i in 0..10_000_u32 {
+            let body = format!("akula-10k-object-{i:05}").into_bytes();
+            let key = ns.immutable_blob_key(
+                &blake3::hash(&body).to_hex().to_string(),
+            ).unwrap();
+            let client = transport.client.clone();
+            let bucket = transport.bucket.clone();
+            tasks.spawn(async move {
+                let uploaded = client.put_object().bucket(bucket).key(key)
+                    .if_none_match("*").body(aws_sdk_s3::primitives::ByteStream::from(body))
+                    .send().await;
+                assert!(uploaded.is_ok(), "conditional S3 PUT failed at object index {i}");
+            });
+            if tasks.len() >= 32 {
+                tasks.join_next().await.unwrap().unwrap();
+            }
+        }
+        while let Some(done) = tasks.join_next().await { done.unwrap(); }
+
+        let mut cursor = None;
+        let mut keys = BTreeSet::new();
+        let mut pages = 0_u32;
+        loop {
+            let page = transport.diagnostic_list_page(cursor.as_deref(), 1000)
+                .await.unwrap();
+            for key in page.keys { assert!(keys.insert(key), "duplicate S3 key"); }
+            pages += 1;
+            if page.complete {
+                assert!(page.next_cursor.is_none());
+                break;
+            }
+            cursor = Some(page.next_cursor.expect("required continuation token"));
+            assert!(pages <= 12, "looping S3 continuation cursor");
+        }
+        assert_eq!(keys.len(), 10_000);
+        assert_eq!(pages, 10);
+
+        // Confirm that a 10k LIST did not conceal an absent or malformed
+        // sampled object. For complete DAG readback every revision and shard
+        // is checked separately by the manifest reader in smaller CI tests.
+        for i in [0_u32, 1, 999, 1000, 5000, 9999] {
+            let content = format!("akula-10k-object-{i:05}");
+            let digest = blake3::hash(content.as_bytes()).to_hex().to_string();
+            let key = ns.immutable_blob_key(&digest).unwrap();
+            assert!(keys.contains(&key));
+            let observed = transport.get_bounded(&key, 64).await.unwrap();
+            assert_eq!(observed.bytes, content.as_bytes());
+            assert_eq!(observed.blake3, digest);
+        }
+    }
+
     /// Disposable localhost MinIO only. Conflicting clients retain immutable
     /// manifest branches and neither can overwrite the winner's CAS.
     #[tokio::test]
