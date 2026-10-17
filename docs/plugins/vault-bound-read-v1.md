@@ -27,8 +27,8 @@ The pinning code is **reused** from aquilum-app/core/src/sync/pinned_read.rs, pi
 ## Important unresolved limitations
 
 - No guest runtime / public extension APIs / panel UI yet; this host adapter cannot be reached by arbitrary guest code.
-- Current bind_host_note uses the host document path registry to mint a logical NoteId. It does not independently attest that an existing selected NoteId cannot be reused for a replaced file at the same path. Before exposing selected-note persistent grants to third-party guests, PLUGIN-04 must bind the handle to a pinned file identity (or equivalent verified document-revision identity) and test same-byte replacement. **Do not claim the selected-note identity gate is fully solved until then.**
-- Normalized casing/collisions across portable filesystems require a complete host-index collision audit. The adapter rejects noncanonical Unicode path spelling and reserved Windows names; Windows file opens remain case-insensitive. Do not map raw plugin path strings to bind_host_note.
+- Binding now captures a pinned OS file identity without copying file contents; read revalidates that identity and rejects same-path replacement even with identical bytes. A legitimate atomic save replacing an inode must trigger a trusted rebind. Same-ID reuse and external process races remain platform residual risks.
+- Normalized casing/collisions across portable filesystems require a complete host-index collision audit. The adapter rejects noncanonical Unicode path spelling and reserved Windows names; Windows file opens remain case-insensitive; an indexed-path collision audit must precede guest RPC exposure. Do not map raw plugin path strings to bind_host_note.
 - No cross-process OS mutation lock: this is a read-only bounded preflight. A different process may change file bytes between operations; the adapter compares identity/bytes twice but is not a globally atomic snapshot.
 - No exactly-once grants or permissions sync to another device.
 - No secret, clipboard, MCP, network or write authority is delegated from these handles.

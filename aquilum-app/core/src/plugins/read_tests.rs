@@ -293,8 +293,26 @@ fn unbound_paths_are_not_exposed_by_a_missing_plugin_permission() {
     let f=fixture();
     let broker=PermissionBroker::new();
     let reader=HostPluginVaultReader::open_registered(&f.core,&broker,&f.root).unwrap();
-    let absent=reader.bind_host_note("NotHere/unknown.md").unwrap();
     let inst=plugin(&broker,reader.host_vault_id());
     let ctx=||HostContext::from_host_state(reader.host_vault_id(),None);
-    assert_eq!(reader.read_note_bounded(inst,&absent,2048,ctx),Err(PluginReadError::Denied));
+    assert_eq!(reader.bind_host_note("NotHere/unknown.md").unwrap_err(),PluginReadError::Unavailable);
+    note(&f.root,"present.md",b"content is not returned without consent");
+    let present=reader.bind_host_note("present.md").unwrap();
+    assert_eq!(reader.read_note_bounded(inst,&present,2048,ctx),Err(PluginReadError::Denied));
+}
+
+#[test]
+fn replacing_a_selected_file_with_identical_bytes_cannot_reuse_old_handle() {
+    let f=fixture();
+    note(&f.root,"Private/selected.md",b"same contents");
+    let broker=PermissionBroker::new();
+    let reader=HostPluginVaultReader::open_registered(&f.core,&broker,&f.root).unwrap();
+    let selected=reader.bind_host_note("Private/selected.md").unwrap();
+    let inst=plugin(&broker,reader.host_vault_id());
+    broker.grant_host_approved(inst,Capability::NotesRead,
+        GrantScope::selected_notes([selected.host_note_id()]).unwrap()).unwrap();
+    let ctx=||HostContext::from_host_state(reader.host_vault_id(),Some(selected.host_note_id()));
+    fs::rename(f.root.join("Private/selected.md"),f.root.join("Private/old.md")).unwrap();
+    note(&f.root,"Private/selected.md",b"same contents");
+    assert_eq!(reader.read_note_bounded(inst,&selected,200,ctx),Err(PluginReadError::Unavailable));
 }

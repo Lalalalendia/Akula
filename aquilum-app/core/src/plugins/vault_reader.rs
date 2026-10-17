@@ -9,7 +9,7 @@ use super::{
     PluginInstanceHandle, RelativeVaultPath, Resource, VaultId,
 };
 use crate::app_core::Core;
-use crate::sync::{LocalFileSnapshot, RegisteredReadAdmission, SyncRelativePath, VaultPortError};
+use crate::sync::{LocalFileSnapshot, PinnedFileIdentity, RegisteredReadAdmission, SyncRelativePath, VaultPortError};
 use std::path::Path;
 
 /// Opaque host-side note handle; future guest RPC uses only a mapped token.
@@ -20,6 +20,7 @@ pub struct ScopedNoteHandle {
     id: NoteId,
     path: RelativeVaultPath,
     relative: SyncRelativePath,
+    file_identity: PinnedFileIdentity,
 }
 
 impl ScopedNoteHandle {
@@ -83,6 +84,7 @@ impl<'a> HostPluginVaultReader<'a> {
         }
         let path = RelativeVaultPath::parse_host_path(indexed_path)
             .map_err(|_| PluginReadError::InvalidHostPath)?;
+        let file_identity = self.admission.bind_plugin_file_identity(&relative)?;
         let id = self.core.ui_state
             .resolve_document(self.admission.registered_workspace_id(), indexed_path)
             .map_err(|_| PluginReadError::Unavailable)?;
@@ -91,6 +93,7 @@ impl<'a> HostPluginVaultReader<'a> {
             id: NoteId::from_uuid_for_host(id),
             path,
             relative,
+            file_identity,
         })
     }
 
@@ -132,7 +135,7 @@ impl<'a> HostPluginVaultReader<'a> {
         let lease = self.broker.authorize(
             instance, context, Capability::NotesRead, &resource,
         )?;
-        let bytes = self.admission.read_plugin_identified_bounded(&note.relative, max_bytes)?;
+        let bytes = self.admission.read_plugin_identified_bounded(&note.relative, note.file_identity, max_bytes)?;
         after_read();
         self.admission.recheck_registered_root()?;
         self.broker.revalidate_lease(&lease, live_context())?;
