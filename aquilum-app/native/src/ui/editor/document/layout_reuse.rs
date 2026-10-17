@@ -4,6 +4,12 @@
 //! state may depend on style, width, caret, resolver and live media. A durable
 //! production cache needs stronger invalidation and paired UI/fidelity tests.
 use masonry::core::{BrushIndex, StyleSet};
+#[cfg(test)]
+fn parley_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("AQ_PARLEY_DIAG_TRACE").is_some())
+}
+
 use masonry::parley::{Alignment, AlignmentOptions, Layout};
 
 use super::super::markdown::{Block, Decor, Fonts};
@@ -71,15 +77,19 @@ impl Document {
         if !self.placed || self.dirty.is_some() || has_pending_edits
             || self.editing.is_some() || self.text.len() > MAX_WINDOW_BYTES
         {
+            if parley_trace_enabled() {
             eprintln!(
                 "PARLEY_TAB_TRACE stage=snapshot_reject placed={} dirty={} pending_edits={} editing={} window_bytes={}",
                 self.placed, self.dirty.is_some(), has_pending_edits,
                 self.editing.is_some(), self.text.len()
             );
+            }
             return None;
         }
         let Some(width) = self.width else {
+            if parley_trace_enabled() {
             eprintln!("PARLEY_TAB_TRACE stage=snapshot_reject reason=no_width");
+            }
             return None;
         };
         let mut indices: Vec<usize> = self.laid.iter()
@@ -105,7 +115,9 @@ impl Document {
             bytes += size;
             entries.push(PlainLayout { line: i, layout: laid.layout.clone() });
         }
+        if parley_trace_enabled() {
         eprintln!("PARLEY_TAB_TRACE stage=snapshot_candidates layouts={}", entries.len());
+        }
         (!entries.is_empty()).then(|| Snapshot {
             base: self.base,
             text: self.text.clone(),
@@ -143,6 +155,7 @@ impl Document {
             || fonts_key(self.markdown.as_ref()) != snapshot.font_key
             || styles_key(styles) != snapshot.style_key
         {
+            if parley_trace_enabled() {
             eprintln!(
                 "PARLEY_TAB_TRACE stage=restore_reject width_match={} requested_width={width:?} snapshot_width={} current_width={:?} placed={} windowed={} len={} base={} text={} fonts={} styles={} compose={} caret={}",
                 width == Some(snapshot.width), snapshot.width, self.width, self.placed,
@@ -155,6 +168,7 @@ impl Document {
                 compose.is_some(),
                 caret.is_some()
             );
+            }
             return 0;
         }
         let needs_rebreak = width != Some(snapshot.width);
@@ -178,10 +192,12 @@ impl Document {
             reused += 1;
         }
         if needs_rebreak && reused != 0 {
+            if parley_trace_enabled() {
             eprintln!(
                 "PARLEY_TAB_TRACE stage=rebreak_shaped cached_width={} actual_width={width:?} reused={reused}",
                 snapshot.width
             );
+            }
         }
         if reused != 0 {
             TRIAL_RESTORED.with(|slot| slot.set(slot.get().saturating_add(reused)));
