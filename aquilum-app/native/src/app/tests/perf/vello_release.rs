@@ -96,6 +96,71 @@ fn describe_difference(case: &str, step: u32, width: u16, lhs: &[u32], rhs: &[u3
     (changed, max_channel)
 }
 
+/// Validate the scroll-copy assumption against two *independent full frames*:
+/// pixels inside the moved region which are not re-rasterized in the new
+/// frame must already equal the previous full frame translated by dy.
+/// This distinguishes stale scene/damage accounting from an incorrect
+/// byte-copy primitive or painter clipping.
+fn check_full_scene_translation(
+    case: &str,
+    step: u32,
+    width: u16,
+    height: u16,
+    previous: &[u32],
+    current: &[u32],
+    moved: &[(u16, u16, u16, u16, i32)],
+    rastered: &[(u16, u16, u16, u16)],
+) {
+    let stride = usize::from(width);
+    let mut checked = 0usize;
+    let mut mismatched = 0usize;
+    let mut worst = 0u8;
+    let mut sample = Vec::new();
+    for &(x, y, w, h, dy) in moved {
+        let shift = dy.unsigned_abs() as usize;
+        let (top, bottom) = (usize::from(y), usize::from(y) + usize::from(h));
+        if shift >= usize::from(h) {
+            continue;
+        }
+        let dst_start = if dy > 0 { top + shift } else { top };
+        let dst_end = if dy < 0 { bottom - shift } else { bottom };
+        for py in dst_start..dst_end.min(usize::from(height)) {
+            let source_y = if dy > 0 { py - shift } else { py + shift };
+            if source_y >= usize::from(height) { continue; }
+            for px in usize::from(x)..(usize::from(x) + usize::from(w)).min(stride) {
+                let redrawn = rastered.iter().any(|&(rx, ry, rw, rh)| {
+                    px >= usize::from(rx)
+                        && px < usize::from(rx) + usize::from(rw)
+                        && py >= usize::from(ry)
+                        && py < usize::from(ry) + usize::from(rh)
+                });
+                if redrawn { continue; }
+                checked += 1;
+                let source = previous[source_y * stride + px];
+                let target = current[py * stride + px];
+                let peak = [0, 8, 16, 24]
+                    .into_iter()
+                    .map(|bits| ((source >> bits) as u8).abs_diff((target >> bits) as u8))
+                    .max()
+                    .unwrap_or(0);
+                worst = worst.max(peak);
+                if peak > 1 {
+                    mismatched += 1;
+                    if sample.len() < 8 {
+                        sample.push(format!("({px},{py}) source_y={source_y} peak={peak}"));
+                    }
+                }
+            }
+        }
+    }
+    if !moved.is_empty() {
+        eprintln!(
+            "VELLO_SCENE_SHIFT case={case} step={step} checked={checked} \
+             mismatched_gt1={mismatched} max_channel={worst} examples={sample:?}"
+        );
+    }
+}
+
 fn trace_marks(case: &str) -> (&'static str, &'static str) {
     match case {
         "text_1x" => ("vello_text_1x_begin", "vello_text_1x_end"),
@@ -148,6 +213,7 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
     let mut first_missed_step = None;
     let mut previous_moved = Vec::new();
     let mut previous_rastered = Vec::new();
+    let mut previous_full: Option<Vec<u32>> = None;
     aq_trace::mark(start);
     for step in 0..FRAMES {
         if step % 8 == 7 {
@@ -183,6 +249,13 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
         // This deliberately does NOT produce performance samples.
         if diagnostic {
             let full = render_full(&layers, w, hh, scale);
+            if let Some(previous) = &previous_full {
+                check_full_scene_translation(
+                    case, step, w, hh, previous, full.frame_pixels(),
+                    &serial.moved, &serial.rastered,
+                );
+            }
+            previous_full = Some(full.frame_pixels().to_vec());
             let (bad, peak) = describe_difference(
                 case, step, w, serial.frame_pixels(), full.frame_pixels(),
             );
