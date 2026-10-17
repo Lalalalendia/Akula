@@ -485,8 +485,10 @@ mod tests {
             assert_ne!(expected.generation, replacement.generation);
             assert_ne!(expected.identity, replacement.identity);
         }
+        // Snapshot replacement bytes BEFORE locking it. On Windows an
+        // exclusive byte-range lock also blocks read(), even from the test
+        // process. Read both files again only AFTER both handles close.
         let new_bytes = fs::read(&original).unwrap();
-        assert_eq!(fs::read(&orphaned).unwrap(), original_bytes);
         let fresh = PinnedProbeRoot::open(&left).unwrap();
         // THIS SUCCESS IS EVIDENCE OF A SPLIT LOCK, NOT A SAFE ADMISSION.
         // A new file ID has a separate OS lock although the child is alive.
@@ -499,10 +501,10 @@ mod tests {
         fs::write(report.with_extension("go"), b"go").unwrap();
         wait_for_report(&mut child, &report, b"refused");
         assert!(child.0.try_wait().unwrap().is_none());
-        assert_eq!(fs::read(&orphaned).unwrap(), original_bytes);
-        assert_eq!(fs::read(&original).unwrap(), new_bytes);
         drop(new_lock);
         child.terminate();
+        assert_eq!(fs::read(&orphaned).unwrap(), original_bytes);
+        assert_eq!(fs::read(&original).unwrap(), new_bytes);
     }
 
     #[test]
