@@ -156,3 +156,96 @@ fn quote_links_point_at_their_text() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+
+#[test]
+#[ignore = "diagnostic benchmark, requires a synthetic EPUB fixture directory"]
+fn synthetic_epub_shape_pipeline_profile() {
+    use super::{flow, page};
+    use masonry::parley::{FontContext, LayoutContext};
+    use std::time::Instant;
+
+    let mode = std::env::var("AQ_EPUB_SHAPE_MODE").expect("AQ_EPUB_SHAPE_MODE");
+    assert!(["single-br", "single-p", "split-br"].contains(&mode.as_str()));
+    let folder = std::env::var("AQ_EPUB_SHAPE_DIR").expect("AQ_EPUB_SHAPE_DIR");
+    let file = std::path::Path::new(&folder).join(format!("{mode}.epub"));
+    let elapsed = |start: Instant| start.elapsed().as_secs_f64() * 1000.0;
+    let start = Instant::now();
+    let book = Book::open(&file).expect("open generated EPUB");
+    let open_ms = elapsed(start);
+    let expected_sections = if mode == "split-br" { 18 } else { 1 };
+    assert_eq!(book.sections.len(), expected_sections);
+    let (mut fcx, mut lcx) = (FontContext::new(), LayoutContext::new());
+    let settings = settings(18.0, false);
+    let mut parse_ms = 0.0;
+    let mut flow_ms = 0.0;
+    let mut layout_ms = 0.0;
+    let mut paginate_ms = 0.0;
+    let mut blocks_total = 0;
+    let mut blocks_over_64k = 0;
+    let mut first_section_ms = 0.0;
+    let mut max_block_bytes = 0;
+    let mut headings = 0;
+    let mut pages = 0;
+    let mut xhtml_bytes = 0;
+    let mut collected = String::new();
+    for index in 0..book.sections.len() {
+        let section_start = Instant::now();
+        xhtml_bytes += book.size(index);
+        let start = Instant::now();
+        let dom = book.document(index).expect("parse generated XHTML");
+        parse_ms += elapsed(start);
+        let start = Instant::now();
+        let blocks = flow::blocks(dom);
+        flow_ms += elapsed(start);
+        blocks_total += blocks.len();
+        for block in &blocks {
+            if let flow::Block::Text { text, role, .. } = block {
+                max_block_bytes = max_block_bytes.max(text.len());
+                blocks_over_64k += usize::from(text.len() > 64 * 1024);
+                headings += usize::from(matches!(role, flow::Role::Heading(_)));
+                collected.push_str(text);
+                collected.push(' ');
+            }
+        }
+        let start = Instant::now();
+        let items = page::layout_blocks(
+            &blocks, &mut |_| None, &mut fcx, &mut lcx, &settings, 440.0, 720.0,
+        );
+        layout_ms += elapsed(start);
+        assert_eq!(items.len(), blocks.len());
+        let start = Instant::now();
+        let laid = page::paginate(items, 720.0);
+        paginate_ms += elapsed(start);
+        pages += laid.columns.len();
+        if index == 0 {
+            first_section_ms = elapsed(section_start);
+        }
+    }
+    assert_eq!(headings, 18, "recover all chapter headings");
+    assert_eq!(blocks_total, if mode == "single-p" { 5352 } else { 51 }, "fixture shape changed");
+    assert_eq!(blocks_over_64k, if mode == "single-p" { 0 } else { 10 }, "fixture lost large-block skew");
+    if mode != "single-p" {
+        assert!((100_000..150_000).contains(&max_block_bytes), "largest block must resemble the real book");
+    }
+    assert_eq!(collected.matches('~').count(), 2 * 5324, "retain all line tokens");
+    assert!(collected.contains("~00000~") && collected.contains("~05323~"));
+    let normalized = collected.split_whitespace().collect::<Vec<_>>().join(" ");
+    let digest = normalized
+        .bytes()
+        .fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        });
+    let peak_rss_kib = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find(|line| line.starts_with("VmHWM:"))
+                .and_then(|line| line.split_whitespace().nth(1))
+                .and_then(|value| value.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    println!(
+        "READER_EPUB_SHAPE mode={mode} sections={} xhtml_bytes={xhtml_bytes} blocks={blocks_total} headings={headings} max_block_bytes={max_block_bytes} blocks_over_64k={blocks_over_64k} pages={pages} first_section_ms={first_section_ms:.3} open_ms={open_ms:.3} parse_ms={parse_ms:.3} flow_ms={flow_ms:.3} layout_ms={layout_ms:.3} paginate_ms={paginate_ms:.3} rss_kib={peak_rss_kib} digest={digest:016x}",
+        book.sections.len(),
+    );
+}

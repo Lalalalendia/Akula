@@ -1,0 +1,128 @@
+name: Reader synthetic EPUB shape profile
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/reader/tests.rs"
+      - "scripts/benchmarks/reader_epub_shape.py"
+      - ".github/workflows/reader-epub-shape.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-epub-shape-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+
+      - name: Install native Linux dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Generate entirely synthetic EPUB fixtures
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/reader_epub_shape.py --out "$RUNNER_TEMP/reader-epub-shapes" \
+            | tee reader-epub-fixtures.log
+          echo "HEAD=$(git rev-parse HEAD)" > reader-epub-environment.log
+          lscpu | grep -E 'Model name:|CPU\(s\):' >> reader-epub-environment.log
+          rustc --version >> reader-epub-environment.log
+          cargo --version >> reader-epub-environment.log
+          cat reader-epub-environment.log
+
+      - name: Measure exact Book, DOM, flow, Parley layout, pagination pipeline
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_EPUB_SHAPE_DIR: ${{ runner.temp }}/reader-epub-shapes
+        run: |
+          set -euo pipefail
+          # ABC CBA controls for warm-up and shared-runner drift.
+          for mode in single-br single-p split-br split-br single-p single-br; do
+            export AQ_EPUB_SHAPE_MODE="$mode"
+            cargo test --locked --release -p aquilum-native --bin aquilum-native \
+              synthetic_epub_shape_pipeline_profile -- --ignored --nocapture --test-threads=1
+          done 2>&1 | tee "$GITHUB_WORKSPACE/reader-epub-shape.log"
+
+      - name: Verify equality and summarize timings without threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from collections import defaultdict
+          import os
+          from pathlib import Path
+          import statistics
+
+          log = Path("reader-epub-shape.log").read_text()
+          samples = defaultdict(list)
+          for line in log.splitlines():
+              if "READER_EPUB_SHAPE mode=" not in line:
+                  continue
+              entry = line.split("READER_EPUB_SHAPE ", 1)[1]
+              fields = dict(x.split("=", 1) for x in entry.split() if "=" in x)
+              samples[fields["mode"]].append(fields)
+          assert set(samples) == {"single-br", "single-p", "split-br"}, samples.keys()
+          assert all(len(values) == 2 for values in samples.values()), {
+              key: len(values) for key, values in samples.items()
+          }
+          digests = {entry["digest"] for values in samples.values() for entry in values}
+          assert len(digests) == 1, f"lost/changed text between layouts: {digests}"
+          assert all(int(entry["headings"]) == 18 for values in samples.values() for entry in values)
+          assert all(int(entry["sections"]) == (18 if key == "split-br" else 1)
+                     for key, values in samples.items() for entry in values)
+          rows = [
+              "## Diagnostic: shape-matched, copyright-free EPUB fixtures",
+              "",
+              "| Mode | Sections | Blocks | Largest block | First section ms | Parse ms | Flow ms | Layout ms | Paginate ms | Peak RSS KiB |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for mode in ("single-br", "single-p", "split-br"):
+              pairs = samples[mode]
+              median = lambda field: statistics.median(float(v[field]) for v in pairs)
+              x = pairs[0]
+              rows.append(
+                  f'| {mode} | {x["sections"]} | {x["blocks"]} | {x["max_block_bytes"]} | '
+                  f'{median("first_section_ms"):.2f} | {median("parse_ms"):.2f} | '
+                  f'{median("flow_ms"):.2f} | {median("layout_ms"):.2f} | '
+                  f'{median("paginate_ms"):.2f} | {round(median("rss_kib"))} |'
+              )
+          rows += ["", "Same logical text and preserved 18 headings across all variants.",
+                   "Timings cover processing every section; first_section_ms is separate.",
+                   "First-section processing is not first visible paint. No UI, FPS, or real-book claim.",
+                   "Synthetic compression and text distributions only approximate the uploaded EPUB.",
+                   "No performance threshold. Hardware/optimization differences still require validation."]
+          summary = "\n".join(rows) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write(summary)
+          PY
+
+      - name: Preserve raw timings and runner identity
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-epub-shape-${{ github.sha }}
+          path: |
+            reader-epub-shape.log
+            reader-epub-fixtures.log
+            reader-epub-environment.log
+          retention-days: 21
