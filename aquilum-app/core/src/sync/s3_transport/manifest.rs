@@ -653,6 +653,173 @@ mod tests {
     };
 
     #[test]
+    fn bounded_parallel_verifier_keeps_out_of_order_parent_closure_and_blob_lengths() {
+        assert_eq!(MAX_PARALLEL_REVISION_READS, 16);
+        assert_eq!(MAX_PARALLEL_BLOB_STREAMS, 4);
+        let document_id = DocumentId::new();
+        let base_id = RevisionId::new();
+        let child_id = RevisionId::new();
+        let base_bytes = b"original";
+        let child_bytes = b"updated";
+        let base_hash = blake3::hash(base_bytes).to_hex().to_string();
+        let child_hash = blake3::hash(child_bytes).to_hex().to_string();
+        let base = RevisionRecord {
+            id: base_id, document_id, parents: vec![],
+            operation: RevisionOperation::Content {
+                path: SyncRelativePath::parse("notes/a.md").unwrap(),
+                blob_hash: base_hash.clone(),
+            },
+        };
+        let child = RevisionRecord {
+            id: child_id, document_id, parents: vec![base_id],
+            operation: RevisionOperation::Content {
+                path: SyncRelativePath::parse("notes/a.md").unwrap(),
+                blob_hash: child_hash,
+            },
+        };
+        let mut dag = RevisionDag::new();
+        let mut blobs = BTreeMap::new();
+        let mut total = 0;
+        let mk_ref = |record: &RevisionRecord, bytes: &[u8]| S3RevisionRefV1 {
+            revision_id: record.id, document_id,
+            revision_blake3: blake3::hash(
+                &serde_json::to_vec(record).unwrap(),
+            ).to_hex().to_string(),
+            blob_bytes: Some(bytes.len() as u64),
+        };
+        // Simulate child completing earlier than its ancestor's network read.
+        accept_verified_revision(
+            &mut dag, &mut blobs, &mut total,
+            mk_ref(&child, child_bytes), child,
+        ).unwrap();
+        assert_eq!(dag.pending_len(), 1);
+        accept_verified_revision(
+            &mut dag, &mut blobs, &mut total,
+            mk_ref(&base, base_bytes), base.clone(),
+        ).unwrap();
+        assert_eq!(dag.pending_len(), 0);
+        assert_eq!(dag.active_len(), 2);
+        assert_eq!(dag.heads(document_id), BTreeSet::from([child_id]));
+        assert_eq!(total, 2);
+        assert_eq!(blobs.get(&base_hash), Some(&(base_bytes.len() as u64)));
+        let mut contradictory = mk_ref(&base, base_bytes);
+        contradictory.blob_bytes = Some(999);
+        assert!(matches!(accept_verified_revision(
+            &mut dag, &mut blobs, &mut total, contradictory, base,
+        ), Err(S3HeadError::InvalidRevision)));
+    }
+
+    /// Real, isolated 384-revision/384-blob DAG crossing three shard bounds.
+    /// Upload uses 24 fixed workers; the verified reader uses 16 metadata and
+    /// four streaming workers. Corrupting one blob must invalidate the entire
+    /// manifest, even though the immutable root and all revisions still match.
+    #[tokio::test]
+    #[ignore = "disposable localhost MinIO only"]
+    async fn minio_verified_384_revision_dag_parallel_and_corruption() {
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").unwrap();
+        assert!(endpoint.starts_with("http://127.0.0.1:")
+            || endpoint.starts_with("http://localhost:"));
+        let ns = S3Keyspace::new("akula-sync/parallel-dag-ci", VaultId::new()).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-parallel-dag-test".into(),
+            region: "us-east-1".into(),
+            endpoint: Some(endpoint),
+            force_path_style: true,
+        };
+        let transport = AwsS3ProbeClient::connect(profile, ns.clone()).await.unwrap();
+        transport.client.create_bucket().bucket(&transport.bucket).send()
+            .await.unwrap();
+
+        let mut refs = Vec::new();
+        let mut uploads = tokio::task::JoinSet::new();
+        let mut corrupt_target = None;
+        for index in 0..384_u32 {
+            let bytes = format!("parallel-proof-content-{index:04}").into_bytes();
+            let content_hash = blake3::hash(&bytes).to_hex().to_string();
+            if index == 17 {
+                corrupt_target = Some((content_hash.clone(), bytes.len()));
+            }
+            let record = RevisionRecord {
+                id: RevisionId::new(),
+                document_id: DocumentId::new(),
+                parents: Vec::new(),
+                operation: RevisionOperation::Content {
+                    path: SyncRelativePath::parse(
+                        &format!("notes/check-{index:04}.md"),
+                    ).unwrap(),
+                    blob_hash: content_hash.clone(),
+                },
+            };
+            let json = serde_json::to_vec(&record).unwrap();
+            let reference = S3RevisionRefV1 {
+                revision_id: record.id, document_id: record.document_id,
+                revision_blake3: blake3::hash(&json).to_hex().to_string(),
+                blob_bytes: Some(bytes.len() as u64),
+            };
+            refs.push(reference);
+            let worker = transport.clone();
+            let blob_key = ns.immutable_blob_key(&content_hash).unwrap();
+            let revision_key = ns.immutable_revision_key(record.id);
+            uploads.spawn(async move {
+                worker.put_conditionally(
+                    &blob_key, &bytes, S3PutCondition::IfAbsent,
+                ).await.unwrap();
+                worker.put_conditionally(
+                    &revision_key, &json, S3PutCondition::IfAbsent,
+                ).await.unwrap();
+            });
+            if uploads.len() >= 24 {
+                uploads.join_next().await.unwrap().unwrap();
+            }
+        }
+        while let Some(completed) = uploads.join_next().await {
+            completed.unwrap();
+        }
+
+        refs.sort_by_key(|entry| entry.revision_id);
+        let mut shards = Vec::new();
+        for chunk in refs.chunks(128) {
+            let shard = S3ManifestShardV1::new(
+                &ns, OperationId::new(), chunk.to_vec(),
+            ).unwrap();
+            transport.store_manifest_object(
+                shard.shard_id, &shard.encode(&ns).unwrap(),
+            ).await.unwrap();
+            shards.push(shard.reference(&ns).unwrap());
+        }
+        assert_eq!(shards.len(), 3);
+        let root = S3ManifestV1::new(
+            &ns, OperationId::new(), 1, None, shards,
+        ).unwrap();
+        let hash = root.digest(&ns).unwrap();
+        transport.store_manifest_object(
+            root.manifest_id, &root.encode(&ns).unwrap(),
+        ).await.unwrap();
+
+        let start = std::time::Instant::now();
+        let verified = transport.read_verified_manifest(root.manifest_id, &hash)
+            .await.unwrap();
+        assert_eq!(verified, root);
+        assert_eq!(verified.total_revisions, 384);
+        eprintln!("fully verified 384 S3 revision+blob pairs across 3 shards in {:?}",
+            start.elapsed());
+
+        // Test-only direct S3 mutation in a disposable bucket: never an
+        // application write path. BLAKE3 must detect equal-length corruption.
+        let (target_hash, target_len) = corrupt_target.unwrap();
+        let damaged = vec![b'!'; target_len];
+        transport.client.put_object()
+            .bucket(&transport.bucket)
+            .key(ns.immutable_blob_key(&target_hash).unwrap())
+            .body(aws_sdk_s3::primitives::ByteStream::from(damaged))
+            .send().await.unwrap();
+        assert!(matches!(
+            transport.read_verified_manifest(root.manifest_id, &hash).await,
+            Err(S3HeadError::IntegrityMismatch)
+        ));
+    }
+
+    #[test]
     fn durable_root_intent_rejects_operation_id_reuse_and_recovers_after_restart() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("s3-head.sqlite");
