@@ -11,9 +11,18 @@ fn starts(text: &str, base: usize) -> impl Iterator<Item = usize> + '_ {
 
 impl Lines {
     pub(super) fn new(text: &str) -> Self {
-        // Collect line starts in one scan. The previous exact reservation made
-        // an extra full pass over the text just to count line breaks.
-        let all = starts(text, 0).collect();
+        // Exact reservation wins for small inputs and newline-dense text.
+        // On long, ordinary prose it costs an extra complete scan. Sampling
+        // at most 128 bytes avoids slowing down tiny-line documents.
+        let dense = text.len() <= 256
+            || text.as_bytes().iter().take(128).filter(|&&b| b == b'\n').count() >= 24;
+        let all = if dense {
+            let mut all = Vec::with_capacity(text.bytes().filter(|&b| b == b'\n').count() + 1);
+            all.extend(starts(text, 0));
+            all
+        } else {
+            starts(text, 0).collect()
+        };
         Lines { starts: all, len: text.len() }
     }
 
