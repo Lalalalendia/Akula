@@ -11,7 +11,9 @@ use super::protection_store::{
     ProtectionOutcome, ProtectionStoreError, SqliteProtectionStore, MAX_PROTECTED_ORIGINAL_BYTES,
 };
 use super::OperationId;
-use super::{LocalFileSnapshot, SyncRelativePath, VaultPortError};
+use super::local_create::{self, UnconfirmedLocalCreate};
+use super::{DagStoreError, JournalAction, JournalError, JournalPhase, LocalFileSnapshot,
+    SqliteDagStore, SqliteSyncJournal, SyncRelativePath, VaultPortError};
 use crate::app_core::Core;
 use crate::documents::hub::SyncAdmissionError;
 use crate::search::paths::{canonical_path, same_path};
@@ -32,6 +34,27 @@ impl From<VaultPortError> for BoundCaptureError {
 }
 impl From<ProtectionStoreError> for BoundCaptureError {
     fn from(error: ProtectionStoreError) -> Self { Self::Protection(error) }
+}
+
+/// No caller may commit a confirmed remote baseline using this result.
+/// An error after an OS publish may leave a legitimate new file on disk:
+/// recovery must inspect the target instead of retrying blind.
+#[derive(Debug)]
+pub(crate) enum LocalCreateError {
+    Admission(VaultPortError),
+    Journal(JournalError),
+    Cache(DagStoreError),
+    InvalidStagedIntent,
+    PublicationUncertain,
+}
+impl From<VaultPortError> for LocalCreateError {
+    fn from(error: VaultPortError) -> Self { Self::Admission(error) }
+}
+impl From<JournalError> for LocalCreateError {
+    fn from(error: JournalError) -> Self { Self::Journal(error) }
+}
+impl From<DagStoreError> for LocalCreateError {
+    fn from(error: DagStoreError) -> Self { Self::Cache(error) }
 }
 
 /// Not externally constructible, and deliberately has no mutation methods.
@@ -229,6 +252,114 @@ impl<'a> RegisteredReadAdmission<'a> {
             return Err(VaultPortError::FileChanged.into());
         }
         self.check_root()?;
+        Ok(())
+    }
+
+    /// SYNC-04g-M1: a private, additive-only local create experiment. This
+    /// intentionally does NOT implement VaultPort or advance the journal
+    /// past Staged; a real executor/recovery gate is still required.
+    pub(crate) fn create_staged_if_absent(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        cache: &SqliteDagStore,
+    ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
+        self.create_staged_with_hook(operation, journal, cache, || {})
+    }
+
+    fn create_staged_with_hook(
+        &self, operation: OperationId, journal: &SqliteSyncJournal,
+        cache: &SqliteDagStore, before_publish: impl FnOnce(),
+    ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
+        let record = journal.get(operation)?
+            .ok_or(LocalCreateError::InvalidStagedIntent)?;
+        if record.phase != JournalPhase::Staged
+            || record.intent.action != JournalAction::StageDownload
+            || record.intent.remote_guard.is_some()
+            || record.intent.vault_id.as_uuid() != self.workspace_id
+            || record.intent.expected_baseline.is_some()
+            || record.staged_hash.as_deref()
+                != Some(record.intent.expected_content_hash.as_str())
+            || journal.baseline(record.intent.vault_id, record.intent.document_id)?.is_some()
+        {
+            return Err(LocalCreateError::InvalidStagedIntent);
+        }
+        let relative = &record.intent.path;
+        let bytes = cache.verified_blob(&record.intent.expected_content_hash)?;
+        if bytes.len() > MAX_PROTECTED_ORIGINAL_BYTES {
+            return Err(LocalCreateError::InvalidStagedIntent);
+        }
+        self.check_root()?;
+        let target = self.root_path.join(relative.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&target)
+            .map_err(admission_error)?;
+        let _gate = self.core.file_mutations.lock()
+            .map_err(|_| VaultPortError::PermissionDenied)?;
+        self.check_root()?;
+
+        // Read and write are always relative to an OS directory handle. The
+        // root registry and the on-path parent ID are checked both before
+        // publication and after it; other processes can still race.
+        let parent = self.pinned.open_parent_for_create(&self.root_path, relative)?;
+        let parent_id = local_create::directory_identity(&parent)?;
+        self.reject_existing_portable_collision(relative)?;
+        let refreshed = self.pinned.open_parent_for_create(&self.root_path, relative)?;
+        if local_create::directory_identity(&refreshed)? != parent_id {
+            return Err(VaultPortError::FileChanged.into());
+        }
+        self.check_root()?;
+
+        let leaf = relative.as_str().rsplit('/').next()
+            .ok_or(LocalCreateError::InvalidStagedIntent)?;
+        let outcome = local_create::create_with_hook(
+            &parent, leaf, operation, &bytes, before_publish,
+        )?;
+        // The OS publication has happened. Any error below is ambiguous:
+        // leave the staged journal intact and require recovery/readback.
+        let fresh_parent = self.pinned.open_parent_for_create(&self.root_path, relative)
+            .map_err(|_| LocalCreateError::PublicationUncertain)?;
+        if local_create::directory_identity(&fresh_parent)
+            .map_err(|_| LocalCreateError::PublicationUncertain)? != parent_id
+        {
+            return Err(LocalCreateError::PublicationUncertain);
+        }
+        self.check_root().map_err(|_| LocalCreateError::PublicationUncertain)?;
+        let observed = self.pinned.read_identified_bounded(
+            relative, MAX_PROTECTED_ORIGINAL_BYTES as u64,
+        ).map_err(|_| LocalCreateError::PublicationUncertain)?;
+        if observed.identity != Some(outcome.file)
+            || observed.snapshot.content_hash != record.intent.expected_content_hash
+            || observed.snapshot.bytes != bytes
+        {
+            return Err(LocalCreateError::PublicationUncertain);
+        }
+        self.check_root().map_err(|_| LocalCreateError::PublicationUncertain)?;
+        Ok(outcome)
+    }
+
+    /// Conservative portable collision preflight. It is NOT the no-replace
+    /// guarantee: the OS rename predicate below enforces that atomically.
+    /// A directory swapped by an external process may invalidate this
+    /// read-only listing; such ambiguity must never authorize a write.
+    fn reject_existing_portable_collision(
+        &self, relative: &SyncRelativePath,
+    ) -> Result<(), VaultPortError> {
+        let target = self.root_path.join(relative.as_str());
+        let parent = target.parent().ok_or(VaultPortError::UnsafePath)?;
+        let prefix = relative.as_str().rsplit_once('/')
+            .map(|(directory, _)| format!("{directory}/"))
+            .unwrap_or_default();
+        let expected = relative.collision_key();
+        for entry in fs::read_dir(parent)
+            .map_err(|error| VaultPortError::Io(error.to_string()))?
+        {
+            let entry = entry.map_err(|error| VaultPortError::Io(error.to_string()))?;
+            let name = entry.file_name().into_string()
+                .map_err(|_| VaultPortError::UnsafePath)?;
+            let observed = SyncRelativePath::parse(&format!("{prefix}{name}"))
+                .map_err(|_| VaultPortError::UnsafePath)?;
+            if observed.collision_key() == expected {
+                return Err(VaultPortError::DestinationExists);
+            }
+        }
         Ok(())
     }
 
