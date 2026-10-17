@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[allow(dead_code)]
@@ -19,9 +21,10 @@ pub(crate) enum CustodyPermissionEvidence {
     /// Unix owner matches effective UID and directory/file have 0700/0600
     /// modes. ACL and malicious same-user replacement are NOT ruled out.
     UnixPrivateModeOnly,
-    /// Windows file and parent handles were checked for physical identity,
-    /// but effective DACL/owner restrictions have NOT been audited.
-    WindowsAclUnverified,
+    /// Windows handle owner equals current token; present DACL was walked
+    /// and non-owner / non-SYSTEM / non-Administrators write grants rejected.
+    /// This is a limited negative audit, NOT verified immutable custody.
+    WindowsOwnerDaclRestricted,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -51,6 +54,28 @@ pub(crate) fn scoped_leaf(root_id: (u64, u64)) -> String {
 
 fn overlaps(a: &Path, b: &Path) -> bool {
     a.starts_with(b) || b.starts_with(a)
+}
+
+/// Refuse direct symlinks or Windows junction/reparse points in every
+/// ancestor of the candidate. This is a PRECONDITION check on a canonical,
+/// absolute host path, NOT a race-free namespace pin (ancestor replacement
+/// by a hostile same-user actor remains possible immediately afterward).
+fn require_no_alias_ancestors(scope: &Path) -> Result<(), VaultPortError> {
+    if !scope.is_absolute() {
+        return Err(reject());
+    }
+    for ancestor in scope.ancestors() {
+        let meta = fs::symlink_metadata(ancestor).map_err(io)?;
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            return Err(reject());
+        }
+        #[cfg(windows)]
+        if meta.file_attributes() & 0x0000_0400 != 0 {
+            // The reparse flag also catches directory junction ancestors.
+            return Err(reject());
+        }
+    }
+    Ok(())
 }
 
 fn require_outside_registered_roots(
@@ -89,11 +114,12 @@ fn require_private_unix(
 pub(crate) fn inspect_external_scope(
     selected_root: &Path,
     expected_root_id: (u64, u64),
-    registered_roots: &[PathBuf],
+    current_registered_roots: impl Fn() -> Result<Vec<PathBuf>, VaultPortError>,
     candidate_scope: &Path,
     recheck_registration: impl Fn() -> Result<(), VaultPortError>,
 ) -> Result<CustodyObservation, VaultPortError> {
     recheck_registration()?;
+    require_no_alias_ancestors(candidate_scope)?;
     let selected = fs::symlink_metadata(candidate_scope).map_err(io)?;
     if selected.file_type().is_symlink() || !selected.is_dir() {
         return Err(reject());
@@ -104,7 +130,7 @@ pub(crate) fn inspect_external_scope(
     {
         return Err(reject());
     }
-    require_outside_registered_roots(candidate_scope, registered_roots)?;
+    require_outside_registered_roots(candidate_scope, &current_registered_roots()?)?;
 
     let workspace = PinnedProbeRoot::open(selected_root).map_err(io)?;
     if workspace.identity() != expected_root_id {
@@ -117,11 +143,15 @@ pub(crate) fn inspect_external_scope(
 
     #[cfg(unix)]
     require_private_unix(&external.opened_root_metadata().map_err(io)?, 0o700)?;
+    #[cfg(windows)]
+    external.audit_windows_acl().map_err(io)?;
 
     let held = external.try_lock().map_err(io)?.ok_or(VaultPortError::PermissionDenied)?;
 
     #[cfg(unix)]
     require_private_unix(&held.opened_file_metadata().map_err(io)?, 0o600)?;
+    #[cfg(windows)]
+    held.audit_windows_acl().map_err(io)?;
 
     // The caller's SQLite registration and opened physical workspace must
     // still describe the same root while this external OS lock is held.
@@ -131,12 +161,24 @@ pub(crate) fn inspect_external_scope(
     if workspace.identity() != expected_root_id {
         return Err(VaultPortError::FileChanged);
     }
-    require_outside_registered_roots(candidate_scope, registered_roots)?;
+    require_no_alias_ancestors(candidate_scope)?;
+    // A fresh SQLite registry snapshot closes the prior stale-list gap.
+    require_outside_registered_roots(candidate_scope, &current_registered_roots()?)?;
+    #[cfg(unix)]
+    {
+        require_private_unix(&external.opened_root_metadata().map_err(io)?, 0o700)?;
+        require_private_unix(&held.opened_file_metadata().map_err(io)?, 0o600)?;
+    }
+    #[cfg(windows)]
+    {
+        external.audit_windows_acl().map_err(io)?;
+        held.audit_windows_acl().map_err(io)?;
+    }
 
     #[cfg(unix)]
     let permission_evidence = CustodyPermissionEvidence::UnixPrivateModeOnly;
     #[cfg(windows)]
-    let permission_evidence = CustodyPermissionEvidence::WindowsAclUnverified;
+    let permission_evidence = CustodyPermissionEvidence::WindowsOwnerDaclRestricted;
     #[cfg(not(any(unix, windows)))]
     return Err(reject());
 
