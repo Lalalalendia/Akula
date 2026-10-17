@@ -17,6 +17,7 @@ on:
       - 'aquilum-app/core/src/sync/s3_delta_walker.rs'
       - 'aquilum-app/core/src/sync/s3_remote_anchor.rs'
       - 'aquilum-app/core/src/sync/s3_transport/selective_snapshot.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/offline_retention.rs'
       - 'aquilum-app/core/src/sync/s3_anchored_delta.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
@@ -119,6 +120,7 @@ jobs:
           cargo test --locked -p aquilum-core --features sync-s3 s3_anchored_delta::tests
           cargo test --locked -p aquilum-core --features sync-s3 selective_snapshot::tests -- --skip live_minio_
           cargo test --locked -p aquilum-core --features sync-s3 verified_cache_disk::tests
+          cargo test --locked -p aquilum-core --features sync-s3 offline_retention::tests
           cargo test --locked -p aquilum-core --features sync-s3 s3_delta_walker::tests -- --skip live_minio_
 
       - name: Falsify experimental immutable pack and member tampering

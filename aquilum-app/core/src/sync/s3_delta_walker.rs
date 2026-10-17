@@ -39,6 +39,11 @@ pub struct S3DeltaWalkPreview {
     pub outcome: S3ManifestDeltaOutcome,
     pub immutable_manifests_read: usize,
     pub manifest_bytes_read: usize,
+    /// Exact immutable manifest frames newest-first, already checked against
+    /// the stable root and each BLAKE3-linked parent by this bounded walker.
+    /// Internal only: later history-retention checks must still verify every
+    /// referenced shard and the complete revision DAG before reporting hints.
+    pub(crate) verified_manifest_frames: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -147,6 +152,7 @@ pub(super) async fn walk_with<R: BoundedReader>(
         outcome,
         immutable_manifests_read: newest_first.len(),
         manifest_bytes_read: total_bytes,
+        verified_manifest_frames: newest_first,
     })
 }
 

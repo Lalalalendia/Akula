@@ -25,6 +25,7 @@ mod snapshot_store;
 mod verified_cache_disk;
 pub use verified_cache_disk::{S3VerifiedHintsError, S3VerifiedHintsJournal};
 mod selective_snapshot;
+mod offline_retention;
 pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
 pub use snapshot_store::{
     S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
