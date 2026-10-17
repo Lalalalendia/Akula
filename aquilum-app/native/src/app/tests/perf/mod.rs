@@ -7,6 +7,7 @@ mod atlas;
 #[cfg(feature = "memory-probe")]
 mod big;
 mod cost;
+mod damage_profile;
 mod frames;
 mod note_latency;
 mod window_preload;
