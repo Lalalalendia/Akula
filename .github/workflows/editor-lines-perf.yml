@@ -1,0 +1,99 @@
+name: Editor line index one-pass performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/ui/editor/document/lines.rs"
+      - ".github/bench/editor-lines.rs"
+      - ".github/workflows/editor-lines-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: editor-lines-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Pin baseline and compile both sources with the same compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/lines-base" "${{ github.event.pull_request.base.sha }}"
+          mkdir -p "$RUNNER_TEMP/lines-probe"
+          cp "$RUNNER_TEMP/lines-base/aquilum-app/native/src/ui/editor/document/lines.rs" \
+            "$RUNNER_TEMP/lines-probe/baseline.rs"
+          cp aquilum-app/native/src/ui/editor/document/lines.rs \
+            "$RUNNER_TEMP/lines-probe/candidate.rs"
+          cp .github/bench/editor-lines.rs "$RUNNER_TEMP/lines-probe/bench.rs"
+          {
+            echo "BASE=$(git -C "$RUNNER_TEMP/lines-base" rev-parse HEAD)"
+            echo "HEAD=${{ github.event.pull_request.head.sha }}"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } | tee environment.txt
+          rustc --edition=2024 -O --test "$RUNNER_TEMP/lines-probe/baseline.rs" -o "$RUNNER_TEMP/lines-tests-base" -Awarnings
+          rustc --edition=2024 -O --test "$RUNNER_TEMP/lines-probe/candidate.rs" -o "$RUNNER_TEMP/lines-tests-head" -Awarnings
+          rustc --edition=2024 -O "$RUNNER_TEMP/lines-probe/bench.rs" -o "$RUNNER_TEMP/lines-benchmark" -Awarnings
+
+      - name: Validate exact line offsets and benchmark A/B in one process
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/lines-tests-base" | tee base-test.log
+          "$RUNNER_TEMP/lines-tests-head" | tee head-test.log
+          "$RUNNER_TEMP/lines-benchmark" | tee line-bench.log
+
+      - name: Summarize full matrix including regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, os
+          from pathlib import Path
+          cases = ("empty", "single-short", "short-five-lines", "single-long-line",
+                   "markdown-regular", "tiny-lines", "sparse-lines", "multilingual-lines",
+                   "crlf-lines")
+          pattern = re.compile(
+              r"BENCH-LINES name=([\w-]+) bytes=(\d+) count=(\d+) "
+              r"baseline_us=([0-9.]+) candidate_us=([0-9.]+) delta_pct=([+-]?[0-9.]+)"
+          )
+          rows = {name: (int(bytes_), int(lines), float(before), float(after), float(delta))
+                  for name, bytes_, lines, before, after, delta
+                  in pattern.findall(Path("line-bench.log").read_text())}
+          assert set(rows) == set(cases), f"missing benchmark cases: {set(cases) - set(rows)}"
+          output = ["## Editor Lines::new — original vs single-pass A/B",
+                    "", "| Case | Input bytes | Lines | Baseline μs | Candidate μs | Change |",
+                    "|---|---:|---:|---:|---:|---:|"]
+          for name in cases:
+              bytes_, lines, before, after, delta = rows[name]
+              output.append(f"| {name} | {bytes_} | {lines} | {before:.4f} | {after:.4f} | {delta:+.1f}% |")
+          output.extend(["", "Negative is faster. Includes vector allocations.",
+                         "Measured in one process with ABBA ordering; not end-to-end editor latency.",
+                         "Review every workload and do not merge regressions without justification."])
+          summary = "\n".join(output) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+
+      - name: Preserve raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-lines-ab-${{ github.sha }}
+          path: |
+            environment.txt
+            base-test.log
+            head-test.log
+            line-bench.log
+          retention-days: 30
