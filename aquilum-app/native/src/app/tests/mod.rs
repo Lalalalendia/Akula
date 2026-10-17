@@ -15,6 +15,7 @@ mod perf;
 mod reader;
 mod snapshots;
 mod support;
+mod tab_cache;
 mod tab_list;
 mod templates;
 mod text_files;

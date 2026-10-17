@@ -9,6 +9,18 @@ use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
 
+const MAX_INACTIVE_NOTES: usize = 2;
+const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Clean text only. A cached Rope is *never* authoritative without comparing
+/// its raw-file BLAKE3 digest against the actual bytes on every reopening.
+pub(in crate::app) struct CachedNote {
+    tab_id: uuid::Uuid,
+    path: PathBuf,
+    hash: String,
+    text: crop::Rope,
+}
+
 // Test-only instrumentation. The production UI path and API stay unchanged.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -21,6 +33,7 @@ pub(crate) struct TabSwitchStages {
     pub version: std::time::Duration,
     pub strip: std::time::Duration,
     pub panel: std::time::Duration,
+    pub cache_hit: bool,
 }
 
 #[cfg(test)]
@@ -45,6 +58,11 @@ fn record_stage(update: impl FnOnce(&mut TabSwitchStages)) {
 
 impl App {
     pub(in crate::app) fn show_active(&mut self, root: &mut RenderRoot) {
+        // Closing/renaming a tab also invalidates any cached text associated
+        // with its old identity; workspace switches clear the cache outright.
+        self.inactive_notes.retain(|entry| {
+            self.tabs.tabs().iter().any(|tab| tab.id == entry.tab_id && tab.path.as_deref() == Some(entry.path.as_path()))
+        });
         #[cfg(test)]
         LAST_TAB_SWITCH.with(|slot| slot.set(TabSwitchStages::default()));
         if let Some((layer, _)) = self.suggest_layer.take() {
@@ -109,7 +127,7 @@ impl App {
         let read = aq_trace::zone("открытие: чтение файла");
         #[cfg(test)]
         let started = std::time::Instant::now();
-        let opened = Note::open(path.clone());
+        let opened = self.open_cached_or_read(tab.id, path.clone());
         #[cfg(test)]
         record_stage(|s| s.file_read = started.elapsed());
         drop(read);
@@ -170,8 +188,45 @@ impl App {
         self.view = None;
         self.restore = None;
         if let Some(note) = self.note.take() {
+            let snapshot = note.clean_cache_hash().and_then(|hash| {
+                self.tabs.tabs().iter()
+                    .find(|tab| tab.path.as_deref() == Some(note.path.as_path()))
+                    .map(|tab| (tab.id, hash))
+            });
+            if let Some((tab_id, hash)) = snapshot {
+                self.remember_clean_note(tab_id, note.path.clone(), hash, self.text.clone());
+            }
             note.leave(&self.workspace.core, &self.text);
         }
+    }
+
+    fn remember_clean_note(&mut self, tab_id: uuid::Uuid, path: PathBuf, hash: String, text: crop::Rope) {
+        self.inactive_notes.retain(|entry| entry.tab_id != tab_id);
+        if text.byte_len() > MAX_INACTIVE_BYTES {
+            return;
+        }
+        self.inactive_notes.push(CachedNote { tab_id, path, hash, text });
+        while self.inactive_notes.len() > MAX_INACTIVE_NOTES
+            || self.inactive_notes.iter().map(|entry| entry.text.byte_len()).sum::<usize>() > MAX_INACTIVE_BYTES
+        {
+            self.inactive_notes.remove(0);
+        }
+    }
+
+    fn open_cached_or_read(&mut self, tab_id: uuid::Uuid, path: PathBuf) -> Result<(Note, crop::Rope), aquilum_core::files::error::FileCommandError> {
+        if let Some(index) = self.inactive_notes.iter().position(|entry| entry.tab_id == tab_id && entry.path == path) {
+            let cached = self.inactive_notes.remove(index);
+            // Size and mtime are not a correctness boundary: external writers
+            // may preserve both. Validate every byte via streaming BLAKE3.
+            let matches_disk = aquilum_core::files::document::read_file_hash_impl(&path)
+                .is_ok_and(|digest| digest == cached.hash);
+            if matches_disk {
+                #[cfg(test)]
+                record_stage(|stage| stage.cache_hit = true);
+                return Ok(Note::from_verified_cache(path, cached.text, cached.hash));
+            }
+        }
+        Note::open(path)
     }
 
     pub(in crate::app) fn show_page(&self, root: &mut RenderRoot, index: usize) {

@@ -114,6 +114,8 @@ pub struct App {
     find: Option<crate::ui::find::FindBar>,
     note: Option<Note>,
     text: crop::Rope,
+    // At most two clean, hash-verified Rope snapshots from inactive tabs.
+    inactive_notes: Vec<tabs::open::CachedNote>,
     system_dark: bool,
     tabs: Tabs,
     renaming_tab: Option<Uuid>,
