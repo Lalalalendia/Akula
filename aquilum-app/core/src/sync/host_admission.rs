@@ -495,4 +495,25 @@ mod tests {
         ));
         assert!(inside_store.read_preimage(id).unwrap().is_none());
     }
+
+    #[test]
+    fn protected_preimage_capture_holds_core_file_gate_interlock() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        fs::write(root.join(note().as_str()), b"first").unwrap();
+        let expected = blake3::hash(b"first").to_hex().to_string();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        let operation = OperationId::new();
+        assert_eq!(
+            guard.preserve_with_hook(&note(), &expected, operation, &mut store, || {
+                assert!(
+                    core.file_mutations.try_lock().is_err(),
+                    "host provenance must hold the same Core mutex as ordinary Gate writes"
+                );
+            }).unwrap(),
+            ProtectionOutcome::Stored
+        );
+        assert_eq!(store.read_bound_preimage(operation).unwrap().unwrap().original.bytes, b"first");
+    }
 }
