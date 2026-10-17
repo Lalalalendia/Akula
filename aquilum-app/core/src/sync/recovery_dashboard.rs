@@ -23,10 +23,47 @@ pub enum NativeRecoveryOverview {
     NoLocalPublicationClaims,
     /// Human investigation is needed. These are historical operation names,
     /// not proof those filenames currently exist.
-    RequiresReview { total_claims: usize, example_paths: Vec<String> },
+    RequiresReview { total_claims: usize, examples: Vec<NativeRecoveryExample> },
     /// Registration, SQLite read, schema, path integrity or size check failed.
     /// Never translate this to "clean" or implicitly repair the database.
     InspectionUnavailable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeRecoveryExample {
+    pub operation_id: String,
+    pub historical_path: String,
+}
+
+/// An immutable, specific reviewed snapshot. Contains metadata and digests,
+/// never the archived Markdown or binary BLOBs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeRecoveryCasePreview {
+    pub operation_id: String,
+    pub historical_path: String,
+    pub assessment: String,
+    pub archive_fingerprint: String,
+    pub review_count: u32,
+    pub latest_event_digest: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeRecoveryDecision {
+    KeepBlocked,
+    EscalateManualReview,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeRecoveryReviewError {
+    NotReady,
+    Stale,
+    Refused,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeRecoveryReviewReceipt {
+    pub sequence: u32,
+    pub decision: NativeRecoveryDecision,
 }
 
 /// Caller MUST pass the real host-owned app-data directory and an already
@@ -107,13 +144,15 @@ pub fn native_recovery_overview(
     if selected.is_empty() {
         return NoLocalPublicationClaims;
     }
-    let mut example_paths: Vec<String> = selected.iter()
+    let mut examples: Vec<NativeRecoveryExample> = selected.iter()
         .take(MAX_DISPLAYED_PATHS)
-        .map(|entry| entry.path.as_str().to_string())
+        .map(|entry| NativeRecoveryExample {
+            operation_id: entry.operation_id.to_string(),
+            historical_path: entry.path.as_str().to_string(),
+        })
         .collect();
-    // Deterministic display, no sorting of or truncation of user bytes.
-    example_paths.sort();
-    RequiresReview { total_claims: selected.len(), example_paths }
+    examples.sort_by(|a, b| a.historical_path.cmp(&b.historical_path));
+    RequiresReview { total_claims: selected.len(), examples }
 }
 
 
@@ -182,9 +221,15 @@ mod tests {
         let two = claim(&core, &mut journal, "notes/conflict.md");
         let expected = NativeRecoveryOverview::RequiresReview {
             total_claims: 2,
-            example_paths: vec![
-                "notes/conflict.md".to_string(),
-                "notes/pending.md".to_string(),
+            examples: vec![
+                NativeRecoveryExample {
+                    operation_id: two.to_string(),
+                    historical_path: "notes/conflict.md".to_string(),
+                },
+                NativeRecoveryExample {
+                    operation_id: one.to_string(),
+                    historical_path: "notes/pending.md".to_string(),
+                },
             ],
         };
         assert_eq!(native_recovery_overview(&core, &appdata, &root), expected);
