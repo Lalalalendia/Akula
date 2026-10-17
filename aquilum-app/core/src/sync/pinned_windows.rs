@@ -21,6 +21,7 @@ const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 const FILE_READ_DATA_OR_LIST_DIRECTORY: u32 = 0x0000_0001;
 const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
+const READ_CONTROL_ACCESS: u32 = 0x0002_0000;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const SHARE_ALL: u32 = 0x0000_0007;
 const FILE_OPEN: u32 = 1;
@@ -237,7 +238,7 @@ pub(super) fn open_existing_probe_lock_child(
 ) -> Result<File, VaultPortError> {
     open_child_access(parent, name, true,
         FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
-        | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        | FILE_READ_ATTRIBUTES | READ_CONTROL_ACCESS | SYNCHRONIZE,
         FILE_OPEN,
     )
 }
