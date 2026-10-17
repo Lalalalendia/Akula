@@ -11,6 +11,9 @@ use super::s3::S3Keyspace;
 
 mod multipart;
 mod manifest;
+// Heavy full-DAG benchmark is ignored unless explicitly run with MinIO.
+#[cfg(test)]
+mod scale_probe;
 mod replan;
 mod core_stage;
 pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError};
