@@ -146,3 +146,161 @@ fn overlay_leaves_no_trace() {
     stamps.restore(&mut canvas);
     assert_eq!(canvas.2, clean, "после подсветки холст прежний");
 }
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn available_simd_pair() -> Option<(vello_cpu::Level, vello_cpu::Level)> {
+    // Level::try_detect is the same CPU capability source as production's
+    // RenderSettings::default. Never use unchecked AVX2 feature assumptions.
+    let detected = vello_cpu::RenderSettings::default().level;
+    let sse = detected.as_sse4_2()?;
+    let avx = detected.as_avx2()?;
+    Some((vello_cpu::Level::Sse4_2(sse), vello_cpu::Level::Avx2(avx)))
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn colored_image_root(width: u16, height: u16) -> RenderRoot {
+    use masonry::peniko::{ImageAlphaType, ImageBrush, ImageData, ImageFormat};
+    use masonry::widgets::Image;
+
+    let pixels = (0..(512_u32 * 512))
+        .flat_map(|index| {
+            let x = (index % 512) as u8;
+            let y = (index / 512) as u8;
+            [x.wrapping_mul(13), y.wrapping_mul(7), x ^ y, 128 + (x % 127)]
+        })
+        .collect::<Vec<_>>();
+    let data = ImageData {
+        data: masonry::peniko::Blob::new(Arc::new(pixels)),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: 512,
+        height: 512,
+    };
+    let options = RenderRootOptions {
+        default_properties: Arc::new(default_property_set()),
+        use_system_fonts: true,
+        size_policy: WindowSizePolicy::User,
+        size: PhysicalSize::new(u32::from(width), u32::from(height)),
+        scale_factor: 1.0,
+        test_font: None,
+    };
+    RenderRoot::new(
+        NewWidget::new(Image::new(ImageBrush::new(data))).erased(),
+        |_| (),
+        options,
+    )
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn compare_simd_frames(
+    case: &str,
+    layers: &masonry::app::VisualLayerPlan,
+    width: u16,
+    height: u16,
+    sse: vello_cpu::Level,
+    avx: vello_cpu::Level,
+    threads: u16,
+) {
+    let mut baseline = Renderer::with_simd_level_for_test(threads, sse);
+    let mut candidate = Renderer::with_simd_level_for_test(threads, avx);
+    baseline.draw_frame(layers, width, height, 1.0, BG, true).unwrap();
+    candidate.draw_frame(layers, width, height, 1.0, BG, true).unwrap();
+    let old = baseline.frame_pixels();
+    let new = candidate.frame_pixels();
+    assert_eq!(old.len(), new.len());
+    let different = old.iter().zip(new).filter(|(a, b)| a != b).count();
+    assert_eq!(
+        different,
+        0,
+        "{case}, threads={threads}: SSE4.2 and AVX2 produced {different} unequal RGBA pixels out of {}",
+        old.len()
+    );
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[test]
+fn avx2_raster_matches_sse4_2_pixels() {
+    let Some((sse, avx)) = available_simd_pair() else {
+        eprintln!("SKIP-SIMD-PARITY no hardware AVX2+x86-v3 support");
+        return;
+    };
+    let (text, _) = root("Unicode 😀 и кириллица. Bold-ish visual text with numbers 0123456789.", 1.0).redraw();
+    let (image, _) = colored_image_root(800, 600).redraw();
+    for threads in [0, 2] {
+        compare_simd_frames("text", &text, W, H, sse, avx, threads);
+        compare_simd_frames("rgba_image", &image, 800, 600, sse, avx, threads);
+    }
+    eprintln!("PASS-SIMD-PARITY text+image, single+multithread, identical pixels");
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn bench_simd_frames(
+    case: &str,
+    layers: &masonry::app::VisualLayerPlan,
+    width: u16,
+    height: u16,
+    sse: vello_cpu::Level,
+    avx: vello_cpu::Level,
+    threads: u16,
+) {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let mut baseline = Renderer::with_simd_level_for_test(threads, sse);
+    let mut candidate = Renderer::with_simd_level_for_test(threads, avx);
+    baseline.draw_frame(layers, width, height, 1.0, BG, true).unwrap();
+    candidate.draw_frame(layers, width, height, 1.0, BG, true).unwrap();
+    assert_eq!(
+        baseline.frame_pixels(),
+        candidate.frame_pixels(),
+        "SIMD benchmark refuses to time divergent {case} frames"
+    );
+
+    fn sample(
+        renderer: &mut Renderer,
+        layers: &masonry::app::VisualLayerPlan,
+        width: u16,
+        height: u16,
+    ) -> f64 {
+        let start = Instant::now();
+        for _ in 0..12 {
+            renderer.draw_frame(layers, width, height, 1.0, BG, true).unwrap();
+            black_box(renderer.frame_pixels());
+        }
+        start.elapsed().as_secs_f64() * 1000.0 / 12.0
+    }
+
+    let mut old = Vec::new();
+    let mut new = Vec::new();
+    // 6 ABBA rounds on the same CPU, in one binary, with warmed renderers.
+    for _ in 0..6 {
+        old.push(sample(&mut baseline, layers, width, height));
+        new.push(sample(&mut candidate, layers, width, height));
+        new.push(sample(&mut candidate, layers, width, height));
+        old.push(sample(&mut baseline, layers, width, height));
+    }
+    old.sort_by(f64::total_cmp);
+    new.sort_by(f64::total_cmp);
+    let baseline_ms = (old[5] + old[6]) / 2.0;
+    let avx2_ms = (new[5] + new[6]) / 2.0;
+    eprintln!(
+        "BENCH-AVX2 case={case} threads={threads} sse_ms={baseline_ms:.4} avx2_ms={avx2_ms:.4} ratio={:.3}",
+        baseline_ms / avx2_ms
+    );
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[test]
+#[ignore = "explicit release-mode SIMD parity and ABBA experiment"]
+fn benchmark_avx2_vs_sse4() {
+    let Some((sse, avx)) = available_simd_pair() else {
+        eprintln!("SKIP-AVX2 no hardware x86-v3 SIMD capability; not a benchmark result");
+        return;
+    };
+    let (text, _) = root("Unicode 😀 и кириллица. Bold-ish visual text with numbers 0123456789.", 1.0).redraw();
+    let (image, _) = colored_image_root(800, 600).redraw();
+    for threads in [0, 2] {
+        bench_simd_frames("text", &text, W, H, sse, avx, threads);
+        bench_simd_frames("rgba_image", &image, 800, 600, sse, avx, threads);
+    }
+}
