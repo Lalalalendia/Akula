@@ -110,11 +110,10 @@ fn benchmark_parley_real_tabs_abba() {
     // must invalidate both the Rope cache and the offered Parley snapshot.
     h.app.parley_trial_enabled = true;
     let _ = select(&mut h, &second);
-    let changed = original.replacen("Абзац", "Сцена ", 1);
+    let changed = original.replacen("Абзац", "Сцена", 1);
     assert_eq!(original.len(), changed.len(), "must not depend on byte length");
     std::fs::write(&first, changed).unwrap();
-    let _ = select(&mut h, &first);
-    let stages = crate::app::tabs::open::take_tab_switch_stages();
+    let stages = select(&mut h, &first);
     let _ = h.root.redraw();
     let hits = crate::ui::editor::take_trial_restore_count();
     assert!(!stages.cache_hit, "BLAKE3 must reject external change");
