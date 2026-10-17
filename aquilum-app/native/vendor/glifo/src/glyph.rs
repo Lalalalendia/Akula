@@ -43,6 +43,35 @@ use skrifa::{GlyphId, MetadataProvider};
 use smallvec::SmallVec;
 use vello_common::paint::PaintType;
 
+/// Diagnostic-only category selector. This experiment is not a shipping
+/// setting: once the faulty category is identified, remove these overrides.
+#[derive(Clone, Copy)]
+enum AtlasKind {
+    Outline,
+    ColorOrBitmap,
+}
+
+#[cfg(feature = "std")]
+static ATLAS_KIND_PROBE_MODE: std::sync::LazyLock<Option<std::string::String>> =
+    std::sync::LazyLock::new(|| std::env::var("AQ_TEST_GLIFO_ATLAS_KIND").ok());
+
+#[inline]
+fn atlas_kind_enabled_for_probe(kind: AtlasKind) -> bool {
+    #[cfg(feature = "std")]
+    {
+        match (ATLAS_KIND_PROBE_MODE.as_deref(), kind) {
+            (Some("without-outline"), AtlasKind::Outline)
+            | (Some("without-color-bitmap"), AtlasKind::ColorOrBitmap) => false,
+            _ => true,
+        }
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let _ = kind;
+        true
+    }
+}
+
 /// Positioned glyph.
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Glyph {
@@ -460,11 +489,16 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
 
         let hinted = hinting_instance.is_some();
 
-        let colr_bitmap_cache_enabled = self
+        let font_size_cache_eligible = self
             .atlas_cacher
             .config()
             .is_some_and(|config| draw_props.font_size <= config.max_cached_font_size);
-        let outline_cache_enabled = colr_bitmap_cache_enabled
+        // Diagnostic modes isolate outline atlas from COLR/bitmap caching.
+        // These env overrides belong only to this experimental branch.
+        let colr_bitmap_cache_enabled =
+            font_size_cache_eligible && atlas_kind_enabled_for_probe(AtlasKind::ColorOrBitmap);
+        let outline_cache_enabled =
+            font_size_cache_eligible && atlas_kind_enabled_for_probe(AtlasKind::Outline)
             // Due to the various parameters that would need to be considered in the cache key,
             // we never cache stroked outlines for now. For COLR and bitmap, this doesn't matter
             // because they are always filled anyway.
