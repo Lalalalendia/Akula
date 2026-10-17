@@ -79,6 +79,8 @@ pub struct NoteView<'a> {
     pub resolver: Option<std::sync::Arc<dyn crate::ui::editor::resolve::Resolver>>,
     pub smart: crate::ui::editor::Smart,
     pub wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    #[cfg(test)]
+    pub trial_layout: Option<crate::ui::editor::TrialSnapshot>,
 }
 
 pub struct NoteIds {
