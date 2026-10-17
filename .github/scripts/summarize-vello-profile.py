@@ -56,6 +56,27 @@ def summaries(log: Path) -> dict[tuple[str, str], dict[str, str]]:
     return found
 
 
+def fidelity(log: Path) -> dict[str, dict[str, str]]:
+    found = {}
+    for line in log.read_text().splitlines():
+        if "VELLO_RELEASE_PARITY case=" not in line:
+            continue
+        tokens = line.split("VELLO_RELEASE_PARITY ", 1)[1].split()
+        row = dict(token.split("=", 1) for token in tokens if "=" in token)
+        case = row["case"]
+        if case in found:
+            raise ValueError(f"duplicate fidelity case: {case}")
+        found[case] = row
+    if set(found) != set(CASES):
+        raise ValueError(f"missing fidelity evidence: {set(CASES)-set(found)}")
+    for case, row in found.items():
+        if row["serial_parallel_diff"] != "0" or row["partial_full_tolerance"] != "1":
+            raise ValueError(f"changed fidelity contract in {case}: {row}")
+        if int(row["partial_full_max_channel"]) > 1:
+            raise ValueError(f"partial/full exceeded documented 1-step channel bound: {case}: {row}")
+    return found
+
+
 def trace_phases(path: Path) -> dict[tuple[str, str], dict[str, tuple[float, float, int]]]:
     data = json.loads(path.read_text())
     events = data["traceEvents"]
@@ -112,14 +133,18 @@ def main() -> None:
     trace, untraced, traced = map(Path, sys.argv[1:])
     base = summaries(untraced)
     _traced_log = summaries(traced)
+    untraced_fidelity = fidelity(untraced)
+    fidelity(traced)
     phases = trace_phases(trace)
     out = [
         "## Vello CPU — paired release-mode renderer attribution",
         "",
         "Akula native release test binary, same host, SSE4.2 rasterization,",
         "31 interactive partial frames per case, serial/2-worker ABBA,",
-        "4 exact partial/full reference frames and strict serial/parallel",
-        "pixel equality per case. Raw Chrome trace is retained as an artifact.",
+        "Four sampled partial/full reference frames per case are checked",
+        "to max 1/255 channel delta (existing standard allows max 2/255);",
+        "serial/parallel SSE4.2 pixels must match byte-for-byte.",
+        "Trace and any nonexact frame PNGs are retained as artifacts.",
         "",
         "### Untraced release-mode frame timings",
         "",
@@ -138,6 +163,24 @@ def main() -> None:
                 f"{ms('raster_p50_us')}/{ms('raster_p95_us')} | "
                 f"{row['area_p50_pct']} |"
             )
+    out.extend([
+        "",
+        "### Pixel fidelity — actual discrepancy counts, not claimed exact full redraw",
+        "",
+        "Same-process single/dual SSE4.2 must be byte-identical on all 32 frames.",
+        "An independent freshly rendered full frame can differ at the",
+        "antialiased glyph edges by at most one 8-bit channel level.",
+        "The below counts include four comparisons, not all 32 frames.",
+        "",
+        "| Scenario | Sampled partial/full different pixel words | Max channel step | Exact serial/parallel |",
+        "|---|---:|---:|---|",
+    ])
+    for case in CASES:
+        r = untraced_fidelity[case]
+        out.append(
+            f"| {case} | {r['partial_full_diff_pixels']} | "
+            f"{r['partial_full_max_channel']} | yes |"
+        )
     out.extend([
         "",
         "### Traced release-mode Vello phases",
