@@ -156,6 +156,131 @@ pub fn native_recovery_overview(
 }
 
 
+/// An action can only target one of the at most five currently displayed
+/// local publication claims; this is an intentionally bounded first UI slice.
+/// A frozen selection will be compared with durable evidence once more when
+/// confirming, so a stale window never silently appends a new decision.
+pub fn native_recovery_case_preview(
+    core: &Core,
+    app_data_dir: &Path,
+    registered_vault_root: &Path,
+    operation_id: &str,
+) -> Result<NativeRecoveryCasePreview, NativeRecoveryReviewError> {
+    let shown = native_recovery_overview(core, app_data_dir, registered_vault_root);
+    let NativeRecoveryOverview::RequiresReview { examples, .. } = shown else {
+        return Err(NativeRecoveryReviewError::NotReady);
+    };
+    if !examples.iter().any(|example| example.operation_id == operation_id) {
+        return Err(NativeRecoveryReviewError::Refused);
+    }
+    let operation = operation_id.parse::<super::OperationId>()
+        .map_err(|_| NativeRecoveryReviewError::Refused)?;
+    let (host, path) = guarded_recovery_journal(core, app_data_dir, registered_vault_root)?;
+    let journal = SqliteSyncJournal::open_existing_read_only(&path)
+        .map_err(|_| NativeRecoveryReviewError::NotReady)?;
+    let snapshot = host.recovery_operator_preview(operation, &journal)
+        .map_err(|_| NativeRecoveryReviewError::NotReady)?;
+    host.recheck_registered_root().map_err(|_| NativeRecoveryReviewError::Refused)?;
+    Ok(NativeRecoveryCasePreview {
+        operation_id: snapshot.operation_id.to_string(),
+        historical_path: snapshot.path.as_str().to_string(),
+        assessment: format!("{:?}", snapshot.assessment),
+        archive_fingerprint: snapshot.archive_fingerprint,
+        review_count: snapshot.review_count,
+        latest_event_digest: snapshot.latest_event_digest,
+    })
+}
+
+/// The native host is the trusted app, but this is not OS user authentication.
+/// This accepts metadata-only decisions, NEVER a delete/quarantine/retry or
+/// baseline authorization. The application must show a dedicated modal and
+/// invoke this function only after an explicit real click to confirm.
+pub fn native_record_recovery_decision(
+    core: &Core,
+    app_data_dir: &Path,
+    registered_vault_root: &Path,
+    displayed: &NativeRecoveryCasePreview,
+    decision: NativeRecoveryDecision,
+    note: &str,
+) -> Result<NativeRecoveryReviewReceipt, NativeRecoveryReviewError> {
+    let current = native_recovery_case_preview(
+        core, app_data_dir, registered_vault_root, &displayed.operation_id,
+    )?;
+    if &current != displayed {
+        return Err(NativeRecoveryReviewError::Stale);
+    }
+    let (host, path) = guarded_recovery_journal(core, app_data_dir, registered_vault_root)?;
+    // READ_WRITE fails when DB is missing; unlike SqliteSyncJournal::open
+    // this method cannot initialize or migrate a missing/outdated schema.
+    let mut journal = SqliteSyncJournal::open_existing_review_writer(&path)
+        .map_err(|_| NativeRecoveryReviewError::NotReady)?;
+    let operation = displayed.operation_id.parse()
+        .map_err(|_| NativeRecoveryReviewError::Refused)?;
+    let relative = super::SyncRelativePath::parse(&displayed.historical_path)
+        .map_err(|_| NativeRecoveryReviewError::Refused)?;
+    let disposition = match decision {
+        NativeRecoveryDecision::KeepBlocked =>
+            super::recovery_review::RecoveryReviewDisposition::KeepBlocked,
+        NativeRecoveryDecision::EscalateManualReview =>
+            super::recovery_review::RecoveryReviewDisposition::EscalateManualReview,
+    };
+    let recorded = host.record_recovery_operator_review(
+        operation,
+        &relative,
+        &displayed.archive_fingerprint,
+        displayed.review_count,
+        &displayed.latest_event_digest,
+        disposition,
+        note,
+        &mut journal,
+    ).map_err(|_| NativeRecoveryReviewError::Stale)?;
+    Ok(NativeRecoveryReviewReceipt {
+        sequence: recorded.sequence,
+        decision,
+    })
+}
+
+/// This is not a cross-process hostile-app-data path lock. Caller supplies
+/// host-controlled app-data, never remote or plugin-selected paths; UI review
+/// is a local non-destructive event, not release authorization.
+fn guarded_recovery_journal<'a>(
+    core: &'a Core,
+    app_data_dir: &Path,
+    registered_vault_root: &Path,
+) -> Result<(RegisteredReadAdmission<'a>, std::path::PathBuf), NativeRecoveryReviewError> {
+    use NativeRecoveryReviewError::Refused;
+    let host = RegisteredReadAdmission::open(core, registered_vault_root)
+        .map_err(|_| Refused)?;
+    host.recheck_registered_root().map_err(|_| Refused)?;
+    let app_data = fs::canonicalize(app_data_dir).map_err(|_| Refused)?;
+    let vault = fs::canonicalize(registered_vault_root).map_err(|_| Refused)?;
+    if app_data.starts_with(&vault) || vault.starts_with(&app_data) {
+        return Err(Refused);
+    }
+    let path = app_data.join(RECOVERY_JOURNAL_FILENAME);
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|_| NativeRecoveryReviewError::NotReady)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(Refused);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() != 1 {
+            return Err(Refused);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(Refused);
+        }
+    }
+    host.recheck_registered_root().map_err(|_| Refused)?;
+    Ok((host, path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
