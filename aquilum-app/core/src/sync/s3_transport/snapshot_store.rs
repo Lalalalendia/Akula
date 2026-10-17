@@ -448,4 +448,106 @@ mod tests {
         assert_eq!(store.len(), 0);
         assert_eq!(store.total_bytes(), 0);
     }
+
+    #[test]
+    fn vault_bound_verified_inventory_preserves_both_offline_edit_branches() {
+        let vault = VaultId::new();
+        let document = DocumentId::new();
+        let (root, root_json) = fixture(document, vec![], b"base");
+        let (left, left_json) = fixture(document, vec![root.revision_id], b"laptop A");
+        let (right, right_json) = fixture(document, vec![root.revision_id], b"laptop B");
+        let mut view = S3VerifiedRevisionMetadataStore::new(
+            vault, "verified-manifest:blake3".into(), 1024 * 1024,
+        ).unwrap();
+
+        // Hash-valid individual records are not yet a complete DAG or listing.
+        assert!(matches!(
+            view.verified_revision_inventory(), Err(S3HeadError::InvalidManifest)
+        ));
+        view.accept(left.clone(), left_json.clone()).unwrap();
+        view.accept(right.clone(), right_json.clone()).unwrap();
+        assert!(matches!(
+            view.validate_complete_dag(), Err(S3HeadError::InvalidManifest)
+        ));
+        assert!(matches!(
+            view.verified_revision_inventory(), Err(S3HeadError::InvalidManifest)
+        ));
+        view.accept(root.clone(), root_json.clone()).unwrap();
+        view.validate_complete_dag().unwrap();
+
+        let remote = view.verified_revision_inventory().unwrap();
+        assert_eq!(remote.vault_id, vault);
+        assert_eq!(remote.revisions.len(), 3);
+        assert!(remote.complete);
+
+        // Shared HAVE/WANT planner must not elect a winner or issue deletion:
+        // the other laptop's sibling remains independent of our local edit.
+        let mut dag = RevisionDag::new();
+        for json in [&root_json, &left_json, &right_json] {
+            let record: RevisionRecord = serde_json::from_slice(json).unwrap();
+            dag.ingest(record).unwrap();
+        }
+        let local = RevisionInventory {
+            vault_id: vault,
+            snapshot_id: "verified-local-source".into(),
+            complete: true,
+            revisions: [root.revision_id, left.revision_id].into_iter().collect(),
+        };
+        let plan = plan_revision_exchange(&dag, &local, &remote).unwrap();
+        assert!(plan.to_remote.revisions.is_empty());
+        assert_eq!(plan.to_local.revisions, vec![right.revision_id]);
+        assert_eq!(
+            plan.to_local.candidate_blob_hashes,
+            vec![blake3::hash(b"laptop B").to_hex().to_string()],
+        );
+        assert_eq!(dag.heads(document).len(), 2);
+
+        let foreign = RevisionInventory {
+            vault_id: VaultId::new(),
+            ..local.clone()
+        };
+        assert_eq!(
+            plan_revision_exchange(&dag, &foreign, &remote),
+            Err(DeltaPlanError::VaultMismatch)
+        );
+        let incomplete = RevisionInventory {
+            complete: false,
+            ..local
+        };
+        assert_eq!(
+            plan_revision_exchange(&dag, &incomplete, &remote),
+            Err(DeltaPlanError::IncompleteInventory)
+        );
+
+        // Complete stores cannot be mutated or relabeled as new generations.
+        assert!(matches!(
+            view.accept(root, root_json), Err(S3HeadError::InvalidManifest)
+        ));
+        assert_eq!(view.verified_revision_inventory().unwrap(), remote);
+    }
+
+    #[test]
+    fn duplicate_rejected_without_replacing_earlier_verified_bytes() {
+        let vault = VaultId::new();
+        let document = DocumentId::new();
+        let (reference, bytes) = fixture(document, vec![], b"first");
+        let mut view = S3VerifiedRevisionMetadataStore::new(
+            vault, "manifest:hash".into(), 1024,
+        ).unwrap();
+        view.accept(reference.clone(), bytes.clone()).unwrap();
+        let original_total = view.total_bytes();
+        assert!(matches!(
+            view.accept(reference.clone(), bytes.clone()),
+            Err(S3HeadError::InvalidRevision)
+        ));
+        assert_eq!(view.total_bytes(), original_total);
+        assert_eq!(view.len(), 1);
+        assert_eq!(
+            view.read(&format!("revisions/{}", reference.revision_id)).unwrap(),
+            bytes
+        );
+        view.validate_complete_dag().unwrap();
+        assert_eq!(view.verified_revision_inventory().unwrap().revisions.len(), 1);
+    }
+
 }
