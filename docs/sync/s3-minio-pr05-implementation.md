@@ -98,3 +98,13 @@ Streaming should cap simultaneous transfers and in-memory buffers. `RemoteStore:
 - [AWS conditional write semantics](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html)
 - [AWS conditional delete semantics](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-deletes.html)
 - [AWS SDK for Rust: conditional multipart completion](https://docs.rs/aws-sdk-s3/latest/aws_sdk_s3/operation/complete_multipart_upload/builders/struct.CompleteMultipartUploadFluentBuilder.html)
+
+## Implementation checkpoint: SYNC-05b (2026-10-17)
+
+- [Draft PR #131](https://github.com/Lalalalendia/Akula/pull/131): real, **opt-in** AWS Rust SDK provider transport in `sync/s3_transport.rs` behind `sync-s3`. The default `sync-engine` feature does not start a network client.
+- Rust `S3ConnectionProfile` requires valid bucket/region, HTTPS remote endpoint or explicit loopback-only HTTP for disposable MinIO tests. SDK ambient endpoint overrides are cleared when the application profile has no custom endpoint.
+- `AwsS3ProbeClient` exposes only scoped `HEAD`, bounded streaming `GET` (1 MiB limit with HEAD / GET If-Match / HEAD verification), small server-conditional `PUT` and limited **diagnostic** ListObjectsV2 pages. No delete operation, no persistent secrets, no local file writes, no remote baseline commit and no `RemoteStore` registration. Snapshot consistency remains **unproven** until 05d.
+- [MinIO run #39049772020](https://github.com/Lalalalendia/Akula/actions/runs/39049772020) verified 4 tests: endpoint guard, profile/ETag guard, server-side If-None-Match and If-Match including stale validation, bounded GET and diagnostics cursor handling. Final-head checks after hardening must still pass before merging.
+- Old `quay.io/minio/minio` image now requires authentication; CI uses the free maintained `cgr.dev/chainguard/minio:latest` image with an isolated tmpfs owned by the unprivileged container user. Never treat the test server as a production S3 instance.
+- Cargo.lock updated by a temporary branch-local resolver; the write-enabled generator workflow has been **removed** from the merge candidate. No CI workflow needs repository write permission for S3 tests.
+- Still outstanding for full 05b: AWS S3 account E2E using narrowly scoped temporary credentials and provider compatibility matrix (e.g. 403/429/5xx); full 05c requires multipart/abort, stream-to-disk staging, and durable operation receipts. Do not enable bidirectional sync before PR 04/05d/05e acceptance.

@@ -62,6 +62,38 @@ impl S3Keyspace {
         format!("{}/v1/vaults/{}", self.prefix, self.vault_id)
     }
 
+    /// Read-only S3 listing prefix; a raw ListObjectsV2 page is never a
+    /// stable snapshot or an authorization to remove local data.
+    pub(crate) fn vault_prefix(&self) -> String {
+        format!("{}/", self.vault_root())
+    }
+
+    /// Reject arbitrary remote object keys before any SDK call, even for
+    /// diagnostics. Do not expose another vault/profile's cloud objects.
+    pub(crate) fn contains_key(&self, key: &str) -> bool {
+        if key == self.current_head_key() {
+            return true;
+        }
+        let prefix = self.vault_prefix();
+        let Some(rest) = key.strip_prefix(&prefix) else {
+            return false;
+        };
+        if let Some(hash) = rest.strip_prefix("blobs/") {
+            return valid_blake3(hash);
+        }
+        if let Some(manifest) = rest.strip_prefix("manifests/")
+            .and_then(|s| s.strip_suffix(".json"))
+        {
+            return manifest.parse::<OperationId>().is_ok();
+        }
+        if let Some(revision) = rest.strip_prefix("revisions/")
+            .and_then(|s| s.strip_suffix(".json"))
+        {
+            return revision.parse::<RevisionId>().is_ok();
+        }
+        false
+    }
+
     /// Mutated ONLY with a provider-enforced If-None-Match:* or If-Match guard.
     /// The root's own ETag is a CAS validator, NOT a content digest.
     pub fn current_head_key(&self) -> String {
@@ -237,6 +269,26 @@ mod tests {
         let ns = layout();
         for invalid in ["", "0", &"g".repeat(64), &"A".repeat(64), &"0".repeat(65)] {
             assert_eq!(ns.immutable_blob_key(invalid), Err(S3ContractError::InvalidContentHash));
+        }
+    }
+
+    #[test]
+    fn sdk_namespace_gate_rejects_foreign_vaults_and_malformed_keys() {
+        let ns = layout();
+        let valid_blob = ns.immutable_blob_key(&digest(b"body")).unwrap();
+        assert!(ns.contains_key(&valid_blob));
+        assert!(ns.contains_key(&ns.current_head_key()));
+        assert!(ns.contains_key(&ns.immutable_manifest_key(OperationId::new())));
+        assert!(ns.contains_key(&ns.immutable_revision_key(RevisionId::new())));
+        for bad in [
+            "akula-sync/desktop/v1/vaults/other/refs/current.json".to_owned(),
+            format!("{}/blobs/../another-vault", ns.vault_prefix()),
+            format!("{}manifests/../other.json", ns.vault_prefix()),
+            format!("{}blobs/not-a-hash", ns.vault_prefix()),
+            format!("{}credentials.env", ns.vault_prefix()),
+            format!("{}revisions/.json", ns.vault_prefix()),
+        ] {
+            assert!(!ns.contains_key(&bad), "must refuse {bad}");
         }
     }
 
