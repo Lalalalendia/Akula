@@ -22,6 +22,24 @@ fn fixture_bytes(marker: char, target: usize) -> String {
     content
 }
 
+// Test-only mixed fixture. The usual matrix still uses its original corpus;
+// this A/B corpus contains plain paragraphs eligible for conservative reuse
+// alongside richer Markdown that must always be shaped from scratch.
+fn parley_mix_bytes(marker: char, target: usize) -> String {
+    let rich = "Заметка с **жирным** текстом, ссылкой [пример](https://example.org) и Markdown.\n";
+    let plain = "Обычный абзац без выделения, со словами на кириллице и emoji 🐱.\n";
+    let mut content = String::with_capacity(target);
+    content.push(marker);
+    let mut count = 0usize;
+    while content.len() + rich.len().max(plain.len()) <= target {
+        content.push_str(if count % 4 == 0 { rich } else { plain });
+        count += 1;
+    }
+    content.push_str(&" ".repeat(target - content.len()));
+    assert_eq!(content.len(), target);
+    content
+}
+
 fn replace_first_byte(path: &std::path::Path, letter: u8) {
     let mut file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
     file.seek(SeekFrom::Start(0)).unwrap();
@@ -81,8 +99,10 @@ fn native_note_latency_matrix() {
     for kib in [64, 512, 4096] {
         let mut h = Harness::new();
         let target = kib * 1024;
-        let first = h.write_note("latency-first.md", &fixture_bytes('A', target));
-        let second = h.write_note("latency-second.md", &fixture_bytes('B', target));
+        let mixed = std::env::var_os("AQ_TEST_PARLEY_MIXED_FIXTURE").is_some();
+        let body: fn(char, usize) -> String = if mixed { parley_mix_bytes } else { fixture_bytes };
+        let first = h.write_note("latency-first.md", &body('A', target));
+        let second = h.write_note("latency-second.md", &body('B', target));
 
         let timer = Instant::now();
         assert!(h.app.open_in(&mut h.root, first.clone(), true));
