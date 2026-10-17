@@ -60,6 +60,7 @@ pub(crate) struct RegisteredS3Binding {
     pub bucket: String,
     pub region: String,
     pub endpoint: Option<String>,
+    pub force_path_style: bool,
     pub remote_head_key: String,
 }
 
@@ -68,7 +69,8 @@ impl RegisteredS3Binding {
         // The *remote namespace*, not a local registration UUID, identifies
         // one logical S3 vault. The fingerprint is for collision checks only.
         let bytes = serde_json::to_vec(&(
-            &self.bucket, &self.region, &self.endpoint, &self.remote_head_key,
+            &self.bucket, &self.region, &self.endpoint,
+            self.force_path_style, &self.remote_head_key,
         )).map_err(|_| S3BindingError::CorruptedBinding)?;
         Ok(blake3::hash(&bytes).to_hex().to_string())
     }
@@ -82,6 +84,7 @@ impl RegisteredS3Binding {
             && self.bucket == profile.bucket
             && self.region == profile.region
             && self.endpoint == profile.endpoint
+            && self.force_path_style == profile.force_path_style
             && self.remote_head_key == keyspace.current_head_key()
     }
 }
@@ -183,6 +186,7 @@ impl SqliteRegisteredS3Bindings {
             bucket: profile.bucket.clone(),
             region: profile.region.clone(),
             endpoint: profile.endpoint.clone(),
+            force_path_style: profile.force_path_style,
             remote_head_key: keyspace.current_head_key(),
         };
         let scope_hash = proposal.scope_hash()?;
