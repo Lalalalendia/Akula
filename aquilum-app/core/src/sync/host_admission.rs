@@ -678,10 +678,11 @@ impl<'a> RegisteredReadAdmission<'a> {
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         expected_vault: super::VaultId,
     ) -> Result<LocalRecoveryEvidenceCase, LocalRecoveryError> {
-        // Legacy M1d-a records read-only evidence even when its journal path
-        // is unsafe for byte archives. The S3-bound wrapper already requires
-        // app-private journal location via checked_registered_s3_recovery_scope;
-        // archive_local_recovery_copy retains its own strict location gate.
+        // Durable forensic evidence is itself a SQLite write. A journal
+        // inside the registered vault could be externally modified or synced,
+        // so reject it before recording any recovery evidence. Pure read-only
+        // inspection remains separately available.
+        journal.require_appdata_outside_vault(&self.root_path)?;
         let evidence = self.inspect_local_publication_for_vault_with_hook(
             operation, journal, expected_vault, || {},
         )?;
