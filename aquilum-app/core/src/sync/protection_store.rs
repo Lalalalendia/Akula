@@ -462,4 +462,116 @@ mod tests {
             Err(ProtectionStoreError::UnsupportedSchema(2))
         ));
     }
+
+    fn opened_id(device: u64, file: u64) -> PinnedFileIdentity {
+        PinnedFileIdentity { device, file }
+    }
+
+    #[test]
+    fn bound_preimages_are_atomically_recorded_and_verified_after_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("p.sqlite");
+        let id = OperationId::new();
+        let p = path("notes/abc.md");
+        let data = b"original\n";
+        let hash = blake3::hash(data).to_hex().to_string();
+        let root = opened_id(u64::MAX, 7);
+        let file = opened_id(42, u64::MAX);
+        {
+            let mut store = SqliteProtectionStore::open(&db).unwrap();
+            assert_eq!(
+                store.store_bound_preimage(id, &p, &hash, data, root, file).unwrap(),
+                ProtectionOutcome::Stored
+            );
+            assert_eq!(
+                store.store_bound_preimage(id, &p, &hash, data, root, file).unwrap(),
+                ProtectionOutcome::AlreadyStored
+            );
+            assert!(matches!(
+                store.store_bound_preimage(id, &p, &hash, data, root, opened_id(42, 6)),
+                Err(ProtectionStoreError::OperationCollision)
+            ));
+            assert!(matches!(
+                store.store_bound_preimage(id, &p, &hash, data, opened_id(9, 9), file),
+                Err(ProtectionStoreError::OperationCollision)
+            ));
+        }
+        let store = SqliteProtectionStore::open(&db).unwrap();
+        let original = store.read_bound_preimage(id).unwrap().unwrap();
+        assert_eq!(original.original.bytes, data);
+        assert_eq!(original.root, root);
+        assert_eq!(original.file, file);
+    }
+
+    #[test]
+    fn bound_preimages_refuse_legacy_promotions_and_migrate_v1_losslessly() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("legacy.sqlite");
+        let id = OperationId::new();
+        let p = path("notes/legacy.md");
+        let bytes = b"legacy protected";
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        {
+            let connection = Connection::open(&db).unwrap();
+            connection.execute_batch(
+                "CREATE TABLE protected_originals (
+                    operation_id TEXT PRIMARY KEY NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    byte_length INTEGER NOT NULL,
+                    original_bytes BLOB NOT NULL);
+                 PRAGMA user_version = 1;",
+            ).unwrap();
+            connection.execute(
+                "INSERT INTO protected_originals
+                 (operation_id, relative_path, content_hash, byte_length, original_bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id.to_string(), p.as_str(), &hash, bytes.len() as i64, bytes],
+            ).unwrap();
+        }
+        let mut store = SqliteProtectionStore::open(&db).unwrap();
+        assert_eq!(
+            store.connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(),
+            2
+        );
+        assert_eq!(store.read_preimage(id).unwrap().unwrap().bytes, bytes);
+        assert!(matches!(
+            store.read_bound_preimage(id), Err(ProtectionStoreError::UnboundOriginal)
+        ));
+        assert!(matches!(
+            store.store_bound_preimage(id, &p, &hash, bytes, opened_id(1, 2), opened_id(3, 4)),
+            Err(ProtectionStoreError::OperationCollision)
+        ));
+        assert_eq!(store.read_preimage(id).unwrap().unwrap().bytes, bytes);
+        let fresh = OperationId::new();
+        assert_eq!(
+            store.store_bound_preimage(fresh, &p, &hash, bytes, opened_id(1, 2), opened_id(3, 4)).unwrap(),
+            ProtectionOutcome::Stored
+        );
+    }
+
+    #[test]
+    fn corrupt_bound_identity_is_never_trusted() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = SqliteProtectionStore::open(&temp.path().join("p.sqlite")).unwrap();
+        let id = OperationId::new();
+        let bytes = b"original";
+        let hash = blake3::hash(bytes).to_hex().to_string();
+        store.store_bound_preimage(
+            id, &path("notes/a.md"), &hash, bytes, opened_id(1, 2), opened_id(3, 4)
+        ).unwrap();
+        store.connection.execute(
+            "UPDATE bound_preimages SET source_file = 'not-a-file-id' WHERE operation_id = ?1",
+            [id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            store.read_bound_preimage(id), Err(ProtectionStoreError::CorruptedRecord)
+        ));
+        assert!(matches!(
+            store.store_bound_preimage(
+                id, &path("notes/a.md"), &hash, bytes, opened_id(1, 2), opened_id(3, 4)
+            ),
+            Err(ProtectionStoreError::CorruptedRecord)
+        ));
+    }
 }
