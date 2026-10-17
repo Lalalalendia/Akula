@@ -140,6 +140,17 @@ impl Core {
         })
     }
 
+    /// MCP permanent trash purge must not race an ordinary File Gate restore
+    /// or protected-original capture. This locks only the filesystem purge;
+    /// no history/editor callbacks are made while the mutex is held.
+    ///
+    /// The purge can delay other in-process writes for large trash folders.
+    /// It is not a cross-process lock or a trusted sync-delete executor.
+    pub fn empty_trash_guarded(&self, workspace: &Path) -> Result<u64, FileCommandError> {
+        let _guard = self.file_mutation_guard()?;
+        crate::files::trash::empty_trash_impl(workspace)
+    }
+
     pub fn emit(&self, event: CoreEvent) {
         self.events.emit(event);
     }

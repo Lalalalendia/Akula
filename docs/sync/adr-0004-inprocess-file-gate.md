@@ -19,7 +19,8 @@ filesystem portion of each managed operation, including calls from distinct
 Core instances accessing the same workspace:
 - note and binary creation, note write with expected hash, copy;
 - directory/file rename and link rewrites as one operation;
-- move-to-trash and each restore-from-trash mutation;
+- move-to-trash, each restore-from-trash mutation, and the irreversible MCP
+  `empty_trash` purge (the latter may block unrelated workspaces for long purges);
 - entire registered-root preimage capture, SQLite persistence and second
   pinned read, while the DocumentHub closed-editor reservation is retained.
 

@@ -36,6 +36,45 @@ fn open_core() -> (tempfile::TempDir, Arc<Core>, Arc<Recording>) {
 }
 
 #[test]
+fn core_file_gate_serializes_mcp_trash_purge_across_core_instances() {
+    use std::sync::mpsc::{channel, RecvTimeoutError};
+    use std::thread;
+    use std::time::Duration;
+
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("vault");
+    let trash = workspace.join(".trash");
+    fs::create_dir_all(&trash).unwrap();
+    let deleted = trash.join("Восстановить.md");
+    fs::write(&deleted, b"valuable original").unwrap();
+
+    let first = Core::open(&directory.path().join("data-a"), Arc::new(Recording::default()));
+    let second = Core::open(&directory.path().join("data-b"), Arc::new(Recording::default()));
+    let held = first.file_mutation_guard().unwrap();
+
+    let (started_tx, started_rx) = channel();
+    let (finished_tx, finished_rx) = channel();
+    let worker = thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        finished_tx.send(second.empty_trash_guarded(&workspace)).unwrap();
+    });
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(
+        matches!(
+            finished_rx.recv_timeout(Duration::from_millis(150)),
+            Err(RecvTimeoutError::Timeout)
+        ),
+        "MCP purge bypassed the process-wide File Gate"
+    );
+    assert_eq!(fs::read(&deleted).unwrap(), b"valuable original");
+    drop(held);
+
+    assert_eq!(finished_rx.recv_timeout(Duration::from_secs(30)).unwrap().unwrap(), 1);
+    worker.join().unwrap();
+    assert!(!deleted.exists());
+}
+
+#[test]
 fn the_frontend_receives_the_same_event_names_and_payloads_as_before() {
     let saved = CoreEvent::DocumentSaved(DocumentEvent { path: "a.md".into(), version: 3 });
     assert_eq!(saved.name(), "document-saved");
