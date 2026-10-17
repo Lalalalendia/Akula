@@ -434,6 +434,93 @@ impl SqliteSyncJournal {
         Ok(result)
     }
 
+    /// Compare a proposed non-authoritative incident snapshot with the
+    /// immutable STAGED publication claim. No user file or Sync baseline is
+    /// modified. This does not certify who created a matching file.
+    fn check_local_recovery_case(&self, case: &LocalRecoveryEvidenceCase)
+        -> JournalResult<()>
+    {
+        let claim = self.local_publication_review_queue()?.into_iter()
+            .find(|entry| entry.operation_id == case.operation_id)
+            .ok_or(JournalError::CorruptedRecord)?;
+        if case.vault_id != claim.vault_id
+            || case.relative_path != claim.path
+            || case.expected_content_hash != claim.expected_content_hash
+            || case.evidence.operation_id != case.operation_id
+            || case.evidence.assessment != local_recovery::classify(
+                &case.evidence.stage, &case.evidence.final_name,
+            )
+            || case.evidence.parent_identity.file == 0
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        // This cap also protects deserialized, tampered evidence records
+        // from being represented as verified, bounded local observations.
+        for observed in [&case.evidence.stage, &case.evidence.final_name] {
+            if let ObservedLocalFile::Present { identity, byte_length, .. } = observed {
+                if identity.file == 0 || *byte_length > 32 * 1024 * 1024 {
+                    return Err(JournalError::CorruptedRecord);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Make the FIRST observed recovery state durable in the *existing*
+    /// app-data WAL/FULL SQLite journal. A later same-byte/different-OS-ID
+    /// observation cannot overwrite it. No cleanup, replay or CAS receipt.
+    pub(crate) fn record_local_recovery_case_once(
+        &self, case: &LocalRecoveryEvidenceCase,
+    ) -> JournalResult<()> {
+        self.check_local_recovery_case(case)?;
+        let payload = serde_json::to_vec(case)?;
+        let digest = blake3::hash(&payload).to_hex().to_string();
+        let count = self.connection.execute(
+            "INSERT OR IGNORE INTO sync_local_recovery_evidence
+                 (operation_id, evidence_json, evidence_digest)
+             SELECT ?1, ?2, ?3 FROM sync_local_publication_attempts AS claim
+             JOIN sync_operations AS operation
+               ON claim.operation_id = operation.operation_id
+             WHERE claim.operation_id = ?1 AND operation.phase = 1",
+            params![case.operation_id.to_string(), &payload, &digest],
+        )?;
+        if count != 1 {
+            return Err(JournalError::RecoveryEvidenceAlreadyRecorded);
+        }
+        let loaded = self.read_local_recovery_case(case.operation_id)?
+            .ok_or(JournalError::CorruptedRecord)?;
+        if loaded != *case {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(())
+    }
+
+    /// Read back exact durable audit evidence. It remains a historical
+    /// observation, not evidence that the filesystem still looks this way.
+    pub(crate) fn read_local_recovery_case(
+        &self, operation: OperationId,
+    ) -> JournalResult<Option<LocalRecoveryEvidenceCase>> {
+        let row: Option<(Vec<u8>, String)> = self.connection.query_row(
+            "SELECT evidence_json, evidence_digest
+             FROM sync_local_recovery_evidence WHERE operation_id = ?1",
+            [operation.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        let Some((payload, expected_digest)) = row else {
+            return Ok(None);
+        };
+        if expected_digest != blake3::hash(&payload).to_hex().as_str() {
+            return Err(JournalError::CorruptedRecord);
+        }
+        let case: LocalRecoveryEvidenceCase = serde_json::from_slice(&payload)
+            .map_err(|_| JournalError::CorruptedRecord)?;
+        if case.operation_id != operation {
+            return Err(JournalError::CorruptedRecord);
+        }
+        self.check_local_recovery_case(&case)?;
+        Ok(Some(case))
+    }
+
     /// Same operation ID and intent is idempotent; reusing the UUID for a
     /// different action is rejected. One in-flight operation per document
     /// prevents two workers from publishing incompatible baselines.
