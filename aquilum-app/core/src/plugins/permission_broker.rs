@@ -316,7 +316,7 @@ impl PermissionBroker {
                 break candidate;
             }
         };
-        let declarations = manifest
+        let declarations: BTreeSet<u8> = manifest
             .permissions
             .required
             .iter()
