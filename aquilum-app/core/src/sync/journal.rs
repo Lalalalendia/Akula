@@ -2014,7 +2014,7 @@ mod tests {
     fn m1dd_existing_journal_inspector_is_strictly_sqlite_read_only() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("existing.sqlite3");
-        let original = SqliteSyncJournal::open(&path).unwrap();
+        let mut original = SqliteSyncJournal::open(&path).unwrap();
         let pending = local_stage_intent(VaultId::new(), DocumentId::new(),
             "notes/safe.md", b"byte content");
         original.begin(pending.clone()).unwrap();
