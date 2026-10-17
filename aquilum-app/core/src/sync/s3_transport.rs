@@ -11,6 +11,10 @@ use super::s3::S3Keyspace;
 
 mod multipart;
 mod manifest;
+mod snapshot_store;
+pub use snapshot_store::{
+    S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
+};
 pub use manifest::{
     S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
     S3PinnedRevisionPage, S3PinnedRevisionSnapshot,

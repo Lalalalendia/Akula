@@ -91,6 +91,7 @@ pub use s3_transport::{
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
     S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,
     S3PinnedRevisionPage, S3PinnedRevisionSnapshot,
+    S3VerifiedRevisionMetadataStore, MAX_S3_REVISION_METADATA_CACHE_BYTES,
 };
 
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};

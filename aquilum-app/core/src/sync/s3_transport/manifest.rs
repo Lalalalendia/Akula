@@ -32,6 +32,8 @@ pub enum S3HeadError {
     RecoveryRequired,
     TooManyAncestors,
     InvalidCursor,
+    /// Preparing the in-memory revision snapshot would exceed its strict cap.
+    SnapshotBudgetExceeded,
 }
 
 impl From<S3ManifestError> for S3HeadError {
@@ -789,6 +791,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut j1 = S3HeadJournal::open(&dir.path().join("first.sqlite")).unwrap();
         let mut j2 = S3HeadJournal::open(&dir.path().join("second.sqlite")).unwrap();
+        // No root is not an authorized *empty listing*. The caller has to
+        // handle initial S3 bootstrap explicitly.
+        assert!(first.materialize_verified_revision_metadata_store(256 * 1024)
+            .await.unwrap().is_none());
 
         // First generation includes a real per-document immutable revision
         // and blob. HEAD/GET/BLAKE3 verifies *every* layer before root CAS.
@@ -942,6 +948,32 @@ mod tests {
         assert_eq!(revision_ids, BTreeSet::from([
             record.id, winner_revision.id, loser_revision.id,
         ]));
+        // SYNC-05d2: materialize only the verified revision JSON in a
+        // bounded synchronous RemoteStore. The provider must never expose
+        // a mutation capability, despite the underlying SDK supporting CAS.
+        let mut view = second.materialize_verified_revision_metadata_store(
+            256 * 1024,
+        ).await.unwrap().unwrap();
+        let assembled = crate::sync::collect_verified_listing(&view, 1, 3).unwrap();
+        assert_eq!(assembled.objects.len(), 3);
+        assert_eq!(assembled.snapshot_id, view.snapshot_id());
+        assert!(!crate::sync::RemoteStore::capabilities(&view).supports_guarded_mutation());
+        for row in &assembled.objects {
+            let verified_json = crate::sync::RemoteStore::read_bounded(
+                &view, &row.id, row.byte_length,
+            ).unwrap();
+            assert_eq!(blake3::hash(&verified_json).to_hex().as_str(),
+                row.content_hash.as_deref().unwrap());
+            let _: RevisionRecord = serde_json::from_slice(&verified_json).unwrap();
+        }
+        assert_eq!(crate::sync::RemoteStore::put(
+            &mut view, "revisions/forbidden", b"write",
+            &crate::sync::RemotePrecondition::Absent,
+        ), Err(crate::sync::RemoteStoreError::PreconditionUnsupported));
+        assert_eq!(crate::sync::RemoteStore::delete(
+            &mut view, "revisions/forbidden",
+            &crate::sync::RemotePrecondition::Absent,
+        ), Err(crate::sync::RemoteStoreError::PreconditionUnsupported));
         let mut recovered_dag = RevisionDag::new();
         for revision in [record, winner_revision.clone(), loser_revision.clone()] {
             recovered_dag.ingest(revision).unwrap();
