@@ -142,8 +142,8 @@ impl Document {
             || styles_key(styles) != snapshot.style_key
         {
             eprintln!(
-                "PARLEY_TAB_TRACE stage=restore_reject width={} windowed={} len={} base={} text={} fonts={} styles={} compose={} caret={}",
-                width == Some(snapshot.width),
+                "PARLEY_TAB_TRACE stage=restore_reject width_match={} requested_width={width:?} snapshot_width={} current_width={:?} placed={} windowed={} len={} base={} text={} fonts={} styles={} compose={} caret={}",
+                width == Some(snapshot.width), snapshot.width, self.width, self.placed,
                 self.windowed == snapshot.windowed,
                 self.full.byte_len() == snapshot.full_len,
                 self.base == snapshot.base,
