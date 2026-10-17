@@ -38,6 +38,28 @@ history signatures cannot yet report the full error to the caller.
 Dedicated Unix symlink and Windows junction regressions exercise version
 read/write denial and nested write/move denial.
 
+## Correct acknowledgement of history persistence (04g-3b-5)
+
+File Gate commits the primary note before attempting to record history.
+`HistoryService::try_saved` now returns a typed `Result<bool, HistorySaveFailure>`:
+`Ok(true)` means a persisted history change, `Ok(false)` means no change,
+and `Err` means history recording failed, **not** that the already-written
+primary note failed. Failures emit `note-history-save-failed` instead of
+`note-history-changed`. The native host logs this separately and refreshes
+an open history panel when the failed operation was only partly applied.
+
+`written_hash` is updated only after the planned history mutation succeeds,
+and `last_edit` only after the version-file change succeeds. An unsuccessful
+first baseline write retains the original bytes **in memory** for the next
+save attempt, which would otherwise see only the newly committed primary note.
+Version removal now propagates directory enumeration and unlink errors.
+
+Baseline+version+name persistence and version+name deletion are still
+**nontransactional**: a partial mutation is reported as an error, never falsely
+acknowledged as complete. A crash can discard an in-memory pending baseline;
+interprocess locking, durable recovery and OS-pinned operations remain future
+work. These changes do NOT authorize sync local writes.
+
 ## Tests and limits
 
 - A real FS two-service regression holds the global history mutex while the second service attempts to persist a new history snapshot. Bytes remain untouched until release.

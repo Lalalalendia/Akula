@@ -1,11 +1,13 @@
 use super::milestone::{self, Before, Incoming, MilestonePlan, Recorded, Source};
 use super::store;
 use crate::files::document::read_text;
+use crate::files::error::FileCommandError;
 use crate::files::relocate::{move_folder, remove_empty_ancestors, Placement};
 use crate::files::trash::trash_path;
 use crate::search::paths::{identity, strip_root};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -23,6 +25,36 @@ static PROCESS_HISTORY_FILES: Mutex<()> = Mutex::new(());
 pub struct HistoryService {
     device: String,
     state: Mutex<State>,
+    #[cfg(test)]
+    next_fault: Mutex<Option<HistoryFault>>,
+}
+
+/// A failed history operation is distinct from a successful primary note write.
+#[derive(Debug)]
+pub struct HistorySaveFailure {
+    pub action: &'static str,
+    pub message: String,
+}
+
+impl HistorySaveFailure {
+    fn new(action: &'static str, error: impl fmt::Display) -> Self {
+        Self { action, message: error.to_string() }
+    }
+}
+
+impl fmt::Display for HistorySaveFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.action, self.message)
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HistoryFault {
+    CreateVersion,
+    UpdateVersion,
+    NameVersion,
+    RemoveVersion,
 }
 
 #[derive(Default)]
@@ -57,6 +89,9 @@ struct Note {
     dir: PathBuf,
     written_hash: Option<String>,
     last_edit: Option<SystemTime>,
+    // On first-write failure, retain the pre-commit original. A later note
+    // save cannot re-read it after the primary document has been replaced.
+    pending_before: Option<(String, SystemTime)>,
 }
 
 impl Note {
@@ -65,6 +100,7 @@ impl Note {
             dir,
             written_hash: None,
             last_edit: None,
+            pending_before: None,
         }
     }
 }
@@ -102,6 +138,8 @@ impl HistoryService {
         Self {
             device: device_id(app_data),
             state: Mutex::default(),
+            #[cfg(test)]
+            next_fault: Mutex::new(None),
         }
     }
 
@@ -124,22 +162,40 @@ impl HistoryService {
         Some((text, at))
     }
 
+    /// Legacy bool wrapper. File Gate uses try_saved so it can propagate
+    /// a history-specific failure without retracting the primary note save.
     pub fn saved(&self, roots: Roots<'_>, note: &Path, write: NoteWrite<'_>) -> bool {
+        match self.try_saved(roots, note, write) {
+            Ok(changed) => changed,
+            Err(error) => {
+                report(note, "не сохранена версия", &error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Ok(true) requires a persisted history change; Ok(false) means no change
+    /// was required. Err means planned history persistence was incomplete.
+    pub fn try_saved(
+        &self,
+        roots: Roots<'_>,
+        note: &Path,
+        write: NoteWrite<'_>,
+    ) -> Result<bool, HistorySaveFailure> {
         let now = SystemTime::now();
         let Some(mut state) = self.files_lock() else {
-            return false;
+            return Err(HistorySaveFailure::new("history lock", "poisoned"));
         };
         let Some(located) = locate(&mut state, roots, note) else {
-            return false;
+            return Ok(false);
         };
         if !allowed_history_directory(&located.vault, &located.dir) {
-            return false;
+            return Err(HistorySaveFailure::new("history path", "unsafe history directory"));
         }
         let entry = state
             .notes
             .entry(located.key)
             .or_insert_with(|| Note::open(located.dir.clone()));
-        entry.written_hash = Some(write.hash.to_owned());
 
         let versions = store::versions(&located.dir);
         let names = store::names(&located.dir);
@@ -147,7 +203,11 @@ impl HistoryService {
         let previous_text = (versions.len() >= 2)
             .then(|| store::read_version(&located.dir, &versions[versions.len() - 2]))
             .flatten();
-        let disk = write.disk_before.as_ref().map(|(text, at)| Before { text, at: *at });
+        let disk = entry
+            .pending_before
+            .as_ref()
+            .or(write.disk_before.as_ref())
+            .map(|(text, at)| Before { text, at: *at });
 
         let plan = milestone::plan(
             &self.device,
@@ -165,57 +225,117 @@ impl HistoryService {
             },
             now,
         );
-
+        let quiet = matches!(&plan, MilestonePlan::Quiet);
         let dir = &located.dir;
-        match plan {
-            MilestonePlan::Quiet => false,
-            MilestonePlan::Skip => match (write.name, versions.last()) {
-                (Some(name), Some(latest)) => {
-                    self.write_name(dir, &latest.id, name, now);
-                    true
-                }
-                _ => false,
-            },
-            MilestonePlan::RevertToPrevious { remove_id } => {
-                store::remove_version_and_names(dir, &remove_id);
-                entry.last_edit = None;
-                true
-            }
-            MilestonePlan::UpdateLatest { id } => {
-                if let Err(error) = store::update_version_text(dir, &id, write.text) {
-                    report(dir, "не обновила версию", &error.to_string());
-                }
-                entry.last_edit = Some(now);
-                if let Some(name) = write.name {
-                    self.write_name(dir, &id, name, now);
-                }
-                true
-            }
-            MilestonePlan::CreateNew { baseline, snapshot } => {
-                if let Some(baseline) = baseline {
-                    if let Err(error) = store::write_version(dir, &self.device, &baseline) {
-                        report(dir, "не записала исходную версию", &error.to_string());
+        let outcome = (|| -> Result<bool, HistorySaveFailure> {
+            match plan {
+                MilestonePlan::Quiet => Ok(false),
+                MilestonePlan::Skip => match (write.name, versions.last()) {
+                    (Some(name), Some(latest)) => {
+                        self.write_name(dir, &latest.id, name, now)
+                            .map_err(|error| HistorySaveFailure::new("write version name", error))?;
+                        Ok(true)
                     }
-                }
-                entry.last_edit = Some(now);
-                match store::write_version(dir, &self.device, &snapshot) {
-                    Ok(path) => {
-                        let id = path.file_name().and_then(|file| file.to_str());
-                        if let (Some(name), Some(id)) = (write.name, id) {
-                            self.write_name(dir, id, name, now);
-                        }
+                    _ => Ok(false),
+                },
+                MilestonePlan::RevertToPrevious { remove_id } => {
+                    let removed = self.remove_version_and_names(dir, &remove_id);
+                    // A later label deletion may fail after unlinking the
+                    // version. Keep coalescing state aligned with the disk.
+                    if !dir.join(&remove_id).exists() {
+                        entry.last_edit = None;
                     }
-                    Err(error) => report(dir, "не записала версию", &error.to_string()),
+                    removed.map_err(|error| HistorySaveFailure::new("remove version", error))?;
+                    Ok(true)
                 }
-                true
+                MilestonePlan::UpdateLatest { id } => {
+                    self.update_version(dir, &id, write.text)
+                        .map_err(|error| HistorySaveFailure::new("update version", error))?;
+                    entry.last_edit = Some(now);
+                    if let Some(name) = write.name {
+                        self.write_name(dir, &id, name, now)
+                            .map_err(|error| HistorySaveFailure::new("write version name", error))?;
+                    }
+                    Ok(true)
+                }
+                MilestonePlan::CreateNew { baseline, snapshot } => {
+                    if let Some(baseline) = baseline {
+                        self.write_version(dir, &baseline)
+                            .map_err(|error| HistorySaveFailure::new("write baseline", error))?;
+                    }
+                    let path = self
+                        .write_version(dir, &snapshot)
+                        .map_err(|error| HistorySaveFailure::new("write version", error))?;
+                    entry.last_edit = Some(now);
+                    if let (Some(name), Some(id)) = (
+                        write.name,
+                        path.file_name().and_then(|file| file.to_str()),
+                    ) {
+                        self.write_name(dir, id, name, now)
+                            .map_err(|error| HistorySaveFailure::new("write version name", error))?;
+                    }
+                    Ok(true)
+                }
+            }
+        })();
+        match outcome {
+            Ok(changed) => {
+                // A quiet reader update must not discard a failed baseline
+                // awaiting the next real save.
+                if !quiet || entry.pending_before.is_none() {
+                    entry.written_hash = Some(write.hash.to_owned());
+                    entry.pending_before = None;
+                }
+                Ok(changed)
+            }
+            Err(error) => {
+                if versions.is_empty() && entry.pending_before.is_none() {
+                    entry.pending_before = write.disk_before;
+                }
+                Err(error)
             }
         }
     }
 
-    fn write_name(&self, dir: &Path, id: &str, name: &str, at: SystemTime) {
-        if let Err(error) = store::write_name(dir, &self.device, id, name, at) {
-            report(dir, "не записала название версии", &error.to_string());
+    fn write_version(&self, dir: &Path, snapshot: &milestone::Snapshot) -> Result<PathBuf, FileCommandError> {
+        #[cfg(test)]
+        self.fail_if_requested(HistoryFault::CreateVersion)?;
+        store::write_version(dir, &self.device, snapshot)
+    }
+
+    fn update_version(&self, dir: &Path, id: &str, text: &str) -> Result<(), FileCommandError> {
+        #[cfg(test)]
+        self.fail_if_requested(HistoryFault::UpdateVersion)?;
+        store::update_version_text(dir, id, text)
+    }
+
+    fn remove_version_and_names(&self, dir: &Path, id: &str) -> Result<(), FileCommandError> {
+        #[cfg(test)]
+        self.fail_if_requested(HistoryFault::RemoveVersion)?;
+        store::remove_version_and_names(dir, id)
+    }
+
+    fn write_name(&self, dir: &Path, id: &str, name: &str, at: SystemTime) -> Result<(), FileCommandError> {
+        #[cfg(test)]
+        self.fail_if_requested(HistoryFault::NameVersion)?;
+        store::write_name(dir, &self.device, id, name, at)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_once(&self, fault: HistoryFault) {
+        *self.next_fault.lock().unwrap() = Some(fault);
+    }
+
+    #[cfg(test)]
+    fn fail_if_requested(&self, kind: HistoryFault) -> Result<(), FileCommandError> {
+        let mut pending = self.next_fault.lock().unwrap();
+        if *pending == Some(kind) {
+            *pending = None;
+            return Err(FileCommandError::Io {
+                message: "injected history persistence failure".to_owned(),
+            });
         }
+        Ok(())
     }
 
     pub fn name(
@@ -726,6 +846,136 @@ mod tests {
         fs::remove_dir(nested.join("Идея.md")).unwrap();
         assert!(history.saved(&|| fixture.roots(), &note, write("local", Source::Agent, "hash", None)));
         assert_eq!(versions(&fixture.history_of("Идея.md")).len(), 1);
+    }
+
+    #[test]
+    fn history_failure_on_initial_baseline_preserves_original_for_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Первый.md");
+        fs::write(&note, "before primary save").unwrap();
+        let captured = history.disk_before(&note, None);
+        fs::write(&note, "first edit committed").unwrap();
+
+        history.fail_once(HistoryFault::CreateVersion);
+        let failed = history.try_saved(
+            &|| fixture.roots(),
+            &note,
+            NoteWrite {
+                disk_before: captured,
+                text: "first edit committed",
+                hash: "first-hash",
+                source: Source::Me,
+                name: None,
+            },
+        ).unwrap_err();
+        assert_eq!(failed.action, "write baseline");
+        assert!(versions(&fixture.history_of("Первый.md")).is_empty());
+        let key = crate::search::paths::identity(&note);
+        let state = history.lock();
+        let pending = state.notes.get(&key).unwrap();
+        assert!(pending.written_hash.is_none());
+        assert!(pending.last_edit.is_none());
+        assert_eq!(pending.pending_before.as_ref().unwrap().0, "before primary save");
+        drop(state);
+
+        let new_capture = history.disk_before(&note, None);
+        fs::write(&note, "retry after failure").unwrap();
+        assert!(history.try_saved(
+            &|| fixture.roots(),
+            &note,
+            NoteWrite {
+                disk_before: new_capture,
+                text: "retry after failure",
+                hash: "retry-hash",
+                source: Source::Me,
+                name: None,
+            },
+        ).unwrap());
+        assert_eq!(
+            texts(&fixture.history_of("Первый.md")),
+            [
+                ("before primary save".to_owned(), Source::Start),
+                ("retry after failure".to_owned(), Source::Me),
+            ]
+        );
+        assert!(history.lock().notes.get(&key).unwrap().pending_before.is_none());
+    }
+
+    #[test]
+    fn history_failed_update_does_not_advance_hash_or_coalescing_state() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Черновик.md");
+        assert!(history.try_saved(&|| fixture.roots(), &note, write("one", Source::Me, "hash-1", None)).unwrap());
+        let key = crate::search::paths::identity(&note);
+        let original_edit = history.lock().notes.get(&key).unwrap().last_edit;
+        history.fail_once(HistoryFault::UpdateVersion);
+        let error = history.try_saved(
+            &|| fixture.roots(), &note, write("two", Source::Me, "hash-2", None)
+        ).unwrap_err();
+        assert_eq!(error.action, "update version");
+        assert_eq!(texts(&fixture.history_of("Черновик.md")), [("one".to_owned(), Source::Me)]);
+        {
+            let state = history.lock();
+            let note = state.notes.get(&key).unwrap();
+            assert_eq!(note.written_hash.as_deref(), Some("hash-1"));
+            assert_eq!(note.last_edit, original_edit);
+        }
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("three", Source::Me, "hash-3", None)
+        ).unwrap());
+        assert_eq!(texts(&fixture.history_of("Черновик.md")), [("three".to_owned(), Source::Me)]);
+    }
+
+    #[test]
+    fn history_failed_name_write_is_not_reported_as_changed_and_can_retry() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Имена.md");
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("original", Source::Agent, "hash-1", None)
+        ).unwrap());
+        history.fail_once(HistoryFault::NameVersion);
+        let error = history.try_saved(
+            &|| fixture.roots(), &note, write("original", Source::Agent, "hash-1", Some("draft"))
+        ).unwrap_err();
+        assert_eq!(error.action, "write version name");
+        assert!(history.page(&|| fixture.roots(), &note, 0, 10).versions[0].name.is_none());
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("original", Source::Agent, "hash-1", Some("draft"))
+        ).unwrap());
+        assert_eq!(
+            history.page(&|| fixture.roots(), &note, 0, 10).versions[0].name.as_deref(),
+            Some("draft")
+        );
+    }
+
+    #[test]
+    fn history_failed_revert_never_claims_removed_version() {
+        use super::HistoryFault;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Откат.md");
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("first", Source::Agent, "hash-1", None)
+        ).unwrap());
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("second", Source::Me, "hash-2", None)
+        ).unwrap());
+        history.fail_once(HistoryFault::RemoveVersion);
+        let error = history.try_saved(
+            &|| fixture.roots(), &note, write("first", Source::Me, "hash-3", None)
+        ).unwrap_err();
+        assert_eq!(error.action, "remove version");
+        assert_eq!(texts(&fixture.history_of("Откат.md")).len(), 2);
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write("first", Source::Me, "hash-3", None)
+        ).unwrap());
+        assert_eq!(texts(&fixture.history_of("Откат.md")), [("first".to_owned(), Source::Agent)]);
     }
 
     #[test]
