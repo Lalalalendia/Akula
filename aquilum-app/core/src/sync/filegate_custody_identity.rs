@@ -88,6 +88,9 @@ impl SqliteCustodyIdentityStore {
             SCHEMA => {},
             other => return Err(CustodyBindingError::UnsupportedSchema(other)),
         }
+        // Reject an unrelated SQLite database masquerading as schema v1;
+        // a matching PRAGMA user_version alone is never sufficient.
+        connection.prepare("SELECT workspace_id FROM custody_anchor_binding LIMIT 0")?;
         validate_store_location(admission, database_path)?;
         admission.recheck_registered_root()?;
         Ok(Self { connection, database_path: database_path.to_path_buf() })
