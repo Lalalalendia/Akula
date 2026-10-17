@@ -316,3 +316,242 @@ fn m1_real_process_exit_after_staging_recovers_without_false_ack() {
     ));
     assert!(!root.join(relative).exists());
 }
+
+
+fn m1c_claim(journal: &SqliteSyncJournal, operation: OperationId) {
+    let intent = journal.get(operation).unwrap().unwrap().intent;
+    journal.record_local_publication_attempt_once(&intent).unwrap();
+}
+
+#[test]
+fn m1c_claim_without_any_files_is_an_unconfirmed_empty_observation() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let (journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), "notes/recovery.md", b"expected", op,
+    );
+    m1c_claim(&journal, op);
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let evidence = host.inspect_local_publication(op, &journal).unwrap();
+    assert_eq!(evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::NoVisibleNames);
+    assert_eq!(evidence.stage, local_recovery::ObservedLocalFile::Absent);
+    assert_eq!(evidence.final_name, local_recovery::ObservedLocalFile::Absent);
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+    assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+}
+
+#[test]
+fn m1c_real_process_crash_stage_is_identified_without_mutating_it() {
+    let (temp, _core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/crash-m1c.md";
+    let output = run_child(&temp, &root, relative, op, "crash");
+    assert_eq!(output.status.code(), Some(87),
+        "crash fixture did not run: {}", String::from_utf8_lossy(&output.stderr));
+    let appdata = temp.path().join("child-appdata");
+    let core = core_at(&root, &appdata);
+    let journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let evidence = host.inspect_local_publication(op, &journal).unwrap();
+    assert_eq!(evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::StagedOnly);
+    assert!(matches!(
+        evidence.stage,
+        local_recovery::ObservedLocalFile::Present {
+            matches_expected_hash: true, .. }
+    ));
+    assert_eq!(evidence.final_name, local_recovery::ObservedLocalFile::Absent);
+    assert_eq!(fs::read(root.join("notes").join(format!(
+        ".akula-sync-stage-{op}"
+    ))).unwrap(), b"staged before process exit");
+    assert!(!root.join(relative).exists());
+    assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+    let record = journal.get(op).unwrap().unwrap();
+    assert!(journal.baseline(record.intent.vault_id, record.intent.document_id)
+        .unwrap().is_none());
+}
+
+#[test]
+fn m1c_completed_local_name_is_matching_evidence_not_a_baseline_receipt() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/new.md";
+    let contents = b"matching data";
+    let (journal, cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), relative, contents, op,
+    );
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    host.create_staged_if_absent(op, &journal, &cache).unwrap();
+    let evidence = host.inspect_local_publication(op, &journal).unwrap();
+    assert_eq!(evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::FinalNameMatchesExpected);
+    assert_eq!(evidence.stage, local_recovery::ObservedLocalFile::Absent);
+    assert!(matches!(evidence.final_name,
+        local_recovery::ObservedLocalFile::Present {
+            matches_expected_hash: true, byte_length: 13, .. }));
+    assert_eq!(fs::read(root.join(relative)).unwrap(), contents);
+    assert_eq!(journal.get(op).unwrap().unwrap().phase, JournalPhase::Staged);
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[test]
+fn m1c_foreign_file_and_corrupted_stage_are_untrusted_without_deletion() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/existing.md";
+    let (journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), relative, b"expected", op,
+    );
+    m1c_claim(&journal, op);
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    let final_name = root.join(relative);
+    fs::write(&stage, b"expected").unwrap();
+    fs::write(&final_name, b"not from this operation").unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let evidence = host.inspect_local_publication(op, &journal).unwrap();
+    assert_eq!(evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::DifferentFinalFile);
+    fs::remove_file(&final_name).unwrap();
+    let both_missing_final = host.inspect_local_publication(op, &journal).unwrap();
+    assert_eq!(both_missing_final.assessment,
+        local_recovery::LocalRecoveryAssessment::StagedOnly);
+    fs::write(&stage, b"maliciously replaced").unwrap();
+    let corrupted = host.inspect_local_publication(op, &journal).unwrap();
+    assert_eq!(corrupted.assessment,
+        local_recovery::LocalRecoveryAssessment::UntrustedStage);
+    assert_eq!(fs::read(&stage).unwrap(), b"maliciously replaced");
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[test]
+fn m1c_both_names_present_remain_ambiguous_even_with_matching_bytes() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/ambiguous.md";
+    let (journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), relative, b"same", op,
+    );
+    m1c_claim(&journal, op);
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    fs::write(&stage, b"same").unwrap();
+    fs::write(root.join(relative), b"same").unwrap();
+    let evidence = RegisteredReadAdmission::open(&core, &root).unwrap()
+        .inspect_local_publication(op, &journal).unwrap();
+    assert_eq!(evidence.assessment,
+        local_recovery::LocalRecoveryAssessment::BothNamesPresent);
+    assert_ne!(
+        match evidence.stage {
+            local_recovery::ObservedLocalFile::Present { identity, .. } => identity,
+            _ => panic!("expected staged file"),
+        },
+        match evidence.final_name {
+            local_recovery::ObservedLocalFile::Present { identity, .. } => identity,
+            _ => panic!("expected final file"),
+        },
+    );
+    assert!(stage.exists());
+    assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn m1c_symlinked_stage_and_hardlinked_final_fail_closed() {
+    use std::os::unix::fs::{hard_link, symlink};
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let external = temp.path().join("external");
+    fs::write(&external, b"outside").unwrap();
+    let op = OperationId::new();
+    let (journal, _cache, vault, doc) = staged(
+        &core, &temp.path().join("appdata"), "notes/alias.md", b"expected", op,
+    );
+    m1c_claim(&journal, op);
+    let stage = root.join("notes").join(format!(".akula-sync-stage-{op}"));
+    symlink(&external, &stage).unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    assert!(host.inspect_local_publication(op, &journal).is_err());
+    fs::remove_file(stage).unwrap();
+    hard_link(&external, root.join("notes/alias.md")).unwrap();
+    assert!(host.inspect_local_publication(op, &journal).is_err());
+    assert_eq!(fs::read(external).unwrap(), b"outside");
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+}
+
+#[test]
+fn m1c_detects_same_content_file_id_swap_between_two_reads() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/swapped.md";
+    let (journal, _cache, _, _) = staged(
+        &core, &temp.path().join("appdata"), relative, b"same", op,
+    );
+    m1c_claim(&journal, op);
+    let dest = root.join(relative);
+    fs::write(&dest, b"same").unwrap();
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let result = host.inspect_local_publication_with_hook(op, &journal, || {
+        fs::rename(&dest, root.join("notes/old-id.md")).unwrap();
+        fs::write(&dest, b"same").unwrap();
+    });
+    assert!(matches!(result, Err(LocalRecoveryError::UnstableObservation)));
+    assert_eq!(fs::read(root.join("notes/old-id.md")).unwrap(), b"same");
+    assert_eq!(fs::read(dest).unwrap(), b"same");
+}
+
+#[cfg(unix)]
+#[test]
+fn m1c_detached_parent_does_not_appear_verified_after_symlink_swap() {
+    use std::os::unix::fs::symlink;
+    let (temp, core, root) = fixture();
+    let parent = root.join("notes");
+    fs::create_dir(&parent).unwrap();
+    let outside = temp.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    let op = OperationId::new();
+    let (journal, _cache, _, _) = staged(
+        &core, &temp.path().join("appdata"), "notes/new.md", b"bytes", op,
+    );
+    m1c_claim(&journal, op);
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let old = temp.path().join("original-notes");
+    let result = host.inspect_local_publication_with_hook(op, &journal, || {
+        fs::rename(&parent, &old).unwrap();
+        symlink(&outside, &parent).unwrap();
+    });
+    assert!(matches!(result, Err(LocalRecoveryError::UnstableObservation)));
+    assert!(!outside.join("new.md").exists());
+}
+
+#[test]
+fn m1c_refuses_unknown_or_foreign_vault_ticket_and_oversize_file() {
+    let (temp, core, root) = fixture();
+    fs::create_dir(root.join("notes")).unwrap();
+    let op = OperationId::new();
+    let relative = "notes/large.md";
+    let (journal, _cache, _, _) = staged(
+        &core, &temp.path().join("appdata"), relative, b"tiny", op,
+    );
+    let host = RegisteredReadAdmission::open(&core, &root).unwrap();
+    assert!(matches!(host.inspect_local_publication(op, &journal),
+        Err(LocalRecoveryError::MissingTicket)));
+    m1c_claim(&journal, op);
+    let other = tempfile::tempdir().unwrap();
+    let other_root = other.path().join("vault");
+    fs::create_dir(&other_root).unwrap();
+    let other_core = core_at(&other_root, &other.path().join("appdata"));
+    let other_host = RegisteredReadAdmission::open(&other_core, &other_root).unwrap();
+    assert!(other_host.inspect_local_publication(op, &journal).is_err());
+    let file = std::fs::OpenOptions::new().create_new(true).write(true)
+        .open(root.join(relative)).unwrap();
+    file.set_len(32 * 1024 * 1024 + 1).unwrap();
+    assert!(matches!(host.inspect_local_publication(op, &journal),
+        Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied))));
+}
