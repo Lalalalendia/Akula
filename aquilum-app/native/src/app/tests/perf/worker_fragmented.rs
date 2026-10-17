@@ -134,7 +134,9 @@ fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
                 "{case}/step{step}: fragmented regions must cover the full screen"
             );
         }
-        if matches!(step, 0 | 10 | 20 | 31 | 47 | 63) {
+        // Fidelity must be checked on every frame. The previous six-frame
+        // sampling skipped a real >1-LSB defect at full refresh step 3.
+        {
             // This independent renderer DOES NOT split its full framebuffer.
             let full_ref = render_full(&layers, w, hh, scale);
             let max = peak_channel(renderers[3].frame_pixels(), full_ref.frame_pixels());
@@ -167,7 +169,7 @@ fn fragmented_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
         assert!(per_rect_switches >= 6, "{case}/strips={strips}: per-rect route should switch on large strips: {per_rect_switches}");
     }
     assert!(frame_switches >= 6, "{case}: aggregate router did not switch modes: {frame_switches}");
-    assert_eq!(full_reference_checks, 6);
+    assert_eq!(full_reference_checks, FRAMES as usize);
 
     for (index, mode) in ["serial", "parallel2", "per_rect", "frame_budget"].into_iter().enumerate() {
         for (class, workload) in ["scroll", "full"].into_iter().enumerate() {
