@@ -16,6 +16,8 @@ mod journal;
 mod planner;
 mod path;
 mod pinned_read;
+#[cfg(windows)]
+mod pinned_windows;
 mod protocol;
 mod provider;
 mod upload;
