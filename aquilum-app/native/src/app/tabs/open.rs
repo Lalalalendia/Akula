@@ -134,6 +134,9 @@ impl App {
             } else {
                 None
             };
+            if self.parley_trial_enabled {
+                eprintln!("PARLEY_TAB_TRACE stage=capture found={}", self.parley_capture.is_some());
+            }
         }
         self.leave_note();
         #[cfg(test)]
@@ -251,6 +254,7 @@ impl App {
                 {
                     record_stage(|stage| stage.cache_hit = true);
                     if self.parley_trial_enabled {
+                        eprintln!("PARLEY_TAB_TRACE stage=verified_cache candidate={}", cached.layout.is_some());
                         // The original Rope hash has just been checked against
                         // disk; an unverified or edited file never receives
                         // the cached Parley layouts.
