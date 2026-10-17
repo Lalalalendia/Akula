@@ -17,6 +17,7 @@ on:
       - 'aquilum-app/core/src/sync/s3_delta_walker.rs'
       - 'aquilum-app/core/src/sync/s3_remote_anchor.rs'
       - 'aquilum-app/core/src/sync/s3_transport/selective_snapshot.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/offline_retention.rs'
       - 'aquilum-app/core/src/sync/s3_anchored_delta.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
