@@ -52,7 +52,7 @@ impl App {
         match result {
             Ok(_) => {
                 if let Some(note) = &mut self.note
-                    && let Some(text) = note.reload()
+                    && let Some(text) = note.reload_after_restore()
                 {
                     self.set_text(root, text);
                 }

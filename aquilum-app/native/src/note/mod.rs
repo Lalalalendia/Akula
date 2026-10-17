@@ -4,6 +4,8 @@ mod save;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, Instant};
 
 use aquilum_core::Core;
@@ -16,6 +18,22 @@ use save::Outcome;
 const POLL: Duration = Duration::from_millis(20);
 const RETRY: Duration = Duration::from_secs(5);
 
+// Exactly one probe per open note. Watcher bursts coalesce into a fresh probe.
+struct ReloadJob {
+    done: Receiver<Option<read::Loaded>>,
+    revision: u64,
+    path: PathBuf,
+    again: bool,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Drop for ReloadJob {
+    fn drop(&mut self) {
+        // Dropping a tab prevents its worker from decoding a stale huge file.
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
 pub struct Note {
     pub path: PathBuf,
     hash: Arc<Mutex<String>>,
@@ -24,16 +42,19 @@ pub struct Note {
     replaced: Option<crop::Rope>,
     queued: usize,
     done: (Sender<Outcome>, Receiver<Outcome>),
+    revision: u64,
+    reload_job: Option<ReloadJob>,
 }
 
 impl Note {
     pub fn open(path: PathBuf) -> Result<(Note, crop::Rope), FileCommandError> {
         let loaded = read(&path)?;
-        let note = Note { path, hash: Arc::new(Mutex::new(loaded.hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel() };
+        let note = Note { path, hash: Arc::new(Mutex::new(loaded.hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel(), revision: 0, reload_job: None };
         Ok((note, loaded.text))
     }
 
     pub fn edit(&mut self, debounce: Duration) {
+        self.revision = self.revision.wrapping_add(1);
         self.pending = Some(Instant::now() + debounce);
     }
 
@@ -42,6 +63,7 @@ impl Note {
     }
 
     fn queue(&mut self, core: &Arc<Core>, text: &crop::Rope) {
+        self.revision = self.revision.wrapping_add(1);
         self.pending = None;
         self.queued += 1;
         save::queue(Arc::clone(core), self.path.clone(), text.clone(), Arc::clone(&self.hash), self.done.0.clone());
@@ -95,22 +117,88 @@ impl Note {
     }
 
     pub fn retry(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
         self.pending = Some(Instant::now());
     }
 
-    pub fn reload(&mut self) -> Option<crop::Rope> {
+    /// Hash and read changed files away from the window event loop.
+    pub fn request_reload(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        if self.pending.is_some() || self.queued > 0 {
+            return;
+        }
+        if let Some(job) = self.reload_job.as_mut() {
+            job.again = true;
+            return;
+        }
+        let expected = self.hash.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let path = self.path.clone();
+        let revision = self.revision;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let stop = Arc::clone(&cancelled);
+        let (tx, done) = channel();
+        let worker_path = path.clone();
+        let spawned = std::thread::Builder::new().name("akula-note-reload".into()).spawn(move || {
+            // A panic must still settle the receiver instead of wedging reload.
+            let result = std::panic::catch_unwind(|| {
+                let probe = aquilum_core::files::document::read_file_hash_impl(&worker_path).ok()?;
+                if stop.load(Ordering::Acquire) || probe == expected {
+                    return None;
+                }
+                let loaded = read(&worker_path).ok()?;
+                if stop.load(Ordering::Acquire) || loaded.hash == expected {
+                    return None;
+                }
+                Some(loaded)
+            }).ok().flatten();
+            if tx.send(result).is_ok() {
+                wake();
+            }
+        });
+        if let Err(error) = spawned {
+            report!("фоновое чтение {} не запущено: {error}", path.display());
+            return;
+        }
+        self.reload_job = Some(ReloadJob { done, revision, path, again: false, cancelled });
+    }
+
+    /// Called on a wake: only accept results for the same note revision/path.
+    pub fn take_reload(&mut self, wake: &Arc<dyn Fn() + Send + Sync>) -> Option<crop::Rope> {
+        let job = self.reload_job.take()?;
+        let loaded = match job.done.try_recv() {
+            Ok(loaded) => loaded,
+            Err(TryRecvError::Empty) => {
+                self.reload_job = Some(job);
+                return None;
+            }
+            Err(TryRecvError::Disconnected) => return None,
+        };
+        if job.again {
+            self.request_reload(Arc::clone(wake));
+            return None;
+        }
+        if job.path != self.path || job.revision != self.revision || self.pending.is_some() || self.queued > 0 {
+            return None;
+        }
+        let loaded = loaded?;
+        let mut hash = self.hash.lock().unwrap_or_else(PoisonError::into_inner);
+        if loaded.hash == *hash {
+            return None;
+        }
+        *hash = loaded.hash;
+        Some(loaded.text)
+    }
+
+    /// Explicit history restore/revert is a user-initiated operation that
+    /// must update the visible text immediately after a successful disk write.
+    /// It is not a watcher notification; bypass the async hash-only probe.
+    pub fn reload_after_restore(&mut self) -> Option<crop::Rope> {
         if self.pending.is_some() || self.queued > 0 {
             return None;
         }
-        // Workspace events can refer to our own save or metadata-only updates.
-        // Verify actual bytes first, without parsing/rebuilding a large Rope.
-        // Do not trust (size, mtime) alone: external writers can preserve both.
-        if aquilum_core::files::document::read_file_hash_impl(&self.path).ok()? == *self.hash.lock().unwrap_or_else(PoisonError::into_inner) {
-            return None;
-        }
+        self.revision = self.revision.wrapping_add(1);
+        self.reload_job = None; // discard and cancel any older watcher result
         let loaded = read(&self.path).ok()?;
         let mut hash = self.hash.lock().unwrap_or_else(PoisonError::into_inner);
-        // The file may change between the hash probe and the full read.
         if loaded.hash == *hash {
             return None;
         }
@@ -127,19 +215,38 @@ impl Note {
 mod tests {
     use super::*;
 
+    fn waker() -> Arc<dyn Fn() + Send + Sync> {
+        Arc::new(|| {})
+    }
+
+    fn wait_reload(note: &mut Note, wake: &Arc<dyn Fn() + Send + Sync>) -> Option<crop::Rope> {
+        for _ in 0..400 {
+            let text = note.take_reload(wake);
+            if note.reload_job.is_none() {
+                return text;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("background note reload did not finish");
+    }
+
     #[test]
     fn reload_ignores_own_write_and_sees_external_one() {
         let dir = crate::test_dir::tempdir();
         let path = dir.path().join("a.md");
         std::fs::write(&path, "раз").unwrap();
         let (mut note, text) = Note::open(path.clone()).unwrap();
+        let wake = waker();
         assert_eq!(text, "раз");
-        assert_eq!(note.reload(), None);
+        note.request_reload(Arc::clone(&wake));
+        assert!(wait_reload(&mut note, &wake).is_none());
         std::fs::write(&path, "два").unwrap();
-        assert_eq!(note.reload().map(|text| text.to_string()).as_deref(), Some("два"));
+        note.request_reload(Arc::clone(&wake));
+        assert_eq!(wait_reload(&mut note, &wake).map(|text| text.to_string()).as_deref(), Some("два"));
         note.edit(Duration::ZERO);
         assert!(note.deadline().is_some());
-        assert_eq!(note.reload(), None, "несохранённая правка не затирается");
+        note.request_reload(Arc::clone(&wake));
+        assert!(note.reload_job.is_none(), "unsaved text must not be overwritten");
     }
 
     #[test]
@@ -154,11 +261,14 @@ mod tests {
         std::fs::File::open(&path).unwrap().set_modified(modified).unwrap();
 
         let restored = std::fs::metadata(&path).unwrap();
-        assert_eq!(restored.len(), previous.len(), "same byte length is essential");
-        assert_eq!(restored.modified().unwrap(), modified, "timestamp must not signal a change");
+        assert_eq!(restored.len(), previous.len());
+        assert_eq!(restored.modified().unwrap(), modified);
         assert_eq!(original.to_string(), "раз");
-        assert_eq!(note.reload().map(|rope| rope.to_string()).as_deref(), Some("два"));
-        assert!(note.reload().is_none(), "unchanged bytes must not replace the Rope again");
+        let wake = waker();
+        note.request_reload(Arc::clone(&wake));
+        assert_eq!(wait_reload(&mut note, &wake).map(|rope| rope.to_string()).as_deref(), Some("два"));
+        note.request_reload(Arc::clone(&wake));
+        assert!(wait_reload(&mut note, &wake).is_none(), "unchanged bytes are a no-op");
     }
 
     #[test]
@@ -168,9 +278,70 @@ mod tests {
         std::fs::write(&path, "текст").unwrap();
         let (mut note, _) = Note::open(path.clone()).unwrap();
         std::fs::write(&path, "текст").unwrap();
-        assert!(note.reload().is_none(), "byte-identical external rewrite is a no-op");
+        let wake = waker();
+        note.request_reload(Arc::clone(&wake));
+        assert!(wait_reload(&mut note, &wake).is_none());
         note.edit(Duration::ZERO);
         std::fs::write(&path, "иначе").unwrap();
-        assert!(note.reload().is_none(), "pending edits must never be replaced");
+        note.request_reload(Arc::clone(&wake));
+        assert!(note.reload_job.is_none(), "pending edits block external reload");
+    }
+
+    #[test]
+    fn late_result_cannot_overwrite_an_edit_even_after_debounce_is_cleared() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("late.md");
+        std::fs::write(&path, "исходно").unwrap();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        let original = note.hash.lock().unwrap().clone();
+        let (tx, done) = channel();
+        note.reload_job = Some(ReloadJob {
+            done, revision: note.revision, path, again: false, cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        note.edit(Duration::ZERO);
+        // Even if saving completed and the pending flag cleared, revision is stale.
+        note.pending = None;
+        tx.send(Some(read::Loaded { text: crop::Rope::from("не принимать"), hash: "старый результат".into() })).unwrap();
+        assert!(note.take_reload(&waker()).is_none());
+        assert_eq!(*note.hash.lock().unwrap(), original);
+    }
+
+    #[test]
+    fn repeated_events_coalesce_and_reprobe_before_publishing() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("burst.md");
+        std::fs::write(&path, "первый").unwrap();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        let original = note.hash.lock().unwrap().clone();
+        let wake = waker();
+        let (tx, done) = channel();
+        note.reload_job = Some(ReloadJob {
+            done, revision: note.revision, path: path.clone(), again: false, cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        for _ in 0..30 {
+            note.request_reload(Arc::clone(&wake));
+        }
+        assert!(note.reload_job.as_ref().unwrap().again, "burst must coalesce");
+        std::fs::write(&path, "второй").unwrap();
+        tx.send(Some(read::Loaded { text: crop::Rope::from("устарело"), hash: "вчера".into() })).unwrap();
+        assert!(note.take_reload(&wake).is_none(), "stale intermediate result must be ignored");
+        assert_eq!(*note.hash.lock().unwrap(), original);
+        assert!(note.reload_job.is_some(), "one new background probe should be started");
+        assert_eq!(wait_reload(&mut note, &wake).map(|r| r.to_string()).as_deref(), Some("второй"));
+    }
+
+    #[test]
+    fn reload_result_for_renamed_path_is_discarded() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("before.md");
+        std::fs::write(&path, "before").unwrap();
+        let (mut note, _) = Note::open(path.clone()).unwrap();
+        let (tx, done) = channel();
+        note.reload_job = Some(ReloadJob {
+            done, revision: note.revision, path: path.clone(), again: false, cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        note.path = dir.path().join("after.md");
+        tx.send(Some(read::Loaded { text: crop::Rope::from("stale"), hash: "stale".into() })).unwrap();
+        assert!(note.take_reload(&waker()).is_none(), "renamed note must not receive old-path bytes");
     }
 }

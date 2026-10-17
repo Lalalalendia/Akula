@@ -54,8 +54,10 @@ fn a_lost_batch_of_events_still_leaves_the_tree_and_the_open_note_up_to_date() {
     std::fs::write(&path, "новый текст").unwrap();
     std::fs::write(h.vault.path().join("новая.md"), "").unwrap();
     h.app.workspace.core.emit(aquilum_core::CoreEvent::WorkspaceRescanned);
-    h.app.on_core_events(&mut h.root);
-    assert_eq!(h.body_text(), "новый текст");
+    assert!(wait_until(250, 20, || {
+        h.app.on_core_events(&mut h.root);
+        h.body_text() == "новый текст"
+    }), "rescan should eventually update the open note");
     assert!(h.app.tree.names().iter().any(|name| name == "новая"), "дерево не перечитано после потери событий");
 }
 
@@ -106,6 +108,23 @@ fn rescanned_workspace_reload_detects_same_size_rewrite_with_restored_mtime() {
     std::fs::write(&path, "два").unwrap();
     std::fs::File::open(&path).unwrap().set_modified(old_modified).unwrap();
     h.app.workspace.core.emit(aquilum_core::CoreEvent::WorkspaceRescanned);
+    assert!(wait_until(250, 20, || {
+        h.app.on_core_events(&mut h.root);
+        h.body_text() == "два"
+    }), "workspace rescan must not rely on mtime or size");
+}
+
+#[test]
+fn background_reload_from_previous_tab_cannot_replace_current_note() {
+    let mut h = Harness::new();
+    let first = h.write_note("первый.md", "первый текст");
+    let second = h.write_note("второй.md", "второй текст");
+    assert!(h.app.open(&mut h.root, first.clone()));
+    std::fs::write(&first, "новый первый").unwrap();
+    h.app.workspace.core.emit(aquilum_core::CoreEvent::ContentChanged(vec![first.to_string_lossy().into_owned()]));
+    h.app.on_core_events(&mut h.root); // queue reload of first note
+    assert!(h.app.open(&mut h.root, second));
+    std::thread::sleep(std::time::Duration::from_millis(30));
     h.app.on_core_events(&mut h.root);
-    assert_eq!(h.body_text(), "два", "workspace rescan must not rely on mtime or size");
+    assert_eq!(h.body_text(), "второй текст", "previous tab's worker cannot replace the new tab");
 }
