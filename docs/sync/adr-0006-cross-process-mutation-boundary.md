@@ -65,3 +65,23 @@ No production `VaultPort` implementation, no OS file-writing API, no `Preservati
 3. Path alias/case-fold preflight scans cannot eliminate active rename races; only kernel no-replace can guarantee a pre-existing destination is not overwritten.
 4. Orphan stages are intentionally retained on ambiguous errors. A separate, provably non-destructive recovery/quarantine policy and stage exclusion from ordinary sync scans are mandatory before any production activation.
 5. No normal Core files/HistoryService/Search events are emitted by this prototype, and it does not call VaultPort. S3/MinIO, Yandex, Google, Sync settings and automatic apply remain disabled.
+
+
+## SYNC-04g-M1b durable publication ledger (PR #111)
+
+**Status:** Draft until exact-head CI. Inert Core-only hardening after M1, not production recovery.
+
+- The existing SQLite Sync journal migrates schema v1 to v2 atomically (WAL / synchronous=FULL). The new `sync_local_publication_attempts` table preserves operations and baselines. Unique operation UUID and `(vault_id, portable collision key)` constraints block a repeat claim.
+- The conditional INSERT is durable **before the first filesystem mutation**. Identical or portable-name-alias retries fail, even if the stage/final filename is missing after a restart. Success and uncertain failures retain the attempt.
+- `local_publication_review_queue` exposes a read-only, tamper-checked inspection list. It is **not** physical quarantine, cleanup, permission to replay, or a confirmed baseline. Presence means an OS side effect *might* have happened.
+- `.akula-sync-stage-*` is a reserved internal namespace, rejected from portable/wire Sync paths. The local scan **fails closed** when an orphan stage is present instead of returning a partial preview; hidden stages remain outside the Markdown search index.
+- Regression gates: SQLite schema migration/restart, invalid intent, duplicate/portable case/NFC name claims, corruption, two independent connections, real process exit, foreign-writer competition, orphan preflight refusal.
+
+### Remaining release blockers
+
+1. Read-only, handle-pinned inspection of both stage and final file identities with an explicit user/host resolution policy; no blind cleanup, claim clearance or auto retry.
+2. Platform-specific Windows directory rename durability under power loss (a flushed NT stage alone cannot prove parent name persistence).
+3. Hostile same-user stage-handle replacement, external-process parent switches, full conflict-preserving write protocol and History/Search notifications.
+4. Two-client filesystem/provider fault matrices before S3/MinIO release. No user-facing Sync activation in M1b.
+
+**Risk decision:** deliberately leave unresolved claims permanently blocked until an independently accepted recovery design is implemented.
