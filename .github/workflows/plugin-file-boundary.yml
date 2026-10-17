@@ -1,0 +1,42 @@
+name: Plugin file boundary matrix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/plugins/**'
+      - 'aquilum-app/core/src/sync/pinned_read.rs'
+      - 'aquilum-app/core/src/sync/pinned_windows.rs'
+      - 'aquilum-app/core/src/sync/host_admission.rs'
+      - 'aquilum-app/core/src/sync/path.rs'
+      - '.github/workflows/plugin-file-boundary.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-file-boundary-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  bound-read:
+    name: Scoped file read / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: plugin-file-boundary-${{ runner.os }}
+      - name: Test scoped reads, registry, symlink/junction and hardlink boundaries
+        working-directory: aquilum-app
+        run: cargo test -p aquilum-core --locked plugins::read_tests
+      - name: Recheck existing pinned sync host admission
+        working-directory: aquilum-app
+        run: cargo test -p aquilum-core --locked sync::host_admission::tests
