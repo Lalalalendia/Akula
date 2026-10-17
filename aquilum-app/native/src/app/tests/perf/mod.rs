@@ -20,6 +20,7 @@ mod search;
 mod timing;
 mod vello_release;
 mod worker_crossover;
+mod worker_router;
 
 use crate::stats::percentiles;
 
