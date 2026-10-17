@@ -489,6 +489,52 @@ mod tests {
             operation_id, &journal, &cache, &bindings, &profile, &namespace,
         ).is_err());
         assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
+
+        // The old local-only recovery entrypoint does not recognize the
+        // shared S3 VaultId. The explicitly bound *read-only* inspector must
+        // work after the no-replace creation, but never certify provenance,
+        // release the one-shot claim or advance the document baseline.
+        assert!(admission.inspect_local_publication(operation_id, &journal).is_err());
+        assert!(admission.inspect_local_publication_for_registered_s3(
+            operation_id, &journal, &bindings, &wrong_profile, &namespace,
+        ).is_err());
+        let evidence = admission.inspect_local_publication_for_registered_s3(
+            operation_id, &journal, &bindings, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(
+            evidence.assessment,
+            super::super::local_recovery::LocalRecoveryAssessment::FinalNameMatchesExpected
+        );
+        assert_eq!(fs::read(root.join(path.as_str())).unwrap(), bytes);
+
+        // A journal ticket for the same vault but a DIFFERENT profile must
+        // never be inspectable merely by presenting the bound S3 namespace.
+        let mut foreign_profile_intent = journal.get(operation_id).unwrap().unwrap().intent;
+        foreign_profile_intent.operation_id = OperationId::new();
+        foreign_profile_intent.document_id = DocumentId::new();
+        foreign_profile_intent.profile_id = "different-profile".into();
+        foreign_profile_intent.path = SyncRelativePath::parse("notes/other.md").unwrap();
+        let alien_id = foreign_profile_intent.operation_id;
+        journal.begin(foreign_profile_intent.clone()).unwrap();
+        journal.mark_staged(alien_id, bytes).unwrap();
+        journal.record_local_publication_attempt_once(&foreign_profile_intent).unwrap();
+        assert!(admission.inspect_local_publication_for_registered_s3(
+            alien_id, &journal, &bindings, &profile, &namespace,
+        ).is_err());
+        assert!(!root.join("notes/other.md").exists());
+
+        // The app-private binding is reloaded on another handle and all
+        // local write/confirmation gates remain in their original phases.
+        let reopened = SqliteRegisteredS3Bindings::open(
+            &admission, &appdata.join("profiles.sqlite"),
+        ).unwrap();
+        let after = admission.inspect_local_publication_for_registered_s3(
+            operation_id, &journal, &reopened, &profile, &namespace,
+        ).unwrap();
+        assert_eq!(after, evidence);
+        assert_eq!(journal.get(operation_id).unwrap().unwrap().phase, JournalPhase::Staged);
+        assert!(journal.baseline(namespace.vault_id(), document).unwrap().is_none());
+        assert_eq!(journal.local_publication_review_queue().unwrap().len(), 2);
     }
 
     #[test]

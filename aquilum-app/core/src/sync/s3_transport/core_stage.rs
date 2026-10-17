@@ -448,6 +448,18 @@ mod tests {
         assert!(journal.baseline(vault, record.document_id).unwrap().is_none());
         assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
 
+        // The shared remote UUID is deliberately different from this Core's
+        // registration: legacy inspection must reject it, whereas the bound
+        // read-only inspector can classify the outcome without a baseline.
+        assert!(admission.inspect_local_publication(operation_id, &journal).is_err());
+        let observed = admission.inspect_local_publication_for_registered_s3(
+            operation_id, &journal, &bindings, &profile, &ns,
+        ).unwrap();
+        assert_eq!(
+            observed.assessment,
+            crate::sync::local_recovery::LocalRecoveryAssessment::FinalNameMatchesExpected
+        );
+
         // Replay after a journal/cache restart must not create another file
         // or grant a baseline. The cloud bytes remain independently readable.
         drop(admission);
@@ -461,5 +473,21 @@ mod tests {
             ).is_err());
         assert!(journal.baseline(vault, record.document_id).unwrap().is_none());
         assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
+
+        // A separately reopened binding and WAL journal allow read-only
+        // diagnosis after process restart; neither releases the one-shot
+        // publication ticket nor enables mark_applied.
+        let reopened_admission = RegisteredReadAdmission::open(&second_core, &root_b).unwrap();
+        let reopened_bindings = SqliteRegisteredS3Bindings::open(
+            &reopened_admission, &app_b.join("s3-profiles.sqlite"),
+        ).unwrap();
+        assert_eq!(
+            reopened_admission.inspect_local_publication_for_registered_s3(
+                operation_id, &journal, &reopened_bindings, &profile, &ns,
+            ).unwrap(),
+            observed
+        );
+        assert_eq!(journal.get(operation_id).unwrap().unwrap().phase, JournalPhase::Staged);
+        assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
     }
 }
