@@ -157,6 +157,7 @@ fn native_note_latency_matrix() {
         let version_p95 = p95_stage(|s| s.version);
         let strip_p95 = p95_stage(|s| s.strip);
         let panel_p95 = p95_stage(|s| s.panel);
+        let cache_hits = stages.iter().filter(|stage| stage.cache_hit).count();
         let [switch_p50, switch_p95, switch_max] = percentiles(&switches, [0.5, 0.95, 1.0]);
         let [_, scene_p95, scene_max] = percentiles(&scenes, [0.5, 0.95, 1.0]);
         let [_, dispatch_p95, dispatch_max] = percentiles(&dispatches, [0.5, 0.95, 1.0]);
@@ -165,7 +166,7 @@ fn native_note_latency_matrix() {
              switch_p50_ms={switch_p50:.3} switch_p95_ms={switch_p95:.3} switch_max_ms={switch_max:.3} \
              scene_p95_ms={scene_p95:.3} scene_max_ms={scene_max:.3} \
              dispatch_p95_ms={dispatch_p95:.3} dispatch_max_ms={dispatch_max:.3} \
-             external_visible_ms={external_visible_ms:.3} stale_overwrites=0"
+             external_visible_ms={external_visible_ms:.3} cache_hits={cache_hits} stale_overwrites=0"
         );
         eprintln!(
             "TAB_STAGE kib={kib} cycles={cycles} leave_p95_ms={leave_p95:.3} read_p95_ms={read_p95:.3} \
