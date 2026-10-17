@@ -51,7 +51,7 @@ def report(results: dict[tuple[str, str, int], dict[str, str]]) -> str:
         "# Vello worker crossover — release-mode Linux",
         "",
         "Same scene and physical frame in each 0/2/4-worker variant. "
-        "ABCA rotation reduces order effects. Only actual scroll frames are timed.",
+        "ABC/BCA/CAB rotation reduces order effects. Timings use frames with detected scroll candidates (even when test modes suppress row copying).",
         "Area is *scheduled* raster work, including overlapping rectangles; "
         "it is not deduplicated damaged area. Worker count here is an "
         "experiment, not a production setting.",
