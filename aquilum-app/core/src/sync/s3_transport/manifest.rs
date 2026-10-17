@@ -31,6 +31,7 @@ pub enum S3HeadError {
     Conflict,
     RecoveryRequired,
     TooManyAncestors,
+    InvalidCursor,
 }
 
 impl From<S3ManifestError> for S3HeadError {
@@ -53,6 +54,58 @@ pub struct S3VerifiedHead {
     pub etag: String,
     /// The strict, fully validated index of referenced revisions.
     pub manifest: S3ManifestV1,
+}
+
+/// A verified, manifest-pinned read-only index. It is NOT the RemoteStore
+/// adapter: file writes, deletes, and provider mutations are unavailable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3PinnedRevisionSnapshot {
+    pub snapshot_id: String,
+    revisions: Vec<S3RevisionRefV1>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3PinnedRevisionPage {
+    pub snapshot_id: String,
+    pub revisions: Vec<S3RevisionRefV1>,
+    pub next_cursor: Option<String>,
+    pub complete: bool,
+}
+
+impl S3PinnedRevisionSnapshot {
+    pub fn len(&self) -> usize { self.revisions.len() }
+    pub fn is_empty(&self) -> bool { self.revisions.is_empty() }
+
+    /// Index-based paging is meaningful only for this exact *immutable*,
+    /// cryptographically checked snapshot. A cursor from another generation,
+    /// a repeated/empty cursor or a page over 1000 items is rejected.
+    pub fn page(&self, cursor: Option<&str>, limit: usize)
+        -> Result<S3PinnedRevisionPage, S3HeadError>
+    {
+        if !(1..=1000).contains(&limit) {
+            return Err(S3HeadError::InvalidCursor);
+        }
+        let start = if let Some(cursor) = cursor {
+            let prefix = format!("{}:", self.snapshot_id);
+            let index = cursor.strip_prefix(&prefix)
+                .filter(|v| !v.is_empty() && !v.starts_with('0'))
+                .and_then(|v| v.parse::<usize>().ok())
+                .ok_or(S3HeadError::InvalidCursor)?;
+            if index == 0 || index >= self.revisions.len() {
+                return Err(S3HeadError::InvalidCursor);
+            }
+            index
+        } else { 0 };
+        let end = start.saturating_add(limit).min(self.revisions.len());
+        Ok(S3PinnedRevisionPage {
+            snapshot_id: self.snapshot_id.clone(),
+            revisions: self.revisions[start..end].to_vec(),
+            next_cursor: if end < self.revisions.len() {
+                Some(format!("{}:{end}", self.snapshot_id))
+            } else { None },
+            complete: end == self.revisions.len(),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -369,6 +422,35 @@ impl AwsS3ProbeClient {
         Ok(hops)
     }
 
+    /// Build a stable revision index ONLY after HEAD, manifest, every shard,
+    /// every revision DAG edge and all referenced blobs have been verified.
+    /// A later CAS changes the current head, not these immutable pages.
+    pub async fn pin_revision_snapshot(&self)
+        -> Result<Option<S3PinnedRevisionSnapshot>, S3HeadError>
+    {
+        let Some(head) = self.read_verified_head().await? else { return Ok(None); };
+        self.verify_manifest_ancestors(&head, MAX_ANCESTOR_HOPS).await?;
+        let refs = self.revision_index(&head.manifest).await?;
+        Ok(Some(S3PinnedRevisionSnapshot {
+            snapshot_id: format!("{}:{}", head.manifest.manifest_id,
+                head.pointer.manifest_blake3()),
+            revisions: refs.into_values().collect(),
+        }))
+    }
+
+    /// Unknown/inaccessible roots are errors, NEVER an empty page. The caller
+    /// may discard a pinned snapshot when false, but cannot use this alone as
+    /// deletion authority.
+    pub async fn is_snapshot_current(&self, snapshot: &S3PinnedRevisionSnapshot)
+        -> Result<bool, S3HeadError>
+    {
+        let now = self.read_verified_head().await?;
+        Ok(now.is_some_and(|head| {
+            snapshot.snapshot_id == format!("{}:{}", head.manifest.manifest_id,
+                head.pointer.manifest_blake3())
+        }))
+    }
+
     /// Only small manifest bodies. This is an immutable, guarded publish:
     /// when a server response is lost, full readback decides, not a blind retry.
     pub async fn store_manifest_object(
@@ -502,6 +584,57 @@ mod tests {
         assert_eq!(again.phase(op).unwrap(), Some(S3HeadAttemptPhase::Published));
     }
 
+    #[test]
+    fn pinned_10k_revision_pages_are_stable_and_reject_cross_snapshot_cursors() {
+        let doc = DocumentId::new();
+        let mut ids: Vec<_> = (0..10_000).map(|_| RevisionId::new()).collect();
+        ids.sort_unstable();
+        let refs: Vec<_> = ids.iter().map(|id| S3RevisionRefV1 {
+            revision_id: *id,
+            document_id: doc,
+            revision_blake3: blake3::hash(id.to_string().as_bytes()).to_hex().to_string(),
+            blob_bytes: None,
+        }).collect();
+        let snapshot = S3PinnedRevisionSnapshot {
+            snapshot_id: "immutable-root:deadbeef".into(),
+            revisions: refs.clone(),
+        };
+        let other = S3PinnedRevisionSnapshot {
+            snapshot_id: "other-root:deadbeef".into(),
+            revisions: refs,
+        };
+        let mut cursor = None;
+        let mut seen = BTreeSet::new();
+        let mut pages = 0;
+        loop {
+            let page = snapshot.page(cursor.as_deref(), 137).unwrap();
+            assert_eq!(page.snapshot_id, snapshot.snapshot_id);
+            for entry in page.revisions { assert!(seen.insert(entry.revision_id)); }
+            pages += 1;
+            if page.complete {
+                assert!(page.next_cursor.is_none());
+                break;
+            }
+            let next = page.next_cursor.unwrap();
+            assert!(matches!(other.page(Some(&next), 137),
+                Err(S3HeadError::InvalidCursor)));
+            cursor = Some(next);
+        }
+        assert_eq!(seen.len(), 10_000);
+        assert_eq!(pages, 73);
+        for invalid in [
+            "wrong-root:1", "immutable-root:deadbeef:0",
+            "immutable-root:deadbeef:001", "immutable-root:deadbeef:10000",
+            "immutable-root:deadbeef:-1", "immutable-root:deadbeef:nan",
+        ] {
+            assert!(matches!(snapshot.page(Some(invalid), 100),
+                Err(S3HeadError::InvalidCursor)));
+        }
+        assert!(matches!(snapshot.page(None, 0), Err(S3HeadError::InvalidCursor)));
+        assert!(matches!(snapshot.page(None, 1001), Err(S3HeadError::InvalidCursor)));
+        assert!(snapshot.page(None, 100).unwrap().revisions.len() == 100);
+    }
+
     /// Disposable localhost MinIO only. Conflicting clients retain immutable
     /// manifest branches and neither can overwrite the winner's CAS.
     #[tokio::test]
@@ -559,6 +692,10 @@ mod tests {
         assert_eq!(second.read_verified_head().await.unwrap().unwrap().pointer, ptr);
         let before = first.read_verified_head().await.unwrap().unwrap();
         assert_eq!(first.verify_manifest_ancestors(&before, 100).await.unwrap(), 0);
+        let pinned_generation_one = second.pin_revision_snapshot().await.unwrap().unwrap();
+        assert_eq!(pinned_generation_one.len(), 1);
+        assert_eq!(pinned_generation_one.page(None, 100).unwrap().revisions[0].revision_id, rid);
+        assert!(second.is_snapshot_current(&pinned_generation_one).await.unwrap());
 
         // A correctly linked successor must not silently drop earlier
         // revisions. Neither an intact root hash nor a CAS guard makes
@@ -598,6 +735,10 @@ mod tests {
         assert!(matches!(second.publish_head_cas(&mut j2, id_loser, pl.clone(), Some(&before)).await,
             Err(S3HeadError::Conflict)));
         assert_eq!(first.read_verified_head().await.unwrap().unwrap().pointer, pw);
+        // Old pinned pages remain unchanged, but must never be mistaken for
+        // the new current generation after the winning CAS.
+        assert!(!second.is_snapshot_current(&pinned_generation_one).await.unwrap());
+        assert_eq!(pinned_generation_one.page(None, 1).unwrap().revisions[0].revision_id, rid);
         assert!(second.read_verified_manifest(id_loser, &loser.digest(&ns).unwrap()).await.is_ok());
         assert_eq!(j2.phase(id_loser).unwrap(), Some(S3HeadAttemptPhase::Prepared));
         // An uncertain retry of the losing operation cannot publish on top of
