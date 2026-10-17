@@ -1,0 +1,57 @@
+name: Inline Markdown marks performance
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/ui/editor/markdown/inline/marks/**"
+      - ".github/workflows/inline-marks-perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inline-marks-perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  paired-inline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: inline-marks-perf
+      - name: Install native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Paired old-vs-new benchmark in one release binary
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+            cargo --version
+          } | tee inline-perf-env.txt
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            benchmark_inline_html_pairs -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee inline-perf.log
+          grep 'BENCH-INLINE' inline-perf.log | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inline-marks-perf-${{ github.sha }}
+          path: |
+            aquilum-app/inline-perf-env.txt
+            aquilum-app/inline-perf.log
+          retention-days: 30
