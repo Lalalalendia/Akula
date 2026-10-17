@@ -150,6 +150,8 @@ impl Renderer {
                 let encoding_started = Instant::now();
                 {
                     let _zone = aq_trace::zone("кодирование");
+                    #[cfg(test)]
+                    painter.route_for_test(w, h);
                     painter.begin(x, y, w, h);
                     frame.paint_into(painter);
                     if let Err(err) = painter.finish() {
