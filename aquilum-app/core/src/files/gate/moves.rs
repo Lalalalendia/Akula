@@ -74,7 +74,11 @@ fn matching_vaults(roots: &[PathBuf], candidate: &Path) -> Vec<String> {
 /// Two marker creations in different vaults are NOT one atomic commit.
 /// This must be called under the ordinary File Gate, BEFORE 'run()'.
 fn admit_vault_relocation(core: &Core, from: &Path, to: &Path) -> Result<(), FileCommandError> {
-    let roots = core.known_roots();
+    let roots = core.ui_state.workspace_roots().map_err(|error| FileCommandError::Task {
+        message: format!(
+            "Workspace registry cannot be read; refusing to move a primary file before validating history ownership: {error}"
+        ),
+    })?;
     let source = matching_vaults(&roots, from);
     let destination = matching_vaults(&roots, to);
     if (source.is_empty() && destination.is_empty())
