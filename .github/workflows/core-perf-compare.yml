@@ -58,6 +58,9 @@ jobs:
             local sample="$3"
             (
               cd "$dir/aquilum-app"
+              # The two worktrees share CARGO_TARGET_DIR: recompile the local
+              # crate when changing revision, or ABBA may time the same binary.
+              cargo clean --release -p aquilum-core
               cargo test --release --locked -p aquilum-core benchmark_sqlite_metadata -- --ignored --nocapture --test-threads=1
             ) 2>&1 | tee "sqlite-${name}-${sample}.txt"
             (
