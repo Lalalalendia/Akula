@@ -252,7 +252,7 @@ mod tests {
         let styles = StyleSet::new(16.0);
         let mut baseline = doc(&original);
         shape(&mut baseline, 600.0, &styles);
-        for case in 0..4 {
+        for case in [0, 2, 3] {
             let snapshot = baseline.trial_snapshot(&styles).unwrap();
             let changed = if case == 0 { original.replace("обычный", "другой ") } else { original.clone() };
             let mut fresh = doc(&changed);
@@ -260,10 +260,37 @@ mod tests {
                 fresh.markdown.as_mut().unwrap().size = 19.0;
             }
             fresh.trial_offer(snapshot);
-            let width = if case == 1 { Some(550.0) } else { Some(600.0) };
             let compose = (case == 3).then_some((0, "превью"));
-            let count = fresh.try_restore_trial(width, &styles, compose, None);
+            let count = fresh.try_restore_trial(Some(600.0), &styles, compose, None);
             assert_eq!(count, 0, "invalidated case {case}");
+        }
+    }
+
+    #[test]
+    fn width_aware_rebreak_matches_fresh_parley_line_geometry() {
+        let content: String = (0..180).map(|i| format!(
+            "Абзац {i}: длинная последовательность слов на русском языке,              переносы строк и границы формата важны для точного рендеринга.\\n"
+        )).collect();
+        let styles = StyleSet::new(16.0);
+        let mut source = doc(&content);
+        shape(&mut source, 345.0, &styles);
+        for target in [361.0, 345.0, 750.0] {
+            let snapshot = source.trial_snapshot(&styles).expect("eligible plain text");
+            let mut candidate = doc(&content);
+            candidate.trial_offer(snapshot);
+            let reused = candidate.try_restore_trial(Some(target), &styles, None, None);
+            assert!(reused > 0, "width {target} must reuse a shaped paragraph");
+            shape(&mut candidate, target, &styles);
+
+            let mut baseline = doc(&content);
+            shape(&mut baseline, target, &styles);
+            assert_eq!(candidate.loaded(), baseline.loaded());
+            assert!((candidate.height() - baseline.height()).abs() < 0.001,
+                "different document height after rebreak at {target}");
+            for i in 0..baseline.lines.count() {
+                assert!((candidate.heights.get(i) - baseline.heights.get(i)).abs() < 0.001,
+                    "line {i}, rebreak {target}: different paragraph height");
+            }
         }
     }
 
