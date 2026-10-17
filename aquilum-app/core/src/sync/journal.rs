@@ -2227,6 +2227,92 @@ mod tests {
     }
 
     #[test]
+    fn m1e4_schema_five_upgrades_without_losing_existing_crash_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync.sqlite");
+        let (journal, staged) = m1dc_fixture(&path);
+        assert!(journal.read_native_local_publication_observation(staged.operation_id)
+            .unwrap().is_none());
+        journal.connection.execute_batch(
+            "DROP TABLE sync_local_native_publication_observations;
+             PRAGMA user_version = 5;",
+        ).unwrap();
+        drop(journal);
+        // A read-only Settings inspection cannot silently migrate the DB.
+        assert!(matches!(
+            SqliteSyncJournal::open_existing_read_only(&path),
+            Err(JournalError::UnsupportedSchema(5))
+        ));
+        let migrated = SqliteSyncJournal::open(&path).unwrap();
+        let version: i64 = migrated.connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(migrated.read_local_recovery_case(staged.operation_id)
+            .unwrap().unwrap().operation_id, staged.operation_id);
+        assert_eq!(migrated.read_local_recovery_copy(staged.operation_id)
+            .unwrap().unwrap().stage_bytes, Some(b"payload".to_vec()));
+        assert_eq!(migrated.local_publication_review_queue().unwrap().len(), 1);
+        assert!(migrated.read_native_local_publication_observation(staged.operation_id)
+            .unwrap().is_none(), "schema migration cannot invent an OS receipt");
+        assert!(migrated.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn m1e4_write_once_unix_audit_corruption_never_releases_baseline() {
+        let mut journal = SqliteSyncJournal::memory().unwrap();
+        let staged = local_stage_intent(VaultId::new(), DocumentId::new(),
+            "notes/unix-publish.md", b"durably synced");
+        journal.begin(staged.clone()).unwrap();
+        journal.mark_staged(staged.operation_id, b"durably synced").unwrap();
+        journal.record_local_publication_attempt_once(&staged).unwrap();
+        let obs = NativeLocalPublicationObservation {
+            operation_id: staged.operation_id,
+            vault_id: staged.vault_id,
+            path: staged.path.clone(),
+            expected_content_hash: staged.expected_content_hash.clone(),
+            parent: PinnedFileIdentity { device: 10, file: 11 },
+            final_file: PinnedFileIdentity { device: 10, file: 12 },
+            byte_length: b"durably synced".len() as u64,
+        };
+        assert!(journal.read_native_local_publication_observation(staged.operation_id)
+            .unwrap().is_none());
+        journal.record_native_local_publication_observation_once(&obs).unwrap();
+        assert_eq!(journal.read_native_local_publication_observation(staged.operation_id)
+            .unwrap(), Some(obs.clone()));
+        assert!(matches!(
+            journal.record_native_local_publication_observation_once(&obs),
+            Err(JournalError::NativePublicationObservationAlreadyRecorded)
+        ));
+        assert!(matches!(
+            journal.mark_applied(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert!(matches!(
+            journal.commit(staged.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert!(journal.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+
+        journal.connection.execute(
+            "UPDATE sync_local_native_publication_observations
+             SET observation_json = ?1 WHERE operation_id = ?2",
+            params![b"tampered".as_slice(), staged.operation_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            journal.read_native_local_publication_observation(staged.operation_id),
+            Err(JournalError::CorruptedRecord)
+        ));
+        assert_eq!(journal.get(staged.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(journal.baseline(staged.vault_id, staged.document_id)
+            .unwrap().is_none());
+    }
+
+    #[test]
     fn newer_schema_must_never_be_overwritten() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA user_version = 99;").unwrap();
