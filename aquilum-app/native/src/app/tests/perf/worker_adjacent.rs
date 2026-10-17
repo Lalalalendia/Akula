@@ -364,3 +364,142 @@ fn benchmark_vello_adjacent_batching() {
     }
     assert!(selected > 0, "no matching A/B scene selected");
 }
+
+
+/// Product-relevance gate: never split damage into synthetic strips. Count how
+/// often the normal Damage Tracker naturally produces full-edge neighbours
+/// that the exact-coverage coalescer could join. A synthetic 16-strip win is
+/// not evidence of any benefit to ordinary scrolling.
+fn run_natural_case(case: &str, width: u32, height: u32, scale: f64, cover: bool, workers: u16) {
+    let mut h = Harness::with(None, scale);
+    h.root.handle_window_event(
+        masonry::core::WindowEvent::Resize(PhysicalSize::new(width, height)),
+    );
+    h.app.window_resized(
+        &mut h.root,
+        Size::new(f64::from(width) / scale, f64::from(height) / scale),
+    );
+    let body: String = (0..250)
+        .map(|i| format!(
+            "Абзац {i}: текст Akula, **жирный**, *курсив* и длинные Unicode \\
+             строки для переноса через Parley.\\n\\n"
+        ))
+        .collect();
+    let frontmatter = if cover {
+        "---\\ncover: true\\ntype: book\\nPage_cover: pattern:polka\\n---\\n"
+    } else {
+        ""
+    };
+    let path = h.write_note("natural-adjacent.md", &format!("{frontmatter}{body}"));
+    h.app.open(&mut h.root, path);
+    if cover {
+        h.wait_cover(true);
+    }
+    let _ = h.root.redraw();
+
+    let (w, hh) = (width as u16, height as u16);
+    let mut renderers = [Renderer::new(workers), Renderer::new(workers)];
+    renderers[1].enable_adjacent_coalescing_for_test();
+    let mut samples: [Vec<Timing>; 2] = std::array::from_fn(|_| Vec::new());
+    let (mut active, mut scroll, mut multiple_regions, mut eligible, mut regions_saved) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut greatest_delta = 0u8;
+
+    for step in 0..FRAMES {
+        if step % 8 == 7 {
+            h.pointer_move(f64::from(70 + step * 8), f64::from(95 + step * 9));
+        } else {
+            let dy = if step < 40 { -29.0 } else { 23.0 };
+            h.scroll(
+                (f64::from(width) * 0.6, f64::from(height) * 0.5),
+                scale,
+                (0.0, dy),
+            );
+        }
+        h.anim(Duration::from_millis(16));
+        let (layers, _) = h.root.redraw();
+        // The first frame seeds the two independent renderers. All later
+        // damage comes from the unmodified production tracker and scroll path.
+        let order = if step % 2 == 0 { [0, 1] } else { [1, 0] };
+        let mut frame: [Option<Timing>; 2] = [None; 2];
+        for index in order {
+            frame[index] = Some(draw_batch(
+                &mut renderers[index], &layers, w, hh, scale, step == 0,
+            ));
+        }
+        let times = frame.map(|v| v.expect("both natural-damage renderers completed"));
+        assert_eq!(
+            times[0].pixels, times[1].pixels,
+            "{case}/workers={workers}/step={step}: coalescing expanded raster area"
+        );
+        assert_eq!(
+            renderers[0].moved, renderers[1].moved,
+            "{case}/workers={workers}/step={step}: scroll movement diverged"
+        );
+        assert!(
+            times[1].rects <= times[0].rects,
+            "{case}/workers={workers}/step={step}: coalescing added rectangles"
+        );
+        let changed_partition = times[1].rects < times[0].rects;
+        let peak = peak_channel(renderers[0].frame_pixels(), renderers[1].frame_pixels());
+        greatest_delta = greatest_delta.max(peak);
+        assert!(
+            peak <= if changed_partition { 1 } else { 0 },
+            "{case}/workers={workers}/step={step}: natural coalescing parity {peak}/255; \\
+             changed_partition={changed_partition}"
+        );
+
+        if changed_partition || step % 16 == 0 {
+            let full = render_full(&layers, w, hh, scale);
+            for (index, renderer) in renderers.iter().enumerate() {
+                let delta = peak_channel(renderer.frame_pixels(), full.frame_pixels());
+                assert!(
+                    delta <= 1,
+                    "{case}/workers={workers}/step={step}: mode {index} versus fresh full {delta}/255"
+                );
+            }
+        }
+
+        if step == 0 {
+            continue;
+        }
+        if times[0].rects == 0 && renderers[0].moved.is_empty() {
+            continue;
+        }
+        active += 1;
+        scroll += usize::from(!renderers[0].moved.is_empty());
+        multiple_regions += usize::from(times[0].rects >= 2);
+        eligible += usize::from(changed_partition);
+        regions_saved += times[0].rects - times[1].rects;
+        for index in 0..2 {
+            samples[index].push(times[index]);
+        }
+    }
+    assert!(active >= 16, "{case}/workers={workers}: insufficient real frames");
+    let [baseline_p50, baseline_p95] = quantiles(&samples[0], |t| t.total);
+    let [merged_p50, merged_p95] = quantiles(&samples[1], |t| t.total);
+    let baseline_sum: f64 = samples[0].iter().map(|t| t.total).sum();
+    let merged_sum: f64 = samples[1].iter().map(|t| t.total).sum();
+    eprintln!(
+        "VELLO_NATURAL_ADJACENT case={case} workers={workers} frames={active} \\
+         scroll_frames={scroll} multiple_regions={multiple_regions} \\
+         eligible_frames={eligible} regions_saved={regions_saved} max_channel={greatest_delta} \\
+         baseline_p50_us={baseline_p50:.2} baseline_p95_us={baseline_p95:.2} \\
+         merged_p50_us={merged_p50:.2} merged_p95_us={merged_p95:.2} \\
+         baseline_sum_us={baseline_sum:.2} merged_sum_us={merged_sum:.2}"
+    );
+}
+
+#[test]
+#[ignore = "opt-in real-damage eligibility gate; no synthetic strips or production changes"]
+fn benchmark_vello_natural_adjacent_regions() {
+    for (case, w, h, scale, cover) in [
+        ("text_1x", 1000, 600, 1.0, false),
+        ("text_175", 1750, 1051, 1.75, false),
+        ("cover_175", 1750, 1051, 1.75, true),
+    ] {
+        for workers in [0, 2] {
+            run_natural_case(case, w, h, scale, cover, workers);
+        }
+    }
+}
