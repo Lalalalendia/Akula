@@ -132,6 +132,19 @@ impl<'a> RegisteredReadAdmission<'a> {
         self.workspace_id
     }
 
+    /// Checked local registration identity for a *configuration binding*.
+    /// This observation does not grant File Gate or write authority.
+    pub(crate) fn registered_root_identity_for_profile(
+        &self,
+    ) -> Result<(u64, u64), VaultPortError> {
+        self.check_root()?;
+        Ok((self.initial.0, self.initial.1))
+    }
+
+    pub(crate) fn registered_root_path(&self) -> &Path {
+        &self.root_path
+    }
+
     pub(crate) fn recheck_registered_root(&self) -> Result<(), VaultPortError> {
         self.check_root()
     }
