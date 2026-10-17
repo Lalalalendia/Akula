@@ -87,15 +87,23 @@ jobs:
             -- --ignored --test-threads=1 --nocapture 2>&1 | tee delta-ab.log
           grep 'AKULA_DELTA_AB {' delta-ab.log | sed 's/^.*AKULA_DELTA_AB //' \
             > delta-ab-results.jsonl
-          test "$(wc -l < delta-ab-results.jsonl)" -eq 2
+          test "$(wc -l < delta-ab-results.jsonl)" -eq 3
           python3 - <<'PY'
           import json
           from pathlib import Path
           lines = [json.loads(line) for line in Path("delta-ab-results.jsonl").read_text().splitlines()]
-          assert {r["scenario"] for r in lines} == {"selective_preview", "full_verified_pin"}
+          assert {r["scenario"] for r in lines} == {
+              "selective_preview", "cold_disk_selective_preview", "full_verified_pin"
+          }
           assert all(r["new_revisions"] == int(__import__("os").environ["AQ_DELTA_BENCH_CHANGES"]) for r in lines)
           assert all(r["notes"] == int(__import__("os").environ["AQ_DELTA_BENCH_NOTES"]) for r in lines)
-          assert lines[0]["attempted_s3_get"] < lines[1]["attempted_s3_get"]
+          warm = next(x for x in lines if x["scenario"] == "selective_preview")
+          cold = next(x for x in lines if x["scenario"] == "cold_disk_selective_preview")
+          full = next(x for x in lines if x["scenario"] == "full_verified_pin")
+          assert warm["attempted_s3_get"] < full["attempted_s3_get"]
+          assert cold["attempted_s3_get"] < full["attempted_s3_get"]
+          assert cold["security_scope"] == "advisory-verified-new-only"
+          assert full["security_scope"] == "full-current-availability-pin"
           PY
       - name: Upload sanitized A/B measurements
         if: always()
