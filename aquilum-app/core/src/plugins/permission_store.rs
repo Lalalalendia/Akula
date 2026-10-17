@@ -3,7 +3,7 @@
 //! or provide a network permission sandbox.
 
 use super::permission_broker::{
-    BrokerError, Grant, GrantScope, NetworkHost, NoteId, PermissionBroker, PluginIdentity,
+    BrokerError, Grant, GrantScope, NetworkHost, NoteId, PluginIdentity,
     RelativeVaultPath, VaultId,
 };
 use super::Capability;
