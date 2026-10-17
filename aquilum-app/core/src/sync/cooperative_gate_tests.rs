@@ -114,8 +114,12 @@ fn oslock_cooperative_child_entrypoint() {
 #[test]
 fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_kill() {
     let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().join("shared-vault");
-    fs::create_dir(&root).unwrap();
+    let selected_root = temp.path().join("shared-vault");
+    fs::create_dir(&selected_root).unwrap();
+    // UI-state registers a canonical physical root. HistoryService uses
+    // lexical strip_root, so /var and /private/var must not be mixed on
+    // macOS (Windows also normalizes extended-length path prefixes).
+    let root = crate::search::paths::canonical_path(&selected_root);
     let note = root.join("Shared.md");
     fs::write(&note, b"original-untouched").unwrap();
     let data_a = temp.path().join("core-a");
@@ -200,8 +204,12 @@ fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_k
 #[test]
 fn oslock_cooperative_held_receipt_rejects_a_replaced_lock_before_any_closure() {
     let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().join("vault");
-    fs::create_dir(&root).unwrap();
+    let selected_root = temp.path().join("vault");
+    fs::create_dir(&selected_root).unwrap();
+    // UI-state registers a canonical physical root. HistoryService uses
+    // lexical strip_root, so /var and /private/var must not be mixed on
+    // macOS (Windows also normalizes extended-length path prefixes).
+    let root = crate::search::paths::canonical_path(&selected_root);
     let core = core_at(&temp.path().join("appdata"), &root);
     let scope = anchor_for(&temp, &root);
     let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
