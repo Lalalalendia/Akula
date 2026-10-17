@@ -472,8 +472,8 @@ fn report(
     edits: usize,
     counts: S3TestIoCounts,
     elapsed_ms: u128,
-    published_objects: usize,
-    published_bytes: usize,
+    mode_objects: usize,
+    mode_bytes: usize,
     letter_bytes: usize,
 ) {
     eprintln!("AKULA_COORD_AB {}", serde_json::json!({
@@ -484,8 +484,8 @@ fn report(
         "attempted_s3_head": counts.head,
         "downloaded_payload_bytes": counts.payload_bytes,
         "elapsed_ms": elapsed_ms,
-        "fixture_immutable_objects_published": published_objects,
-        "fixture_upload_bytes": published_bytes,
+        "mode_required_immutable_objects": mode_objects,
+        "mode_required_payload_bytes": mode_bytes,
         "letter_bytes": letter_bytes,
         "assurance": "test-only-trusted-fixture-read-only-no-file-gate"
     }));
@@ -605,13 +605,17 @@ async fn minio_coord_letter_pack_merkle_ab() {
     // Publish everything as TEST-ONLY immutable, content-addressed blobs.
     // There is no production S3 schema change or mutable current-root CAS.
     // S3 PUT/write cost is counted separately from all read measurements.
+    let individual_objects = 1 + new_payload.len();
+    let individual_bytes = letter_bytes.len()
+        + new_payload.values().map(Vec::len).sum::<usize>();
+    let packed_objects = 1 + packs.len();
+    let packed_bytes = letter_bytes.len()
+        + packs.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
     let mut common_objects = new_payload;
     common_objects.insert(letter_key, letter_bytes.clone());
     for (descriptor, payload) in &packs {
         common_objects.insert(descriptor.key.clone(), payload.clone());
     }
-    let common_count = common_objects.len();
-    let common_bytes: usize = common_objects.values().map(Vec::len).sum();
     upload(&client, common_objects).await;
 
     let mut extra_writes = Vec::new();
@@ -639,7 +643,7 @@ async fn minio_coord_letter_pack_merkle_ab() {
     assert_eq!(baseline.active_len(), count + edits);
     report("letter_individual", count, edits,
         client.test_io_snapshot().since(begin),
-        started.elapsed().as_millis(), common_count, common_bytes,
+        started.elapsed().as_millis(), individual_objects, individual_bytes,
         letter_bytes.len());
 
     let mut batch_dag = seeded_dag(&prior_json);
@@ -651,7 +655,7 @@ async fn minio_coord_letter_pack_merkle_ab() {
     report("letter_pack", count, edits,
         client.test_io_snapshot().since(begin),
         started.elapsed().as_millis(),
-        common_count, common_bytes, letter_bytes.len());
+        packed_objects, packed_bytes, letter_bytes.len());
 
     for (i, f) in [7_u8, 16, 32].into_iter().enumerate() {
         let mut dag = seeded_dag(&prior_json);
@@ -673,7 +677,7 @@ async fn minio_coord_letter_pack_merkle_ab() {
         report(&format!("merkle_{f}_pack"), count, edits,
             client.test_io_snapshot().since(begin),
             started.elapsed().as_millis(),
-            common_count + nodes, common_bytes + new_bytes, letter_bytes.len());
+            packed_objects + nodes, packed_bytes + new_bytes, letter_bytes.len());
     }
 }
 
