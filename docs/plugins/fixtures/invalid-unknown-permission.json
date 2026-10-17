@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "id": "org.example.word-count",
+  "publisher": "org.example",
+  "display_name": "Word Count",
+  "version": "0.1.0",
+  "api": {
+    "family": "akula.plugin",
+    "min": 1,
+    "max": 1
+  },
+  "runtime": "wasm-component",
+  "entry": "plugin.wasm",
+  "platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
+  "dependencies": [],
+  "permissions": {
+    "required": [
+      "system.exec"
+    ],
+    "optional": [
+      "notes.read"
+    ]
+  },
+  "network_domains": []
+}
