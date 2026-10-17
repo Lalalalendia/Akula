@@ -319,10 +319,7 @@ async fn minio_full_10k_revision_dag_and_blob_readback() {
             .into_iter().collect(),
     );
     eprintln!(
-        "AKULA_S3_PACK_AB_10K raw_verify_ms={} raw_get={} raw_head={} \\
-         packed_read_ms={} packed_get={} packed_head={} packed_bytes={} \\
-         pack_count={} pack_seed_ms={} (independent trusted in-memory index, \\
-         NOT a production pack manifest)",
+        "AKULA_S3_PACK_AB_10K raw_verify_ms={} raw_get={} raw_head={} packed_read_ms={} packed_get={} packed_head={} packed_bytes={} pack_count={} pack_seed_ms={} trusted_index_only=true",
         verify_elapsed.as_millis(), io.get, io.head,
         pack_read_ms, pack_io.get, pack_io.head, pack_io.payload_bytes,
         pack_count, pack_seed_ms,
