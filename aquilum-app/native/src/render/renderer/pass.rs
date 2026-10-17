@@ -97,6 +97,22 @@ impl Renderer {
                 damage.areas.push((m.x, m.y.saturating_add(m.h - band), m.w, band));
             }
         }
+        #[cfg(test)]
+        if full {
+            if let Some(strips) = self.split_full_frame_strips {
+                let mut fragmented = Vec::new();
+                for &(x, y, w, h) in &damage.areas {
+                    let parts = u32::from(strips).min(u32::from(h));
+                    if parts == 0 { continue; }
+                    for slice in 0..parts {
+                        let start = u32::from(h) * slice / parts;
+                        let end = u32::from(h) * (slice + 1) / parts;
+                        fragmented.push((x, y + start as u16, w, (end - start) as u16));
+                    }
+                }
+                damage.areas = fragmented;
+            }
+        }
         let bounds = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let layers = self.tracker.live.iter().filter_map(|&(id, rect, transform, shape)| Some(Layer { id, area: area_of(rect, bounds)?, transform, shape })).collect();
         self.refresh_live(layers, &mut damage, full, seconds);
@@ -133,6 +149,8 @@ impl Renderer {
         for &rect in &damage.areas {
             self.overlay.flash(area(rect), Mark::Raster);
         }
+        #[cfg(test)]
+        let route_frame_pixels: u64 = damage.areas.iter().map(|&(_, _, w, h)| u64::from(w) * u64::from(h)).sum();
         let painter = &mut self.painter;
         painter.seconds = seconds;
         let mut result = Ok(());
@@ -151,7 +169,7 @@ impl Renderer {
                 {
                     let _zone = aq_trace::zone("кодирование");
                     #[cfg(test)]
-                    painter.route_for_test(w, h);
+                    painter.route_for_test(w, h, route_frame_pixels);
                     painter.begin(x, y, w, h);
                     frame.paint_into(painter);
                     if let Err(err) = painter.finish() {
