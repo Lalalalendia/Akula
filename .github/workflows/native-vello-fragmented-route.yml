@@ -45,18 +45,20 @@ jobs:
             grep -m1 'flags' /proc/cpuinfo || true
             rustc --version
           } | tee vello-fragmented-env.txt
-      - name: Verify independent full-reference parity across eight strips
+      - name: Repeat full-reference parity and fragmentation A/B in three fresh processes
         shell: bash
         working-directory: aquilum-app
         run: |
           set -euo pipefail
-          cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_fragmented_route -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-fragmented-route.log"
-      - name: Require all 48 matrix rows and summarize routing effect
+          for trial in 1 2 3; do
+            cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_fragmented_route -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/vello-fragmented-trial-$trial.log"
+          done
+      - name: Require all 144 rows and summarize repeated routing effect
         shell: bash
         run: |
           set -euo pipefail
           python3 -m py_compile .github/scripts/summarize-vello-fragmented-route.py
-          python3 .github/scripts/summarize-vello-fragmented-route.py vello-fragmented-route.log --output vello-fragmented-route-summary.md
+          python3 .github/scripts/summarize-vello-fragmented-route.py vello-fragmented-trial-1.log vello-fragmented-trial-2.log vello-fragmented-trial-3.log --output vello-fragmented-route-summary.md
           cat vello-fragmented-route-summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Archive raw evidence
         if: always()
@@ -65,7 +67,7 @@ jobs:
           name: vello-fragmented-route-${{ github.sha }}
           path: |
             vello-fragmented-env.txt
-            vello-fragmented-route.log
+            vello-fragmented-trial-*.log
             vello-fragmented-route-summary.md
           if-no-files-found: warn
           retention-days: 14
