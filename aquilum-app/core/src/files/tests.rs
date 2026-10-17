@@ -229,3 +229,17 @@ fn streamed_hash_of_empty_and_binary_files_matches_byte_hash() {
     fs::write(&path, bytes).expect("binary fixture");
     assert_eq!(read_file_hash_impl(&path).unwrap(), hash_bytes(&bytes));
 }
+
+
+#[test]
+fn structured_extensions_are_discovered_but_not_markdown_notes() {
+    let directory = tempfile::tempdir().unwrap();
+    fs::write(directory.path().join("Board.canvas"), "canvas").unwrap();
+    fs::write(directory.path().join("Tasks.BASE"), "base").unwrap();
+    let items = read_directory_impl(directory.path()).unwrap();
+    let names: Vec<_> = items.iter().map(|item| item.name.as_str()).collect();
+    assert!(names.contains(&"Board.canvas"));
+    assert!(names.contains(&"Tasks.BASE"));
+    assert!(!crate::search::paths::is_note(&directory.path().join("Board.canvas")));
+    assert!(!crate::search::paths::is_note(&directory.path().join("Tasks.BASE")));
+}
