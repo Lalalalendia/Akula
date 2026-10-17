@@ -96,7 +96,7 @@ fn deleted_file_never_reopens_stale_cached_bytes() {
 fn parley_trial_rejects_selected_text_and_secondary_carets() {
     let mut h = Harness::new();
     h.app.parley_trial_enabled = true;
-    let text = "Обычный абзац без ссылок или украшений.\\n".replace("\\n", "\n").repeat(120);
+    let text = "Обычный абзац без ссылок или украшений.\n".repeat(120);
     let path = h.write_note("parley-multicaret.md", &text);
     assert!(h.app.open_in(&mut h.root, path.clone(), true));
     let _ = h.root.redraw();
