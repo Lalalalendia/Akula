@@ -1227,7 +1227,12 @@ impl<S: Simd> PosExt<S> for f32x4<S> {
         let columns: [f32; Tile::HEIGHT as usize] = [0.0, 1.0, 2.0, 3.0];
         let column_mask: Self = columns.simd_into(simd);
 
-        column_mask.mul_add(Self::splat(simd, y_advance), Self::splat(simd, pos))
+        // Keep lane positions rounded after multiplication before adding the
+        // origin. SSE4.2 and AVX2 may otherwise differ by one ULP when their
+        // mul_add paths use different instruction sequences (FMA vs fallback).
+        // This is intentionally experimental: measure parity and performance
+        // before adopting this in the vendored renderer.
+        (column_mask * Self::splat(simd, y_advance)) + Self::splat(simd, pos)
     }
 }
 
