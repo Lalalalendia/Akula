@@ -1,0 +1,32 @@
+name: Sync pinned-read OS checks
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/sync/pinned_read.rs"
+      - "aquilum-app/core/src/sync/mod.rs"
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/Cargo.lock"
+      - ".github/workflows/sync-pinned-read.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-read-platform:
+    name: Pinned read / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: pinned-read-${{ matrix.os }}
+      - name: Read-only descriptor regression tests
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine pinned_read -- --nocapture
