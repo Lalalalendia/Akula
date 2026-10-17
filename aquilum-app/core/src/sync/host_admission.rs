@@ -168,6 +168,70 @@ impl<'a> RegisteredReadAdmission<'a> {
         Ok(result)
     }
 
+    /// Recheck a durable preimage against the current, registered OS file IDs.
+    ///
+    /// This is a read-only diagnostic used before designing the native
+    /// mutation transaction. Returning Ok DOES NOT grant local write, rename,
+    /// trash, preservation-receipt or sync-baseline authority: another
+    /// process may swap the pathname immediately after this method returns.
+    /// A future executor must keep pinned parent/file handles and its final
+    /// mutation in one platform-specific atomic/admitted operation.
+    pub(crate) fn revalidate_bound_preimage(
+        &self,
+        relative: &SyncRelativePath,
+        expected_hash: &str,
+        operation: OperationId,
+        store: &SqliteProtectionStore,
+    ) -> Result<(), BoundCaptureError> {
+        // Mirror capture's negative app-data guard. A workspace-local SQLite
+        // copy is not durable isolation from remote sync or user edits.
+        if canonical_path(store.database_path()).starts_with(&self.root_path) {
+            return Err(VaultPortError::PermissionDenied.into());
+        }
+        self.check_root()?;
+        let path = self.root_path.join(relative.as_str());
+        let _reservation = self.core.documents.reserve_sync_closed_document(&path)
+            .map_err(admission_error)?;
+        let _gate = self.core.file_mutations.lock()
+            .map_err(|_| BoundCaptureError::Admission(VaultPortError::PermissionDenied))?;
+        self.check_root()?;
+
+        let saved = store.read_bound_preimage(operation)?
+            .ok_or(ProtectionStoreError::UnboundOriginal)?;
+        if saved.original.path != *relative
+            || saved.original.content_hash != expected_hash
+        {
+            return Err(ProtectionStoreError::OperationCollision.into());
+        }
+        let root_id = PinnedFileIdentity {
+            device: self.initial.0,
+            file: self.initial.1,
+        };
+        if saved.root != root_id {
+            return Err(VaultPortError::FileChanged.into());
+        }
+
+        let first = self.pinned.read_identified_bounded(
+            relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
+        if first.identity != Some(saved.file)
+            || first.snapshot.content_hash != expected_hash
+            || first.snapshot.bytes != saved.original.bytes
+        {
+            return Err(VaultPortError::FileChanged.into());
+        }
+        self.check_root()?;
+        let second = self.pinned.read_identified_bounded(
+            relative, MAX_PROTECTED_ORIGINAL_BYTES as u64)?;
+        if second.identity != Some(saved.file)
+            || second.snapshot.content_hash != expected_hash
+            || second.snapshot.bytes != saved.original.bytes
+        {
+            return Err(VaultPortError::FileChanged.into());
+        }
+        self.check_root()?;
+        Ok(())
+    }
+
     /// Bind file identity by pinned handles without reading bytes or taking
     /// guest authority. A later read must verify this exact file ID.
     pub(crate) fn bind_plugin_file_identity(
@@ -558,6 +622,97 @@ mod tests {
             Err(BoundCaptureError::Admission(VaultPortError::PermissionDenied))
         ));
         assert!(inside_store.read_preimage(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn durable_preimage_revalidation_after_restart_is_read_only() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let path = root.join(note().as_str());
+        fs::write(&path, b"stable original").unwrap();
+        let expected = blake3::hash(b"stable original").to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        {
+            let mut store = protection_store(&temp);
+            guard.preserve_closed_original(&note(), &expected, operation, &mut store).unwrap();
+        }
+        let store = protection_store(&temp);
+        guard.revalidate_bound_preimage(&note(), &expected, operation, &store).unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"stable original");
+    }
+
+    #[test]
+    fn durable_preimage_revalidation_rejects_same_byte_replacement() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let path = root.join(note().as_str());
+        fs::write(&path, b"same content").unwrap();
+        let expected = blake3::hash(b"same content").to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        guard.preserve_closed_original(&note(), &expected, operation, &mut store).unwrap();
+
+        fs::rename(&path, root.join("notes/old-identity.md")).unwrap();
+        fs::write(&path, b"same content").unwrap();
+        assert!(matches!(
+            guard.revalidate_bound_preimage(&note(), &expected, operation, &store),
+            Err(BoundCaptureError::Admission(VaultPortError::FileChanged))
+        ));
+        assert_eq!(fs::read(&path).unwrap(), b"same content");
+        assert_eq!(store.read_bound_preimage(operation).unwrap().unwrap().original.bytes,
+            b"same content");
+    }
+
+    #[test]
+    fn durable_preimage_revalidation_rejects_wrong_operation_and_open_editor() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        let path = root.join(note().as_str());
+        fs::write(&path, b"original").unwrap();
+        let expected = blake3::hash(b"original").to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        guard.preserve_closed_original(&note(), &expected, operation, &mut store).unwrap();
+
+        assert!(matches!(
+            guard.revalidate_bound_preimage(&note(), &expected, OperationId::new(), &store),
+            Err(BoundCaptureError::Protection(ProtectionStoreError::UnboundOriginal))
+        ));
+        assert!(matches!(
+            guard.revalidate_bound_preimage(&note(), "wrong-hash", operation, &store),
+            Err(BoundCaptureError::Protection(ProtectionStoreError::OperationCollision))
+        ));
+        core.documents.open(&core, &path, 0).unwrap();
+        assert!(matches!(
+            guard.revalidate_bound_preimage(&note(), &expected, operation, &store),
+            Err(BoundCaptureError::Admission(VaultPortError::DirtyEditorBuffer))
+        ));
+        core.documents.release(&core, &path);
+        assert_eq!(fs::read(path).unwrap(), b"original");
+    }
+
+    #[test]
+    fn durable_preimage_revalidation_rejects_replaced_registered_root() {
+        let (temp, core, root) = fixture();
+        fs::create_dir(root.join("notes")).unwrap();
+        fs::write(root.join(note().as_str()), b"original").unwrap();
+        let expected = blake3::hash(b"original").to_hex().to_string();
+        let operation = OperationId::new();
+        let guard = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut store = protection_store(&temp);
+        guard.preserve_closed_original(&note(), &expected, operation, &mut store).unwrap();
+
+        let old_root = temp.path().join("old-vault");
+        fs::rename(&root, &old_root).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(root.join("notes")).unwrap();
+        fs::write(root.join(note().as_str()), b"original").unwrap();
+        assert!(guard.revalidate_bound_preimage(&note(), &expected, operation, &store).is_err());
+        assert_eq!(fs::read(root.join(note().as_str())).unwrap(), b"original");
+        assert_eq!(fs::read(old_root.join(note().as_str())).unwrap(), b"original");
     }
 
     #[test]
