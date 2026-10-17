@@ -118,9 +118,14 @@ impl<S: Simd> NumericVec<S> for u8x16<S> {
     fn from_f32(simd: S, val: f32x16<S>) -> Self {
         let v1 = f32x16::splat(simd, 255.0);
         let v2 = f32x16::splat(simd, 0.5);
-        let mulled = val.mul_add(v1, v2);
+        // Quantize with a rounded multiplication followed by a rounded
+        // addition on every SIMD backend. Hardware FMA and emulated mul_add
+        // can straddle the same 8-bit rounding boundary by one value.
+        // Candidate only: the PR's pixel-golden and frame-parity gates decide
+        // whether this preserves the established SSE4.2 rendering.
+        let rounded = (val * v1) + v2;
 
-        f32_to_u8(mulled)
+        f32_to_u8(rounded)
     }
 
     #[inline(always)]
