@@ -33,7 +33,14 @@ impl Painter {
 
     pub(in crate::render) fn draw_glyph_run(&mut self, run: GlyphRunRef<'_>, glyphs: &mut dyn Iterator<Item = SceneGlyph>) {
         let Some(first) = glyphs.next() else { return };
-        if self.offscreen(convert::line_bounds(first.y, run.font_size, run.glyph_transform, run.transform)) {
+        let outside_first = self.offscreen(convert::line_bounds(
+            first.y, run.font_size, run.glyph_transform, run.transform,
+        ));
+        #[cfg(test)]
+        let outside_first = outside_first
+            && (self.culled > 0
+                || std::env::var_os("AQ_TEST_FULL_GLYPH_RUN_VISIBILITY").is_none());
+        if outside_first {
             return;
         }
         let paint = convert::brush_to_paint(run.brush, run.composite, &mut self.images);
