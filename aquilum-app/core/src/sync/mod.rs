@@ -19,6 +19,7 @@ mod journal;
 mod local_create;
 mod local_recovery;
 mod recovery_review;
+mod recovery_dashboard;
 mod planner;
 mod protection_store;
 mod path;
@@ -36,6 +37,7 @@ mod vault;
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
+pub use recovery_dashboard::{native_recovery_overview, NativeRecoveryOverview, RECOVERY_JOURNAL_FILENAME};
 pub use download::{stage_remote_download, StageDownloadError, StagedDownload};
 pub use identity::{DeviceId, DocumentId, OperationId, RevisionId, VaultId};
 pub use journal::{
