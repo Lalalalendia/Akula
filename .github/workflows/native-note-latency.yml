@@ -48,7 +48,6 @@ jobs:
         shell: bash
         env:
           AQ_LATENCY_SWITCHES: '16'
-          AQ_PARLEY_TRACE: '1' # temporary test-only context mismatch diagnostics
         run: |
           set -euo pipefail
           cargo test -p aquilum-native --bin aquilum-native --locked native_note_latency_matrix \
