@@ -76,6 +76,15 @@ impl Renderer {
         let bounds = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let layers = self.tracker.live.iter().filter_map(|&(id, rect, transform, shape)| Some(Layer { id, area: area_of(rect, bounds)?, transform, shape })).collect();
         self.refresh_live(layers, &mut damage, full, seconds);
+        #[cfg(test)]
+        {
+            // Measure the *final* scheduled raster and row-shift workload.
+            // Use u64 so large physical frames cannot overflow the counter.
+            stages.screen_pixels = u64::from(width) * u64::from(height);
+            stages.raster_rects = damage.areas.len();
+            stages.raster_pixels = damage.areas.iter().map(|&(_, _, w, h)| u64::from(w) * u64::from(h)).sum();
+            stages.shifted_pixels = damage.moves.iter().map(|m| u64::from(m.w) * u64::from(m.h)).sum();
+        }
         let sprites = std::mem::take(&mut self.tracker.sprites);
         self.sprite_changes = sprite::changes(&self.sprites, &sprites);
         self.sprites = sprites;

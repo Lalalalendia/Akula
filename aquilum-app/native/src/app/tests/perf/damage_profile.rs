@@ -102,6 +102,31 @@ fn run_damage_profile(name: &str, scale: f64, width: u32, height: u32) {
          max_draws={max_draws} max_changed={max_changed} \
          max_raw_rects={max_rects} max_areas={max_areas} max_regions={max_regions}"
     );
+    // The first frame is deliberately full; exclude it from the partial
+    // raster coverage distribution so the normal UI workload is not skewed.
+    let partial = &samples[1..];
+    assert!(partial.iter().all(|s| s.screen_pixels == u64::from(w) * u64::from(hh)));
+    let coverage_pct: Vec<f64> = partial.iter().map(|s| {
+        100.0 * s.raster_pixels as f64 / s.screen_pixels as f64
+    }).collect();
+    let shifted_pct: Vec<f64> = partial.iter().map(|s| {
+        100.0 * s.shifted_pixels as f64 / s.screen_pixels as f64
+    }).collect();
+    let [coverage_p50, coverage_p95] = percentiles(&coverage_pct, [0.5, 0.95]);
+    let [shifted_p50, shifted_p95] = percentiles(&shifted_pct, [0.5, 0.95]);
+    let max_coverage = coverage_pct.iter().copied().fold(0.0f64, f64::max);
+    let max_final_rects = partial.iter().map(|s| s.raster_rects).max().unwrap_or(0);
+    let empty_rasters = partial.iter().filter(|s| s.raster_pixels == 0).count();
+    let total_raster_pixels: u64 = partial.iter().map(|s| s.raster_pixels).sum();
+    assert!(total_raster_pixels > 0, "{name}: no rasterized pixels in scroll workload");
+    eprintln!(
+        "DAMAGE_COVERAGE case={name} frames=47 screen_pixels={} \
+         raster_p50_pct={coverage_p50:.3} raster_p95_pct={coverage_p95:.3} \
+         raster_max_pct={max_coverage:.3} shifted_p50_pct={shifted_p50:.3} \
+         shifted_p95_pct={shifted_p95:.3} max_final_rects={max_final_rects} \
+         empty_rasters={empty_rasters} total_raster_pixels={total_raster_pixels}",
+        u64::from(w) * u64::from(hh)
+    );
     eprintln!("DAMAGE_PARITY case={name} frames=48 checked=4 pixel_differences=0");
 }
 

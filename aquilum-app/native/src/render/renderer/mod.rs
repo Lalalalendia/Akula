@@ -47,6 +47,12 @@ pub(crate) struct FrameStages {
     pub detect: std::time::Duration,
     pub encode: std::time::Duration,
     pub raster: std::time::Duration,
+    /// Pixels scheduled for rasterization after merging and live-layer updates.
+    /// Areas may overlap, so this is workload area, not distinct-screen coverage.
+    pub raster_pixels: u64,
+    pub shifted_pixels: u64,
+    pub screen_pixels: u64,
+    pub raster_rects: usize,
     pub damage: super::damage::DamageStats,
 }
 
