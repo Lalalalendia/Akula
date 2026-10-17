@@ -185,6 +185,12 @@ pub fn page(view: NoteView<'_>) -> (NewWidget<Flex>, NoteIds) {
         .with_smart(view.smart);
     #[cfg(test)]
     let markdown = started.elapsed();
+    #[cfg(test)]
+    let mut body_area = body_area;
+    #[cfg(test)]
+    if let Some(snapshot) = view.trial_layout {
+        body_area.offer_plain_layout_trial(snapshot);
+    }
     let body_area = NewWidget::new(body_area).with_class(style::EDITOR_TEXT);
     let body = Handle::of(&body_area);
 
