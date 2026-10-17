@@ -17,7 +17,10 @@ impl Document {
             fonts.ch = text::measure_ch(fcx, lcx, fonts);
         }
         #[cfg(test)]
-        let _ = self.try_restore_trial(width, styles, compose, caret);
+        {
+            let reused = self.try_restore_trial(width, styles, compose, caret);
+            super::layout_reuse::record_ui_restore_hits(reused);
+        }
         let rebreak = self.width != width;
         self.width = width;
         self.rebroke |= rebreak;
