@@ -542,11 +542,11 @@ mod tests {
             .await;
         let sdk = aws_sdk_s3::Client::from_conf(
             aws_sdk_s3::config::Builder::from(&shared)
-                .endpoint_url(&endpoint)
+                .endpoint_url(endpoint.clone())
                 .force_path_style(true)
                 .build(),
         );
-        sdk.create_bucket().bucket(&bucket).send().await.unwrap();
+        sdk.create_bucket().bucket(bucket.clone()).send().await.unwrap();
 
         let layout = ns();
         let client = AwsS3ProbeClient::connect(
