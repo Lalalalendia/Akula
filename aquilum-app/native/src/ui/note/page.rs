@@ -16,6 +16,38 @@ use crate::ui::style;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{ButtonSize, Caption, IconButton, Slot, TextButton, Variant, Visible};
 
+// Fine-grained editor page profiler enabled exclusively by cargo test.
+#[cfg(test)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct EditorPageProfile {
+    pub constructor: std::time::Duration,
+    pub document_rescan: std::time::Duration,
+    pub document_window: std::time::Duration,
+    pub markdown: std::time::Duration,
+    pub page_total: std::time::Duration,
+    pub install: std::time::Duration,
+}
+
+#[cfg(test)]
+thread_local! {
+    static LAST_PAGE: std::cell::Cell<EditorPageProfile> =
+        std::cell::Cell::new(EditorPageProfile::default());
+}
+
+#[cfg(test)]
+pub(crate) fn take_page_profile() -> EditorPageProfile {
+    LAST_PAGE.with(|slot| slot.replace(EditorPageProfile::default()))
+}
+
+#[cfg(test)]
+pub(crate) fn record_page_install(duration: std::time::Duration) {
+    LAST_PAGE.with(|slot| {
+        let mut profile = slot.get();
+        profile.install = duration;
+        slot.set(profile);
+    });
+}
+
 pub struct NoteView<'a> {
     pub file_name: &'a str,
     pub title: &'a str,
@@ -77,6 +109,8 @@ pub fn hero_parts(view: Option<crate::ui::book::HeroView>) -> HeroParts {
 }
 
 pub fn page(view: NoteView<'_>) -> (NewWidget<Flex>, NoteIds) {
+    #[cfg(test)]
+    let page_started = std::time::Instant::now();
     let back = NewWidget::new(IconButton::new(icons::ARROW_LEFT, t("editor.back"))).disabled(!view.can_back);
     let forward = NewWidget::new(IconButton::new(icons::ARROW_RIGHT, t("editor.forward"))).disabled(!view.can_forward);
     let (back_id, forward_id) = (back.id(), forward.id());
@@ -113,13 +147,24 @@ pub fn page(view: NoteView<'_>) -> (NewWidget<Flex>, NoteIds) {
     let metadata = Slot::fit(metadata_widget(view.metadata));
     let metadata_handle = Handle::of(&metadata);
 
-    let body_area = crate::ui::editor::TextEditor::windowed(view.body)
+    #[cfg(test)]
+    let started = std::time::Instant::now();
+    let body_area = crate::ui::editor::TextEditor::windowed(view.body);
+    #[cfg(test)]
+    let constructor = started.elapsed();
+    #[cfg(test)]
+    let doc = crate::ui::editor::take_document_build_profile();
+    #[cfg(test)]
+    let started = std::time::Instant::now();
+    let body_area = body_area
         .styled(style::editor_text)
         .markdown()
         .report_edits()
         .with_resolver(view.resolver.clone())
         .with_wake(std::sync::Arc::clone(&view.wake))
         .with_smart(view.smart);
+    #[cfg(test)]
+    let markdown = started.elapsed();
     let body_area = NewWidget::new(body_area).with_class(style::EDITOR_TEXT);
     let body = Handle::of(&body_area);
 
@@ -178,5 +223,14 @@ pub fn page(view: NoteView<'_>) -> (NewWidget<Flex>, NoteIds) {
         scroll: scroll_handle,
         find: find_handle,
     };
+    #[cfg(test)]
+    LAST_PAGE.with(|slot| slot.set(EditorPageProfile {
+        constructor,
+        document_rescan: doc.rescan,
+        document_window: doc.load,
+        markdown,
+        page_total: page_started.elapsed(),
+        install: std::time::Duration::ZERO,
+    }));
     (page, ids)
 }
