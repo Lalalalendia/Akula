@@ -455,11 +455,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let db = temp.path().join("p.sqlite");
         let store = SqliteProtectionStore::open(&db).unwrap();
-        store.connection.pragma_update(None, "user_version", 2).unwrap();
+        store.connection.pragma_update(None, "user_version", 3).unwrap();
         drop(store);
         assert!(matches!(
             SqliteProtectionStore::open(&db),
-            Err(ProtectionStoreError::UnsupportedSchema(2))
+            Err(ProtectionStoreError::UnsupportedSchema(3))
         ));
     }
 
