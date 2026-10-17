@@ -93,12 +93,14 @@ fn native_note_latency_matrix() {
         let mut switches = Vec::with_capacity(cycles);
         let mut scenes = Vec::with_capacity(cycles);
         let mut stages = Vec::with_capacity(cycles);
+        let mut editor_profiles = Vec::with_capacity(cycles);
         for i in 0..cycles {
             let (id, path, letter) = if i % 2 == 0 { (first_id, &first, "A") } else { (second_id, &second, "B") };
             let timer = Instant::now();
             h.app.on_titlebar(&mut h.root, &crate::ui::titlebar::TitlebarAction::Select(id), Size::new(f64::from(W), f64::from(H)));
             let switched_ms = milliseconds(timer.elapsed());
             stages.push(crate::app::tabs::open::take_tab_switch_stages());
+            editor_profiles.push(crate::ui::note::page::take_page_profile());
             let timer = Instant::now();
             let _ = h.root.redraw();
             let scene_ms = milliseconds(timer.elapsed());
@@ -158,6 +160,16 @@ fn native_note_latency_matrix() {
         let strip_p95 = p95_stage(|s| s.strip);
         let panel_p95 = p95_stage(|s| s.panel);
         let cache_hits = stages.iter().filter(|stage| stage.cache_hit).count();
+        let p95_editor = |field: fn(&crate::ui::note::page::EditorPageProfile) -> Duration| {
+            let samples: Vec<f64> = editor_profiles.iter().map(|profile| milliseconds(field(profile))).collect();
+            percentiles(&samples, [0.95])[0]
+        };
+        let constructor_p95 = p95_editor(|p| p.constructor);
+        let rescan_p95 = p95_editor(|p| p.document_rescan);
+        let initial_window_p95 = p95_editor(|p| p.document_window);
+        let markdown_p95 = p95_editor(|p| p.markdown);
+        let page_total_p95 = p95_editor(|p| p.page_total);
+        let install_p95 = p95_editor(|p| p.install);
         let [switch_p50, switch_p95, switch_max] = percentiles(&switches, [0.5, 0.95, 1.0]);
         let [_, scene_p95, scene_max] = percentiles(&scenes, [0.5, 0.95, 1.0]);
         let [_, dispatch_p95, dispatch_max] = percentiles(&dispatches, [0.5, 0.95, 1.0]);
@@ -172,6 +184,12 @@ fn native_note_latency_matrix() {
             "TAB_STAGE kib={kib} cycles={cycles} leave_p95_ms={leave_p95:.3} read_p95_ms={read_p95:.3} \
              page_p95_ms={page_p95:.3} tree_p95_ms={tree_p95:.3} tab_p95_ms={tab_p95:.3} \
              version_p95_ms={version_p95:.3} strip_p95_ms={strip_p95:.3} panel_p95_ms={panel_p95:.3}"
+        );
+        eprintln!(
+            "EDITOR_PAGE kib={kib} cycles={cycles} constructor_p95_ms={constructor_p95:.3} \
+             rescan_p95_ms={rescan_p95:.3} initial_window_p95_ms={initial_window_p95:.3} \
+             markdown_p95_ms={markdown_p95:.3} page_total_p95_ms={page_total_p95:.3} \
+             install_p95_ms={install_p95:.3}"
         );
         // Cleanup is deliberately excluded from the measured operation times.
         // Shutdown joins background search/index workers before TempDir removal.
