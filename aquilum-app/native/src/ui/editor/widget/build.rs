@@ -69,6 +69,15 @@ impl TextEditor {
         self
     }
 
+    /// Offer hash-verified plain paragraph layouts; validation happens only
+    /// after the final width and editor styles are available in layout().
+    pub(crate) fn with_clean_parley_snapshot(mut self, snapshot: Option<crate::ui::editor::LayoutSnapshot>) -> Self {
+        if let Some(snapshot) = snapshot {
+            self.doc.trial_offer(snapshot);
+        }
+        self
+    }
+
     pub fn report_edits(mut self) -> Self {
         self.doc.report_edits();
         self
