@@ -168,7 +168,7 @@ mod tests {
                     thread::sleep(Duration::from_millis(10));
                 }
                 let refused = held.recheck_held_name(&root).is_err();
-                fs::write(&report, if refused { b"refused" } else { b"unsafe" }).unwrap();
+                fs::write(&report, if refused { "refused" } else { "unsafe" }).unwrap();
                 // Stay ALIVE with old handle: the parent must observe that
                 // both distinct lock objects can be held simultaneously.
                 loop {
