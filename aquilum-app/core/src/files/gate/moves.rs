@@ -168,7 +168,7 @@ mod cross_vault_admission_tests {
 
         let error = admit_vault_relocation(&core, &source, &target).unwrap_err();
         assert!(
-            matches!(error, FileCommandError::Task { .. }),
+            matches!(&error, FileCommandError::Task { .. }),
             "missing registry must fail closed: {error:?}"
         );
         assert_eq!(fs::read(&source).unwrap(), b"keep original");
