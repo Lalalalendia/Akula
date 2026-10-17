@@ -32,6 +32,39 @@ use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
 use std::time::Duration;
 
+#[cfg(test)]
+use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+
+/// Test-only S3 method-attempt instrumentation. These count Akula SDK
+/// HEAD/GET attempts and fully read payload bytes, not TCP bytes, retries
+/// inside the AWS SDK, TLS frames or server-side network traffic.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct S3TestIoCounts {
+    pub head: u64,
+    pub get: u64,
+    pub payload_bytes: u64,
+}
+
+#[cfg(test)]
+impl S3TestIoCounts {
+    pub(super) fn since(self, before: Self) -> Self {
+        Self {
+            head: self.head.checked_sub(before.head).unwrap(),
+            get: self.get.checked_sub(before.get).unwrap(),
+            payload_bytes: self.payload_bytes.checked_sub(before.payload_bytes).unwrap(),
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct S3TestIoCounters {
+    head: AtomicU64,
+    get: AtomicU64,
+    payload_bytes: AtomicU64,
+}
+
 const MAX_PROBE_BYTES: u64 = 1024 * 1024;
 const MAX_S3_PAGE_SIZE: i32 = 1000;
 
@@ -151,6 +184,8 @@ pub struct AwsS3ProbeClient {
     keyspace: S3Keyspace,
     /// Non-secret endpoint/bucket/region identity used to bind durable anchors.
     profile: S3ConnectionProfile,
+    #[cfg(test)]
+    test_io: Arc<S3TestIoCounters>,
 }
 
 impl AwsS3ProbeClient {
@@ -184,7 +219,18 @@ impl AwsS3ProbeClient {
             bucket: profile.bucket.clone(),
             keyspace,
             profile,
+            #[cfg(test)]
+            test_io: Arc::new(S3TestIoCounters::default()),
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_io_snapshot(&self) -> S3TestIoCounts {
+        S3TestIoCounts {
+            head: self.test_io.head.load(Ordering::Relaxed),
+            get: self.test_io.get.load(Ordering::Relaxed),
+            payload_bytes: self.test_io.payload_bytes.load(Ordering::Relaxed),
+        }
     }
 
     pub(super) fn bound_profile(&self) -> &S3ConnectionProfile {
@@ -206,6 +252,8 @@ impl AwsS3ProbeClient {
 
     pub async fn head(&self, key: &str) -> Result<S3ObservedObject, S3TransportError> {
         self.checked_key(key)?;
+        #[cfg(test)]
+        self.test_io.head.fetch_add(1, Ordering::Relaxed);
         let response = self.client.head_object()
             .bucket(&self.bucket)
             .key(key)
@@ -236,6 +284,8 @@ impl AwsS3ProbeClient {
         if before.byte_length > max_bytes {
             return Err(S3TransportError::ObjectTooLarge);
         }
+        #[cfg(test)]
+        self.test_io.get.fetch_add(1, Ordering::Relaxed);
         let response = self.client.get_object()
             .bucket(&self.bucket)
             .key(key)
@@ -256,6 +306,8 @@ impl AwsS3ProbeClient {
         if before != after || bytes.len() as u64 != after.byte_length {
             return Err(S3TransportError::ChangedDuringRead);
         }
+        #[cfg(test)]
+        self.test_io.payload_bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         let blake3 = blake3::hash(&bytes).to_hex().to_string();
         Ok(S3BoundedObject { object: after, bytes, blake3 })
     }

@@ -1,0 +1,112 @@
+name: S3 delta A/B network benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/multipart.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/selective_snapshot.rs'
+      - 'aquilum-app/core/src/sync/s3_manifest.rs'
+      - 'aquilum-app/core/src/sync/s3_manifest_delta.rs'
+      - 'docs/sync/delta-ab-benchmark.md'
+      - '.github/workflows/sync-s3-delta-ab.yml'
+  workflow_dispatch:
+  # A one-time full 10k matrix on the initial merge of this benchmark
+  # workflow into main; routine changes elsewhere do not trigger it.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/sync-s3-delta-ab.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-delta-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selective-vs-full:
+    name: S3 A/B / ${{ matrix.changes }} changed / ${{ github.event_name == 'pull_request' && '64 smoke' || '10000 notes' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        changes: ${{ fromJSON(github.event_name == 'pull_request' && '[7]' || '[0,7,1000]') }}
+    env:
+      AWS_ACCESS_KEY_ID: akula_minio_ci
+      AWS_SECRET_ACCESS_KEY: isolated_akula_minio_ci_only_20261017
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_MAX_ATTEMPTS: '1'
+      AQ_S3_TEST_ENDPOINT: http://127.0.0.1:9000
+      AQ_DELTA_BENCH_NOTES: ${{ github.event_name == 'pull_request' && '64' || '10000' }}
+      AQ_DELTA_BENCH_CHANGES: ${{ matrix.changes }}
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared read-only Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Start isolated, disposable localhost MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --rm --name akula-delta-ab-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs akula-delta-ab-minio
+          exit 1
+      - name: Measure actual HEAD/GET SDK attempts and payload bytes
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 \
+            minio_selective_ab_notes_network_requests \
+            -- --ignored --test-threads=1 --nocapture 2>&1 | tee delta-ab.log
+          grep 'AKULA_DELTA_AB {' delta-ab.log | sed 's/^.*AKULA_DELTA_AB //' \
+            > delta-ab-results.jsonl
+          test "$(wc -l < delta-ab-results.jsonl)" -eq 2
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          lines = [json.loads(line) for line in Path("delta-ab-results.jsonl").read_text().splitlines()]
+          assert {r["scenario"] for r in lines} == {"selective_preview", "full_verified_pin"}
+          assert all(r["new_revisions"] == int(__import__("os").environ["AQ_DELTA_BENCH_CHANGES"]) for r in lines)
+          assert all(r["notes"] == int(__import__("os").environ["AQ_DELTA_BENCH_NOTES"]) for r in lines)
+          assert lines[0]["attempted_s3_get"] < lines[1]["attempted_s3_get"]
+          PY
+      - name: Upload sanitized A/B measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-delta-ab-${{ github.event_name }}-${{ matrix.changes }}
+          path: aquilum-app/delta-ab-results.jsonl
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Stop disposable MinIO
+        if: always()
+        shell: bash
+        run: |
+          docker stop akula-delta-ab-minio >/dev/null 2>&1 || true
