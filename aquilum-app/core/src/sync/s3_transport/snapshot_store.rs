@@ -527,6 +527,97 @@ mod tests {
     }
 
     #[test]
+    fn cas_replay_plans_both_offline_siblings_without_rewriting_either_head() {
+        use super::super::replan::{
+            plan_verified_s3_revision_replay, S3ReplanError,
+        };
+        let vault = VaultId::new();
+        let doc = DocumentId::new();
+        let (root, root_json) = fixture(doc, vec![], b"base");
+        let (alice, alice_json) = fixture(doc, vec![root.revision_id], b"alice");
+        let (bob, bob_json) = fixture(doc, vec![root.revision_id], b"bob");
+        let mut remote = S3VerifiedRevisionMetadataStore::new(
+            vault, "verified-remote-root:hash".into(), 1024 * 1024,
+        ).unwrap();
+        remote.accept(root.clone(), root_json.clone()).unwrap();
+        remote.accept(bob.clone(), bob_json).unwrap();
+        // An individually valid revision is not a trusted remote inventory
+        // until every parent is proven and the complete DAG is sealed.
+        let mut local_dag = RevisionDag::new();
+        for json in [&root_json, &alice_json] {
+            local_dag.ingest(serde_json::from_slice(json).unwrap()).unwrap();
+        }
+        let local = RevisionInventory {
+            vault_id: vault,
+            snapshot_id: "pinned-local-dag".into(),
+            complete: true,
+            revisions: [root.revision_id, alice.revision_id].into_iter().collect(),
+        };
+        assert!(matches!(
+            plan_verified_s3_revision_replay(&local_dag, &local, &remote),
+            Err(S3ReplanError::Remote(S3HeadError::InvalidManifest))
+        ));
+        remote.validate_complete_dag().unwrap();
+        let preview = plan_verified_s3_revision_replay(
+            &local_dag, &local, &remote,
+        ).unwrap();
+        assert_eq!(preview.local_snapshot_id, local.snapshot_id);
+        assert_eq!(preview.remote_snapshot_id, remote.snapshot_id());
+        assert_eq!(preview.exchange.to_remote.revisions, vec![alice.revision_id]);
+        assert_eq!(preview.exchange.to_local.revisions, vec![bob.revision_id]);
+        assert_eq!(preview.conflicting_heads.get(&doc), Some(
+            &[alice.revision_id, bob.revision_id].into_iter().collect()
+        ));
+        assert_eq!(preview.exchange.to_remote.candidate_blob_hashes,
+            vec![blake3::hash(b"alice").to_hex().to_string()]);
+        assert_eq!(preview.exchange.to_local.candidate_blob_hashes,
+            vec![blake3::hash(b"bob").to_hex().to_string()]);
+        // Pure planning never mutates even the remote projection.
+        assert!(!remote.capabilities().supports_guarded_mutation());
+        assert_eq!(remote.len(), 2);
+
+        let foreign = RevisionInventory {
+            vault_id: VaultId::new(),
+            ..local.clone()
+        };
+        assert!(matches!(
+            plan_verified_s3_revision_replay(&local_dag, &foreign, &remote),
+            Err(S3ReplanError::Delta(DeltaPlanError::VaultMismatch))
+        ));
+        let incomplete = RevisionInventory { complete: false, ..local.clone() };
+        assert!(matches!(
+            plan_verified_s3_revision_replay(&local_dag, &incomplete, &remote),
+            Err(S3ReplanError::Delta(DeltaPlanError::IncompleteInventory))
+        ));
+        let broken = RevisionInventory {
+            revisions: [root.revision_id].into_iter().collect(),
+            ..local.clone()
+        };
+        let plan = plan_verified_s3_revision_replay(&local_dag, &broken, &remote).unwrap();
+        assert!(plan.exchange.to_local.revisions.contains(&bob.revision_id));
+        assert!(plan.exchange.to_local.revisions.contains(&root.revision_id) == false);
+
+        let mut colliding = RevisionDag::new();
+        colliding.ingest(RevisionRecord {
+            id: root.revision_id,
+            document_id: doc,
+            parents: vec![],
+            operation: RevisionOperation::Content {
+                path: SyncRelativePath::parse("notes/test.md").unwrap(),
+                blob_hash: blake3::hash(b"spoofed-root").to_hex().to_string(),
+            },
+        }).unwrap();
+        let old_root_only = RevisionInventory {
+            revisions: [root.revision_id].into_iter().collect(),
+            ..local
+        };
+        assert!(matches!(
+            plan_verified_s3_revision_replay(&colliding, &old_root_only, &remote),
+            Err(S3ReplanError::Dag(crate::sync::DagError::RevisionCollision))
+        ));
+    }
+
+    #[test]
     fn duplicate_rejected_without_replacing_earlier_verified_bytes() {
         let vault = VaultId::new();
         let document = DocumentId::new();

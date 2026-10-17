@@ -904,7 +904,32 @@ mod tests {
         assert_eq!(second.get_bounded(
             &ns.immutable_revision_key(loser_revision.id), 4096,
         ).await.unwrap().bytes, serde_json::to_vec(&loser_revision).unwrap());
+        // A real failed CAS must generate a *read-only* plan against the
+        // winner's freshly verified root. Both divergent edits are retained,
+        // and the prepared loser receipt must remain unacknowledged.
+        let mut offline_dag = RevisionDag::new();
+        offline_dag.ingest(record.clone()).unwrap();
+        offline_dag.ingest(loser_revision.clone()).unwrap();
+        let local_inventory = crate::sync::RevisionInventory {
+            vault_id: ns.vault_id(),
+            snapshot_id: "pinned-offline-bob-scan".into(),
+            complete: true,
+            revisions: [record.id, loser_revision.id].into_iter().collect(),
+        };
+        let proposal = second.preview_replan_after_s3_cas_conflict(
+            &before, &offline_dag, &local_inventory, 256 * 1024,
+        ).await.unwrap();
+        assert_eq!(proposal.exchange.to_remote.revisions, vec![loser_revision.id]);
+        assert_eq!(proposal.exchange.to_local.revisions, vec![winner_revision.id]);
+        assert_eq!(proposal.conflicting_heads.get(&record.document_id), Some(
+            &[winner_revision.id, loser_revision.id].into_iter().collect()
+        ));
         assert_eq!(j2.phase(id_loser).unwrap(), Some(S3HeadAttemptPhase::Prepared));
+        assert_eq!(second.read_verified_head().await.unwrap().unwrap().pointer, pw);
+        let current_head = second.read_verified_head().await.unwrap().unwrap();
+        assert!(matches!(second.preview_replan_after_s3_cas_conflict(
+            &current_head, &offline_dag, &local_inventory, 256 * 1024,
+        ).await, Err(super::super::replan::S3ReplanError::UnchangedCurrentHead)));
         // An uncertain retry of the losing operation cannot publish on top of
         // the winner: caller must explicitly reconcile its proposed branch.
         assert!(matches!(second.publish_head_cas(&mut j2, id_loser, pl.clone(), Some(&before)).await,
