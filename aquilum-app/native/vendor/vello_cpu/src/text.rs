@@ -253,9 +253,23 @@ impl Resources {
                 let page = Arc::get_mut(&mut glyph_resources.pixmaps[page_index])
                     .expect("atlas page pixmap must be uniquely owned during replay");
 
-                let Some((x0, y0, w, h)) = dirty_bounds(&recorder.commands, page.width(), page.height()) else {
-                    recorder.commands.clear();
-                    return Ok(());
+                // Diagnostic A/B only: make glyph-atlas preparation independent
+                // of the union bounds of pending glyph commands. This keeps
+                // the glyph cache/key/lookup and final atlas sampling intact;
+                // only the raster target origin and extent change.
+                #[cfg(feature = "std")]
+                let full_page_prep =
+                    std::env::var_os("AQ_TEST_ATLAS_PREP_FULL_PAGE").is_some();
+                #[cfg(not(feature = "std"))]
+                let full_page_prep = false;
+                let bounds = dirty_bounds(&recorder.commands, page.width(), page.height());
+                let (x0, y0, w, h) = match bounds {
+                    Some(_) if full_page_prep => (0, 0, page.width(), page.height()),
+                    Some(bounds) => bounds,
+                    None => {
+                        recorder.commands.clear();
+                        return Ok(());
+                    }
                 };
                 let shift = Affine::translate((-f64::from(x0), -f64::from(y0)));
                 for cmd in &mut recorder.commands {
