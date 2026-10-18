@@ -132,14 +132,15 @@ def execute(binary: Path, book: Path, out: Path, count: int, pause: int,
             raise AssertionError("Closed Reader retained its UI layer")
     for mode in ("paged", "scrolled"):
         direction = "reader_page" if mode == "paged" else "reader_scroll_px"
+        position = lambda row: (row["reader_section"], row[direction])
         start = next(r for r in rows if r["label"] == f"{mode}_start")
         forward = next(r for r in reversed(rows)
                        if str(r.get("label", "")).startswith(f"{mode}_next_"))
         backward = next(r for r in reversed(rows)
                         if str(r.get("label", "")).startswith(f"{mode}_prev_"))
-        if not forward.get(direction, 0) > start.get(direction, 0):
+        if not position(forward) > position(start):
             raise AssertionError(f"{mode} forward navigation did not advance: {forward}")
-        if not backward.get(direction, 0) < forward.get(direction, 0):
+        if not position(backward) < position(forward):
             raise AssertionError(f"{mode} reverse navigation did not return: {backward}")
     measured = json.loads(metrics.read_text())
     if measured.get("frames", 0) < count * 2:
