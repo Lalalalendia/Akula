@@ -66,9 +66,19 @@ fn trim_reader_heap_after_close() {
     unsafe extern "C" {
         fn malloc_trim(pad: usize) -> i32;
     }
+    #[cfg(feature = "memory-probe")]
+    let (before, started) = (crate::memory_probe::reader_rss_kib(), std::time::Instant::now());
     // SAFETY: glibc documents malloc_trim as MT-Safe; zero requests that
     // available whole free pages be returned to the OS.
-    let _ = unsafe { malloc_trim(0) };
+    let released = unsafe { malloc_trim(0) };
+    #[cfg(feature = "memory-probe")]
+    eprintln!(
+        "READER_POSTCLOSE_TRIM released={released} before_kib={before} after_kib={} elapsed_us={}",
+        crate::memory_probe::reader_rss_kib(),
+        started.elapsed().as_micros(),
+    );
+    #[cfg(not(feature = "memory-probe"))]
+    let _ = released;
 }
 
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
