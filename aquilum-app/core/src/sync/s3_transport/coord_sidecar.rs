@@ -19,7 +19,7 @@ use super::pack_probe::{
 use crate::sync::{
     RevisionDag, RevisionId, RevisionRecord, S3ContractError,
     S3DeltaEnvelopeV2, S3DeltaEnvelopeV2Error,
-    S3HeadPointerV1, S3Keyspace, S3ManifestError, S3ManifestV1,
+    S3HeadPointerV1, S3ManifestError, S3ManifestV1,
     S3RemoteAnchorError, S3RemoteAnchorJournal, S3RemoteAnchorScope,
     MAX_DELTA_ENVELOPE_BYTES,
 };
@@ -171,10 +171,11 @@ impl AwsS3ProbeClient {
                 key, digest: pack.pack_blake3.clone(),
                 references: letter.revisions()[start..end].to_vec(),
             };
-            let accepted = ingest_verified_pack(
+            ingest_verified_pack(
                 &payload.bytes, &descriptor, &mut dag, &mut seen,
             ).map_err(|_| S3CoordSidecarReadError::InvalidPackPayload)?;
-            verified_pack_bytes = verified_pack_bytes.checked_add(accepted)
+            verified_pack_bytes = verified_pack_bytes
+                .checked_add(payload.bytes.len() as u64)
                 .ok_or(S3CoordSidecarReadError::InvalidPackPayload)?;
         }
 
