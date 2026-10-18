@@ -246,7 +246,6 @@ impl Renderer {
     }
 }
 
-
 #[cfg(test)]
 mod small_rect_policy_tests {
     use super::single_rect_route_enabled;
