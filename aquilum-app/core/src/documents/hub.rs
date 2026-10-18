@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -120,7 +121,7 @@ pub struct DocumentHub {
     /// the app-data document store/registry is unreadable. No auto-clear on
     /// restart or rebind; an explicit custody-verified guarded writer is the
     /// sole exception inside File Gate.
-    guarded_participant_hold: AtomicBool,
+    guarded_participant_hold: Arc<AtomicBool>,
     writes: Mutex<Option<Sender<(String, Instant)>>>,
     offset_seconds: AtomicI64,
 }
@@ -145,7 +146,7 @@ impl DocumentHub {
             sessions: Mutex::new(HashMap::new()),
             sync_reservations: Mutex::new(HashSet::new()),
             guarded_write_roots: Mutex::new(Vec::new()),
-            guarded_participant_hold: AtomicBool::new(guarded_participant_hold),
+            guarded_participant_hold: Arc::new(AtomicBool::new(guarded_participant_hold)),
             writes: Mutex::new(None),
             offset_seconds: AtomicI64::new(0),
         }
@@ -158,6 +159,13 @@ impl DocumentHub {
     /// including other workspace roots. Read-only inspection remains possible.
     pub(crate) fn requires_guarded_participant_hold(&self) -> bool {
         self.guarded_participant_hold.load(Ordering::Acquire)
+    }
+
+    /// Shared with this Core's HistoryService so public direct metadata,
+    /// relocation and retention writes cannot bypass the participant HOLD.
+    /// The flag changes to true before a participant is committed to appdata.
+    pub(crate) fn guarded_history_policy(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.guarded_participant_hold)
     }
 
     /// Called only AFTER verifying a registered S3 profile and pinned custody,

@@ -144,6 +144,9 @@ impl Core {
                 events,
             }
         });
+        // Bind HistoryService to the SAME live/cold-start participant HOLD
+        // before publishing the Core to hosts, watchers or editor workers.
+        core.history.bind_guarded_participant_policy(core.documents.guarded_history_policy());
         core.documents.start(Arc::downgrade(&core));
         core
     }

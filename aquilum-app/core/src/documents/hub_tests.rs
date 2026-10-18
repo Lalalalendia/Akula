@@ -265,3 +265,57 @@ fn unreadable_documents_sqlite_never_downgrades_participant_policy_to_empty() {
     assert!(gate::write(&reopened, &note, "overwrite", None, Source::Me, None).is_err());
     assert_eq!(std::fs::read(&note).unwrap(), b"keep");
 }
+
+
+#[test]
+fn enrolled_history_service_denies_direct_metadata_save_move_and_retention_on_reopen() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::files::gate;
+    use crate::history::{NoteWrite, Source};
+    use std::sync::Arc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let appdata = temp.path().join("appdata");
+    let root = temp.path().join("vault");
+    std::fs::create_dir_all(&appdata).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    let root = std::fs::canonicalize(root).unwrap();
+    let note = root.join("Versioned.md");
+    let replacement = root.join("Renamed.md");
+    let trash = root.join(".trash").join("Versioned.md");
+    let baseline = "original version";
+    let hash = blake3::hash(baseline.as_bytes()).to_hex().to_string();
+    let events = Arc::new(|_: CoreEvent| {});
+    {
+        let core = Core::open(&appdata, events.clone());
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        gate::create(&core, &note, baseline, Source::Me, None).unwrap();
+        assert!(core.history.name(&|| core.known_roots(), &note, None, "allowed").is_some());
+        core.documents.enroll_guarded_participant(
+            &root, "distinct-remote-vault",
+            &appdata.join("profile.sqlite"), &appdata.join("custody.sqlite"),
+            &temp.path().join("os-lock-scope"),
+        ).unwrap();
+        assert!(core.documents.requires_guarded_participant_hold());
+        assert!(core.history.name(&|| core.known_roots(), &note, None, "blocked").is_none());
+        assert!(core.history.try_saved(&|| core.known_roots(), &note, NoteWrite {
+            disk_before: None, text: "not published", hash: &hash,
+            source: Source::Me, name: Some("unauthorized"),
+        }).is_err());
+        assert!(core.history.try_moved(&|| core.known_roots(), &note, &replacement).is_err());
+        assert!(core.history.try_trashed(&|| core.known_roots(), &note, &trash).is_err());
+        assert!(core.history.try_restored(&|| core.known_roots(), &trash, &note).is_err());
+        assert!(core.history.maintain_retention(&root, 30).is_err());
+    }
+    let cold = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    assert!(cold.documents.requires_guarded_participant_hold());
+    assert!(cold.history.name(&|| cold.known_roots(), &note, None, "cold bypass").is_none());
+    assert!(cold.history.try_saved(&|| cold.known_roots(), &note, NoteWrite {
+        disk_before: None, text: "forbidden", hash: &hash,
+        source: Source::Me, name: None,
+    }).is_err());
+    assert!(cold.history.maintain_retention(&root, 30).is_err());
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), baseline);
+    assert_eq!(cold.history.page(&|| vec![root.clone()], &note, 0, 10).total, 1);
+    assert!(!replacement.exists());
+}
