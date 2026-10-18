@@ -23,6 +23,13 @@ on:
 permissions:
   contents: read
 
+# Native and docs checks on a force-updated PR must represent the exact
+# newest head. Cancel obsolete pushes/rebases so earlier queued macOS jobs
+# cannot consume the same runner or be mistaken for acceptance.
+concurrency:
+  group: docs-installer-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docs:
     runs-on: ubuntu-24.04
@@ -55,5 +62,19 @@ jobs:
 
       - name: Check macOS installer scripts
         run: |
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash scripts/test-install-scripts.sh
+
+  macos-installer:
+    name: macOS installer BSD-lock and crash recovery
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise real macOS lockf, cross-process restore and HOLD
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/lockf
           bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
           bash scripts/test-install-scripts.sh
