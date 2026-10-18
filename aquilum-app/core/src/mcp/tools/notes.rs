@@ -4,7 +4,7 @@ use super::{offset,
     content, content_or_empty, flag, limit, open_after_write, optional_content, optional_names, optional_text,
     require_write, shorten, text, tool, version_name_property, workspace_property, write_retrying,
 };
-use crate::files::document::{ensure_directory_impl, read_text};
+use crate::files::document::read_text;
 use crate::files::gate;
 use crate::history::Source;
 use crate::search::headings::{self, Heading};
@@ -312,7 +312,7 @@ fn create_one(
         return Err(format!("Заметка уже существует: {}", vault.relative(&path)));
     }
     if let Some(parent) = path.parent() {
-        ensure_directory_impl(parent).map_err(|error| error.to_string())?;
+        gate::ensure_folder_tree(core, parent).map_err(|error| error.to_string())?;
     }
     gate::create(core, &path, initial, Source::Agent, version_name).map_err(|error| error.to_string())?;
     Ok(path)
@@ -510,7 +510,7 @@ fn move_note(core: &Core, arguments: &Value) -> Result<Value, String> {
         return Err(format!("В целевой базе уже есть {}", destination.relative(&target)));
     }
     if let Some(parent) = target.parent() {
-        ensure_directory_impl(parent).map_err(|error| error.to_string())?;
+        gate::ensure_folder_tree(core, parent).map_err(|error| error.to_string())?;
     }
 
     let broken = core
@@ -545,7 +545,7 @@ fn move_inside_vault(
         return Err(format!("Заметка уже существует: {}", vault.relative(&target)));
     }
     if let Some(parent) = target.parent() {
-        ensure_directory_impl(parent).map_err(|error| error.to_string())?;
+        gate::ensure_folder_tree(core, parent).map_err(|error| error.to_string())?;
     }
     let result = gate::rename(core, note, &target).map_err(|error| error.to_string())?;
     Ok(json!({
@@ -753,4 +753,39 @@ mod tests {
         assert!(compose(NOTE, &edit("patch", "текст")).is_err());
         assert!(compose(NOTE, &edit("replaceSection", "текст")).is_err());
     }
+
+    #[test]
+    fn mcp_nested_create_and_move_do_not_make_folders_on_cold_core_hold() {
+        use super::{create_one, move_inside_vault};
+        use crate::app_core::{Core, CoreEvent};
+        use crate::mcp::vault::Vault;
+        use std::fs;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let appdata = temp.path().join("appdata");
+        let root = temp.path().join("vault");
+        fs::create_dir_all(&appdata).unwrap();
+        fs::create_dir_all(&root).unwrap();
+
+        // Simulate an unreadable participant registry on a cold Core. The
+        // primary File Gate already refused; previously MCP mkdir bypassed
+        // it and left a new folder as a side effect.
+        fs::write(appdata.join("documents.sqlite3"), b"invalid sqlite").unwrap();
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        let root = fs::canonicalize(root).unwrap();
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let vault = Vault { root: root.clone(), visible: true };
+
+        assert!(create_one(&core, &vault, "New/Nested.md", "body", None).is_err());
+        assert!(!root.join("New").exists());
+
+        let old_note = root.join("Original.md");
+        fs::write(&old_note, b"untouched original").unwrap();
+        let target = root.join("Moved").join("Original.md");
+        assert!(move_inside_vault(&core, &vault, &old_note, target).is_err());
+        assert!(!root.join("Moved").exists());
+        assert_eq!(fs::read(&old_note).unwrap(), b"untouched original");
+    }
+
 }
