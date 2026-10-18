@@ -131,6 +131,13 @@ pub(crate) fn activate_registered_s3_editor(
         scope: fs::canonicalize(custody_scope)?,
         binding,
     };
+    // DocumentHub writers hold sessions while waiting for File Gate. Arming
+    // under PROCESS_FILE_MUTATIONS would invert that order and deadlock.
+    // First reject existing buffers and install the fail-closed *prewrite*
+    // root. If later custody enrollment fails, new DocumentSession writers
+    // still cannot fall back: they require a one-shot receipt, and the
+    // unactivated guarded route explicitly refuses that receipt.
+    core.documents.arm_durable_intents_for_root(&config.root)?;
     // Close the admission transition against an ordinary File Gate operation
     // already inside its process-wide primary-file critical section. Take
     // this FIRST, before the HistoryService barrier, to preserve the
@@ -156,7 +163,7 @@ pub(crate) fn activate_registered_s3_editor(
         // Holding both the process File Gate and HistoryFiles barriers means
         // no in-flight ordinary primary mutation or direct history mutation
         // is actively touching those files when HOLD becomes visible.
-        core.documents.arm_durable_intents_for_root(&config.root)?;
+        // DocumentHub prewrite admission was armed BEFORE taking File Gate.
         // Commit the appdata participant marker before publishing the writer
         // route. A failed insert keeps the Core on HOLD with no silent retry.
         core.documents.enroll_guarded_participant(
@@ -395,6 +402,27 @@ mod tests {
         assert!(activate_registered_s3_editor(
             &core, &vault, &profile_db, &custody_db, &scope,
         ).is_err(), "live editor admission must refuse activation");
+
+        // Even while another thread owns the primary File Gate, a live
+        // DocumentHub session must cause immediate refusal. Acquiring Gate
+        // BEFORE checking sessions creates an ABBA deadlock with save_entry.
+        let gate_held_with_editor = core.file_mutation_guard().unwrap();
+        let (blocked_tx, blocked_rx) = std::sync::mpsc::channel();
+        let other_core = Arc::clone(&core);
+        let root_arg = vault.clone();
+        let profile_arg = profile_db.clone();
+        let custody_arg = custody_db.clone();
+        let scope_arg = scope.clone();
+        let rejected = std::thread::spawn(move || {
+            let reply = activate_registered_s3_editor(
+                &other_core, &root_arg, &profile_arg, &custody_arg, &scope_arg,
+            );
+            blocked_tx.send(reply.is_err()).unwrap();
+        });
+        assert!(blocked_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+            "activation waited on File Gate while holding a live editor");
+        rejected.join().unwrap();
+        drop(gate_held_with_editor);
         core.documents.release(&core, &note);
 
         // Real activation must wait until an already-entered, ordinary File
