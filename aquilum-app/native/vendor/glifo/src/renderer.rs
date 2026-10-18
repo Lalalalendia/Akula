@@ -456,6 +456,23 @@ fn insert_and_render_outline(
     };
 
     #[cfg(feature = "std")]
+    if let Some((_, path_hash, _)) = traced_outline.as_ref() {
+        // One real-font glyph fixture only. The path and its full-f64
+        // control points are needed for an isolated, reproducible atlas-slot
+        // experiment; the hash alone does not reconstruct geometry.
+        // Renderers without AQ_TRACE_ATLAS_PIXEL take no diagnostic path.
+        if *path_hash == 0x02b95e89df1cbf3e {
+            static PRINT_REAL_GLYPH_ONCE: std::sync::Once = std::sync::Once::new();
+            PRINT_REAL_GLYPH_ONCE.call_once(|| {
+                std::eprintln!(
+                    "GLIFO_TARGET_OUTLINE path_hash={path_hash:016x} elements={:?}",
+                    glyph.path.elements()
+                );
+            });
+        }
+    }
+
+    #[cfg(feature = "std")]
     if let Some((key, path_hash, elements)) = traced_outline {
         std::eprintln!(
             "GLIFO_ATLAS_SLOT page={} slot=({},{},{},{}) \
