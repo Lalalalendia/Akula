@@ -1,0 +1,120 @@
+name: Sparse splice exact-source ABBA
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/ui/editor/document/sparse.rs'
+      - '.github/bench/sparse-splice-ab.rs'
+      - '.github/workflows/sparse-splice-abba.yml'
+
+permissions:
+  contents: read
+
+# Diagnostic only; superseded PR heads should not consume runner time.
+concurrency:
+  group: akula-sparse-splice-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline-vs-head:
+    name: Actual Sparse implementation A/B/B/A
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Extract and compile exact base and candidate
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          SRC='aquilum-app/native/src/ui/editor/document/sparse.rs'
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          git show "$BASE_SHA:$SRC" > "$RUNNER_TEMP/sparse-base.rs"
+          git show "$HEAD_SHA:$SRC" > "$RUNNER_TEMP/sparse-head.rs"
+          for side in base head; do
+            AKULA_SPARSE_IMPL="$RUNNER_TEMP/sparse-$side.rs" \
+              rustc --edition=2021 -O -Awarnings \
+              .github/bench/sparse-splice-ab.rs -o "$RUNNER_TEMP/sparse-$side"
+          done
+          {
+            echo "base=$BASE_SHA"
+            echo "head=$HEAD_SHA"
+            echo "runner=$RUNNER_NAME"
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } | tee sparse-environment.log
+      - name: Measure both real implementations, interleaved ABBA
+        shell: bash
+        run: |
+          set -euo pipefail
+          run=0
+          for side in base head head base base head head base; do
+            run=$((run + 1))
+            "$RUNNER_TEMP/sparse-$side" | tee "sparse-$run-$side.log"
+          done
+      - name: Verify exact output parity and report paired medians
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import statistics
+          from pathlib import Path
+
+          cases = ('one_line', 'sixteen_lines', 'line_delta_control')
+          pattern = re.compile(r'SPARSE_AB case=(\w+) elapsed_ms=([0-9.]+) checksum=(\d+)')
+          trials = {'base': [], 'head': []}
+          for path in Path('.').glob('sparse-*-*.log'):
+              match = re.fullmatch(r'sparse-\d+-(base|head)\.log', path.name)
+              if not match:
+                  continue
+              trial = {case: (float(ms), checksum) for case, ms, checksum
+                       in pattern.findall(path.read_text())}
+              assert set(trial) == set(cases), f'Incomplete run: {path}'
+              trials[match.group(1)].append(trial)
+          assert len(trials['base']) == len(trials['head']) == 4, trials
+          lines = [
+              '## Akula Sparse::splice ABBA — exact source, same runner',
+              '',
+              '| Case | Baseline median ms | PR median ms | Difference |',
+              '|---|---:|---:|---:|',
+          ]
+          for case in cases:
+              checksums = {run[case][1] for runs in trials.values() for run in runs}
+              assert len(checksums) == 1, f'Cache semantics differ for {case}: {checksums}'
+              before = statistics.median(run[case][0] for run in trials['base'])
+              after = statistics.median(run[case][0] for run in trials['head'])
+              assert before > 0 and after > 0
+              change = 100.0 * (after / before - 1)
+              lines.append(f'| {case} | {before:.4f} | {after:.4f} | {change:+.1f}% |')
+          lines += [
+              '',
+              'Negative difference means lower elapsed time. This isolates cached',
+              'paragraph key maintenance, not real editor input-to-frame latency.',
+              'No hard performance threshold; native Rust and pixel fidelity CI remain required.',
+              '',
+          ]
+          report = '\n'.join(lines)
+          print(report)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as handle:
+              handle.write(report)
+          Path('sparse-abba-summary.md').write_text(report)
+          PY
+      - name: Upload numeric diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-sparse-splice-${{ github.event.pull_request.head.sha }}
+          path: |
+            sparse-environment.log
+            sparse-*-*.log
+            sparse-abba-summary.md
+          if-no-files-found: warn
+          retention-days: 14
