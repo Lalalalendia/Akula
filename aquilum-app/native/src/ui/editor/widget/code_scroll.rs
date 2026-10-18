@@ -177,6 +177,24 @@ mod tests {
     }
 
     #[test]
+    fn deleting_newline_before_a_fence_clears_its_stale_scroll() {
+        let original = "before\n~~~rust\nx\n~~~";
+        let mut editor = TextEditor::new(original).markdown();
+        let opener = original.find("~~~rust").unwrap();
+        assert!(editor.code_scrolls.advance(opener, 65.0, 300.0, 100.0));
+        editor.apply_change(opener - 1..opener, String::new());
+        assert_eq!(editor.code_scrolls.get(opener - 1), 0.0, "joined prose must not own the old fence offset");
+    }
+
+    #[test]
+    fn destroying_a_middle_fence_marker_clears_scroll() {
+        let mut editor = TextEditor::new("~~~rust\ncode\n~~~").markdown();
+        assert!(editor.code_scrolls.advance(0, 80.0, 400.0, 180.0));
+        editor.apply_change(1..2, "x".to_owned());
+        assert_eq!(editor.code_scrolls.get(0), 0.0, "old opener is no longer fenced code");
+    }
+
+    #[test]
     fn direct_edit_map_can_preserve_before_and_delete_crossing_fence() {
         let mut offsets = Offsets::default();
         assert!(offsets.advance(100, 45.0, 400.0, 200.0));
