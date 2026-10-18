@@ -233,6 +233,9 @@ mod tests {
                 blob_bytes: Some(bytes.len() as u64),
             });
         }
+        // Shard wire records must be strictly ascending by RevisionId;
+        // UUID generation order is unrelated to canonical shard order.
+        references.sort_by_key(|entry| entry.revision_id);
         let shard = S3ManifestShardV1::new(
             &ns, OperationId::new(), references,
         ).unwrap();
