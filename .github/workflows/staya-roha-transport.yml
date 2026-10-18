@@ -41,6 +41,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y iproute2
           python3 tests/two_namespace_smoke.py
+      - name: Offline mDNS discovery and authorized QUIC across namespaces
+        working-directory: staya/roha-transport
+        timeout-minutes: 4
+        run: python3 tests/mdns_namespace_smoke.py
       - name: Format
         working-directory: staya/roha-transport
         run: cargo fmt --all -- --check
