@@ -30,6 +30,8 @@ installed = []
 memory-probe = []
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
+# Separate non-published installer-witness integration acceptance.
+sync-installed-host-witness = ["sync-installed-host", "aquilum-core/sync-installed-host-witness"]
 
 [dependencies]
 aquilum-core = { path = "../core", features = ["host-custody"] }
