@@ -349,3 +349,7 @@ fn missing_installer_ledger_blocks_all_structural_file_gate_mutations() {
             "forbidden File Gate route changed bytes: {forbidden}");
     }
 }
+
+// Run only for the separately built, non-published witnessed-host flavor.
+#[cfg(feature = "sync-installed-host-witness")]
+include!("app_core_witness_tests.rs");

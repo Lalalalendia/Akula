@@ -174,6 +174,20 @@ impl SharedHostCustodyRegistry {
         Self::open_existing_checked(path, Some(expected))
     }
 
+    /// Dedicated compiler-selected installer-witness route. Only the
+    /// approved, independent witness reader may supply expected physical IDs.
+    /// This does not authenticate ownership without a real OS-protected
+    /// installer authority over the witness and its directory.
+    #[cfg(feature = "sync-installed-host-witness")]
+    pub(crate) fn open_existing_installer_witness(
+        path: &Path, witness_path: &Path,
+    ) -> Result<Self, HostCustodyError> {
+        let expected = super::host_install_witness::read_installer_witness(
+            path, witness_path,
+        )?;
+        Self::open_existing_checked(path, Some(expected))
+    }
+
     fn open_existing_checked(
         path: &Path,
         expected: Option<HostLedgerObjectIds>,

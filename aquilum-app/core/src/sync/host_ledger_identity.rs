@@ -52,7 +52,7 @@ impl FileId {
 /// No creating, truncating, repairing or following symlink/reparse leaves.
 /// SQLite may create its own sidecars, but its read/write handle must NEVER
 /// silently resolve to an untrusted alias.
-fn checked_member(path: &Path) -> Result<Option<(File, FileId)>, HostCustodyError> {
+pub(super) fn checked_member(path: &Path) -> Result<Option<(File, FileId)>, HostCustodyError> {
     let first = match fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),

@@ -13,8 +13,11 @@ on:
       - 'aquilum-app/core/src/sync/host_custody_registry.rs'
       - 'aquilum-app/core/src/sync/host_ledger_identity.rs'
       - 'aquilum-app/core/src/sync/host_cold_identity_tests.rs'
+      - 'aquilum-app/core/src/sync/host_install_witness.rs'
+      - 'aquilum-app/core/src/app_core_witness_tests.rs'
       - 'aquilum-app/core/src/sync/host_core_epoch_tests.rs'
       - 'aquilum-app/native/src/workspace.rs'
+      - 'aquilum-app/native/src/workspace_installed_witness_tests.rs'
       - '.github/workflows/sync-host-custody.yml'
   workflow_dispatch:
 
@@ -128,3 +131,59 @@ jobs:
         env:
           AKULA_INSTALLED_HOST_CUSTODY_DB: ''
         run: cargo test --locked -p aquilum-native --bin aquilum-native --no-default-features --features installed,sync-installed-host workspace::installed_host_native_tests -- --nocapture
+
+  witnessed-installed-host:
+    name: Witnessed cold-start Core / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 80
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AKULA_B6B_TEST_ALLOW_PROVISION: '1'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-b6b-witness
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Select independent disposable compile-time paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AKULA_INSTALLED_HOST_CUSTODY_DB=$RUNNER_TEMP/akula-b6b-host/akula-ci-b6b-ledger.sqlite3" >> "$GITHUB_ENV"
+          echo "AKULA_INSTALLED_HOST_WITNESS_PATH=$RUNNER_TEMP/akula-b6b-witness/akula-ci-b6b-receipt.json" >> "$GITHUB_ENV"
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-b6b-witness
+          key: p0-b6b-witness-${{ matrix.os }}
+          cache-workspace-crates: true
+      - name: Verify witnessed host does not activate AWS
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo tree --locked -p aquilum-core --no-default-features --features sync-installed-host-witness > witnessed-tree.txt
+          cargo tree --locked -p aquilum-native --no-default-features --features installed,sync-installed-host-witness > native-tree.txt
+          if grep -E 'aws-(config|sdk-s3|sdk-sts) ' witnessed-tree.txt native-tree.txt; then
+            echo 'Witnessed host-only profile unexpectedly activated AWS'
+            exit 1
+          fi
+      - name: Real cold Core.open witness, 2 processes, forged valid empty DB and missing receipt
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --no-default-features --features sync-installed-host-witness compiler_pinned_witness_survives_cold_restart_and_refuses_foreign_empty_ledger -- --nocapture
+      - name: Install native Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Real native Workspace.open with external witness and second process
+        working-directory: aquilum-app
+        env:
+          AKULA_B6B_NATIVE_SMOKE: '1'
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --no-default-features --features installed,sync-installed-host-witness workspace::installed_host_witness_tests -- --nocapture
