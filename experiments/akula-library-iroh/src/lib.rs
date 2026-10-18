@@ -470,6 +470,70 @@ mod tests {
         server_ep.close().await; task.abort();
         Ok(())
     }
+    #[tokio::test(flavor="multi_thread",worker_threads=8)]
+    async fn ten_simultaneous_quic_readers_load_and_measure() -> Result<()> {
+        use tokio::time::Instant;
+        const N: usize = 10;
+        let server_ep = private_endpoint(None).await?;
+        let addr = loopback_addr(&server_ep)?;
+        let mut endpoints = Vec::with_capacity(N);
+        for _ in 0..N { endpoints.push(private_endpoint(None).await?); }
+        let allowed: HashSet<_> = endpoints.iter().map(|ep| ep.id()).collect();
+        let book = Book::new(bytes(CHUNK_SIZE))?;
+        let global_bytes = (N * CHUNK_SIZE) as u64;
+        let server = Server::new(book.clone(), allowed, QuotaState::new(global_bytes, CHUNK_SIZE as u64))
+            .with_rate_limit(rate_limit::RateGate::new(2 * 1024 * 1024, 1024 * 1024)?);
+        let quota = server.quota();
+        let task = tokio::spawn(server.run(server_ep.clone()));
+        let barrier = Arc::new(tokio::sync::Barrier::new(N+1));
+        let mut jobs = Vec::new();
+        for ep in &endpoints {
+            let ep = ep.clone();
+            let expected = book.manifest.digest;
+            let addr = addr.clone();
+            let gate = barrier.clone();
+            jobs.push(tokio::spawn(async move {
+                gate.wait().await;
+                let start = Instant::now();
+                let manifest = manifest_from(&ep, addr.clone()).await?;
+                ensure!(manifest.digest == expected, "book mismatch");
+                let mut partial = PartialDownload::new(manifest)?;
+                let (count, usage) = get_parts_with_usage(&ep, addr, &mut partial, None).await?;
+                let complete = partial.finish()?;
+                ensure!(count == 1 && sha(&complete) == expected, "verified payload mismatch");
+                Ok::<_, anyhow::Error>((start.elapsed(), usage.udp_rx_bytes, complete.len()))
+            }));
+        }
+        barrier.wait().await;
+        let started = Instant::now();
+        let mut times = Vec::new();
+        let mut udp_rx = 0u64;
+        for job in jobs {
+            let (elapsed, udp, size) = timeout(Duration::from_secs(40), job).await???;
+            ensure!(size == CHUNK_SIZE, "unexpected payload size");
+            times.push(elapsed);
+            udp_rx = udp_rx.saturating_add(udp);
+        }
+        times.sort();
+        let elapsed = started.elapsed();
+        let p50 = times[4].as_millis();
+        let p95 = times[9].as_millis();
+        let slowest_ratio = times[9].as_secs_f64() / times[0].as_secs_f64().max(0.001);
+        let accounted = quota.lock().unwrap();
+        ensure!(accounted.used() == global_bytes, "global budget mismatch");
+        for ep in &endpoints {
+            ensure!(accounted.used_for(&ep.id()) == CHUNK_SIZE as u64, "peer quota mismatch");
+        }
+        println!("LOAD_10 clients=10 payload_bytes={global_bytes} udp_rx_bytes={udp_rx} elapsed_ms={} p50_ms={p50} p95_ms={p95} slowest_fastest_ratio={slowest_ratio:.3} max_connections={MAX_ACTIVE_CONNECTIONS}",
+            elapsed.as_millis());
+        ensure!(p95 < 40_000, "ten-client completion too slow");
+        ensure!(slowest_ratio < 20.0, "slowest reader starved");
+        drop(accounted);
+        for ep in endpoints { ep.close().await; }
+        server_ep.close().await;
+        task.abort();
+        Ok(())
+    }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn real_iroh_direct_loopback_and_resume() -> Result<()> {
         let server_ep = private_endpoint(None).await?;
