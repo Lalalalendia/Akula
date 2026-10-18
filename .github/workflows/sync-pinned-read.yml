@@ -128,6 +128,7 @@ jobs:
           cargo test --locked -p aquilum-core --features sync-engine migrates_v1_document_store -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine durable_intent_survives_restart -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine armed_document_write_crash_intent -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-engine cannot_arm_durable_editor_with_active_document_buffers -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine guarded_write_completes_only_after -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine guarded_metadata_failure_preserves_crash_intent -- --nocapture
       - name: OS two-process File Gate advisory lock probe (test-only)
