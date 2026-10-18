@@ -8,6 +8,7 @@ use std::{
 
 use akula_roha_transport::{
     AllowedPeers, StayaTransport,
+    admission::{AdmissionError, AdmissionLimits, StageBudget},
     transfer::{
         FRAME_HEADER_BYTES, MAX_CHUNK_BYTES, MAX_OBJECT_BYTES, TransferManifest, VerifiedAssembly,
     },
@@ -1001,4 +1002,92 @@ async fn kill_receiver_during_unflushed_partial_and_fail_closed() {
     })
     .await
     .expect("SIGKILL crash-recovery fixture exceeded hard deadline");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn quota_requires_preflight_before_quic_get() {
+    tokio::time::timeout(TEST_DEADLINE, async {
+        // These descriptors are local fixed test metadata. No remote-provided
+        // size is accepted as an authority for quota or VaultId permissions.
+        let provider_key = SecretKey::generate();
+        let client_key = SecretKey::generate();
+        let bytes = bytes(64 * 1024 + 17);
+        let store = MemStore::new();
+        let tag = store.add_slice(&bytes).await.expect("seed immutable known blob");
+        let hash = tag.hash;
+        let expected = *blake3::hash(&bytes).as_bytes();
+        assert_eq!(expected, *hash.as_bytes(), "same BLAKE3 contents");
+        let budget = StageBudget::new(AdmissionLimits {
+            max_object_bytes: 128 * 1024,
+            max_tracked_bytes: 128 * 1024,
+            max_peer_bytes: 128 * 1024,
+            max_active: 1,
+            max_peer_active: 1,
+        })
+        .expect("valid independent quota policy");
+        let client_id = client_key.public();
+
+        assert!(matches!(
+            budget.reserve(client_id, expected, (128 * 1024) + 1),
+            Err(AdmissionError::ObjectTooLarge)
+        ));
+        assert_eq!(budget.snapshot().expect("empty quota").tracked_objects, 0);
+        let mut lease = budget
+            .reserve(client_id, expected, bytes.len() as u64)
+            .expect("authorized object fits quota");
+        assert!(matches!(
+            budget.reserve(client_id, *blake3::hash(b"another").as_bytes(), 1),
+            Err(AdmissionError::GlobalSlotsExhausted)
+        ));
+        assert!(matches!(
+            budget.reserve(client_id, expected, bytes.len() as u64),
+            Err(AdmissionError::DuplicateObject)
+        ));
+
+        let (events, worker) = restricted_events(client_id, HashSet::from([hash]));
+        let server = local_endpoint(provider_key).await;
+        let router = Router::builder(server)
+            .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, Some(events)))
+            .spawn();
+        let client = local_endpoint(client_key).await;
+        let connection = client
+            .connect(router.endpoint().addr(), iroh_blobs::ALPN)
+            .await
+            .expect("authenticated private QUIC connection");
+
+        let downloaded = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            get_blob(connection.clone(), hash).bytes(),
+        )
+        .await
+        .expect("bounded GET")
+        .expect("verified iroh-blobs");
+        assert_eq!(downloaded.as_ref(), bytes.as_slice());
+        lease
+            .verify(downloaded.as_ref())
+            .expect("independent full BLAKE3 and size");
+        assert_eq!(budget.snapshot().expect("reservation held").verified_objects, 1);
+        assert_eq!(
+            budget.snapshot().expect("reservation held").tracked_bytes,
+            bytes.len() as u64,
+            "completed download still consumes capacity"
+        );
+
+        // The future production adapter must delete the corresponding
+        // disk staging data BEFORE releasing a retained reservation.
+        drop(downloaded);
+        drop(lease);
+        assert_eq!(budget.snapshot().expect("released").tracked_bytes, 0);
+        println!(
+            "P2P_BLOB_ADMISSION size={} single_object_bounded=true global_slots_bounded=true duplicate_denied=true completed_bytes_held_until_cleanup=true verified=true hard_disk_quota=false file_gate=false",
+            bytes.len()
+        );
+        connection.close(0u8.into(), b"quota lab done");
+        router.shutdown().await.expect("provider shutdown");
+        client.close().await;
+        worker.abort();
+        drop(tag);
+    })
+    .await
+    .expect("admitted QUIC transfer time budget");
 }
