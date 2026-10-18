@@ -1101,7 +1101,24 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                 };
                 let tint = image.tint.as_ref();
 
-                match (image.has_skew(), image.nearest_neighbor()) {
+                // Diagnostic-only: compare the existing fast axis-aligned
+                // nearest-neighbor painter against the generic nearest-neighbor
+                // painter for *alpha-mask* images (cached outline glyphs).
+                // Do not alter sampling quality, glyph atlas, or non-mask
+                // images. This switch is not a production configuration.
+                #[cfg(feature = "std")]
+                let probe_generic_nearest = std::env::var_os("AQ_TEST_GLYPH_GENERIC_NN").is_some()
+                    && image.nearest_neighbor()
+                    && tint.is_some_and(|t| {
+                        matches!(t.mode, vello_common::paint::TintMode::AlphaMask)
+                    });
+                #[cfg(not(feature = "std"))]
+                let probe_generic_nearest = false;
+
+                match (
+                    image.has_skew() || probe_generic_nearest,
+                    image.nearest_neighbor(),
+                ) {
                     (false, false) => {
                         // Axis-aligned with filtering - use optimized plain painters
                         if image.sampler.quality == ImageQuality::Medium {
