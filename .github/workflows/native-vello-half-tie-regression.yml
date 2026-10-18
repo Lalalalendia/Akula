@@ -1,0 +1,93 @@
+name: Vello Common half-tie fidelity (production candidate)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/vendor/vello_common/**'
+      - 'aquilum-app/native/vendor/vello_cpu/src/render.rs'
+      - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
+      - 'aquilum-app/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - '.github/workflows/native-vello-half-tie-regression.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-half-tie-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    name: Locked local Vello Common / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-common-vendored-half-tie-v1
+          cache-workspace-crates: true
+      - name: Install Linux native GUI dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Verify locked local dependency and source provenance
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo metadata --locked --format-version=1 > "$RUNNER_TEMP/vello-half-tie-meta.json"
+          python - "$RUNNER_TEMP/vello-half-tie-meta.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+          meta = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          matches = [p for p in meta["packages"] if p["name"] == "vello_common"]
+          assert len(matches) == 1, matches
+          path = pathlib.Path(matches[0]["manifest_path"])
+          assert "native/vendor/vello_common" in path.as_posix(), path
+          assert matches[0]["version"] == "0.3.0", matches[0]["version"]
+          print("Using Akula-vendored vello_common", path)
+          PY
+      - name: Exact real glyph 495 source mask / all atlas slots and crop origins
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p vello_cpu --lib guard96_real_glyph_495_slot_and_crop_coverage -- --nocapture
+          cargo test --release --locked -p vello_cpu --lib atlas_like_outline_coverage_is_ -- --nocapture
+          cargo test --release --locked -p glifo --lib hinted_vertical_snap -- --nocapture
+      - name: App fractional-scroll and mixed-frame reference parity
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native hinted_fractional_scroll_remains_pixel_stable -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_dual_dispatch_route -- --ignored --nocapture --test-threads=1
+      - name: Five independent real-editor guard96 processes / all 32 frames
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 5); do
+            echo "GUARD96_RELEASE_RUN_BEGIN $attempt"
+            cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1
+            echo "GUARD96_RELEASE_RUN_PASS $attempt"
+          done
+          echo "Native release guard96: 5/5 full-frame runs passed <=1/255" >> "$GITHUB_STEP_SUMMARY"
