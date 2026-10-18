@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# Replace obsolete PR experiment runs after new commits; keep manual runs.
+concurrency:
+  group: akula-staya-iroh-blobs-lab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   blobs:
     name: Direct QUIC Staya vs iroh-blobs and unauthorized push refusal
