@@ -25,6 +25,8 @@ pub struct HubIo<'a> {
 fn disk_error(path: &Path, error: FileCommandError) -> DiskError {
     match error {
         FileCommandError::Conflict { .. } => DiskError::Conflict,
+        FileCommandError::NeedsReview { message } =>
+            DiskError::Other { code: "needs_review", message },
         _ if !path.exists() => DiskError::Missing,
         FileCommandError::InvalidUtf8 { message } => DiskError::Other { code: "invalid_utf8", message },
         error => DiskError::Other { code: "io", message: error.to_string() },
@@ -101,6 +103,20 @@ impl SessionIo for HubIo<'_> {
     }
 
     fn preserve(&self, body: &str, report: ConflictReport) -> Result<(), DiskError> {
+        // Conflict/truncation copies use an independent File Gate *create*.
+        // That path is not OS-locked yet. Fail closed for armed editor roots,
+        // rather than creating an unprotected copy within a guarded vault.
+        #[cfg(feature = "sync-s3")]
+        match crate::sync::guarded_editor::active_for(self.core, self.path) {
+            Ok(true) => return Err(DiskError::Other {
+                code: "preservation_failed",
+                message: "guarded editor conflict-copy creation is not yet admitted".into(),
+            }),
+            Err(error) => return Err(DiskError::Other {
+                code: "preservation_failed", message: error.to_string(),
+            }),
+            Ok(false) => {}
+        }
         preserve_copy(self.core, self.path, body, report, self.offset_seconds).map(|_| ())
     }
 

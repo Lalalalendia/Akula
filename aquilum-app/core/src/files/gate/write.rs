@@ -17,6 +17,15 @@ pub fn write(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
+    // Opt-in S3-registered editor mode reuses a held external OS lock across
+    // primary bytes AND HistoryService. It must run before the ordinary
+    // process-global File Gate mutex to preserve the lock order.
+    #[cfg(feature = "sync-s3")]
+    if let Some(guarded) = crate::sync::guarded_editor::maybe_write(
+        core, path, content, expected_hash, source, version_name,
+    ) {
+        return guarded;
+    }
     let (before, result) = {
         let _guard = core.file_mutation_guard_for_write()?;
         let before = core.history.disk_before(path, expected_hash);

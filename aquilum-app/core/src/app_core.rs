@@ -92,6 +92,10 @@ pub struct Core {
     /// File Gate writes and read-only protected-original capture. It is NOT a
     /// cross-process OS lock or trusted write authorization.
     pub(crate) file_mutations: &'static Mutex<()>,
+    /// Explicitly armed, per-Core cooperative editor save routes. No UI
+    /// activation, implicit S3 bootstrap or remote sync write permission.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) guarded_editors: Mutex<Vec<crate::sync::guarded_editor::ActiveEditorGuard>>,
     pub wikixiv: WikixivService,
     pub watcher: WorkspaceWatcher,
     /// The note open in the UI, reported by the host; MCP tools use it for «эта заметка».
@@ -125,6 +129,8 @@ impl Core {
                 history: HistoryService::new(app_data_dir),
                 documents: DocumentHub::new(&app_data_dir.join("documents.sqlite3")),
                 file_mutations: &PROCESS_FILE_MUTATIONS,
+                #[cfg(feature = "sync-s3")]
+                guarded_editors: Mutex::new(Vec::new()),
                 wikixiv: WikixivService::new(),
                 watcher: WorkspaceWatcher::new(watch_sink),
                 active_note: ActiveNote::default(),
