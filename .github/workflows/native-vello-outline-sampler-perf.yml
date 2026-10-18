@@ -1,0 +1,138 @@
+name: Native outline atlas quality, fidelity and perf ABBA
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-outline-sampler-perf.yml'
+      - '.github/scripts/compare-outline-sampler-abba.py'
+      - 'aquilum-app/native/vendor/glifo/src/renderer.rs'
+      - 'aquilum-app/native/src/app/tests/perf/vello_release.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-outline-sampler-perf-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sampler-abba:
+    name: Release p95 and direct-render visual difference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-outline-sampler-perf-v1
+          cache-workspace-crates: true
+      - name: Install native Linux libraries and isolated image analyzer
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev python3-venv
+          python3 -m venv "$RUNNER_TEMP/outline-image-venv"
+          "$RUNNER_TEMP/outline-image-venv/bin/python" -m pip install 'Pillow==11.3.0'
+      - name: Capture source and CPU environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/vello-outline-performance"
+          mkdir -p "$root/images"
+          {
+            git rev-parse HEAD
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+            cargo --version
+          } | tee "$root/runner.txt"
+      - name: Four LOW–HIGH–HIGH–LOW release ABBA cycles, same runner
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/vello-outline-performance"
+          low_n=0
+          high_n=0
+          for cycle in 1 2 3 4; do
+            for mode in low high high low; do
+              if [ "$mode" = low ]; then
+                low_n=$((low_n + 1))
+                number="$low_n"
+              else
+                high_n=$((high_n + 1))
+                number="$high_n"
+              fi
+              label=$(printf '%02d' "$number")
+              log="$root/perf-$mode-$label.log"
+              echo "OUTLINE_PERF cycle=$cycle mode=$mode attempt=$label"
+              if [ "$mode" = high ]; then
+                if ! env AQ_TEST_OUTLINE_ATLAS_SAMPLER=high cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  tail -n 80 "$log"
+                  exit 1
+                fi
+              else
+                if ! cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  tail -n 80 "$log"
+                  exit 1
+                fi
+              fi
+              test "$(grep -c 'VELLO_RELEASE case=' "$log")" -eq 8
+              test "$(grep -c 'VELLO_RELEASE_PARITY case=' "$log")" -eq 4
+            done
+          done
+          test "$low_n" -eq 8
+          test "$high_n" -eq 8
+      - name: Capture deterministic reference and cached text frames outside timing loops
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/vello-outline-performance"
+          for mode in direct1 low high direct2; do
+            folder="$root/images/$mode"
+            mkdir -p "$folder"
+            log="$root/capture-$mode.log"
+            echo "OUTLINE_CAPTURE=$mode"
+            case "$mode" in
+              direct1|direct2)
+                if ! env AQ_TEST_DISABLE_GLYPH_ATLAS=1 AQ_SAMPLER_SCREENSHOTS="$folder" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  tail -n 80 "$log"
+                  exit 1
+                fi
+                ;;
+              high)
+                if ! env AQ_TEST_OUTLINE_ATLAS_SAMPLER=high AQ_SAMPLER_SCREENSHOTS="$folder" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  tail -n 80 "$log"
+                  exit 1
+                fi
+                ;;
+              low)
+                if ! env AQ_SAMPLER_SCREENSHOTS="$folder" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  tail -n 80 "$log"
+                  exit 1
+                fi
+                ;;
+            esac
+            test "$(find "$folder" -name '*.png' -type f | wc -l)" -eq 8
+          done
+      - name: Summarize paired frame cost, raster cost and pixel deviations
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/vello-outline-performance"
+          "$RUNNER_TEMP/outline-image-venv/bin/python" .github/scripts/compare-outline-sampler-abba.py "$root" | tee "$root/analysis.log"
+          test -s "$root/sampler-abba-summary.md"
+          cat "$root/sampler-abba-summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve paired release logs, input captures and measured differences
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-outline-sampler-abba-${{ github.sha }}
+          path: |
+            vello-outline-performance/
+          retention-days: 14
+          if-no-files-found: warn
