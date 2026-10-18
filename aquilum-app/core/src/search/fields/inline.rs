@@ -22,9 +22,9 @@ const SEPARATOR: &str = "::";
 fn inline_pairs(text: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
     for (_, line) in fence::outside(frontmatter_body(text)) {
-        // Backtick removal can join two ':' characters into a separator.
-        // Keep parsing such lines even when the raw text has no "::".
-        if !line.contains(SEPARATOR) && !line.contains('`') {
+        // Only literal Markdown separators are valid field syntax.
+        // Removing inline code must not manufacture "::" from separated ":".
+        if !line.contains(SEPARATOR) {
             continue;
         }
         let line = strip_code_spans(line);
@@ -49,6 +49,11 @@ fn strip_code_spans(line: &str) -> Cow<'_, str> {
     let mut inside = false;
     for symbol in line.chars() {
         if symbol == '`' {
+            // Keep a boundary where code was removed, otherwise ':' + ':' may
+            // join across a code span when a different "::" occurs in the line.
+            if !inside {
+                kept.push(' ');
+            }
             inside = !inside;
             continue;
         }
@@ -206,12 +211,24 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_code_span_can_join_separated_colons() {
-        // Preserve the previous parser's behavior even if "::" is not
-        // present verbatim in the Markdown input.
+    fn code_spans_cannot_manufacture_metadata_separators() {
+        // Removing inline code must not join two standalone colons into "::".
+        assert!(pairs("Статус:`ignored`: готово").is_empty());
+        assert!(pairs("В строке [Статус:`ignored`: готово]").is_empty());
+        assert!(indexed_fields("Статус:`ignored`: готово").is_empty());
+        // Even if "::" exists inside the removed code, the outside colons
+        // must not combine into a fabricated metadata delimiter.
+        assert!(pairs("Статус:`ignored::value`: готово").is_empty());
+        assert!(pairs("В строке [Статус:`ignored::value`: готово]").is_empty());
+
+        // A literal separator still works, even when the value includes code.
         assert_eq!(
-            pairs("Статус:`ignored`: готово"),
+            pairs("Статус:: `ignored`готово"),
             vec![("Статус".to_owned(), "готово".to_owned())]
+        );
+        assert_eq!(
+            pairs("Автор:: до`inline`после"),
+            vec![("Автор".to_owned(), "до после".to_owned())]
         );
     }
 
