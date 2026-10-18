@@ -24,6 +24,9 @@ use crate::sync::{
 };
 
 const MAX_SELECTIVE_SHARD_BYTES: u64 = 32 * 1024 * 1024;
+// Cap cumulative V2 letter bytes for the optional long-offline reader.
+// The original 8-generation path already fits below this ceiling.
+const MAX_LONG_OFFLINE_LETTER_BYTES: u64 = 16 * 1024 * 1024;
 type KnownShards = BTreeMap<OperationId, (String, Vec<S3RevisionRefV1>)>;
 
 /// Observational receipt only. It does not prove current availability of
@@ -164,11 +167,35 @@ impl AwsS3ProbeClient {
         previous_metadata: &S3VerifiedRevisionMetadataStore,
         letters_oldest_first: &[String],
     ) -> Result<S3CoordSelectivePacksPreview, S3CoordOfflineChainError> {
+        self.inspect_v2_offline_selective_packs_with_budget(
+            scope, journal, previous_pinned, previous_metadata,
+            letters_oldest_first, MAX_OFFLINE_GENERATIONS,
+        ).await
+    }
+
+    /// An internal read-only verifier shared with 03b locator discovery.
+    /// Existing public explicit-letter API remains limited to 8 generations.
+    /// A separate opt-in long-offline discovery entrypoint can prove up to
+    /// the generic walker ceiling, under the SAME global byte budgets.
+    pub(super) async fn inspect_v2_offline_selective_packs_with_budget(
+        &self,
+        scope: &S3RemoteAnchorScope,
+        journal: &S3RemoteAnchorJournal,
+        previous_pinned: &S3PinnedRevisionSnapshot,
+        previous_metadata: &S3VerifiedRevisionMetadataStore,
+        letters_oldest_first: &[String],
+        max_generations: usize,
+    ) -> Result<S3CoordSelectivePacksPreview, S3CoordOfflineChainError> {
+        if max_generations == 0
+            || max_generations > S3ManifestDeltaLimits::default().max_frames
+        {
+            return Err(S3CoordOfflineChainError::ExceededOfflineBudget);
+        }
         if !scope.matches_connection(self.bound_profile(), self.bound_keyspace()) {
             return Err(S3CoordSidecarReadError::ScopeMismatch.into());
         }
         if letters_oldest_first.is_empty()
-            || letters_oldest_first.len() > MAX_OFFLINE_GENERATIONS
+            || letters_oldest_first.len() > max_generations
         {
             return Err(S3CoordOfflineChainError::ExceededOfflineBudget);
         }
@@ -211,8 +238,8 @@ impl AwsS3ProbeClient {
         // before attempting to trust any letter or changed shard.
         let history = walk_s3_delta_from_saved_anchor(
             self, scope, journal, S3ManifestDeltaLimits {
-                max_frames: MAX_OFFLINE_GENERATIONS,
-                max_total_shard_refs: MAX_OFFLINE_GENERATIONS * 256,
+                max_frames: max_generations,
+                max_total_shard_refs: max_generations * 256,
             },
         ).await?;
         let generations = match &history.outcome {
@@ -244,6 +271,7 @@ impl AwsS3ProbeClient {
         let mut total_new = Vec::new();
         let mut packs = 0usize;
         let mut pack_bytes = 0_u64;
+        let mut letter_bytes = 0_u64;
         let mut downloaded_shards = 0usize;
         let mut reused_shards = 0usize;
         let mut checked_shard_bytes = 0_u64;
@@ -276,6 +304,10 @@ impl AwsS3ProbeClient {
             let raw = self.get_bounded(
                 &key, MAX_DELTA_ENVELOPE_BYTES as u64,
             ).await.map_err(S3CoordSidecarReadError::from)?;
+            letter_bytes = letter_bytes
+                .checked_add(raw.bytes.len() as u64)
+                .filter(|value| *value <= MAX_LONG_OFFLINE_LETTER_BYTES)
+                .ok_or(S3CoordOfflineChainError::ExceededOfflineBudget)?;
             if raw.blake3 != *digest {
                 return Err(S3CoordSidecarReadError::InvalidEnvelopeDigest.into());
             }
@@ -348,6 +380,7 @@ mod tests {
         assert!(MAX_SELECTIVE_SHARD_BYTES <= 32 * 1024 * 1024);
         assert_eq!(MAX_OFFLINE_GENERATIONS, 8);
         assert_eq!(MAX_OFFLINE_PACK_BYTES, 16 * 1024 * 1024);
+        assert_eq!(MAX_LONG_OFFLINE_LETTER_BYTES, 16 * 1024 * 1024);
     }
 
     #[test]
