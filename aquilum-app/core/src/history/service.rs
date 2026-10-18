@@ -238,6 +238,23 @@ impl HistoryService {
             .is_some_and(|flag| flag.load(Ordering::Acquire))
     }
 
+    /// Serialize the transition into participant HOLD with every in-flight
+    /// direct HistoryService mutation across all cooperating Core instances.
+    /// The caller MUST already own PROCESS_FILE_MUTATIONS and may NOT run
+    /// callbacks, enter File Gate again, or execute a normal HistoryService
+    /// mutator from inside the closure.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn with_participant_enrollment_fence<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, FileCommandError>,
+    ) -> Result<T, FileCommandError> {
+        let _history_files = PROCESS_HISTORY_FILES.lock()
+            .map_err(|_| FileCommandError::Task {
+                message: "HistoryService enrollment fence poisoned; refusing participant activation".into(),
+            })?;
+        operation()
+    }
+
     pub fn disk_before(
         &self,
         note: &Path,
@@ -283,7 +300,7 @@ impl HistoryService {
                 "direct history save lacks pinned S3 custody",
             ));
         }
-        self.try_saved_impl(roots, note, write)
+        self.try_saved_impl(roots, note, write, false)
     }
 
     /// Narrow checked File Gate exception. The sealed token can be created
@@ -296,7 +313,7 @@ impl HistoryService {
         note: &Path,
         write: NoteWrite<'_>,
     ) -> Result<bool, HistorySaveFailure> {
-        self.try_saved_impl(roots, note, write)
+        self.try_saved_impl(roots, note, write, true)
     }
 
     fn try_saved_impl(
@@ -304,11 +321,21 @@ impl HistoryService {
         roots: Roots<'_>,
         note: &Path,
         write: NoteWrite<'_>,
+        custody_verified: bool,
     ) -> Result<bool, HistorySaveFailure> {
         let now = SystemTime::now();
         let Some(mut state) = self.files_lock() else {
             return Err(HistorySaveFailure::new("history lock", "poisoned"));
         };
+        // Check again AFTER PROCESS_HISTORY_FILES: activation takes that same
+        // mutex while publishing its durable HOLD. A direct writer that saw
+        // a false flag before waiting cannot publish history after enrollment.
+        if !custody_verified && self.denies_unverified_history_writes() {
+            return Err(HistorySaveFailure::new(
+                "guarded history HOLD",
+                "participant enrollment occurred before history mutation",
+            ));
+        }
         let Some(located) = locate(&mut state, roots, note) else {
             return Ok(false);
         };
@@ -475,6 +502,7 @@ impl HistoryService {
         let Some(mut state) = self.files_lock() else {
             return None;
         };
+        if self.denies_unverified_history_writes() { return None; }
         let located = locate(&mut state, roots, note)?;
         if history_blocked(&state, &located) || !allowed_history_directory(&located.vault, &located.dir) {
             return None;
@@ -570,6 +598,10 @@ impl HistoryService {
         let Some(mut state) = self.files_lock() else {
             return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
+        if self.denies_unverified_history_writes() {
+            return Err(HistoryMoveFailure::new(action,
+                "participant HOLD activated before direct history relocation", false));
+        }
         let (Some(source), Some(target)) = (
             locate(&mut state, roots, from),
             locate(&mut state, roots, to),
@@ -640,6 +672,10 @@ impl HistoryService {
         let Some(mut state) = self.files_lock() else {
             return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
+        if self.denies_unverified_history_writes() {
+            return Err(HistoryMoveFailure::new(action,
+                "participant HOLD activated before direct history relocation", false));
+        }
         let Some(located) = locate(&mut state, roots, note) else {
             return Ok(());
         };
@@ -694,6 +730,10 @@ impl HistoryService {
         let Some(mut state) = self.files_lock() else {
             return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
+        if self.denies_unverified_history_writes() {
+            return Err(HistoryMoveFailure::new(action,
+                "participant HOLD activated before direct history relocation", false));
+        }
         let Some(located) = locate(&mut state, roots, restored) else {
             return Ok(());
         };
@@ -798,6 +838,9 @@ impl HistoryService {
         let guard = PROCESS_HISTORY_FILES
             .lock()
             .map_err(|_| "process history-files lock poisoned; refusing cleanup")?;
+        if self.denies_unverified_history_writes() {
+            return Err("history retention denied: participant HOLD activated while waiting for history lock");
+        }
         // A failed transfer in one vault must not stall retention in every
         // unrelated vault. The global lock is still held only during work.
         if guard.blocked.values().any(|block| block.affected_roots.iter().any(|root| {
@@ -1831,5 +1874,64 @@ mod tests {
         let second = fixture.service();
         assert_eq!(first.device, second.device);
         assert_eq!(first.device.len(), 8);
+    }
+
+    #[cfg(feature = "sync-s3")]
+    #[test]
+    fn enrollment_waits_for_history_files_and_late_mutations_observe_hold() {
+        use super::PROCESS_HISTORY_FILES;
+        use crate::files::error::FileCommandError;
+        use std::sync::{mpsc, Arc};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::thread;
+        use std::time::Duration;
+
+        let fixture = Fixture::new();
+        let history = Arc::new(fixture.service());
+        let policy = Arc::new(AtomicBool::new(false));
+        history.bind_guarded_participant_policy(Arc::clone(&policy));
+
+        // A history operation that was already admitted owns the shared
+        // mutex. The enrolling Core MUST wait for that operation to finish
+        // before switching the live participant flag and exposing new routes.
+        let held_history = PROCESS_HISTORY_FILES.lock().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker_service = Arc::clone(&history);
+        let worker_policy = Arc::clone(&policy);
+        let worker = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let result = worker_service.with_participant_enrollment_fence(|| {
+                worker_policy.store(true, Ordering::Release);
+                Ok::<(), FileCommandError>(())
+            });
+            done_tx.send(result).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "participant switched while a history writer still held the mutex");
+        assert!(!policy.load(Ordering::Acquire));
+        drop(held_history);
+        done_rx.recv_timeout(Duration::from_secs(20)).unwrap().unwrap();
+        worker.join().unwrap();
+        assert!(policy.load(Ordering::Acquire));
+
+        let note = fixture.vault.join("NoNewHistory.md");
+        fs::write(&note, "unmodified").unwrap();
+        let blocked = history.try_saved(
+            &|| fixture.roots(), &note,
+            NoteWrite {
+                disk_before: None,
+                text: "rejected",
+                hash: "never-publish",
+                source: Source::Agent,
+                name: None,
+            },
+        );
+        assert!(blocked.is_err());
+        assert!(!fixture.history_of("NoNewHistory.md").exists());
+        assert_eq!(fs::read_to_string(&note).unwrap(), "unmodified");
     }
 }
