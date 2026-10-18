@@ -299,6 +299,39 @@ impl Core {
     pub(crate) fn requires_installed_host_epoch(&self) -> bool {
         self.installed_host_required
     }
+    /// A verified S3 editor can enter host-wide custody ONLY by persisting
+    /// the same root/profile/VaultId/OS-lock identity under the shared SQLite
+    /// enrollment transaction. The caller must already hold the process
+    /// publication + File Gate + HistoryService enrollment fences.
+    ///
+    /// The shared entry is committed BEFORE the private DocumentHub marker:
+    /// a failed private insert leaves the machine-wide HOLD in place. This
+    /// is a one-way safety transition, never an S3 or local write capability.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn enroll_installed_host_s3_participant(
+        &self,
+        record: &crate::sync::host_custody_registry::HostCustodyRecord,
+    ) -> Result<(), FileCommandError> {
+        use crate::sync::host_custody_registry::SharedHostCustodyRegistry;
+        if !self.installed_host_required {
+            return Err(FileCommandError::Task {
+                message: "host S3 enrollment requires the mandatory installed-host policy".into(),
+            });
+        }
+        let path = self.installed_host_custody_db.as_ref()
+            .ok_or_else(|| FileCommandError::Task {
+                message: "cannot enroll host custody: installer ledger missing".into(),
+            })?;
+        let refused = |error| FileCommandError::Task {
+            message: format!("host custody enrollment HOLD: {error:?}"),
+        };
+        let mut host = SharedHostCustodyRegistry::open_existing(path)
+            .map_err(refused)?;
+        host.enroll(record).map_err(refused)?;
+        Ok(())
+    }
+
+
 
     /// Only the still-held host SQLite enrollment epoch can invoke this
     /// exception, never a normal File Gate entrypoint or a network reader.

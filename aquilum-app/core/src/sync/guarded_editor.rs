@@ -148,32 +148,65 @@ pub(crate) fn activate_registered_s3_editor(
     let _file_gate_fence = core.file_mutation_guard()?;
     let mut registry = core.guarded_editors.lock()
         .map_err(|_| refused("cooperative editor registry poisoned"))?;
+    let mut already_active = false;
     for previous in registry.iter() {
         if previous.root.starts_with(&config.root) || config.root.starts_with(&previous.root) {
             // Never switch an armed root to a different custody config in
-            // memory. Host must restart and undergo explicit new admission.
-            return if previous == &config {
-                Ok(())
-            } else {
-                Err(refused("ambiguous or conflicting cooperative editor root"))
-            };
+            // memory. Even an identical reactivation must re-prove the
+            // shared host enrollment, not return early on a cached flag.
+            if previous != &config {
+                return Err(refused("ambiguous or conflicting cooperative editor root"));
+            }
+            already_active = true;
         }
     }
     // This must succeed BEFORE any guarded File Gate route becomes reachable.
     // In particular, it refuses activation with open CRDT editor sessions
     // or an unreadable v2 SQLite write-intent journal.
     core.history.with_participant_enrollment_fence(|| {
-        // Holding both the process File Gate and HistoryFiles barriers means
-        // no in-flight ordinary primary mutation or direct history mutation
-        // is actively touching those files when HOLD becomes visible.
-        // DocumentHub prewrite admission was armed BEFORE taking File Gate.
-        // Commit the appdata participant marker before publishing the writer
-        // route. A failed insert keeps the Core on HOLD with no silent retry.
+        // Enrollment and an ordinary host-bound primary+history publication
+        // use the SAME SQLite BEGIN IMMEDIATE epoch. Register globally FIRST
+        // so another appdata cannot continue to view this root as unenrolled.
+        // A subsequent failed local marker leaves global HOLD intact.
+        if core.requires_installed_host_epoch() {
+            use super::host_custody_registry::{HostCustodyRecord, PhysicalObjectId};
+            let record = HostCustodyRecord {
+                root_path: fs::canonicalize(&config.root)?
+                    .to_str().ok_or_else(|| refused("non-UTF8 shared host root"))?
+                    .to_owned(),
+                root_identity: PhysicalObjectId {
+                    device: verified.registered_root_volume,
+                    file: verified.registered_root_file,
+                },
+                vault_id: config.binding.vault_id,
+                profile_id: config.binding.profile_id.clone(),
+                custody_scope_path: fs::canonicalize(&config.scope)?
+                    .to_str().ok_or_else(|| refused("non-UTF8 shared custody scope"))?
+                    .to_owned(),
+                lock_identity: PhysicalObjectId {
+                    device: verified.lock_volume,
+                    file: verified.lock_file,
+                },
+            };
+            // The verified appdata binding already checked the OS lock and
+            // registered root; the durable host record must agree with it.
+            if record.root_identity.device != config.binding.local_root_device
+                || record.root_identity.file != config.binding.local_root_file
+                || record.vault_id != verified.vault_id
+            {
+                return Err(refused("host and S3 physical identity mismatch"));
+            }
+            core.enroll_installed_host_s3_participant(&record)?;
+        }
+        // Holding both local barriers prevents in-flight primary/history
+        // writes from crossing the local participant transition.
         core.documents.enroll_guarded_participant(
             &config.root, &config.binding.vault_id.to_string(),
             &config.profile_db, &config.custody_db, &config.scope,
         )?;
-        registry.push(config);
+        if !already_active {
+            registry.push(config);
+        }
         Ok(())
     })
 }
@@ -528,4 +561,236 @@ mod tests {
         assert_eq!(fs::read(&lock_note).unwrap(), b"lock original");
         assert_eq!(fs::read(&old).unwrap(), b"stable existing OS lock");
     }
-}
+
+    /// Real second OS process, not a synthetic second Core in one address
+    /// space. The parent test provisions and enrolls through editor activation.
+    #[test]
+    fn host_editor_second_process_child() {
+        let Some(db) = std::env::var_os("AKULA_HOST_EDITOR_CHILD_DB") else {
+            return;
+        };
+        let root = PathBuf::from(std::env::var_os("AKULA_HOST_EDITOR_CHILD_ROOT").unwrap());
+        let app_b = PathBuf::from(std::env::var_os("AKULA_HOST_EDITOR_CHILD_APPDATA").unwrap());
+        let report = PathBuf::from(std::env::var_os("AKULA_HOST_EDITOR_CHILD_REPORT").unwrap());
+        let core = Core::open_with_installed_host(
+            &app_b, Path::new(&db), Arc::new(|_: CoreEvent| {}),
+        );
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let note = root.join("Original.md");
+        let overwritten = gate::write(
+            &core, &note, "FORBIDDEN", None, Source::Me, None,
+        ).is_ok();
+        let created = gate::create(
+            &core, &root.join("Foreign.md"), "FORBIDDEN", Source::Me, None,
+        ).is_ok();
+        let direct_history = core.history.try_saved(
+            &|| core.known_roots(), &note,
+            crate::history::NoteWrite {
+                disk_before: None, text: "FORBIDDEN",
+                hash: "invalid", source: Source::Me, name: None,
+            },
+        ).is_ok();
+        fs::write(report, format!("{overwritten}|{created}|{direct_history}")).unwrap();
+    }
+
+    /// S3 activation must itself publish host-wide enrollment. Merely
+    /// inserting into DocumentHub's private appdata would leave Core B free
+    /// to write the same physical vault through the shared host epoch.
+    #[test]
+    fn verified_editor_activation_enrolls_shared_host_before_other_appdata_can_write() {
+        use super::super::host_custody_registry::{
+            PhysicalObjectId, SharedHostCustodyRegistry,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let app_a = temp.path().join("app-a");
+        let app_b = temp.path().join("app-b");
+        let shared = temp.path().join("installed-host");
+        for dir in [&root, &app_a, &app_b, &shared] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let root = fs::canonicalize(&root).unwrap();
+        let original = root.join("Original.md");
+        fs::write(&original, b"unchanged").unwrap();
+        let host_db = shared.join("custody.sqlite");
+        let installer = SharedHostCustodyRegistry::provision_new(
+            &host_db, &[root.as_path(), app_a.as_path(), app_b.as_path()],
+        ).unwrap();
+        drop(installer);
+
+        let core_a = Core::open_with_installed_host(
+            &app_a, &host_db, Arc::new(|_: CoreEvent| {}),
+        );
+        core_a.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
+        let scope = temp.path().join("external").join(scoped_leaf(root_id));
+        fs::create_dir_all(&scope).unwrap();
+        let lock = scope.join(LOCK_NAME);
+        fs::write(&lock, b"existing OS lock").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let scope = fs::canonicalize(scope).unwrap();
+        let namespace = S3Keyspace::new("akula/host-editor-enrollment", VaultId::new()).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-host-enrollment-fixture".into(),
+            region: "us-east-1".into(),
+            endpoint: Some("http://127.0.0.1:9000".into()),
+            force_path_style: true,
+        };
+        let manifest = S3ManifestV1::new(
+            &namespace, OperationId::new(), 1, None, vec![],
+        ).unwrap();
+        let pointer = S3HeadPointerV1::new(
+            &namespace, 1, manifest.manifest_id,
+            &manifest.digest(&namespace).unwrap(), None,
+        ).unwrap();
+        let head = S3VerifiedHead {
+            pointer, manifest, etag: "\"test-host-enrollment\"".into(),
+        };
+        let profile_db = app_a.join("s3-profile.sqlite");
+        let custody_db = app_a.join("local-custody.sqlite");
+        {
+            let admission = RegisteredReadAdmission::open(&core_a, &root).unwrap();
+            let mut profiles = SqliteRegisteredS3Bindings::open(
+                &admission, &profile_db,
+            ).unwrap();
+            profiles.bind_existing_verified_s3(
+                &admission, "host-editor", &profile, &namespace, &head,
+            ).unwrap();
+            let mut custody = SqliteCustodyIdentityStore::open(
+                &admission, &custody_db,
+            ).unwrap();
+            custody.bind_registered_s3(&admission, &profiles, &scope).unwrap();
+        }
+
+        // A itself performs the live activation. NO explicit host.enroll()
+        // may appear in this test: that would hide the original bug.
+        activate_registered_s3_editor(
+            &core_a, &root, &profile_db, &custody_db, &scope,
+        ).unwrap();
+        assert!(core_a.documents.requires_guarded_participant_hold());
+        const CHILD: &str =
+            "sync::guarded_editor::tests::host_editor_second_process_child";
+        let report = temp.path().join("different-process-result.txt");
+        let process = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact").arg(CHILD).arg("--nocapture")
+            .env("AKULA_HOST_EDITOR_CHILD_DB", &host_db)
+            .env("AKULA_HOST_EDITOR_CHILD_ROOT", &root)
+            .env("AKULA_HOST_EDITOR_CHILD_APPDATA", &app_b)
+            .env("AKULA_HOST_EDITOR_CHILD_REPORT", &report)
+            .output().unwrap();
+        assert!(process.status.success(),
+            "independent appdata process failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&process.stdout),
+            String::from_utf8_lossy(&process.stderr));
+        assert!(String::from_utf8_lossy(&process.stdout).contains(
+            "host_editor_second_process_child ... ok"
+        ), "different-process fixture did not actually execute");
+        assert_eq!(fs::read_to_string(&report).unwrap(), "false|false|false");
+        let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
+        let readback = SharedHostCustodyRegistry::open_existing(&host_db).unwrap();
+        let durable = readback.inspect(
+            &root,
+            PhysicalObjectId { device: root_id.0, file: root_id.1 },
+        ).unwrap().expect("guarded editor activation must enroll shared host");
+        assert_eq!(durable.vault_id, namespace.vault_id());
+        assert_eq!(durable.profile_id, "host-editor");
+        drop(readback);
+
+        let core_b = Core::open_with_installed_host(
+            &app_b, &host_db, Arc::new(|_: CoreEvent| {}),
+        );
+        core_b.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        assert!(gate::write(
+            &core_b, &original, "FORBIDDEN", None, Source::Me, None,
+        ).is_err());
+        let new_note = root.join("Foreign.md");
+        assert!(gate::create(
+            &core_b, &new_note, "FORBIDDEN", Source::Me, None,
+        ).is_err());
+        assert_eq!(fs::read(&original).unwrap(), b"unchanged");
+        assert!(!new_note.exists());
+    }
+
+    #[test]
+    fn missing_shared_host_database_refuses_s3_editor_activation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let appdata = temp.path().join("appdata");
+        for dir in [&root, &appdata] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let root = fs::canonicalize(root).unwrap();
+        let host_db = temp.path().join("no-installed-ledger.sqlite");
+        let core = Core::open_with_installed_host(
+            &appdata, &host_db, Arc::new(|_: CoreEvent| {}),
+        );
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+
+        // All OTHER S3 binding and physical OS custody preconditions are
+        // valid. The rejection must be caused by the missing shared ledger,
+        // not a missing profile or malformed prewrite fixture.
+        let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
+        let scope = temp.path().join("external").join(scoped_leaf(root_id));
+        fs::create_dir_all(&scope).unwrap();
+        let lock = scope.join(LOCK_NAME);
+        fs::write(&lock, b"stable lock").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let scope = fs::canonicalize(scope).unwrap();
+        let namespace = S3Keyspace::new("akula/missing-installed-ledger", VaultId::new()).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-missing-host-fixture".into(),
+            region: "us-east-1".into(),
+            endpoint: Some("http://127.0.0.1:9000".into()),
+            force_path_style: true,
+        };
+        let manifest = S3ManifestV1::new(
+            &namespace, OperationId::new(), 1, None, vec![],
+        ).unwrap();
+        let pointer = S3HeadPointerV1::new(
+            &namespace, 1, manifest.manifest_id,
+            &manifest.digest(&namespace).unwrap(), None,
+        ).unwrap();
+        let head = S3VerifiedHead {
+            pointer, manifest, etag: "\"missing-ledger-test\"".into(),
+        };
+        let profile_db = appdata.join("registered-s3.sqlite");
+        let custody_db = appdata.join("custody.sqlite");
+        {
+            let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+            let mut profiles = SqliteRegisteredS3Bindings::open(
+                &admission, &profile_db,
+            ).unwrap();
+            profiles.bind_existing_verified_s3(
+                &admission, "missing-host", &profile, &namespace, &head,
+            ).unwrap();
+            let mut custody = SqliteCustodyIdentityStore::open(
+                &admission, &custody_db,
+            ).unwrap();
+            custody.bind_registered_s3(&admission, &profiles, &scope).unwrap();
+        }
+        let failure = activate_registered_s3_editor(
+            &core, &root, &profile_db, &custody_db, &scope,
+        ).unwrap_err();
+        assert!(
+            format!("{failure:?}").contains("host custody enrollment HOLD"),
+            "activation should fail specifically on absent installer ledger: {failure:?}"
+        );
+        assert!(!host_db.exists(), "activation must never provision host ledger");
+        assert!(core.guarded_editors.lock().unwrap().is_empty(),
+            "no guarded writer may become active without shared enrollment");
+        let forbidden = root.join("NoFallback.md");
+        assert!(gate::create(
+            &core, &forbidden, "FORBIDDEN", Source::Me, None,
+        ).is_err());
+        assert!(!forbidden.exists());
+    }}
