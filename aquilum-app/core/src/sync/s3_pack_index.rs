@@ -887,3 +887,9 @@ mod tests {
         assert_eq!(index.total_packs, 80);
     }
 }
+
+// V2 read/conditional-write integration is deliberately restricted to
+// disposable MinIO tests until persisted protocol migration and E2EE gates.
+#[cfg(all(test, feature = "sync-s3"))]
+#[path = "s3_pack_v2_minio_probe.rs"]
+mod minio_probe;
