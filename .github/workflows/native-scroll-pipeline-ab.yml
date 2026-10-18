@@ -29,8 +29,9 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
-          shared-key: akula-scroll-pipeline-v1
+          shared-key: akula-vello-single-region-rss-v1
           cache-workspace-crates: true
+          save-if: false
       - name: Install Linux native GUI build libraries
         shell: bash
         run: |

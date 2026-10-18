@@ -38,7 +38,8 @@ fn peak_channel_delta(a: &[u32], b: &[u32]) -> u8 {
 }
 
 fn frame_digest(mut digest: u64, frame: &[u32]) -> u64 {
-    // Stable across independent processes; computed OUTSIDE timed frames.
+    // Diagnostic fingerprint outside timings. Fresh UI profiles may differ
+    // even under the SAME worker mode; only within-process parity is gated.
     for &pixel in frame {
         digest ^= u64::from(pixel);
         digest = digest.wrapping_mul(0x100000001b3);

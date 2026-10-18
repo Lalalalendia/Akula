@@ -25,8 +25,11 @@ sampled sums. It uses six independent test processes, alternating fixed and
 adaptive launch order across three trials. Each scene checks natural pixel
 moves, small damage, full-frame redraws, expected context switching,
 and strict <=1/255 partial-versus-independent-full fidelity on six selected
-frames. Per-scene visual digests and event/workload counts must be identical
-across configurations and trials before timing comparisons are accepted.
+frames. Event and damage geometry counts must match across independent
+processes. Full framebuffer digests are retained for diagnostics but NOT
+compared byte-for-byte across fresh temporary UI profiles: the first CI run
+proved that even two independent fixed-worker sessions differ in their full
+frame fingerprints despite passing internal full-frame fidelity checks.
 
 ## Run
 

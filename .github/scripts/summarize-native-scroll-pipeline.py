@@ -64,17 +64,19 @@ def main() -> None:
             for case, fields in parse(path, mode).items():
                 rows[(trial, mode, case)] = fields
 
-    # Both policies must have seen identical native visual output and workload
-    # geometry; otherwise a timing comparison is invalid rather than slower.
+    # Independent temporary profiles may render run-specific UI metadata:
+    # even FIXED-vs-FIXED whole-frame digests differed in the first CI run.
+    # Strict output correctness is instead checked against an independent
+    # full-frame reference at six frames WITHIN each process (<=1/255).
+    # Cross-process comparisons require the same event/damage geometry.
     for case in CASES:
-        fingerprints = {
-            (r["digest"], r["frames"], r["shifts"], r["full_frames"],
-             r["small_frames"])
+        workloads = {
+            (r["frames"], r["shifts"], r["full_frames"], r["small_frames"])
             for trial in TRIALS for mode in MODES
             for r in [rows[(trial, mode, case)]]
         }
-        if len(fingerprints) != 1:
-            raise ValueError(f"Different frame outputs or workloads in {case}: {fingerprints}")
+        if len(workloads) != 1:
+            raise ValueError(f"Different scroll workloads in {case}: {workloads}")
 
     def m(case: str, mode: str, metric: str) -> float:
         return median(rows[(trial, mode, case)][metric] for trial in TRIALS)
@@ -131,7 +133,9 @@ def main() -> None:
         "",
         "Validation requires 12 scene rows from 6 independent processes,",
         "including full-frame parity <=1/255 at six selected frames in each",
-        "scene, the actual serial switching witness and matching frame digest.",
+        "scene, actual context switching, and matching scroll/damage geometry.",
+        "Run-specific framebuffer digests are archived for diagnosis, but",
+        "are not equated across independently initialized UI profiles.",
         "",
     ])
     report = "\n".join(lines)
