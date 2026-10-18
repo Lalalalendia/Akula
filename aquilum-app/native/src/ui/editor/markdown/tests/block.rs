@@ -64,6 +64,63 @@ fn quote_callouts() {
 }
 
 #[test]
+fn known_typed_callouts_use_existing_palette_without_changing_quote_structure() {
+    let cases = [
+        ("NOTE", 4),
+        ("info", 4),
+        ("todo", 4),
+        ("abstract", 4),
+        ("summary", 4),
+        ("tldr", 4),
+        ("tip", 3),
+        ("hint", 3),
+        ("example", 3),
+        ("success", 5),
+        ("check", 5),
+        ("done", 5),
+        ("question", 1),
+        ("help", 1),
+        ("faq", 1),
+        ("warning", 2),
+        ("caution", 2),
+        ("attention", 2),
+        ("important", 0),
+        ("danger", 0),
+        ("error", 0),
+        ("failure", 0),
+        ("bug", 0),
+        ("cite", 6),
+    ];
+    for (name, expected) in cases {
+        let source = format!("> [!{name}] Заголовок\n> продолжение");
+        let b = blocks(&source);
+        assert!(
+            matches!(
+                &b[0],
+                Block::Quote {
+                    callout: Some((_, Callout::Typed(tone))), ..
+                } if *tone == expected
+            ),
+            "incorrect color classification for {name}: {:?}",
+            b[0],
+        );
+        assert!(
+            matches!(&b[1], Block::Quote { callout: None, .. }),
+            "continuation must not open another callout: {name}",
+        );
+    }
+
+    let unknown = blocks("> [!custom] без типа");
+    assert!(matches!(
+        &unknown[0],
+        Block::Quote { callout: Some((_, Callout::Other)), .. }
+    ));
+    let special = blocks("> [!quote] цитата\n> [!book] [[Книга]]");
+    assert!(matches!(&special[0], Block::Quote { callout: Some((_, Callout::Quote)), .. }));
+    assert!(matches!(&special[1], Block::Quote { callout: Some((_, Callout::Book)), .. }));
+}
+
+#[test]
 fn media_lines_follow_tauri_rules() {
     let b = blocks("![](a.png)
 ![[кадр.mp4|300]]

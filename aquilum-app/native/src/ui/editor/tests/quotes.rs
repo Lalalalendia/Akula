@@ -36,6 +36,51 @@ fn a_nested_quote_gets_a_bar_for_every_level() {
 }
 
 #[test]
+fn typed_callout_tones_are_visible_on_the_existing_quote_bar() {
+    let tm = crate::ui::theme::current();
+    let rgb = |c: masonry::peniko::Color| {
+        let c = c.to_rgba8();
+        [c.r, c.g, c.b]
+    };
+    let near = |pixel: u32, target: [u8; 3]| {
+        let actual = [(pixel >> 16) as u8, (pixel >> 8) as u8, pixel as u8];
+        actual.iter().zip(target).all(|(a, b)| a.abs_diff(b) <= 16)
+    };
+
+    // Find an interior pixel on the neutral quote bar, not a glyph edge.
+    let neutral = render("> [!custom] Heading\\n> continuation", "callout-neutral.png");
+    let accent = rgb(tm.bg_accent);
+    let row = WIDTH as usize;
+    let at = (0..neutral.len().saturating_sub(row * 2))
+        .find(|&i| {
+            i % row < row / 4
+                && near(neutral[i], accent)
+                && near(neutral[i + row], accent)
+                && near(neutral[i + row * 2], accent)
+        })
+        .expect("neutral quote has a visible accent bar");
+
+    for (name, color) in [
+        ("note", tm.list_callout_info),
+        ("tip", tm.list_callout_idea),
+        ("warning", tm.list_callout_highlight),
+        ("danger", tm.list_callout_important),
+        ("success", tm.list_callout_success),
+        ("question", tm.list_callout_question),
+        ("cite", tm.list_callout_muted),
+    ] {
+        let pixels = render(
+            &format!("> [!{name}] Heading\\n> continuation"),
+            &format!("callout-{name}.png"),
+        );
+        assert!(
+            near(pixels[at], rgb(color)),
+            "{name} must color the quote bar with its semantic tone",
+        );
+    }
+}
+
+#[test]
 fn highlight_is_painted_softly() {
     let plain = render("слово", "plain.png");
     let marked = render("==слово==", "highlight.png");
