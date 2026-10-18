@@ -28,7 +28,7 @@ pub const MAX_PACK_V2_ROOT_BYTES: usize = 4096;
 pub const MAX_PACK_V2_INDEX_BYTES: usize = 128 * 1024;
 pub const MAX_PACK_V2_SHARD_BYTES: usize = 128 * 1024;
 pub const MAX_PACK_V2_SHARDS: usize = 256;
-pub const MAX_PACK_V2_PACKS_PER_SHARD: usize = 4;
+pub const MAX_PACK_V2_PACKS_PER_SHARD: usize = 2;
 pub const MAX_PACK_V2_MEMBERS_PER_PACK: usize = 128;
 pub const MAX_PACK_V2_BYTES: u32 = 512 * 1024;
 const MAX_PACK_REVISION_BYTES: u32 = 64 * 1024;
@@ -624,9 +624,10 @@ mod tests {
             &ns, 1, manifest.manifest_id, &digest,
             index.index_id, &index.digest(&ns).unwrap(), None,
         ).unwrap();
+        let shard_bytes = shard.encode(&ns).unwrap();
         Fixture {
             ns, manifest, references: refs, index, head,
-            shards: vec![(shard.shard_id, shard.encode(&ns).unwrap())],
+            shards: vec![(shard.shard_id, shard_bytes)],
             pack_bytes: raw_pack,
         }
     }
@@ -841,13 +842,13 @@ mod tests {
     }
 
     #[test]
-    fn pack_index_10k_small_revisions_fit_in_20_bounded_shards() {
+    fn pack_index_10k_small_revisions_fit_in_40_bounded_shards() {
         let ns = S3Keyspace::new("akula-sync/pack-v2-large", VaultId::new()).unwrap();
         let mut refs = Vec::new();
         let mut shards = Vec::new();
-        for batch in 0..20 {
+        for batch in 0..40 {
             let mut packs = Vec::new();
-            for _ in 0..4 {
+            for _ in 0..2 {
                 let mut members = Vec::new();
                 for _ in 0..125 {
                     if refs.len() == 10_000 { break; }
@@ -876,7 +877,7 @@ mod tests {
             }
         }
         assert_eq!(refs.len(), 10_000);
-        assert_eq!(shards.len(), 20);
+        assert_eq!(shards.len(), 40);
         let index = S3PackIndexRootV2::new(
             &ns, OperationId::new(), 1, OperationId::new(),
             blake3_hex(b"manifest fixture"), shards,
