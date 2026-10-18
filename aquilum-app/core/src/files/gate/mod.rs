@@ -15,7 +15,7 @@ pub(crate) use write::{write_checked_history, CheckedHistoryError};
 use super::attachments::forget_attachments_if_touched;
 use crate::app_core::{Core, CoreEvent};
 use crate::history::NoteWrite;
-use crate::history::service::HistoryMoveFailure;
+use crate::history::service::{HistoryMoveFailure, HistorySaveFailure};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -59,7 +59,14 @@ pub struct NoteMove {
 }
 
 fn record(core: &Core, note: &Path, write: NoteWrite<'_>) {
-    match core.history.try_saved(&|| core.known_roots(), note, write) {
+    report_record(core, note,
+        core.history.try_saved(&|| core.known_roots(), note, write));
+}
+
+/// Report only AFTER any process publication lease or file/history mutex has
+/// been released. Host callbacks may recursively use Core services.
+fn report_record(core: &Core, note: &Path, outcome: Result<bool, HistorySaveFailure>) {
+    match outcome {
         Ok(true) => announce_history(core, note),
         Ok(false) => {}
         Err(error) => {

@@ -309,3 +309,73 @@ fn cold_core_participant_hold_rejects_file_gate_mutations_and_history_naming() {
         assert!(!root.join(denied_path).exists(), "unexpected mutation: {denied_path}");
     }
 }
+
+
+/// The note is already published on disk but its HistoryService commit is
+/// blocked. An enrollment writer must not flip HOLD until that SAME normal
+/// File Gate operation has completed both stages. No actual cloud writes.
+#[cfg(feature = "sync-s3")]
+#[test]
+fn note_publication_epoch_spans_primary_and_history_before_enrollment() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::files::error::FileCommandError;
+    use crate::history::Source;
+    use std::sync::{mpsc, Arc};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("appdata");
+    let root = temp.path().join("workspace");
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let note = root.join("Existing.md");
+    fs::write(&note, "before").unwrap();
+    let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+    core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+    let next = "after ".repeat(120);
+
+    // Hold the history-files lock, while the real File Gate writer publishes
+    // the primary note and then waits to record its history. This reproduces
+    // exactly the gap that the old File Gate mutex did NOT cover.
+    let (writer, enrollment) = core.history.with_participant_enrollment_fence(|| {
+        let core_write = Arc::clone(&core);
+        let writer_note = note.clone();
+        let replacement = next.clone();
+        let worker = thread::spawn(move || {
+            super::write::write(
+                &core_write, &writer_note, &replacement, None, Source::Me, None,
+            )
+        });
+        let started = Instant::now();
+        while fs::read_to_string(&note).ok().as_deref() != Some(next.as_str()) {
+            assert!(started.elapsed() < Duration::from_secs(15),
+                "ordinary File Gate never published primary bytes while history was held");
+            thread::sleep(Duration::from_millis(5));
+        }
+        // At this instant the process-global primary File Gate mutex has
+        // been dropped. Only the publication lease must still bar enrollment.
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let core_enroll = Arc::clone(&core);
+        let admission = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let fence = core_enroll.ordinary_note_enrollment_fence();
+            finished_tx.send(fence.is_ok()).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(
+            finished_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "enrollment bypassed a legacy write between primary and history");
+        Ok::<_, FileCommandError>((worker, admission))
+    }).unwrap();
+
+    assert!(writer.join().unwrap().is_ok(),
+        "ordinary note publication failed after HistoryService lock released");
+    enrollment.join().unwrap();
+    assert_eq!(fs::read_to_string(&note).unwrap(), next);
+    assert!(core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0,
+        "enrollment fence must wait for recorded history, not just primary bytes");
+}
