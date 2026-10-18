@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/vendor/glifo/src/util.rs'
+      - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
       - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
       - 'aquilum-app/native/vendor/glifo/src/renderer.rs'
       - 'aquilum-app/native/vendor/glifo/src/atlas/key.rs'
@@ -22,7 +23,7 @@ jobs:
   probe:
     name: Guard96 crop/frame parity - repeated real editor
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -47,12 +48,21 @@ jobs:
         env:
           AQ_CROSSOVER_WORKLOAD: guard96
           AQ_TEST_SCROLL_EDGE_GUARD: '96'
+          AQ_CROSSOVER_EVERY_FRAME: '1'
         run: |
-          set -euo pipefail
-          for trial in 1 2 3 4 5; do
-            echo "GUARD96_REAL_EDITOR trial=$trial"
-            cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/glifo-guard96-trial-$trial.log"
+          set -uo pipefail
+          failures=0
+          for trial in $(seq 1 20); do
+            echo "GUARD96_REAL_EDITOR_ALL_FRAMES trial=$trial"
+            if cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/glifo-guard96-trial-$trial.log"; then
+              echo "GUARD96_PASS=$trial"
+            else
+              echo "GUARD96_FAIL=$trial"
+              failures=$((failures + 1))
+            fi
           done
+          echo "GUARD96_FAILURES=$failures / 20" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$failures" -eq 0
       - name: Archive all observed attempts, including failures
         if: always()
         uses: actions/upload-artifact@v4
