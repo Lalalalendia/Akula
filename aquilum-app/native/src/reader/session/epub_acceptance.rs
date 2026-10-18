@@ -89,7 +89,7 @@ fn write_zip(path: &std::path::Path, members: &[(String, Vec<u8>)]) {
     std::fs::write(path, zip).expect("write synthetic EPUB");
 }
 
-fn synthetic_epub() -> (tempfile::TempDir, std::path::PathBuf) {
+pub(crate) fn synthetic_epub() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = crate::test_dir::tempdir();
     let path = dir.path().join("reader-navigation.epub");
     let mut manifest = String::new();
