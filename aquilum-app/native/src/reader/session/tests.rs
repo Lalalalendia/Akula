@@ -252,3 +252,178 @@ fn session_synthetic_first_page_profile() {
         }
     }
 }
+
+
+fn assert_same_page_state(old: &Session, new: &Session) {
+    use crate::reader::page::Item;
+    assert_eq!(old.pages(), new.pages(), "page count");
+    assert_eq!(old.start(), new.start(), "page anchor start");
+    assert_eq!(old.end(), new.end(), "page anchor end");
+    let a = old.laid.as_ref().expect("baseline has paginated");
+    let b = new.laid.as_ref().expect("reused version has paginated");
+    assert_eq!(a.items.len(), b.items.len());
+    assert_eq!(a.columns.len(), b.columns.len());
+    for (index, (x, y)) in a.items.iter().zip(&b.items).enumerate() {
+        match (x, y) {
+            (Item::Text { lines: al, breaks: ab, x: ax, before: ap, after: aq },
+             Item::Text { lines: bl, breaks: bb, x: bx, before: bp, after: bq }) => {
+                assert_eq!((ab, ax.to_bits(), ap.to_bits(), aq.to_bits()),
+                           (bb, bx.to_bits(), bp.to_bits(), bq.to_bits()), "text item {index}");
+                assert_eq!(al.len(), bl.len(), "line count {index}");
+                for (a, b) in al.iter().zip(bl) {
+                    assert_eq!(
+                        (a.start, a.end, a.top.to_bits(), a.bottom.to_bits()),
+                        (b.start, b.end, b.top.to_bits(), b.bottom.to_bits()),
+                        "line geometry {index}",
+                    );
+                }
+            }
+            (Item::Image { size: a, before: ap, after: aq },
+             Item::Image { size: b, before: bp, after: bq }) => {
+                assert_eq!(
+                    (a.width.to_bits(), a.height.to_bits(), ap.to_bits(), aq.to_bits()),
+                    (b.width.to_bits(), b.height.to_bits(), bp.to_bits(), bq.to_bits()),
+                );
+            }
+            (Item::Rule, Item::Rule) => {}
+            _ => panic!("item kind mismatch {index}"),
+        }
+    }
+    for (a, b) in a.columns.iter().zip(&b.columns) {
+        assert_eq!(a.pieces.len(), b.pieces.len());
+        for (x, y) in a.pieces.iter().zip(&b.pieces) {
+            assert_eq!((x.item, x.from.to_bits(), x.to.to_bits(), x.y.to_bits()),
+                       (y.item, y.from.to_bits(), y.to.to_bits(), y.y.to_bits()));
+        }
+    }
+    assert_eq!(old.on_screen(), new.on_screen(), "visible item order");
+    for item in old.on_screen() {
+        match (old.layout(item), new.layout(item)) {
+            (Some(a), Some(b)) => {
+                let a: Vec<_> = a.lines().map(|l| {
+                    let m = l.metrics();
+                    (l.text_range(), m.block_min_coord.to_bits(), m.block_max_coord.to_bits())
+                }).collect();
+                let b: Vec<_> = b.lines().map(|l| {
+                    let m = l.metrics();
+                    (l.text_range(), m.block_min_coord.to_bits(), m.block_max_coord.to_bits())
+                }).collect();
+                assert_eq!(a, b, "visible Parley layout {item}");
+            }
+            (None, None) => {}
+            _ => panic!("visible layout presence changed for {item}"),
+        }
+    }
+    if let (Some((item, byte)), Some((end_item, end_byte))) = (old.start(), old.end()) {
+        let first = Spot { block: item, byte };
+        let last = Spot { block: end_item, byte: end_byte };
+        assert_eq!(old.range_cfi(first, last), new.range_cfi(first, last), "CFI");
+    }
+}
+
+#[test]
+fn bounded_first_page_reuse_matches_legacy_reader() {
+    let large = "Синтетическая глава с длинным абзацем и переносами слов. ".repeat(1800);
+    let rest: String = (0..28).map(|i| format!("<p>Проверочный абзац номер {i}.</p>")).collect();
+    let source = format!(
+        "<FictionBook><body><section><title><p>Глава</p></title><p>{large}</p>{rest}</section></body></FictionBook>"
+    );
+    let (_dir, file) = book_file(source);
+    for scrolled in [false, true] {
+        let mut old = Session::open(&file, Target::Start).unwrap();
+        let mut new = Session::open(&file, Target::Start).unwrap();
+        assert!(new.blocks.iter().any(
+            |block| matches!(block, crate::reader::flow::Block::Text { text, .. } if text.len() > 16 * 1024)
+        ));
+        let (mut af, mut al) = (FontContext::new(), LayoutContext::new());
+        let (mut bf, mut bl) = (FontContext::new(), LayoutContext::new());
+        old.ensure_without_reuse(VIEW, &settings(18.0, scrolled), &mut af, &mut al);
+        new.ensure(VIEW, &settings(18.0, scrolled), &mut bf, &mut bl);
+        assert_same_page_state(&old, &new);
+        assert!(!new.needs_layout());
+        let reused = new.on_screen().into_iter().filter(
+            |&item| new.layout(item).is_some()
+        ).count();
+        assert!(reused > 0);
+        if scrolled {
+            old.scroll_by(380.0);
+            new.scroll_by(380.0);
+        } else {
+            assert_eq!(old.next(), new.next());
+        }
+        old.ensure_without_reuse(VIEW, &settings(18.0, scrolled), &mut af, &mut al);
+        new.ensure(VIEW, &settings(18.0, scrolled), &mut bf, &mut bl);
+        assert_same_page_state(&old, &new);
+        old.ensure_without_reuse(VIEW, &settings(21.0, scrolled), &mut af, &mut al);
+        new.ensure(VIEW, &settings(21.0, scrolled), &mut bf, &mut bl);
+        assert_same_page_state(&old, &new);
+    }
+}
+
+#[test]
+#[ignore = "paired release ABBA of first ensure (synthetic, not desktop first paint)"]
+fn initial_layout_reuse_abba_profile() {
+    use std::hint::black_box;
+    use std::path::Path;
+    use std::time::Instant;
+
+    fn median(mut samples: Vec<f64>) -> f64 {
+        samples.sort_by(f64::total_cmp);
+        (samples[6] + samples[7]) * 0.5
+    }
+
+    let folder = std::env::var("AQ_EPUB_SHAPE_DIR").expect("AQ_EPUB_SHAPE_DIR");
+    let mut fcx = FontContext::new();
+    let mut lcx = LayoutContext::new();
+    for mode in ["single-br", "single-p", "split-br"] {
+        let path = Path::new(&folder).join(format!("{mode}.epub"));
+        for scrolled in [false, true] {
+            let settings = settings(18.0, scrolled);
+            let mut old_ms = Vec::new();
+            let mut reused_ms = Vec::new();
+            let mut retained = 0usize;
+            let mut visible = 0usize;
+            let mut benchmark = |reuse: bool, fcx: &mut FontContext, lcx: &mut LayoutContext<masonry::core::BrushIndex>| -> f64 {
+                let mut session = Session::open(&path, Target::Start).unwrap();
+                let start = Instant::now();
+                if reuse {
+                    session.ensure(VIEW, &settings, fcx, lcx);
+                } else {
+                    session.ensure_without_reuse(VIEW, &settings, fcx, lcx);
+                }
+                let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                assert!(!session.needs_layout());
+                if reuse {
+                    retained = session.layouts.len();
+                    visible = session.on_screen().len();
+                }
+                black_box(session);
+                elapsed
+            };
+            for _ in 0..2 {
+                black_box(benchmark(false, &mut fcx, &mut lcx));
+                black_box(benchmark(true, &mut fcx, &mut lcx));
+            }
+            let mut first = Session::open(&path, Target::Start).unwrap();
+            let mut second = Session::open(&path, Target::Start).unwrap();
+            first.ensure_without_reuse(VIEW, &settings, &mut fcx, &mut lcx);
+            second.ensure(VIEW, &settings, &mut fcx, &mut lcx);
+            assert_same_page_state(&first, &second);
+            for _ in 0..7 {
+                old_ms.push(benchmark(false, &mut fcx, &mut lcx));
+                reused_ms.push(benchmark(true, &mut fcx, &mut lcx));
+                reused_ms.push(benchmark(true, &mut fcx, &mut lcx));
+                old_ms.push(benchmark(false, &mut fcx, &mut lcx));
+            }
+            let old_median = median(old_ms.clone());
+            let new_median = median(reused_ms.clone());
+            println!(
+                "READER_REUSE_RAW mode={mode} scrolled={scrolled} old_ms={old_ms:?} reused_ms={reused_ms:?}",
+            );
+            println!(
+                "READER_REUSE_RESULT mode={mode} scrolled={scrolled} visible={visible} retained={retained} old_ms={old_median:.3} reused_ms={new_median:.3} speedup={:.3}",
+                old_median / new_median,
+            );
+        }
+    }
+}

@@ -8,7 +8,7 @@ mod tests;
 use masonry::kurbo::Size;
 
 pub use geometry::{Geometry, advance, geometry};
-pub use layout::{dash_width, layout_blocks, text_layout};
+pub use layout::{dash_width, layout_blocks, layout_blocks_with_candidates, text_layout};
 pub use paginate::paginate;
 
 #[derive(Clone, Debug, PartialEq)]

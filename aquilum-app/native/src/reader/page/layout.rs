@@ -163,6 +163,34 @@ fn layout_ranges(blocks: &[Block], weighted: bool) -> Vec<std::ops::Range<usize>
     }
 }
 
+// Retain only first-page candidates. The source-byte budget limits
+// speculative retention; it is not an exact allocator/RSS measurement.
+// We use this path only for a giant paragraph near the beginning.
+pub(super) const REUSE_LOOKAHEAD_BLOCKS: usize = 24;
+pub(super) const REUSE_SOURCE_BUDGET: usize = 256 * 1024;
+pub(super) const REUSE_BLOCK_LIMIT: usize = 128 * 1024;
+const REUSE_MIN_GIANT: usize = 16 * 1024;
+
+fn initial_candidates(blocks: &[Block]) -> Vec<bool> {
+    let mut flags = vec![false; blocks.len()];
+    if !blocks.iter().take(REUSE_LOOKAHEAD_BLOCKS).any(
+        |block| matches!(block, Block::Text { text, .. } if text.len() >= REUSE_MIN_GIANT)
+    ) {
+        return flags;
+    }
+    let mut used = 0usize;
+    for (index, block) in blocks.iter().take(REUSE_LOOKAHEAD_BLOCKS).enumerate() {
+        if let Block::Text { text, .. } = block {
+            let bytes = text.len();
+            if bytes <= REUSE_BLOCK_LIMIT && bytes <= REUSE_SOURCE_BUDGET - used {
+                flags[index] = true;
+                used += bytes;
+            }
+        }
+    }
+    flags
+}
+
 fn layout_blocks_impl(
     blocks: &[Block],
     images: &mut dyn FnMut(&str) -> Option<(u32, u32)>,
@@ -202,6 +230,78 @@ fn layout_blocks_impl(
         })
         .collect();
     parts.into_iter().flatten().collect()
+}
+
+
+
+// Capture the exact Parley layouts produced for a bounded set of prospective
+// first-page blocks while computing page geometry. Later Session::show can
+// adopt these if they actually land on-screen; all others are dropped.
+pub fn layout_blocks_with_candidates(
+    blocks: &[Block],
+    images: &mut dyn FnMut(&str) -> Option<(u32, u32)>,
+    fcx: &mut FontContext,
+    lcx: &mut LayoutContext<BrushIndex>,
+    settings: &Settings,
+    width: f64,
+    height: f64,
+) -> (Vec<Item>, Vec<(usize, Layout<BrushIndex>)>) {
+    use rayon::prelude::*;
+    let candidates = initial_candidates(blocks);
+    if !candidates.contains(&true) {
+        return (layout_blocks(blocks, images, fcx, lcx, settings, width, height), Vec::new());
+    }
+    let (em, dash) = (f64::from(settings.size), dash_width(fcx, lcx, settings));
+    let sizes: Vec<Option<(u32, u32)>> = blocks.iter().map(
+        |block| if let Block::Image { src, .. } = block { images(src) } else { None }
+    ).collect();
+    let ranges = layout_ranges(blocks, true);
+    let contexts: Vec<FontContext> = ranges.iter().map(|_| fcx.clone()).collect();
+    let parts: Vec<Vec<(Item, Option<Layout<BrushIndex>>)>> = ranges
+        .into_par_iter()
+        .zip(contexts)
+        .map(|(range, mut fcx)| {
+            let mut lcx = LayoutContext::new();
+            blocks[range.clone()]
+                .iter()
+                .zip(&sizes[range.clone()])
+                .enumerate()
+                .map(|(offset, (block, &natural))| {
+                    let index = range.start + offset;
+                    match (block, text_layout(block, &mut fcx, &mut lcx, settings, width, dash)) {
+                        (Block::Text { role, .. }, Some((layout, breaks, x))) => {
+                            let lines = layout
+                                .lines()
+                                .map(|line| {
+                                    let (metrics, range) = (line.metrics(), line.text_range());
+                                    Line {
+                                        top: f64::from(metrics.block_min_coord),
+                                        bottom: f64::from(metrics.block_max_coord),
+                                        start: range.start,
+                                        end: range.end,
+                                    }
+                                })
+                                .collect();
+                            let (before, after) = spacing(*role, font_size(*role, settings), em);
+                            let retained = candidates[index].then_some(layout);
+                            (Item::Text { lines, x, before, after, breaks }, retained)
+                        }
+                        (Block::Image { .. }, _) => (image_item(natural, width, height, em), None),
+                        _ => (Item::Rule, None),
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let mut items = Vec::with_capacity(blocks.len());
+    let mut retained = Vec::new();
+    for (index, (item, layout)) in parts.into_iter().flatten().enumerate() {
+        items.push(item);
+        if let Some(layout) = layout {
+            retained.push((index, layout));
+        }
+    }
+    (items, retained)
 }
 
 
@@ -268,5 +368,48 @@ mod partition_tests {
         let fixed_peak = weights.chunks(fixed_chunk).map(|c| c.iter().sum::<usize>()).max().unwrap();
         let weighted_peak = weighted.iter().map(|range| weights[range.clone()].iter().sum::<usize>()).max().unwrap();
         assert!(weighted_peak < fixed_peak);
+    }
+}
+
+
+#[cfg(test)]
+mod candidate_tests {
+    use super::{initial_candidates, REUSE_LOOKAHEAD_BLOCKS, REUSE_SOURCE_BUDGET, REUSE_BLOCK_LIMIT};
+    use crate::reader::flow::{Block, Role};
+
+    fn block(size: usize) -> Block {
+        Block::Text {
+            text: "X".repeat(size),
+            spans: Vec::new(),
+            origins: Vec::new(),
+            role: Role::Paragraph,
+            depth: 0,
+            indent: false,
+            align: None,
+        }
+    }
+
+    #[test]
+    fn no_capture_for_ordinary_books_or_late_giant_blocks() {
+        let mut small: Vec<Block> = (0..25).map(|_| block(100)).collect();
+        assert!(initial_candidates(&small).iter().all(|&b| !b));
+        small[REUSE_LOOKAHEAD_BLOCKS] = block(40 * 1024);
+        assert!(initial_candidates(&small).iter().all(|&b| !b));
+    }
+
+    #[test]
+    fn speculative_retention_is_limited_by_source_bytes_and_indices() {
+        let mut blocks: Vec<Block> = (0..32).map(|_| block(4096)).collect();
+        blocks[1] = block(118 * 1024);
+        blocks[2] = block(118 * 1024);
+        blocks[3] = block(REUSE_BLOCK_LIMIT + 1);
+        let flags = initial_candidates(&blocks);
+        assert!(flags[0] && flags[1] && flags[2]);
+        assert!(!flags[3]);
+        assert!(flags[REUSE_LOOKAHEAD_BLOCKS..].iter().all(|&flag| !flag));
+        let budget: usize = blocks.iter().zip(flags).filter_map(
+            |(block, keep)| keep.then_some(super::block_weight(block))
+        ).sum();
+        assert!(budget <= REUSE_SOURCE_BUDGET);
     }
 }

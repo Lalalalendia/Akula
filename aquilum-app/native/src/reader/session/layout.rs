@@ -47,14 +47,23 @@ impl Session {
     }
 
     pub fn ensure(&mut self, view: Size, settings: &Settings, fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>) {
+        self.ensure_inner(view, settings, fcx, lcx, true);
+    }
+
+    #[cfg(test)]
+    pub(super) fn ensure_without_reuse(&mut self, view: Size, settings: &Settings, fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>) {
+        self.ensure_inner(view, settings, fcx, lcx, false);
+    }
+
+    fn ensure_inner(&mut self, view: Size, settings: &Settings, fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>, reuse: bool) {
         let key = (view, settings.clone());
         if self.laid.is_none() || self.key.as_ref() != Some(&key) {
-            self.lay_out(key, fcx, lcx);
+            self.lay_out(key, fcx, lcx, reuse);
         }
         self.show(fcx, lcx);
     }
 
-    fn lay_out(&mut self, key: (Size, Settings), fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>) {
+    fn lay_out(&mut self, key: (Size, Settings), fcx: &mut FontContext, lcx: &mut LayoutContext<BrushIndex>, reuse: bool) {
         if self.laid.is_some() && (self.page, self.scroll) != self.placed {
             self.anchor = self.current();
         }
@@ -65,13 +74,25 @@ impl Session {
         let (book, section) = (&self.book, self.section);
         let mut load = |src: &str| book.resource(section, src).and_then(|b| crate::images::decoded_size(&b));
         let fit = if settings.scrolled { view.height - 2.0 * settings.margin } else { self.geometry.height };
-        let items = page::layout_blocks(&self.blocks, &mut load, fcx, lcx, settings, self.geometry.column_width, fit.max(1.0));
+        // Session::show normally shapes visible blocks for a second time after
+        // full-section geometry is ready. Keep a bounded subset of the exact
+        // original layouts only for a Start anchor; the geometry and CFI paths
+        // remain unchanged, including jumps and later sections.
+        let (items, candidates) = if reuse && matches!(self.anchor, Anchor::Start) {
+            page::layout_blocks_with_candidates(&self.blocks, &mut load, fcx, lcx, settings, self.geometry.column_width, fit.max(1.0))
+        } else {
+            (page::layout_blocks(&self.blocks, &mut load, fcx, lcx, settings, self.geometry.column_width, fit.max(1.0)), Vec::new())
+        };
         let height = if settings.scrolled { f64::INFINITY } else { self.geometry.height };
         self.laid = Some(page::paginate(items, height));
         self.layouts.clear();
         self.images.clear();
         self.key = Some(key);
         self.place();
+        if !candidates.is_empty() {
+            let visible = self.on_screen();
+            self.layouts = candidates.into_iter().filter(|(item, _)| visible.contains(item)).collect();
+        }
     }
 
     pub(super) fn on_screen(&self) -> Vec<usize> {
