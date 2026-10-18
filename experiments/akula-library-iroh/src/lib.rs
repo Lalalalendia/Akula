@@ -17,7 +17,11 @@ pub const MAX_CHUNKS: usize = MAX_BOOK_BYTES / CHUNK_SIZE;
 const MANIFEST_MAGIC: &[u8; 4] = b"AKM1";
 const MAX_MANIFEST_BYTES: usize = 4 + 8 + 4 + 4 + 32 + MAX_CHUNKS * 32;
 const REQUEST_LIMIT: usize = 1 + 32 + 4;
-pub const MAX_ACTIVE_CONNECTIONS: usize = 32; // isolated 25-peer load lab; still bounded
+pub const MAX_ACTIVE_CONNECTIONS: usize = 32; // bounded lab admission, even during overload
+pub const MAX_CONNECTIONS_PER_PEER: usize = 2;
+const MAX_STREAMS_PER_CONNECTION: usize = 128;
+const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const OP_MANIFEST: u8 = 1;
@@ -148,6 +152,22 @@ impl QuotaState {
     }
 }
 
+/// Per-identity admission lease; releases on normal close, network failure,
+/// task cancellation, or panic. Prevents a single identity from hoarding slots.
+struct ActivePeerLease {
+    counts: Arc<Mutex<HashMap<EndpointId, usize>>>,
+    id: EndpointId,
+}
+impl Drop for ActivePeerLease {
+    fn drop(&mut self) {
+        let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(n) = counts.get_mut(&self.id) {
+            *n -= 1;
+            if *n == 0 { counts.remove(&self.id); }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Server {
     book: Book,
@@ -155,10 +175,18 @@ pub struct Server {
     quota: Arc<Mutex<QuotaState>>,
     disk_quota: Option<Arc<Mutex<persistent_quota::PersistentQuota>>>,
     rate: Option<Arc<rate_limit::RateGate>>,
+    active_per_peer: Arc<Mutex<HashMap<EndpointId, usize>>>,
+    idle_timeout: Duration,
+    request_timeout: Duration,
 }
 impl Server {
     pub fn new(book: Book, allowed: HashSet<EndpointId>, limits: QuotaState) -> Self {
-        Self { book, allowed: Arc::new(allowed), quota: Arc::new(Mutex::new(limits)), disk_quota: None, rate: None }
+        Self {
+            book, allowed: Arc::new(allowed),
+            quota: Arc::new(Mutex::new(limits)), disk_quota: None, rate: None,
+            active_per_peer: Arc::new(Mutex::new(HashMap::new())),
+            idle_timeout: DEFAULT_IDLE_TIMEOUT, request_timeout: DEFAULT_REQUEST_TIMEOUT,
+        }
     }
     pub fn quota(&self) -> Arc<Mutex<QuotaState>> { self.quota.clone() }
     pub fn with_persistent_quota(mut self, quota: persistent_quota::PersistentQuota) -> Self {
@@ -168,6 +196,20 @@ impl Server {
     pub fn with_rate_limit(mut self, gate: rate_limit::RateGate) -> Self {
         self.rate = Some(Arc::new(gate));
         self
+    }
+    /// Shorter timeouts are used only by negative laboratory tests.
+    pub fn with_request_timeouts(mut self, idle: Duration, request: Duration) -> Self {
+        assert!(!idle.is_zero() && !request.is_zero());
+        self.idle_timeout = idle;
+        self.request_timeout = request;
+        self
+    }
+    fn admit_peer(&self, peer: EndpointId) -> Option<ActivePeerLease> {
+        let mut active = self.active_per_peer.lock().unwrap_or_else(|p| p.into_inner());
+        let count = active.entry(peer).or_default();
+        if *count >= MAX_CONNECTIONS_PER_PEER { return None; }
+        *count += 1;
+        Some(ActivePeerLease { counts: self.active_per_peer.clone(), id: peer })
     }
     /// Run until the endpoint is closed; bounded to 32 concurrent accepted connections.
     pub async fn run(self, endpoint: Endpoint) {
@@ -187,7 +229,15 @@ impl Server {
     }
     async fn handle_connection(&self, conn: Connection) -> Result<()> {
         let peer = conn.remote_id();
-        let result = self.handle_connection_inner(&conn, peer).await;
+        let result = if !self.allowed.contains(&peer) {
+            conn.close(403u32.into(), b"denied");
+            Ok(())
+        } else if let Some(_lease) = self.admit_peer(peer) {
+            self.handle_connection_inner(&conn, peer).await
+        } else {
+            conn.close(429u32.into(), b"per-peer connection cap");
+            Ok(())
+        };
         let usage = WireUsage::sample(&conn);
         println!("SERVER_WIRE_METRICS peer={peer} udp_tx_bytes={} udp_rx_bytes={} udp_tx_datagrams={} udp_rx_datagrams={}",
             usage.udp_tx_bytes, usage.udp_rx_bytes, usage.udp_tx_datagrams, usage.udp_rx_datagrams);
@@ -196,16 +246,26 @@ impl Server {
         result
     }
     async fn handle_connection_inner(&self, conn: &Connection, peer: EndpointId) -> Result<()> {
-        if !self.allowed.contains(&peer) {
-            conn.close(403u32.into(), b"denied");
-            return Ok(());
-        }
-        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-            // A peer cannot force unlimited receive buffering via malformed messages.
-            let incoming = timeout(RESPONSE_TIMEOUT, recv.read_to_end(REQUEST_LIMIT)).await;
+        for _ in 0..MAX_STREAMS_PER_CONNECTION {
+            // An authenticated peer must not occupy a global connection slot forever.
+            let (mut send, mut recv) = match timeout(self.idle_timeout, conn.accept_bi()).await {
+                Ok(Ok(stream)) => stream,
+                Ok(Err(_)) => return Ok(()), // Peer closed the connection.
+                Err(_) => {
+                    conn.close(408u32.into(), b"idle connection");
+                    return Ok(());
+                }
+            };
+            // Request upload is tiny (at most 37 bytes); it must be completed
+            // promptly even when book downloads themselves are rate-limited.
+            let incoming = timeout(self.request_timeout, recv.read_to_end(REQUEST_LIMIT)).await;
             let response: Vec<u8> = match incoming {
                 Ok(Ok(raw)) => self.reply(peer, &raw),
-                _ => vec![BAD_REQUEST],
+                Ok(Err(_)) => vec![BAD_REQUEST],
+                Err(_) => {
+                    conn.close(408u32.into(), b"incomplete request");
+                    return Ok(());
+                }
             };
             if let Some(gate) = &self.rate {
                 // Pacing applies to all application response bytes including manifest/status.
@@ -219,6 +279,7 @@ impl Server {
             }
             send.finish()?;
         }
+        conn.close(429u32.into(), b"stream count limit");
         Ok(())
     }
     fn reply(&self, peer: EndpointId, req: &[u8]) -> Vec<u8> {
