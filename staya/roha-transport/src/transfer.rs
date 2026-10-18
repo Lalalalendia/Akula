@@ -148,7 +148,9 @@ impl VerifiedAssembly {
         if bytes.is_empty() && total != 0 {
             return Err(TransferError::EmptyChunk);
         }
-        let end = offset.checked_add(length as u64).ok_or(TransferError::InvalidRange)?;
+        let end = offset
+            .checked_add(length as u64)
+            .ok_or(TransferError::InvalidRange)?;
         if end > total {
             return Err(TransferError::InvalidRange);
         }
@@ -201,11 +203,16 @@ mod tests {
         let m = TransferManifest::for_bytes(&data).unwrap();
         let mut stage = VerifiedAssembly::new(m).unwrap();
         let a = m.encode_chunk(0, &data[..MAX_CHUNK_BYTES]).unwrap();
-        let b = m.encode_chunk(MAX_CHUNK_BYTES as u64, &data[MAX_CHUNK_BYTES..]).unwrap();
+        let b = m
+            .encode_chunk(MAX_CHUNK_BYTES as u64, &data[MAX_CHUNK_BYTES..])
+            .unwrap();
         assert_eq!(stage.accept_frame(&b), Err(TransferError::OutOfOrder));
         let mut corrupt = a.clone();
         *corrupt.last_mut().unwrap() ^= 1;
-        assert_eq!(stage.accept_frame(&corrupt), Err(TransferError::IntegrityMismatch));
+        assert_eq!(
+            stage.accept_frame(&corrupt),
+            Err(TransferError::IntegrityMismatch)
+        );
         assert_eq!(stage.verified_offset(), 0);
         let foreign = TransferManifest::for_bytes(&vec![42; data.len()]).unwrap();
         assert_eq!(
