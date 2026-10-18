@@ -106,10 +106,22 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
     }
     let _ = h.root.redraw();
     let (w, hh) = (width as u16, height as u16);
+    // Ordinary worker-crossover profiling retains true fixed-worker controls.
+    // The opt-in strict guard96 test instead compares fixed zero-worker output
+    // against the actual adaptive production policy at two worker settings.
+    let route_trial = std::env::var_os("AQ_CROSSOVER_ADAPTIVE").is_some();
     let mut renderers = [
         Renderer::new_fixed_for_test(WORKERS[0]),
-        Renderer::new_fixed_for_test(WORKERS[1]),
-        Renderer::new_fixed_for_test(WORKERS[2]),
+        if route_trial {
+            Renderer::new(WORKERS[1])
+        } else {
+            Renderer::new_fixed_for_test(WORKERS[1])
+        },
+        if route_trial {
+            Renderer::new(WORKERS[2])
+        } else {
+            Renderer::new_fixed_for_test(WORKERS[2])
+        },
     ];
     let mut samples: [Vec<WorkerSample>; 3] =
         std::array::from_fn(|_| Vec::with_capacity((STEPS - 1) as usize));
@@ -165,6 +177,14 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
         }
     }
 
+    if route_trial {
+        for renderer in &renderers[1..] {
+            assert!(
+                renderer.dual_dispatch_switches_for_test() > 0,
+                "{case}: adaptive worker context was never selected"
+            );
+        }
+    }
     for (index, thread_count) in WORKERS.into_iter().enumerate() {
         let selected = &samples[index];
         assert!(
