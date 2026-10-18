@@ -64,7 +64,7 @@ def verified_pin(folder, identity_key, identity_id, label):
         [str(BIN), "show-contact", identity_key],
         capture_output=True, text=True, check=True, timeout=15
     )
-    contact.write_text(exported.stdout, encoding="utf-8")
+    contact.write_bytes(exported.stdout.encode("utf-8"))
     subprocess.run(
         [str(BIN), "confirm-contact", str(contact), identity_id, str(trusted)],
         capture_output=True, text=True, check=True, timeout=15
