@@ -11,7 +11,7 @@ resolver = "2"
 
 [dependencies]
 iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49", default-features = false, features = ["tls-ring"] }
-tokio = { version = "1", features = ["rt", "macros", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 
 [patch.crates-io]
 noq = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
