@@ -12,6 +12,8 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::p
 pub const STAYA_ALPN: &[u8] = b"akula/staya/transport/0";
 
 pub mod admission;
+#[cfg(target_os = "linux")]
+pub mod durable_admission;
 pub mod transfer;
 
 /// Explicitly authorized endpoint keys. The pairing workflow owns this list.
