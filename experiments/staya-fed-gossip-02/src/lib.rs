@@ -1,3 +1,5 @@
+pub mod announcement;
+
 //! Small, isolated FED-GOSSIP-02 laboratory using the actual iroh-gossip
 //! 0.101.0 IO-less HyParView and PlumTree protocol state machine.
 //! Simulated delivery is NOT signed federation authority or real UDP/QUIC.
