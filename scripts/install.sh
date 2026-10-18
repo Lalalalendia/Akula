@@ -16,6 +16,68 @@ case "$(uname -m)" in
   *) printf 'Aquilum DMG installer supports Apple Silicon and Intel Macs only.\n' >&2; exit 1 ;;
 esac
 
+# Serialize install, recovery and uninstall with a shared BSD advisory lock.
+# A persistent lock *file* is necessary: unlink/recreate could split the lock
+# between two cooperating processes. The OS releases the held descriptor on
+# SIGKILL, so a dead installer does not leave an unrecoverable PID lock.
+# This is not security isolation against a hostile same-UID process.
+if [[ -L "$APP_DIR" || ( -e "$APP_DIR" && ! -d "$APP_DIR" ) ]]; then
+  printf 'Unsafe Applications directory: %s\n' "$APP_DIR" >&2
+  exit 1
+fi
+mkdir -p "$APP_DIR"
+lock_file="$APP_DIR/.akula-install.lock"
+if [[ -L "$lock_file" || ( -e "$lock_file" && ! -f "$lock_file" ) ]]; then
+  printf 'Unsafe shared installer lock path: %s\n' "$lock_file" >&2
+  exit 1
+fi
+exec 9>>"$lock_file"
+if ! lockf -s -t 0 9; then
+  printf 'Another Akula installer or uninstaller holds the Applications lock.\n' >&2
+  exit 1
+fi
+
+if [[ -L "$APP_PATH" || ( -e "$APP_PATH" && ! -d "$APP_PATH" ) ]]; then
+  printf 'Unsafe or non-directory application destination: %s\n' "$APP_PATH" >&2
+  exit 1
+fi
+
+# A process can die without running EXIT traps after old -> backup or after
+# candidate -> destination. Inspect persistent staging BEFORE even fetching a
+# release. Restore the one unambiguous missing app, then stop so the caller
+# can independently retry the update. Never silently erase a backup when a
+# destination already exists: publication may have completed before SIGKILL.
+for stale in "$APP_DIR"/.akula-install.*; do
+  [[ "$stale" == "$lock_file" ]] && continue
+  [[ -e "$stale" || -L "$stale" ]] || continue
+  if [[ ! -d "$stale" || -L "$stale" ]]; then
+    printf 'Untrusted interrupted installer artifact: %s\n' "$stale" >&2
+    exit 1
+  fi
+  previous="$stale/Aquilum.previous.app"
+  if [[ -L "$previous" || ( -e "$previous" && ! -d "$previous" ) ]]; then
+    printf 'Unsafe interrupted installer backup: %s\n' "$previous" >&2
+    exit 1
+  fi
+  if [[ -d "$previous" && ! -e "$APP_PATH" && ! -L "$APP_PATH" ]]; then
+    if ! mv "$previous" "$APP_PATH"; then
+      printf 'Recovery could not restore %s; backup preserved at %s\n' "$APP_PATH" "$previous" >&2
+      exit 1
+    fi
+    # Only an unambiguous recovered backup permits deletion of this stage.
+    # A later crash may leave an orphan stage without a backup: the next run
+    # conservatively refuses it rather than deleting unknown files.
+    if ! rm -rf "$stale"; then
+      printf 'Previous application restored, but stage needs inspection: %s\n' "$stale" >&2
+      exit 1
+    fi
+    printf 'Recovered interrupted install to %s; please retry update separately.\n' "$APP_PATH" >&2
+    exit 1
+  fi
+  printf 'Interrupted installer state needs review: %s (destination: %s). No files removed.\n' "$stale" "$APP_PATH" >&2
+  exit 1
+done
+
 work_dir="$(mktemp -d)"
 mount_dir="$work_dir/mount"
 mkdir "$mount_dir"
@@ -85,11 +147,6 @@ fi
 # Stage and inspect the new bundle BEFORE moving or replacing the old
 # installation. This also keeps the candidate on the same filesystem as the
 # final Applications directory, so promotion can use a single rename.
-mkdir -p "$APP_DIR"
-if [[ -L "$APP_PATH" || ( -e "$APP_PATH" && ! -d "$APP_PATH" ) ]]; then
-  printf 'Unsafe or non-directory application destination: %s\n' "$APP_PATH" >&2
-  exit 1
-fi
 stage_dir="$(mktemp -d "$APP_DIR/.akula-install.XXXXXXXX")"
 staged_app="$stage_dir/Aquilum.app"
 backup_app="$stage_dir/Aquilum.previous.app"
