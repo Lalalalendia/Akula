@@ -107,6 +107,12 @@ pub struct Core {
     /// the same thread, even if the host reconstructs a Core without exiting.
     #[cfg(feature = "sync-s3")]
     pub(crate) guarded_instance_nonce: uuid::Uuid,
+    /// Opt-in only: explicit host-selected ledger shared by cooperating Core
+    /// processes. This is not a default installer trust root or public sync
+    /// activation. Unconfigured Core remains the legacy (unsafe for cross-
+    /// appdata S3 custody) path until P0-B3 native host provisioning.
+    #[cfg(feature = "sync-s3")]
+    shared_host_custody_path: Option<PathBuf>,
     pub wikixiv: WikixivService,
     pub watcher: WorkspaceWatcher,
     /// The note open in the UI, reported by the host; MCP tools use it for «эта заметка».
@@ -118,6 +124,29 @@ pub struct Core {
 impl Core {
     /// Opens all stores under `app_data_dir`, which the host picks.
     pub fn open(app_data_dir: &Path, events: Arc<dyn EventSink>) -> Arc<Self> {
+        Self::open_impl(app_data_dir, events, None)
+    }
+
+    /// A host/test integration seam, NOT a user-provided preference. The
+    /// actual native installer must bind the same trusted path to *every*
+    /// cooperating process; passing arbitrary different paths is unsafe.
+    /// This method never creates or repairs the host custody database.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn open_with_shared_host_custody(
+        app_data_dir: &Path,
+        events: Arc<dyn EventSink>,
+        installer_registry_path: &Path,
+    ) -> Arc<Self> {
+        Self::open_impl(app_data_dir, events, Some(installer_registry_path.to_path_buf()))
+    }
+
+    fn open_impl(
+        app_data_dir: &Path,
+        events: Arc<dyn EventSink>,
+        host_registry_path: Option<PathBuf>,
+    ) -> Arc<Self> {
+        #[cfg(not(feature = "sync-s3"))]
+        let _ = &host_registry_path;
         let core = Arc::new_cyclic(|this: &Weak<Core>| {
             let changed = Arc::clone(&events);
             let notifier: ChangeNotifier = Arc::new(move |paths| {
@@ -144,6 +173,8 @@ impl Core {
                 guarded_editors: Mutex::new(Vec::new()),
                 #[cfg(feature = "sync-s3")]
                 guarded_instance_nonce: uuid::Uuid::new_v4(),
+                #[cfg(feature = "sync-s3")]
+                shared_host_custody_path: host_registry_path.clone(),
                 wikixiv: WikixivService::new(),
                 watcher: WorkspaceWatcher::new(watch_sink),
                 active_note: ActiveNote::default(),
@@ -189,6 +220,92 @@ impl Core {
         PROCESS_NOTE_PUBLICATIONS.write().map_err(|_| FileCommandError::Task {
             message: "note publication epoch poisoned; refusing enrollment".into(),
         })
+    }
+
+    /// In the explicitly host-configured S3 slice, serialize an ordinary
+    /// note's primary bytes AND HistoryService against host enrollment using
+    /// the same SQLite BEGIN IMMEDIATE epoch as installer registration.
+    ///
+    /// Deliberate scope: File Gate write/create only, cooperative processes
+    /// that were passed one trusted registry by their installer. No external
+    /// OS-lock writer authority, path-scoped HOLD removal, remote overwrite,
+    /// or safety assertion for an unconfigured Core follows from this API.
+    pub(crate) fn with_shared_host_note_epoch<T>(
+        &self, note: &Path,
+        publish: impl FnOnce() -> Result<T, FileCommandError>,
+    ) -> Result<T, FileCommandError> {
+        #[cfg(not(feature = "sync-s3"))]
+        {
+            let _ = note;
+            publish()
+        }
+        #[cfg(feature = "sync-s3")]
+        {
+            use crate::sync::filegate_lock_probe::PinnedProbeRoot;
+            use crate::sync::host_custody_registry::{
+                PhysicalObjectId, SharedHostCustodyRegistry,
+            };
+            let Some(db_path) = self.shared_host_custody_path.as_ref() else {
+                return publish();
+            };
+            let deny = |problem: String| FileCommandError::Task {
+                message: format!("host-wide custody admission HOLD: {problem}"),
+            };
+            let parent = note.parent()
+                .ok_or_else(|| deny("note has no containing directory".into()))?;
+            let parent = std::fs::canonicalize(parent)
+                .map_err(|error| deny(format!("cannot resolve note parent: {error}")))?;
+            // A leaf alias is not admitted as an ordinary primary write.
+            match std::fs::symlink_metadata(note) {
+                Ok(meta) => {
+                    if meta.file_type().is_symlink() {
+                        return Err(deny("note leaf is a symlink".into()));
+                    }
+                    #[cfg(windows)]
+                    if {
+                        use std::os::windows::fs::MetadataExt;
+                        meta.file_attributes() & 0x0000_0400 != 0
+                    } {
+                        return Err(deny("note leaf is a reparse point".into()));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(deny(format!("cannot inspect note leaf: {error}"))),
+            }
+            let roots = self.ui_state.workspace_roots()
+                .map_err(|error| deny(format!("registered roots unavailable: {error:?}")))?;
+            let mut selected: Option<PathBuf> = None;
+            for root in roots {
+                let canonical = std::fs::canonicalize(&root)
+                    .map_err(|error| deny(format!("registered root cannot be resolved: {error}")))?;
+                if parent.starts_with(&canonical) {
+                    if selected.is_some() {
+                        return Err(deny("overlapping registered roots".into()));
+                    }
+                    selected = Some(canonical);
+                }
+            }
+            let root = selected.ok_or_else(|| deny(
+                "unregistered or untrusted note destination".into()
+            ))?;
+            let pinned = PinnedProbeRoot::open(&root)
+                .map_err(|error| deny(format!("physical root admission failed: {error}")))?;
+            let (device, file) = pinned.identity();
+            let mut registry = SharedHostCustodyRegistry::open_existing(db_path)
+                .map_err(|error| deny(format!("installer registry unavailable: {error:?}")))?;
+            let result = registry.with_unenrolled_epoch(
+                &root, PhysicalObjectId { device, file },
+                || {
+                    let published = publish();
+                    // Postflight evidence only: a file may already have been
+                    // written. Never acknowledge success on a root swap.
+                    let recheck = pinned.recheck_root()
+                        .map_err(|error| deny(format!("root changed during publication: {error}")));
+                    recheck.and(published)
+                },
+            ).map_err(|error| deny(format!("shared enrollment conflict: {error:?}")))?;
+            result
+        }
     }
 
     /// Mutating File Gate entrypoints must refuse a pending or invalid history

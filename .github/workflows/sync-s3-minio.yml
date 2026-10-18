@@ -165,6 +165,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 coord_locator::tests
+      - name: Prove host-configured two-process File Gate refusal on Linux
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 oslock_host_configured_second_process_denies_ordinary_write_and_create -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 absent_installer_ledger_is_hold_without_touching_original -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 host_configured_unenrolled_root_can_publish_file_and_history -- --nocapture
       - name: Verify host-installed shared custody ledger rejects cross-appdata reset
         shell: bash
         working-directory: aquilum-app

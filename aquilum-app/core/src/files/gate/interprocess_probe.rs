@@ -134,6 +134,33 @@ mod tests {
         let right = PathBuf::from(std::env::var_os("AKULA_FILEGATE_OSLOCK_RIGHT").unwrap());
         let report = PathBuf::from(std::env::var_os("AKULA_FILEGATE_OSLOCK_REPORT").unwrap());
         match mode.to_str().unwrap() {
+            #[cfg(feature = "sync-s3")]
+            "host-enforced-alternate-appdata-ordinary-write" => {
+                use crate::app_core::{Core, CoreEvent};
+                use crate::files::gate;
+                use crate::history::Source;
+                use std::sync::Arc;
+
+                let appdata = PathBuf::from(
+                    std::env::var_os("AKULA_FILEGATE_OTHER_APPDATA").unwrap()
+                );
+                let host_db = PathBuf::from(
+                    std::env::var_os("AKULA_FILEGATE_HOST_LEDGER").unwrap()
+                );
+                let core = Core::open_with_shared_host_custody(
+                    &appdata, Arc::new(|_: CoreEvent| {}), &host_db,
+                );
+                core.ui_state.resolve_workspace(left.to_str().unwrap(), 1).unwrap();
+                let changed = gate::write(
+                    &core, &left.join("Enrolled.md"), "forbidden-second-process",
+                    None, Source::Me, None,
+                ).is_ok();
+                let created = gate::create(
+                    &core, &left.join("HostBypass.md"), "forbidden-create",
+                    Source::Me, None,
+                ).is_ok();
+                fs::write(report, format!("{changed}|{created}")).unwrap();
+            }
             "alternate-appdata-ordinary-write" => {
                 use crate::app_core::{Core, CoreEvent};
                 use crate::files::gate;
@@ -606,6 +633,142 @@ mod tests {
             &core_a, &protected, "still-denied", None, Source::Me, None,
         ).is_err());
         drop(held);
+    }
+
+    /// Positive P0-B2 slice: a different OS process uses installer-provided
+    /// shared ledger rather than private appdata-A. B cannot write/create
+    /// while A owns the enrolled root and existing physical OS lock. The
+    /// original negative #251 test intentionally remains as a separate
+    /// falsifier for unconfigured Core instances.
+    #[cfg(feature = "sync-s3")]
+    #[test]
+    fn oslock_host_configured_second_process_denies_ordinary_write_and_create() {
+        use crate::app_core::{Core, CoreEvent};
+        use crate::files::gate;
+        use crate::history::Source;
+        use crate::sync::host_custody_registry::{
+            HostCustodyRecord, PhysicalObjectId, SharedHostCustodyRegistry,
+        };
+        use crate::sync::VaultId;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let app_a = temp.path().join("appdata-a");
+        let app_b = temp.path().join("appdata-b");
+        let host = temp.path().join("host");
+        let external = temp.path().join("external-custody");
+        for path in [&root, &app_a, &app_b, &host, &external] {
+            fs::create_dir(path).unwrap();
+        }
+        let root = fs::canonicalize(root).unwrap();
+        let note = root.join("Enrolled.md");
+        fs::write(&note, b"original").unwrap();
+        let core_a = Core::open(&app_a, Arc::new(|_: CoreEvent| {}));
+        core_a.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        core_a.documents.enroll_guarded_participant(
+            &root, "one-shared-vault-id",
+            &app_a.join("profiles.sqlite"), &app_a.join("custody.sqlite"),
+            &external,
+        ).unwrap();
+        assert!(gate::write(
+            &core_a, &note, "owner-denied", None, Source::Me, None,
+        ).is_err());
+        fs::write(external.join(TEST_LOCK_NAME), b"").unwrap();
+        let pinned = PinnedProbeRoot::open(&external).unwrap();
+        let held = pinned.try_lock().unwrap().expect("real external OS lock");
+        let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
+        let host_db = host.join("installer-ledger.sqlite3");
+        let mut ledger = SharedHostCustodyRegistry::provision_new(
+            &host_db, &[root.as_path(), app_a.as_path(), app_b.as_path()],
+        ).unwrap();
+        ledger.enroll(&HostCustodyRecord {
+            root_path: root.to_string_lossy().into_owned(),
+            root_identity: PhysicalObjectId {
+                device: root_id.0, file: root_id.1,
+            },
+            vault_id: VaultId::new(),
+            profile_id: "trusted-s3".into(),
+            custody_scope_path: fs::canonicalize(&external).unwrap()
+                .to_string_lossy().into_owned(),
+            lock_identity: PhysicalObjectId {
+                device: held.identity().0, file: held.identity().1,
+            },
+        }).unwrap();
+        drop(ledger);
+        let report = temp.path().join("child-host-result.txt");
+        let output = child_command(
+            "host-enforced-alternate-appdata-ordinary-write", &root, &external, &report,
+        )
+        .env("AKULA_FILEGATE_OTHER_APPDATA", &app_b)
+        .env("AKULA_FILEGATE_HOST_LEDGER", &host_db)
+        .output().unwrap();
+        assert!(output.status.success(),
+            "child crashed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr));
+        assert_eq!(fs::read_to_string(&report).unwrap(), "false|false",
+            "shared host custody MUST deny both real File Gate mutations");
+        assert_eq!(fs::read(&note).unwrap(), b"original");
+        assert!(!root.join("HostBypass.md").exists());
+        drop(held);
+    }
+
+    #[cfg(feature = "sync-s3")]
+    #[test]
+    fn host_configured_unenrolled_root_can_publish_file_and_history() {
+        use crate::app_core::{Core, CoreEvent};
+        use crate::files::gate;
+        use crate::history::Source;
+        use crate::sync::host_custody_registry::SharedHostCustodyRegistry;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("new-vault");
+        let app = temp.path().join("appdata");
+        let host = temp.path().join("host");
+        for dir in [&root, &app, &host] { fs::create_dir(dir).unwrap(); }
+        let root = fs::canonicalize(root).unwrap();
+        let db = host.join("approved.sqlite");
+        drop(SharedHostCustodyRegistry::provision_new(
+            &db, &[root.as_path(), app.as_path()],
+        ).unwrap());
+        let core = Core::open_with_shared_host_custody(
+            &app, Arc::new(|_: CoreEvent| {}), &db,
+        );
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let note = root.join("Allowed.md");
+        gate::create(&core, &note, "start", Source::Me, None).unwrap();
+        gate::write(&core, &note, "healthy", None, Source::Me, None).unwrap();
+        assert_eq!(fs::read_to_string(&note).unwrap(), "healthy");
+        assert!(core.history.page(&|| vec![root], &note, 0, 10).total >= 1);
+    }
+
+    #[cfg(feature = "sync-s3")]
+    #[test]
+    fn absent_installer_ledger_is_hold_without_touching_original() {
+        use crate::app_core::{Core, CoreEvent};
+        use crate::files::gate;
+        use crate::history::Source;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let app = temp.path().join("appdata");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&app).unwrap();
+        let root = fs::canonicalize(root).unwrap();
+        let note = root.join("Keep.md");
+        fs::write(&note, b"keep").unwrap();
+        let core = Core::open_with_shared_host_custody(
+            &app, Arc::new(|_: CoreEvent| {}), &temp.path().join("missing.sqlite"),
+        );
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        assert!(gate::write(&core, &note, "bad", None, Source::Me, None).is_err());
+        assert!(gate::create(&core, &root.join("Bad.md"), "bad", Source::Me, None).is_err());
+        assert_eq!(fs::read(&note).unwrap(), b"keep");
+        assert!(!root.join("Bad.md").exists());
+        assert!(!temp.path().join("missing.sqlite").exists());
     }
 
     #[test]

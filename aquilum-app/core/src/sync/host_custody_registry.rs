@@ -228,6 +228,25 @@ impl SharedHostCustodyRegistry {
         if lookup(&transaction, &root_identity.key(), &root)?.is_some() {
             return Err(HostCustodyError::ConflictingEnrollment);
         }
+        // An independently registered *nested* workspace must not become
+        // an escape hatch into its enrolled ancestor (or conversely a broad
+        // parent-root publication into an enrolled child). Examine every
+        // registered host path while retaining the SQLite writer epoch.
+        {
+            let mut statement = transaction.prepare(
+                "SELECT root_path FROM shared_custody"
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            for record_path in rows {
+                let other = record_path?;
+                let enrolled = Path::new(&other);
+                if Path::new(&root).starts_with(enrolled)
+                    || enrolled.starts_with(Path::new(&root))
+                {
+                    return Err(HostCustodyError::ConflictingEnrollment);
+                }
+            }
+        }
         let outcome = operation();
         transaction.commit()?;
         Ok(outcome)
@@ -654,5 +673,22 @@ mod tests {
         drop(conn);
         assert!(SharedHostCustodyRegistry::open_existing(&db).is_err());
         assert!(db.exists(), "broken host ledger must never be silently removed");
+    }
+
+    #[test]
+    fn nested_alias_cannot_escape_enrolled_ancestor_via_a_new_appdata_root() {
+        let (_temp, db, vault, appdata, record) = specimen();
+        let nested = vault.join("independent-workspace");
+        fs::create_dir(&nested).unwrap();
+        let mut host = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()]
+        ).unwrap();
+        host.enroll(&record).unwrap();
+        let mut callback_executed = false;
+        let nested_id = PhysicalObjectId { device: 9999, file: 8888 };
+        assert!(matches!(host.with_unenrolled_epoch(&nested, nested_id, || {
+            callback_executed = true;
+        }), Err(HostCustodyError::ConflictingEnrollment)));
+        assert!(!callback_executed, "nested root bypassed enrolled parent");
     }
 }

@@ -16,6 +16,7 @@ on:
       - "aquilum-app/core/src/files/gate/moves.rs"
       - "aquilum-app/core/src/files/gate/trash.rs"
       - "aquilum-app/core/src/files/gate/tests.rs"
+      - "aquilum-app/core/src/files/gate/interprocess_probe.rs"
       - "aquilum-app/core/src/files/error.rs"
       - "aquilum-app/core/src/documents/io.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
@@ -65,6 +66,12 @@ jobs:
       - name: Verify real editor HubIo save under registered S3 cooperative custody
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3 guarded_editor::tests -- --nocapture
+      - name: Verify explicitly configured shared ledger denies second process writes
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --features sync-s3 oslock_host_configured_second_process_denies_ordinary_write_and_create -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 absent_installer_ledger_is_hold_without_touching_original -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 host_configured_unenrolled_root_can_publish_file_and_history -- --nocapture
       - name: Verify actual primary/history publication epochs before S3 enrollment
         working-directory: aquilum-app
         run: |

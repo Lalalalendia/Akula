@@ -26,7 +26,8 @@ pub fn write(
     ) {
         return guarded;
     }
-    let (result, history_outcome) = {
+    let (result, history_outcome) = core.with_shared_host_note_epoch(path, || {
+
         // This lease spans BOTH the primary file replacement and the history
         // attempt. Activation waits for it before flipping durable HOLD.
         // Only enabled for opt-in S3 builds; the unarmed route stays cheap.
@@ -43,8 +44,8 @@ pub fn write(
             name: version_name,
         };
         let outcome = core.history.try_saved(&|| core.known_roots(), path, write);
-        (result, outcome)
-    };
+        Ok((result, outcome))
+    })?;
     // Do NOT invoke any host callback while holding the publication epoch.
     report_record(core, path, history_outcome);
     if is_markdown(path) {
@@ -106,7 +107,8 @@ pub fn create(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
-    let (result, history_outcome) = {
+    let (result, history_outcome) = core.with_shared_host_note_epoch(path, || {
+
         #[cfg(feature = "sync-s3")]
         let _publication = core.ordinary_note_publication_lease()?;
         let result = {
@@ -122,8 +124,8 @@ pub fn create(
         } else {
             None
         };
-        (result, history)
-    };
+        Ok((result, history))
+    })?;
     if let Some(history) = history_outcome {
         report_record(core, path, history);
     }
