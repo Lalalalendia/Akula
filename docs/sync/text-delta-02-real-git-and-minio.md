@@ -28,3 +28,42 @@ MinIO counters are provider HEAD and GET calls plus response body payload bytes,
 Only consider a delta if the recipient is already known to hold an independently pinned exact base and the entire message saves >= 128 bytes **and** >=15% compared with full-Zstd. On a cache miss, compare fetching the old base plus delta against sending full. Always preserve the full fallback, conflicts, tombstones, and old reader compatibility.
 
 Do not enable a user-facing codec, schedule a sync agent, switch the V1 blob format or promote local baselines on the strength of this experiment. Existing host custody P0 and the two-client File Gate end-to-end acceptance remain the actual release blockers.
+
+## Measured first run — real Git history and two S3 clients
+
+[GitHub Actions #39135781977](https://github.com/Lalalalendia/Akula/actions/runs/39135781977), artifact ID **12139936077** (17-row JSONL, SHA-256 fixture digests, no Markdown content).
+
+This is **17 actual adjacent Git-version pairs from 5 first-party public Markdown files**. No manually generated one-character changes were added to this corpus. The largest new text was 29,446 bytes and all were within the old V2 32 KiB member limit. All 17 selected Zstd patch-from under the experimental 128 B / 15% threshold; this biased corpus consists of successive documentation edits and is NOT proof that user edits always favor patching.
+
+| Measurement | All 17 transfers |
+| --- | ---: |
+| Full Zstd-3 envelopes | 139,916 B |
+| One-region splice+Zstd-3 envelopes | 46,812 B |
+| Zstd patch-from envelopes | 14,171 B |
+| Saved V2-only message bytes when old base is present | 89.87% |
+| Required independent full new V1 blobs | 364,019 B |
+| Hypothetical full V1 + full-Zstd-sidecar sender bytes | 503,935 B |
+| Hypothetical full V1 + adaptive-sidecar sender bytes | 378,190 B |
+| **Hypothetical sender payload saving including required V1** | **24.95%** |
+
+Actual independent test provider S3 clients on disposable localhost MinIO:
+
+| Verified receiver route | S3 GET | S3 HEAD | Returned object-body payload |
+| --- | ---: | ---: | ---: |
+| Download full Zstd | 17 | 17 | 139,916 B |
+| Cache hit — download only Zstd patch | 17 | 17 | 14,171 B |
+| Cache miss — fetch raw old V1-like blob then patch | 34 | 34 | 350,302 B |
+| Old base absent — use full compressed content | 17 | 17 | 139,916 B |
+
+**Cache miss interpretation:** the strategy that first fetches a raw old base to apply a tiny patch returned 2.50x more object-body bytes and used 2x GET/HEAD than fetching the complete compressed target. It was worse in **all 17 individual pairs**. A production sender should *not* require extra remote old-base downloads just to enable a patch; it must send full compressed bytes or choose from already-available verified bases. Never speculate that a receiver has a base solely from its manifest ID.
+
+Median local CLI-driven encoding times (per pair): full Zstd 1.270 ms, one-splice Zstd 4.804 ms, Zstd patch-from 1.182 ms; median decoding times 1.136, 1.111 and 1.319 ms respectively. Median localhost S3 path wall time (HEAD+GET) was ~3.38 ms for full vs ~3.38 ms for warm patch; on a cold base path (2 HEAD+2 GET), ~6.65 ms. Single-run medians include process startup and local runner noise, NOT a statistically meaningful latency advantage.
+
+Important constraints:
+
+- The actual loopback test uploads **both competing sidecar representations**, plus full old/new raw blobs, for measurement. The sender numbers in the table are *counterfactual accounting*, not bytes uploaded by that one test execution and not AWS billing.
+- No V1 root, cloud CAS journal, source File Gate, trusted BLAKE3 revision anchor or user baseline is changed. Boto3 writer and reader are separately constructed sessions but share temporary MinIO test credentials; this does not establish remote writer identity.
+- Production still has to verify old content, changes in the revision DAG, tombstones and offline siblings; HTTP headers, retries, TLS, cold full pinned reads and authentication were outside the probe.
+- Dataset selection favors documentation that was edited incrementally and has a short Git history. Need real opt-in sequential user note revisions and larger files before introducing a Rust content codec or revising V1/V2 storage.
+
+**Provisional technical verdict:** reference patching is compelling for a **verified warm base**, while cold-base on-demand download is a losing default. Retain a full-content representation and cache-aware negotiation. The integration/release P0 for File Gate and ordinary Core startup still outranks this optional optimization.
