@@ -12,6 +12,7 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::p
 /// Network protocol reserved for a Staya connection, not a file-write capability.
 pub const STAYA_ALPN: &[u8] = b"akula/staya/transport/0";
 
+pub mod admission;
 pub mod transfer;
 
 /// Explicitly authorized endpoint keys. The pairing workflow owns this list.
@@ -33,6 +34,7 @@ impl AllowedPeers {
 pub struct StayaTransport {
     endpoint: Endpoint,
     peers: AllowedPeers,
+    admission: admission::HandshakeGate,
 }
 
 impl StayaTransport {
@@ -71,7 +73,11 @@ impl StayaTransport {
         }
 
         let endpoint = builder.bind().await.map_err(|err| format!("bind: {err}"))?;
-        Ok(Self { endpoint, peers })
+        Ok(Self {
+            endpoint,
+            peers,
+            admission: admission::HandshakeGate::new(),
+        })
     }
 
     pub fn address(&self) -> EndpointAddr {
@@ -80,6 +86,11 @@ impl StayaTransport {
 
     pub fn id(&self) -> EndpointId {
         self.endpoint.id()
+    }
+
+    /// Diagnostics about QUIC handoffs, not UDP or CPU usage before Roha.
+    pub fn admission_stats(&self) -> Result<admission::AdmissionStats, admission::AdmissionError> {
+        self.admission.stats()
     }
 
     /// Actual bound UDP socket addresses (not a public discovery service).
@@ -112,6 +123,17 @@ impl StayaTransport {
     pub async fn accept_one(&self) -> Result<iroh::endpoint::Connection, String> {
         loop {
             let incoming = self.endpoint.accept().await.ok_or("endpoint stopped")?;
+            // Charge before accepting the QUIC handshake. All unverified
+            // peer claims share the same LAN budget; a reject is fail-closed.
+            // The reservation is automatically released on errors, timeouts,
+            // future cancellation and unknown peers.
+            let _reservation = match self.admission.reserve_lan() {
+                Ok(reservation) => reservation,
+                Err(_) => {
+                    drop(incoming);
+                    continue;
+                }
+            };
             let connecting = incoming.accept().map_err(|err| format!("accept: {err}"))?;
             let conn = match tokio::time::timeout(Duration::from_secs(15), connecting).await {
                 Ok(Ok(conn)) => conn,
