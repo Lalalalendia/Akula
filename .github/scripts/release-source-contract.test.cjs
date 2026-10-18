@@ -59,3 +59,17 @@ test('runtime-supplied host DB cannot slip into local-only release', () => {
   const bad = original.replace('name: Release', 'name: Release\n# AKULA_INSTALLED_HOST_CUSTODY_DB=untrusted');
   mustReject(bad, 'Unsafe custody/S3 feature');
 });
+
+
+test('manifest must not redirect new Akula downloads to the upstream project', () => {
+  const bad = original.replace(
+    'url="https://github.com/Lalalalendia/Akula/releases/download/v$version"',
+    'url="https://github.com/Freaction/Aquilum/releases/download/v$version"',
+  );
+  mustReject(bad, 'Release manifest must publish artifacts');
+});
+
+test('missing Akula verification key must fail closed', () => {
+  const bad = original.replace('test -n "$key" || {', 'true # key not checked');
+  mustReject(bad, 'Release must stop when');
+});
