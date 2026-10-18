@@ -12,7 +12,12 @@ pub fn reconcile_if_authorized(
     gate: &mut AnnouncementGate, payload: &[u8], now: u64,
     local: &Inventory, remote: &Inventory,
 ) -> Result<Vec<Revision>, String> {
+    // A valid announcement must refer to the very Vault being compared.
+    // Never let a provider's scope-verified but unrelated hint trigger a scan.
     let claim = gate.accept(payload,now).map_err(|e|format!("announcement: {e:?}"))?;
+    if claim.vault != local.vault_scope() || claim.vault != remote.vault_scope() {
+        return Err("announcement/inventory Vault mismatch".into());
+    }
     // These are synthetic fixtures: the separate inventory code checks vault
     // scope and a simulated permission bit, not real Akula signed grants.
     let diff = compare(local,remote,100_000).map_err(|e|format!("inventory: {e:?}"))?;
@@ -71,6 +76,25 @@ mod tests {
         }
         assert_eq!(accepted,2);
         assert!(reconcile_if_authorized(&mut g1,&raw,1002,&a,&b).is_err(),"replay");
+    }
+    #[test]
+    fn signed_message_for_other_vault_never_triggers_inventory_comparison() {
+        let (key, mut gate) = setup();
+        let other_vault = [22u8;16];
+        gate.grant(other_vault, TOPIC, key.verifying_key().to_bytes());
+        let foreign_notice = Announcement::signed(&key, other_vault, TOPIC, [6;32], 2, 1, 1000, 2000);
+        let (a,b) = inventories();
+        let result = reconcile_if_authorized(&mut gate, &foreign_notice.to_wire(), 1001, &a, &b);
+        assert_eq!(result, Err("announcement/inventory Vault mismatch".into()));
+    }
+    #[test]
+    fn untrusted_inventories_cannot_be_compared_after_valid_announcement() {
+        let (key, mut gate) = setup();
+        let notice = Announcement::signed(&key, TEST_VAULT, TOPIC, [6;32], 2, 1, 1000, 2000);
+        let left = Inventory::fixture(TEST_VAULT, false, vec![]).unwrap();
+        let right = Inventory::fixture(TEST_VAULT, true, vec![sample_revision(2)]).unwrap();
+        let result = reconcile_if_authorized(&mut gate, &notice.to_wire(), 1001, &left, &right);
+        assert_eq!(result, Err("inventory: NoGrant".into()));
     }
     #[test]
     fn revoked_or_wrong_vault_fails_before_candidate_discovery() {
