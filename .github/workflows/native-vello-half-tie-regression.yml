@@ -52,7 +52,7 @@ jobs:
           import json
           import pathlib
           import sys
-          meta = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          meta = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
           matches = [p for p in meta["packages"] if p["name"] == "vello_common"]
           assert len(matches) == 1, matches
           path = pathlib.Path(matches[0]["manifest_path"])
