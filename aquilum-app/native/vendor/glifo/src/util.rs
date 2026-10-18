@@ -84,10 +84,62 @@ impl AffineExt for Affine {
     }
 }
 
+
+/// Tiny bias for discrete glyph-pixel decisions. Keeps full-frame and
+/// integer-cropped glyph placements stable under last-ulp translation noise.
+/// Must stay far below a horizontal subpixel cache bucket (currently 0.25px).
+const PIXEL_DECISION_BIAS: f64 = 1e-6;
+
+/// Integer pixel for a cached glyph. Pair with `biased_fract` so the atlas
+/// lookup and final image quad use the *same* coordinate split.
+#[inline]
+pub(crate) fn biased_floor(v: f64) -> f64 {
+    (v + PIXEL_DECISION_BIAS).floor()
+}
+
+/// Fractional part matching `biased_floor`, always in [0, 1).
+/// The f64-to-f32 conversion may round the result to 1; the atlas key
+/// quantizer must clamp such values rather than wrap to bucket zero.
+#[inline]
+pub(crate) fn biased_fract(v: f64) -> f64 {
+    let biased = v + PIXEL_DECISION_BIAS;
+    biased - biased.floor()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::AffineExt;
+    use super::{AffineExt, biased_floor, biased_fract};
     use peniko::kurbo::Affine;
+
+    #[test]
+    fn glyph_pixel_split_stays_consistent_under_integer_cropping() {
+        for position in [-1234.0, -12.0, -0.5, 0.0, 7.0, 9.25, 341.5, 4096.0] {
+            for noise in [-1e-9, 0.0, 1e-9] {
+                let x = position + noise;
+                for origin in [0.0, 1.0, 29.0, 142.0, 1020.0] {
+                    assert_eq!(
+                        biased_floor(x - origin) + origin,
+                        biased_floor(x),
+                        "integer crop changed pixel: x={x}, origin={origin}"
+                    );
+                    assert!(
+                        (biased_fract(x - origin) - biased_fract(x)).abs() < 1e-8,
+                        "integer crop changed fraction: x={x}, origin={origin}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn glyph_pixel_split_resists_noise_around_integers() {
+        for pixel in [-1234.0, -1.0, 0.0, 7.0, 341.0, 4096.0] {
+            for noise in [-1e-9, 0.0, 1e-9] {
+                assert_eq!(biased_floor(pixel + noise), pixel);
+                assert!(biased_fract(pixel + noise) < 1e-5);
+            }
+        }
+    }
 
     #[test]
     fn detects_positive_uniform_scale_without_skew() {
