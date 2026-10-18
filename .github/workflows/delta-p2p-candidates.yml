@@ -26,11 +26,11 @@ jobs:
           workspaces: experiments/p2p-delta-candidates
           key: p2p-delta-candidates
       - name: Check isolated Rust unit tests and fail-closed base validation
-        run: cargo test --manifest-path experiments/p2p-delta-candidates/Cargo.toml -- --nocapture
+        run: cargo test --locked --manifest-path experiments/p2p-delta-candidates/Cargo.toml -- --nocapture
       - name: Compare on genuine adjacent public Git Markdown edits
         run: |
           set -o pipefail
-          cargo run --release --manifest-path experiments/p2p-delta-candidates/Cargo.toml -- "$GITHUB_WORKSPACE" | tee experiments/p2p-delta-candidates/p2p-delta-results.txt
+          cargo run --locked --release --manifest-path experiments/p2p-delta-candidates/Cargo.toml -- "$GITHUB_WORKSPACE" | tee experiments/p2p-delta-candidates/p2p-delta-results.txt
       - name: Retain dependency resolution and numeric results
         if: always()
         uses: actions/upload-artifact@v4
