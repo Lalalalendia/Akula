@@ -500,7 +500,10 @@ fn insert_and_render_colr(
         bearing_y: 0,
     };
 
-    let area = glyph.area;
+    // Already-AA atlas pixels must not be clipped a second time at exact
+    // fractional ink bounds. Include the existing transparent atlas guard
+    // band without modifying the cached glyph's geometric transform.
+    let area = glyph.area.inflate(1.0, 1.0).ceil();
 
     let context_color = cache_key.context_color;
     let Some((atlas_slot, recorder)) = glyph_atlas.insert(image_cache, cache_key, raster_metrics)
@@ -577,11 +580,13 @@ fn render_colr_glyph_from_atlas(
     transform: Affine,
     area: Rect,
 ) {
+    // Match initial cached draw: use transparent padding outside ink bounds.
+    let image_area = area.inflate(1.0, 1.0).ceil();
     render_from_atlas(
         renderer,
         atlas_slot,
         transform,
-        area,
+        image_area,
         quality_for_skew(&transform),
         None,
     );
