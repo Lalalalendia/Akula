@@ -110,6 +110,19 @@ The second Argon audit covered text hyphenation, reader page layout, graph raste
 
 Potential next experiments from the audit, **not yet accepted**: graph `Band::disc` solid-interior fast path, separable 3×3 dilation, chunked rope common-prefix matching, and no-allocation reader session visibility. Require visual pixel-level equality or bounded explained diffs for raster changes, unchanged text position/selection for reader changes, and same-runner paired timings. Avoid adding extra buffers to dilation unless the total memory and latency trade-off wins.
 
+## Reader memory after EPUB close — bounded diagnosis (2026-10-18)
+
+[Real native EPUB four-cycle attribution and stop condition](perf/reader-glibc-rss-attribution.md).
+PRs [#211](https://github.com/Lalalalendia/Akula/pull/211),
+[#221](https://github.com/Lalalalendia/Akula/pull/221) and
+[#228](https://github.com/Lalalalendia/Akula/pull/228) are **merged**.
+The live Rust heap and glibc occupied-size estimate remained nearly flat over
+1,280 GUI navigation steps, despite post-close RSS growth associated with
+anonymous pages and free glibc arenas. The Linux-only after-close trim has
+already been accepted. A four-arena glibc experiment produced mixed gains
+and is **not** approved for production. Stop speculative Reader memory tuning
+without a demonstrable live-object leak or user-visible regression.
+
 ## Third optimization audit: inline parser, search hits, and surface labels (2026-10-17)
 
 The third Argon audit suggested large multipliers for several hot functions. The multipliers were **hypotheses** and were never accepted as whole-app speedups. Only behavior-preserving changes with reproducible measurements entered `main`.
