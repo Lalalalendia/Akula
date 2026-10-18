@@ -13,7 +13,7 @@ use aquilum_core::files::error::FileCommandError;
 
 use crate::i18n::{t, t_with};
 pub use read::read;
-use save::Outcome;
+use save::{Outcome, SaveSafety};
 
 const POLL: Duration = Duration::from_millis(20);
 const RETRY: Duration = Duration::from_secs(5);
@@ -42,6 +42,7 @@ pub struct Note {
     replaced: Option<crop::Rope>,
     queued: usize,
     done: (Sender<Outcome>, Receiver<Outcome>),
+    save_safety: Arc<SaveSafety>,
     revision: u64,
     reload_job: Option<ReloadJob>,
 }
@@ -55,7 +56,7 @@ impl Note {
     /// Construct an ordinary clean note only after a raw on-disk BLAKE3 match.
     /// The caller must compare the cached digest to the *current* file bytes.
     pub(crate) fn from_verified_cache(path: PathBuf, text: crop::Rope, hash: String) -> (Note, crop::Rope) {
-        let note = Note { path, hash: Arc::new(Mutex::new(hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel(), revision: 0, reload_job: None };
+        let note = Note { path, hash: Arc::new(Mutex::new(hash)), pending: None, save_error: None, replaced: None, queued: 0, done: channel(), save_safety: Arc::new(SaveSafety::default()), revision: 0, reload_job: None };
         (note, text)
     }
 
@@ -70,24 +71,31 @@ impl Note {
 
     pub fn edit(&mut self, debounce: Duration) {
         self.revision = self.revision.wrapping_add(1);
-        self.pending = Some(Instant::now() + debounce);
+        // Keep new edits in memory after an ambiguous result; never schedule
+        // another native write until explicit, separately reviewed recovery.
+        self.pending = (!self.save_safety.held()).then(|| Instant::now() + debounce);
     }
 
     pub fn deadline(&self) -> Option<Instant> {
-        if self.queued > 0 { Some(Instant::now() + POLL) } else { self.pending }
+        if self.queued > 0 { Some(Instant::now() + POLL) }
+        else if self.save_safety.held() { None }
+        else { self.pending }
     }
 
     fn queue(&mut self, core: &Arc<Core>, text: &crop::Rope) {
         self.revision = self.revision.wrapping_add(1);
         self.pending = None;
         self.queued += 1;
-        save::queue(Arc::clone(core), self.path.clone(), text.clone(), Arc::clone(&self.hash), self.done.0.clone());
+        save::queue(
+            Arc::clone(core), self.path.clone(), text.clone(),
+            Arc::clone(&self.hash), self.done.0.clone(), Arc::clone(&self.save_safety),
+        );
     }
 
     pub fn tick(&mut self, core: &Arc<Core>, text: &crop::Rope, now: Instant) -> bool {
         let before = self.save_error.clone();
         self.collect();
-        if self.pending.is_some_and(|due| due <= now) {
+        if !self.save_safety.held() && self.pending.is_some_and(|due| due <= now) {
             self.queue(core, text);
         }
         self.save_error != before
@@ -96,6 +104,18 @@ impl Note {
     fn collect(&mut self) {
         while let Ok(outcome) = self.done.1.try_recv() {
             self.queued -= 1;
+            // Worker-side hold is authoritative and can already be set
+            // before a previously queued success ACK is delivered. A stale
+            // success must not clear the manual-review status.
+            if self.save_safety.held() {
+                self.pending = None;
+                let reason = match outcome {
+                    Outcome::NeedsReview(reason) => reason,
+                    _ => "native save needs review before any retry".to_owned(),
+                };
+                self.save_error = Some(t_with("editor.saveFailed", &[("reason", &reason)]));
+                continue;
+            }
             match outcome {
                 Outcome::Saved => self.save_error = None,
                 Outcome::Copied { copy, disk } => {
@@ -104,17 +124,23 @@ impl Note {
                 }
                 Outcome::Unsaved => self.fail(t("editor.conflictUnsaved")),
                 Outcome::Failed(reason) => self.fail(t_with("editor.saveFailed", &[("reason", &reason)])),
+                Outcome::NeedsReview(reason) => {
+                    self.pending = None;
+                    self.save_error = Some(t_with("editor.saveFailed", &[("reason", &reason)]));
+                },
             }
         }
     }
 
     fn fail(&mut self, message: String) {
-        self.pending = Some(Instant::now() + RETRY);
+        if !self.save_safety.held() {
+            self.pending = Some(Instant::now() + RETRY);
+        }
         self.save_error = Some(message);
     }
 
     pub fn flush(&mut self, core: &Arc<Core>, text: &crop::Rope) {
-        if self.pending.is_some() {
+        if self.pending.is_some() && !self.save_safety.held() {
             self.queue(core, text);
         }
         crate::disk::wait();
@@ -122,7 +148,7 @@ impl Note {
     }
 
     pub fn leave(mut self, core: &Arc<Core>, text: &crop::Rope) {
-        if self.pending.is_some() {
+        if self.pending.is_some() && !self.save_safety.held() {
             self.queue(core, text);
         }
     }
@@ -132,13 +158,15 @@ impl Note {
     }
 
     pub fn retry(&mut self) {
+        // Manual retry is NOT review/clearance for a possibly published write.
+        if self.save_safety.held() { return; }
         self.revision = self.revision.wrapping_add(1);
         self.pending = Some(Instant::now());
     }
 
     /// Hash and read changed files away from the window event loop.
     pub fn request_reload(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
-        if self.pending.is_some() || self.queued > 0 {
+        if self.save_safety.held() || self.pending.is_some() || self.queued > 0 {
             return;
         }
         if let Some(job) = self.reload_job.as_mut() {
@@ -191,7 +219,7 @@ impl Note {
             self.request_reload(Arc::clone(wake));
             return None;
         }
-        if job.path != self.path || job.revision != self.revision || self.pending.is_some() || self.queued > 0 {
+        if job.path != self.path || job.revision != self.revision || self.save_safety.held() || self.pending.is_some() || self.queued > 0 {
             return None;
         }
         let loaded = loaded?;
@@ -207,7 +235,7 @@ impl Note {
     /// must update the visible text immediately after a successful disk write.
     /// It is not a watcher notification; bypass the async hash-only probe.
     pub fn reload_after_restore(&mut self) -> Option<crop::Rope> {
-        if self.pending.is_some() || self.queued > 0 {
+        if self.save_safety.held() || self.pending.is_some() || self.queued > 0 {
             return None;
         }
         self.revision = self.revision.wrapping_add(1);
@@ -243,6 +271,37 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         panic!("background note reload did not finish");
+    }
+
+
+    #[test]
+    fn ambiguous_native_save_never_schedules_retry_or_reload() {
+        let dir = crate::test_dir::tempdir();
+        let path = dir.path().join("hold.md");
+        std::fs::write(&path, "original").unwrap();
+        let (mut note, _body) = Note::open(path.clone()).unwrap();
+        note.edit(Duration::ZERO);
+        assert!(note.pending.is_some());
+
+        // Simulate worker publication with an uncertain postflight. The
+        // worker records HOLD before delivering its acknowledgement.
+        let first = note.save_safety.run(|| Outcome::NeedsReview("lost ACK".into()));
+        note.done.0.send(first).unwrap();
+        note.queued = 1;
+        note.collect();
+        assert!(note.save_safety.held());
+        assert!(note.pending.is_none());
+        assert!(note.save_error.is_some());
+
+        note.edit(Duration::ZERO);
+        note.retry();
+        assert!(note.pending.is_none());
+        assert!(note.deadline().is_none());
+
+        note.request_reload(waker());
+        assert!(note.reload_job.is_none());
+        assert!(note.reload_after_restore().is_none());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "original");
     }
 
     #[test]
