@@ -7,16 +7,18 @@ import socket
 import subprocess
 import sys
 import time
+import tempfile
 
 BIN = pathlib.Path(__file__).resolve().parents[1] / "target" / "debug" / ("staya-lan.exe" if os.name == "nt" else "staya-lan")
 
-def make_identity():
-    result = subprocess.run([str(BIN), "gen-key"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=True)
-    id_match = re.search(r"^endpoint_id=(\S+)$", result.stdout, re.M)
-    key_match = re.search(r"^secret_hex=([0-9a-f]{64})$", result.stdout, re.M)
-    if not id_match or not key_match:
+def make_identity(folder, label):
+    key_path = pathlib.Path(folder) / (label + ".key")
+    result = subprocess.run([str(BIN), "gen-key-file", str(key_path)], text=True, capture_output=True, timeout=15, check=True)
+    match = re.search(r"^endpoint_id=(\S+)$", result.stdout, re.M)
+    if not match:
         raise AssertionError("identity generation failed")
-    return id_match.group(1), key_match.group(1)
+    return match.group(1), "@" + str(key_path)
+
 
 def free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -24,9 +26,14 @@ def free_port():
         return s.getsockname()[1]
 
 def main():
-    a_id, a_key = make_identity()
-    b_id, b_key = make_identity()
-    wrong_id, _ = make_identity()
+    with tempfile.TemporaryDirectory(prefix='staya-private-') as folder:
+        return run_with_keys(folder)
+
+
+def run_with_keys(folder):
+    a_id, a_key = make_identity(folder, 'a')
+    b_id, b_key = make_identity(folder, 'b')
+    wrong_id, _ = make_identity(folder, 'wrong')
     port = free_port()
     peer = f"127.0.0.1:{port}"
     server = subprocess.Popen([str(BIN), "serve", b_key, a_id, peer],
