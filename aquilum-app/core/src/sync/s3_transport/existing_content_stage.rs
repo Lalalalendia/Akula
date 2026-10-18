@@ -20,6 +20,7 @@ pub(crate) enum S3ExistingStageError {
     MissingOrChangedBaseline,
     WrongPreviousOperation,
     InvalidBudget,
+    DeclaredSizeMismatch,
     Plan(S3GuardedUpdatePlanError),
     Stage(S3CoreStageError),
     Journal(JournalError),
@@ -105,12 +106,23 @@ impl AwsS3ProbeClient {
         let old = require_existing_baseline(
             self, verified, admission, bindings, journal, &intent,
         )?;
+        // The complete verified manifest carries the immutable declared
+        // size. Require an exact size, rather than trusting only the later
+        // S3 Content-Length; reject over-budget before a network download.
+        let declared_bytes = verified.cached_revision(intent.revision_id)
+            .and_then(|(reference, _)| reference.blob_bytes)
+            .ok_or(E::DeclaredSizeMismatch)?;
+        if declared_bytes > max_blob_bytes {
+            return Err(E::InvalidBudget);
+        }
         let head_before = self.core_stage_current_head(verified).await?;
         let payload = self.get_immutable_blob_for_core_stage(
             &intent.expected_content_hash, max_blob_bytes,
         ).await.map_err(S3CoreStageError::from)?;
-        if payload.blake3 != intent.expected_content_hash {
-            return Err(E::Stage(S3CoreStageError::IntegrityMismatch));
+        if payload.blake3 != intent.expected_content_hash
+            || payload.bytes.len() as u64 != declared_bytes
+        {
+            return Err(E::DeclaredSizeMismatch);
         }
         let head_after = self.core_stage_current_head(verified).await?;
         if head_before != head_after {
@@ -321,6 +333,7 @@ mod tests {
             &mut journal, &mut cache, intent.clone(), 4096,
         ).await.unwrap();
         assert_eq!(staged.content_hash, new_hash);
+        assert_eq!(staged.byte_length, updated.len() as u64);
         assert_eq!(cache.verified_blob(&new_hash).unwrap(), updated);
         assert_eq!(fs::read(root.join(relative.as_str())).unwrap(), original);
         assert_eq!(journal.baseline(ns.vault_id(), doc).unwrap(), Some(old_baseline));
