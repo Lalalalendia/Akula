@@ -562,6 +562,37 @@ mod tests {
         assert_eq!(fs::read(&old).unwrap(), b"stable existing OS lock");
     }
 
+    /// Real second OS process, not a synthetic second Core in one address
+    /// space. The parent test provisions and enrolls through editor activation.
+    #[test]
+    fn host_editor_second_process_child() {
+        let Some(db) = std::env::var_os("AKULA_HOST_EDITOR_CHILD_DB") else {
+            return;
+        };
+        let root = PathBuf::from(std::env::var_os("AKULA_HOST_EDITOR_CHILD_ROOT").unwrap());
+        let app_b = PathBuf::from(std::env::var_os("AKULA_HOST_EDITOR_CHILD_APPDATA").unwrap());
+        let report = PathBuf::from(std::env::var_os("AKULA_HOST_EDITOR_CHILD_REPORT").unwrap());
+        let core = Core::open_with_installed_host(
+            &app_b, Path::new(&db), Arc::new(|_: CoreEvent| {}),
+        );
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let note = root.join("Original.md");
+        let overwritten = gate::write(
+            &core, &note, "FORBIDDEN", None, Source::Me, None,
+        ).is_ok();
+        let created = gate::create(
+            &core, &root.join("Foreign.md"), "FORBIDDEN", Source::Me, None,
+        ).is_ok();
+        let direct_history = core.history.try_saved(
+            &|| core.known_roots(), &note,
+            crate::history::NoteWrite {
+                disk_before: None, text: "FORBIDDEN",
+                hash: "invalid", source: Source::Me, name: None,
+            },
+        ).is_ok();
+        fs::write(report, format!("{overwritten}|{created}|{direct_history}")).unwrap();
+    }
+
     /// S3 activation must itself publish host-wide enrollment. Merely
     /// inserting into DocumentHub's private appdata would leave Core B free
     /// to write the same physical vault through the shared host epoch.
@@ -642,6 +673,24 @@ mod tests {
             &core_a, &root, &profile_db, &custody_db, &scope,
         ).unwrap();
         assert!(core_a.documents.requires_guarded_participant_hold());
+        const CHILD: &str =
+            "sync::guarded_editor::tests::host_editor_second_process_child";
+        let report = temp.path().join("different-process-result.txt");
+        let process = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact").arg(CHILD).arg("--nocapture")
+            .env("AKULA_HOST_EDITOR_CHILD_DB", &host_db)
+            .env("AKULA_HOST_EDITOR_CHILD_ROOT", &root)
+            .env("AKULA_HOST_EDITOR_CHILD_APPDATA", &app_b)
+            .env("AKULA_HOST_EDITOR_CHILD_REPORT", &report)
+            .output().unwrap();
+        assert!(process.status.success(),
+            "independent appdata process failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&process.stdout),
+            String::from_utf8_lossy(&process.stderr));
+        assert!(String::from_utf8_lossy(&process.stdout).contains(
+            "host_editor_second_process_child ... ok"
+        ), "different-process fixture did not actually execute");
+        assert_eq!(fs::read_to_string(&report).unwrap(), "false|false|false");
         let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
         let readback = SharedHostCustodyRegistry::open_existing(&host_db).unwrap();
         let durable = readback.inspect(
