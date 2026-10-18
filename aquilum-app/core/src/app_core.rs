@@ -14,11 +14,18 @@ use crate::wikixiv::WikixivService;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
+#[cfg(feature = "sync-s3")]
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Conservatively serialize all Core-managed mutations and protected original
 // captures within this process, even when two distinct Core instances use
 // the same workspace. External processes still require an OS-level guard.
 static PROCESS_FILE_MUTATIONS: Mutex<()> = Mutex::new(());
+/// An ordinary note's primary bytes and HistoryService may be separate
+/// mutex stages. Hold a read lease across BOTH, while activation obtains
+/// an exclusive write fence before publishing participant HOLD.
+#[cfg(feature = "sync-s3")]
+static PROCESS_NOTE_PUBLICATIONS: RwLock<()> = RwLock::new(());
 
 /// What the core tells its host.
 #[derive(Clone, Serialize)]
@@ -156,6 +163,31 @@ impl Core {
     pub(crate) fn file_mutation_guard(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
         self.file_mutations.lock().map_err(|_| FileCommandError::Task {
             message: "Core File Gate interlock poisoned; refusing mutation".into(),
+        })
+    }
+
+    /// Keep a legacy note publication (primary bytes + history snapshot)
+    /// within a single cooperative admission epoch. Callers MUST drop this
+    /// guard before UI callbacks, document reconciliation or notifications.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn ordinary_note_publication_lease(
+        &self,
+    ) -> Result<RwLockReadGuard<'static, ()>, FileCommandError> {
+        PROCESS_NOTE_PUBLICATIONS.read().map_err(|_| FileCommandError::Task {
+            message: "note publication epoch poisoned; refusing ordinary save".into(),
+        })
+    }
+
+    /// Exclusive barrier for an explicit protected-root activation, acquired
+    /// AFTER DocumentHub prewrite arming and BEFORE File Gate/HistoryFiles.
+    /// Waits for any already-admitted ordinary note primary+history attempt
+    /// to finish. This is process-local, not an interprocess custody lock.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn ordinary_note_enrollment_fence(
+        &self,
+    ) -> Result<RwLockWriteGuard<'static, ()>, FileCommandError> {
+        PROCESS_NOTE_PUBLICATIONS.write().map_err(|_| FileCommandError::Task {
+            message: "note publication epoch poisoned; refusing enrollment".into(),
         })
     }
 
