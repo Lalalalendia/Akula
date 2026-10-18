@@ -370,8 +370,16 @@ impl Core {
         };
         let mut owners = Vec::new();
         for root in roots {
-            if let Ok(relative) = target.strip_prefix(&root) {
-                let canonical = fs::canonicalize(&root)?;
+            // ui_state may retain a normal Windows C:\\... spelling while
+            // the pinned caller supplies fs::canonicalize's \\\\?\\C:\\...
+            // spelling (and macOS /var may resolve to /private/var).
+            // Require a LEXICAL prefix under one of those two names as well
+            // as the independently resolved physical target: a symlink from
+            // elsewhere into the root is never accepted solely by resolving.
+            let canonical = fs::canonicalize(&root)?;
+            let relative = target.strip_prefix(&root)
+                .or_else(|_| target.strip_prefix(&canonical));
+            if let Ok(relative) = relative {
                 if canonical.join(relative) != resolved {
                     return Err(refused("host-bound path changed or used an ambiguous alias".into()));
                 }
