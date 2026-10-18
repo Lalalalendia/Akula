@@ -6,6 +6,7 @@ use super::*;
 use std::collections::BTreeSet;
 use std::time::Instant;
 use super::super::{
+    coord_locator::S3CoordLetterLocatorV2,
     pack_probe::PackBuilder, S3ConnectionProfile, S3PutCondition,
 };
 use crate::sync::{
@@ -119,6 +120,15 @@ async fn publish_letter(
         &ns.immutable_blob_key(&digest).unwrap(),
         &letter.encode(ns).unwrap(), S3PutCondition::IfAbsent,
     ).await.unwrap();
+    // Test writer creates the canonical immutable manifest-ID locator
+    // only after the exact letter and packs exist. No production publisher.
+    let locator = S3CoordLetterLocatorV2::new(
+        ns, current, &digest,
+    ).unwrap();
+    client.put_conditionally(
+        &ns.immutable_coord_letter_locator_key(current.manifest_id()),
+        &locator.encode(ns, current).unwrap(), S3PutCondition::IfAbsent,
+    ).await.unwrap();
     digest
 }
 
@@ -198,6 +208,11 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
         &ns.current_head_key(), &head2.encode(&ns).unwrap(),
         S3PutCondition::IfMatch(first_put.etag),
     ).await.unwrap();
+    // A V1 head published before its locator is not a zero-change state.
+    // The fast discovery path must HOLD until the exact immutable hint exists.
+    assert!(reader.inspect_v2_offline_selective_packs_discovered(
+        &scope, &journal, &pinned, &cache,
+    ).await.is_err());
     let letter2 = publish_letter(
         &writer, &ns, &genesis_head, &head2, &[changed.clone()],
     ).await;
@@ -251,6 +266,13 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     ).await.unwrap();
     let packed_micros = packed_started.elapsed().as_micros();
     let packed_io = reader.test_io_snapshot().since(packed_before);
+
+    // 03b: read-only discovery knows only the saved V1 anchor and S3
+    // profile. No externally supplied list of opaque V2 letter hashes.
+    let auto = reader.inspect_v2_offline_selective_packs_discovered(
+        &scope, &journal, &pinned, &cache,
+    ).await.unwrap();
+    assert_eq!(auto, packed);
     assert_eq!(packed.from_generation, 1);
     assert_eq!(packed.to_generation, 3);
     assert_eq!(packed.verified_generations, 2);
@@ -412,6 +434,9 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     // earlier tombstone. The saved durable root remains unchanged.
     assert!(reader.inspect_v2_offline_selective_packs_against_pinned_v1(
         &scope, &journal, &pinned, &cache, &forged,
+    ).await.is_err());
+    assert!(reader.inspect_v2_offline_selective_packs_discovered(
+        &scope, &journal, &pinned, &cache,
     ).await.is_err());
     // The selective reader must also inspect the full immutable history:
     // a plausible final root that silently drops the gen3 tombstone is HOLD.
