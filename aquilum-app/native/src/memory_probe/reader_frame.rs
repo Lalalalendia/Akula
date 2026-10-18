@@ -111,6 +111,9 @@ impl ReaderFrame {
             self.initial_mem.rss_kib,
             mem.rss_kib,
             mem.hwm_kib,
+            scene_ms = scene_ms,
+            raster_ms = raster_ms,
+            present_ms = present_ms,
         )
     }
 }
