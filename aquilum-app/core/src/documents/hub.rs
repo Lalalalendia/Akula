@@ -112,6 +112,10 @@ pub struct DocumentHub {
     store: Mutex<Option<DocumentStore>>,
     sessions: Mutex<HashMap<String, Entry>>,
     sync_reservations: Mutex<HashSet<String>>,
+    /// Explicit, opt-in roots that use crash-durable prewrite evidence. No
+    /// normal desktop mode arms them; the S3-bound editor integration must
+    /// call this BEFORE enabling its guarded File Gate writer.
+    guarded_write_roots: Mutex<Vec<PathBuf>>,
     writes: Mutex<Option<Sender<(String, Instant)>>>,
     offset_seconds: AtomicI64,
 }
@@ -125,6 +129,7 @@ impl DocumentHub {
             store: Mutex::new(store),
             sessions: Mutex::new(HashMap::new()),
             sync_reservations: Mutex::new(HashSet::new()),
+            guarded_write_roots: Mutex::new(Vec::new()),
             writes: Mutex::new(None),
             offset_seconds: AtomicI64::new(0),
         }
@@ -156,6 +161,58 @@ impl DocumentHub {
         Ok(SyncReservation { hub: self, key })
     }
 
+    /// Explicitly prepare restart-durable prewrite evidence for one already
+    /// verified, registered root. The caller must arm this BEFORE activating
+    /// any File Gate guarded-editor route. The method is deliberately internal
+    /// and does not grant OS-lock ownership or S3 write authority.
+    #[allow(dead_code)]
+    pub(crate) fn arm_durable_intents_for_root(&self, root: &Path)
+        -> Result<(), crate::files::error::FileCommandError>
+    {
+        use crate::files::error::FileCommandError;
+        let refused = |message: String| FileCommandError::Task { message };
+        let physical = std::fs::canonicalize(root)
+            .map_err(|error| refused(format!("cannot pin durable editor root: {error}")))?;
+        if !physical.is_dir() || std::fs::symlink_metadata(root)
+            .map_err(|error| refused(format!("unsafe durable editor root: {error}")))?
+            .file_type().is_symlink()
+        {
+            return Err(refused("durable editor registration requires a real directory".into()));
+        }
+        // Do not arm a root while DocumentHub already holds live editor
+        // sessions or unsent CRDT buffers there. Keep sessions locked through
+        // registering the root, preserving sessions -> store -> roots order.
+        // A future host must additionally quiesce standalone/native writers
+        // before enabling its File Gate guarded route.
+        let sessions = self.sessions.lock()
+            .map_err(|_| refused("document sessions lock poisoned".into()))?;
+        if sessions.values().any(|entry| {
+            entry.path.starts_with(&physical) || std::fs::canonicalize(&entry.path)
+                .is_ok_and(|note| note.starts_with(&physical))
+        }) {
+            return Err(refused("cannot arm durable editor while its documents are open".into()));
+        }
+        {
+            let store = self.store.lock()
+                .map_err(|_| refused("document store lock poisoned".into()))?;
+            let store = store.as_ref()
+                .ok_or_else(|| refused("document app-data SQLite unavailable".into()))?;
+            // Prove the v2 durable intent table is readable before arming.
+            store.write_intent("__akula_durable_store_probe__")
+                .map_err(|error| refused(format!("document durable intent store unavailable: {error}")))?;
+        }
+        let mut roots = self.guarded_write_roots.lock()
+            .map_err(|_| refused("document durable root registry poisoned".into()))?;
+        if roots.iter().any(|other| other == &physical) { return Ok(()); }
+        if roots.iter().any(|other|
+            other.starts_with(&physical) || physical.starts_with(other))
+        {
+            return Err(refused("nested durable editor roots have ambiguous ownership".into()));
+        }
+        roots.push(physical);
+        Ok(())
+    }
+
     pub fn start(&self, core: Weak<Core>) {
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || run_writes(core, receiver));
@@ -174,6 +231,7 @@ impl DocumentHub {
             path,
             key,
             store: &self.store,
+            guarded_write_roots: &self.guarded_write_roots,
             offset_seconds: self.offset_seconds.load(Ordering::Relaxed),
             source,
         }
@@ -196,7 +254,7 @@ impl DocumentHub {
         let blobs = self.load(&key);
         let session = DocumentSession::open(&blobs, &self.io(core, path, &key))?;
         self.compact(&key, &session);
-        if session.dirty() {
+        if session.dirty() && !session.requires_review() {
             self.schedule(&key, Duration::ZERO);
         }
         let opened = OpenedDocument { text: session.text(), version: session.version() };
@@ -218,7 +276,9 @@ impl DocumentHub {
         let entry_path = entry.path.clone();
         let accepted = entry.session.push(client, version, changes, &self.io(core, &entry_path, &key))?;
         if accepted {
-            self.schedule(&key, self.save_delay(core));
+            if !entry.session.requires_review() {
+                self.schedule(&key, self.save_delay(core));
+            }
             announce_change(core, &entry_path, entry.session.version());
         }
         Ok(accepted)
@@ -400,7 +460,7 @@ impl DocumentHub {
         let mut sessions = self.sessions.lock().expect("document sessions");
         for (key, entry) in sessions.iter_mut().filter(|(_, entry)| entry.moving) {
             entry.moving = false;
-            if entry.session.dirty() {
+            if entry.session.dirty() && !entry.session.requires_review() {
                 self.schedule(key, Duration::ZERO);
             }
         }
