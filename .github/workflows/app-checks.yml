@@ -80,8 +80,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh scripts/verify-macos-release.sh scripts/test-macos-release-verifier.sh
           bash scripts/test-install-scripts.sh
+          bash scripts/test-macos-release-verifier.sh
           node --test .github/scripts/branch-hygiene.test.cjs
 
       - name: Release source and custody flavor contract

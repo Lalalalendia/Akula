@@ -11,12 +11,16 @@ on:
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
+      - "scripts/verify-macos-release.sh"
+      - "scripts/test-macos-release-verifier.sh"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
+      - "scripts/verify-macos-release.sh"
+      - "scripts/test-macos-release-verifier.sh"
       - ".github/workflows/docs.yml"
 
 permissions:
@@ -61,8 +65,9 @@ jobs:
 
       - name: Check macOS installer scripts
         run: |
-          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh scripts/verify-macos-release.sh scripts/test-macos-release-verifier.sh
           bash scripts/test-install-scripts.sh
+          bash scripts/test-macos-release-verifier.sh
 
   macos-installer:
     name: macOS installer BSD-lock and crash recovery
@@ -75,5 +80,6 @@ jobs:
         run: |
           set -euo pipefail
           test -x /usr/bin/lockf
-          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh scripts/verify-macos-release.sh scripts/test-macos-release-verifier.sh
           bash scripts/test-install-scripts.sh
+          bash scripts/test-macos-release-verifier.sh
