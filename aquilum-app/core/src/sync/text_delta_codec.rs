@@ -183,7 +183,8 @@ pub(crate) fn encode(
     }
     let full = zstd::bulk::compress(target, LEVEL)
         .map_err(|_| TextDeltaError::CorruptCompression)?;
-    let mut chosen = to_header(TextDeltaMode::FullZstd, None, target_id, target, full)?;
+    let fallback = to_header(TextDeltaMode::FullZstd, None, target_id, target, full)?;
+    let mut chosen = fallback.clone();
     let mut mode = TextDeltaMode::FullZstd;
     if let Some((old_id, old_bytes)) = old {
         let patch = splice(old_bytes, target)?;
@@ -220,9 +221,6 @@ pub(crate) fn encode(
     }
     // A small size win is not sufficient to justify a dependent transfer.
     if mode != TextDeltaMode::FullZstd {
-        let full = zstd::bulk::compress(target, LEVEL)
-            .map_err(|_| TextDeltaError::CorruptCompression)?;
-        let fallback = to_header(TextDeltaMode::FullZstd, None, target_id, target, full)?;
         let saved = fallback.len().saturating_sub(chosen.len());
         if saved < DELTA_MIN_SAVING_BYTES ||
             saved * 100 < fallback.len() * DELTA_MIN_SAVING_PERCENT
@@ -446,6 +444,46 @@ mod tests {
             encode(target_id, target.as_bytes(), Some((target_id,base.as_bytes())))
                 .err(), Some(TextDeltaError::WrongRevision)
         );
+    }
+
+    #[test]
+    fn direct_dictionary_and_splice_modes_have_independent_decoders() {
+        // Explicitly exercise modes 1 and 2 even when automatic selection
+        // would choose a different encoding for a particular text.
+        let parent_id = RevisionId::new();
+        let target_id = RevisionId::new();
+        let parent = real_like_base();
+        let target = parent.replacen("shared", "новое слово", 1);
+        let base = Some((parent_id, parent.as_bytes()));
+        for mode in [TextDeltaMode::SpliceZstd, TextDeltaMode::DictionaryZstd] {
+            let payload = match mode {
+                TextDeltaMode::SpliceZstd => {
+                    let patch = splice(parent.as_bytes(), target.as_bytes()).unwrap();
+                    zstd::bulk::compress(&patch, LEVEL).unwrap()
+                }
+                TextDeltaMode::DictionaryZstd => {
+                    let mut encoder = zstd::bulk::Compressor::with_dictionary(
+                        LEVEL, parent.as_bytes(),
+                    ).unwrap();
+                    encoder.compress(target.as_bytes()).unwrap()
+                }
+                TextDeltaMode::FullZstd => unreachable!(),
+            };
+            let frame = to_header(mode, base, target_id, target.as_bytes(), payload)
+                .unwrap();
+            assert_eq!(
+                decode(&frame, target_id, base).unwrap(), target.as_bytes(),
+            );
+            assert_eq!(
+                decode(&frame, target_id, None),
+                Err(TextDeltaError::MissingBase),
+            );
+            assert_eq!(
+                decode(&frame, target_id,
+                       Some((parent_id, "untrusted replacement".as_bytes()))),
+                Err(TextDeltaError::WrongBase),
+            );
+        }
     }
 
     #[test]
