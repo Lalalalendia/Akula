@@ -210,6 +210,11 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
     let mut partial_full_max_channel = 0u8;
     let (start, end) = trace_marks(case);
     let diagnostic = std::env::var_os("AQ_PIXEL_DIAG").is_some();
+    // Diagnostic only. The normal release/guard96 tests keep the hard
+    // <=1/255 assertion. This isolates timing of the first cold glyph-atlas
+    // creation from subsequent warm scrolling even when a non-guard scene
+    // has an independently reported partial/full visual discrepancy.
+    let canonical_timing_only = std::env::var_os("AQ_CANONICAL_TIMING_ONLY").is_some();
     let mut first_missed_step = None;
     let mut previous_moved = Vec::new();
     let mut previous_rastered = Vec::new();
@@ -239,6 +244,15 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
             let a = draw(&mut serial, &layers, w, hh, scale, step == 0, "bench: serial frame");
             (a, b)
         };
+        if step == 0 && canonical_timing_only {
+            eprintln!(
+                "VELLO_CANONICAL_COLD case={case} \
+                 serial_frame_us={:.2} serial_encode_us={:.2} serial_raster_us={:.2} \
+                 parallel_frame_us={:.2} parallel_encode_us={:.2} parallel_raster_us={:.2}",
+                a.total_us, a.encode_us, a.raster_us,
+                b.total_us, b.encode_us, b.raster_us
+            );
+        }
         let (mismatch, _) = describe_difference(
             case, step, w, serial.frame_pixels(), parallel.frame_pixels(),
         );
@@ -313,10 +327,18 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
             // corruption without misreporting existing glyph edge 1-LSB
             // rounding as byte-identical incremental output.
             // Serial/parallel renderer parity above stays byte-exact.
-            assert!(
-                max_delta <= 1,
-                "{case}: partial/full exceeded 1-LSB channel difference on frame {step}: {bad} pixels, max={max_delta}"
-            );
+            if max_delta > 1 && canonical_timing_only {
+                eprintln!(
+                    "VELLO_CANONICAL_TIMING_FIDELITY_BREACH case={case} step={step} \
+                     bad_pixels={bad} max_channel={max_delta} tolerance=1 \
+                     accepted=false"
+                );
+            } else {
+                assert!(
+                    max_delta <= 1,
+                    "{case}: partial/full exceeded 1-LSB channel difference on frame {step}: {bad} pixels, max={max_delta}"
+                );
+            }
             parity_checks += 1;
         }
         if step != 0 {
