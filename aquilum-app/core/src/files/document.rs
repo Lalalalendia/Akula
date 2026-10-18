@@ -120,16 +120,42 @@ pub fn write_file_atomic_impl(
     content: &str,
     expected_hash: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
+    #[cfg(feature = "save-stage-probe")]
+    let profile_start = std::time::Instant::now();
     let bytes = content.as_bytes();
     let hash = hash_bytes(bytes);
+    #[cfg(feature = "save-stage-probe")]
+    let profile_hash = profile_start.elapsed();
     let mut file = AtomicWriteFile::open(path)?;
+    #[cfg(feature = "save-stage-probe")]
+    let profile_open = profile_start.elapsed();
     file.write_all(bytes)?;
+    #[cfg(feature = "save-stage-probe")]
+    let profile_write = profile_start.elapsed();
 
     if let Some(expected_hash) = expected_hash {
         check_expected_hash(path, expected_hash)?;
     }
+    #[cfg(feature = "save-stage-probe")]
+    let profile_cas = profile_start.elapsed();
 
     file.commit()?;
+    #[cfg(feature = "save-stage-probe")]
+    {
+        let profile_commit = profile_start.elapsed();
+        let ms = |duration: std::time::Duration| duration.as_secs_f64() * 1000.0;
+        eprintln!(
+            "AKULA_SAVE_ATOMIC cas={} bytes={} hash_ms={:.4} open_ms={:.4} write_ms={:.4} cas_ms={:.4} commit_ms={:.4} total_ms={:.4}",
+            u8::from(expected_hash.is_some()),
+            bytes.len(),
+            ms(profile_hash),
+            ms(profile_open - profile_hash),
+            ms(profile_write - profile_open),
+            ms(profile_cas - profile_write),
+            ms(profile_commit - profile_cas),
+            ms(profile_commit),
+        );
+    }
     Ok(FileWriteResult { hash })
 }
 

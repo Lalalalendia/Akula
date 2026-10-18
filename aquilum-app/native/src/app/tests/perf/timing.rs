@@ -18,7 +18,9 @@ fn frame_parts() {
     b.h.app.open(&mut b.h.root, note);
     b.h.wait_cover(!head.is_empty());
     let threads: u16 = std::env::var("AQUILUM_BENCH_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or_else(raster_threads);
-    b.renderer = Renderer::new(threads);
+    // AQUILUM_BENCH_THREADS selects a *fixed* worker policy for this
+    // attribution experiment, independently of the product's adaptive default.
+    b.renderer = Renderer::new_fixed_for_test(threads);
     let (mut scene, mut raster) = (Duration::ZERO, Duration::ZERO);
     let frames = 60u32;
     for i in 0..frames {

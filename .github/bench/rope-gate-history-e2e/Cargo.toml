@@ -1,0 +1,21 @@
+# An isolated benchmark executable. Never linked into Akula production.
+[package]
+name = "akula-rope-gate-history-e2e"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[workspace]
+resolver = "2"
+
+[dependencies]
+aquilum-core = { path = "../../../aquilum-app/core" }
+crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
+blake3 = "1.8.5"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+codegen-units = 8
+lto = false
+debug = 0
