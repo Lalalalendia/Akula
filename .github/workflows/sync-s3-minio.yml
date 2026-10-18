@@ -164,6 +164,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 coord_locator::tests
+      - name: Verify host-installed shared custody ledger rejects cross-appdata reset
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 host_custody_registry::tests
       - name: Reject forged AWS identity, cross-account scope and custom endpoints
         shell: bash
         working-directory: aquilum-app
