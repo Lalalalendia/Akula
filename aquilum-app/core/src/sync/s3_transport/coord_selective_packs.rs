@@ -15,8 +15,9 @@ use super::{
 };
 use super::coord_chain::{MAX_OFFLINE_GENERATIONS, MAX_OFFLINE_PACK_BYTES};
 use crate::sync::{
-    walk_s3_delta_from_saved_anchor, OperationId, RevisionDag, RevisionId,
-    RevisionRecord, S3DeltaEnvelopeV2, S3HeadPointerV1,
+    inspect_s3_manifest_delta, walk_s3_delta_from_saved_anchor,
+    OperationId, RevisionDag, RevisionId,
+    RevisionRecord, S3DeltaEnvelopeV2, S3DeltaWalkPreview, S3HeadPointerV1,
     S3ManifestDeltaBase, S3ManifestDeltaLimits, S3ManifestDeltaOutcome,
     S3ManifestShardV1, S3ManifestV1,
     S3RemoteAnchorJournal, S3RemoteAnchorScope, S3RevisionRefV1,
@@ -169,7 +170,7 @@ impl AwsS3ProbeClient {
     ) -> Result<S3CoordSelectivePacksPreview, S3CoordOfflineChainError> {
         self.inspect_v2_offline_selective_packs_with_budget(
             scope, journal, previous_pinned, previous_metadata,
-            letters_oldest_first, MAX_OFFLINE_GENERATIONS,
+            letters_oldest_first, MAX_OFFLINE_GENERATIONS, None,
         ).await
     }
 
@@ -177,6 +178,10 @@ impl AwsS3ProbeClient {
     /// Existing public explicit-letter API remains limited to 8 generations.
     /// A separate opt-in long-offline discovery entrypoint can prove up to
     /// the generic walker ceiling, under the SAME global byte budgets.
+    /// Only the internal locator path supplies a previously verified V1 walk;
+    /// the public explicit-letter path independently fetches its own walk.
+    /// Even the supplied walk is rechecked against the persisted anchor
+    /// in memory and the final S3 HEAD/ETag remains mandatory.
     pub(super) async fn inspect_v2_offline_selective_packs_with_budget(
         &self,
         scope: &S3RemoteAnchorScope,
@@ -185,6 +190,7 @@ impl AwsS3ProbeClient {
         previous_metadata: &S3VerifiedRevisionMetadataStore,
         letters_oldest_first: &[String],
         max_generations: usize,
+        preverified_history: Option<S3DeltaWalkPreview>,
     ) -> Result<S3CoordSelectivePacksPreview, S3CoordOfflineChainError> {
         if max_generations == 0
             || max_generations > S3ManifestDeltaLimits::default().max_frames
@@ -236,12 +242,29 @@ impl AwsS3ProbeClient {
 
         // Verify *all* immutable V1 predecessors and one stable final root,
         // before attempting to trust any letter or changed shard.
-        let history = walk_s3_delta_from_saved_anchor(
-            self, scope, journal, S3ManifestDeltaLimits {
-                max_frames: max_generations,
-                max_total_shard_refs: max_generations * 256,
-            },
-        ).await?;
+        let limits = S3ManifestDeltaLimits {
+            max_frames: max_generations,
+            max_total_shard_refs: max_generations * 256,
+        };
+        let history = if let Some(history) = preverified_history {
+            // Never treat locator discovery as authority. Re-check *all*
+            // already fetched immutable frames from the SAME saved anchor
+            // using the canonical V1 verifier (no additional S3 GETs).
+            // An unrelated, partial or altered in-memory walk must HOLD.
+            let checked = inspect_s3_manifest_delta(
+                ns, history.observed_head.pointer(),
+                Some((old_head, anchor.manifest_bytes())),
+                &history.verified_manifest_frames, limits,
+            ).map_err(|_| S3CoordOfflineChainError::InvalidChain)?;
+            if checked != history.outcome {
+                return Err(S3CoordOfflineChainError::InvalidChain);
+            }
+            history
+        } else {
+            // Preserve the existing public explicit-letter entrypoint's
+            // independent bounded S3 ancestry walk.
+            walk_s3_delta_from_saved_anchor(self, scope, journal, limits).await?
+        };
         let generations = match &history.outcome {
             S3ManifestDeltaOutcome::Complete {
                 generations_traversed,

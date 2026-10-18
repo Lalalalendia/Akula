@@ -235,11 +235,13 @@ impl AwsS3ProbeClient {
         if prior != *history.observed_head.pointer() {
             return Err(S3CoordOfflineChainError::InvalidChain);
         }
-        // Reverify canonical history, all old/new shards and every packed
-        // member; never convert a discovered hint directly into authority.
+        // Hand the *bounded canonical* V1 walk to the same full V2 verifier.
+        // That verifier independently revalidates the in-memory chain against
+        // the original journal anchor, every shard/pack/member/DAG, and
+        // current HEAD/ETag. Avoid only the redundant S3 ancestry downloads.
         self.inspect_v2_offline_selective_packs_with_budget(
             scope, journal, previous_pinned, previous_metadata,
-            &letters, max_generations,
+            &letters, max_generations, Some(history),
         ).await
     }
 }
