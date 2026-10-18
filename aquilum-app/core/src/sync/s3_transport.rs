@@ -12,8 +12,8 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod manifest;
-// Strict pack framing is experimental and available to tests only.
-#[cfg(test)]
+// Bounded, opt-in read-only pack verifier. The sender/builder stays
+// test-only; no new remote writer or local file apply is enabled.
 mod pack_probe;
 // SYNC-COORD-01 stays test-only: no production S3 format or file writes.
 #[cfg(test)]
