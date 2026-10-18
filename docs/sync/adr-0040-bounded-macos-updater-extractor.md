@@ -37,7 +37,8 @@ rather than through a size-controlled `Vec`.
 
 Limits: 40,000 headers, 4,096 bytes and 64 components per archive pathname,
 16 KiB per TAR metadata extension, 256 MiB per regular file, 1 GiB total
-regular-file content. These are deliberately conservative local-first
+regular-file content, and 64 MiB for the accumulated explicit/case-alias
+path-index strings (including parent path prefixes). These are deliberately conservative local-first
 update limits, to be checked against real signed release bundles before
 activating updates. Essential Info.plist and the native app binary must be
 regular files under the signed bundle's expected paths.
