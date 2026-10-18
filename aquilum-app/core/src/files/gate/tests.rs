@@ -218,3 +218,94 @@ fn core_file_gate_lock_is_shared_by_separate_core_instances() {
     worker.join().unwrap();
     assert_eq!(fs::read(destination).unwrap(), b"unchanged");
 }
+
+
+/// Enrolled root registry lives in appdata and must be honored by a fresh
+/// Core even though its opt-in S3 writer registry is deliberately empty.
+/// Exercise the real exported mutation paths, not only a helper predicate.
+/// This is one-Core fail-closed coverage, NOT hostile or alternate-appdata
+/// interprocess custody proof.
+#[test]
+fn cold_core_participant_hold_rejects_file_gate_mutations_and_history_naming() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::files::error::FileCommandError;
+    use crate::history::Source;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime};
+
+    fn expect_hold<T>(result: Result<T, FileCommandError>) {
+        match result {
+            Err(FileCommandError::Task { message }) if message.contains("File Gate is HOLD") => {}
+            _ => panic!("mutation did not reach the enrolled-workspace File Gate HOLD"),
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("appdata");
+    let root = temp.path().join("vault");
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let note = root.join("Keep.md");
+    fs::write(&note, b"original").unwrap();
+
+    {
+        let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        super::write::write(&core, &note, "before enrollment", None, Source::Me, None).unwrap();
+        assert!(super::write::name_version(&core, &note, None, "before").is_some(),
+            "test fixture requires a real history version to rename");
+        core.documents.enroll_guarded_participant(
+            &root, "stable-vault-id",
+            &data.join("profiles.sqlite"), &data.join("custody.sqlite"),
+            &temp.path().join("external-os-lock"),
+        ).unwrap();
+    }
+
+    let cold = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+    assert!(cold.documents.requires_guarded_participant_hold());
+    let original = fs::read(&note).unwrap();
+
+    expect_hold(super::write::write(
+        &cold, &note, "overwritten", None, Source::Me, None));
+    expect_hold(super::write::create(
+        &cold, &root.join("New.md"), "created", Source::Me, None));
+    expect_hold(super::write::create_binary(
+        &cold, &root.join("binary.bin"), b"created"));
+    expect_hold(super::write::copy(
+        &cold, &note, &root.join("Copy.md")));
+    expect_hold(super::write::create_folder(
+        &cold, &root.join("NewFolder")));
+    expect_hold(super::write::ensure_folder_tree(
+        &cold, &root.join("Generated").join("Subfolder")));
+    expect_hold(super::moves::rename(
+        &cold, &note, &root.join("Renamed.md")));
+    expect_hold(super::moves::move_across(
+        &cold, &note, &root.join("Moved.md")));
+    expect_hold(super::trash::ensure_trash(&cold, &root));
+    expect_hold(super::trash::trash(&cold, &root, &note));
+    expect_hold(super::trash::restore(
+        &cold, &root, &root.join(".trash").join("missing")));
+
+    // A history-version label changes durable .aquilum metadata even though
+    // the primary note bytes do not change. It is not an authorized exception.
+    assert!(super::write::name_version(
+        &cold, &note, None, "must-not-rename").is_none());
+
+    // Retention is another File Gate entrypoint: stage a genuinely expired
+    // candidate to reach its destructive branch, not the no-op fast path.
+    let stale = root.join(".trash").join("Old").join("stale.md");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, b"stale but preserved").unwrap();
+    fs::File::options().write(true).open(&stale).unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(40 * 24 * 3600))
+        .unwrap();
+    expect_hold(super::trash::cleanup_retention(&cold, &root, 30));
+    assert_eq!(fs::read(&stale).unwrap(), b"stale but preserved");
+
+    assert_eq!(fs::read(&note).unwrap(), original);
+    for denied_path in ["New.md", "binary.bin", "Copy.md", "NewFolder",
+        "Generated", "Renamed.md", "Moved.md"] {
+        assert!(!root.join(denied_path).exists(), "unexpected mutation: {denied_path}");
+    }
+}
