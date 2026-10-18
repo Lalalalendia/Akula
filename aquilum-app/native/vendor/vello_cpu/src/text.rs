@@ -35,6 +35,8 @@ use vello_common::paint::ImageId;
 
 #[cfg(feature = "std")]
 mod slot_probe;
+#[cfg(feature = "std")]
+mod canonical_miss;
 
 fn atlas_page_image_id(page_index: u32) -> ImageId {
     ImageId::new(ATLAS_IMAGE_ID_BASE + page_index)
@@ -265,6 +267,18 @@ impl Resources {
                     glyph_renderer.render_settings().level,
                     recorder.page_index,
                 );
+
+                // Opt-in cache-miss-only canonical raster test. All
+                // unsupported/mixed command batches use normal atlas replay.
+                #[cfg(feature = "std")]
+                if canonical_miss::replay(
+                    &mut recorder.commands,
+                    glyph_renderer,
+                    page,
+                    recorder.page_index,
+                ) {
+                    return Ok(());
+                }
 
                 let Some((x0, y0, w, h)) = dirty_bounds(&recorder.commands, page.width(), page.height()) else {
                     recorder.commands.clear();
