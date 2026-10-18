@@ -14,27 +14,27 @@ operations on HOLD without breaking positive unenrolled note create/write.
 After all processes quit, however, an attacker (or a broken installer) can
 rename the **real** parent or SQLite main file, then replace the original
 pathname with a genuine schema-1 **empty** SQLite registry. An unanchored
-\`SharedHostCustodyRegistry::open_existing(path)\` cannot tell that its old
+`SharedHostCustodyRegistry::open_existing(path)` cannot tell that its old
 enrollment was discarded: it sees an authentic SQLite schema and no entries.
 
-This remains true even with \`--features sync-installed-host\`, because the
+This remains true even with `--features sync-installed-host`, because the
 compiled absolute path is not a previously authenticated physical identity.
 A BLAKE3 checksum inside the replacement DB is not authentication.
 
 ## Narrow B6a contract
 
-- \`HostLedgerObjectIds\` is a four-number snapshot: OS device/file identity
+- `HostLedgerObjectIds` is a four-number snapshot: OS device/file identity
   for the immediate parent directory and the SQLite **main file**. The live
   object is held as before; no extra descriptors are opened/closed inside a
-  Unix SQLite transaction (closing them could break POSIX \`fcntl\` locks).
-- \`HostLedgerIdentity::require_expected\` compares a pinned live object with
+  Unix SQLite transaction (closing them could break POSIX `fcntl` locks).
+- `HostLedgerIdentity::require_expected` compares a pinned live object with
   a pre-existing expected snapshot and checks names before and after.
-  Mismatch means \`InvalidHostLocation\`, not empty enrollment.
-- The separate \`SharedHostCustodyRegistry::open_existing_with_expected\`
+  Mismatch means `InvalidHostLocation`, not empty enrollment.
+- The separate `SharedHostCustodyRegistry::open_existing_with_expected`
   invokes the comparison **before** opening SQLite and after validating
   schema and durable rows. It never provisions, repairs, writes an anchor,
   or authorizes a File Gate mutation.
-- The existing unanchored \`open_existing\` remains unchanged so current
+- The existing unanchored `open_existing` remains unchanged so current
   local mode, CI fixtures and release are not inadvertently switched.
   **No production Core or release workflow consumes the witness yet.**
 
@@ -49,11 +49,11 @@ That environment is never a production authority.
 OS physical IDs can be recycled; a hostile same-user process that rewrites
 the original inode, changes an independently mutable witness, or forges
 another filesystem namespace may defeat the comparison. Neither a copied
-manifest nor \`chmod 0600\` against the same user addresses this.
+manifest nor `chmod 0600` against the same user addresses this.
 
 ## Cross-OS negative evidence required
 
-\`host_cold_identity_tests.rs\` shares the existing host-registry fixture.
+`host_cold_identity_tests.rs` shares the existing host-registry fixture.
 The local host-custody CI runs it on Linux, macOS and Windows.
 
 1. Provision/enroll original ledger, capture the original identity as a
@@ -61,8 +61,8 @@ The local host-custody CI runs it on Linux, macOS and Windows.
 2. In a genuine second OS process, open with that expected identity, observe
    the enrolled record, and verify positive behavior.
 3. Replace the original path with a *different, valid and empty* SQLite DB.
-   The second OS process must return \`InvalidHostLocation\`; demonstrate that
-   the current **unanchored** opener still sees \`None\` for the old enrolled
+   The second OS process must return `InvalidHostLocation`; demonstrate that
+   the current **unanchored** opener still sees `None` for the old enrolled
    workspace. Restore the original DB and reopen with the unchanged witness.
 4. Rename the original parent away; create another **real** directory with
    a valid empty host SQLite at the compiled name. Expected-identity open must
@@ -85,15 +85,15 @@ explicit external witness is **not** a shipped installer trust root.
 
 A trusted cold-start claim also needs installer-instance identity, rollback
 policy, physical ancestor and SQLite sidecar lifecycle validation, not just
-\`(device, file)\`. Upgrades must preserve enrollment; uninstall must not
+`(device, file)`. Upgrades must preserve enrollment; uninstall must not
 silently erase it. On corrupt/missing/changed anchor, present **HOLD +
 recovery instructions**, retain original user bytes, and never automatically
 adopt a valid-looking replacement database.
 
 ## Release decision
 
-Do **not** change \`.github/workflows/release.yml\` from
-\`--features installed\` to \`sync-installed-host\` in B6a. The current
+Do **not** change `.github/workflows/release.yml` from
+`--features installed` to `sync-installed-host` in B6a. The current
 packaged local Desktop mode must keep working independently of unfinished S3
 trust policy. Before a guarded installed release, build and test the
 installer-owned anchor/broker, native two-process enrolled S3 refusal,
