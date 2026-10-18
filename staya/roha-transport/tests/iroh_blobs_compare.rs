@@ -1194,3 +1194,84 @@ async fn durable_admission_stays_charged_after_verified_quic_and_process_reopen(
         drop(tag);
     }).await.expect("durable ledger QUIC fixture timeout");
 }
+
+/// This test is intentionally ignored in ordinary CI: it may write only to
+/// a dedicated, *fresh* ext4 loopback volume under RUNNER_TEMP, never to a
+/// user workspace or a non-mounted host path. The separate GitHub workflow
+/// must mount and validate the finite image before invoking it.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires dedicated isolated 64MiB ext4 loopback mount"]
+async fn bounded_ext4_fsstore_seed() {
+    use akula_roha_transport::bounded_staging::StagingVolumeGuard;
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("explicit lab mount root"),
+    );
+    let volume = StagingVolumeGuard::open(&root).expect("isolated private filesystem required");
+    volume.check().expect("mountpoint not replaced");
+    let path = root.join("real-fsstore");
+    std::fs::create_dir(&path).expect("private real FsStore staging inside bounded mount");
+    let payload = bytes(1024 * 1024 + 17);
+    let hash = Hash::new(&payload);
+    let store = FsStore::load(&path).await.expect("start real FsStore on bounded ext4");
+    let tag = store.add_slice(&payload).await.expect("write content and Bao outboard");
+    assert_eq!(tag.hash, hash);
+    let exact = store.get_bytes(hash).await.expect("read Bao-verified seed");
+    assert_eq!(exact.as_ref(), payload.as_slice());
+    store.shutdown().await.expect("flush bounded FsStore");
+    drop(tag);
+    drop(store);
+    volume.check().expect("still on same isolated FS");
+    println!(
+        "P2P_BLOB_EXT4_FSSTORE_SEED size={} physical_mount_present=true real_fsstore=true full_b3_verified=true user_file_gate=false",
+        payload.len()
+    );
+}
+
+/// Reopen the same FsStore *after the CI script has unmounted and remounted
+/// the actual finite ext4 image*, to ensure the real backend persists.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires remounted dedicated ext4 image previously seeded by fixture"]
+async fn bounded_ext4_fsstore_reopen() {
+    use akula_roha_transport::bounded_staging::StagingVolumeGuard;
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("explicit lab remount root"),
+    );
+    let volume = StagingVolumeGuard::open(&root).expect("separate FS after remount");
+    volume.check().expect("mount identity during reopen");
+    let payload = bytes(1024 * 1024 + 17);
+    let hash = Hash::new(&payload);
+    let store = FsStore::load(root.join("real-fsstore"))
+        .await
+        .expect("reopen actual FsStore database after unmount");
+    let status = store.remote().local(hash).await.expect("reopen local verified status");
+    assert!(status.is_complete(), "on-disk FsStore metadata lost across remount");
+    let data = store.get_bytes(hash).await.expect("read persisted verified data");
+    assert_eq!(data.as_ref(), payload.as_slice());
+    assert_eq!(Hash::new(data.as_ref()), hash);
+    store.shutdown().await.expect("flush reopened FsStore");
+    volume.check().expect("bounded mount still present");
+    println!(
+        "P2P_BLOB_EXT4_FSSTORE_REOPEN size={} remounted=true persisted_exact_b3=true OS_enforced_capacity_tested_separately=true",
+        payload.len()
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires intentionally unmounted isolated test directory"]
+fn bounded_ext4_missing_mount_fails_closed() {
+    use akula_roha_transport::bounded_staging::{StagingVolumeGuard, VolumeError};
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("explicit unmounted lab root"),
+    );
+    assert!(matches!(
+        StagingVolumeGuard::open(&root),
+        Err(VolumeError::NotSeparateFilesystem)
+    ));
+    println!("P2P_BLOB_EXT4_MISSING_MOUNT refused=true no_fallback_to_host_disk=true");
+}
