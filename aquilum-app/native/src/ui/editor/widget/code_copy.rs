@@ -1,5 +1,5 @@
 use super::*;
-use aquilum_core::markdown::fence::{Fence, INDENT_LIMIT};
+use aquilum_core::markdown::fence::Fence;
 
 impl TextEditor {
     // The popup carries only the opener offset; avoid cloning large code bodies
@@ -15,7 +15,7 @@ impl TextEditor {
         // Math ($) is a different code-style block. Never offer an action
         // that would fail silently when clicked.
         let opener = self.doc.paragraph(first);
-        Fence::open(self.doc.slice(opener.range()), INDENT_LIMIT).map(|_| opener.start)
+        Fence::open(self.doc.slice(opener.range()), usize::MAX).map(|_| opener.start)
     }
 
     // Indented-code normalization is not yet covered by our Markdown tests.
@@ -107,6 +107,13 @@ mod tests {
             editor.fenced_code_body_from_start(0).as_deref(),
             Some("\u{60}\u{60}\u{60}js\ninside\n\u{60}\u{60}\u{60}")
         );
+    }
+
+    #[test]
+    fn crlf_code_copy_keeps_internal_line_breaks_without_orphan_cr() {
+        let text = "\u{60}\u{60}\u{60}txt\r\none\r\ntwo\r\n\u{60}\u{60}\u{60}\r\nend";
+        let editor = TextEditor::new(text).markdown();
+        assert_eq!(editor.fenced_code_body_from_start(0).as_deref(), Some("one\r\ntwo"));
     }
 
     #[test]
