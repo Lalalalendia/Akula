@@ -59,10 +59,13 @@ impl StayaTransport {
         if !self.peers.contains(&addr.id) {
             return Err("peer not admitted".into());
         }
-        tokio::time::timeout(Duration::from_secs(15), self.endpoint.connect(addr, STAYA_ALPN))
-            .await
-            .map_err(|_| "connect timeout".to_owned())?
-            .map_err(|err| format!("connect: {err}"))
+        tokio::time::timeout(
+            Duration::from_secs(15),
+            self.endpoint.connect(addr, STAYA_ALPN),
+        )
+        .await
+        .map_err(|_| "connect timeout".to_owned())?
+        .map_err(|err| format!("connect: {err}"))
     }
 
     /// Wait for one authorized incoming connection. Unknown keys are closed.
