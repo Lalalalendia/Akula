@@ -91,7 +91,7 @@ impl App {
         };
         let MenuChoice::Item(item) = choice else { return };
         root.remove_layer(layer);
-        let Some(&command) = commands.get(*item) else { return };
+        let Some(command) = commands.get(*item) else { return };
         let Some(ids) = &self.note_ids else { return };
         let body = ids.body;
         root.focus_on(Some(body.id()));
