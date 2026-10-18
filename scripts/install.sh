@@ -76,10 +76,20 @@ for stale in "$APP_DIR"/.akula-install.*; do
       printf 'Recovery could not restore %s; backup preserved at %s\n' "$APP_PATH" "$previous" >&2
       exit 1
     fi
-    # Only an unambiguous recovered backup permits deletion of this stage.
-    # A later crash may leave an orphan stage without a backup: the next run
-    # conservatively refuses it rather than deleting unknown files.
-    if ! rm -rf "$stale"; then
+    # Never recursively delete an entire *abandoned* staging directory:
+    # other files may have appeared during an interrupted run. The sole
+    # remaining expected entry is our unpromoted Aquilum.app candidate.
+    # Preserve any unexpected payload for inspection, including dotfiles.
+    candidate="$stale/Aquilum.app"
+    extra="$(find "$stale" -maxdepth 1 ! -path "$stale" ! -path "$candidate" -print -quit)"
+    if [[ -n "$extra" || -L "$candidate" || ( -e "$candidate" && ! -d "$candidate" ) ]]; then
+      printf 'Recovered old app, but abandoned stage has unverified entries: %s\n' "$stale" >&2
+      exit 1
+    fi
+    if [[ -d "$candidate" ]]; then
+      rm -rf "$candidate"
+    fi
+    if ! rmdir "$stale"; then
       printf 'Previous application restored, but stage needs inspection: %s\n' "$stale" >&2
       exit 1
     fi
