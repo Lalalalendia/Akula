@@ -233,3 +233,8 @@ mod installed_host_native_tests {
         assert_eq!(fs::read(runtime_fake_host).unwrap(), b"untrusted");
     }
 }
+
+
+#[cfg(all(test, feature = "sync-installed-host"))]
+#[path = "workspace_host_positive_tests.rs"]
+mod installed_host_positive_tests;
