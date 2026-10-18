@@ -13,11 +13,11 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
-// P0-A: inert installer-provisioned cross-appdata custody ledger;
-// ordinary File Gate/HistoryService do NOT use this yet.
-#[cfg(feature = "sync-s3")]
+// Local-only host custody ledger and File Gate/HistoryService admission,
+// compiled without AWS/Tokio. An installed trusted host must still bind Core.
+#[cfg(feature = "host-custody")]
 pub(crate) mod host_custody_registry;
-#[cfg(all(test, feature = "sync-s3"))]
+#[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
 pub(crate) mod guarded_note_write;
 #[cfg(feature = "sync-s3")]
