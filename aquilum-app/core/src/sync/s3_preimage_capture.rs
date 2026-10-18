@@ -686,8 +686,10 @@ mod tests {
             &intent.path, "new cloud content", &f.old_hash,
             Source::External, None,
         );
-        assert!(matches!(second, Err(GuardedNoteWriteError::Denied(_))),
-            "CAS must refuse to write a second time after an uncertain primary");
+        assert!(matches!(second, Err(GuardedNoteWriteError::NeedsReview(_))),
+            "even a CAS failure inside entered File Gate is uncertain, never a retry grant");
+        assert_eq!(fs::read(f.root.join(intent.path.as_str())).unwrap(),
+            b"new cloud content", "a failed second CAS must preserve the visible first write");
     }
 
     #[test]
