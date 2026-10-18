@@ -153,7 +153,9 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
                 WORKERS[index],
             );
         }
-        if matches!(step, 0 | 10 | 20 | 31) {
+        if matches!(step, 0 | 10 | 20 | 31)
+            || std::env::var_os("AQ_CROSSOVER_EVERY_FRAME").is_some()
+        {
             let full = render_full(&layers, w, hh, scale);
             let peak = max_pixel_channel_delta(renderers[0].frame_pixels(), full.frame_pixels());
             assert!(
@@ -189,12 +191,24 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
 #[ignore = "opt-in 0/2/4-worker release-mode crossover; production policy unchanged"]
 fn benchmark_vello_worker_crossover() {
     let workload = std::env::var("AQ_CROSSOVER_WORKLOAD").unwrap_or_else(|_| "normal".into());
+    let only = std::env::var("AQ_CROSSOVER_ONLY_CASE").ok();
+    let mut executed = 0usize;
     for (case, width, height, scale, cover) in [
         ("text_1x", 1000, 600, 1.0, false),
         ("text_175", 1750, 1051, 1.75, false),
         ("cover_1x", 1000, 600, 1.0, true),
         ("cover_175", 1750, 1051, 1.75, true),
     ] {
+        if let Some(ref selected) = only {
+            if selected != case {
+                continue;
+            }
+        }
+        executed += 1;
         run_worker_case(case, width, height, scale, cover, &workload);
     }
+    assert!(
+        executed != 0,
+        "AQ_CROSSOVER_ONLY_CASE selected no known scene: {only:?}"
+    );
 }
