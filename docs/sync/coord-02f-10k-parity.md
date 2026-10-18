@@ -31,6 +31,10 @@ Every mode must agree with the exact newly added UUID set, independent complete 
 
 The `AKULA_COORD_02F_SCALE` single JSON row per job includes: workload, cold pin cost, genesis/changed-object publication cost (wall time), new immutable V1 revision/blob/shard counts and V2 pack count/bytes, per-mode attempted SDK GET/HEAD count, received bytes and elapsed microseconds, revision-count parity and unmodified durable anchor. Raw SDK method attempts are not TCP packets, retries or cloud provider billing; `AWS_MAX_ATTEMPTS=1` limits retries in CI.
 
-Use `.github/workflows/sync-coord-02f-scale.yml` to reproduce the isolated MinIO workload. Its pull-request smoke initially uses 64 notes/7 changes; after smoke compilation and correctness pass, add the 10k 0/7/1000 matrix and require all four artifacts before accepting this stage. The expensive matrix is intentionally not added to every normal application change.
+Use `.github/workflows/sync-coord-02f-scale.yml` to reproduce the isolated MinIO workload. After the initial 64-note/7-edit MinIO smoke passed on #238, the pull-request workflow was extended to **four cases**: 64/7, 10000/0, 10000/7 and 10000/1000. Require all four final-head JSONL artifacts before accepting the stage; routine application changes do not trigger this expensive workflow. The expensive matrix is intentionally not added to every normal application change.
 
 No performance comparison here authorizes user-file application. Old blob availability, remote writer authenticity/anti-rollback, capability negotiation, E2EE and safe File Gate crash handling remain independent requirements. A smaller S3 read count on immutable metadata is **not** complete synchronization.
+
+## First smoke result (64 notes, 7 edits)
+
+Real localhost MinIO on PR #238, first isolated smoke: selective V2 packs 11 GET / 22 HEAD / 66.827 ms, selective V1 19 GET / 38 HEAD / 111.472 ms, conservative V2 chain 287 GET / 574 HEAD / 1201.130 ms, full final V1 151 GET / 302 HEAD / 634.470 ms. All four agree on exactly 7 new UUIDs and final 71 revisions, including a gen2 content sibling and gen3 tombstone sibling. Initial cold anchor construction (three expensive verified stages) cost 464 GET / 928 HEAD / 2009.188 ms. These are single small-workload readings, not 10k speedup claims.
