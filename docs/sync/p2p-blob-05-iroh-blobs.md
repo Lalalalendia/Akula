@@ -36,6 +36,25 @@ Outputs from the two methods are **different protocol counters**, not measured e
 - Both log elapsed transfer microseconds after connecting, on **one local CI host**. Connection setup and importing the bytes happen before snapshots. Real WAN RTT/loss, relay, File Gate, durable staging, grants and user-experience timings are not measured.
 - Existing Staya's per-frame application ACK can penalize it on high-delay paths, while iroh-blobs has Bao proof overhead. Interpret the same-layer UDP measurements as **specific to this fixture** (one host, sequential uploads and one request per blob), not a broad throughput verdict.
 
+## First measured accepted UDP A/B (2026-10-18)
+
+[CI #39153129204](https://github.com/Lalalalendia/Akula/actions/runs/39153129204) passed: existing Staya regressions plus new authorization tests, including unknown peers and denied PUSH/GET-many/observe.
+
+Both sides count *the same Roha/noq UDP datagram statistics* `Connection::stats()` for request/sender endpoints, tx+rx combined after connection establishment:
+
+| Content | Staya UDP tx+rx bytes | iroh-blobs UDP tx+rx bytes | Staya datagrams total | iroh-blobs datagrams total | Staya transfer us | blobs transfer us |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 B | 10,973 | 8,573 | 18 | 16 | 3,705 | 4,151 |
+| 65,553 B | 74,779 | 78,974 | 63 | 65 | 7,333 | 7,194 |
+| 1 MiB | 1,083,289 | 1,088,649 | 821 | 769 | 56,436 | 42,815 |
+| 8 MiB | **8,620,324** | **8,630,250** | **6,501** | **6,014** | **445,109** | **300,930** |
+
+`iroh-blobs` finished the 8MiB transfer ~32% faster in this single local runner sample and used ~487 fewer datagrams, while requiring ~9,926 more counted UDP payload bytes (+0.115%). Not representative of WAN RTT, relay, losses, Android battery or production. **Do not claim universally faster.** Big speed difference may be Staya's blocking application ACK once per 64KiB frame, not just Bao itself. Measure Staya's batched/streamed ACK policy separately before replacing implementation.
+
+Added independent experiment `resume_missing_verified_ranges_after_new_quic_connection` after the UDP measurement: receiver fetches a BLAKE3-verified 64KiB prefix, closes QUIC, asks its **existing verified local `LocalInfo::missing()`** over a fresh connection, and validates exact complete content. Test result not yet accepted by CI. This tests in-process re-connect only, not durable disk resumption across restart.
+
+**Follow-up comparison:** pin exact generated Cargo.lock after SHA256 verification, enforce `--locked`, run 10 independent repetitions over selected RTT/loss profiles with identical peer/key/storage policy, and test disk quotas + interrupted large transfer. Compare the result to the existing Staya chunker only after controlling for ACK count and network conditions.
+
 The first goal is **ABI/API compatibility + security refusal + byte-exact local transfer**. A future controlled A/B needs per-direction QUIC/UDP byte counters from the same measurement layer and loss/RTT shaping, partial-range resume and interrupted mid-stream tests. Only if it materially improves reliability and user-visible transfer cost should an optional product adapter be considered.
 
 ## CI and acceptance
