@@ -1,0 +1,136 @@
+name: Reader native navigation and memory residency
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/app/probe.rs"
+      - "aquilum-app/native/src/host/replay.rs"
+      - "aquilum-app/native/src/memory_probe/**"
+      - "aquilum-app/native/src/reader/session/mod.rs"
+      - "aquilum-app/native/src/ui/reader/view.rs"
+      - "scripts/benchmarks/reader_nav_memory.py"
+      - ".github/workflows/reader-nav-memory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-nav-memory-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-scroll-memory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+
+      - name: Install native Linux and Xvfb dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            xvfb openbox
+
+      - name: Build the same instrumented native executable
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p aquilum-native --features memory-probe
+          test -x ../.artifacts/cargo-native/release/aquilum-native
+
+      - name: Create copyright-free shape-matched EPUB controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reader-nav-memory-results
+          python3 scripts/benchmarks/reader_epub_shape.py --out "$RUNNER_TEMP/reader-nav-samples" | tee reader-nav-memory-results/fixtures.log
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            lscpu | grep -E 'Model name:|CPU\(s\):'
+            rustc --version
+          } | tee reader-nav-memory-results/runner.log
+
+      - name: Exercise native Reader pages and scrolling in actual Winit window
+        shell: bash
+        run: |
+          set -euo pipefail
+          export READER_NAV_BINARY="$PWD/.artifacts/cargo-native/release/aquilum-native"
+          export READER_NAV_OUT="$PWD/reader-nav-memory-results"
+          xvfb-run -a -s "-screen 0 1366x768x24" bash -c '
+            set -euo pipefail
+            openbox >/dev/null 2>&1 &
+            sleep 1
+            for mode in single-br split-br; do
+              python3 scripts/benchmarks/reader_nav_memory.py \
+                --binary "$READER_NAV_BINARY" \
+                --book "$RUNNER_TEMP/reader-nav-samples/$mode.epub" \
+                --out "$READER_NAV_OUT/$mode" \
+                --count 60 --pause-ms 65 --checkpoint-every 20 --timeout-s 110
+            done
+          '
+
+      - name: Publish sampled memory and residency table
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path("reader-nav-memory-results")
+          rows = [
+              "## Real native Reader navigation, one renderer and process per EPUB",
+              "",
+              "Winit/Masonry/softbuffer and Xvfb, native instrumented release binary.",
+              "Page forward/back and scrolled forward/back, then close and reopen.",
+              "",
+              "| Shape | Navigation actions | Frames | RSS at open MiB | Peak sampled RSS MiB | RSS after close MiB | RSS after reopen MiB | Max retained layouts |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for mode in ("single-br", "split-br"):
+              d = json.loads((root / mode / "results.json").read_text())
+              rows.append(f'| {mode} | {d["navigation_steps"]} | {d["frame_count"]} | '
+                          f'{d["rss_at_paged_start_mib"]} | {d["max_checkpoint_rss_mib"]} | '
+                          f'{d["rss_after_first_close_mib"]} | {d["rss_after_reopen_mib"]} | '
+                          f'{d["max_checkpoint_layouts"]} |')
+          rows += [
+              "",
+              "Memory is sampled at checkpoints, not continuously, and RSS includes the entire app.",
+              "Heap peak is captured since reader-open, while Linux VmHWM is process lifetime.",
+              "No absolute leak threshold is asserted: retained layout counts, forward/reverse",
+              "memory trends and post-close residency must be reviewed against real books.",
+              "Copyrighted user EPUB is never uploaded to CI.",
+          ]
+          report = "\n".join(rows) + "\n"
+          print(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(report)
+          PY
+
+      - name: Preserve diagnostics for regressions
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-nav-memory-${{ github.sha }}
+          path: reader-nav-memory-results/
+          retention-days: 21
+
+      - name: Save instrumented Linux binary for real-book local-only run
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-nav-memory-binary-${{ github.sha }}
+          path: .artifacts/cargo-native/release/aquilum-native
+          retention-days: 7
