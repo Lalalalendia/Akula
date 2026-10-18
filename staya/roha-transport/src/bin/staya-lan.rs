@@ -29,11 +29,11 @@ fn key_hex(key: &SecretKey) -> String {
     key.to_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// File-backed keys do not appear in process arguments. Hex arguments remain
-/// temporarily supported for existing laboratory tests, never for production.
+/// Only file-backed private keys are accepted. Never put private key hex
+/// in shell arguments; command-line arguments are visible to other processes.
 fn secret_from_arg(value: &str) -> Result<SecretKey, String> {
     let Some(path) = value.strip_prefix('@') else {
-        return decode_key(value);
+        return Err("private key must be supplied as @KEY_PATH".into());
     };
     if path.is_empty() {
         return Err("missing secret key file path".into());
@@ -75,19 +75,13 @@ fn parse_id(s: &str) -> Result<EndpointId, String> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\nlegacy LAB ONLY: gen-key and raw SECRET_HEX instead of @KEY_PATH\nDo not publish key files or include secret arguments in shared logs.\n"
+    "usage:\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\nDo not publish or commit the private key files.\n"
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("gen-key") if args.len() == 2 => {
-            let key = SecretKey::generate();
-            println!("endpoint_id={}", key.public());
-            println!("secret_hex={}", key_hex(&key));
-            eprintln!("LAB ONLY: secret exposed to terminal output; do not reuse in production.");
-        }
         Some("gen-key-file") if args.len() == 3 => {
             let key = SecretKey::generate();
             save_key_file(Path::new(&args[2]), &key)?;
@@ -166,5 +160,52 @@ mod tests {
         assert_eq!(decode_key(&hex).unwrap().public(), k.public());
         assert!(decode_key("bad").is_err());
         assert!(decode_key(&"gg".repeat(32)).is_err());
+    }
+
+    #[test]
+    fn key_file_roundtrip_rejects_overwrite_and_raw_argument() {
+        let key = SecretKey::generate();
+        let path = env::temp_dir().join(format!(
+            "staya-lan-key-{}-{}.key",
+            std::process::id(),
+            key.public()
+        ));
+        save_key_file(&path, &key).expect("create private key file");
+        let reference = format!("@{}", path.display());
+        assert_eq!(
+            secret_from_arg(&reference).expect("read secret file").public(),
+            key.public()
+        );
+        assert!(save_key_file(&path, &SecretKey::generate()).is_err());
+        assert!(secret_from_arg(&key_hex(&key)).is_err());
+        #[cfg(unix)]
+        {
+            use std::fs::Permissions;
+            std::fs::set_permissions(&path, Permissions::from_mode(0o644))
+                .expect("make key file insecure");
+            assert!(secret_from_arg(&reference).is_err());
+        }
+        std::fs::remove_file(path).expect("remove test key");
+    }
+
+    #[test]
+    fn key_file_rejects_invalid_bytes_and_missing_path() {
+        let key = SecretKey::generate();
+        let path = env::temp_dir().join(format!(
+            "staya-lan-bad-key-{}-{}.key",
+            std::process::id(),
+            key.public()
+        ));
+        let mut opts = OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        let mut file = opts.open(&path).expect("create key file");
+        file.write_all(&[b'x'; 129]).expect("write oversized input");
+        drop(file);
+        let reference = format!("@{}", path.display());
+        assert!(secret_from_arg(&reference).is_err());
+        assert!(secret_from_arg("@").is_err());
+        std::fs::remove_file(path).expect("remove invalid key");
     }
 }
