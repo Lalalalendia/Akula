@@ -22,10 +22,13 @@ pub fn refine(coordinates: &mut [f64], edges: &[(u32, u32)], settings: &Settings
     separate_coincident(coordinates, spacing);
     let mut displacement = vec![0.0f64; coordinates.len()];
     let mut stack = Vec::with_capacity(64);
+    // Retain Quadtree cell storage across physics ticks. The tree's cell
+    // contents, insert order and all force arithmetic are rebuilt unchanged.
+    let mut tree = Quadtree { cells: Vec::with_capacity(count * 2) };
     let mut temperature = spacing * 2.0;
     for _ in 0..settings.ticks {
         displacement.fill(0.0);
-        let tree = Quadtree::build(coordinates);
+        tree.rebuild(coordinates);
         for node in 0..count {
             tree.repel(node, coordinates, spacing, strength, &mut displacement, &mut stack);
         }
@@ -107,7 +110,7 @@ struct Quadtree {
 }
 
 impl Quadtree {
-    fn build(coordinates: &[f64]) -> Self {
+    fn rebuild(&mut self, coordinates: &[f64]) {
         let count = coordinates.len() / 2;
         let mut min_x = f64::INFINITY;
         let mut min_y = f64::INFINITY;
@@ -120,14 +123,11 @@ impl Quadtree {
             max_y = max_y.max(pair[1]);
         }
         let size = (max_x - min_x).max(max_y - min_y).max(1e-6) * 1.01;
-        let mut tree = Self {
-            cells: Vec::with_capacity(count * 2),
-        };
-        tree.push_cell(min_x, min_y, size);
+        self.cells.clear();
+        self.push_cell(min_x, min_y, size);
         for node in 0..count {
-            tree.insert(0, node as u32, coordinates, 0);
+            self.insert(0, node as u32, coordinates, 0);
         }
-        tree
     }
 
     fn push_cell(&mut self, origin_x: f64, origin_y: f64, size: f64) -> u32 {
@@ -245,7 +245,31 @@ impl Quadtree {
 
 #[cfg(test)]
 mod tests {
-    use super::{refine, Settings};
+    use super::{refine, Quadtree, Settings};
+
+    #[test]
+    fn rebuilding_quadtree_preserves_cells_and_retained_capacity() {
+        let positions = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 2.0, 2.0, -1.0, 0.0];
+        let mut tree = Quadtree { cells: Vec::new() };
+        tree.rebuild(&positions);
+        let capacity = tree.cells.capacity();
+        let snapshot = tree.cells.iter().map(|cell| (
+            cell.mass.to_bits(), cell.sum_x.to_bits(), cell.sum_y.to_bits(),
+            cell.origin_x.to_bits(), cell.origin_y.to_bits(), cell.size.to_bits(),
+            cell.children, cell.point,
+        )).collect::<Vec<_>>();
+        for _ in 0..16 {
+            tree.rebuild(&positions);
+            let actual = tree.cells.iter().map(|cell| (
+                cell.mass.to_bits(), cell.sum_x.to_bits(), cell.sum_y.to_bits(),
+                cell.origin_x.to_bits(), cell.origin_y.to_bits(), cell.size.to_bits(),
+                cell.children, cell.point,
+            )).collect::<Vec<_>>();
+            assert_eq!(actual, snapshot);
+            assert_eq!(tree.cells.capacity(), capacity);
+            assert_eq!(tree.cells[0].mass, (positions.len() / 2) as f64);
+        }
+    }
 
     fn settings(ticks: usize) -> Settings {
         Settings {
