@@ -1,0 +1,69 @@
+name: Vello upstream CPU glyph/filter regressions (cross-platform)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/vendor/glifo/src/**'
+      - 'aquilum-app/native/vendor/vello_cpu/src/coarse/**'
+      - 'aquilum-app/native/vendor/vello_cpu/src/dispatch/**'
+      - 'aquilum-app/native/vendor/vello_cpu/src/fine/**'
+      - 'aquilum-app/native/src/render/colr_bounds_tests.rs'
+      - 'aquilum-app/native/src/render/paint/mask.rs'
+      - '.github/workflows/native-vello-upstream-regressions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-upstream-regressions-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native COLR and filter-coordinate regression / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-upstream-issues-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Exact COLRv1 ClipBox and existing color glyph scale checks
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q 'fn colr_without_clipbox_matches_identical_outline' native/src/render/colr_bounds_tests.rs 2>/dev/null; then
+            cargo test --release --locked -p aquilum-native --bin aquilum-native colr_without_clipbox_matches_identical_outline -- --nocapture --test-threads=1
+          else
+            echo "COLR synthetic fixture is not yet present on this isolated branch" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cargo test --release --locked -p aquilum-native --bin aquilum-native color_glyphs_follow_window_scale -- --nocapture --test-threads=1
+      - name: Supported sequential offset-filter root-mask checks (where present)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q 'fn nested_mask_layer_in_offset_filter_uses_root_coordinates' native/src/render/paint/mask.rs; then
+            cargo test --release --locked -p aquilum-native --bin aquilum-native filter_mask_origin_tests -- --nocapture --test-threads=1
+          else
+            echo "Filter-coordinate tests are not yet present on this isolated branch" >> "$GITHUB_STEP_SUMMARY"
+          fi
