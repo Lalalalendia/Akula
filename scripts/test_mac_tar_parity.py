@@ -37,6 +37,37 @@ class ParityTests(unittest.TestCase):
     def test_equal_bundle(self):
         self.assertGreater(compare(self.root, self.tar), 2)
 
+    def test_archive_root_mode_must_match_mounted_app(self):
+        with tarfile.open(self.tar, 'w:gz') as archive:
+            root = archive.gettarinfo(self.root, arcname='Aquilum.app')
+            mounted_mode = self.root.stat().st_mode & 0o777
+            root.mode = 0o700 if mounted_mode != 0o700 else 0o755
+            archive.addfile(root)
+            archive.add(self.root / 'Contents', arcname='Aquilum.app/Contents')
+        self.rejected("changed=['']")
+
+    def test_duplicate_archive_root_is_refused(self):
+        def extra(archive):
+            root = tarfile.TarInfo('Aquilum.app/')
+            root.type = tarfile.DIRTYPE
+            root.mode = self.root.stat().st_mode & 0o777
+            archive.addfile(root)
+        self.pack(extra)
+        self.rejected('duplicate archive root')
+
+    def test_privileged_archive_root_is_refused(self):
+        with tarfile.open(self.tar, 'w:gz') as archive:
+            root = archive.gettarinfo(self.root, arcname='Aquilum.app')
+            root.mode = 0o4755
+            archive.addfile(root)
+            archive.add(self.root / 'Contents', arcname='Aquilum.app/Contents')
+        self.rejected('privileged permission bits in archive app root')
+
+    def test_root_entry_is_required_before_children(self):
+        with tarfile.open(self.tar, 'w:gz') as archive:
+            archive.add(self.root / 'Contents', arcname='Aquilum.app/Contents')
+        self.rejected('archive app root directory missing or not first')
+
     def test_modified_file(self):
         (self.root / 'Contents' / 'Info.plist').write_bytes(b'changed')
         self.rejected('changed=')

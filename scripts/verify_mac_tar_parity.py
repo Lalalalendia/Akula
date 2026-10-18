@@ -72,7 +72,12 @@ def add(manifest, folded, name, result):
 def mounted_manifest(root):
     if root.name != 'Aquilum.app' or not root.is_dir() or root.is_symlink():
         fail('expected an actual mounted Aquilum.app directory')
-    manifest, folded = {}, set()
+    # The bundle root itself is installed by the updater, so its mode is
+    # part of parity just like the modes of all nested directories.
+    root_mode = stat.S_IMODE(root.lstat().st_mode)
+    if root_mode & 0o7000:
+        fail('privileged permission bits in mounted app root')
+    manifest, folded = {'': ('dir', root_mode & 0o777)}, set()
     pending = [(root, '')]
     total = 0
     while pending:
@@ -109,13 +114,24 @@ def mounted_manifest(root):
 def tar_manifest(archive):
     manifest, folded = {}, set()
     total = 0
+    root_seen = False
     with tarfile.open(archive, mode='r|gz') as tar:
         for member in tar:
             name = valid_name(member.name)
             if not name:
                 if not member.isdir():
                     fail('archive root is not a directory')
+                if root_seen:
+                    fail('duplicate archive root directory')
+                if member.mode & 0o7000:
+                    fail('privileged permission bits in archive app root')
+                manifest[''] = ('dir', member.mode & 0o777)
+                root_seen = True
                 continue
+            # The release TAR must begin with exactly one app root. Otherwise
+            # an extractor can implicitly create or later chmod this directory.
+            if not root_seen:
+                fail('archive app root directory missing or not first')
             if member.mode & 0o7000:
                 fail(f'privileged file mode: {name}')
             mode = member.mode & 0o777
@@ -137,6 +153,8 @@ def tar_manifest(archive):
             else:
                 fail(f'unsupported TAR member type: {name}')
             add(manifest, folded, name, result)
+    if not root_seen:
+        fail('archive app root directory missing')
     return manifest
 
 
