@@ -1,5 +1,10 @@
 //! Local discovery is untrusted address information, not pairing.
-use std::{collections::BTreeSet, net::{IpAddr, SocketAddr}, str::FromStr, time::{Duration, Instant}};
+use std::{
+    collections::BTreeSet,
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+    time::{Duration, Instant},
+};
 use iroh::EndpointId;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
@@ -13,7 +18,12 @@ pub struct LanCandidate {
 
 /// Only explicitly allowed peers can become connection candidates.
 /// mDNS records are unauthenticated; QUIC still authenticates the key.
-pub fn candidate(id: &str, port: u16, ip: IpAddr, allowed: &BTreeSet<EndpointId>) -> Option<LanCandidate> {
+pub fn candidate(
+    id: &str,
+    port: u16,
+    ip: IpAddr,
+    allowed: &BTreeSet<EndpointId>,
+) -> Option<LanCandidate> {
     if port == 0 || ip.is_unspecified() || ip.is_multicast() || ip.is_loopback() {
         return None;
     }
@@ -34,14 +44,23 @@ pub fn advertise(id: EndpointId, address: SocketAddr) -> Result<ServiceDaemon, S
     let name = id.to_string();
     let hostname = format!("staya-{}.local.", &name[..12]);
     let service = ServiceInfo::new(
-        SERVICE, &name, &hostname, address.ip(), address.port(), &[("version", "0")][..]
-    ).map_err(|e| e.to_string())?;
+        SERVICE,
+        &name,
+        &hostname,
+        address.ip(),
+        address.port(),
+        &[("version", "0")][..],
+    )
+    .map_err(|e| e.to_string())?;
     daemon.register(service).map_err(|e| e.to_string())?;
     Ok(daemon)
 }
 
 /// Bounded discovery. Does not enroll unknown peers or request any files.
-pub fn scan(allowed: &BTreeSet<EndpointId>, duration: Duration) -> Result<Vec<LanCandidate>, String> {
+pub fn scan(
+    allowed: &BTreeSet<EndpointId>,
+    duration: Duration,
+) -> Result<Vec<LanCandidate>, String> {
     if duration.is_zero() || duration > Duration::from_secs(20) {
         return Err("discovery window must be 1..20 seconds".into());
     }
@@ -50,11 +69,17 @@ pub fn scan(allowed: &BTreeSet<EndpointId>, duration: Duration) -> Result<Vec<La
     let deadline = Instant::now() + duration;
     let mut result = BTreeSet::new();
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-        if remaining.is_zero() { break; }
+        if remaining.is_zero() {
+            break;
+        }
         match events.recv_timeout(remaining) {
             Ok(ServiceEvent::ServiceResolved(info)) => {
-                if info.get_property_val_str("version") != Some("0") { continue; }
-                let Some((text_id, _)) = info.get_fullname().split_once('.') else { continue; };
+                if info.get_property_val_str("version") != Some("0") {
+                    continue;
+                }
+                let Some((text_id, _)) = info.get_fullname().split_once('.') else {
+                    continue;
+                };
                 for ip in info.get_addresses_v4() {
                     if let Some(c) = candidate(text_id, info.get_port(), IpAddr::V4(ip), allowed) {
                         result.insert((c.id, c.address));
@@ -67,7 +92,10 @@ pub fn scan(allowed: &BTreeSet<EndpointId>, duration: Duration) -> Result<Vec<La
         }
     }
     let _ = daemon.shutdown();
-    Ok(result.into_iter().map(|(id, address)| LanCandidate { id, address }).collect())
+    Ok(result
+        .into_iter()
+        .map(|(id, address)| LanCandidate { id, address })
+        .collect())
 }
 
 #[cfg(test)]
@@ -80,7 +108,15 @@ mod tests {
         let allow = BTreeSet::from([known]);
         let id = known.to_string();
         assert!(candidate(&id, 42424, "192.168.1.3".parse().unwrap(), &allow).is_some());
-        assert!(candidate(&stranger.to_string(), 42424, "192.168.1.3".parse().unwrap(), &allow).is_none());
+        assert!(
+            candidate(
+                &stranger.to_string(),
+                42424,
+                "192.168.1.3".parse().unwrap(),
+                &allow
+            )
+            .is_none()
+        );
         assert!(candidate(&id, 0, "192.168.1.3".parse().unwrap(), &allow).is_none());
         assert!(candidate(&id, 42424, "127.0.0.1".parse().unwrap(), &allow).is_none());
         assert!(candidate(&id, 42424, "0.0.0.0".parse().unwrap(), &allow).is_none());
