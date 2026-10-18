@@ -26,6 +26,7 @@ jobs:
     if: github.event_name == 'pull_request'
     name: Classify required CI lanes
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
     steps:
@@ -47,6 +48,8 @@ jobs:
     needs: classify
     name: Required Rust tests and policy checks
     runs-on: ubuntu-24.04
+    # Fail boundedly if cold compilation or Rust tests hang.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
@@ -173,6 +176,7 @@ jobs:
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs: [classify, required-tests, native-frames]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Enforce all required lanes (fail closed)
         shell: bash
