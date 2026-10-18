@@ -45,6 +45,7 @@ mod s3_manifest;
 // Inert V2 contract only: no S3 pack writer, reader or auto-sync activation.
 mod s3_pack_index;
 mod s3_manifest_delta;
+mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
 mod s3_anchored_delta;
 #[cfg(feature = "sync-s3")]
@@ -90,6 +91,11 @@ pub use provider::{
     RemoteSnapshot, RemoteStore, RemoteStoreError, RemoteWriteReceipt,
 };
 pub use s3::{S3ContractError, S3HeadPointerV1, S3Keyspace};
+pub use s3_coord_v2::{
+    S3DeltaEnvelopeV2, S3DeltaEnvelopeV2Error, S3DeltaEnvelopeCoverageV2,
+    S3DeltaPackRefV2, MAX_DELTA_ENVELOPE_BYTES, MAX_DELTA_ENVELOPE_REVISIONS,
+    MAX_DELTA_PACK_BYTES, MAX_DELTA_PACK_MEMBERS,
+};
 #[cfg(feature = "sync-s3")]
 pub use s3_anchored_delta::{
     walk_s3_delta_from_saved_anchor, S3AnchoredWalkError,
