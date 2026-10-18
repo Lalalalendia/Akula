@@ -1,6 +1,6 @@
 //! Local discovery is untrusted address information, not pairing.
 use iroh::EndpointId;
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{DaemonEvent, ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::{
     collections::BTreeSet,
     net::{IpAddr, SocketAddr},
@@ -41,6 +41,26 @@ pub fn advertise(id: EndpointId, address: SocketAddr) -> Result<ServiceDaemon, S
         return Err("advertise requires a concrete LAN address and port".into());
     }
     let daemon = ServiceDaemon::new().map_err(|e| e.to_string())?;
+    // This is a laboratory probe: collect daemon status without disclosing
+    // endpoint keys or accepting peer-controlled debug text.
+    let monitor = daemon.monitor().map_err(|e| e.to_string())?;
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut announces = 0u64;
+        let mut errors = 0u64;
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            if left.is_zero() {
+                break;
+            }
+            match monitor.recv_timeout(left) {
+                Ok(DaemonEvent::Announce(_, _)) => announces += 1,
+                Ok(DaemonEvent::Error(_)) => errors += 1,
+                Err(mdns_sd::RecvTimeoutError::Timeout | mdns_sd::RecvTimeoutError::Disconnected) => break,
+                _ => {}
+            }
+        }
+        eprintln!("mdns_publisher_diagnostics announced={announces} daemon_errors={errors}");
+    });
     let name = id.to_string();
     let hostname = format!("staya-{}.local.", &name[..12]);
     let service = ServiceInfo::new(
@@ -68,6 +88,7 @@ pub fn scan(
     let events = daemon.browse(SERVICE).map_err(|e| e.to_string())?;
     let deadline = Instant::now() + duration;
     let mut result = BTreeSet::new();
+    let mut found = 0u64;
     let mut resolved = 0u64;
     let mut wrong_version = 0u64;
     let mut rejected = 0u64;
@@ -76,6 +97,7 @@ pub fn scan(
             break;
         }
         match events.recv_timeout(remaining) {
+            Ok(ServiceEvent::ServiceFound(_, _)) => found += 1,
             Ok(ServiceEvent::ServiceResolved(info)) => {
                 resolved += 1;
                 if info.get_property_val_str("version") != Some("0") {
@@ -102,7 +124,7 @@ pub fn scan(
     // The command prints no secret key or untrusted peer-provided data.
     // Counts help distinguish multicast delivery from peer filtering.
     eprintln!(
-        "mdns_diagnostics resolved={resolved} wrong_version={wrong_version} rejected_address_or_id={rejected} permitted={}",
+        "mdns_diagnostics found={found} resolved={resolved} wrong_version={wrong_version} rejected_address_or_id={rejected} permitted={}",
         result.len()
     );
     Ok(result
