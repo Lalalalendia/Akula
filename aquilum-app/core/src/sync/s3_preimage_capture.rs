@@ -312,6 +312,11 @@ mod tests {
     use super::super::filegate_lock_custody::scoped_leaf;
     use super::super::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
     use crate::app_core::{Core, CoreEvent};
+    use crate::history::Source;
+    use crate::history::service::HistoryFault;
+    use crate::sync::guarded_note_write::{
+        save_existing_note_under_custody, GuardedNoteWriteError,
+    };
     use std::{fs, path::PathBuf, sync::Arc};
 
     struct Fixture {
@@ -541,6 +546,148 @@ mod tests {
         assert!(journal.read_existing_replace_attempt(f.operation)
             .unwrap().is_none());
         assert_eq!(fs::read(&path).unwrap(),b"unchanged original");
+    }
+
+    // This exercises REAL Core File Gate + HistoryService against disposable
+    // temporary files, after the V7 once-only S3 replace fence. It does not
+    // wire an automatic S3 writer or mint a native durability receipt.
+    #[test]
+    fn fenced_s3_update_can_use_real_guarded_filegate_but_not_promote_baseline() {
+        let f = fixture();
+        let admission = f.admission();
+        let bindings = SqliteRegisteredS3Bindings::open(
+            &admission, &f.appdata.join("profile.sqlite"),
+        ).unwrap();
+        let custody = SqliteCustodyIdentityStore::open(
+            &admission, &f.appdata.join("custody.sqlite"),
+        ).unwrap();
+        let mut journal = SqliteSyncJournal::open(
+            &f.appdata.join("operation.sqlite"),
+        ).unwrap();
+        let mut cache = SqliteDagStore::open(
+            &f.appdata.join("cache.sqlite"),
+        ).unwrap();
+        let new_bytes = b"new cloud content";
+        cache.store_blob(new_bytes).unwrap();
+        let mut copies = SqliteProtectionStore::open(
+            &f.appdata.join("originals.sqlite"),
+        ).unwrap();
+        capture_registered_s3_update_preimage(
+            &admission, &bindings, &f.profile, &f.keyspace,
+            &custody, &f.scope, &journal, &mut copies,
+            f.operation, &f.old_hash,
+        ).unwrap();
+        let operation = journal.get(f.operation).unwrap().unwrap();
+        let baseline = journal.baseline(
+            operation.intent.vault_id, operation.intent.document_id,
+        ).unwrap();
+        let claimed = fence_registered_s3_replace_attempt_once(
+            &admission, &bindings, &f.profile, &f.keyspace,
+            &custody, &f.scope, &mut journal, &cache, &copies,
+            f.operation, &f.old_hash,
+        ).unwrap();
+
+        // Existing experimental Core writer is the ONLY primary writer.
+        // The durable claim by itself remains a diagnostic, not permission.
+        let result = save_existing_note_under_custody(
+            &admission, &custody, f.keyspace.vault_id(), &f.scope,
+            &operation.intent.path, std::str::from_utf8(new_bytes).unwrap(),
+            &f.old_hash, Source::External, Some("unconfirmed-s3-update"),
+        );
+        assert!(result.is_ok(), "existing guarded File Gate failed: {result:?}");
+        let target = f.root.join(operation.intent.path.as_str());
+        assert_eq!(fs::read(&target).unwrap(), new_bytes);
+        assert!(f.core.history.page(
+            &|| vec![f.root.clone()], &target, 0, 8,
+        ).total > 0, "the real HistoryService must observe the File Gate save");
+        assert_eq!(journal.baseline(
+            operation.intent.vault_id, operation.intent.document_id,
+        ).unwrap(), baseline, "File Gate success cannot promote remote baseline");
+        assert_eq!(journal.get(f.operation).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(matches!(journal.mark_applied(f.operation),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)));
+        let original = copies.read_bound_preimage(f.operation).unwrap().unwrap();
+        assert_eq!(original.original.bytes, b"unchanged original");
+        assert_eq!(journal.read_existing_replace_attempt(f.operation)
+            .unwrap(), Some(claimed.clone()));
+        // A fresh journal instance cannot grant another attempt, even after
+        // the first File Gate save made the desired new bytes visible.
+        drop(journal);
+        let mut reopened = SqliteSyncJournal::open(
+            &f.appdata.join("operation.sqlite"),
+        ).unwrap();
+        assert!(matches!(reopened.record_existing_replace_attempt_once(
+            &operation.intent, &original,
+        ), Err(JournalError::ExistingReplaceAttemptAlreadyRecorded)));
+        assert_eq!(reopened.read_existing_replace_attempt(f.operation)
+            .unwrap(), Some(claimed));
+    }
+
+    #[test]
+    fn fenced_s3_filegate_history_failure_is_uncertain_and_original_survives() {
+        let f = fixture();
+        let admission = f.admission();
+        let bindings = SqliteRegisteredS3Bindings::open(
+            &admission, &f.appdata.join("profile.sqlite"),
+        ).unwrap();
+        let custody = SqliteCustodyIdentityStore::open(
+            &admission, &f.appdata.join("custody.sqlite"),
+        ).unwrap();
+        let mut journal = SqliteSyncJournal::open(
+            &f.appdata.join("operation.sqlite"),
+        ).unwrap();
+        let mut cache = SqliteDagStore::open(
+            &f.appdata.join("cache.sqlite"),
+        ).unwrap();
+        cache.store_blob(b"new cloud content").unwrap();
+        let mut copies = SqliteProtectionStore::open(
+            &f.appdata.join("originals.sqlite"),
+        ).unwrap();
+        capture_registered_s3_update_preimage(
+            &admission, &bindings, &f.profile, &f.keyspace,
+            &custody, &f.scope, &journal, &mut copies,
+            f.operation, &f.old_hash,
+        ).unwrap();
+        let intent = journal.get(f.operation).unwrap().unwrap().intent;
+        let baseline = journal.baseline(
+            intent.vault_id, intent.document_id,
+        ).unwrap();
+        let claimed = fence_registered_s3_replace_attempt_once(
+            &admission, &bindings, &f.profile, &f.keyspace,
+            &custody, &f.scope, &mut journal, &cache, &copies,
+            f.operation, &f.old_hash,
+        ).unwrap();
+
+        f.core.history.fail_once(HistoryFault::CreateVersion);
+        let failed = save_existing_note_under_custody(
+            &admission, &custody, f.keyspace.vault_id(), &f.scope,
+            &intent.path, "new cloud content", &f.old_hash,
+            Source::External, Some("ambiguous-s3-update"),
+        );
+        assert!(matches!(failed, Err(GuardedNoteWriteError::NeedsReview(_))),
+            "a failed HistoryService is NOT a successful remote ACK: {failed:?}");
+        assert_eq!(fs::read(f.root.join(intent.path.as_str())).unwrap(),
+            b"new cloud content",
+            "a primary write may be visible despite an error in history");
+        assert_eq!(copies.read_bound_preimage(f.operation)
+            .unwrap().unwrap().original.bytes, b"unchanged original");
+        assert_eq!(journal.get(f.operation).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert_eq!(journal.baseline(
+            intent.vault_id, intent.document_id,
+        ).unwrap(), baseline);
+        assert_eq!(journal.read_existing_replace_attempt(f.operation)
+            .unwrap(), Some(claimed));
+        assert!(matches!(journal.mark_applied(f.operation),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)));
+        let second = save_existing_note_under_custody(
+            &admission, &custody, f.keyspace.vault_id(), &f.scope,
+            &intent.path, "new cloud content", &f.old_hash,
+            Source::External, None,
+        );
+        assert!(matches!(second, Err(GuardedNoteWriteError::Denied(_))),
+            "CAS must refuse to write a second time after an uncertain primary");
     }
 
     #[test]
