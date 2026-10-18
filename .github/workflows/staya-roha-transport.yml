@@ -1,0 +1,35 @@
+name: Staya Roha/noq transport lab
+on:
+  push:
+    branches:
+      - "feat/staya-roha-transport-*"
+  pull_request:
+    paths:
+      - "staya/roha-transport/**"
+      - ".github/workflows/staya-roha-transport.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  roha:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91.0"
+          components: rustfmt
+      - name: Check fork versions and network adapter
+        working-directory: staya/roha-transport
+        run: |
+          cargo check
+          cargo test --lib
+          cargo tree -i noq
+          cargo tree -i noq-proto
+          cargo tree -i noq-udp
+      - name: Format
+        working-directory: staya/roha-transport
+        run: cargo fmt --all -- --check
