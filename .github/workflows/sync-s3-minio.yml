@@ -172,6 +172,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 minio_two_clients_manifest_cas_and_lost_ack -- --ignored --test-threads=1 --nocapture
+      - name: Prove isolated V2 CAS, complete pack readback and lost-ACK SQLite recovery
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 minio_v2_pack_root_cas_two_clients_and_lost_ack -- --ignored --test-threads=1 --nocapture
       - name: Prove bounded parallel DAG verification and reject corrupted S3 blobs
         shell: bash
         working-directory: aquilum-app
