@@ -15,6 +15,11 @@ use std::path::{Path, PathBuf};
 
 const MAX_NOTE_BYTES: usize = 32 * 1024 * 1024;
 
+/// The constructor is deliberately private to this module. This proof is
+/// borrowed only by the real File Gate checked history write, from within a
+/// previously verified pinned OS custody lock callback. It is NOT clonable.
+pub(crate) struct HeldCustodyHistoryPermit(());
+
 /// Denied means that this API did not enter the primary writer. NeedsReview
 /// means that bytes and/or history *might* have changed, even when an
 /// OS-lock/custody post-check failed. Never automatically retry NeedsReview.
@@ -116,8 +121,9 @@ pub(crate) fn save_existing_note_under_custody(
                 admission.registered_root_path(), relative, expected_hash, content,
             ).map_err(CheckedHistoryError::Primary)?;
             attempted = true;
+            let permit = HeldCustodyHistoryPermit(());
             gate::write_checked_history(
-                core, &checked, content, expected_hash, source, version_name,
+                &permit, core, &checked, content, expected_hash, source, version_name,
             )
         },
     );

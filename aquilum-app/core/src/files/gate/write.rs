@@ -53,6 +53,7 @@ pub(crate) enum CheckedHistoryError {
 
 #[allow(dead_code)]
 pub(crate) fn write_checked_history(
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
     core: &Core,
     path: &Path,
     content: &str,
@@ -77,8 +78,9 @@ pub(crate) fn write_checked_history(
         disk_before: before, text: content, hash: &result.hash,
         source, name: version_name,
     };
-    let history_changed = core.history.try_saved(&|| core.known_roots(), path, write)
-        .map_err(CheckedHistoryError::History)?;
+    let history_changed = core.history.try_saved_with_custody(
+        permit, &|| core.known_roots(), path, write,
+    ).map_err(CheckedHistoryError::History)?;
     // The outer custody wrapper announces changes and notifies search only
     // AFTER releasing its external OS lock, even if postflight failed.
     Ok((result, history_changed))

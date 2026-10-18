@@ -13,7 +13,7 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
-mod guarded_note_write;
+pub(crate) mod guarded_note_write;
 #[cfg(feature = "sync-s3")]
 pub(crate) mod guarded_editor;
 #[cfg(test)]

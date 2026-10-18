@@ -12,7 +12,8 @@ use std::fmt;
 use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 const DEVICE_FILE: &str = "device-id";
@@ -43,6 +44,9 @@ static PROCESS_HISTORY_FILES: LazyLock<Mutex<HistoryFilesShared>> =
 pub struct HistoryService {
     device: String,
     state: Mutex<State>,
+    /// Set once by Core::open before exposing any direct HistoryService API.
+    /// Standalone HistoryService in legacy tests has no enrolled Core policy.
+    guarded_participant: OnceLock<Arc<AtomicBool>>,
     #[cfg(test)]
     next_fault: Mutex<Option<HistoryFault>>,
 }
@@ -216,9 +220,22 @@ impl HistoryService {
         Self {
             device: device_id(app_data),
             state: Mutex::default(),
+            guarded_participant: OnceLock::new(),
             #[cfg(test)]
             next_fault: Mutex::new(None),
         }
+    }
+
+    /// A Core must bind this before workers or UI callbacks can mutate
+    /// history. A second bind is a construction error, not a policy reset.
+    pub(crate) fn bind_guarded_participant_policy(&self, policy: Arc<AtomicBool>) {
+        assert!(self.guarded_participant.set(policy).is_ok(),
+            "history participant safety policy already installed");
+    }
+
+    fn denies_unverified_history_writes(&self) -> bool {
+        self.guarded_participant.get()
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
     }
 
     pub fn disk_before(
@@ -255,6 +272,34 @@ impl HistoryService {
     /// Ok(true) requires a persisted history change; Ok(false) means no change
     /// was required. Err means planned history persistence was incomplete.
     pub fn try_saved(
+        &self,
+        roots: Roots<'_>,
+        note: &Path,
+        write: NoteWrite<'_>,
+    ) -> Result<bool, HistorySaveFailure> {
+        if self.denies_unverified_history_writes() {
+            return Err(HistorySaveFailure::new(
+                "guarded history HOLD",
+                "direct history save lacks pinned S3 custody",
+            ));
+        }
+        self.try_saved_impl(roots, note, write)
+    }
+
+    /// Narrow checked File Gate exception. The sealed token can be created
+    /// only by the sync wrapper, while inside its physically held OS lock.
+    /// No direct Core/host caller can construct that token.
+    pub(crate) fn try_saved_with_custody(
+        &self,
+        _permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+        roots: Roots<'_>,
+        note: &Path,
+        write: NoteWrite<'_>,
+    ) -> Result<bool, HistorySaveFailure> {
+        self.try_saved_impl(roots, note, write)
+    }
+
+    fn try_saved_impl(
         &self,
         roots: Roots<'_>,
         note: &Path,
@@ -426,6 +471,7 @@ impl HistoryService {
         id: Option<&str>,
         name: &str,
     ) -> Option<String> {
+        if self.denies_unverified_history_writes() { return None; }
         let Some(mut state) = self.files_lock() else {
             return None;
         };
@@ -517,6 +563,10 @@ impl HistoryService {
 
     pub fn try_moved(&self, roots: Roots<'_>, from: &Path, to: &Path) -> Result<(), HistoryMoveFailure> {
         let action = "move history";
+        if self.denies_unverified_history_writes() {
+            return Err(HistoryMoveFailure::new(action,
+                "direct history mutation refused by enrolled workspace HOLD", false));
+        }
         let Some(mut state) = self.files_lock() else {
             return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
@@ -583,6 +633,10 @@ impl HistoryService {
 
     pub fn try_trashed(&self, roots: Roots<'_>, note: &Path, trashed_at: &Path) -> Result<(), HistoryMoveFailure> {
         let action = "trash history";
+        if self.denies_unverified_history_writes() {
+            return Err(HistoryMoveFailure::new(action,
+                "direct history mutation refused by enrolled workspace HOLD", false));
+        }
         let Some(mut state) = self.files_lock() else {
             return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
@@ -633,6 +687,10 @@ impl HistoryService {
 
     pub fn try_restored(&self, roots: Roots<'_>, trashed_at: &Path, restored: &Path) -> Result<(), HistoryMoveFailure> {
         let action = "restore history";
+        if self.denies_unverified_history_writes() {
+            return Err(HistoryMoveFailure::new(action,
+                "direct history mutation refused by enrolled workspace HOLD", false));
+        }
         let Some(mut state) = self.files_lock() else {
             return Err(HistoryMoveFailure::new(action, "history mutex poisoned", false));
         };
@@ -734,6 +792,9 @@ impl HistoryService {
     /// Full-tree housekeeping can delay other history operations but cannot
     /// block the ordinary File Gate mutex directly.
     pub fn maintain_retention(&self, workspace: &Path, retention_days: u32) -> Result<u64, &'static str> {
+        if self.denies_unverified_history_writes() {
+            return Err("history retention refused by enrolled workspace HOLD");
+        }
         let guard = PROCESS_HISTORY_FILES
             .lock()
             .map_err(|_| "process history-files lock poisoned; refusing cleanup")?;
