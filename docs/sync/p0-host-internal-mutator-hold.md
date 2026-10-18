@@ -11,8 +11,10 @@ without a held shared host SQLite enrollment epoch. But
 by opt-in additive local create and the new S3 additive receiver (#296),
 takes `Core.file_mutations` directly. That process-local mutex **does not
 check** the installed-host shared SQLite ledger or preserve the host epoch.
-Likewise `archive_local_recovery_copy_for_vault` can write recovered bytes
-under the workspace through a process-local mutex.
+Recovery archive is **not** a workspace writer: it reads/captures bytes
+under a pinned root and copies forensic evidence into a separate appdata
+SQLite journal, without publishing a recovered workspace file. It should
+remain available for manual recovery.
 
 The separate cooperative custody OS lock in S3 receiver experiments does
 not automatically replace the installer-host admission contract across
@@ -22,8 +24,8 @@ must not create an alternative host-policy writer.
 
 ## Minimal fix
 
-At the beginning of each of these two native mutation routes, while no
-primary filesystem byte has been touched:
+At the beginning of the **actual staged-create mutation route**, before
+any primary filesystem byte has been touched:
 
 - If the associated Core requires the installed-host epoch, refuse with
   `PermissionDenied`. This applies to `sync-installed-host`, witnessed-host
@@ -31,8 +33,9 @@ primary filesystem byte has been touched:
   experiments. The guard is only compiled when `host-custody` is present.
 - Do not silently acquire a different private appdata lock, rebootstrap
   a ledger, or treat a held `Core.file_mutations` as shared authority.
-- Read-only pinned diagnostics, preimage capture and recovery inspection
-  remain available. No S3 overwrite/delete/GC/baseline permission changes.
+- Read-only pinned diagnostics, preimage capture, recovery inspection and
+  the appdata-only forensic archive remain available. No S3
+  overwrite/delete/GC/baseline permission changes.
 
 The existing local additive proof continues in unhosted mode, preserving
 its current experimental value. It is **not** automatically elevated into
@@ -45,7 +48,9 @@ opened through `Core::open_with_installed_host` WITHOUT a provisioned host
 ledger. `create_staged_if_absent` must return PermissionDenied before
 creating the destination. The staged intent and baseline remain unchanged;
 the code must not create the missing host SQLite automatically.
-The analogous archive helper must refuse before creating any recovery copy.
+The forensic archive helper is deliberately not blocked, since it stores
+independent readback evidence in appdata SQLite rather than writing a file
+into the selected workspace.
 
 The local host-custody CI matrix runs this negative test on Linux, macOS,
 Windows, alongside Application and relevant S3 regressions.
