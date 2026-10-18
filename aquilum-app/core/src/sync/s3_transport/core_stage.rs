@@ -96,7 +96,7 @@ impl AwsS3ProbeClient {
     /// Read the small mutable S3 pointer with HEAD/If-Match GET/HEAD and
     /// require this exact complete immutable snapshot, without inferring a
     /// deletion or treating an absent root as an empty vault.
-    async fn core_stage_current_head(
+    pub(super) async fn core_stage_current_head(
         &self,
         verified: &S3VerifiedRevisionMetadataStore,
     ) -> Result<S3BoundedObject, S3CoreStageError> {
@@ -502,10 +502,11 @@ mod tests {
         ).unwrap();
         custody.bind_registered_s3(&admission, &bindings, &custody_scope).unwrap();
 
-        let published = admission.create_staged_if_absent_for_registered_s3(
-            operation_id, &journal, &cache, &bindings, &profile, &ns,
-            &custody, &custody_scope,
-        ).unwrap();
+        // Exercise the full verified-head -> cache -> host File Gate path.
+        let published = reader.receive_single_verified_s3_additive_once(
+            &verified, &admission, &bindings, &custody, &custody_scope,
+            &mut journal, &mut cache, intent.clone(), max_blob_bytes,
+        ).await.unwrap();
         assert_eq!(published.byte_length, bytes.len() as u64);
         assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
         assert!(matches!(

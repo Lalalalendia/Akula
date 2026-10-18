@@ -20,6 +20,7 @@ pub enum DagStoreError {
     IntegrityMismatch,
     MissingBlob,
     InvalidHash,
+    UnsafeStoreLocation,
 }
 
 impl From<rusqlite::Error> for DagStoreError {
@@ -45,6 +46,57 @@ impl SqliteDagStore {
     /// existing editor DocumentStore database.
     pub fn open(path: &Path) -> DagStoreResult<Self> {
         Self::prepare(Connection::open(path)?)
+    }
+
+    /// Negative host-admission check: no SQLite cache or WAL/SHM sidecar
+    /// may be stored inside a user-controlled vault. This does not prove
+    /// ownership of the external app-data directory.
+    pub(crate) fn require_appdata_outside_vault(&self, root: &Path)
+        -> DagStoreResult<()>
+    {
+        let mut stmt = self.connection.prepare("PRAGMA database_list")?;
+        let mut rows = stmt.query([])?;
+        let mut path = None;
+        while let Some(row) = rows.next()? {
+            if row.get::<_, String>(1)? == "main" {
+                path = Some(row.get::<_, String>(2)?);
+                break;
+            }
+        }
+        let raw = path.ok_or(DagStoreError::UnsafeStoreLocation)?;
+        if raw.is_empty() {
+            return Err(DagStoreError::UnsafeStoreLocation);
+        }
+        let file = std::fs::canonicalize(raw)
+            .map_err(|_| DagStoreError::UnsafeStoreLocation)?;
+        let root = std::fs::canonicalize(root)
+            .map_err(|_| DagStoreError::UnsafeStoreLocation)?;
+        if file.starts_with(&root) {
+            return Err(DagStoreError::UnsafeStoreLocation);
+        }
+        let meta = std::fs::metadata(&file)
+            .map_err(|_| DagStoreError::UnsafeStoreLocation)?;
+        if !meta.is_file() {
+            return Err(DagStoreError::UnsafeStoreLocation);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if meta.nlink() != 1 {
+                return Err(DagStoreError::UnsafeStoreLocation);
+            }
+        }
+        #[cfg(windows)]
+        {
+            let handle = std::fs::File::open(&file)
+                .map_err(|_| DagStoreError::UnsafeStoreLocation)?;
+            let (_, _, links) = super::pinned_windows::file_identity_with_links(&handle)
+                .map_err(|_| DagStoreError::UnsafeStoreLocation)?;
+            if links != 1 {
+                return Err(DagStoreError::UnsafeStoreLocation);
+            }
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -205,6 +257,27 @@ mod tests {
                 blob_hash: blake3::hash(bytes).to_hex().to_string(),
             },
         }
+    }
+
+    #[test]
+    fn durable_cache_must_be_outside_the_registered_user_vault() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let appdata = temp.path().join("appdata");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&appdata).unwrap();
+        let unsafe_cache = SqliteDagStore::open(&root.join("cache.sqlite")).unwrap();
+        assert!(matches!(
+            unsafe_cache.require_appdata_outside_vault(&root),
+            Err(DagStoreError::UnsafeStoreLocation)
+        ));
+        let external = SqliteDagStore::open(&appdata.join("cache.sqlite")).unwrap();
+        assert!(external.require_appdata_outside_vault(&root).is_ok());
+        let memory = SqliteDagStore::memory().unwrap();
+        assert!(matches!(
+            memory.require_appdata_outside_vault(&root),
+            Err(DagStoreError::UnsafeStoreLocation)
+        ));
     }
 
     #[test]
