@@ -140,6 +140,11 @@ impl ReaderView {
     }
 
     #[cfg(test)]
+    pub fn test_reader_position(&self) -> Option<(usize, String)> {
+        self.session.location().map(|(cfi, _)| (self.session.section(), cfi))
+    }
+
+    #[cfg(test)]
     pub fn label_rects(&self) -> Vec<Rect> {
         self.labels.iter().map(|(r, _)| *r).collect()
     }
