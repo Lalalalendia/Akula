@@ -1,0 +1,40 @@
+name: SYNC-TEXT-DELTA-02 real Git Markdown revisions
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/benchmarks/sync-text-delta-history-s3.py'
+      - '.github/workflows/sync-text-delta-history-s3.yml'
+      - 'docs/sync/text-delta-02-real-git-and-minio.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  history-delta:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install isolated comparison tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+          python -m pip install 'boto3>=1.35,<2'
+      - name: Compare actual consecutive Git Markdown versions
+        run: |
+          python scripts/benchmarks/sync-text-delta-history-s3.py --repo . --output text-delta-real-git-minio.jsonl
+      - name: Upload numeric comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-text-delta-02-real-history
+          path: text-delta-real-git-minio.jsonl
+          retention-days: 14
+          if-no-files-found: ignore
