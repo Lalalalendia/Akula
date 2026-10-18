@@ -7,21 +7,22 @@ Isolated experiment using the repository's Roha -> noq fork chain; no cloud, rel
 From `staya/roha-transport` with Rust 1.91 or later:
 
 ```sh
-cargo run --bin staya-lan -- gen-key
+cargo run --bin staya-lan -- gen-key-file ./akula1.key
 ```
 
-Run that on **both PCs**, recording each machine's endpoint ID and secret key **privately**. Secrets printed by `gen-key` are for laboratory use only; they are exposed in terminal output/process arguments. Do not reuse them as production keys or share logs containing them.
+Run on both machines with different local key file names. Each command prints a public `endpoint_id` only. On Linux/macOS the key file is created with owner-only permissions (0600), and existing files are never overwritten. Keep the key out of Git, logs and backup uploads. On Windows file permissions require manual review because this prototype does not yet enforce an ACL.
 
-On Akula-2 (server), for example with LAN address `192.168.1.22`:
+Akula-2 (server at LAN IP `192.168.1.22`):
 
 ```sh
-cargo run --bin staya-lan -- serve B_SECRET_HEX A_ENDPOINT_ID 0.0.0.0:42424
+cargo run --bin staya-lan -- gen-key-file ./akula2.key
+cargo run --bin staya-lan -- serve @./akula2.key AKULA1_ENDPOINT_ID 0.0.0.0:42424
 ```
 
-On Akula-1:
+Akula-1:
 
 ```sh
-cargo run --bin staya-lan -- ping A_SECRET_HEX B_ENDPOINT_ID 192.168.1.22:42424
+cargo run --bin staya-lan -- ping @./akula1.key AKULA2_ENDPOINT_ID 192.168.1.22:42424
 ```
 
 Allow **inbound UDP port 42424** to Akula-2 from Akula-1's LAN IP using an operating-system firewall rule; never expose the port to untrusted networks. Both PCs must be on the same routed LAN (client isolation disabled). Stop server with Ctrl-C.
