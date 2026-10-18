@@ -386,7 +386,7 @@ impl MultiThreadedDispatcher {
         let bucket_zone = aq_trace::zone("vello: раскладка по строкам");
         let mut bucketer = self.bucketer.lock().unwrap();
         let filters = FilterContext::new(0);
-        bucketer.reset(RectU16::new(0, 0, scene_width, scene_height));
+        bucketer.reset(RectU16::new(0, 0, scene_width, scene_height), (0, 0));
         let target_init = settings.target_init.map(PremulColor::from_alpha_color);
         bucketer.bucket_commands(
             &self.recorder.nodes,
