@@ -474,7 +474,10 @@ fn relocation_trash_and_restore_hold_publication_epoch_until_history_finishes() 
     let restored = prove_lease(&core, move || super::trash::restore(&a, &r, &note), || {
         moved.exists()
     });
-    assert_eq!(restored, moved);
+    // Windows can return an extended \\?\\-prefixed path for the same file.
+    // Compare Akula's normalized path identity, not textual path spelling.
+    assert!(crate::search::paths::same_path(&restored, &moved),
+        "restore returned a different physical note path: {restored:?} vs {moved:?}");
     assert_eq!(fs::read_to_string(&moved).unwrap(), "important version");
     assert!(core.history.page(&|| vec![root.clone()], &moved, 0, 8).total > 0,
         "history must be restored before the participant admission completes");
