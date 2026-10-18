@@ -104,6 +104,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: needs.classify.outputs.mode != 'none'
 
+      - name: Security-test macOS updater TAR parser on Linux too
+        if: needs.classify.outputs.mode != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#[path = "%s"] mod tar;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/tar.rs" > "$RUNNER_TEMP/akula_tar_test_harness.rs"
+          rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_tar_test_harness.rs" -o "$RUNNER_TEMP/akula_tar_security_tests"
+          "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
+
+
       - name: Restore shared main Rust cache (read-only on PRs)
         uses: swatinem/rust-cache@v2
         if: needs.classify.outputs.mode != 'none'

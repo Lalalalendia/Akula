@@ -15,6 +15,7 @@ on:
       - "scripts/test-macos-release-verifier.sh"
       - "scripts/verify_mac_tar_parity.py"
       - "scripts/test_mac_tar_parity.py"
+      - "aquilum-app/native/src/updater/tar.rs"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - "scripts/test-macos-release-verifier.sh"
       - "scripts/verify_mac_tar_parity.py"
       - "scripts/test_mac_tar_parity.py"
+      - "aquilum-app/native/src/updater/tar.rs"
       - ".github/workflows/docs.yml"
 
 permissions:
@@ -90,3 +92,11 @@ jobs:
           bash scripts/test-install-scripts.sh
           bash scripts/test-macos-release-verifier.sh
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Native macOS TAR extractor security regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#[path = "%s"] mod tar;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/tar.rs" > "$RUNNER_TEMP/akula_tar_test_harness.rs"
+          rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_tar_test_harness.rs" -o "$RUNNER_TEMP/akula_tar_security_tests"
+          "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
