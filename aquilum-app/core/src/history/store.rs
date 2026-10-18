@@ -1,5 +1,5 @@
 use super::milestone::{Snapshot, Source};
-use crate::files::document::{read_text, write_file_atomic_impl};
+use crate::files::document::{read_text, write_history_snapshot_atomic_impl};
 use crate::files::error::FileCommandError;
 use crate::files::relocate::{remove_empty_folders, remove_files};
 use serde::Serialize;
@@ -261,7 +261,7 @@ pub(super) fn write_version(
     fs::create_dir_all(dir)?;
     #[cfg(feature = "save-stage-probe")]
     let profile_named = profile_start.elapsed();
-    write_file_atomic_impl(&path, snapshot.text.as_ref(), None)?;
+    write_history_snapshot_atomic_impl(&path, snapshot.text.as_ref())?;
     #[cfg(feature = "save-stage-probe")]
     {
         let profile_end = profile_start.elapsed();
@@ -324,7 +324,7 @@ pub(super) fn update_version_text(
     version_id: &str,
     text: &str,
 ) -> Result<(), FileCommandError> {
-    write_file_atomic_impl(&dir.join(version_id), text, None).map(|_| ())
+    write_history_snapshot_atomic_impl(&dir.join(version_id), text)
 }
 
 pub(super) fn remove_version_and_names(
@@ -367,7 +367,7 @@ pub(super) fn write_name(
     let path = free_name(dir, millis(at), |at| {
         format!("{version_id}.{at:013}_{device}{NAME_EXTENSION}")
     });
-    write_file_atomic_impl(&path, name.trim(), None).map(|_| ())
+    write_history_snapshot_atomic_impl(&path, name.trim())
 }
 
 pub fn names(dir: &Path) -> HashMap<String, String> {
