@@ -152,7 +152,7 @@ pub(super) fn prepare_delta_packs_v2(
     }
     let expected: BTreeSet<_> =
         references.iter().map(|r| r.revision_id).collect();
-    if seen != expected || dag.active_len() + dag.pending_len() < expected.len() {
+    if seen != expected || dag.active_len() + dag.pending_len() != expected.len() {
         return Err(PackProbeError::Invalid);
     }
     Ok(PreparedDeltaPacksV2 { references, packs, packed_bytes })
@@ -260,6 +260,42 @@ mod tests {
         let dupes = vec![first.clone(), first];
         assert_eq!(prepare_delta_packs_v2(&ns, &dupes).unwrap_err(),
             PackProbeError::DuplicateRevision);
+    }
+
+    #[test]
+    fn deltas_with_older_missing_parents_can_be_serialized_but_not_applied() {
+        let ns = ns();
+        let older = RevisionId::new();
+        let child = fixture(
+            1, DocumentId::new(), RevisionId::new(), Some(older),
+            Some(b"offline edit whose base is an old pinned revision".to_vec()),
+        );
+        let prepared = prepare_delta_packs_v2(&ns, &[child]).unwrap();
+        assert_eq!(prepared.references.len(), 1);
+        assert_eq!(prepared.packs.len(), 1);
+        let mut dag = RevisionDag::new();
+        let mut seen = BTreeSet::new();
+        ingest_verified_pack(
+            &prepared.packs[0].payload, &prepared.packs[0].descriptor,
+            &mut dag, &mut seen,
+        ).unwrap();
+        assert_eq!(dag.active_len(), 0);
+        assert_eq!(dag.pending_len(), 1);
+        // Only receiver-side V1-pinned old parents can close this DAG.
+    }
+
+    #[test]
+    fn pack_capacity_split_handles_large_members_before_128_limit() {
+        let ns = ns();
+        let rows: Vec<_> = (0..30).map(|i| {
+            fixture(i, DocumentId::new(), RevisionId::new(), None,
+                Some(vec![i as u8; 24 * 1024]))
+        }).collect();
+        let prepared = prepare_delta_packs_v2(&ns, &rows).unwrap();
+        assert!(prepared.packs.len() >= 2);
+        assert_eq!(prepared.packs.iter().map(|p|p.index.revision_count as usize)
+            .sum::<usize>(), rows.len());
+        assert!(prepared.packs.iter().all(|p|p.payload.len() <= MAX_PACK_BYTES));
     }
 
     #[test]
