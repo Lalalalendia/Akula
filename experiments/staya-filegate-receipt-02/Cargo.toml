@@ -1,0 +1,25 @@
+[package]
+name = "staya-filegate-receipt-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Independent research crate. The Akula Core File Gate is called as-is;
+# no writer or VaultPort is replaced or reimplemented here.
+[workspace]
+resolver = "2"
+
+[dependencies]
+aquilum-core = { path = "../../aquilum-app/core", default-features = false }
+lesha-replication = { path = "../../deps/crates/lesha-replication" }
+lesha-types = { path = "../../deps/crates/lesha-types" }
+blake3 = "=1.8.5"
+sha2 = "0.10"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "staya-filegate-child"
+path = "src/bin/child.rs"
