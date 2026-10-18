@@ -17,6 +17,7 @@ pub const MAX_CHUNKS: usize = MAX_BOOK_BYTES / CHUNK_SIZE;
 const MANIFEST_MAGIC: &[u8; 4] = b"AKM1";
 const MAX_MANIFEST_BYTES: usize = 4 + 8 + 4 + 4 + 32 + MAX_CHUNKS * 32;
 const REQUEST_LIMIT: usize = 1 + 32 + 4;
+pub const MAX_ACTIVE_CONNECTIONS: usize = 16; // isolated 10-peer load lab; still bounded
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const OP_MANIFEST: u8 = 1;
@@ -168,9 +169,9 @@ impl Server {
         self.rate = Some(Arc::new(gate));
         self
     }
-    /// Run until the endpoint is closed; bounded to eight concurrent accepted connections.
+    /// Run until the endpoint is closed; bounded to 16 concurrent accepted connections.
     pub async fn run(self, endpoint: Endpoint) {
-        let slots = Arc::new(Semaphore::new(8));
+        let slots = Arc::new(Semaphore::new(MAX_ACTIVE_CONNECTIONS));
         loop {
             let Ok(permit) = slots.clone().acquire_owned().await else { break };
             let Some(incoming) = endpoint.accept().await else { break };
