@@ -210,7 +210,7 @@ impl Server {
                 // Pacing applies to all application response bytes including manifest/status.
                 // The persistent ledger separately accounts only accepted file payload.
                 for piece in response.chunks(rate_limit::PACE_SLICE) {
-                    gate.wait(peer, piece.len()).await;
+                    gate.wait(peer, piece.len()).await?;
                     timeout(RESPONSE_TIMEOUT, send.write_all(piece)).await??;
                 }
             } else {
