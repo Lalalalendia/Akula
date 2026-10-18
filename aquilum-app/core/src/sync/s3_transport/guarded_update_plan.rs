@@ -95,6 +95,13 @@ pub(crate) fn preview_verified_s3_existing_content_update(
             return Err(Error::MalformedRecord);
         }
         if record.document_id == intent.document_id {
+            // A single current tip does not prove a linear history:
+            // fork A -> {B,C} -> merge D has just one head, yet B/C
+            // could represent competing edits. Until a separate signed
+            // merge policy exists, *any* multi-parent node is a HOLD.
+            if record.parents.len() > 1 {
+                return Err(Error::AmbiguousDocumentHistory);
+            }
             match &record.operation {
                 RevisionOperation::Content { path, .. } if path == &intent.path => {}
                 _ => return Err(Error::AmbiguousDocumentHistory),
@@ -331,6 +338,35 @@ mod tests {
         let path_drift = snapshot(ns.vault_id(), &[old, alternate]);
         assert!(preview_verified_s3_existing_content_update(
             &path_drift, &ns, &base, &intent).is_err());
+    }
+
+    #[test]
+    fn rejects_two_siblings_merged_back_into_one_current_head() {
+        let (ns, base, mut intent, old, _) = accepted();
+        let fork_a = content(
+            RevisionId::new(), old.document_id, vec![old.id],
+            "notes/one.md", b"fork-a",
+        );
+        let fork_b = content(
+            RevisionId::new(), old.document_id, vec![old.id],
+            "notes/one.md", b"fork-b",
+        );
+        let merge = content(
+            RevisionId::new(), old.document_id,
+            vec![fork_a.id, fork_b.id], "notes/one.md", b"merged",
+        );
+        intent.revision_id = merge.id;
+        if let RevisionOperation::Content { blob_hash, .. } = &merge.operation {
+            intent.expected_content_hash = blob_hash.clone();
+            intent.remote_object_id = ns.immutable_blob_key(blob_hash).unwrap();
+        }
+        let verified = snapshot(ns.vault_id(), &[old, fork_a, fork_b, merge]);
+        assert!(matches!(
+            preview_verified_s3_existing_content_update(
+                &verified, &ns, &base, &intent,
+            ),
+            Err(S3GuardedUpdatePlanError::AmbiguousDocumentHistory)
+        ));
     }
 
     #[test]
