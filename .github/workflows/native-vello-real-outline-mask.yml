@@ -1,0 +1,99 @@
+name: Native Vello real outline mask slot and batch-order invariance
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-real-outline-mask.yml'
+      - '.github/scripts/summarize-vello-real-outline.py'
+      - 'aquilum-app/native/vendor/vello_cpu/src/text.rs'
+      - 'aquilum-app/native/vendor/vello_cpu/src/text/slot_probe.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-real-outline-slot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-outline:
+    name: Compare real font outline AA under slot and order changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-real-outline-v1
+          cache-workspace-crates: true
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Capture pinned revision and runner environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vello-real-outline
+          {
+            git rev-parse HEAD
+            rustc --version
+            grep -m1 'model name' /proc/cpuinfo || true
+          } | tee vello-real-outline/environment.txt
+      - name: Compile test harness before independent reproductions
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked --no-run -p aquilum-native --bin aquilum-native
+      - name: Eight real-editor runs with unmodified strict 1-LSB reference
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+          AQ_TEST_REAL_OUTLINE_SLOT_AB: '1'
+        run: |
+          set -uo pipefail
+          unexpected=0
+          red=0
+          for attempt in $(seq 1 8); do
+            log="$GITHUB_WORKSPACE/vello-real-outline/outline-mask-$attempt.log"
+            if cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+              rc=0
+            else
+              rc=$?
+            fi
+            if [ "$rc" -eq 0 ]; then
+              :
+            elif grep -q 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
+              red=$((red + 1))
+            else
+              unexpected=$((unexpected + 1))
+              echo "REAL_OUTLINE_UNEXPECTED run=$attempt rc=$rc"
+              tail -n 40 "$log"
+            fi
+          done
+          echo "REAL_OUTLINE strict_guard96_red=$red/8 unexpected=$unexpected" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$unexpected" -eq 0
+      - name: Aggregate source-outline mask evidence (not a release gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/summarize-vello-real-outline.py vello-real-outline | tee vello-real-outline/summary.log
+          cat vello-real-outline/real-outline-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve real outline comparisons and strict-failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-real-outline-${{ github.sha }}
+          path: vello-real-outline/
+          retention-days: 14
+          if-no-files-found: warn
