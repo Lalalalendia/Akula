@@ -748,7 +748,7 @@ async fn fs_verified_prefix_is_resumed_in_a_distinct_client_os_process() {
         assert_eq!(final_data.as_ref(), data.as_slice());
         final_disk.shutdown().await.expect("final storage shutdown");
         println!(
-            "P2P_BLOB_PROCESS_BOUNDARY size={} verified=true independent_client_process=true clean_shutdown_before_crash=false quota_enforced=false file_gate=false",
+            "P2P_BLOB_PROCESS_BOUNDARY size={} verified=true independent_client_process=true graceful_previous_shutdown=true forced_crash=false quota_enforced=false file_gate=false",
             data.len()
         );
         router.shutdown().await.expect("source shutdown");
