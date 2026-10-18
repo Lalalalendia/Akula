@@ -29,11 +29,25 @@ an installer ledger nor S3 mutator is provisioned. This is **workflow provenance
 metadata**, not cryptographic proof of installed file content or OS attestation.
 Existing package signatures and smoke tests remain required independently.
 
+## Distribution identity is a separate release blocker
+
+The fork's checkout and package names still inherit Aquilum's default
+branding and the `Freaction/Aquilum` release origin. Old upstream v0.2.6
+packages used for explicit upgrade smoke tests are historical fixtures,
+not Akula distribution. Before a public Akula installer exists, separately
+migrate its release/download/update origin and signing/provenance chain,
+prove first-install/update/uninstall against Akula's own published artifacts,
+and prevent installer scripts from silently downloading upstream binaries.
+This PR deliberately does not publish a release or switch those URLs.
+
 ## Three different properties — do not mix them
 
-1. **Local-only installer, shipping today** — `installed`; no mandatory host
-   registry, no S3 writes. Normal existing local editor behavior must remain
-   available to users with no S3 profile.
+1. **Local-only installer recipe (NOT a published Akula release)** —
+   `installed`; no mandatory host registry, no S3 writes. The fork's GitHub
+   Releases API returned no published releases at this checkpoint, and the
+   inherited `scripts/install.sh` and update-manifest URLs still point at
+   `Freaction/Aquilum`. They must not be represented as Akula distribution.
+   Normal local editor behavior must remain available without S3.
 2. **Cooperative installed-host prototype** — opt-in
    `installed,sync-installed-host`; `Core::open` uses one compiler-selected
    absolute SQLite pathname without consulting appdata or runtime environment.
