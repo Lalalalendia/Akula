@@ -46,6 +46,15 @@ impl TextEditor {
         // Keep code-view offsets bound to their opening fence, never to a
         // line index that can be reused after an edit or document replacement.
         self.code_scrolls.remap(&change);
+        // Deleting a newline before a fence, or editing its interior ticks,
+        // can turn the opener into ordinary prose without touching its first
+        // byte. Never silently transfer a view offset to that prose.
+        let doc = &self.doc;
+        self.code_scrolls.retain_openers(|opener| {
+            let line = doc.line_at(opener);
+            line.start == opener
+                && aquilum_core::markdown::fence::Fence::open(&doc.copy(line), usize::MAX).is_some()
+        });
         let map = |at: usize| change.map(at);
         for (anchor, focus) in &mut self.extra_cursors {
             (*anchor, *focus) = (map(*anchor), map(*focus));
