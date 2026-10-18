@@ -134,6 +134,31 @@ mod tests {
         let right = PathBuf::from(std::env::var_os("AKULA_FILEGATE_OSLOCK_RIGHT").unwrap());
         let report = PathBuf::from(std::env::var_os("AKULA_FILEGATE_OSLOCK_REPORT").unwrap());
         match mode.to_str().unwrap() {
+            "alternate-appdata-ordinary-write" => {
+                use crate::app_core::{Core, CoreEvent};
+                use crate::files::gate;
+                use crate::history::Source;
+                use std::sync::Arc;
+
+                let appdata = PathBuf::from(
+                    std::env::var_os("AKULA_FILEGATE_OTHER_APPDATA").unwrap()
+                );
+                let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+                core.ui_state.resolve_workspace(left.to_str().unwrap(), 1).unwrap();
+                let note = left.join("Enrolled.md");
+                let new_note = left.join("BypassCreated.md");
+                // This is a negative test of the CURRENT contract, confined to
+                // disposable temp files. B has no registry for A's enrollment.
+                let overwritten = gate::write(
+                    &core, &note, "alternate-appdata-write",
+                    None, Source::Me, None,
+                ).is_ok();
+                let created = gate::create(
+                    &core, &new_note, "alternate-appdata-created",
+                    Source::Me, None,
+                ).is_ok();
+                fs::write(report, format!("{overwritten}|{created}")).unwrap();
+            }
             "try" => {
                 let acquired = try_both(&left, &right).unwrap().is_some();
                 fs::write(report, if acquired { "acquired" } else { "busy" }).unwrap();
@@ -515,6 +540,72 @@ mod tests {
     #[test]
     fn oslock_live_split_lock_with_cloned_valid_generation_is_detected() {
         demonstrate_live_split_lock_detected(true);
+    }
+
+
+    /// NEGATIVE evidence: same physical root + distinct appdata is enough to
+    /// bypass #235's per-profile HOLD, even while a separate process-local
+    /// custody lock remains live. This intentionally proves a release BLOCKER,
+    /// not a correct or authorized S3 writer. All files are temp fixtures.
+    #[test]
+    fn oslock_falsifier_alternate_appdata_bypasses_enrolled_core_hold() {
+        use crate::app_core::{Core, CoreEvent};
+        use crate::files::gate;
+        use crate::history::Source;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let app_a = temp.path().join("appdata-a");
+        let app_b = temp.path().join("appdata-b");
+        let external = temp.path().join("external-custody");
+        for path in [&root, &app_a, &app_b, &external] {
+            fs::create_dir(path).unwrap();
+        }
+        let root = fs::canonicalize(root).unwrap();
+        let protected = root.join("Enrolled.md");
+        fs::write(&protected, b"original").unwrap();
+        let core_a = Core::open(&app_a, Arc::new(|_: CoreEvent| {}));
+        core_a.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        core_a.documents.enroll_guarded_participant(
+            &root, "one-shared-vault-id",
+            &app_a.join("profiles.sqlite"), &app_a.join("custody.sqlite"),
+            &external,
+        ).unwrap();
+        assert!(core_a.documents.requires_guarded_participant_hold());
+        assert!(gate::write(
+            &core_a, &protected, "owner-denied", None, Source::Me, None,
+        ).is_err());
+        assert_eq!(fs::read(&protected).unwrap(), b"original");
+
+        // An actual LIVE kernel lock exists outside vault content. The second
+        // process's independent Core does not know its location or the durable
+        // appdata-A enrollment, so the current ordinary File Gate ignores it.
+        fs::write(external.join(TEST_LOCK_NAME), b"").unwrap();
+        let pinned = PinnedProbeRoot::open(&external).unwrap();
+        let held = pinned.try_lock().unwrap().expect("exclusive external lock fixture");
+        let report = temp.path().join("child-result.txt");
+        let output = child_command(
+            "alternate-appdata-ordinary-write", &root, &external, &report,
+        )
+        .env("AKULA_FILEGATE_OTHER_APPDATA", &app_b)
+        .output().unwrap();
+        assert!(output.status.success(),
+            "second OS process failed: stdout={}, stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr));
+        assert_eq!(fs::read_to_string(&report).unwrap(), "true|true",
+            "current bypass falsifier must be inverted after shared custody enforcement");
+        assert_eq!(fs::read(&protected).unwrap(), b"alternate-appdata-write");
+        assert_eq!(
+            fs::read(root.join("BypassCreated.md")).unwrap(),
+            b"alternate-appdata-created"
+        );
+        assert!(core_a.documents.requires_guarded_participant_hold());
+        assert!(gate::write(
+            &core_a, &protected, "still-denied", None, Source::Me, None,
+        ).is_err());
+        drop(held);
     }
 
     #[test]
