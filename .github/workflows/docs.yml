@@ -1,7 +1,10 @@
 name: Docs and installer checks
 
 on:
+  # PRs validate feature branches; push checks run only after merge on main.
+  # Avoid duplicate push + pull_request runs for each feature-branch commit.
   push:
+    branches: [main]
     paths:
       - "*.md"
       - "**/*.md"
