@@ -1147,8 +1147,14 @@ async fn durable_admission_stays_charged_after_verified_quic_and_process_reopen(
         live_lease.verify(returned.as_ref()).expect("in-memory full hash");
         let temp_file = stage.join("payload");
         fs::write(&temp_file, returned.as_ref()).expect("test-only physical stage");
-        fs::File::open(&temp_file).expect("open stage").sync_all()
+        fs::File::open(&temp_file)
+            .expect("open stage")
+            .sync_all()
             .expect("flush complete physical stage");
+        fs::File::open(&stage)
+            .expect("open staging directory")
+            .sync_all()
+            .expect("flush staging directory entry");
         durable.verify_full(expected, returned.as_ref())
             .expect("durably record verified byte length and BLAKE3");
         drop(returned);
