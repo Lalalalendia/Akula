@@ -151,6 +151,41 @@ fn host_bound_core_allows_unenrolled_create_and_write_with_history_epoch() {
 }
 
 #[test]
+fn independent_nested_workspace_cannot_create_inside_enrolled_parent() {
+    let (_temp, root, app_a, app_b, db, external) = prep();
+    let nested = root.join("nested-appdata-workspace");
+    fs::create_dir(&nested).unwrap();
+    fs::write(external.join(LOCK_NAME), b"").unwrap();
+    let held = PinnedProbeRoot::open(&external).unwrap()
+        .try_lock().unwrap().expect("live external lock");
+    let identity = PinnedProbeRoot::open(&root).unwrap().identity();
+    let mut host = provision(&db, &root, &app_a);
+    host.enroll(&HostCustodyRecord {
+        root_path: fs::canonicalize(&root).unwrap()
+            .to_string_lossy().into_owned(),
+        root_identity: PhysicalObjectId {
+            device: identity.0, file: identity.1,
+        },
+        vault_id: VaultId::new(),
+        profile_id: "approved-s3".into(),
+        custody_scope_path: fs::canonicalize(&external).unwrap()
+            .to_string_lossy().into_owned(),
+        lock_identity: PhysicalObjectId {
+            device: held.identity().0, file: held.identity().1,
+        },
+    }).unwrap();
+    drop(host);
+
+    let child = Core::open_with_installed_host(&app_b, &db, events());
+    child.ui_state.resolve_workspace(nested.to_str().unwrap(), 1).unwrap();
+    let target = nested.join("MustNotCreate.md");
+    assert!(gate::create(&child, &target, "unauthorized", Source::Me, None).is_err(),
+        "separate appdata nested beneath an enrolled root must be HOLD");
+    assert!(!target.exists());
+    drop(held);
+}
+
+#[test]
 fn missing_host_registry_is_not_an_empty_unenrolled_roster() {
     let (_tmp, root, app_a, _app_b, db, _external) = prep();
     let core = Core::open_with_installed_host(&app_a, &db, events());
