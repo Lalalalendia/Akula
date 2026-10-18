@@ -57,6 +57,18 @@ pub struct Session {
 }
 
 impl Session {
+    #[cfg(feature = "memory-probe")]
+    pub fn probe_stats(&self) -> String {
+        format!(
+            "reader_section={} reader_page={} reader_layouts={} reader_blocks={} reader_visible_items={}",
+            self.section,
+            self.page,
+            self.layouts.len(),
+            self.blocks.len(),
+            self.on_screen().len(),
+        )
+    }
+
     pub fn open(path: &Path, target: Target) -> Option<Session> {
         let book = Book::open(path)?;
         if book.sections.is_empty() {
