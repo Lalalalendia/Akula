@@ -39,7 +39,7 @@ jobs:
         working-directory: staya/roha-transport
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y iproute2
+          sudo apt-get install -y iproute2 tcpdump
           python3 tests/two_namespace_smoke.py
       - name: Offline mDNS discovery and authorized QUIC across namespaces
         working-directory: staya/roha-transport
