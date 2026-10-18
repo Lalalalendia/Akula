@@ -84,6 +84,13 @@ jobs:
           bash scripts/test-install-scripts.sh
           node --test .github/scripts/branch-hygiene.test.cjs
 
+      - name: Release source and custody flavor contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/release-source-contract.test.cjs
+          node .github/scripts/release-source-contract.cjs
+
       - uses: dtolnay/rust-toolchain@stable
         if: needs.classify.outputs.mode != 'none'
 

@@ -19,13 +19,42 @@ env:
   NFPM_VERSION: 2.47.0
 
 jobs:
+  # Pin the selected release ref once; a moving main branch cannot produce
+  # divergent binaries or manifest metadata in the same release run.
+  source:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Capture immutable release source
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse --verify HEAD^{commit})
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Release source: $sha" >> "$GITHUB_STEP_SUMMARY"
+
   windows:
+    needs: source
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.source.outputs.sha }}
+
+      - name: Verify pinned release source
+        shell: bash
+        env:
+          PINNED_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SOURCE_SHA"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -135,6 +164,7 @@ jobs:
           retention-days: 7
 
   macos:
+    needs: source
     strategy:
       fail-fast: false
       matrix:
@@ -148,7 +178,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.source.outputs.sha }}
+
+      - name: Verify pinned release source
+        shell: bash
+        env:
+          PINNED_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SOURCE_SHA"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -245,12 +283,21 @@ jobs:
           retention-days: 7
 
   linux:
+    needs: source
     runs-on: ubuntu-22.04
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.source.outputs.sha }}
+
+      - name: Verify pinned release source
+        shell: bash
+        env:
+          PINNED_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SOURCE_SHA"
 
       - name: Linux dependencies
         run: |
@@ -389,13 +436,21 @@ jobs:
           retention-days: 7
 
   manifest:
-    needs: [windows, macos, linux]
+    needs: [source, windows, macos, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.source.outputs.sha }}
+
+      - name: Verify pinned release source
+        shell: bash
+        env:
+          PINNED_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SOURCE_SHA"
 
       - uses: actions/download-artifact@v7
         with:
@@ -404,11 +459,17 @@ jobs:
           path: dist
 
       - name: Verify signatures and write latest.json
+        env:
+          PINNED_SOURCE_SHA: ${{ needs.source.outputs.sha }}
         run: |
           sudo apt-get update
           sudo apt-get install -y minisign
           version=$(grep -m1 '^version' aquilum-app/native/Cargo.toml | cut -d'"' -f2)
           key=$(grep -rho 'PUBLIC_KEY: &str = "[^"]*"' aquilum-app/native/src | head -n 1 | cut -d'"' -f2)
+          test -n "$key" || {
+            echo "::error::Akula signing public key is not provisioned; refuse release manifest"
+            exit 1
+          }
           echo "$key" | base64 -d > aquilum.pub
           cd dist
           ls -la
@@ -418,7 +479,7 @@ jobs:
             minisign -Vm "$file" -x "/tmp/$file.minisig" -p ../aquilum.pub -q
             echo "signature ok: $file"
           done
-          url="https://github.com/Freaction/Aquilum/releases/download/v$version"
+          url="https://github.com/Lalalalendia/Akula/releases/download/v$version"
           entry() { printf '{"signature":"%s","url":"%s/%s"}' "$(cat "$1.sig")" "$url" "$1"; }
           setup="Aquilum_${version}_x64-setup.exe"
           appimage="Aquilum_${version}_amd64.AppImage"
@@ -448,6 +509,18 @@ jobs:
           EOF
           jq . latest.json > /dev/null
           jq -r '.platforms | to_entries[] | "\(.key) -> \(.value.url)"' latest.json
+          # Metadata only: the default installer is local-only.
+          # Not proof of OS-owned custody and not sync write authority.
+          jq -n --arg source "$PINNED_SOURCE_SHA" '{
+            source_sha: $source,
+            custody_mode: "local-only",
+            cargo_features: ["installed"],
+            installer_host_registry_provisioned: false,
+            remote_s3_mutations_enabled: false
+          }' > custody-release.json
+          jq -e --arg source "$PINNED_SOURCE_SHA" \
+            '.source_sha == $source and .custody_mode == "local-only" and .cargo_features == ["installed"]' \
+            custody-release.json > /dev/null
 
       - uses: actions/upload-artifact@v7
         with:

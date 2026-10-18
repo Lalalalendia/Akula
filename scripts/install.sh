@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="Freaction/Aquilum"
+REPO="Lalalalendia/Akula"
 APP_DIR="$HOME/Applications"
 APP_PATH="$APP_DIR/Aquilum.app"
 
@@ -28,7 +28,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" -o "$work_dir/release.json"
+# Akula has no published release channel yet. Never fall back to the
+# upstream Aquilum release if this fork's latest release is unavailable.
+if ! curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" -o "$work_dir/release.json"; then
+  printf 'No Akula release available from %s; existing application and vaults untouched.\n' "$REPO" >&2
+  exit 1
+fi
 download_url="$(sed -n 's/^[[:space:]]*"browser_download_url":[[:space:]]*"\(.*\)",\{0,1\}$/\1/p' "$work_dir/release.json" | grep "_${target}\.dmg$" | head -n 1 || true)"
 if [[ -z "$download_url" ]]; then
   printf 'Latest GitHub release has no macOS %s DMG.\n' "$target" >&2
