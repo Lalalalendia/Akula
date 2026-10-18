@@ -64,6 +64,15 @@ impl From<io::Error> for DurableError {
     }
 }
 
+/// A read-only view of one persisted reservation, *not* a File Gate grant.
+/// `verified` is only the P2P-07 ledger flag, not proof of FsStore/db integrity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReservedBlobAudit {
+    pub hash: [u8; 32],
+    pub expected_bytes: u64,
+    pub verified: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DurableSnapshot {
     pub objects: usize,
@@ -324,6 +333,24 @@ impl DurableLedger {
             entries,
             poisoned: false,
         })
+    }
+
+    /// Return the already-authorized ledger inventory without committing or
+    /// freeing any bytes. Caller must hold this owner lock during a staging
+    /// filesystem audit and must independently verify the bounded mount.
+    pub fn reservation_inventory(&self) -> Result<Vec<ReservedBlobAudit>, DurableError> {
+        if self.poisoned {
+            return Err(DurableError::PoisonedWriter);
+        }
+        Ok(self
+            .entries
+            .iter()
+            .map(|(hash, entry)| ReservedBlobAudit {
+                hash: *hash,
+                expected_bytes: entry.expected_bytes,
+                verified: entry.verified,
+            })
+            .collect())
     }
 
     pub fn snapshot(&self) -> Result<DurableSnapshot, DurableError> {
