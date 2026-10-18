@@ -604,6 +604,77 @@ mod tests {
         task.abort();
         Ok(())
     }
+    /// 50 clients race for at most 32 active server slots. The overload
+    /// scenario exercises admission/backpressure as well as the per-peer
+    /// and global byte/rate budgets. One Linux host, not 50 physical devices.
+    #[tokio::test(flavor="multi_thread",worker_threads=8)]
+    async fn fifty_quic_clients_backpressure_and_measure() -> Result<()> {
+        use tokio::time::Instant;
+        const N: usize = 50;
+        const SIZE: usize = CHUNK_SIZE;
+        ensure!(N > MAX_ACTIVE_CONNECTIONS, "test must exceed slot capacity");
+        let server_ep = private_endpoint(None).await?;
+        let addr = loopback_addr(&server_ep)?;
+        let mut endpoints = Vec::with_capacity(N);
+        for _ in 0..N { endpoints.push(private_endpoint(None).await?); }
+        let allowed: HashSet<_> = endpoints.iter().map(|ep| ep.id()).collect();
+        let book = Book::new(bytes(SIZE))?;
+        let expected = book.manifest.digest;
+        let budget = (N * SIZE) as u64;
+        let server = Server::new(book, allowed, QuotaState::new(budget, SIZE as u64))
+            .with_rate_limit(rate_limit::RateGate::new(8 * 1024 * 1024, 2 * 1024 * 1024)?);
+        let quota = server.quota();
+        let server_task = tokio::spawn(server.run(server_ep.clone()));
+        let barrier = Arc::new(tokio::sync::Barrier::new(N + 1));
+        let mut jobs = Vec::with_capacity(N);
+        for ep in &endpoints {
+            let ep = ep.clone();
+            let addr = addr.clone();
+            let gate = barrier.clone();
+            jobs.push(tokio::spawn(async move {
+                gate.wait().await;
+                let start = Instant::now();
+                let manifest = manifest_from(&ep, addr.clone()).await?;
+                ensure!(manifest.digest == expected, "manifest digest mismatch");
+                let mut partial = PartialDownload::new(manifest)?;
+                let (count, usage) = get_parts_with_usage(&ep, addr, &mut partial, None).await?;
+                let file = partial.finish()?;
+                ensure!(count == 1 && file.len() == SIZE && sha(&file) == expected,
+                    "book content mismatch");
+                Ok::<_, anyhow::Error>((start.elapsed(), usage.udp_rx_bytes))
+            }));
+        }
+        barrier.wait().await;
+        let started = Instant::now();
+        let mut times = Vec::with_capacity(N);
+        let mut udp_rx = 0u64;
+        for job in jobs {
+            let (elapsed, udp) = timeout(Duration::from_secs(60), job).await???;
+            times.push(elapsed);
+            udp_rx = udp_rx.saturating_add(udp);
+        }
+        times.sort();
+        let p50 = times[24].as_millis(); // nearest rank ceil(0.5*50)
+        let p95 = times[47].as_millis(); // nearest rank ceil(0.95*50)
+        let max_ms = times[49].as_millis();
+        let slowest_ratio = times[49].as_secs_f64() / times[0].as_secs_f64().max(0.001);
+        let used = quota.lock().unwrap();
+        ensure!(used.used() == budget, "50-client total payload budget mismatch");
+        for ep in &endpoints {
+            ensure!(used.used_for(&ep.id()) == SIZE as u64, "per-peer budget mismatch");
+        }
+        println!("LOAD_50 clients=50 payload_bytes={budget} udp_rx_bytes={udp_rx} elapsed_ms={} p50_ms={p50} p95_ms={p95} max_ms={max_ms} slowest_fastest_ratio={slowest_ratio:.3} max_connections={MAX_ACTIVE_CONNECTIONS}",
+            started.elapsed().as_millis());
+        ensure!(p95 < 60_000, "50-client p95 exceeded transport timeout");
+        // At most 32 concurrently accepted streams means a waiting wave can
+        // legitimately be slower; this bound catches extreme starvation only.
+        ensure!(slowest_ratio < 25.0, "some of 50 clients may have starved");
+        drop(used);
+        for ep in endpoints { ep.close().await; }
+        server_ep.close().await;
+        server_task.abort();
+        Ok(())
+    }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn real_iroh_direct_loopback_and_resume() -> Result<()> {
         let server_ep = private_endpoint(None).await?;
