@@ -206,9 +206,17 @@ fn register(
     explicit: &mut HashSet<String>,
     index_bytes: &mut usize,
 ) -> Result<(), String> {
-    if !explicit.insert(relative.to_owned()) {
+    if explicit.contains(relative) {
         return Err(error("duplicate TAR entry"));
     }
+    let next = index_bytes
+        .checked_add(relative.len())
+        .ok_or_else(|| error("TAR path index byte budget overflow"))?;
+    if next > MAX_PATH_INDEX_BYTES {
+        return Err(error("TAR path index byte budget exceeded"));
+    }
+    *index_bytes = next;
+    explicit.insert(relative.to_owned());
     let mut prefix = String::new();
     for part in relative.split('/') {
         if !prefix.is_empty() {
