@@ -61,15 +61,21 @@ jobs:
             for mode in $order; do
               log="$GITHUB_WORKSPACE/glifo-slot-$mode-$trial.log"
               if [ "$mode" = grid ]; then
-                AQ_TEST_ATLAS_SLOT_INVARIANT=1 cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
-                rc=$?
+                if AQ_TEST_ATLAS_SLOT_INVARIANT=1 cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  rc=0
+                else
+                  rc=$?
+                fi
                 if ! grep -q 'GLIFO_ATLAS_SLOT_INVARIANT_ACTIVE grid=4096' "$log"; then
                   echo "EXPERIMENT_NOT_ENABLED mode=grid trial=$trial"
                   unexpected=$((unexpected + 1))
                 fi
               else
-                env -u AQ_TEST_ATLAS_SLOT_INVARIANT cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
-                rc=$?
+                if env -u AQ_TEST_ATLAS_SLOT_INVARIANT cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  rc=0
+                else
+                  rc=$?
+                fi
                 if grep -q 'GLIFO_ATLAS_SLOT_INVARIANT_ACTIVE' "$log"; then
                   echo "CONTROL_CONTAMINATED trial=$trial"
                   unexpected=$((unexpected + 1))
