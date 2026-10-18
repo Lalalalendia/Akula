@@ -12,6 +12,7 @@ on:
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/src/sync/host_custody_registry.rs'
       - 'aquilum-app/core/src/sync/host_ledger_identity.rs'
+      - 'aquilum-app/core/src/sync/host_cold_identity_tests.rs'
       - 'aquilum-app/core/src/sync/host_core_epoch_tests.rs'
       - 'aquilum-app/native/src/workspace.rs'
       - '.github/workflows/sync-host-custody.yml'
