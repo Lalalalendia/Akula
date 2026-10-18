@@ -33,6 +33,8 @@ mod coord_sidecar;
 pub use coord_sidecar::{S3CoordSidecarReadError, S3CoordSidecarPreview};
 mod coord_chain;
 pub use coord_chain::{S3CoordOfflineChainError, S3CoordOfflineChainPreview};
+mod coord_selective_packs;
+pub use coord_selective_packs::S3CoordSelectivePacksPreview;
 mod selective_snapshot;
 mod offline_retention;
 pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
