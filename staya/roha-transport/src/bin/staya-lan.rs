@@ -20,7 +20,7 @@ fn usage() -> &'static str {
     "usage:\n  staya-lan gen-key\n  staya-lan serve SECRET_HEX ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping SECRET_HEX SERVER_PEER_ID SERVER_IP:UDP_PORT\nWARNING: SECRET_HEX is sensitive. Do not paste into reports, logs or shared terminals.\n"
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
