@@ -67,6 +67,11 @@ fn process_memory() -> Memory {
 }
 
 // RSS and VmHWM are process-wide. VmHWM is cumulative since process start.
+// Separate from lifetime process high-water; used to audit Linux malloc_trim.
+pub fn reader_rss_kib() -> u64 {
+    process_memory().rss_kib
+}
+
 pub fn navigation_sample(label: &str, reader_state: Option<&str>) -> String {
     let memory = process_memory();
     let mib = |bytes: usize| bytes as f64 / 1_048_576.0;
