@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
+      - 'aquilum-app/native/vendor/glifo/src/util.rs'
+      - 'aquilum-app/native/vendor/glifo/src/renderer.rs'
+      - 'aquilum-app/native/vendor/glifo/src/atlas/key.rs'
       - '.github/workflows/glifo-hinted-scroll-regression.yml'
   workflow_dispatch:
 
@@ -38,3 +41,15 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --release --locked -p glifo --lib hinted_vertical_snap -- --nocapture
+      - name: Check atlas X coordinate split invariant under integer crop
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p glifo --lib glyph_pixel_split -- --nocapture
+      - name: Check subpixel cache key never wraps at f32 1.0
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p glifo --lib test_quantize_subpixel -- --nocapture
