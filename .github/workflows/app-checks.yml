@@ -113,6 +113,9 @@ jobs:
           set -euo pipefail
           cargo test -p aquilum-core --locked
           cargo test -p aquilum-core --features sync-engine --locked
+          # Local-only custody must compile and run without AWS SDK or Tokio.
+          cargo test -p aquilum-core --features host-custody --locked host_custody_registry::tests
+          cargo test -p aquilum-core --features host-custody --locked host_core_epoch_tests
 
       - name: Run full Rust workspace and sync-engine tests
         if: needs.classify.outputs.mode == 'workspace'
@@ -122,6 +125,9 @@ jobs:
           set -euo pipefail
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
+          # Local-only custody must compile and run without AWS SDK or Tokio.
+          cargo test -p aquilum-core --features host-custody --locked host_custody_registry::tests
+          cargo test -p aquilum-core --features host-custody --locked host_core_epoch_tests
 
 
   native-frames:
