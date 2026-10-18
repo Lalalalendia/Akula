@@ -165,7 +165,26 @@ impl Core {
     /// This is a pathname/SQLite HOLD check under an in-process mutex, NOT
     /// an OS interprocess lock or permission for a sync overwrite/delete.
     pub(crate) fn file_mutation_guard_for_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+        self.file_mutation_guard_for_write_mode(false)
+    }
+
+    /// INTERNAL ONLY: the caller must already hold a verified, pinned
+    /// external OS custody lock across the entire primary write + history.
+    /// No other File Gate operation may use this exception. This is not a
+    /// remote sync overwrite/delete capability or a generic write permit.
+    pub(crate) fn file_mutation_guard_for_custody_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+        self.file_mutation_guard_for_write_mode(true)
+    }
+
+    fn file_mutation_guard_for_write_mode(
+        &self, proven_custody: bool,
+    ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
         let guard = self.file_mutation_guard()?;
+        if !proven_custody && self.documents.requires_guarded_participant_hold() {
+            return Err(FileCommandError::Task {
+                message: "File Gate is HOLD: an S3 workspace was enrolled or its appdata registry is unavailable; ordinary mutations require explicit custody admission".into(),
+            });
+        }
         let roots = self.ui_state.workspace_roots().map_err(|error| FileCommandError::Task {
             message: format!(
                 "Cannot read registered workspaces before File Gate mutation: {error:?}"

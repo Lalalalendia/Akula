@@ -63,7 +63,10 @@ pub(crate) fn write_checked_history(
     // Only Core's own File Gate mutex is held here, after the external OS
     // lock. Release it BEFORE taking HistoryService's files/state mutexes.
     let (before, result) = {
-        let _guard = core.file_mutation_guard_for_write()
+        // The only opt-in exception to the cold-start participant HOLD.
+        // Its caller already validated a fresh DocumentSession one-shot
+        // token, persisted SQLite intent, VaultId, and the held OS lock.
+        let _guard = core.file_mutation_guard_for_custody_write()
             .map_err(CheckedHistoryError::Primary)?;
         let before = core.history.disk_before(path, Some(expected_hash));
         let result = write_file_atomic_impl(path, content, Some(expected_hash))

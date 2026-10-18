@@ -123,7 +123,7 @@ fn migrates_v1_document_store_and_keeps_existing_replica_data() {
     assert!(store.write_intent("legacy").unwrap().is_none());
     assert_eq!(
         store.connection.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
-        2
+        3
     );
 }
 
@@ -166,5 +166,69 @@ fn durable_intent_survives_restart_and_cannot_be_overwritten_or_silently_forgott
         store.complete_write_intent("note", &base, &proposed).unwrap();
         assert!(store.write_intent("note").unwrap().is_none());
         store.forget("note").unwrap();
+    }
+}
+
+
+#[test]
+fn migrates_v2_document_store_preserving_intent_and_creating_participant_table() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("documents.sqlite3");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE replicas (key TEXT PRIMARY KEY, state BLOB NOT NULL);
+             CREATE TABLE replica_updates (
+                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                 key TEXT NOT NULL, data BLOB NOT NULL
+             );
+             CREATE INDEX replica_updates_key ON replica_updates (key, seq);
+             CREATE TABLE sync_points (
+                 key TEXT PRIMARY KEY, file_hash TEXT NOT NULL, text_hash TEXT NOT NULL
+             );
+             CREATE TABLE write_intents (
+                 key TEXT PRIMARY KEY, base_hash TEXT NOT NULL,
+                 proposed_hash TEXT NOT NULL
+             );
+             INSERT INTO replicas VALUES ('before', X'0102');
+             INSERT INTO write_intents VALUES ('before', 'original', 'proposed');
+             PRAGMA user_version = 2;"
+        ).unwrap();
+    }
+    let db = DocumentStore::open(&path).unwrap();
+    assert_eq!(db.load("before").unwrap(), vec![vec![1, 2]]);
+    assert_eq!(db.write_intent("before").unwrap(), Some(DurableWriteIntent {
+        base_hash: "original".into(), proposed_hash: "proposed".into(),
+    }));
+    assert!(db.guarded_participants().unwrap().is_empty());
+    assert_eq!(db.connection.query_row("PRAGMA user_version", [], |r|
+        r.get::<_, i64>(0)).unwrap(), 3);
+}
+
+#[test]
+fn participant_enrollment_is_insert_only_and_durable_across_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("documents.sqlite3");
+    let enrollment = GuardedParticipant {
+        root: "/physical/workspace".into(),
+        vault_id: "independent-vault".into(),
+        profile_db: "/appdata/profiles.sqlite".into(),
+        custody_db: "/appdata/custody.sqlite".into(),
+        custody_scope: "/outside/lock-scope".into(),
+    };
+    {
+        let db = DocumentStore::open(&path).unwrap();
+        db.enroll_guarded_participant(&enrollment).unwrap();
+        db.enroll_guarded_participant(&enrollment).unwrap();
+        let mut changed = enrollment.clone();
+        changed.vault_id = "unapproved-other-vault".into();
+        assert!(matches!(db.enroll_guarded_participant(&changed),
+            Err(StoreError::ConflictingParticipant)));
+        db.begin_write_intent("note", "before", "after").unwrap();
+    }
+    {
+        let db = DocumentStore::open(&path).unwrap();
+        assert_eq!(db.guarded_participants().unwrap(), vec![enrollment]);
+        assert!(db.write_intent("note").unwrap().is_some());
     }
 }

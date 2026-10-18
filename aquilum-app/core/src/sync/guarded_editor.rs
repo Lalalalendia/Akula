@@ -148,6 +148,13 @@ pub(crate) fn activate_registered_s3_editor(
     // In particular, it refuses activation with open CRDT editor sessions
     // or an unreadable v2 SQLite write-intent journal.
     core.documents.arm_durable_intents_for_root(&config.root)?;
+    // Persist a *second* fail-closed participant marker before exposing the
+    // active writer. Every fresh Core must read this marker at boot and refuse
+    // legacy File Gate mutations until a verified custody writer is active.
+    core.documents.enroll_guarded_participant(
+        &config.root, &config.binding.vault_id.to_string(),
+        &config.profile_db, &config.custody_db, &config.scope,
+    )?;
     registry.push(config);
     Ok(())
 }
