@@ -189,6 +189,9 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 host_custody_registry::tests
           cargo test --locked -p aquilum-core --features sync-s3 host_core_epoch_tests
+          # P0-B4c: activation itself, not a manual fixture, must insert into
+          # host-wide enrollment before a different appdata can mutate.
+          cargo test --locked -p aquilum-core --features sync-s3 verified_editor_activation_enrolls_shared_host_before_other_appdata_can_write -- --nocapture
       - name: Reject forged AWS identity, cross-account scope and custom endpoints
         shell: bash
         working-directory: aquilum-app
