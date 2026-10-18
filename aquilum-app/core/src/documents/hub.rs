@@ -213,6 +213,66 @@ impl DocumentHub {
         Ok(())
     }
 
+    /// Before ANY guarded File Gate writer enters its OS-lock critical
+    /// section, demand a matching app-data pre-publication record written by
+    /// DocumentSession. A direct native Note::save / MCP File Gate caller has
+    /// no such receipt and is denied, never silently downgraded to unguarded
+    /// I/O. Lock acquisition is short and does not outlive this check.
+    pub(crate) fn require_matching_durable_intent(
+        &self, path: &Path, base_hash: &str, proposed_hash: &str,
+    ) -> Result<(), crate::files::error::FileCommandError> {
+        use crate::files::error::FileCommandError;
+        let deny = |message: String| FileCommandError::Task { message };
+        let physical = std::fs::canonicalize(path).ok();
+        let armed = {
+            let roots = self.guarded_write_roots.lock()
+                .map_err(|_| deny("guarded document roots registry poisoned".into()))?;
+            roots.iter().any(|root| {
+                path.starts_with(root) || physical.as_ref()
+                    .is_some_and(|resolved| resolved.starts_with(root))
+            })
+        };
+        if !armed {
+            return Err(deny("guarded file writer has no durable DocumentHub root admission".into()));
+        }
+        let key = identity(path);
+        let store = self.store.lock()
+            .map_err(|_| deny("guarded document intent store lock poisoned".into()))?;
+        let store = store.as_ref()
+            .ok_or_else(|| deny("guarded document SQLite store unavailable".into()))?;
+        let recorded = store.write_intent(&key)
+            .map_err(|error| deny(format!("guarded document intent unreadable: {error}")))?;
+        if recorded.as_ref().is_some_and(|intent| {
+            intent.base_hash == base_hash && intent.proposed_hash == proposed_hash
+        }) {
+            Ok(())
+        } else {
+            Err(deny("guarded File Gate requires matching durable prewrite intent".into()))
+        }
+    }
+
+    /// Unit-test fixture writer; real sessions record the prewrite intent
+    /// BEFORE calling File Gate and retire it only after confirmed metadata.
+    #[cfg(test)]
+    pub(crate) fn test_seed_guarded_intent(&self, core: &Core, path: &Path, base: &str, body: &str) {
+        let store = self.store.lock().unwrap();
+        let proposed = crate::files::document::hash_bytes(body.as_bytes());
+        store.as_ref().unwrap()
+            .begin_write_intent(&identity(path), base, &proposed).unwrap();
+        #[cfg(feature = "sync-s3")]
+        crate::sync::guarded_editor::arm_live_document_attempt(
+            core.guarded_instance_nonce, path, base, &proposed,
+        ).unwrap();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_confirm_guarded_intent(&self, path: &Path, base: &str, body: &str) {
+        let store = self.store.lock().unwrap();
+        store.as_ref().unwrap()
+            .complete_write_intent(&identity(path), base,
+                &crate::files::document::hash_bytes(body.as_bytes())).unwrap();
+    }
+
     pub fn start(&self, core: Weak<Core>) {
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || run_writes(core, receiver));

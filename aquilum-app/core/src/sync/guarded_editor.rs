@@ -15,6 +15,66 @@ use crate::history::Source;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// A durable SQLite row alone is NOT write authority: after a process crash
+// its old (base,new) digests can still match the physical file. Only the
+// DocumentSession thread that *just* committed that row may attempt a guarded
+// File Gate mutation. These permits never persist or survive restart.
+#[derive(Debug)]
+struct LiveDocumentAttempt {
+    instance_id: uuid::Uuid,
+    key: String,
+    base_hash: String,
+    proposed_hash: String,
+}
+
+thread_local! {
+    static LIVE_DOCUMENT_ATTEMPT: std::cell::RefCell<Option<LiveDocumentAttempt>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn arm_live_document_attempt(
+    instance_id: uuid::Uuid, path: &Path, base_hash: &str, proposed_hash: &str,
+) -> Result<(), FileCommandError> {
+    let key = crate::search::paths::identity(path);
+    LIVE_DOCUMENT_ATTEMPT.with(|cell| {
+        let mut live = cell.borrow_mut();
+        if live.as_ref().is_some_and(|existing| existing.instance_id == instance_id) {
+            return Err(refused("document thread already holds a native write attempt"));
+        }
+        // Discard an ephemeral ticket from a different Core constructed on
+        // this thread. Its durable SQLite record is NOT cleared or reused.
+        *live = Some(LiveDocumentAttempt {
+            instance_id, key, base_hash: base_hash.to_owned(),
+            proposed_hash: proposed_hash.to_owned(),
+        });
+        Ok(())
+    })
+}
+
+fn live_attempt_matches(instance_id: uuid::Uuid, path: &Path, base_hash: &str, proposed_hash: &str) -> bool {
+    let key = crate::search::paths::identity(path);
+    LIVE_DOCUMENT_ATTEMPT.with(|cell| cell.borrow().as_ref().is_some_and(|live| {
+        live.instance_id == instance_id && live.key.as_str() == key.as_str()
+            && live.base_hash == base_hash && live.proposed_hash == proposed_hash
+    }))
+}
+
+/// Drop on success, denial, panic or ambiguous HistoryService postflight:
+/// there is NEVER a second File Gate attempt authorized by the same ticket.
+struct ConsumeDocumentAttempt(String);
+impl Drop for ConsumeDocumentAttempt {
+    fn drop(&mut self) {
+        LIVE_DOCUMENT_ATTEMPT.with(|cell| {
+            let mut live = cell.borrow_mut();
+            if live.as_ref().is_some_and(|attempt| attempt.key.as_str() == self.0.as_str()) {
+                *live = None;
+            }
+        });
+    }
+}
+
+
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ActiveEditorGuard {
     root: PathBuf,
@@ -84,6 +144,10 @@ pub(crate) fn activate_registered_s3_editor(
             };
         }
     }
+    // This must succeed BEFORE any guarded File Gate route becomes reachable.
+    // In particular, it refuses activation with open CRDT editor sessions
+    // or an unreadable v2 SQLite write-intent journal.
+    core.documents.arm_durable_intents_for_root(&config.root)?;
     registry.push(config);
     Ok(())
 }
@@ -140,7 +204,24 @@ pub(crate) fn maybe_write(
     source: Source,
     version_name: Option<&str>,
 ) -> Option<Result<FileWriteResult, FileCommandError>> {
+    // Even if the guarded root has not been activated, a document thread
+    // with an already FULL-synced prewrite intent must NOT fall back to the
+    // unguarded legacy File Gate writer.
+    // The ordinary no-sync editor fast path must not canonicalize/hash a
+    // pathname for every save. Only a live attempt requires this comparison.
+    let live_key = LIVE_DOCUMENT_ATTEMPT.with(|cell| {
+        cell.borrow().as_ref().map(|attempt| attempt.key.clone())
+    });
+    let matching_key = live_key.filter(|live| {
+        crate::search::paths::identity(path).as_str() == live.as_str()
+    });
+    let has_live_prewrite = matching_key.is_some();
+    // Consume only the permit for THIS document, even on an early refusal.
+    let _consume = matching_key.map(ConsumeDocumentAttempt);
     let selected = match selected(core, path) {
+        Ok(None) if has_live_prewrite => return Some(Err(refused(
+            "durable DocumentSession intent has no active S3 custody; refusing unguarded fallback",
+        ))),
         Ok(None) => return None,
         Ok(Some(selected)) => selected,
         Err(error) => return Some(Err(error)),
@@ -150,6 +231,14 @@ pub(crate) fn maybe_write(
         let expected = expected_hash.ok_or_else(|| {
             refused("cooperative editor save requires a disk-content CAS hash")
         })?;
+        // No direct native/MCP File Gate save may mutate an armed root without
+        // the crash-durable pre-intent that DocumentSession commits first.
+        // This also verifies the EXACT old and intended new BLAKE3 digests.
+        let proposed = blake3::hash(content.as_bytes()).to_hex().to_string();
+        if !live_attempt_matches(core.guarded_instance_nonce, path, expected, &proposed) {
+            return Err(refused("guarded File Gate requires a fresh one-shot DocumentSession attempt"));
+        }
+        core.documents.require_matching_durable_intent(path, expected, &proposed)?;
         let admission = RegisteredReadAdmission::open(core, &config.root)
             .map_err(|error| refused(format!("workspace registration changed: {error:?}")))?;
         let profiles = SqliteRegisteredS3Bindings::open(&admission, &config.profile_db)
@@ -187,13 +276,44 @@ mod tests {
         S3Keyspace, S3VerifiedHead, VaultId,
     };
     use crate::app_core::{Core, CoreEvent};
-    use crate::documents::io::HubIo;
-    use crate::documents::session::{DiskError, SessionIo};
+    use crate::files::error::FileCommandError;
+    use crate::files::gate;
     use crate::history::service::HistoryFault;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+
 
     #[test]
-    fn optin_actual_editor_io_uses_os_guard_and_never_falls_back_after_lock_swap() {
+    fn prepared_prewrite_without_activated_custody_cannot_use_legacy_gate() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("workspace");
+        let data = temp.path().join("appdata");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        let root = crate::search::paths::canonical_path(&root);
+        let path = root.join("NoRoute.md");
+        fs::write(&path, b"previous").unwrap();
+        let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        core.documents.arm_durable_intents_for_root(&root).unwrap();
+        let before = blake3::hash(b"previous").to_hex().to_string();
+        core.documents.test_seed_guarded_intent(&core, &path, &before, "new text");
+        let denied = gate::write(
+            &core, &path, "new text", Some(&before), Source::Me, None,
+        );
+        assert!(matches!(denied, Err(FileCommandError::Task { .. })));
+        assert_eq!(fs::read(&path).unwrap(), b"previous");
+        assert!(!live_attempt_matches(
+            core.guarded_instance_nonce, &path, &before,
+            &blake3::hash(b"new text").to_hex().to_string(),
+        ), "failed route selection must consume the one-shot ticket");
+        // The FULL-synced record is still present for restart/review.
+        assert!(core.documents.require_matching_durable_intent(
+            &path, &before, &blake3::hash(b"new text").to_hex().to_string(),
+        ).is_ok());
+    }
+
+    #[test]
+    fn optin_file_gate_requires_durable_document_intent_and_pinned_os_lock() {
         let temp = tempfile::tempdir().unwrap();
         let vault = temp.path().join("vault");
         let data = temp.path().join("appdata");
@@ -202,6 +322,10 @@ mod tests {
         let vault = crate::search::paths::canonical_path(&vault);
         let note = vault.join("Shared.md");
         fs::write(&note, b"original").unwrap();
+        let mismatch_note = vault.join("Mismatch.md");
+        fs::write(&mismatch_note, b"mismatch original").unwrap();
+        let lock_note = vault.join("Lock.md");
+        fs::write(&lock_note, b"lock original").unwrap();
         let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
         core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
 
@@ -249,47 +373,61 @@ mod tests {
             let mut custody = SqliteCustodyIdentityStore::open(&admission, &custody_db).unwrap();
             custody.bind_registered_s3(&admission, &profiles, &scope).unwrap();
         }
+        // An already-open CRDT editor cannot be switched mid-save to the
+        // guarded route: its unsent in-memory changes have not been fenced.
+        core.documents.open(&core, &note, 0).unwrap();
+        assert!(activate_registered_s3_editor(
+            &core, &vault, &profile_db, &custody_db, &scope,
+        ).is_err(), "live editor admission must refuse activation");
+        core.documents.release(&core, &note);
         activate_registered_s3_editor(
             &core, &vault, &profile_db, &custody_db, &scope,
         ).unwrap();
 
-        let store = Mutex::new(None);
-        // HubIo now requires a separate crash-durable prewrite root registry.
-        // Keep this opt-in guarded workspace explicitly armed in the test,
-        // rather than silently falling back to the unguarded editor path.
-        let guarded_write_roots = Mutex::new(vec![fs::canonicalize(&vault).unwrap()]);
-        let editor = HubIo {
-            core: &core, path: &note, key: "Shared.md", store: &store,
-            guarded_write_roots: &guarded_write_roots,
-            offset_seconds: 0, source: Source::Me,
-        };
         let first = "first guarded edit ".repeat(90);
         let hash = blake3::hash(b"original").to_hex().to_string();
-        let result = SessionIo::write(&editor, &first, &hash);
-        assert!(result.is_ok(), "editor guarded write: {result:?}");
+        let without_intent = gate::write(
+            &core, &note, &first, Some(&hash), Source::Me, None,
+        );
+        assert!(matches!(without_intent, Err(FileCommandError::Task { .. })),
+            "native/MCP File Gate must not bypass the durable prewrite journal");
+        assert_eq!(fs::read(&note).unwrap(), b"original");
+
+        let mismatch_hash = blake3::hash(b"mismatch original").to_hex().to_string();
+        core.documents.test_seed_guarded_intent(
+            &core, &mismatch_note, &mismatch_hash, "allowed content",
+        );
+        let wrong_attempt = gate::write(
+            &core, &mismatch_note, "other text", Some(&mismatch_hash), Source::Me, None,
+        );
+        assert!(matches!(wrong_attempt, Err(FileCommandError::Task { .. })),
+            "a one-shot ticket for different content cannot authorize mutation");
+        assert_eq!(fs::read(&mismatch_note).unwrap(), b"mismatch original");
+
+        core.documents.test_seed_guarded_intent(&core, &note, &hash, &first);
+        let result = gate::write(&core, &note, &first, Some(&hash), Source::Me, None);
+        assert!(result.is_ok(), "guarded note write with exact intent: {result:?}");
         assert_eq!(fs::read_to_string(&note).unwrap(), first);
         assert!(core.history.page(&|| vec![vault.clone()], &note, 0, 8).total > 0);
-
-        // Editor conflict/truncation preservation may not silently create an
-        // unguarded file while this cooperative workspace is armed.
-        assert!(matches!(
-            SessionIo::preserve(
-                &editor, "unsaved", crate::documents::conflict::ConflictReport {
-                    cause: crate::documents::conflict::ConflictCause::Diverged,
-                    disk_hash: None, synced_hash: None,
-                }
-            ),
-            Err(DiskError::Other { code: "preservation_failed", .. })
-        ));
+        // In production DocumentSession removes this exact ticket only AFTER
+        // HistoryService and durable sync-point confirmation.
+        core.documents.test_confirm_guarded_intent(&note, &hash, &first);
 
         let current = blake3::hash(first.as_bytes()).to_hex().to_string();
         core.history.fail_once(HistoryFault::CreateVersion);
         let second = "second guarded edit ".repeat(90);
-        let ambiguous = SessionIo::write(&editor, &second, &current);
-        assert!(matches!(
-            ambiguous, Err(DiskError::Other { code: "needs_review", .. })
-        ), "history failure must not be acknowledged: {ambiguous:?}");
+        core.documents.test_seed_guarded_intent(&core, &note, &current, &second);
+        let ambiguous = gate::write(
+            &core, &note, &second, Some(&current), Source::Me, None,
+        );
+        assert!(matches!(ambiguous, Err(FileCommandError::NeedsReview { .. })),
+            "history failure must never acknowledge an uncertain writer: {ambiguous:?}");
         assert_eq!(fs::read_to_string(&note).unwrap(), second);
+        // Its durable SQLite intent is still pending. The consumed ephemeral
+        // permit must NOT authorize any replay, even with identical digests.
+        let stale = gate::write(&core, &note, &second, Some(&current), Source::Me, None);
+        assert!(matches!(stale, Err(FileCommandError::Task { .. })),
+            "stale SQLite intent after uncertain result must not be reusable");
 
         // A changed inode under the same lock name cannot turn a registered
         // editor write into an ordinary unguarded File Gate write.
@@ -301,10 +439,13 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         }
-        let latest = blake3::hash(second.as_bytes()).to_hex().to_string();
-        let denied = SessionIo::write(&editor, "unapproved", &latest);
-        assert!(denied.is_err());
-        assert_eq!(fs::read_to_string(&note).unwrap(), second);
+        let lock_hash = blake3::hash(b"lock original").to_hex().to_string();
+        core.documents.test_seed_guarded_intent(&core, &lock_note, &lock_hash, "lock change");
+        let denied = gate::write(
+            &core, &lock_note, "lock change", Some(&lock_hash), Source::Me, None,
+        );
+        assert!(matches!(denied, Err(FileCommandError::Task { .. })));
+        assert_eq!(fs::read(&lock_note).unwrap(), b"lock original");
         assert_eq!(fs::read(&old).unwrap(), b"stable existing OS lock");
     }
 }
