@@ -1,0 +1,116 @@
+name: Graph Barnes-Hut exact-source ABBA
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/search/graph/force.rs'
+      - 'aquilum-app/core/src/search/graph/separate.rs'
+      - '.github/bench/graph-barnes-hut-ab.rs'
+      - '.github/workflows/graph-barnes-hut-abba.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-barnes-hut-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source-abba:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile real base/head force and separation implementations
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for side in base head; do
+            if [ "$side" = base ]; then ref="$BASE_SHA"; else ref="$HEAD_SHA"; fi
+            git cat-file -e "$ref^{commit}"
+            git show "$ref:aquilum-app/core/src/search/graph/force.rs" > "$RUNNER_TEMP/force-$side.rs"
+            git show "$ref:aquilum-app/core/src/search/graph/separate.rs" > "$RUNNER_TEMP/separate-$side.rs"
+            AKULA_FORCE_IMPL="$RUNNER_TEMP/force-$side.rs" \
+            AKULA_SEPARATE_IMPL="$RUNNER_TEMP/separate-$side.rs" \
+              rustc --edition=2021 -O -Awarnings \
+                .github/bench/graph-barnes-hut-ab.rs -o "$RUNNER_TEMP/graph-$side"
+          done
+          {
+            echo "base=$BASE_SHA"
+            echo "head=$HEAD_SHA"
+            echo "runner=$RUNNER_NAME"
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } | tee graph-bh-environment.log
+      - name: ABBA same-runner 1k 4k 10k graph layout and collision control
+        shell: bash
+        run: |
+          set -euo pipefail
+          trial=0
+          for side in base head head base base head head base; do
+            trial=$((trial + 1))
+            "$RUNNER_TEMP/graph-$side" | tee "graph-bh-$trial-$side.log"
+          done
+      - name: Enforce exact floating-point output parity and record measured timings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import statistics
+          from pathlib import Path
+
+          names = ('force_1024', 'force_4096', 'force_10000', 'separate_control')
+          pattern = re.compile(r'GRAPH_BH_AB case=(\w+) elapsed_ms=([0-9.]+) checksum=(\d+)')
+          values = {'base': [], 'head': []}
+          for path in Path('.').glob('graph-bh-*-*.log'):
+              name = re.fullmatch(r'graph-bh-\d+-(base|head)\.log', path.name)
+              if not name:
+                  continue
+              trial = {case: (float(ms), digest) for case, ms, digest
+                       in pattern.findall(path.read_text())}
+              assert set(trial) == set(names), f'missing cases: {path}'
+              values[name.group(1)].append(trial)
+          assert len(values['base']) == len(values['head']) == 4, values
+          lines = [
+              '## Barnes-Hut exact-source microbench, same-runner ABBA',
+              '',
+              '| Layout | Base median ms | PR median ms | Change |',
+              '|---|---:|---:|---:|',
+          ]
+          for case in names:
+              digests = {trial[case][1] for runs in values.values() for trial in runs}
+              assert len(digests) == 1, f'different layout bits in {case}: {digests}'
+              base = statistics.median(v[case][0] for v in values['base'])
+              head = statistics.median(v[case][0] for v in values['head'])
+              assert base > 0 and head > 0
+              lines.append(f'| {case} | {base:.4f} | {head:.4f} | {100 * (head/base - 1):+.1f}% |')
+          lines += [
+              '',
+              'Exact final coordinate checksums must match across all 8 runs.',
+              'This does not measure real UI input latency, labels, or FPS.',
+              'No speed-based pass threshold; acceptance requires Core and GUI CI.',
+          ]
+          result = '\n'.join(lines) + '\n'
+          print(result)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(result)
+          Path('graph-bh-summary.md').write_text(result)
+          PY
+      - name: Publish diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-barnes-hut-${{ github.event.pull_request.head.sha }}
+          path: |
+            graph-bh-*.log
+            graph-bh-summary.md
+          if-no-files-found: warn
+          retention-days: 14
