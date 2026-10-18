@@ -1,0 +1,116 @@
+name: Reader first-page Parley reuse ABBA
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/reader/page/layout.rs"
+      - "aquilum-app/native/src/reader/page/mod.rs"
+      - "aquilum-app/native/src/reader/session/layout.rs"
+      - "aquilum-app/native/src/reader/session/tests.rs"
+      - ".github/workflows/reader-initial-layout-reuse-abba.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-first-reuse-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abba:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+
+      - name: Linux dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Generate synthetic EPUB and identify runner
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/reader_epub_shape.py --out "$RUNNER_TEMP/reader-epub-shapes" | tee reader-first-reuse-fixtures.log
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            lscpu | grep -E 'Model name:|CPU\(s\):'
+            rustc --version
+            cargo --version
+          } | tee reader-first-reuse-environment.log
+
+      - name: Check complete Session fidelity and time paired first ensure
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_EPUB_SHAPE_DIR: ${{ runner.temp }}/reader-epub-shapes
+        run: |
+          set -euo pipefail
+          cargo test --locked --release -p aquilum-native --bin aquilum-native \
+            bounded_first_page_reuse_matches_legacy_reader -- --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/reader-first-reuse-fidelity.log"
+          cargo test --locked --release -p aquilum-native --bin aquilum-native \
+            initial_layout_reuse_abba_profile -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/reader-first-reuse-abba.log"
+          test "$(grep -c 'READER_REUSE_RESULT mode=' "$GITHUB_WORKSPACE/reader-first-reuse-abba.log")" -eq 6
+
+      - name: Summarize every case, including regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          content = Path("reader-first-reuse-abba.log").read_text()
+          matches = re.findall(
+              r"READER_REUSE_RESULT mode=(\S+) scrolled=(true|false) "
+              r"visible=(\d+) retained=(\d+) old_ms=([\d.]+) reused_ms=([\d.]+) speedup=([\d.]+)",
+              content,
+          )
+          assert len(matches) == 6 and len({(row[0], row[1]) for row in matches}) == 6, matches
+          rows = [
+              "## Identical Session::ensure with bounded first-page layout reuse",
+              "",
+              "| EPUB shape | Scrolled | Visible pieces | Kept layouts | Old ms | New ms | Old/new |",
+              "|---|---|---:|---:|---:|---:|---:|",
+          ]
+          for mode, scrolled, visible, kept, old, new, speedup in matches:
+              rows.append(f"| {mode} | {scrolled} | {visible} | {kept} | {old} | {new} | {speedup}× |")
+          rows += [
+              "",
+              "Same-process, 14 samples per variant, seven ABBA cycles after warm-up.",
+              "The synthetic book and a separate large FB2 parity test verify exact page pieces,",
+              "line geometry, hyphen breaks, source positions, CFI, pagination and on-screen Parley lines.",
+              "Measurements exclude desktop first paint, GPU and cold filesystem cache.",
+              "Candidate retention is source-byte bounded at 256 KiB and only activated",
+              "on an initial giant-section Start anchor. This is not an exact RSS cap.",
+              "No performance threshold: assess result before merging."
+          ]
+          summary = "\n".join(rows) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write(summary)
+          PY
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-first-reuse-${{ github.sha }}
+          path: |
+            reader-first-reuse-environment.log
+            reader-first-reuse-fixtures.log
+            reader-first-reuse-fidelity.log
+            reader-first-reuse-abba.log
+          retention-days: 21
