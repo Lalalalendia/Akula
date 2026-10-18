@@ -730,17 +730,67 @@ mod tests {
             &appdata, &host_db, Arc::new(|_: CoreEvent| {}),
         );
         core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
-        // No valid S3 profile or custody identities exist either: activation
-        // must refuse without creating the missing installer database.
-        assert!(activate_registered_s3_editor(
-            &core, &root, &appdata.join("s3.sqlite"),
-            &appdata.join("custody.sqlite"), &temp.path().join("scope"),
-        ).is_err());
-        assert!(!host_db.exists());
+
+        // All OTHER S3 binding and physical OS custody preconditions are
+        // valid. The rejection must be caused by the missing shared ledger,
+        // not a missing profile or malformed prewrite fixture.
+        let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
+        let scope = temp.path().join("external").join(scoped_leaf(root_id));
+        fs::create_dir_all(&scope).unwrap();
+        let lock = scope.join(LOCK_NAME);
+        fs::write(&lock, b"stable lock").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let scope = fs::canonicalize(scope).unwrap();
+        let namespace = S3Keyspace::new("akula/missing-installed-ledger", VaultId::new()).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-missing-host-fixture".into(),
+            region: "us-east-1".into(),
+            endpoint: Some("http://127.0.0.1:9000".into()),
+            force_path_style: true,
+        };
+        let manifest = S3ManifestV1::new(
+            &namespace, OperationId::new(), 1, None, vec![],
+        ).unwrap();
+        let pointer = S3HeadPointerV1::new(
+            &namespace, 1, manifest.manifest_id,
+            &manifest.digest(&namespace).unwrap(), None,
+        ).unwrap();
+        let head = S3VerifiedHead {
+            pointer, manifest, etag: "\"missing-ledger-test\"".into(),
+        };
+        let profile_db = appdata.join("registered-s3.sqlite");
+        let custody_db = appdata.join("custody.sqlite");
+        {
+            let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+            let mut profiles = SqliteRegisteredS3Bindings::open(
+                &admission, &profile_db,
+            ).unwrap();
+            profiles.bind_existing_verified_s3(
+                &admission, "missing-host", &profile, &namespace, &head,
+            ).unwrap();
+            let mut custody = SqliteCustodyIdentityStore::open(
+                &admission, &custody_db,
+            ).unwrap();
+            custody.bind_registered_s3(&admission, &profiles, &scope).unwrap();
+        }
+        let failure = activate_registered_s3_editor(
+            &core, &root, &profile_db, &custody_db, &scope,
+        ).unwrap_err();
+        assert!(
+            format!("{failure:?}").contains("host custody enrollment HOLD"),
+            "activation should fail specifically on absent installer ledger: {failure:?}"
+        );
+        assert!(!host_db.exists(), "activation must never provision host ledger");
+        assert!(core.guarded_editors.lock().unwrap().is_empty(),
+            "no guarded writer may become active without shared enrollment");
         let forbidden = root.join("NoFallback.md");
         assert!(gate::create(
             &core, &forbidden, "FORBIDDEN", Source::Me, None,
         ).is_err());
         assert!(!forbidden.exists());
-    }
-}
+    }}
