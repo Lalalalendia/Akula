@@ -96,6 +96,13 @@ jobs:
               if line.startswith(expected):
                   event, _, pairs = line.partition(" ")
                   fields = dict(re.findall(r"([a-z_]+)=([^\s]+)", pairs))
+                  # Core::open can atomically persist settings before the
+                  # actual note write. Exclude setup I/O from save timing.
+                  # The target CAS write is the unambiguous start marker.
+                  if not events and not (
+                      event == "AKULA_SAVE_ATOMIC" and fields.get("cas") == "1"
+                  ):
+                      continue
                   events.append((event, fields))
                   continue
               if not line.startswith("REAL_GATE_SAVE "):
