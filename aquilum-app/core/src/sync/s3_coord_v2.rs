@@ -177,9 +177,31 @@ impl S3DeltaEnvelopeV2 {
         )
     }
 
-    /// Private inventory comparison. Only the pinned entrypoint above may
-    /// provide read-only remote assurance to other Core subsystems; direct
-    /// fabricated slices in tests prove fail-closed arithmetic only.
+    /// Narrow crate-private advisory comparator for the SDK reader that
+    /// independently reconstructs every V1 immutable shard inventory and
+    /// verifies newly added revision JSON + blobs inside bounded V2 packs.
+    /// This is NOT the public fully pinned assurance method above: older
+    /// remote blob availability is reused from the durable prior anchor.
+    /// No caller may turn this receipt into File Gate or baseline authority.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn verify_shard_inventory_advisory(
+        &self,
+        ns: &S3Keyspace,
+        previous_head: &S3HeadPointerV1,
+        previous_manifest: &S3ManifestV1,
+        previous_refs: &[S3RevisionRefV1],
+        current_head: &S3HeadPointerV1,
+        current_manifest: &S3ManifestV1,
+        current_refs: &[S3RevisionRefV1],
+    ) -> Result<S3DeltaEnvelopeCoverageV2, S3DeltaEnvelopeV2Error> {
+        self.verify_v1_coverage(
+            ns, previous_head, previous_manifest, previous_refs,
+            current_head, current_manifest, current_refs,
+        )
+    }
+
+    /// Private inventory comparison; callers require a separate canonical
+    /// trust boundary (full pin or SDK-verified immutable shard chain).
     fn verify_v1_coverage(
         &self,
         ns: &S3Keyspace,
