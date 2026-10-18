@@ -1364,4 +1364,119 @@ mod tests {
         }
     }
 
+    /// Exact source outline captured from the real guard96 glyph 495 in CI
+    /// 39117599078, not a synthetic Bezier stand-in. It consists exclusively
+    /// of straight segments at exact binary-fractional coordinates.
+    fn guard96_real_glyph_495_outline() -> vello_common::kurbo::BezPath {
+        use vello_common::kurbo::BezPath;
+        let mut path = BezPath::new();
+        path.move_to((1.921875, 9.0));
+        path.line_to((3.546875, 9.0));
+        path.line_to((4.734375, 4.390625));
+        path.line_to((4.765625, 4.390625));
+        path.line_to((7.375, 9.0));
+        path.line_to((9.0625, 9.0));
+        path.line_to((7.6875, 0.0));
+        path.line_to((6.5, 0.0));
+        path.line_to((7.4375, 6.03125));
+        path.line_to((7.640625, 7.265625));
+        path.line_to((7.546875, 7.265625));
+        path.line_to((4.359375, 1.640625));
+        path.line_to((2.890625, 7.265625));
+        path.line_to((2.796875, 7.265625));
+        path.line_to((2.65625, 6.03125));
+        path.line_to((1.734375, 0.0));
+        path.line_to((0.546875, 0.0));
+        path.close_path();
+        path
+    }
+
+    /// Isolate the exact guard96 outline in the Vello renderer. Compare all
+    /// 11x9 local alpha pixels for the actual atlas slots, both with a full
+    /// 512px page and with the shifted dirty-area context used by glifo.
+    ///
+    /// Distinguishes slot/dirty-crop arithmetic from glyph insertion order;
+    /// a green result rules out neither batching nor cache-state effects.
+    #[test]
+    fn guard96_real_glyph_495_slot_and_crop_coverage() {
+        use vello_common::kurbo::Affine;
+        use vello_common::color::palette::css::BLACK;
+
+        fn paint(slot: (u16, u16), crop: bool) -> Pixmap {
+            let origin = if crop {
+                (slot.0 - 2, slot.1 - 2)
+            } else {
+                (0, 0)
+            };
+            let extent = if crop { (15, 13) } else { (512, 512) };
+            let mut ctx = RenderContext::new(extent.0, extent.1);
+            // glifo render_outline_to_atlas uses scale=(1,-1), and the
+            // captured raster bearing is (0,-9), hence Y translation +9.
+            let transform = Affine::new([
+                1.0, 0.0, 0.0, -1.0,
+                f64::from(slot.0) - f64::from(origin.0),
+                f64::from(slot.1) + 9.0 - f64::from(origin.1),
+            ]);
+            ctx.set_transform(transform);
+            ctx.set_paint(BLACK);
+            ctx.fill_path(&guard96_real_glyph_495_outline());
+            ctx.flush();
+
+            let mut page = Pixmap::new(512, 512);
+            ctx.render_with(
+                &mut page,
+                &mut Resources::new(),
+                RasterizerSettings {
+                    target_init: TargetInit::SrcOver,
+                    offset: origin,
+                    ..Default::default()
+                },
+            );
+            page
+        }
+
+        // First two are the exact failing paths from guard96 attempt 10:
+        // cropped (416,24) gave D5; full (381,24) gave D4 at local (8,1).
+        // Further slots cover tile boundaries and alternate atlas rows.
+        let slots = [(381, 24), (416, 24), (24, 149), (34, 83), (105, 11)];
+        let reference = paint(slots[0], false);
+        let expected: alloc::vec::Vec<_> = (0..9)
+            .flat_map(|y| (0..11).map(move |x| reference.sample(slots[0].0 + x, slots[0].1 + y)))
+            .collect();
+
+        let mut total_bad = 0_usize;
+        for slot in slots {
+            for crop in [false, true] {
+                let page = paint(slot, crop);
+                let mut changed = 0_usize;
+                let mut first = None;
+                for y in 0..9 {
+                    for x in 0..11 {
+                        let index = usize::from(y) * 11 + usize::from(x);
+                        let actual = page.sample(slot.0 + x, slot.1 + y);
+                        if actual != expected[index] {
+                            changed += 1;
+                            if first.is_none() {
+                                first = Some((x, y, expected[index], actual));
+                            }
+                        }
+                    }
+                }
+                total_bad += changed;
+                std::eprintln!(
+                    "GUARD96_EXACT_495 slot={slot:?} crop={crop} \
+                     different_alpha_pixels={changed} first={first:?} \
+                     critical_reference={:?} critical_actual={:?}",
+                    expected[19], page.sample(slot.0 + 8, slot.1 + 1),
+                );
+            }
+        }
+        assert_eq!(
+            total_bad, 0,
+            "same exact glyph 495 at different atlas coordinates changed source alpha; \
+             inspect GUARD96_EXACT_495 rows before proposing a global renderer fix"
+        );
+    }
+
+
 }
