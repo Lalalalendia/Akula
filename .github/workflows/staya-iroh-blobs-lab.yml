@@ -1,0 +1,80 @@
+name: Staya iroh-blobs pinned fork A/B (experiment only)
+
+on:
+  pull_request:
+    paths:
+      - "staya/roha-transport/**"
+      - ".github/workflows/staya-iroh-blobs-lab.yml"
+      - "docs/sync/p2p-blob-05-iroh-blobs.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blobs:
+    name: Direct QUIC Staya vs iroh-blobs and unauthorized push refusal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: staya/roha-transport
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91.0"
+          components: rustfmt
+      - uses: SwatinEm/rust-cache@v2
+        with:
+          workspaces: staya/roha-transport
+          key: iroh-blobs-01031
+      - name: Verify a single pinned Roha and noq source graph
+        run: |
+          cargo metadata --format-version 1 > dependency-metadata.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path("dependency-metadata.json").read_text())["packages"]
+          expected = {
+              "iroh": ("calex794/roha", "a42ad5aef1626df80d39398e05dac6e362bf6e49"),
+              "noq": ("calex794/noq", "2eabf9895d40c263aa3369afd66efcf4a5d95056"),
+              "noq-proto": ("calex794/noq", "2eabf9895d40c263aa3369afd66efcf4a5d95056"),
+              "noq-udp": ("calex794/noq", "2eabf9895d40c263aa3369afd66efcf4a5d95056"),
+          }
+          for name, (repo, rev) in expected.items():
+              items = [x for x in p if x["name"] == name]
+              assert len(items) == 1, (name, [(x["version"], x["source"]) for x in items])
+              source = items[0]["source"] or ""
+              assert repo in source and rev in source, (name, source)
+              print("PIN_OK", name, items[0]["version"], source)
+          blobs = [x for x in p if x["name"] == "iroh-blobs"]
+          assert len(blobs) == 1 and blobs[0]["version"] == "0.103.1", blobs
+          print("PIN_OK iroh-blobs 0.103.1")
+          PY
+          cargo tree -i iroh
+          cargo tree -i noq
+      - name: Execute actual QUIC bytes and denied-request tests
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --nocapture 2>&1 | tee iroh-blobs-ab.log
+      - name: Generate rustfmt difference for exact review
+        if: always()
+        run: |
+          cargo fmt --all
+          git diff -- staya/roha-transport > iroh-blobs-fmt.patch
+          test ! -s iroh-blobs-fmt.patch
+      - name: Upload exact resolved lock, A/B metrics and formatting diff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2p-blob-05-laboratory
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            staya/roha-transport/Cargo.lock
+            staya/roha-transport/iroh-blobs-ab.log
+            staya/roha-transport/iroh-blobs-fmt.patch
