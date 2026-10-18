@@ -152,6 +152,22 @@ fn sidecar_path(db: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Physical identity supplied by an INDEPENDENT installer-owned witness.
+///
+/// IMPORTANT: these four numbers authenticate nothing by themselves. Reading
+/// them from the candidate SQLite DB, its own sidecar, runtime environment or
+/// private appdata and then comparing them would be a circular trust check.
+/// The installer must persist/protect the expected values outside the mutable
+/// SQLite namespace. A copied/replayed DB on the same physical inode and an
+/// uncooperative same-user writer remain outside this narrow check.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) struct HostLedgerObjectIds {
+    pub(super) parent_device: u64,
+    pub(super) parent_file: u64,
+    pub(super) db_device: u64,
+    pub(super) db_file: u64,
+}
+
 /// Snapshot is taken *after* BEGIN IMMEDIATE has established SQLite's WAL
 /// writer epoch. Compare after primary+history and after commit. Never infer
 /// that an absent/moved sidecar permits a new, independent SQLite universe.
@@ -180,6 +196,33 @@ impl HostLedgerIdentity {
         };
         result.recheck()?;
         Ok(result)
+    }
+
+    /// Observation only, NOT a trusted witness. The caller must obtain the
+    /// expected snapshot from an installer-controlled source at a different
+    /// time, without reading/deriving it from the candidate registry itself.
+    pub(super) fn object_ids(&self) -> HostLedgerObjectIds {
+        let (parent_device, parent_file) = self.pinned_parent.identity();
+        HostLedgerObjectIds {
+            parent_device,
+            parent_file,
+            db_device: self.db.device,
+            db_file: self.db.inode,
+        }
+    }
+
+    /// Cold-open physical-identity check against a PREEXISTING trusted claim.
+    /// Must execute before an SQLite connection can admit a writer and again
+    /// after validating schema/rows. Does not grant custody or verify OS ACL.
+    pub(super) fn require_expected(
+        &self,
+        expected: HostLedgerObjectIds,
+    ) -> Result<(), HostCustodyError> {
+        self.recheck()?;
+        if self.object_ids() != expected {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
+        self.recheck()
     }
 
     pub(super) fn sidecars(&self) -> Result<SidecarIds, HostCustodyError> {
