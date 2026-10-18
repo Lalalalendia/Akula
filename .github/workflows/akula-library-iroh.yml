@@ -33,6 +33,9 @@ jobs:
       - name: Record 10-client QUIC load metrics
         working-directory: experiments/akula-library-iroh
         run: cargo test --locked ten_simultaneous_quic_readers_load_and_measure -- --nocapture
+      - name: Record 25-client QUIC load metrics
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --locked twenty_five_quic_readers_two_chunks_load_and_measure -- --nocapture
       - name: Build two-process laboratory binary
         working-directory: experiments/akula-library-iroh
         run: cargo build --locked --bin akula-library-iroh-lab
