@@ -156,7 +156,11 @@ fn assert_selected_damage_mode(workload: &str, case: &str, step: u32, area_pct: 
 }
 
 fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool, workload: &str) {
-    let mut h = Harness::with(None, scale);
+    let mut h = if std::env::var_os("AQ_CROSSOVER_AB_STABLE_VAULT").is_some() {
+        Harness::with_ab_vault(None, scale, Some(case))
+    } else {
+        Harness::with(None, scale)
+    };
     h.root
         .handle_window_event(masonry::core::WindowEvent::Resize(PhysicalSize::new(width, height)));
     h.app.window_resized(
