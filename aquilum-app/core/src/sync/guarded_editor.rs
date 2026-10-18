@@ -131,6 +131,18 @@ pub(crate) fn activate_registered_s3_editor(
         scope: fs::canonicalize(custody_scope)?,
         binding,
     };
+    // DocumentHub writers hold sessions while waiting for File Gate. Arming
+    // under PROCESS_FILE_MUTATIONS would invert that order and deadlock.
+    // First reject existing buffers and install the fail-closed *prewrite*
+    // root. If later custody enrollment fails, new DocumentSession writers
+    // still cannot fall back: they require a one-shot receipt, and the
+    // unactivated guarded route explicitly refuses that receipt.
+    core.documents.arm_durable_intents_for_root(&config.root)?;
+    // Close the admission transition against an ordinary File Gate operation
+    // already inside its process-wide primary-file critical section. Take
+    // this FIRST, before the HistoryService barrier, to preserve the
+    // established File Gate -> HistoryFiles ordering.
+    let _file_gate_fence = core.file_mutation_guard()?;
     let mut registry = core.guarded_editors.lock()
         .map_err(|_| refused("cooperative editor registry poisoned"))?;
     for previous in registry.iter() {
@@ -147,16 +159,20 @@ pub(crate) fn activate_registered_s3_editor(
     // This must succeed BEFORE any guarded File Gate route becomes reachable.
     // In particular, it refuses activation with open CRDT editor sessions
     // or an unreadable v2 SQLite write-intent journal.
-    core.documents.arm_durable_intents_for_root(&config.root)?;
-    // Persist a *second* fail-closed participant marker before exposing the
-    // active writer. Every fresh Core must read this marker at boot and refuse
-    // legacy File Gate mutations until a verified custody writer is active.
-    core.documents.enroll_guarded_participant(
-        &config.root, &config.binding.vault_id.to_string(),
-        &config.profile_db, &config.custody_db, &config.scope,
-    )?;
-    registry.push(config);
-    Ok(())
+    core.history.with_participant_enrollment_fence(|| {
+        // Holding both the process File Gate and HistoryFiles barriers means
+        // no in-flight ordinary primary mutation or direct history mutation
+        // is actively touching those files when HOLD becomes visible.
+        // DocumentHub prewrite admission was armed BEFORE taking File Gate.
+        // Commit the appdata participant marker before publishing the writer
+        // route. A failed insert keeps the Core on HOLD with no silent retry.
+        core.documents.enroll_guarded_participant(
+            &config.root, &config.binding.vault_id.to_string(),
+            &config.profile_db, &config.custody_db, &config.scope,
+        )?;
+        registry.push(config);
+        Ok(())
+    })
 }
 
 /// A matching known path must never fall back to the unguarded writer just
@@ -386,10 +402,64 @@ mod tests {
         assert!(activate_registered_s3_editor(
             &core, &vault, &profile_db, &custody_db, &scope,
         ).is_err(), "live editor admission must refuse activation");
+
+        // Even while another thread owns the primary File Gate, a live
+        // DocumentHub session must cause immediate refusal. Acquiring Gate
+        // BEFORE checking sessions creates an ABBA deadlock with save_entry.
+        let gate_held_with_editor = core.file_mutation_guard().unwrap();
+        let (blocked_tx, blocked_rx) = std::sync::mpsc::channel();
+        let other_core = Arc::clone(&core);
+        let root_arg = vault.clone();
+        let profile_arg = profile_db.clone();
+        let custody_arg = custody_db.clone();
+        let scope_arg = scope.clone();
+        let rejected = std::thread::spawn(move || {
+            let reply = activate_registered_s3_editor(
+                &other_core, &root_arg, &profile_arg, &custody_arg, &scope_arg,
+            );
+            blocked_tx.send(reply.is_err()).unwrap();
+        });
+        assert!(blocked_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+            "activation waited on File Gate while holding a live editor");
+        rejected.join().unwrap();
+        drop(gate_held_with_editor);
         core.documents.release(&core, &note);
-        activate_registered_s3_editor(
-            &core, &vault, &profile_db, &custody_db, &scope,
-        ).unwrap();
+
+        // Real activation must wait until an already-entered, ordinary File
+        // Gate critical section has fully released PROCESS_FILE_MUTATIONS.
+        // A concurrent opt-in cannot flip the participant flag mid-primary
+        // write or install the guarded route before the in-flight gate exits.
+        let in_flight_primary = core.file_mutation_guard().unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let concurrent_core = Arc::clone(&core);
+        let concurrent_root = vault.clone();
+        let concurrent_profile = profile_db.clone();
+        let concurrent_custody = custody_db.clone();
+        let concurrent_scope = scope.clone();
+        let enrollment = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let enrolled = activate_registered_s3_editor(
+                &concurrent_core, &concurrent_root, &concurrent_profile,
+                &concurrent_custody, &concurrent_scope,
+            );
+            finished_tx.send(enrolled).unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(finished_rx.recv_timeout(std::time::Duration::from_millis(60)).is_err(),
+            "activation passed while an ordinary File Gate operation owned the mutex");
+        assert!(!core.documents.requires_guarded_participant_hold(),
+            "enrollment exposed participant HOLD before its Gate barrier");
+        drop(in_flight_primary);
+        let activated = finished_rx.recv_timeout(std::time::Duration::from_secs(20))
+            .expect("activation could not finish after releasing the existing File Gate");
+        assert!(activated.is_ok(), "enrollment after Gate quiescence: {activated:?}");
+        enrollment.join().unwrap();
+        assert!(core.documents.requires_guarded_participant_hold());
+
+        // The external writer still works through its one-shot + persisted
+        // intent. Direct history labels and retention are denied under HOLD.
+        assert!(core.history.maintain_retention(&vault, 30).is_err());
 
         let first = "first guarded edit ".repeat(90);
         let hash = blake3::hash(b"original").to_hex().to_string();

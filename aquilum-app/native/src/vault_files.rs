@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use aquilum_core::Core;
-use aquilum_core::files::document::ensure_directory_impl;
 use aquilum_core::files::gate;
 use aquilum_core::files::error::FileCommandError;
 
@@ -34,7 +33,10 @@ pub enum Source<'a> {
 
 pub fn import(core: &Core, workspace: &Path, source: Source<'_>, fallback_name: &str, fallback_ext: &str) -> Result<String, FileCommandError> {
     let folder = normalize_folder(&core.settings.get_config().files.folder);
-    ensure_directory_impl(&workspace.join(&folder))?;
+    // Directory creation is a workspace mutation too. Do not bypass File Gate
+    // before its subsequent attachment copy/create; enrolled or corrupted
+    // participant journals must refuse without creating an empty Files tree.
+    gate::ensure_folder_tree(core, &workspace.join(&folder))?;
     let original = match &source {
         Source::Path(path) => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         Source::Bytes(_, name) => (*name).to_owned(),
@@ -80,4 +82,55 @@ mod tests {
         assert_eq!(resolve(Some(root), "pattern:x").unwrap(), root.join("pattern:x"));
         assert!(resolve(Some(root), "https://x").is_none());
     }
+
+    #[test]
+    fn attachment_import_does_not_create_folders_while_core_is_on_cold_hold() {
+        use aquilum_core::CoreEvent;
+        use std::fs;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let appdata = temp.path().join("appdata");
+        let workspace = temp.path().join("vault");
+        fs::create_dir_all(&appdata).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+
+        // A corrupted participant registry is an authoritative HOLD, not
+        // evidence that there is no enrolled S3 workspace. The original
+        // import path used to create Files/ before failing in File Gate.
+        fs::write(appdata.join("documents.sqlite3"), b"not a SQLite database").unwrap();
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(workspace.to_str().unwrap(), 1).unwrap();
+        let folder = workspace.join("Files");
+        assert!(!folder.exists());
+
+        assert!(import(&core, &workspace, Source::Bytes(b"image", "photo.png"), "fallback", "png").is_err());
+        assert!(!folder.exists(), "bytes import bypassed cold-Core File Gate HOLD");
+
+        let external = temp.path().join("outside.png");
+        fs::write(&external, b"untouched external bytes").unwrap();
+        assert!(import(&core, &workspace, Source::Path(&external), "fallback", "png").is_err());
+        assert!(!folder.exists(), "file import bypassed cold-Core File Gate HOLD");
+        assert_eq!(fs::read(&external).unwrap(), b"untouched external bytes");
+    }
+
+    #[test]
+    fn attachment_import_still_creates_folder_for_healthy_core() {
+        use aquilum_core::CoreEvent;
+        use std::fs;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let appdata = temp.path().join("appdata");
+        let workspace = temp.path().join("vault");
+        fs::create_dir_all(&appdata).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(workspace.to_str().unwrap(), 1).unwrap();
+        let imported = import(&core, &workspace, Source::Bytes(b"image", "photo.png"), "fallback", "png").unwrap();
+        assert!(workspace.join("Files").is_dir());
+        assert_eq!(fs::read(workspace.join(imported)).unwrap(), b"image");
+    }
+
 }
