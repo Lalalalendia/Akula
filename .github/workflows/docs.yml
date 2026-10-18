@@ -23,6 +23,13 @@ on:
 permissions:
   contents: read
 
+# Native and docs checks on a force-updated PR must represent the exact
+# newest head. Cancel obsolete pushes/rebases so earlier queued macOS jobs
+# cannot consume the same runner or be mistaken for acceptance.
+concurrency:
+  group: docs-installer-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docs:
     runs-on: ubuntu-24.04
