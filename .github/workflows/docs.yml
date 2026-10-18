@@ -1,23 +1,19 @@
 name: Docs and installer checks
 
 on:
-  # PRs validate feature branches; push checks run only after merge on main.
-  # Avoid duplicate push + pull_request runs for each feature-branch commit.
+  # The required Application checks already enforce patch whitespace and
+  # exercise installer shell scripts on EVERY PR. Run separate Linux/macOS
+  # installer acceptance only when installer code or this workflow changes.
+  # This avoids spending macOS runners on Markdown/screenshots-only PRs.
   push:
     branches: [main]
     paths:
-      - "*.md"
-      - "**/*.md"
-      - "screenshots/**"
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
-      - "*.md"
-      - "**/*.md"
-      - "screenshots/**"
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
