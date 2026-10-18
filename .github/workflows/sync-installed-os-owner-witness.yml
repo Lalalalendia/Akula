@@ -55,6 +55,8 @@ jobs:
             exit 1
           fi
           sudo mkdir -m 0755 "$parent"
+          # Only a directory we just created may be removed on failure.
+          echo "AKULA_B6B2_CREATED_FIXTURE_DIR=$parent" >> "$GITHUB_ENV"
           receipt="$parent/receipt.json"
           printf 'CI-only root-owner probe; NOT a valid Akula receipt\n' |
             sudo tee "$receipt" >/dev/null
@@ -90,6 +92,11 @@ jobs:
           base=/etc
           if [[ "$(uname -s)" = Darwin ]]; then base=/private/etc; fi
           parent="$base/akula-b6b2a-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # Never destroy a preexisting installation that issuance refused.
+          if [[ "${AKULA_B6B2_CREATED_FIXTURE_DIR:-}" != "$parent" ]]; then
+            echo 'No verified new CI-owned fixture to clean'
+            exit 0
+          fi
           if test -f "$parent/receipt.json" && ! test -L "$parent/receipt.json"; then
             sudo rm -f "$parent/receipt.json"
           fi
