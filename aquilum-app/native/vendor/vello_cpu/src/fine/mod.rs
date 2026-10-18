@@ -1150,10 +1150,10 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                                         .to_u32();
                                 }
                                 let image_id = match &image.source {
-                                    ImageSource::OpaqueId { id, .. } => format!("{id:?}"),
-                                    _ => "inline".to_string(),
+                                    ImageSource::OpaqueId { id, .. } => std::format!("{id:?}"),
+                                    _ => std::format!("inline"),
                                 };
-                                eprintln!(
+                                std::eprintln!(
                                     "VELLO_ATLAS_TEXEL target=({target_x},{target_y}) \
                                      chunk=({sample_x},{sample_y}) origin={:?} \
                                      page={}x{} image_id={} quality={:?} \
