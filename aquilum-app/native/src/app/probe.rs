@@ -3,6 +3,10 @@ use masonry::app::RenderRoot;
 use super::App;
 
 impl App {
+    pub fn probe_reader_active(&self) -> bool {
+        matches!(self.popup, Some(super::Popup::Reader(_)))
+    }
+
     pub fn probe(&mut self, root: &mut RenderRoot, step: &crate::memory_probe::Step) {
         use crate::memory_probe::Step;
         match step {
