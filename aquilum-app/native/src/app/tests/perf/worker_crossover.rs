@@ -213,6 +213,12 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
             _ => [2, 0, 1],
         };
         for index in order {
+            if std::env::var_os("AQ_TRACE_ATLAS_PIXEL").is_some() {
+                eprintln!(
+                    "VELLO_ATLAS_PASS case={case} workload={workload} step={step}                      kind=partial workers={}",
+                    WORKERS[index],
+                );
+            }
             let sample = draw_worker(&mut renderers[index], &layers, w, hh, scale, step == 0);
             // Sample scroll-candidate frames only. The tracker records the
             // candidate before the viewport/full test mode suppresses copies.
@@ -232,6 +238,9 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
             );
         }
         if matches!(step, 0 | 10 | 20 | 31) || std::env::var_os("AQ_CROSSOVER_EVERY_FRAME").is_some() {
+            if std::env::var_os("AQ_TRACE_ATLAS_PIXEL").is_some() {
+                eprintln!("VELLO_ATLAS_PASS case={case} workload={workload} step={step} kind=full");
+            }
             let full = render_full(&layers, w, hh, scale);
             let peak = max_pixel_channel_delta(renderers[0].frame_pixels(), full.frame_pixels());
             if peak > 1 {
@@ -244,6 +253,11 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
                 diagnose_channel_mismatch(
                     case, workload, step, w, &renderers[0], &full, previous, previous_part,
                 );
+                if std::env::var_os("AQ_TRACE_ATLAS_PIXEL").is_some() {
+                    eprintln!(
+                        "VELLO_ATLAS_PASS case={case} workload={workload} step={step} kind=full_repeat"
+                    );
+                }
                 let repeated = render_full(&layers, w, hh, scale);
                 let repeated_peak =
                     max_pixel_channel_delta(full.frame_pixels(), repeated.frame_pixels());
