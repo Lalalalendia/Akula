@@ -3,12 +3,14 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::fmt;
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug)]
 pub enum StoreError {
     Sqlite(rusqlite::Error),
     UnsupportedSchema(i64),
+    HoldPresent,
+    HoldMissing,
 }
 
 impl fmt::Display for StoreError {
@@ -18,6 +20,8 @@ impl fmt::Display for StoreError {
             Self::UnsupportedSchema(version) => {
                 write!(formatter, "documents store schema {version} is newer than this build")
             }
+            Self::HoldPresent => formatter.write_str("document has an unresolved native write intent"),
+            Self::HoldMissing => formatter.write_str("durable native write intent is missing or changed"),
         }
     }
 }
@@ -29,6 +33,15 @@ impl From<rusqlite::Error> for StoreError {
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
+
+/// A crash-resumable, fail-closed pre-publication intent. It is NOT a
+/// confirmation that bytes or HistoryService were modified. Never infer a
+/// successful publication from this row or release it automatically.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DurableWriteIntent {
+    pub(crate) base_hash: String,
+    pub(crate) proposed_hash: String,
+}
 
 pub struct DocumentStore {
     connection: Connection,
@@ -65,12 +78,94 @@ impl DocumentStore {
                      file_hash TEXT NOT NULL,
                      text_hash TEXT NOT NULL
                  );
+                 CREATE TABLE write_intents (
+                     key TEXT PRIMARY KEY,
+                     base_hash TEXT NOT NULL,
+                     proposed_hash TEXT NOT NULL
+                 );
                  PRAGMA user_version = {SCHEMA_VERSION};"
             ))?,
+            1 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE IF NOT EXISTS write_intents (
+                     key TEXT PRIMARY KEY,
+                     base_hash TEXT NOT NULL,
+                     proposed_hash TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 2;
+                 COMMIT;"
+            )?,
             SCHEMA_VERSION => {}
             newer => return Err(StoreError::UnsupportedSchema(newer)),
         }
         Ok(Self { connection })
+    }
+
+    /// Inspect durable HOLD evidence before reading/merging the live disk.
+    /// The caller MUST propagate query failure; absent rows mean no durable
+    /// write attempt was armed for this document.
+    pub(crate) fn write_intent(&self, key: &str) -> StoreResult<Option<DurableWriteIntent>> {
+        self.connection.query_row(
+            "SELECT base_hash, proposed_hash FROM write_intents WHERE key = ?1",
+            [key],
+            |row| Ok(DurableWriteIntent {
+                base_hash: row.get(0)?, proposed_hash: row.get(1)?,
+            }),
+        ).optional().map_err(StoreError::from)
+    }
+
+    /// Reserve a crash-durable ambiguity window BEFORE any native writer is
+    /// called. Only an explicitly armed root uses this slower FULL-sync path;
+    /// ordinary offline/editor saves retain their original cost model.
+    ///
+    /// This is an INSERT-only one-shot: no upsert, auto-clear, or implicit
+    /// overwrite of an already unresolved attempt.
+    pub(crate) fn begin_write_intent(
+        &self, key: &str, base_hash: &str, proposed_hash: &str,
+    ) -> StoreResult<()> {
+        self.with_full_sync(|connection| {
+            let written = connection.execute(
+                "INSERT OR IGNORE INTO write_intents (key, base_hash, proposed_hash)
+                 VALUES (?1, ?2, ?3)",
+                params![key, base_hash, proposed_hash],
+            )?;
+            if written != 1 { return Err(StoreError::HoldPresent); }
+            Ok(())
+        })
+    }
+
+    /// A confirmed native write + successful HistoryService and durable
+    /// sync-point update can clear *only its exact* pre-publication intent.
+    /// Any failure leaves a persistent HOLD for forensic review on restart.
+    pub(crate) fn complete_write_intent(
+        &self, key: &str, base_hash: &str, proposed_hash: &str,
+    ) -> StoreResult<()> {
+        self.with_full_sync(|connection| {
+            let cleared = connection.execute(
+                "DELETE FROM write_intents
+                 WHERE key = ?1 AND base_hash = ?2 AND proposed_hash = ?3",
+                params![key, base_hash, proposed_hash],
+            )?;
+            if cleared != 1 { return Err(StoreError::HoldMissing); }
+            Ok(())
+        })
+    }
+
+    fn with_full_sync<T>(
+        &self, operation: impl FnOnce(&Connection) -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        // WAL + synchronous=NORMAL is appropriate for frequent CRDT deltas,
+        // but NOT for an authoritative pre-write crash marker. Switch to
+        // FULL for this one SQLite commit, then restore NORMAL. The DB
+        // connection is already serialized behind DocumentHub.store mutex.
+        self.connection.execute_batch("PRAGMA synchronous = FULL;")?;
+        let result = operation(&self.connection);
+        let restore = self.connection.execute_batch("PRAGMA synchronous = NORMAL;");
+        match (result, restore) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(error), _) => Err(error),
+            (_, Err(error)) => Err(error.into()),
+        }
     }
 
     pub fn load(&self, key: &str) -> StoreResult<Vec<Vec<u8>>> {
@@ -118,6 +213,7 @@ impl DocumentStore {
     }
 
     pub fn forget(&mut self, key: &str) -> StoreResult<()> {
+        if self.write_intent(key)?.is_some() { return Err(StoreError::HoldPresent); }
         let transaction = self.connection.transaction()?;
         forget_in(&transaction, key)?;
         transaction.commit()?;
@@ -127,6 +223,11 @@ impl DocumentStore {
     pub fn relocate(&mut self, from: &str, to: &str) -> StoreResult<()> {
         if from == to {
             return Ok(());
+        }
+        if self.write_intent(from)?.is_some() || self.write_intent(to)?.is_some() {
+            // A rename/relocation cannot silently discard or transfer an
+            // unresolved write attempt to a different document identity.
+            return Err(StoreError::HoldPresent);
         }
         let transaction = self.connection.transaction()?;
         forget_in(&transaction, to)?;
