@@ -43,9 +43,7 @@ impl StagingVolumeGuard {
     /// No mounting or privileged host operation happens in Rust.
     pub fn open(root: &Path) -> Result<Self, VolumeError> {
         let metadata = fs::symlink_metadata(root).map_err(VolumeError::Io)?;
-        if !metadata.file_type().is_dir()
-            || metadata.permissions().mode() & 0o077 != 0
-        {
+        if !metadata.file_type().is_dir() || metadata.permissions().mode() & 0o077 != 0 {
             return Err(VolumeError::UnsafeDirectory);
         }
         let parent = root.parent().ok_or(VolumeError::UnsafeDirectory)?;
@@ -70,18 +68,14 @@ impl StagingVolumeGuard {
     /// becomes accessible to unrelated local users between operations.
     pub fn check(&self) -> Result<(), VolumeError> {
         let metadata = fs::symlink_metadata(&self.root).map_err(VolumeError::Io)?;
-        if !metadata.file_type().is_dir()
-            || metadata.permissions().mode() & 0o077 != 0
-        {
+        if !metadata.file_type().is_dir() || metadata.permissions().mode() & 0o077 != 0 {
             return Err(VolumeError::UnsafeDirectory);
         }
         if metadata.dev() != self.device || metadata.ino() != self.inode {
             return Err(VolumeError::ChangedSinceAdmission);
         }
-        let parent = fs::metadata(
-            self.root.parent().ok_or(VolumeError::UnsafeDirectory)?,
-        )
-        .map_err(VolumeError::Io)?;
+        let parent = fs::metadata(self.root.parent().ok_or(VolumeError::UnsafeDirectory)?)
+            .map_err(VolumeError::Io)?;
         if parent.dev() == metadata.dev() {
             return Err(VolumeError::NotSeparateFilesystem);
         }
