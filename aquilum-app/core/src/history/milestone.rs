@@ -1,4 +1,5 @@
 use super::store;
+use std::borrow::Cow;
 use serde::{Serialize, Serializer};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -75,8 +76,10 @@ impl Serialize for Source {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Snapshot {
-    pub text: String,
+pub struct Snapshot<'a> {
+    // Borrow the already immutable save buffer; never duplicate a large note
+    // merely to decide/persist a history milestone.
+    pub text: Cow<'a, str>,
     pub source: Source,
     pub at: SystemTime,
 }
@@ -87,7 +90,7 @@ pub struct Before<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum MilestonePlan {
+pub enum MilestonePlan<'a> {
     Quiet,
     Skip,
     RevertToPrevious {
@@ -97,8 +100,8 @@ pub enum MilestonePlan {
         id: String,
     },
     CreateNew {
-        baseline: Option<Snapshot>,
-        snapshot: Snapshot,
+        baseline: Option<Snapshot<'a>>,
+        snapshot: Snapshot<'a>,
     },
 }
 
@@ -116,12 +119,12 @@ pub struct Recorded<'a> {
     pub last_edit: Option<SystemTime>,
 }
 
-pub fn plan(
+pub fn plan<'a>(
     device: &str,
-    incoming: &Incoming<'_>,
+    incoming: &Incoming<'a>,
     recorded: &Recorded<'_>,
     now: SystemTime,
-) -> MilestonePlan {
+) -> MilestonePlan<'a> {
     let Incoming {
         source: write_source,
         text: write_text,
@@ -162,7 +165,7 @@ pub fn plan(
     let baseline = if !has_versions {
         disk_before.and_then(|disk| {
             (!disk.text.is_empty() && disk.text != write_text).then(|| Snapshot {
-                text: disk.text.to_owned(),
+                text: Cow::Borrowed(disk.text),
                 source: Source::Start,
                 at: disk.at,
             })
@@ -190,7 +193,7 @@ pub fn plan(
         MilestonePlan::CreateNew {
             baseline,
             snapshot: Snapshot {
-                text: write_text.to_owned(),
+                text: Cow::Borrowed(write_text),
                 source: write_source,
                 at: now,
             },
@@ -287,17 +290,51 @@ mod tests {
             p,
             MilestonePlan::CreateNew {
                 baseline: Some(Snapshot {
-                    text: "исходный".to_owned(),
+                    text: "исходный".to_owned().into(),
                     source: Source::Start,
                     at: at(10)
                 }),
                 snapshot: Snapshot {
-                    text: "исходный + правка".to_owned(),
+                    text: "исходный + правка".to_owned().into(),
                     source: Source::Me,
                     at: at(20)
                 }
             }
         );
+    }
+
+    #[test]
+    fn creating_history_versions_borrows_existing_large_source_buffers() {
+        use std::borrow::Cow;
+
+        let current = "Текущий текст 😀漢字\n".repeat(100_000);
+        let earlier = "Предыдущая версия\r\n".repeat(100_000);
+        let original = Before { text: &earlier, at: at(10) };
+        let incoming = Incoming {
+            source: Source::Me,
+            text: &current,
+            disk_before: Some(&original),
+        };
+        let empty_versions = [];
+        let names = HashMap::new();
+        let recorded = Recorded {
+            versions: &empty_versions,
+            names: &names,
+            latest_text: None,
+            previous_text: None,
+            last_edit: None,
+        };
+
+        let planned = plan("dev1", &incoming, &recorded, at(20));
+        let MilestonePlan::CreateNew { baseline: Some(baseline), snapshot } = planned else {
+            panic!("an initial edit must preserve a baseline and new snapshot");
+        };
+        assert!(matches!(&baseline.text, Cow::Borrowed(_)));
+        assert!(matches!(&snapshot.text, Cow::Borrowed(_)));
+        assert_eq!(baseline.text.as_bytes().as_ptr(), earlier.as_bytes().as_ptr());
+        assert_eq!(snapshot.text.as_bytes().as_ptr(), current.as_bytes().as_ptr());
+        assert_eq!(baseline.text.as_ref(), earlier);
+        assert_eq!(snapshot.text.as_ref(), current);
     }
 
     #[test]
@@ -351,7 +388,7 @@ mod tests {
             MilestonePlan::CreateNew {
                 baseline: None,
                 snapshot: Snapshot {
-                    text: "новая мысль".to_owned(),
+                    text: "новая мысль".to_owned().into(),
                     source: Source::Me,
                     at: at(20) + IDLE + Duration::from_secs(1),
                 }
@@ -383,7 +420,7 @@ mod tests {
             MilestonePlan::CreateNew {
                 baseline: None,
                 snapshot: Snapshot {
-                    text: "текст".to_owned(),
+                    text: "текст".to_owned().into(),
                     source: Source::Me,
                     at: at(20) + CAP + Duration::from_secs(1),
                 }
@@ -416,7 +453,7 @@ mod tests {
             MilestonePlan::CreateNew {
                 baseline: None,
                 snapshot: Snapshot {
-                    text: big,
+                    text: big.clone().into(),
                     source: Source::Me,
                     at: at(25),
                 }
@@ -448,7 +485,7 @@ mod tests {
             MilestonePlan::CreateNew {
                 baseline: None,
                 snapshot: Snapshot {
-                    text: "правка агента".to_owned(),
+                    text: "правка агента".to_owned().into(),
                     source: Source::Agent,
                     at: at(25),
                 }

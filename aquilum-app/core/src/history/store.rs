@@ -238,7 +238,7 @@ pub fn history_dir(base: &Path, relative: &Path) -> PathBuf {
 pub(super) fn write_version(
     dir: &Path,
     device: &str,
-    snapshot: &Snapshot,
+    snapshot: &Snapshot<'_>,
 ) -> Result<PathBuf, FileCommandError> {
     let label = snapshot.source.file_label();
     // Distinct source labels can otherwise share a millisecond, causing history
@@ -255,7 +255,7 @@ pub(super) fn write_version(
         format!("{at:013}_{device}_{label}{VERSION_EXTENSION}")
     });
     fs::create_dir_all(dir)?;
-    write_file_atomic_impl(&path, &snapshot.text, None)?;
+    write_file_atomic_impl(&path, snapshot.text.as_ref(), None)?;
     Ok(path)
 }
 
@@ -480,9 +480,9 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    fn snapshot(text: &str, source: Source, seconds: u64) -> Snapshot {
+    fn snapshot(text: &str, source: Source, seconds: u64) -> Snapshot<'static> {
         Snapshot {
-            text: text.to_owned(),
+            text: text.to_owned().into(),
             source,
             at: UNIX_EPOCH + Duration::from_secs(seconds),
         }
@@ -655,7 +655,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let dir = history_dir(directory.path(), Path::new("same-millisecond.md"));
         let at = UNIX_EPOCH + Duration::from_millis(5);
-        let make = |text: &str, source| Snapshot { text: text.to_owned(), source, at };
+        let make = |text: &str, source| Snapshot { text: text.to_owned().into(), source, at };
         let first = write_version(&dir, "dev", &make("first", Source::Agent)).unwrap();
         let second = write_version(&dir, "dev", &make("second", Source::Me)).unwrap();
         let found = versions(&dir);
@@ -672,7 +672,7 @@ mod tests {
         let dir = history_dir(directory.path(), Path::new("Идея.md"));
         let at = UNIX_EPOCH + Duration::from_millis(20_000);
         let snapshot = |text: &str, source| Snapshot {
-            text: text.to_owned(),
+            text: text.to_owned().into(),
             source,
             at,
         };
