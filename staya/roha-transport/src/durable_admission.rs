@@ -162,12 +162,12 @@ fn decode_snapshot(
         return Err(DurableError::CorruptOrUnknownSnapshot);
     }
     let (data, checksum) = content.split_at(content.len() - CHECKSUM_LEN);
-    if blake3::hash(data).as_bytes() != checksum {
+    if blake3::hash(data).as_bytes().as_slice() != checksum {
         return Err(DurableError::CorruptOrUnknownSnapshot);
     }
     let mut pos = 0usize;
-    if take(data, &mut pos, MAGIC.len())? != MAGIC
-        || take(data, &mut pos, 2)? != FORMAT_VERSION.to_le_bytes()
+    if take(data, &mut pos, MAGIC.len())? != MAGIC.as_slice()
+        || take(data, &mut pos, 2)? != FORMAT_VERSION.to_le_bytes().as_slice()
     {
         return Err(DurableError::CorruptOrUnknownSnapshot);
     }
@@ -502,7 +502,10 @@ mod tests {
         assert_eq!(reopened.snapshot().unwrap().generation, generation);
         let staging = dir.path().join("test-only-staged-object");
         fs::write(&staging, data).unwrap();
-        reopened.release_after_cleanup(key, || fs::remove_file(&staging)).unwrap();
+        reopened.release_after_cleanup(key, || {
+            fs::remove_file(&staging)?;
+            File::open(dir.path())?.sync_all()
+        }).unwrap();
         assert_eq!(reopened.snapshot().unwrap().reserved_bytes, 0);
     }
 
