@@ -28,6 +28,34 @@ const NOT_FOUND: u8 = 3;
 
 pub(crate) fn sha(bytes: &[u8]) -> [u8; 32] { *blake3::hash(bytes).as_bytes() }
 
+/// UDP datagram payload statistics observed on *one* QUIC connection using
+/// the pinned Roha/noq forks. NOT IP/UDP headers, relay overhead, other
+/// processes, or an enforceable interface-level traffic budget.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WireUsage {
+    pub udp_tx_bytes: u64,
+    pub udp_rx_bytes: u64,
+    pub udp_tx_datagrams: u64,
+    pub udp_rx_datagrams: u64,
+    pub connections: u64,
+}
+impl WireUsage {
+    pub fn sample(conn: &Connection) -> Self {
+        let s = conn.stats();
+        Self { udp_tx_bytes: s.udp_tx.bytes, udp_rx_bytes: s.udp_rx.bytes,
+               udp_tx_datagrams: s.udp_tx.datagrams,
+               udp_rx_datagrams: s.udp_rx.datagrams, connections: 1 }
+    }
+    pub fn add(&mut self, rhs: Self) {
+        self.udp_tx_bytes = self.udp_tx_bytes.saturating_add(rhs.udp_tx_bytes);
+        self.udp_rx_bytes = self.udp_rx_bytes.saturating_add(rhs.udp_rx_bytes);
+        self.udp_tx_datagrams = self.udp_tx_datagrams.saturating_add(rhs.udp_tx_datagrams);
+        self.udp_rx_datagrams = self.udp_rx_datagrams.saturating_add(rhs.udp_rx_datagrams);
+        self.connections = self.connections.saturating_add(rhs.connections);
+    }
+}
+
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub len: u64,
@@ -158,6 +186,15 @@ impl Server {
     }
     async fn handle_connection(&self, conn: Connection) -> Result<()> {
         let peer = conn.remote_id();
+        let result = self.handle_connection_inner(&conn, peer).await;
+        let usage = WireUsage::sample(&conn);
+        println!("SERVER_WIRE_METRICS peer={peer} udp_tx_bytes={} udp_rx_bytes={} udp_tx_datagrams={} udp_rx_datagrams={}",
+            usage.udp_tx_bytes, usage.udp_rx_bytes, usage.udp_tx_datagrams, usage.udp_rx_datagrams);
+        use std::io::Write as _;
+        let _ = std::io::stdout().flush();
+        result
+    }
+    async fn handle_connection_inner(&self, conn: &Connection, peer: EndpointId) -> Result<()> {
         if !self.allowed.contains(&peer) {
             conn.close(403u32.into(), b"denied");
             return Ok(());
