@@ -3,6 +3,7 @@
 //! Explicit quotas below bound file payload bytes, NOT actual wire bytes including QUIC/IP.
 
 use anyhow::{bail, ensure, Context, Result};
+pub mod durable;
 use iroh::{endpoint::{presets, Connection}, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, Mutex}};
 use tokio::{sync::Semaphore, time::{timeout, Duration}};
@@ -23,7 +24,7 @@ const BAD_REQUEST: u8 = 1;
 const QUOTA: u8 = 2;
 const NOT_FOUND: u8 = 3;
 
-fn sha(bytes: &[u8]) -> [u8; 32] { *blake3::hash(bytes).as_bytes() }
+pub(crate) fn sha(bytes: &[u8]) -> [u8; 32] { *blake3::hash(bytes).as_bytes() }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
@@ -39,7 +40,7 @@ impl Manifest {
         ensure!(self.parts.len() == required && required <= MAX_CHUNKS, "invalid chunk count");
         Ok(())
     }
-    fn encode(&self) -> Vec<u8> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(52 + self.parts.len() * 32);
         out.extend(MANIFEST_MAGIC);
         out.extend(self.len.to_be_bytes());
@@ -84,7 +85,7 @@ impl Book {
         manifest.validate()?;
         Ok(Self {bytes: Arc::new(bytes), manifest})
     }
-    fn part(&self, i: usize) -> Result<&[u8]> {
+    pub(crate) fn part(&self, i: usize) -> Result<&[u8]> {
         let len = self.manifest.part_len(i)?;
         Ok(&self.bytes[i*CHUNK_SIZE..i*CHUNK_SIZE+len])
     }
@@ -189,6 +190,17 @@ pub async fn private_endpoint(secret: Option<SecretKey>) -> Result<Endpoint> {
     Ok(builder.bind().await?)
 }
 
+/// Explicit direct-only UDP endpoint for the two-process LAN/WAN laboratory.
+/// It does not use an external relay or the N0 address lookup service.
+pub async fn direct_endpoint(secret: SecretKey, bind_addr: SocketAddr) -> Result<Endpoint> {
+    Ok(Endpoint::builder(presets::Minimal)
+        .clear_ip_transports()
+        .bind_addr(bind_addr)?
+        .secret_key(secret)
+        .alpns(vec![ALPN.to_vec()])
+        .bind().await?)
+}
+
 pub fn loopback_addr(endpoint: &Endpoint) -> Result<EndpointAddr> {
     let addr: SocketAddr = endpoint.bound_sockets().into_iter().find(|addr| addr.is_ipv4())
         .context("missing IPv4 socket")?;
@@ -204,6 +216,7 @@ impl PartialDownload {
         manifest.validate()?;
         Ok(Self { parts: vec![None; manifest.parts.len()], manifest })
     }
+    pub fn verified_part(&self, index: usize) -> Option<&[u8]> { self.parts.get(index)?.as_deref() }
     pub fn verified_count(&self) -> usize { self.parts.iter().filter(|part| part.is_some()).count() }
     pub fn is_complete(&self) -> bool { self.verified_count() == self.parts.len() }
     pub fn add_part(&mut self, index: usize, bytes: Vec<u8>) -> Result<()> {
