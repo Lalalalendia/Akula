@@ -1,0 +1,83 @@
+name: Vello half-tie whole-frame pixel A/B (diagnostic)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
+      - '.github/scripts/summarize-vello-half-tie-frame-ab.py'
+      - '.github/workflows/native-vello-half-tie-frame-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-half-tie-frame-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-frame-pixels:
+    name: Original versus 0.5001 quantization, same editor scenes on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-half-tie-full-frame-v1
+          cache-workspace-crates: true
+      - name: Native Linux GUI dependencies and reproducibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          git rev-parse HEAD
+          rustc --version
+          mkdir -p frame-ab-original frame-ab-patched
+      - name: Original Vello / normal real editor / exact full frames
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_WORKLOAD: normal
+          AQ_CROSSOVER_DUMP_REFERENCE_DIR: "${{ github.workspace }}/frame-ab-original"
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/half-tie-ab-original.log"
+      - name: Overlay only published Vello Common quantizer addend
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/ci_vello_half_tie_overlay.py --bias 0.5001
+      - name: Patched Vello / same normal editor / exact full frames
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_WORKLOAD: normal
+          AQ_CROSSOVER_DUMP_REFERENCE_DIR: "${{ github.workspace }}/frame-ab-patched"
+        run: |
+          set -euo pipefail
+          cargo test --release -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/half-tie-ab-patched.log"
+      - name: Quantify every channel change across 8 full frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/summarize-vello-half-tie-frame-ab.py frame-ab-original frame-ab-patched --output half-tie-ab-summary.md
+          cat half-tie-ab-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve precise A/B pixels and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-half-tie-frame-ab-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            half-tie-ab-*.log
+            half-tie-ab-summary.md
+            frame-ab-original/*.u32le
+            frame-ab-patched/*.u32le
