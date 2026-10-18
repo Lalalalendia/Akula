@@ -25,6 +25,31 @@ For one already verified, staged S3 revision, the internal Core host requires tw
 
 The targeted OS CI runs the real `sync-s3` feature on Windows and macOS; the live MinIO job covers two independent Core registrations, shared cloud VaultId and immutable S3 content. A separate child-process regression holds the exact same external OS lock; the losing S3 writer cannot create an operation ticket or local file. The ancestor namespace remains same-user mutable, so this is cooperative serialization and defensive detection, **not** an attacker-proof production capability.
 
+## SYNC-04g-3d — existing-note history namespace and event guard
+
+[PR #210](https://github.com/Lalalalendia/Akula/pull/210) was merged: unlike the
+superseded duplicate #209, it uses an explicit expected BLAKE3 hash/CAS for
+existing-note writes, requires durable external lock custody, and distinguishes
+`Denied` from `NeedsReview` (including any failure after entering the file
+write or during HistoryService persistence). It remains **opt-in**, not the
+default native UI/editor/MCP save path.
+
+This follow-up closes two specific acceptance gaps without adding another
+writer implementation:
+
+- `existing_note` refuses every `.aquilum` component in its relative path,
+  including the `.AQUILUM` and mixed-case NTFS aliases, **before** opening
+  files. Historical version objects may be Markdown but are not editable
+  user notes. Other ordinary Markdown notes remain writable with CAS.
+- An actual successful HistoryService save triggers a synchronous
+  `NoteHistoryChanged` callback which reacquires the very same pre-existing
+  external OS lock. This is only possible after the writer has released it.
+  Linux, macOS and Windows run the dedicated regression in pinned-read CI.
+
+The contract remains cooperative and does not protect against hostile same-user
+path swaps or grant confirmed S3 sync baseline, retry, rename, delete, garbage
+collection or default editor integration.
+
 ## Lock order and safety boundary
 
 Cooperating order: (1) one externally scoped OS lock, (2) File Gate process-global mutex during primary disk work, released, then (3) HistoryService process-global files mutex and state mutex during version persistence. The test holds step (1) across the entire File Gate call and until step (3) completes. Never acquire File Gate again while holding a HistoryService mutex; never emit synchronous callbacks that re-enter the same OS lock; do not use a blocking lock acquisition that could deadlock with existing process-global locks.
