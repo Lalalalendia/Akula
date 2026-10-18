@@ -13,6 +13,7 @@
 //! schema is an error, not an empty enrollment roster.
 
 use super::VaultId;
+use super::host_ledger_identity::HostLedgerIdentity;
 use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -89,6 +90,8 @@ impl From<rusqlite::Error> for HostCustodyError {
 #[allow(dead_code)]
 pub(crate) struct SharedHostCustodyRegistry {
     conn: Connection,
+    /// Pinned DB name+parent; detects namespace switches, not hostile ACL bypass.
+    identity: HostLedgerIdentity,
 }
 
 #[allow(dead_code)]
@@ -135,6 +138,7 @@ impl SharedHostCustodyRegistry {
         #[cfg(unix)]
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         drop(file);
+        let identity = HostLedgerIdentity::capture(path)?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&conn)?;
         conn.execute_batch(
@@ -148,7 +152,8 @@ impl SharedHostCustodyRegistry {
              PRAGMA user_version = 1;
              COMMIT;",
         )?;
-        Ok(Self { conn })
+        identity.recheck()?;
+        Ok(Self { conn, identity })
     }
 
     /// Ordinary Core must use this method: NEVER open with CREATE, auto
@@ -162,6 +167,7 @@ impl SharedHostCustodyRegistry {
         if !entry.is_file() || entry.file_type().is_symlink() {
             return Err(HostCustodyError::InvalidHostLocation);
         }
+        let identity = HostLedgerIdentity::capture(path)?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&conn)?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -189,7 +195,8 @@ impl SharedHostCustodyRegistry {
                 decode_row(row)?;
             }
         }
-        Ok(Self { conn })
+        identity.recheck()?;
+        Ok(Self { conn, identity })
     }
 
     /// Insert-only registration by physically identified root, with
