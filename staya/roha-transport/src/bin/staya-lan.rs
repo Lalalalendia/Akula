@@ -173,7 +173,9 @@ mod tests {
         save_key_file(&path, &key).expect("create private key file");
         let reference = format!("@{}", path.display());
         assert_eq!(
-            secret_from_arg(&reference).expect("read secret file").public(),
+            secret_from_arg(&reference)
+                .expect("read secret file")
+                .public(),
             key.public()
         );
         assert!(save_key_file(&path, &SecretKey::generate()).is_err());
