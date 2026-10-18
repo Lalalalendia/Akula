@@ -200,8 +200,8 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
     let _ = h.root.redraw();
 
     let (w, hh) = (width as u16, height as u16);
-    let mut serial = Renderer::new(0);
-    let mut parallel = Renderer::new(2);
+    let mut serial = Renderer::new_fixed_for_test(0);
+    let mut parallel = Renderer::new_fixed_for_test(2);
     let mut samples_serial = Vec::new();
     let mut samples_parallel = Vec::new();
     let mut shift_count = 0usize;
