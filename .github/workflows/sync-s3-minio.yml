@@ -13,6 +13,7 @@ on:
       - 'aquilum-app/core/src/sync/s3.rs'
       - 'aquilum-app/core/src/sync/s3_manifest.rs'
       - 'aquilum-app/core/src/sync/s3_manifest_delta.rs'
+      - 'aquilum-app/core/src/sync/s3_coord_v2.rs'
       - 'aquilum-app/core/src/sync/s3_head_probe.rs'
       - 'aquilum-app/core/src/sync/s3_delta_walker.rs'
       - 'aquilum-app/core/src/sync/s3_remote_anchor.rs'
@@ -110,6 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_manifest::tests
+          cargo test --locked -p aquilum-core --features sync-s3 s3_coord_v2::tests
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::manifest::tests -- --skip minio_
       - name: Verify durable profile-bound remote anchors and delta lineage
         shell: bash
