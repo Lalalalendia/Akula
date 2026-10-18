@@ -14,7 +14,7 @@ use iroh::{endpoint::presets, protocol::Router, Endpoint, EndpointId, RelayMode,
 use iroh_blobs::{
     api::blobs::BlobStatus,
     get::request::get_blob,
-    protocol::{ChunkRangesSeq, GetManyRequest, ObserveRequest, PushRequest},
+    protocol::{ChunkRanges, ChunkRangesExt, ChunkRangesSeq, GetManyRequest, GetRequest, ObserveRequest, PushRequest},
     provider::events::{
         AbortReason, ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage,
         RequestMode, ThrottleMode,
@@ -310,4 +310,75 @@ async fn compare_real_quic_verified_stream_against_existing_staya_frames() {
     })
     .await
     .expect("bounded benchmark did not finish");
+}
+
+
+#[tokio::test(flavor = "current_thread")]
+async fn resume_missing_verified_ranges_after_new_quic_connection() {
+    tokio::time::timeout(TEST_DEADLINE, async {
+        let sender_key = SecretKey::generate();
+        let recipient_key = SecretKey::generate();
+        let data = bytes(2 * 1024 * 1024 + 13);
+        let store = MemStore::new();
+        let tag = store.add_slice(&data).await.expect("seed authorized blob");
+        let hash = tag.hash;
+        let (events, worker) = restricted_events(recipient_key.public(), HashSet::from([hash]));
+        let provider = local_endpoint(sender_key).await;
+        let router = Router::builder(provider)
+            .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, Some(events)))
+            .spawn();
+        let peer = local_endpoint(recipient_key).await;
+        let local = MemStore::new();
+
+        // A bounded 64KiB prefix is verified and staged only in the isolated MemStore.
+        let first = peer.connect(router.endpoint().addr(), iroh_blobs::ALPN)
+            .await.expect("first QUIC connection");
+        let prefix = GetRequest::builder()
+            .root(ChunkRanges::bytes(..(64 * 1024)))
+            .build(hash);
+        let initial_stats = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            local.remote().execute_get(first.clone(), prefix).complete(),
+        ).await.expect("prefix fetch not stalled").expect("prefix accepted");
+        first.close(0u8.into(), b"simulate reconnect");
+        drop(first);
+
+        let pre_resume = local.remote().local(hash).await.expect("inspect verified prefix");
+        assert!(!pre_resume.is_complete(), "prefix unexpectedly completed whole blob");
+        assert!(
+            pre_resume.local_bytes() >= 64 * 1024,
+            "first verified 64KiB missing from staging"
+        );
+        assert!(
+            pre_resume.local_bytes() < data.len() as u64,
+            "partial prefix was counted as a complete blob"
+        );
+        // The *existing locally verified* range set computes the missing
+        // ranges; peer cannot claim an unauthenticated baseline.
+        let missing = pre_resume.missing();
+
+        // Open another QUIC connection, request only missing bytes, then
+        // verify exact final content independently. No File Gate or filesystem.
+        let second = peer.connect(router.endpoint().addr(), iroh_blobs::ALPN)
+            .await.expect("replacement QUIC connection");
+        let resumed_stats = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            local.remote().execute_get(second.clone(), missing).complete(),
+        ).await.expect("resume not stalled").expect("verified missing ranges");
+        assert!(
+            local.remote().local(hash).await.expect("final status").is_complete(),
+            "resumed object is not complete"
+        );
+        let restored = local.get_bytes(hash).await.expect("complete bytes");
+        assert_eq!(restored.as_ref(), data.as_slice(), "resume reconstructed wrong bytes");
+        println!(
+            "P2P_BLOB_RESUME size={} initial_verified_bytes={} initial_protocol_bytes={} resumed_protocol_bytes={} after_reconnect=true same_store=true durable_restart=false",
+            data.len(), pre_resume.local_bytes(), initial_stats.total_bytes_read(),
+            resumed_stats.total_bytes_read(),
+        );
+        second.close(0u8.into(), b"done");
+        router.shutdown().await.expect("provider shutdown");
+        peer.close().await;
+        worker.abort();
+    }).await.expect("bounded QUIC resume fixture");
 }
