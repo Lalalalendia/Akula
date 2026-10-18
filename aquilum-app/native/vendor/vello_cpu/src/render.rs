@@ -1440,9 +1440,12 @@ mod tests {
         // Further slots cover tile boundaries and alternate atlas rows.
         let slots = [(381, 24), (416, 24), (24, 149), (34, 83), (105, 11)];
         let reference = paint(slots[0], false);
-        let expected: alloc::vec::Vec<_> = (0..9)
-            .flat_map(|y| (0..11).map(move |x| reference.sample(slots[0].0 + x, slots[0].1 + y)))
-            .collect();
+        let mut expected = alloc::vec::Vec::with_capacity(11 * 9);
+        for y in 0..9 {
+            for x in 0..11 {
+                expected.push(reference.sample(slots[0].0 + x, slots[0].1 + y));
+            }
+        }
 
         let mut total_bad = 0_usize;
         for slot in slots {
