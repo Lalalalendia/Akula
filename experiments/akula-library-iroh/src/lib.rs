@@ -968,7 +968,7 @@ mod tests {
         let mut timed_out = 0usize;
         let mut times = Vec::with_capacity(STRANGERS);
         for job in jobs {
-            let (leaked, expired, elapsed) = timeout(Duration::from_secs(18), job).await???;
+            let (leaked, expired, elapsed) = timeout(Duration::from_secs(18), job).await??;
             ensure!(!leaked, "unknown QUIC key obtained a private book manifest");
             denied += 1;
             timed_out += usize::from(expired);
