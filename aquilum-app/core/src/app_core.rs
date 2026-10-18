@@ -354,9 +354,11 @@ impl Core {
         // same-UID-writable SQLite rows. Until a privileged broker owns the
         // SQLite writer epoch, even verified receipts grant NO S3 enrollment.
         #[cfg(feature = "sync-installed-host-unix-root-witness")]
-        return Err(FileCommandError::Task {
-            message: "host custody enrollment HOLD: privileged SQLite broker not implemented".into(),
-        });
+        if self.installed_host_required {
+            return Err(FileCommandError::Task {
+                message: "host custody enrollment HOLD: privileged SQLite broker not implemented".into(),
+            });
+        }
         // Keep the stable outward S3 enrollment diagnostic even when the
         // shared opener refuses an unavailable or replaced install witness.
         // The user must still see HOLD rather than a retryable empty roster.
@@ -459,9 +461,11 @@ impl Core {
         // Keep ALL ordinary protected writers on HOLD until the actual
         // installer-controlled SQLite broker mediates the shared epoch.
         #[cfg(feature = "sync-installed-host-unix-root-witness")]
-        return Err(refused(
-            "host custody HOLD: privileged SQLite broker not implemented".into()
-        ));
+        if self.installed_host_required {
+            return Err(refused(
+                "host custody HOLD: privileged SQLite broker not implemented".into()
+            ));
+        }
 
         let roots = self.ui_state.workspace_roots()
             .map_err(|error| refused(format!("host root registration unavailable: {error:?}")))?;
