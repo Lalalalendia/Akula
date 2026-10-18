@@ -1,0 +1,100 @@
+name: Staya FED-INVENTORY-01 and upstream AuthorHeads (research only)
+
+on:
+  pull_request:
+    paths:
+      - "experiments/staya-fed-inventory-01/**"
+      - "experiments/staya-authorheads-01/**"
+      - ".github/workflows/staya-fed-inventory-01.yml"
+      - "docs/sync/fed-inventory-01-research.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-inventory:
+    name: Read-only three-peer inventory and independent full-list baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91.0"
+      - uses: SwatinEm/rust-cache@v2
+        with:
+          workspaces: experiments/staya-fed-inventory-01
+          key: fed-inventory-01
+      - name: Resolve test-only dependencies (never touch product lockfiles)
+        run: cargo generate-lockfile --manifest-path experiments/staya-fed-inventory-01/Cargo.toml
+      - name: Verify bounded inventory against exact full-list baseline
+        run: |
+          set -o pipefail
+          cargo test --locked --manifest-path experiments/staya-fed-inventory-01/Cargo.toml --all-targets -- --nocapture 2>&1 | tee fed-inventory-tests.log
+      - name: Print deterministic case measurements (not real network wire bytes)
+        run: |
+          set -o pipefail
+          cargo run --locked --manifest-path experiments/staya-fed-inventory-01/Cargo.toml --release 2>&1 | tee fed-inventory-cases.log
+      - name: Upload bounded read-only findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fed-inventory-01
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            experiments/staya-fed-inventory-01/Cargo.lock
+            fed-inventory-tests.log
+            fed-inventory-cases.log
+
+  upstream-authorheads:
+    name: Pinned upstream AuthorHeads control GREEN and collision expected RED
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91.0"
+      - uses: SwatinEm/rust-cache@v2
+        with:
+          workspaces: experiments/staya-authorheads-01
+          key: upstream-heads-01010
+      - name: Resolve pinned upstream package and our own fork graph
+        run: |
+          cargo generate-lockfile --manifest-path experiments/staya-authorheads-01/Cargo.toml
+          cargo tree --locked --manifest-path experiments/staya-authorheads-01/Cargo.toml -i iroh-docs
+      - name: Confirm distinct timestamp control is GREEN
+        run: |
+          cargo test --locked --manifest-path experiments/staya-authorheads-01/Cargo.toml --test upstream_collision distinct_timestamps_are_preserved_control_green -- --exact --nocapture
+      - name: Reproduce real upstream timestamp-collision RED (test failure is expected)
+        run: |
+          set +e
+          cargo test --locked --manifest-path experiments/staya-authorheads-01/Cargo.toml --test upstream_collision equal_timestamps_for_two_authors_must_both_survive_expected_red -- --exact --nocapture > upstream-heads-red.log 2>&1
+          status=$?
+          set -e
+          cat upstream-heads-red.log
+          if [ "$status" -eq 0 ]; then
+            echo "Unexpected GREEN: upstream behavior may have changed; inspect and update hypothesis."
+            exit 1
+          fi
+          grep -F "STAYA_EXPECTED_HEADS_COLLISION_LEN2" upstream-heads-red.log
+          grep -F "left: 1" upstream-heads-red.log
+          echo "EXPECTED_RED_CONFIRMED: one of two authors with equal timestamps was dropped at encode(None)."
+      - name: Upload upstream reproducer output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fed-authorheads-upstream-red
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            experiments/staya-authorheads-01/Cargo.lock
+            upstream-heads-red.log
