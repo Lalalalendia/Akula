@@ -565,13 +565,12 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 if let Some(ref key) = cache_key
                     && let Some(cached_slot) = self.atlas_cacher.get(key)
                 {
-                    // Use fractional scaled_bbox dimensions to preserve sub-pixel accuracy.
-                    let area = Rect::new(
-                        0.0,
-                        0.0,
-                        metrics.scaled_bbox.width(),
-                        metrics.scaled_bbox.height(),
-                    );
+                    // The atlas stores whole device pixels. The ink bbox may
+                    // start at a fractional coordinate; preserve that fraction
+                    // inside the cached sprite instead of resampling it with
+                    // a fractional output translation. See Vello #1983.
+                    let cache_bbox = snapped_colr_bbox(metrics.scaled_bbox);
+                    let area = Rect::new(0.0, 0.0, cache_bbox.width(), cache_bbox.height());
                     render_cached_glyph(
                         renderer,
                         cached_slot,
@@ -1451,6 +1450,15 @@ fn calculate_colr_metrics<'a>(
     }
 }
 
+/// Snap the intermediate COLR raster bounds *outward* to the pixel grid.
+///
+/// The difference between the exact ink origin and its floor is rendered into
+/// the sprite as coverage. Placing the sprite at an integer pixel origin then
+/// avoids re-sampling (and losing) that fractional coverage in the atlas.
+fn snapped_colr_bbox(bounds: Rect) -> Rect {
+    Rect::new(bounds.x0.floor(), bounds.y0.floor(), bounds.x1.ceil(), bounds.y1.ceil())
+}
+
 /// Calculate transform for COLR glyphs.
 ///
 /// This uses pre-calculated metrics to compute the final positioning transform for a COLR glyph,
@@ -1483,7 +1491,10 @@ fn calculate_colr_transform(metrics: &ColrMetrics) -> Affine {
         )
         // Shift the pixmap back so that the bbox aligns with the original position
         // of where the glyph should be placed.
-        * Affine::translate((metrics.scaled_bbox.x0, metrics.scaled_bbox.y0))
+        * Affine::translate((
+            metrics.scaled_bbox.x0.floor(),
+            metrics.scaled_bbox.y0.floor(),
+        ))
 }
 
 /// Create COLR glyph data with intermediate texture parameters.
@@ -1497,15 +1508,13 @@ fn create_colr_glyph<'a>(
     normalized_coords: &'a [skrifa::instance::NormalizedCoord],
     font_info: FontInfo,
 ) -> GlyphType<'a> {
-    let (pix_width, pix_height) = (
-        metrics.scaled_bbox.width().ceil() as u16,
-        metrics.scaled_bbox.height().ceil() as u16,
-    );
+    let cache_bbox = snapped_colr_bbox(metrics.scaled_bbox);
+    let (pix_width, pix_height) = (cache_bbox.width() as u16, cache_bbox.height() as u16);
 
     let draw_transform =
         // Shift everything so that the bbox starts at (0, 0) and the whole visible area of
         // the glyph will be contained in the intermediate pixmap.
-        Affine::translate((-metrics.scaled_bbox.x0, -metrics.scaled_bbox.y0)) *
+        Affine::translate((-cache_bbox.x0, -cache_bbox.y0)) *
         // Scale down to the actual size that the COLR glyph will have in device units.
         Affine::scale_non_uniform(metrics.scale_factor_x, metrics.scale_factor_y);
 
@@ -1514,8 +1523,8 @@ fn create_colr_glyph<'a>(
     let area = Rect::new(
         0.0,
         0.0,
-        metrics.scaled_bbox.width(),
-        metrics.scaled_bbox.height(),
+        cache_bbox.width(),
+        cache_bbox.height(),
     );
 
     let location = LocationRef::new(normalized_coords);

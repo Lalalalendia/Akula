@@ -16,26 +16,46 @@ const TEST_COLR_FONT_BASE64: &str = "AAEAAAAMAIAAAwBAQ09MUhJoDj0AAAJcAAAAUkNQQUz
 
 fn glyph(font: &FontData, id: u32, size: u16, workers: u16, atlas_cache: bool) -> Vec<u8> {
     let settings = RenderSettings { num_threads: workers, ..RenderSettings::default() };
-    let mut ctx = RenderContext::new_with(size, size, settings);
     let mut resources = Resources::default();
-    if id == 1 {
-        ctx.set_paint(AlphaColor::<Srgb>::from_rgba8(242, 177, 52, 255));
+    let use_atlas = atlas_cache && size <= 128;
+    // First draw fills the atlas; second draws the same glyph again with
+    // identical retained Resources and must exercise the cache-hit path.
+    let passes = if use_atlas { 2 } else { 1 };
+    let mut first: Option<Vec<u8>> = None;
+    let mut output = Vec::new();
+    for pass in 0..passes {
+        let mut ctx = RenderContext::new_with(size, size, settings);
+        if id == 1 {
+            ctx.set_paint(AlphaColor::<Srgb>::from_rgba8(242, 177, 52, 255));
+        }
+        ctx.set_transform(Affine::translate((0.0, f64::from(size))));
+        ctx.glyph_run(&mut resources, font)
+            .font_size(f32::from(size))
+            .atlas_cache(atlas_cache)
+            .hint(false)
+            .fill_glyphs(std::iter::once(Glyph { id, x: 0.0, y: 0.0 }))
+            .expect("draw synthetic COLR glyph");
+        ctx.flush();
+        let mut pixmap = Pixmap::new(size, size);
+        ctx.render_with(
+            &mut pixmap,
+            &mut resources,
+            RasterizerSettings { target_init: TargetInit::Clear(WHITE), ..RasterizerSettings::default() },
+        );
+        let pixels = pixmap.data_as_u8_slice().to_vec();
+        if pass == 0 {
+            first = Some(pixels.clone());
+        } else {
+            assert_eq!(pixels, first.as_ref().unwrap().as_slice(),
+                "atlas cache hit must match miss exactly: gid={id}, size={size}, workers={workers}");
+        }
+        output = pixels;
     }
-    ctx.set_transform(Affine::translate((0.0, f64::from(size))));
-    ctx.glyph_run(&mut resources, font)
-        .font_size(f32::from(size))
-        .atlas_cache(atlas_cache)
-        .hint(false)
-        .fill_glyphs(std::iter::once(Glyph { id, x: 0.0, y: 0.0 }))
-        .expect("draw synthetic COLR glyph");
-    ctx.flush();
-    let mut pixmap = Pixmap::new(size, size);
-    ctx.render_with(
-        &mut pixmap,
-        &mut resources,
-        RasterizerSettings { target_init: TargetInit::Clear(WHITE), ..RasterizerSettings::default() },
-    );
-    pixmap.data_as_u8_slice().to_vec()
+    if use_atlas {
+        assert!(resources.glyph_atlas_summary().is_some_and(|(_, _, glyphs)| glyphs > 0),
+            "atlas_cache=true should actually populate the glyph atlas for gid={id} size={size}");
+    }
+    output
 }
 
 fn compare_pixels(actual: &[u8], reference: &[u8], glyph: u32, size: u16, workers: u16, atlas_cache: bool) {
