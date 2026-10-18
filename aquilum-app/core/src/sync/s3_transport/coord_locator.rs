@@ -23,6 +23,10 @@ use crate::sync::{
 
 const SCHEMA: u16 = 2;
 const MAX_LOCATOR_BYTES: usize = 2048;
+// Deliberately the generic V1 walker ceiling, NOT a new wire format.
+// Only the separately named advisory long-offline API uses this budget.
+// 128 * 256 remains inside S3ManifestDeltaLimits' 32,768 shard-ref cap.
+const MAX_LONG_OFFLINE_GENERATIONS: usize = 128;
 
 /// Only advisory immutable metadata. No local paths or credentials, no
 /// publisher capability, no confirmed baseline or mutable current-root write.
@@ -119,6 +123,46 @@ impl AwsS3ProbeClient {
         previous_pinned: &S3PinnedRevisionSnapshot,
         previous_metadata: &S3VerifiedRevisionMetadataStore,
     ) -> Result<S3CoordSelectivePacksPreview, S3CoordOfflineChainError> {
+        self.inspect_v2_offline_selective_packs_discovered_bounded(
+            scope, journal, previous_pinned, previous_metadata,
+            MAX_OFFLINE_GENERATIONS,
+        ).await
+    }
+
+    /// Explicit long-offline read-only inspection of 9..=128 missed V1
+    /// generations, grouped into eight-generation LOCATOR windows without
+    /// ever promoting a temporary checkpoint or changing the persisted
+    /// original anchor. No native apply, writer authority or baseline.
+    ///
+    /// Global 16 MiB manifest/letter/pack and 32 MiB new-shard budgets still
+    /// apply: more generations do not grant unlimited downloads. All V2
+    /// letters and parent DAG are verified by the single 02e reader at end.
+    pub async fn inspect_v2_long_offline_selective_packs_discovered(
+        &self,
+        scope: &S3RemoteAnchorScope,
+        journal: &S3RemoteAnchorJournal,
+        previous_pinned: &S3PinnedRevisionSnapshot,
+        previous_metadata: &S3VerifiedRevisionMetadataStore,
+    ) -> Result<S3CoordSelectivePacksPreview, S3CoordOfflineChainError> {
+        self.inspect_v2_offline_selective_packs_discovered_bounded(
+            scope, journal, previous_pinned, previous_metadata,
+            MAX_LONG_OFFLINE_GENERATIONS,
+        ).await
+    }
+
+    async fn inspect_v2_offline_selective_packs_discovered_bounded(
+        &self,
+        scope: &S3RemoteAnchorScope,
+        journal: &S3RemoteAnchorJournal,
+        previous_pinned: &S3PinnedRevisionSnapshot,
+        previous_metadata: &S3VerifiedRevisionMetadataStore,
+        max_generations: usize,
+    ) -> Result<S3CoordSelectivePacksPreview, S3CoordOfflineChainError> {
+        if max_generations == 0
+            || max_generations > S3ManifestDeltaLimits::default().max_frames
+        {
+            return Err(S3CoordOfflineChainError::ExceededOfflineBudget);
+        }
         if !scope.matches_connection(self.bound_profile(), self.bound_keyspace()) {
             return Err(S3CoordSidecarReadError::ScopeMismatch.into());
         }
@@ -137,8 +181,8 @@ impl AwsS3ProbeClient {
         }
         let history = walk_s3_delta_from_saved_anchor(
             self, scope, journal, S3ManifestDeltaLimits {
-                max_frames: MAX_OFFLINE_GENERATIONS,
-                max_total_shard_refs: MAX_OFFLINE_GENERATIONS * 256,
+                max_frames: max_generations,
+                max_total_shard_refs: max_generations * 256,
             },
         ).await?;
         let count = match &history.outcome {
@@ -149,7 +193,7 @@ impl AwsS3ProbeClient {
             } => *generations_traversed,
             _ => return Err(S3CoordOfflineChainError::InvalidChain),
         };
-        if count == 0 || count > MAX_OFFLINE_GENERATIONS
+        if count == 0 || count > max_generations
             || history.verified_manifest_frames.len() != count
         {
             // An unchanged S3 head is NOT a synthetic V2 generation.
@@ -158,36 +202,44 @@ impl AwsS3ProbeClient {
 
         let mut prior = old_head.clone();
         let mut letters = Vec::with_capacity(count);
-        for frame in history.verified_manifest_frames.iter().rev() {
-            let provisional: S3ManifestV1 = serde_json::from_slice(frame)
-                .map_err(|_| S3CoordOfflineChainError::InvalidChain)?;
-            let manifest = S3ManifestV1::decode(
-                ns, provisional.manifest_id, frame,
-            ).map_err(S3CoordSidecarReadError::from)?;
-            let head = S3HeadPointerV1::new(
-                ns, manifest.generation, manifest.manifest_id,
-                &blake3::hash(frame).to_hex().to_string(),
-                manifest.previous_manifest_id,
-            ).map_err(S3CoordSidecarReadError::from)?;
-            if !head.is_direct_successor_of(&prior) {
-                return Err(S3CoordOfflineChainError::InvalidChain);
+        // Reconstruct from the EXACT original saved anchor through windows.
+        // A window boundary is only a batching boundary for locator GETs;
+        // it is NOT a new trusted or durable sync checkpoint.
+        let chronological: Vec<_> =
+            history.verified_manifest_frames.iter().rev().collect();
+        for window in chronological.chunks(MAX_OFFLINE_GENERATIONS) {
+            for frame in window {
+                let provisional: S3ManifestV1 = serde_json::from_slice(frame)
+                    .map_err(|_| S3CoordOfflineChainError::InvalidChain)?;
+                let manifest = S3ManifestV1::decode(
+                    ns, provisional.manifest_id, frame,
+                ).map_err(S3CoordSidecarReadError::from)?;
+                let head = S3HeadPointerV1::new(
+                    ns, manifest.generation, manifest.manifest_id,
+                    &blake3::hash(frame).to_hex().to_string(),
+                    manifest.previous_manifest_id,
+                ).map_err(S3CoordSidecarReadError::from)?;
+                if !head.is_direct_successor_of(&prior) {
+                    return Err(S3CoordOfflineChainError::InvalidChain);
+                }
+                let key = ns.immutable_coord_letter_locator_key(manifest.manifest_id);
+                let fetched = self.get_bounded(&key, MAX_LOCATOR_BYTES as u64)
+                    .await.map_err(S3CoordSidecarReadError::from)?;
+                let locator = S3CoordLetterLocatorV2::decode(
+                    ns, &head, &fetched.bytes,
+                )?;
+                letters.push(locator.letter_blake3);
+                prior = head;
             }
-            let key = ns.immutable_coord_letter_locator_key(manifest.manifest_id);
-            let fetched = self.get_bounded(&key, MAX_LOCATOR_BYTES as u64)
-                .await.map_err(S3CoordSidecarReadError::from)?;
-            let locator = S3CoordLetterLocatorV2::decode(
-                ns, &head, &fetched.bytes,
-            )?;
-            letters.push(locator.letter_blake3);
-            prior = head;
         }
         if prior != *history.observed_head.pointer() {
             return Err(S3CoordOfflineChainError::InvalidChain);
         }
         // Reverify canonical history, all old/new shards and every packed
         // member; never convert a discovered hint directly into authority.
-        self.inspect_v2_offline_selective_packs_against_pinned_v1(
-            scope, journal, previous_pinned, previous_metadata, &letters,
+        self.inspect_v2_offline_selective_packs_with_budget(
+            scope, journal, previous_pinned, previous_metadata,
+            &letters, max_generations,
         ).await
     }
 }
@@ -205,6 +257,17 @@ mod tests {
         ).unwrap();
         let letter = blake3::hash(b"immutable letter").to_hex().to_string();
         (ns, head, letter)
+    }
+
+    #[test]
+    fn long_offline_is_opt_in_and_capped_by_canonical_walk() {
+        assert_eq!(MAX_OFFLINE_GENERATIONS, 8);
+        assert_eq!(MAX_LONG_OFFLINE_GENERATIONS, 128);
+        assert!(MAX_LONG_OFFLINE_GENERATIONS <= S3ManifestDeltaLimits::default().max_frames);
+        assert_eq!(MAX_LONG_OFFLINE_GENERATIONS * 256,
+            S3ManifestDeltaLimits::default().max_total_shard_refs);
+        assert_eq!((9_usize + MAX_OFFLINE_GENERATIONS - 1) / MAX_OFFLINE_GENERATIONS, 2);
+        assert_eq!((100_usize + MAX_OFFLINE_GENERATIONS - 1) / MAX_OFFLINE_GENERATIONS, 13);
     }
 
     #[test]
