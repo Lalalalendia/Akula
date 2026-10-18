@@ -1,7 +1,9 @@
 name: Docs and installer checks
 
 on:
+  # Validate feature branches via PR only; preserve post-merge push checks.
   push:
+    branches: [main]
     paths:
       - "*.md"
       - "**/*.md"
@@ -9,6 +11,7 @@ on:
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
+      - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "*.md"
@@ -17,9 +20,15 @@ on:
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
+      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
+
+# Replaced PR heads cancel obsolete docs jobs; manual dispatch is absent.
+concurrency:
+  group: docs-installer-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   docs:
