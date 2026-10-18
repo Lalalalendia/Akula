@@ -97,3 +97,26 @@ fn actual_simulator_broadcasts_to_everyone_for_ten_and_hundred_nodes() {
         println!("FED_GOSSIP_02 peers={count} avg={:?}", sim.round_stats_average().mean);
     }
 }
+
+
+#[test]
+fn thousand_join_leave_cycles_do_not_accumulate_live_peers() {
+    let mut n = network(2, 91);
+    n.command(0, topic(), Command::Join(vec![]));
+    n.command(1, topic(), Command::Join(vec![0]));
+    n.run_trips(10);
+    for cycle in 0..1000u64 {
+        let temporary = cycle + 2;
+        n.insert(temporary);
+        n.command(temporary, topic(), Command::Join(vec![0]));
+        n.run_trips(8);
+        n.remove(&temporary);
+        n.run_trips(8);
+        let live = n.peer_ids().count();
+        assert_eq!(live, 2, "unexpected live peer leak at cycle {cycle}");
+        assert!(n.check_synchronicity(), "neighbor disagreement at cycle {cycle}");
+    }
+    n.command(0, topic(), Command::Broadcast(Bytes::from_static(b"after-1000-churn"), Scope::Swarm));
+    n.run_trips(12);
+    assert_eq!(count_receivers(&mut n), 1);
+}
