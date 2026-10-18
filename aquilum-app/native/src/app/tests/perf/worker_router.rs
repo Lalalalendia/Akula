@@ -49,7 +49,13 @@ fn run_route_case(case: &str, width: u32, height: u32, scale: f64, cover: bool, 
     if cover { h.wait_cover(true); }
     let _ = h.root.redraw();
 
-    let mut renderers = [Renderer::new(0), Renderer::new(2), Renderer::new(2)];
+    // The two baseline controls must remain fixed-worker even when the
+    // product chooses adaptive Vello by default.
+    let mut renderers = [
+        Renderer::new_fixed_for_test(0),
+        Renderer::new_fixed_for_test(2),
+        Renderer::new_fixed_for_test(2),
+    ];
     renderers[2].enable_dual_dispatch_for_test(ROUTE_THRESHOLD_PX);
     let mut totals: [[Vec<f64>; 2]; 3] =
         std::array::from_fn(|_| std::array::from_fn(|_| Vec::new()));
@@ -181,7 +187,13 @@ fn benchmark_vello_single_region_process_rss() {
     h.app.open(&mut h.root, path);
     let _ = h.root.redraw();
     let (w, hh) = (width as u16, height as u16);
-    let mut renderer = Renderer::new(threads);
+    let mut renderer = if routed {
+        // Exercise the actual user-facing default-on policy, not the
+        // explicit test-only dispatch helper.
+        Renderer::new(threads)
+    } else {
+        Renderer::new_fixed_for_test(threads)
+    };
     let mut sampled = Vec::new();
     let (mut actual_shifts, mut full_frames, mut small_region_frames) = (0usize, 0usize, 0usize);
     for step in 0..FRAME_COUNT {
