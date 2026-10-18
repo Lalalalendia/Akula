@@ -17,7 +17,10 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
+mod existing_replace_attempt;
+pub(crate) use existing_replace_attempt::ReadOnlyExistingReplaceAttempt;
+
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -238,6 +241,7 @@ pub enum JournalError {
     /// Never automatically replay an uncertain local publication.
     PublicationAttemptAlreadyRecorded,
     NativePublicationObservationAlreadyRecorded,
+    ExistingReplaceAttemptAlreadyRecorded,
 }
 
 impl From<rusqlite::Error> for JournalError {
@@ -518,8 +522,28 @@ impl SqliteSyncJournal {
                  PRAGMA user_version = 6;
                  COMMIT;",
             )?,
-            SCHEMA_VERSION => {},
+            6 | SCHEMA_VERSION => {},
             other => return Err(JournalError::UnsupportedSchema(other)),
+        }
+        // Older migrations still reach v6. Upgrade atomically on the next
+        // writer-open; read-only Settings never creates or migrates tables.
+        if version < SCHEMA_VERSION {
+            connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sync_existing_replace_attempts (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_operations(operation_id),
+                     vault_id TEXT NOT NULL,
+                     document_id TEXT NOT NULL,
+                     path_collision_key TEXT NOT NULL,
+                     baseline_revision TEXT NOT NULL,
+                     evidence_json BLOB NOT NULL,
+                     evidence_digest TEXT NOT NULL,
+                     UNIQUE(vault_id,path_collision_key,baseline_revision)
+                 );
+                 PRAGMA user_version = 7;
+                 COMMIT;",
+            )?;
         }
         Ok(Self { connection })
     }
@@ -1698,7 +1722,8 @@ mod tests {
                  DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
                  DROP TABLE sync_local_publication_attempts;
-                 PRAGMA user_version = 1;",
+                 DROP TABLE IF EXISTS sync_existing_replace_attempts;
+                  PRAGMA user_version = 1;",
             ).unwrap();
         }
         let migrated = SqliteSyncJournal::open(&path).unwrap();
@@ -1908,7 +1933,8 @@ mod tests {
                  DROP TABLE sync_local_recovery_reviews;
                  DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
-                 PRAGMA user_version = 2;",
+                 DROP TABLE IF EXISTS sync_existing_replace_attempts;
+                  PRAGMA user_version = 2;",
             ).unwrap();
         }
         let upgraded = SqliteSyncJournal::open(&path).unwrap();
@@ -2021,7 +2047,8 @@ mod tests {
                 "DROP TABLE sync_local_native_publication_observations;
                  DROP TABLE sync_local_recovery_reviews;
                  DROP TABLE sync_local_recovery_copies;
-                 PRAGMA user_version = 3;",
+                 DROP TABLE IF EXISTS sync_existing_replace_attempts;
+                  PRAGMA user_version = 3;",
             ).unwrap();
         }
         let journal = SqliteSyncJournal::open(&db).unwrap();
@@ -2066,7 +2093,8 @@ mod tests {
         journal.connection.execute_batch(
             "DROP TABLE sync_local_native_publication_observations;
                  DROP TABLE sync_local_recovery_reviews;
-             PRAGMA user_version = 4;",
+             DROP TABLE IF EXISTS sync_existing_replace_attempts;
+                  PRAGMA user_version = 4;",
         ).unwrap();
         drop(journal);
         let mut upgraded = SqliteSyncJournal::open(&db).unwrap();
@@ -2235,7 +2263,8 @@ mod tests {
             .unwrap().is_none());
         journal.connection.execute_batch(
             "DROP TABLE sync_local_native_publication_observations;
-             PRAGMA user_version = 5;",
+             DROP TABLE IF EXISTS sync_existing_replace_attempts;
+                  PRAGMA user_version = 5;",
         ).unwrap();
         drop(journal);
         // A read-only Settings inspection cannot silently migrate the DB.
