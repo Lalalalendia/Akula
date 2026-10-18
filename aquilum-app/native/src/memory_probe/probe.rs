@@ -70,6 +70,12 @@ impl Probe {
         self.steps.get(self.next - 1).map(|(_, step)| step)
     }
 
+    pub fn append_frame(&self, record: &str) {
+        if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&self.output) {
+            let _ = writeln!(file, "{record}");
+        }
+    }
+
     pub fn record(&self, name: &str, extra: &str) {
         let heap = CURRENT.load(Ordering::Relaxed);
         let peak = PEAK.load(Ordering::Relaxed);
