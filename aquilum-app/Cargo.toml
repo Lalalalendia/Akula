@@ -65,3 +65,4 @@ masonry = { path = "native/vendor/masonry" }
 ratex-parser = { path = "native/vendor/ratex-parser" }
 krilla = { path = "native/vendor/krilla" }
 subsetter = { path = "native/vendor/subsetter" }
+vello_common = { path = "native/vendor/vello_common" }
