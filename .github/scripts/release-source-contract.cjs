@@ -81,6 +81,13 @@ function validateRelease(yaml) {
   if (count(yaml, pinnedRef) !== 4) {
     errors.push('Every platform and manifest must checkout the pinned commit');
   }
+  if (!yaml.includes('url="https://github.com/Lalalalendia/Akula/releases/download/v$version"')) {
+    errors.push('Release manifest must publish artifacts from Lalalalendia/Akula, not upstream');
+  }
+  if (!yaml.includes('test -n "$key" || {')
+      || !yaml.includes('Akula signing public key is not provisioned')) {
+    errors.push('Release must stop when the Akula signing public key is absent');
+  }
   if (yaml.includes('AKULA_INSTALLED_HOST_CUSTODY_DB')
       || /--all-features|sync-installed-host|sync-s3/.test(yaml)) {
     errors.push('Unsafe custody/S3 feature or runtime selection in local-only release');
