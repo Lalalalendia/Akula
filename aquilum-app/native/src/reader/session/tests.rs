@@ -383,7 +383,7 @@ fn initial_layout_reuse_abba_profile() {
             let mut reused_ms = Vec::new();
             let mut retained = 0usize;
             let mut visible = 0usize;
-            let mut benchmark = |reuse: bool| -> f64 {
+            let mut benchmark = |reuse: bool, fcx: &mut FontContext, lcx: &mut LayoutContext<masonry::core::BrushIndex>| -> f64 {
                 let mut session = Session::open(&path, Target::Start).unwrap();
                 let start = Instant::now();
                 if reuse {
@@ -401,8 +401,8 @@ fn initial_layout_reuse_abba_profile() {
                 elapsed
             };
             for _ in 0..2 {
-                black_box(benchmark(false));
-                black_box(benchmark(true));
+                black_box(benchmark(false, &mut fcx, &mut lcx));
+                black_box(benchmark(true, &mut fcx, &mut lcx));
             }
             let mut first = Session::open(&path, Target::Start).unwrap();
             let mut second = Session::open(&path, Target::Start).unwrap();
@@ -410,10 +410,10 @@ fn initial_layout_reuse_abba_profile() {
             second.ensure(VIEW, &settings, &mut fcx, &mut lcx);
             assert_same_page_state(&first, &second);
             for _ in 0..7 {
-                old_ms.push(benchmark(false));
-                reused_ms.push(benchmark(true));
-                reused_ms.push(benchmark(true));
-                old_ms.push(benchmark(false));
+                old_ms.push(benchmark(false, &mut fcx, &mut lcx));
+                reused_ms.push(benchmark(true, &mut fcx, &mut lcx));
+                reused_ms.push(benchmark(true, &mut fcx, &mut lcx));
+                old_ms.push(benchmark(false, &mut fcx, &mut lcx));
             }
             let old_median = median(old_ms.clone());
             let new_median = median(reused_ms.clone());
