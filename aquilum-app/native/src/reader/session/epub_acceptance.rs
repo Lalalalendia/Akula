@@ -92,7 +92,7 @@ fn write_zip(path: &std::path::Path, members: &[(String, Vec<u8>)]) {
 pub(crate) fn synthetic_epub() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = crate::test_dir::tempdir();
     let path = dir.path().join("reader-navigation.epub");
-    let mut manifest = String::new();
+    let mut manifest = String::from("<item id=\"toc\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>");
     let mut spine = String::new();
     let mut members = Vec::new();
     for chapter in 0..3 {
@@ -133,16 +133,32 @@ pub(crate) fn synthetic_epub() -> (tempfile::TempDir, std::path::PathBuf) {
     }
     let package = format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
-         <package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\">\
-         <manifest>{manifest}</manifest><spine>{spine}</spine></package>"
+         <package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"uid\">\
+         <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\
+         <dc:title>Copyright-free Reader CFI fixture</dc:title>\
+         <dc:identifier id=\"uid\">urn:uuid:reader-navigation-test</dc:identifier>\
+         <dc:language>ru</dc:language></metadata>\
+         <manifest>{manifest}</manifest><spine toc=\"toc\">{spine}</spine></package>"
+    );
+    let points: String = (0..3).map(|chapter| format!(
+        "<navPoint id=\"nav{chapter}\" playOrder=\"{}\"><navLabel><text>Глава {chapter}</text></navLabel>\
+         <content src=\"chapters/{chapter}.xhtml\"/></navPoint>", chapter + 1
+    )).collect();
+    let ncx = format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+         <ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\">\
+         <head/><docTitle><text>Reader fixture</text></docTitle><navMap>{points}</navMap></ncx>"
     );
     members.extend([
-        ("mimetype".into(), b"application/epub+zip".to_vec()),
         ("META-INF/container.xml".into(),
-            b"<?xml version=\"1.0\"?><container><rootfiles>\
-              <rootfile full-path=\"OPS/book.opf\"/></rootfiles></container>".to_vec()),
+            b"<?xml version=\"1.0\"?><container xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\
+              <rootfiles><rootfile full-path=\"OPS/book.opf\" media-type=\"application/oebps-package+xml\"/>\
+              </rootfiles></container>".to_vec()),
         ("OPS/book.opf".into(), package.into_bytes()),
+        ("OPS/toc.ncx".into(), ncx.into_bytes()),
     ]);
+    // EPUB 2 mandates the uncompressed mimetype entry as the first ZIP member.
+    members.insert(0, ("mimetype".into(), b"application/epub+zip".to_vec()));
     write_zip(&path, &members);
     (dir, path)
 }
