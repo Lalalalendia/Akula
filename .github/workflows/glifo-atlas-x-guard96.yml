@@ -1,0 +1,65 @@
+name: Glyph atlas X guard96 partial/full parity (diagnostic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/vendor/glifo/src/util.rs'
+      - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
+      - 'aquilum-app/native/vendor/glifo/src/renderer.rs'
+      - 'aquilum-app/native/vendor/glifo/src/atlas/key.rs'
+      - '.github/workflows/glifo-atlas-x-guard96.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glifo-atlas-guard96-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Guard96 crop/frame parity - repeated real editor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-glifo-guard96-v1
+          cache-workspace-crates: true
+      - name: Install GUI build libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record environment
+        shell: bash
+        run: |
+          { git rev-parse HEAD; rustc --version; cargo --version; grep -m1 'model name' /proc/cpuinfo || true; } | tee glifo-guard96-env.txt
+      - name: Repeat real guard96 scroll and full-reference tolerance without relaxing the gate
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -euo pipefail
+          for trial in 1 2 3 4 5; do
+            echo "GUARD96_REAL_EDITOR trial=$trial"
+            cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/glifo-guard96-trial-$trial.log"
+          done
+      - name: Archive all observed attempts, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glifo-guard96-${{ github.sha }}
+          path: |
+            glifo-guard96-env.txt
+            glifo-guard96-trial-*.log
+          if-no-files-found: warn
+          retention-days: 14
