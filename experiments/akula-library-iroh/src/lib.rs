@@ -736,6 +736,63 @@ mod tests {
         server_task.abort();
         Ok(())
     }
+    #[tokio::test(flavor="multi_thread",worker_threads=4)]
+    async fn idle_authorized_connections_release_slots() -> Result<()> {
+        let server_ep = private_endpoint(None).await?;
+        let attacker_ep = private_endpoint(None).await?;
+        let healthy_ep = private_endpoint(None).await?;
+        let addr = loopback_addr(&server_ep)?;
+        let book = Book::new(bytes(2048))?;
+        let allowed = HashSet::from([attacker_ep.id(), healthy_ep.id()]);
+        let service = Server::new(book.clone(), allowed, QuotaState::new(100_000, 100_000))
+            .with_request_timeouts(Duration::from_millis(250), Duration::from_millis(250));
+        let active = service.active_per_peer.clone();
+        let worker = tokio::spawn(service.run(server_ep.clone()));
+        let first = attacker_ep.connect(addr.clone(), ALPN).await?;
+        let second = attacker_ep.connect(addr.clone(), ALPN).await?;
+        // The first two authorized connections hold slots but send no streams.
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert_eq!(active.lock().unwrap().get(&attacker_ep.id()).copied(), Some(2));
+        let third = attacker_ep.connect(addr.clone(), ALPN).await?;
+        let _ = timeout(Duration::from_secs(2), third.closed()).await?;
+        let result = download(&healthy_ep, addr.clone()).await?;
+        ensure!(result == *book.bytes, "healthy client blocked by idle peer");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(active.lock().unwrap().get(&attacker_ep.id()).is_none(),
+            "idle leases must expire and release slots");
+        first.close(0u32.into(), b"done");
+        second.close(0u32.into(), b"done");
+        third.close(0u32.into(), b"done");
+        attacker_ep.close().await;
+        healthy_ep.close().await;
+        server_ep.close().await;
+        worker.abort();
+        Ok(())
+    }
+
+    #[tokio::test(flavor="multi_thread",worker_threads=4)]
+    async fn stalled_partial_request_is_evicted() -> Result<()> {
+        let server_ep = private_endpoint(None).await?;
+        let peer_ep = private_endpoint(None).await?;
+        let addr = loopback_addr(&server_ep)?;
+        let service = Server::new(Book::new(bytes(2048))?,
+            HashSet::from([peer_ep.id()]), QuotaState::new(100_000,100_000))
+            .with_request_timeouts(Duration::from_millis(500), Duration::from_millis(150));
+        let active = service.active_per_peer.clone();
+        let worker = tokio::spawn(service.run(server_ep.clone()));
+        let conn = peer_ep.connect(addr, ALPN).await?;
+        let (mut send, _recv) = conn.open_bi().await?;
+        send.write_all(&[OP_CHUNK]).await?; // Never sends the rest of request.
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        assert!(active.lock().unwrap().get(&peer_ep.id()).is_none(),
+            "incomplete request must expire without reserving quota");
+        assert_eq!(service.quota.lock().unwrap().used(),0);
+        conn.close(0u32.into(), b"done");
+        peer_ep.close().await;
+        server_ep.close().await;
+        worker.abort();
+        Ok(())
+    }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn real_iroh_direct_loopback_and_resume() -> Result<()> {
         let server_ep = private_endpoint(None).await?;
