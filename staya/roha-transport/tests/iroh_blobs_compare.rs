@@ -940,14 +940,14 @@ async fn kill_receiver_during_unflushed_partial_and_fail_closed() {
             .expect("recovery QUIC");
 
         let mut valid = false;
-        let mut response_bytes = 0usize;
+        let mut response_bytes = 0u64;
         if let Ok(Ok(stats)) = tokio::time::timeout(
             Duration::from_secs(25),
             disk.remote().execute_get(connection.clone(), request.clone()).complete(),
         )
         .await
         {
-            response_bytes = stats.total_bytes_read();
+            response_bytes = stats.total_bytes_read() as u64;
             if let Ok(finished) = disk.get_bytes(hash).await {
                 valid = finished.as_ref() == data.as_slice()
                     && Hash::new(finished.as_ref()) == hash;
@@ -969,7 +969,7 @@ async fn kill_receiver_during_unflushed_partial_and_fail_closed() {
             .await
             .expect("full fallback deadline")
             .expect("full fallback verified download");
-            response_bytes += stats.total_bytes_read();
+            response_bytes += stats.total_bytes_read() as u64;
         }
 
         let result = disk.get_bytes(hash).await.expect("full reconstructed bytes");
