@@ -165,6 +165,23 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 coord_locator::tests
+      - name: Prove missing installer ledger fails closed on default Core.open
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AKULA_INSTALLED_HOST_CUSTODY_DB: ''
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-installed-host installed_host_tests -- --nocapture
+      - name: Verify real build-time host ledger across two default Core processes
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AKULA_INSTALLED_HOST_CUSTODY_DB: ${{ runner.temp }}/akula-ci-installed-host.sqlite3
+          AKULA_INSTALLED_HOST_TEST_ALLOW_PROVISION: '1'
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-installed-host mandatory_installed_host_core_open_uses_real_compiled_shared_ledger -- --nocapture
       - name: Verify host-installed shared custody ledger rejects cross-appdata reset
         shell: bash
         working-directory: aquilum-app

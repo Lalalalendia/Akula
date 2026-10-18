@@ -547,6 +547,11 @@ mod tests {
     /// bypass #235's per-profile HOLD, even while a separate process-local
     /// custody lock remains live. This intentionally proves a release BLOCKER,
     /// not a correct or authorized S3 writer. All files are temp fixtures.
+    // The original negative test documents the legacy, unconfigured Core
+    // (which is still how ordinary local builds work). Installer-enforced
+    // builds must instead refuse through Core::open; see installed-policy
+    // process tests in app_core.rs.
+    #[cfg(not(feature = "sync-installed-host"))]
     #[test]
     fn oslock_falsifier_alternate_appdata_bypasses_enrolled_core_hold() {
         use crate::app_core::{Core, CoreEvent};

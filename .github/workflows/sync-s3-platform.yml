@@ -13,6 +13,8 @@ on:
       - "aquilum-app/core/src/sync/guarded_note_write.rs"
       - "aquilum-app/core/src/sync/guarded_editor.rs"
       - "aquilum-app/core/src/app_core.rs"
+      - "aquilum-app/core/src/app_core_installed_host_tests.rs"
+      - "aquilum-app/native/Cargo.toml"
       - "aquilum-app/core/src/files/gate/write.rs"
       - "aquilum-app/core/src/files/gate/moves.rs"
       - "aquilum-app/core/src/files/gate/trash.rs"
@@ -60,6 +62,17 @@ jobs:
       - name: Check installer-owned shared custody ledger on macOS and Windows
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3 host_custody_registry::tests -- --nocapture
+      - name: Prove mandatory host policy on packaged Core.open (two processes)
+        working-directory: aquilum-app
+        env:
+          AKULA_INSTALLED_HOST_CUSTODY_DB: ''
+        run: cargo test --locked -p aquilum-core --features sync-installed-host installed_host_tests -- --nocapture
+      - name: Verify product Core.open uses one REAL compiled installer ledger
+        working-directory: aquilum-app
+        env:
+          AKULA_INSTALLED_HOST_CUSTODY_DB: ${{ runner.temp }}/akula-ci-installed-host.sqlite3
+          AKULA_INSTALLED_HOST_TEST_ALLOW_PROVISION: '1'
+        run: cargo test --locked -p aquilum-core --features sync-installed-host mandatory_installed_host_core_open_uses_real_compiled_shared_ledger -- --nocapture
       - name: Prove host Core real second process and fail-closed ordinary writes
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3 host_core_epoch_tests -- --nocapture
