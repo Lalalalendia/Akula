@@ -459,8 +459,8 @@ fn insert_and_render_outline(
     if let Some((key, path_hash, elements)) = traced_outline {
         std::eprintln!(
             "GLIFO_ATLAS_SLOT page={} slot=({},{},{},{}) \
-             path_hash={path_hash:016x} elements={elements} \\
-             scale_bits={:016x} subpixel_bits={:08x} \\
+             path_hash={path_hash:016x} elements={elements} \
+             scale_bits={:016x} subpixel_bits={:08x} \
              bearing=({},{}) key={key:?}",
             atlas_slot.page_index, atlas_slot.x, atlas_slot.y,
             atlas_slot.width, atlas_slot.height, glyph.scale.to_bits(),
