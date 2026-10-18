@@ -61,6 +61,9 @@ async fn main() -> Result<(), String> {
                     .await
                     .map_err(|e| e.to_string())?;
                 send.finish().map_err(|e| e.to_string())?;
+                // Keep the QUIC connection alive while the reply is delivered.
+                // The client closes its side only after reading the entire reply.
+                let _ = tokio::time::timeout(Duration::from_secs(15), conn.closed()).await;
                 println!("ping_ok remote={}", conn.remote_id());
             }
         }
@@ -84,6 +87,7 @@ async fn main() -> Result<(), String> {
                 return Err("wrong response".into());
             }
             println!("direct_lan_ping_ok peer={server} relay=disabled");
+            conn.close(0u8.into(), b"ping complete");
             local.close().await;
         }
         _ => return Err(usage().into()),
