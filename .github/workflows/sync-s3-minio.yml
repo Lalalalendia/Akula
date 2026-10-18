@@ -171,6 +171,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 host_custody_registry::tests
+          cargo test --locked -p aquilum-core --features sync-s3 host_core_epoch_tests
       - name: Reject forged AWS identity, cross-account scope and custom endpoints
         shell: bash
         working-directory: aquilum-app
