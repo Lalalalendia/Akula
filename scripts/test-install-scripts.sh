@@ -47,9 +47,36 @@ chmod +x "$temporary_home/tools/uname" "$temporary_home/tools/curl"
 
 calls="$temporary_home/curl-requests.log"
 error_log="$temporary_home/install-error.log"
+
+# PRODUCTION INSTALLER: signing identity is deliberately absent until an
+# Akula Developer ID and bundle identifier have been independently enrolled.
+# It must fail without a single API/download request, before replacing any
+# existing app. Recovery itself remains a separate earlier operation.
 if HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" AKULA_INSTALL_CURL_CALLS="$calls" \
     bash "$script_dir/install.sh" > /dev/null 2> "$error_log"; then
-  echo 'Installer unexpectedly succeeded without a fork release' >&2
+  echo 'Production installer accepted a release without publisher identity' >&2
+  exit 1
+fi
+grep -Fq 'publisher identity is not provisioned' "$error_log"
+[[ ! -e "$calls" ]]
+[[ "$(cat "$temporary_home/Applications/Aquilum.app/Keep.txt")" == 'installed app remains' ]]
+
+# TEST-ONLY COPY: replace precisely TWO source literals in an isolated file.
+# No production environment override or release-supplied signing root exists.
+# This runs the same Bash installer, with synthetic pinned identity for the
+# positive offline fixture, against mocks (not a genuinely signed DMG).
+grep -Fxq 'AKULA_DEVELOPER_TEAM_ID=""' "$script_dir/install.sh"
+grep -Fxq 'AKULA_BUNDLE_ID=""' "$script_dir/install.sh"
+test_installer="$temporary_home/test-only-signed-akula-installer.sh"
+sed -e 's/^AKULA_DEVELOPER_TEAM_ID=""$/AKULA_DEVELOPER_TEAM_ID="AB12CD34EF"/' \
+    -e 's/^AKULA_BUNDLE_ID=""$/AKULA_BUNDLE_ID="com.lalalalendia.akula"/' \
+    "$script_dir/install.sh" > "$test_installer"
+grep -Fxq 'AKULA_DEVELOPER_TEAM_ID="AB12CD34EF"' "$test_installer"
+grep -Fxq 'AKULA_BUNDLE_ID="com.lalalalendia.akula"' "$test_installer"
+
+if HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" AKULA_INSTALL_CURL_CALLS="$calls" \
+    bash "$test_installer" > /dev/null 2> "$error_log"; then
+  echo 'Test fixture unexpectedly succeeded without a fork release' >&2
   exit 1
 fi
 grep -Fq 'https://api.github.com/repos/Lalalalendia/Akula/releases/latest' "$calls"
@@ -62,8 +89,9 @@ grep -Fq 'No Akula release available' "$error_log"
 [[ "$(cat "$temporary_home/Notes/Keep.md")" == keep ]]
 
 
-# Offline macOS installer acceptance. Mock only external OS utilities; execute
-# the ACTUAL installer with a real filesystem and a preserved existing bundle.
+# Offline macOS installer acceptance: execute the test-only copy of the real
+# script (with two synthetic hard-coded pin values), while mocking external OS
+# utilities. The production script is separately proved fail-closed above.
 cat > "$temporary_home/tools/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -158,7 +186,7 @@ printf 'old installed version\n' > "$existing/Contents/MacOS/aquilum-app"
 run_installer() {
   HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" \
     AKULA_INSTALL_CURL_CALLS="$calls" \
-    bash "$script_dir/install.sh" > "$temporary_home/install-stdout.log" 2> "$error_log"
+    bash "$test_installer" > "$temporary_home/install-stdout.log" 2> "$error_log"
 }
 old_intact() {
   [[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'old installed version' ]]
