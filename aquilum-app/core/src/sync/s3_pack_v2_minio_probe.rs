@@ -10,7 +10,8 @@ use super::*;
 use crate::sync::{
     DocumentId, RevisionDag, RevisionOperation, RevisionRecord, S3ContractError,
     S3HeadPointerV1, S3ManifestShardV1, SyncRelativePath,
-    S3RemoteAnchorScope, S3PinnedV2ReadError,
+    S3RemoteAnchorScope, S3PinnedV2ReadError, RegisteredReadAdmission,
+    S3V2TrustedAnchorJournal, S3V2TrustAnchorOutcome,
     MAX_MANIFEST_BYTES, MAX_SHARD_BYTES,
 };
 use crate::sync::s3_transport::{
@@ -19,6 +20,8 @@ use crate::sync::s3_transport::{
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::Arc;
+use crate::app_core::{Core, CoreEvent};
 
 type ProbeResult<T> = Result<T, String>;
 
@@ -522,6 +525,18 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     ];
     let first = upload_candidate(&a, &ns, None, &[original]).await.unwrap();
     let dir = tempfile::tempdir().unwrap();
+    // Only disposable, registered test root + *separate* app-private data.
+    let local_root = dir.path().join("markdown-workspace");
+    let private_data = dir.path().join("private-appdata");
+    std::fs::create_dir_all(&local_root).unwrap();
+    std::fs::create_dir_all(&private_data).unwrap();
+    let core = Core::open(&private_data, Arc::new(|_: CoreEvent| {}));
+    core.ui_state.resolve_workspace(local_root.to_str().unwrap(), 1).unwrap();
+    let admission = RegisteredReadAdmission::open(&core, &local_root).unwrap();
+    let durable_db = private_data.join("v2-trusted-roots.sqlite");
+    let mut durable = S3V2TrustedAnchorJournal::open(&admission, &durable_db)
+        .unwrap();
+    assert!(durable.load(&scope).unwrap().is_none());
     let genesis_db = dir.path().join("genesis.sqlite");
     let op1 = OperationId::new();
     let mut journal = V2ProbeJournal::open(&genesis_db).unwrap();
@@ -542,6 +557,19 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     assert_eq!(first_preview.verified_revisions, 1);
     assert_eq!(first_preview.verified_packs, 1);
     assert!(first_preview.requires_explicit_file_gate_review);
+    // Initial trusted hash is from the independently constructed local
+    // genesis fixture, NOT from the untrusted remote response. The full
+    // V2 read proof must be pinned to the identical root, ETag and scope.
+    let out_of_band_digest = first.head.digest(&ns).unwrap();
+    assert_eq!(durable.enroll_verified_genesis(
+        &scope, &out_of_band_digest, &first.head,
+        &written.etag, &first_preview,
+    ).unwrap(), S3V2TrustAnchorOutcome::Inserted);
+    drop(durable);
+    let mut durable = S3V2TrustedAnchorJournal::open(&admission, &durable_db)
+        .unwrap();
+    let saved_genesis = durable.inspect_saved_root(&b, &scope).await.unwrap();
+    assert_eq!(saved_genesis.generation, 1);
     journal.recover_verified(op1, &ns, &b).await.unwrap();
     assert!(journal.is_observed(op1).unwrap());
 
@@ -589,6 +617,15 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     assert_eq!(v2_preview.verified_revisions, 3);
     assert_eq!(v2_preview.verified_packs, 1);
     assert_eq!(v2_preview.document_head_count, 2);
+    assert_eq!(durable.record_verified_successor(
+        &scope, &winning.head, &_ack_lost.etag, &v2_preview,
+    ).unwrap(), S3V2TrustAnchorOutcome::Advanced);
+    drop(durable);
+    let durable = S3V2TrustedAnchorJournal::open(&admission, &durable_db)
+        .unwrap();
+    let saved_current = durable.inspect_saved_root(&b, &scope).await.unwrap();
+    assert_eq!(saved_current.generation, 2);
+    assert_eq!(saved_current.verified_revisions, 3);
     assert!(matches!(
         b.inspect_explicitly_pinned_v2_read_only(
             &scope, &winning.head, &_ack_lost.etag, None,
@@ -683,6 +720,7 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     assert!(b.inspect_explicitly_pinned_v2_read_only(
         &scope, &winning.head, &_ack_lost.etag, Some(&first.head),
     ).await.is_err());
+    assert!(durable.inspect_saved_root(&b, &scope).await.is_err());
     // Previously recorded intent is never a user's confirmed sync baseline.
     assert!(after_restart.recover_verified(intent_winner, &ns, &b).await.is_err());
     eprintln!(
