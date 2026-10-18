@@ -419,6 +419,12 @@ impl DocumentHub {
     }
 
     fn reconcile_entry(&self, core: &Core, key: &str, path: &Path, entry: &mut Entry) {
+        // A native publication with uncertain receipt is not an ordinary
+        // disk change. Do not reschedule dirty edits or auto-merge them back
+        // into an ambiguous file. Keep the editor's in-memory changes.
+        if entry.session.requires_review() {
+            return;
+        }
         let before = entry.session.version();
         match entry.session.reconcile(&self.io(core, path, key)) {
             Ok(()) => {}
@@ -438,7 +444,10 @@ impl DocumentHub {
     }
 
     fn write_entry_as(&self, core: &Core, key: &str, entry: &mut Entry, source: Source) {
-        if !entry.session.dirty() || entry.moving {
+        // Hub timers, client edits and watcher pulses must never replay an
+        // ambiguous native write; only a future explicit operator review may
+        // clear this sticky in-memory HOLD.
+        if entry.session.requires_review() || !entry.session.dirty() || entry.moving {
             return;
         }
         let path = entry.path.clone();
