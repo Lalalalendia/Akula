@@ -16,6 +16,8 @@ pub mod admission;
 pub mod bounded_staging;
 #[cfg(target_os = "linux")]
 pub mod durable_admission;
+#[cfg(target_os = "linux")]
+pub mod reconcile_inventory;
 pub mod transfer;
 
 /// Explicitly authorized endpoint keys. The pairing workflow owns this list.

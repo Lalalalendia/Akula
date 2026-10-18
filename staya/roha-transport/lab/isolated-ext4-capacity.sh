@@ -165,6 +165,21 @@ cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
   --test iroh_blobs_compare bounded_ext4_fsstore_reopen \
   -- --exact --ignored --nocapture
 
+# P2P-BLOB-09a: after the real FsStore has shut down, compare external
+# paths with an independently persisted journal. Every deliberately injected
+# orphan/corruption/residual-temp/database-absence must HOLD; the test restores
+# only its own disposable injected data. The audit never grants File Gate.
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_inventory_audit_seed \
+  -- --exact --ignored --nocapture
+
+sync
+sudo umount "$volume"
+mount_image
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_inventory_audit_after_remount \
+  -- --exact --ignored --nocapture
+
 # A missing mount must NOT cause staging to continue on its host parent.
 sudo umount "$volume"
 cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \

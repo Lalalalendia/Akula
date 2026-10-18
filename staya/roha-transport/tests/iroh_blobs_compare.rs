@@ -1290,3 +1290,169 @@ fn bounded_ext4_missing_mount_fails_closed() {
     ));
     println!("P2P_BLOB_EXT4_MISSING_MOUNT refused=true no_fallback_to_host_disk=true");
 }
+
+/// External files only: on a real ext4-bounded image after FsStore clean
+/// shutdown. The journal here is synthetic known metadata for the lab;
+/// production MUST reserve durably before the original network GET.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires seeded disposable ext4 image after actual FsStore shutdown"]
+fn bounded_ext4_inventory_audit_seed() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits,
+        bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger,
+        reconcile_inventory::{AuditHold, audit_external_inventory},
+    };
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("disposable ext4 root"),
+    );
+    let volume = StagingVolumeGuard::open(&root).expect("bounded mount required");
+    let stage = root.join("real-fsstore");
+    let journal_dir = root.join("reconciliation-ledger");
+    fs::create_dir(&journal_dir).expect("test-only journal directory");
+    fs::set_permissions(&journal_dir, fs::Permissions::from_mode(0o700))
+        .expect("private journal directory");
+
+    let payload = bytes(1024 * 1024 + 17);
+    let hash = Hash::new(&payload);
+    let expected = *hash.as_bytes();
+    let size = payload.len() as u64;
+    let policy = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let mut journal = DurableLedger::open(&journal_dir, policy).expect("private durable metadata");
+    journal
+        .reserve(SecretKey::generate().public(), expected, size)
+        .expect("synthetic exact known hash and size");
+    journal
+        .verify_full(expected, &payload)
+        .expect("persist verified ledger record");
+    let original_journal = fs::read(journal_dir.join("reservations.v1"))
+        .expect("immutable snapshot for observational tests");
+
+    let evidence = audit_external_inventory(&volume, &journal, "real-fsstore")
+        .expect("real FsStore external paths agree with persisted hash");
+    assert_eq!(evidence.reserved_objects, 1);
+    assert_eq!(evidence.reserved_bytes, size);
+    assert_eq!(evidence.verified_external_data, 1);
+    assert_eq!(evidence.verified_external_bytes, size);
+    assert!(evidence.database_contents_uninspected);
+    assert!(!evidence.file_gate_ready);
+
+    let data_file = stage.join("data").join(format!("{}.data", hash.to_hex()));
+    let known_file = fs::read(&data_file).expect("actual external data exists");
+    assert_eq!(known_file.as_slice(), payload.as_slice());
+
+    // An orphan file with the right suffix and another digest must HOLD.
+    let orphan = stage.join("data").join(format!(
+        "{}.data",
+        blake3::hash(b"foreign-unreserved-blob").to_hex()
+    ));
+    fs::write(&orphan, b"foreign").expect("test-only orphan injection");
+    assert!(matches!(
+        audit_external_inventory(&volume, &journal, "real-fsstore"),
+        Err(AuditHold::OrphanExternalHash(_))
+    ));
+    fs::remove_file(orphan).expect("remove only our injected orphan");
+
+    // A same-length edit must be detected by FULL BLAKE3.
+    let mut corrupted = known_file.clone();
+    corrupted[0] ^= 0x80;
+    fs::write(&data_file, &corrupted).expect("test-only corrupt payload");
+    assert!(matches!(
+        audit_external_inventory(&volume, &journal, "real-fsstore"),
+        Err(AuditHold::WrongVerifiedDataHash(_))
+    ));
+    fs::write(&data_file, &known_file).expect("restore known original bytes");
+
+    // Never silently reuse uncommitted temp, stray root entries or a missing DB.
+    let temp = stage.join("temp").join("untrusted-leftover.temp");
+    fs::write(&temp, b"partial").expect("create crash residue");
+    assert!(matches!(
+        audit_external_inventory(&volume, &journal, "real-fsstore"),
+        Err(AuditHold::ResidualTemp(_))
+    ));
+    fs::remove_file(temp).expect("remove injected leftover only");
+
+    let unknown = stage.join("unknown-backup.bin");
+    fs::write(&unknown, b"untracked").expect("create unknown store-root object");
+    assert!(matches!(
+        audit_external_inventory(&volume, &journal, "real-fsstore"),
+        Err(AuditHold::UnexpectedStoreEntry(_))
+    ));
+    fs::remove_file(unknown).expect("remove our own unknown file");
+
+    let db = stage.join("blobs.db");
+    let renamed = stage.join("blobs.db.displaced-by-test");
+    fs::rename(&db, &renamed).expect("displace database for negative audit");
+    assert!(audit_external_inventory(&volume, &journal, "real-fsstore").is_err());
+    fs::rename(&renamed, &db).expect("restore database untouched");
+
+    let restored = audit_external_inventory(&volume, &journal, "real-fsstore")
+        .expect("all injected obstacles removed");
+    assert_eq!(restored, evidence);
+    assert_eq!(
+        fs::read(journal_dir.join("reservations.v1")).unwrap(),
+        original_journal,
+        "audit must not mutate durable journal metadata"
+    );
+    fs::File::open(stage.join("data"))
+        .unwrap()
+        .sync_all()
+        .unwrap();
+    fs::File::open(stage.join("temp"))
+        .unwrap()
+        .sync_all()
+        .unwrap();
+    fs::File::open(&stage).unwrap().sync_all().unwrap();
+    fs::File::open(&root).unwrap().sync_all().unwrap();
+    drop(journal);
+    println!(
+        "P2P_BLOB09_EXTERNAL_AUDIT size={} verified_external=true orphan_hold=true corrupt_hold=true temp_hold=true stray_hold=true missing_db_hold=true journal_unchanged=true db_tables_uninspected=true file_gate_ready=false",
+        size
+    );
+}
+
+/// Read-only verify the same external store AND the same durable journal after
+/// physically unmounting and remounting the ext4 file image.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires remounted disposable ext4 image after prior inventory fixture"]
+fn bounded_ext4_inventory_audit_after_remount() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, reconcile_inventory::audit_external_inventory,
+    };
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 root"),
+    );
+    let volume = StagingVolumeGuard::open(&root).expect("bounded mount required");
+    let size = (1024 * 1024 + 17) as u64;
+    let policy = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let journal = DurableLedger::open(&root.join("reconciliation-ledger"), policy)
+        .expect("reopen same durable ledger after physical remount");
+    let evidence = audit_external_inventory(&volume, &journal, "real-fsstore")
+        .expect("external hash and journal survived remount");
+    assert_eq!(evidence.reserved_bytes, size);
+    assert_eq!(evidence.verified_external_bytes, size);
+    assert_eq!(evidence.verified_external_data, 1);
+    assert!(evidence.database_contents_uninspected);
+    assert!(!evidence.file_gate_ready);
+    println!(
+        "P2P_BLOB09_EXTERNAL_REMOUNT size={} same_persisted_journal=true full_external_b3=true still_hold_for_db_tables=true file_gate_ready=false",
+        size
+    );
+}
