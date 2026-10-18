@@ -126,8 +126,16 @@ impl Replay {
         let span = self.presents.last().zip(self.presents.first()).map_or(0.0, |(l, f)| (*l - *f).as_secs_f64());
         let [p95] = crate::stats::percentiles(&intervals, [0.95]);
         let missed = intervals.iter().filter(|&&i| i > REFRESH_MS * 1.5).count();
+        // Rust tuple Debug output such as [(0, 34.0)] is not JSON.
+        // Serialize slow-frame entries as genuine arrays; do not lose the
+        // very stalls this diagnostic must capture.
+        let long = intervals.iter().enumerate()
+            .filter(|(_, interval)| **interval > 30.0)
+            .map(|(index, interval)| (index, interval.round()))
+            .collect::<Vec<_>>();
+        let long_json = serde_json::to_string(&long).expect("finite replay interval JSON");
         let json = format!(
-            "{{\"quarters\":{:?},\"frames\":{},\"fps\":{:.1},\"intervalAvgMs\":{:.2},\"intervalP95Ms\":{:.2},\"missed\":{},\"workAvgMs\":{:.2},\"long\":{:?}}}",
+            "{{\"quarters\":{:?},\"frames\":{},\"fps\":{:.1},\"intervalAvgMs\":{:.2},\"intervalP95Ms\":{:.2},\"missed\":{},\"workAvgMs\":{:.2},\"long\":{}}}",
             self.work.chunks(self.work.len().div_ceil(4).max(1)).map(|c| (c.iter().sum::<f64>() / c.len() as f64 * 100.0).round() / 100.0).collect::<Vec<_>>(),
             self.presents.len(),
             if span > 0.0 { (self.presents.len().saturating_sub(1)) as f64 / span } else { 0.0 },
@@ -135,10 +143,31 @@ impl Replay {
             p95,
             missed,
             crate::stats::mean(&self.work),
-            intervals.iter().enumerate().filter(|(_, i)| **i > 30.0).map(|(n, i)| (n, i.round())).collect::<Vec<_>>(),
+            long_json,
         );
         if let Err(error) = std::fs::write(&self.output, json) {
             eprintln!("замер прокрутки не записан: {error}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_frame_interval_is_valid_json_pair() {
+        let dir = tempfile::tempdir().expect("temporary diagnostics");
+        let path = dir.path().join("replay.json");
+        let mut replay = Replay::new(Kind::Scroll, path.clone());
+        let started = Instant::now();
+        assert!(matches!(replay.step(started), Some(Step::Wheel(_))));
+        replay.frame(started + Duration::from_millis(2), Duration::from_millis(3));
+        replay.frame(started + Duration::from_millis(50), Duration::from_millis(3));
+        replay.write();
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).expect("valid JSON on long frame");
+        assert_eq!(parsed["frames"], 2);
+        assert_eq!(parsed["long"], serde_json::json!([[0, 48.0]]));
     }
 }
