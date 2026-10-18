@@ -176,6 +176,21 @@ fn mandatory_installed_host_core_open_uses_real_compiled_shared_ledger() {
     assert!(gate::write(
         &a, &original, "owner-forbidden", None, Source::Me, None
     ).is_err());
+
+    // A real installed host ledger must support legitimate writes in an
+    // UNENROLLED sibling workspace, not simply deny every operation.
+    // This is the positive counterpart to the protected-root refusal.
+    let clean_root = temp.path().join("unenrolled-vault");
+    fs::create_dir(&clean_root).unwrap();
+    let clean_root = fs::canonicalize(clean_root).unwrap();
+    a.ui_state.resolve_workspace(clean_root.to_str().unwrap(), 2).unwrap();
+    let clean_note = clean_root.join("Allowed.md");
+    gate::create(&a, &clean_note, "initial", Source::Me, None).unwrap();
+    gate::write(&a, &clean_note, "updated", None, Source::Me, None).unwrap();
+    assert_eq!(fs::read_to_string(&clean_note).unwrap(), "updated");
+    assert!(a.history.page(&|| vec![clean_root], &clean_note, 0, 10).total > 0,
+        "legitimate installed-host note publication must persist HistoryService");
+
     let report = temp.path().join("second-process-report");
     let output = Command::new(std::env::current_exe().unwrap())
         .arg("--exact").arg(CHILD).arg("--nocapture")
