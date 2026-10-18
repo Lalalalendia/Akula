@@ -378,19 +378,25 @@ mod buffered_write_tests {
 
         impl Read for PausedReader {
             fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-                let part = match self.stage {
-                    0 => b"first".as_slice(),
+                let count = match self.stage {
+                    0 => {
+                        // Force the first complete 256-KiB batch to be staged
+                        // in the atomic temporary before we pause.
+                        buffer.fill(b'x');
+                        buffer.len()
+                    }
                     1 => {
                         self.ready.send(()).unwrap();
                         self.resume.recv_timeout(Duration::from_secs(10))
                             .expect("stalled source was not resumed");
-                        b"second".as_slice()
+                        let tail = b"second";
+                        buffer[..tail.len()].copy_from_slice(tail);
+                        tail.len()
                     }
                     _ => return Ok(0),
                 };
                 self.stage += 1;
-                buffer[..part.len()].copy_from_slice(part);
-                Ok(part.len())
+                Ok(count)
             }
         }
 
@@ -400,13 +406,17 @@ mod buffered_write_tests {
         let old_hash = hash_bytes(b"old revision");
         let (ready_tx, ready_rx) = mpsc::channel();
         let (resume_tx, resume_rx) = mpsc::channel();
+        let mut payload = vec![b'x'; 256 * 1024];
+        payload.extend_from_slice(b"second");
+        let announced_hash = hash_bytes(&payload);
+        let announced_len = payload.len();
         let worker_path = path.clone();
         let worker = thread::spawn(move || {
             write_file_atomic_buffered_impl(
                 &worker_path,
                 PausedReader { stage: 0, ready: ready_tx, resume: resume_rx },
-                b"firstsecond".len(),
-                &hash_bytes(b"firstsecond"),
+                announced_len,
+                &announced_hash,
                 Some(&old_hash),
             )
         });
@@ -416,8 +426,8 @@ mod buffered_write_tests {
         assert_eq!(fs::read(&path).unwrap(), b"old revision",
             "a partial temporary write must never be visible at the original path");
         resume_tx.send(()).unwrap();
-        assert_eq!(worker.join().unwrap().unwrap().hash, hash_bytes(b"firstsecond"));
-        assert_eq!(fs::read(&path).unwrap(), b"firstsecond");
+        assert_eq!(worker.join().unwrap().unwrap().hash, hash_bytes(&payload));
+        assert_eq!(fs::read(&path).unwrap(), payload);
     }
 
     #[test]
