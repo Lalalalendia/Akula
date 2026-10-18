@@ -1,12 +1,12 @@
 //! Local discovery is untrusted address information, not pairing.
+use iroh::EndpointId;
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::{
     collections::BTreeSet,
     net::{IpAddr, SocketAddr},
     str::FromStr,
     time::{Duration, Instant},
 };
-use iroh::EndpointId;
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
 pub const SERVICE: &str = "_akula-staya._udp.local.";
 
