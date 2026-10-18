@@ -1,0 +1,144 @@
+name: History unused BLAKE3 A/B
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/files/document.rs"
+      - "aquilum-app/core/src/history/store.rs"
+      - ".github/workflows/history-unused-hash-ab.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: history-unused-hash-ab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Real Gate + History nohash ABBA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/Akula
+          ref: 1e17e59168b1a79aa2d559c70c488faf60da1d2d
+          path: baseline
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile same fixture against pinned before/after
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C baseline rev-parse HEAD)" = "1e17e59168b1a79aa2d559c70c488faf60da1d2d"
+          cmp baseline/aquilum-app/Cargo.lock candidate/aquilum-app/Cargo.lock
+          mkdir -p baseline/.github/bench
+          cp -R candidate/.github/bench/rope-gate-history-e2e baseline/.github/bench/
+          for tree in baseline candidate; do
+            cp "$tree/aquilum-app/Cargo.lock" \
+              "$tree/.github/bench/rope-gate-history-e2e/Cargo.lock"
+          done
+          {
+            git -C baseline rev-parse HEAD
+            git -C candidate rev-parse HEAD
+            rustc --version
+            cargo --version
+            grep -m 1 "model name" /proc/cpuinfo || true
+          } | tee environment.txt
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/nohash-target"
+          cargo build --release \
+            --manifest-path baseline/.github/bench/rope-gate-history-e2e/Cargo.toml
+          cp "$CARGO_TARGET_DIR/release/akula-rope-gate-history-e2e" "$RUNNER_TEMP/bench-before"
+          cargo build --release \
+            --manifest-path candidate/.github/bench/rope-gate-history-e2e/Cargo.toml
+          cp "$CARGO_TARGET_DIR/release/akula-rope-gate-history-e2e" "$RUNNER_TEMP/bench-after"
+          cmp baseline/.github/bench/rope-gate-history-e2e/Cargo.lock \
+              candidate/.github/bench/rope-gate-history-e2e/Cargo.lock
+          sha256sum baseline/.github/bench/rope-gate-history-e2e/Cargo.lock >> environment.txt
+      - name: Real first-save with both history versions and stale-CAS denial
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > measurements.txt
+          for size in 1 8; do
+            for round in 1 2 3; do
+              echo "round=$round size=$size MiB" | tee -a measurements.txt
+              for variant in before after after before; do
+                "$RUNNER_TEMP/bench-$variant" "$variant" "$size" | tee -a measurements.txt
+              done
+            done
+          done
+      - name: Summarize paired p50/p95 with strict sample counts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from collections import defaultdict
+          from pathlib import Path
+          import os
+          import re
+          import statistics
+          rex = re.compile(
+              r"^REAL_GATE_SAVE variant=(before|after) mib=(1|8) bytes=(\d+) "
+              r"flatten_ms=([\d.]+) gate_ms=([\d.]+) total_ms=([\d.]+) "
+              r"rss_before_kib=(\d+) rss_after_kib=(\d+) peak_extra_kib=(\d+)$"
+          )
+          samples = defaultdict(list)
+          for line in Path("measurements.txt").read_text().splitlines():
+              m = rex.fullmatch(line)
+              if m is None:
+                  continue
+              mode, size, size_bytes, flat, gate, total, *memory = m.groups()
+              assert int(size_bytes) == int(size) * 1024 * 1024
+              samples[int(size), mode].append((float(flat), float(gate), float(total)))
+          report = [
+              "## History snapshot unused digest: same-runner real-save A/B",
+              "",
+              "Exact baseline 1e17e591, same release fixture and resolved Cargo.lock.",
+              "Every sample verifies primary BLAKE3+bytes, both history revisions",
+              "and stale-CAS refusal without overwriting foreign changes.",
+              "",
+              "| MiB | Before p50 / p95 ms | After p50 / p95 ms | Change in p50 | Gate before / after p50 ms |",
+              "|---:|---:|---:|---:|---:|",
+          ]
+          for size in (1, 8):
+              before = samples[size, "before"]
+              after = samples[size, "after"]
+              assert len(before) == len(after) == 6, (size, len(before), len(after))
+              b = statistics.median(x[2] for x in before)
+              a = statistics.median(x[2] for x in after)
+              report.append(
+                  f"| {size} | {b:.3f} / {max(x[2] for x in before):.3f} | "
+                  f"{a:.3f} / {max(x[2] for x in after):.3f} | "
+                  f"{(a / b - 1) * 100:+.1f}% | "
+                  f"{statistics.median(x[1] for x in before):.3f} / "
+                  f"{statistics.median(x[1] for x in after):.3f} |"
+              )
+          report += [
+              "",
+              "Six samples per mode/size in ABBA order. p95 is the observed",
+              "maximum and therefore noisy. No performance-based CI threshold.",
+              "Production custody, OS lock, HOLD and restart gates are separate.",
+          ]
+          summary = "\n".join(report)
+          print(summary)
+          Path("summary.md").write_text(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: history-unused-blake3-${{ github.sha }}
+          path: |
+            environment.txt
+            measurements.txt
+            summary.md
+          retention-days: 30
+          if-no-files-found: warn

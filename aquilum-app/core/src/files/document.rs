@@ -115,15 +115,20 @@ fn check_expected_hash(path: &Path, expected_hash: &str) -> Result<(), FileComma
     Ok(())
 }
 
-pub fn write_file_atomic_impl(
+/// The one atomic publication sequence for both normal note files and
+/// HistoryService version bytes. CAS must be checked after staging and before
+/// commit; a failed CAS must never publish the temporary file.
+fn write_atomic_bytes_impl(
     path: &Path,
-    content: &str,
+    bytes: &[u8],
     expected_hash: Option<&str>,
-) -> Result<FileWriteResult, FileCommandError> {
+    return_hash: bool,
+) -> Result<Option<String>, FileCommandError> {
     #[cfg(feature = "save-stage-probe")]
     let profile_start = std::time::Instant::now();
-    let bytes = content.as_bytes();
-    let hash = hash_bytes(bytes);
+    // Some callers (primary note saves) need the new BLAKE3 digest. History
+    // version persistence previously calculated one only to discard it.
+    let hash = return_hash.then(|| hash_bytes(bytes));
     #[cfg(feature = "save-stage-probe")]
     let profile_hash = profile_start.elapsed();
     let mut file = AtomicWriteFile::open(path)?;
@@ -145,7 +150,7 @@ pub fn write_file_atomic_impl(
         let profile_commit = profile_start.elapsed();
         let ms = |duration: std::time::Duration| duration.as_secs_f64() * 1000.0;
         eprintln!(
-            "AKULA_SAVE_ATOMIC cas={} bytes={} hash_ms={:.4} open_ms={:.4} write_ms={:.4} cas_ms={:.4} commit_ms={:.4} total_ms={:.4}",
+            "AKULA_SAVE_ATOMIC cas={} bytes={} hash_ms={:.4} open_ms={:.4} write_ms={:.4} cas_ms={:.4} commit_ms={:.4} total_ms={:.4} hash_used={}",
             u8::from(expected_hash.is_some()),
             bytes.len(),
             ms(profile_hash),
@@ -154,9 +159,33 @@ pub fn write_file_atomic_impl(
             ms(profile_cas - profile_write),
             ms(profile_commit - profile_cas),
             ms(profile_commit),
+            u8::from(return_hash),
         );
     }
+    Ok(hash)
+}
+
+pub fn write_file_atomic_impl(
+    path: &Path,
+    content: &str,
+    expected_hash: Option<&str>,
+) -> Result<FileWriteResult, FileCommandError> {
+    // This is still the only primary-document writer: its digest and
+    // raw-byte expected-hash CAS semantics are unchanged.
+    let hash = write_atomic_bytes_impl(path, content.as_bytes(), expected_hash, true)?
+        .expect("hash is always computed for the primary document");
     Ok(FileWriteResult { hash })
+}
+
+/// HistoryService's version writer needs durable bytes but never consumes
+/// FileWriteResult.hash. Reuse the exact same atomic open/write/commit sequence
+/// without recalculating a digest that was not checked or stored. Only the
+/// history store should call this, under its existing custody/lock lifetime.
+pub(crate) fn write_history_snapshot_atomic_impl(
+    path: &Path,
+    content: &str,
+) -> Result<(), FileCommandError> {
+    write_atomic_bytes_impl(path, content.as_bytes(), None, false).map(|_| ())
 }
 
 /// A bounded prepublication serializer for future File Gate content sources.
@@ -545,5 +574,60 @@ mod snapshot_hash_reuse_tests {
                 baseline_ms / candidate_ms
             );
         }
+    }
+}
+
+
+#[cfg(test)]
+mod history_unhashed_atomic_tests {
+    use super::{hash_bytes, write_file_atomic_impl, write_history_snapshot_atomic_impl};
+    use std::fs;
+
+    #[test]
+    fn unused_history_digest_can_be_skipped_without_changing_published_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let large = "История 😀漢字\r\nданные\0".repeat(100_000);
+        for (index, content) in ["", "ASCII", "CRLF\r\nLF\n😀漢字", &large].into_iter().enumerate() {
+            let hashed = temp.path().join(format!("hashed-{index}.md"));
+            let history = temp.path().join(format!("history-{index}.md"));
+            let expected_hash = hash_bytes(content.as_bytes());
+            let returned = write_file_atomic_impl(&hashed, content, None).unwrap();
+            write_history_snapshot_atomic_impl(&history, content).unwrap();
+
+            assert_eq!(returned.hash, expected_hash);
+            assert_eq!(fs::read(&hashed).unwrap(), content.as_bytes());
+            assert_eq!(fs::read(&history).unwrap(), fs::read(&hashed).unwrap());
+
+            let replacement = format!("версия {index}\n{}", content);
+            let second = write_file_atomic_impl(&hashed, &replacement, None).unwrap();
+            write_history_snapshot_atomic_impl(&history, &replacement).unwrap();
+            assert_eq!(second.hash, hash_bytes(replacement.as_bytes()));
+            assert_eq!(fs::read(&history).unwrap(), fs::read(&hashed).unwrap());
+        }
+    }
+
+    #[test]
+    fn primary_note_cas_still_checks_raw_crlf_disk_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("CAS.md");
+        let raw = b"old\r\nraw bytes";
+        fs::write(&path, raw).unwrap();
+        // This is the editor-normalized hash, NOT the actual disk hash.
+        let wrong_expected = hash_bytes(b"old\nraw bytes");
+        let error = write_file_atomic_impl(&path, "new version", Some(&wrong_expected))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::files::error::FileCommandError::Conflict { .. }
+        ));
+        assert_eq!(fs::read(&path).unwrap(), raw);
+    }
+
+    #[test]
+    fn history_writer_rejects_missing_parent_without_publishing_any_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("no-such-history").join("version.md");
+        assert!(write_history_snapshot_atomic_impl(&missing, "do not create").is_err());
+        assert!(!missing.exists());
     }
 }
