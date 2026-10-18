@@ -87,6 +87,8 @@ struct Host {
     replay: Option<crate::replay::Replay>,
     #[cfg(feature = "memory-probe")]
     probe: Option<crate::memory_probe::Probe>,
+    #[cfg(feature = "memory-probe")]
+    reader_frame: Option<crate::memory_probe::ReaderFrame>,
     cursor: CursorIcon,
     resize_edge: Option<ResizeDirection>,
     background: Option<masonry::peniko::Color>,
