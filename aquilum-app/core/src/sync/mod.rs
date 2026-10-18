@@ -13,6 +13,10 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
+// P0-A: inert installer-provisioned cross-appdata custody ledger;
+// ordinary File Gate/HistoryService do NOT use this yet.
+#[cfg(feature = "sync-s3")]
+pub(crate) mod host_custody_registry;
 pub(crate) mod guarded_note_write;
 #[cfg(feature = "sync-s3")]
 pub(crate) mod guarded_editor;
