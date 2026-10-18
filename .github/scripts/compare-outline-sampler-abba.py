@@ -22,13 +22,17 @@ def metric_from_line(line: str) -> dict[str, str]:
     return dict(part.split("=", 1) for part in line.split() if "=" in part)
 
 
-def parse_logs(directory: Path, mode: str) -> dict[tuple[str, str], list[dict[str, str]]]:
+def parse_logs(directory: Path, mode: str) -> tuple[
+    dict[tuple[str, str], list[dict[str, str]]],
+    dict[str, list[int]],
+]:
     logs = sorted(directory.glob(f"perf-{mode}-*.log"))
     if len(logs) != 8:
         raise ValueError(f"{mode}: expected 8 independent trial logs, got {len(logs)}")
     records: dict[tuple[str, str], list[dict[str, str]]] = {
         (case, worker): [] for case in CASES for worker in WORKERS
     }
+    parity_maxima: dict[str, list[int]] = {case: [] for case in CASES}
     for log in logs:
         lines = log.read_text(errors="replace").splitlines()
         samples = [metric_from_line(s.split("VELLO_RELEASE ", 1)[1])
@@ -38,8 +42,12 @@ def parse_logs(directory: Path, mode: str) -> dict[tuple[str, str], list[dict[st
         if len(samples) != 8 or len(parity) != 4:
             raise ValueError(f"{log}: expected 8 samples/4 parity rows; got {len(samples)}/{len(parity)}")
         for row in parity:
-            if row["serial_parallel_diff"] != "0" or int(row["partial_full_max_channel"]) > 1:
-                raise ValueError(f"{log}: parity gate failed: {row}")
+            if row["serial_parallel_diff"] != "0":
+                raise ValueError(f"{log}: serial/parallel parity changed: {row}")
+            case = row["case"]
+            if case not in parity_maxima or row["partial_full_tolerance"] != "1":
+                raise ValueError(f"{log}: unexpected case/tolerance: {row}")
+            parity_maxima[case].append(int(row["partial_full_max_channel"]))
         for row in samples:
             key = row["case"], row["mode"]
             if key not in records:
@@ -48,7 +56,10 @@ def parse_logs(directory: Path, mode: str) -> dict[tuple[str, str], list[dict[st
     for key, rows in records.items():
         if len(rows) != 8:
             raise ValueError(f"{mode}/{key}: expected eight observations, got {len(rows)}")
-    return records
+    for case, values in parity_maxima.items():
+        if len(values) != 8:
+            raise ValueError(f"{mode}/{case}: expected 8 independent parity observations")
+    return records, parity_maxima
 
 
 def pixel_diff(a: Path, b: Path) -> dict[str, float | int]:
@@ -74,8 +85,8 @@ def pixel_diff(a: Path, b: Path) -> dict[str, float | int]:
 
 def main() -> None:
     root = Path(sys.argv[1])
-    low = parse_logs(root, "low")
-    high = parse_logs(root, "high")
+    low, low_parity = parse_logs(root, "low")
+    high, high_parity = parse_logs(root, "high")
     lines = [
         "# Akula cached outline sampler A/B",
         "",
@@ -97,6 +108,25 @@ def main() -> None:
                 f"| {case} / {worker} | {fl:.2f} | {fh:.2f} | {(fh/fl-1)*100:+.1f}% | "
                 f"{rl:.2f} | {rh:.2f} | {(rh/rl-1)*100:+.1f}% |"
             )
+    lines.extend([
+        "",
+        "## Strict-parity violations observed during timing (NOT acceptance)",
+        "",
+        "Performance runs use AQ_SAMPLER_TIMING_ONLY to collect all timings and",
+        "capture images despite >1/255 differences. Every such violation",
+        "remains a **fidelity failure**, not a permitted threshold change.",
+        "The normal strict guard96 acceptance workflow still fails on >1/255.",
+        "",
+        "| Case | Low breach processes | Low worst delta | High breach processes | High worst delta |",
+        "|---|---:|---:|---:|---:|",
+    ])
+    for case in CASES:
+        l = low_parity[case]
+        h = high_parity[case]
+        lines.append(
+            f"| {case} | {sum(v > 1 for v in l)}/8 | {max(l)} | "
+            f"{sum(v > 1 for v in h)}/8 | {max(h)} |"
+        )
     lines.extend([
         "",
         "## Captured scene fidelity (cached versus direct, screen RGBA)",
@@ -126,6 +156,7 @@ def main() -> None:
             )
     lines.extend(["", "## Interpretation guardrails", ""])
     lines.append("- `High` uses a 4×4 bicubic sampler instead of nearest-neighbor, not a free numerical-precision fix.")
+    lines.append("- The timing workflow is **diagnostic** and reports visual failures; only strict parity jobs determine acceptance.")
     lines.append("- 0/20 guard96 mismatches is necessary but not sufficient to ship; review images, p95, Windows/macOS UI parity.")
     if unstable:
         lines.append("- **Direct-control images were not deterministic:** " + "; ".join(unstable))
