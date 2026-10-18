@@ -257,6 +257,11 @@ impl Core {
         self.file_mutation_guard_for_write_mode(true, false)
     }
 
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn requires_installed_host_epoch(&self) -> bool {
+        self.installed_host_custody_db.is_some()
+    }
+
     /// Only the still-held host SQLite enrollment epoch can invoke this
     /// exception, never a normal File Gate entrypoint or a network reader.
     #[cfg(feature = "sync-s3")]
