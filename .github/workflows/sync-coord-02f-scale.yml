@@ -26,6 +26,12 @@ jobs:
         include:
           - notes: 64
             edits: 7
+          - notes: 10000
+            edits: 0
+          - notes: 10000
+            edits: 7
+          - notes: 10000
+            edits: 1000
     env:
       AWS_ACCESS_KEY_ID: akula_coord_02f_test
       AWS_SECRET_ACCESS_KEY: disposable_scale_ci_no_production_access
@@ -95,6 +101,13 @@ jobs:
               assert r["offline_generations"] == 2
               assert r["selective_v2_packs"]["verified_packs"] >= 2
               assert r["selective_v2_packs"]["io"]["get"] > 0
+              assert r["selective_v2_packs"]["io"]["head"] == 2 * r["selective_v2_packs"]["io"]["get"]
+              assert r["selective_v2_packs"]["checked_pack_bytes"] <= 16 * 1024 * 1024
+              assert r["publication"]["new_v1_revision_objects"] == r["edits"]
+              assert r["publication"]["final_v1_shards"] <= 256
+              assert r["selective_v2_packs"]["verified_packs"] == r["publication"]["new_v2_pack_objects"]
+              assert r["selective_v2_packs"]["io"]["get"] < r["conservative_chain_v2"]["get"]
+              assert r["conservative_chain_v2"]["head"] == 2 * r["conservative_chain_v2"]["get"]
           else:
               assert r["offline_generations"] == 0
               assert r["v2_letter_mode"] == "not-applicable-without-new-generation"
