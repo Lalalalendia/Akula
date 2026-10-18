@@ -621,7 +621,10 @@ async fn child_process_downloads_missing_verified_ranges() {
             .is_complete(),
         "reassembled FsStore blob still incomplete"
     );
-    let finished = disk.get_bytes(hash).await.expect("read complete child blob");
+    let finished = disk
+        .get_bytes(hash)
+        .await
+        .expect("read complete child blob");
     assert_eq!(finished.as_ref(), original.as_slice());
     assert_eq!(Hash::new(finished.as_ref()), hash);
     println!(
@@ -631,7 +634,9 @@ async fn child_process_downloads_missing_verified_ranges() {
         stats.total_bytes_read(),
     );
     connection.close(0u8.into(), b"child done");
-    disk.shutdown().await.expect("persist full bytes after child");
+    disk.shutdown()
+        .await
+        .expect("persist full bytes after child");
     peer.close().await;
 }
 
