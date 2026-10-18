@@ -323,3 +323,193 @@ mod mipmap_integration_tests {
         assert!(images.mips.is_empty());
     }
 }
+
+
+// This exercises the actual Akula image-brush converter and Vello CPU rasterizer
+// on an in-repository PNG. The reference is a direct full-footprint area sum,
+// independent of mipmap::half and of Vello's sampling implementation.
+#[cfg(test)]
+mod image_scene_tests {
+    use super::*;
+    use masonry::peniko::{ImageAlphaType, ImageQuality};
+    use vello_cpu::color::palette::css::WHITE;
+    use vello_cpu::{RasterizerSettings, RenderContext, RenderSettings, Resources, TargetInit};
+
+    const SIDE: usize = 128;
+
+    #[derive(Clone, Copy, Debug)]
+    enum Scene {
+        Photo,
+        AlphaCrop,
+    }
+
+    fn fixture(scene: Scene) -> Vec<u8> {
+        // A real repository asset, not a repeated synthetic stripe texture.
+        let photo = image::load_from_memory(include_bytes!("../../../assets/city-cover.png"))
+            .expect("pinned local city cover PNG")
+            .to_rgba8();
+        let mut bytes = image::imageops::resize(
+            &photo, SIDE as u32, SIDE as u32, image::imageops::FilterType::Lanczos3,
+        )
+        .into_raw();
+        if matches!(scene, Scene::AlphaCrop) {
+            // Use straight-alpha input through the same decoding/registration
+            // semantics as Markdown images. Fully transparent texels retain
+            // their RGB so a non-premultiplied filter would produce halos.
+            for y in 0..SIDE {
+                for x in 0..SIDE {
+                    let pixel = (y * SIDE + x) * 4;
+                    bytes[pixel + 3] = [0, 64, 128, 192, 255][(x / 7 + y / 11) % 5];
+                }
+            }
+        }
+        bytes
+    }
+
+    fn shape(scene: Scene) -> Rect {
+        match scene {
+            Scene::Photo => Rect::new(0.0, 0.0, 128.0, 128.0),
+            Scene::AlphaCrop => Rect::new(16.0, 16.0, 112.0, 112.0),
+        }
+    }
+
+    fn draw(data: &[u8], ratio: u16, scene: Scene, enabled: bool, workers: u16) -> (Pixmap, usize) {
+        let brush = crate::render::pixels::from_rgba(
+            data.to_vec(), SIDE as u32, SIDE as u32, ImageAlphaType::Alpha,
+        )
+        .expect("valid source fixture")
+        .with_quality(ImageQuality::High);
+
+        let transform = Affine::scale(1.0 / f64::from(ratio));
+        let mut images = Images::default();
+        let (paint, brush_transform) = brush_to_paint_candidate(
+            BrushRef::Image(brush.as_ref()), Composite::default(),
+            &mut images, transform, Affine::IDENTITY, enabled,
+        );
+        let allocated = images.mips.len();
+        if enabled {
+            assert!(allocated > 0, "a quality test must exercise actual mip generation");
+        } else {
+            assert_eq!(allocated, 0, "the baseline may not allocate candidate mipmaps");
+        }
+
+        let size = (SIDE as u16) / ratio;
+        let mut ctx = RenderContext::new_with(
+            size, size, RenderSettings { num_threads: workers, ..RenderSettings::default() },
+        );
+        ctx.set_transform(transform);
+        ctx.set_paint_transform(brush_transform);
+        ctx.set_paint(paint);
+        ctx.fill_rect(&shape(scene));
+        ctx.flush();
+        let mut out = Pixmap::new(size, size);
+        ctx.render_with(
+            &mut out, &mut Resources::default(),
+            RasterizerSettings {
+                target_init: TargetInit::Clear(WHITE),
+                ..RasterizerSettings::default()
+            },
+        );
+        (out, allocated)
+    }
+
+    // Straight RGBA -> premultiplied area average -> source-over white.
+    // Unlike the candidate, this reference sums *every* source texel in the
+    // destination's footprint in one pass, without iterative halving.
+    fn area_reference(data: &[u8], x: usize, y: usize, ratio: usize) -> [u8; 3] {
+        let mut rgba = [0u64; 4];
+        for iy in (y * ratio)..((y + 1) * ratio) {
+            for ix in (x * ratio)..((x + 1) * ratio) {
+                let index = (iy * SIDE + ix) * 4;
+                let a = u64::from(data[index + 3]);
+                for channel in 0..3 {
+                    // Premultiplication is deliberately independent of Vello.
+                    rgba[channel] += (u64::from(data[index + channel]) * a + 127) / 255;
+                }
+                rgba[3] += a;
+            }
+        }
+        let count = (ratio * ratio) as u64;
+        let a = (rgba[3] + count / 2) / count;
+        let mut expected = [255u8; 3];
+        for channel in 0..3 {
+            let value = (rgba[channel] + count / 2) / count;
+            expected[channel] = value.saturating_add(255 - a).min(255) as u8;
+        }
+        expected
+    }
+
+    fn error_against_area(
+        data: &[u8], frame: &Pixmap, ratio: u16, scene: Scene,
+    ) -> (f64, u8, usize) {
+        let side = SIDE / usize::from(ratio);
+        let mut total = 0u64;
+        let mut worst = 0u8;
+        let mut compared = 0usize;
+        for y in 0..side {
+            for x in 0..side {
+                let score = match scene {
+                    Scene::Photo => x > 0 && y > 0 && x + 1 < side && y + 1 < side,
+                    Scene::AlphaCrop => {
+                        let left = 16 / usize::from(ratio);
+                        let right = 112 / usize::from(ratio);
+                        x > left && y > left && x + 1 < right && y + 1 < right
+                    }
+                };
+                if !score { continue; }
+                let expect = area_reference(data, x, y, usize::from(ratio));
+                let px = frame.data()[y * side + x];
+                for (actual, wanted) in [px.r, px.g, px.b].into_iter().zip(expect) {
+                    let delta = actual.abs_diff(wanted);
+                    total += u64::from(delta);
+                    worst = worst.max(delta);
+                    compared += 1;
+                }
+            }
+        }
+        assert!(compared > 0, "need interior pixels for an independent reference");
+        (total as f64 / compared as f64, worst, compared)
+    }
+
+    #[test]
+    fn real_png_and_straight_alpha_crop_match_independent_area_reference() {
+        let mut checked = 0usize;
+        for workers in [0, 2] {
+            for scene in [Scene::Photo, Scene::AlphaCrop] {
+                let data = fixture(scene);
+                for ratio in [4u16, 8, 16] {
+                    let (before, _) = draw(&data, ratio, scene, false, workers);
+                    let (after, mips) = draw(&data, ratio, scene, true, workers);
+                    let (base_mae, base_max, pixels) =
+                        error_against_area(&data, &before, ratio, scene);
+                    let (trial_mae, trial_max, _) =
+                        error_against_area(&data, &after, ratio, scene);
+
+                    if matches!(scene, Scene::AlphaCrop) {
+                        // Cropping must not move the brush or paint into the
+                        // untouched top-left corner of the white canvas.
+                        let corner = after.data()[0];
+                        assert_eq!([corner.r, corner.g, corner.b, corner.a], [255, 255, 255, 255]);
+                    }
+                    println!(
+                        "AKULA_MIP_REALPNG scene={scene:?} ratio={ratio} workers={workers} \
+                         baseline_mae={base_mae:.3} candidate_mae={trial_mae:.3} \
+                         baseline_max={base_max} candidate_max={trial_max} \
+                         compared_channels={pixels} allocated_mips={mips}"
+                    );
+                    // Fail on a material quality loss rather than asking only
+                    // whether the specialized stripe fixture became green.
+                    // Tighten once we inspect the independent A/B distributions.
+                    assert!(
+                        trial_mae <= base_mae + 4.0 && trial_mae <= 25.0,
+                        "candidate outside conservative real-image quality guard \
+                         scene={scene:?} ratio={ratio} workers={workers} \
+                         baseline={base_mae:.3} candidate={trial_mae:.3}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 12);
+    }
+}
