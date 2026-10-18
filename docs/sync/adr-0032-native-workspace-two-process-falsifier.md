@@ -6,7 +6,7 @@
 
 The original [#251](https://github.com/Lalalalendia/Akula/pull/251) proved that a *second* OS process can open a physically identical workspace through a different `--data-dir` and bypass the first Core's appdata-local S3 custody. Internal Core-only tests can pass even if the native entrypoint loses the intended build feature or silently chooses a legacy constructor.
 
-This slice exercises the actual `native::workspace::Workspace::open(Some(appdata), Some(vault), wake)`, the function used by the GUI path behind `--data-dir`. It is compiled with the separately selected **AWS-free** `aquilum-native/sync-installed-host` feature.
+This slice exercises the actual `native::workspace::Workspace::open(Some(appdata), Some(vault), wake)`, the function used by the GUI path behind `--data-dir`. It is compiled with the **AWS-free** `aquilum-native --features installed,sync-installed-host` pair, matching the packaged desktop feature and adding mandatory host admission.
 
 ## Exact negative acceptance
 
