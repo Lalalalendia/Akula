@@ -49,7 +49,7 @@ pub struct HistoryService {
     guarded_participant: OnceLock<Arc<AtomicBool>>,
     // Once a Core is host-bound, direct history mutation without its held
     // shared enrollment epoch is forbidden, even in fresh private appdata.
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     installed_host_requires_epoch: AtomicBool,
     #[cfg(test)]
     next_fault: Mutex<Option<HistoryFault>>,
@@ -225,7 +225,7 @@ impl HistoryService {
             device: device_id(app_data),
             state: Mutex::default(),
             guarded_participant: OnceLock::new(),
-            #[cfg(feature = "sync-s3")]
+            #[cfg(feature = "host-custody")]
             installed_host_requires_epoch: AtomicBool::new(false),
             #[cfg(test)]
             next_fault: Mutex::new(None),
@@ -239,7 +239,7 @@ impl HistoryService {
             "history participant safety policy already installed");
     }
 
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     pub(crate) fn require_installed_host_epoch(&self) {
         self.installed_host_requires_epoch.store(true, Ordering::Release);
     }
@@ -247,9 +247,9 @@ impl HistoryService {
     fn denies_unverified_history_writes(&self) -> bool {
         let enrolled = self.guarded_participant.get()
             .is_some_and(|flag| flag.load(Ordering::Acquire));
-        #[cfg(feature = "sync-s3")]
+        #[cfg(feature = "host-custody")]
         { enrolled || self.installed_host_requires_epoch.load(Ordering::Acquire) }
-        #[cfg(not(feature = "sync-s3"))]
+        #[cfg(not(feature = "host-custody"))]
         { enrolled }
     }
 
@@ -321,7 +321,7 @@ impl HistoryService {
     /// A host-bound ordinary File Gate note write is admitted only while the
     /// same physical Core holds the installer-wide unenrolled SQLite epoch.
     /// No direct history caller can construct this lexical capability.
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     pub(crate) fn try_saved_with_host_epoch(
         &self,
         permit: &crate::app_core::HostUnenrolledEpochPermit<'_>,
