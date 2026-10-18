@@ -109,3 +109,42 @@ fn copy_header_is_not_offered_for_prose_math_or_occluded_long_info() {
     assert_eq!(editor.code_header_button_for_test(source.find("\u{60}\u{60}\u{60}").unwrap()), None);
     assert_eq!(editor.code_header_button_for_test(source.find("$$").unwrap()), None);
 }
+
+
+#[test]
+fn code_header_click_changes_only_its_control_pixels() {
+    use super::support::click;
+
+    const W: u16 = 600;
+    const H: u16 = 260;
+    fn render(root: &mut masonry::app::RenderRoot) -> Vec<u32> {
+        let (layers, _) = root.redraw();
+        let mut renderer = crate::render::Renderer::new(2);
+        renderer.render(&layers, W, H, 1.0, crate::ui::theme::background()).expect("native frame");
+        renderer.frame_pixels().to_vec()
+    }
+
+    let source = "\u{60}\u{60}\u{60}rust\nfn main() { println!(\"hello\"); }\n\u{60}\u{60}\u{60}";
+    let mut root = unfocused(TextEditor::new(source).markdown(), u32::from(W), u32::from(H));
+    let button = root.get_widget_with_tag(TAG).unwrap().inner().code_header_button_for_test(0).expect("header button");
+    let old = render(&mut root);
+    click(&mut root, button.center().x, button.center().y);
+    let new = render(&mut root);
+    assert_eq!(old.len(), new.len());
+    let (mut inside, mut outside) = (0usize, 0usize);
+    for (index, (old, new)) in old.iter().zip(new.iter()).enumerate() {
+        if old == new {
+            continue;
+        }
+        let x = (index % usize::from(W)) as f64;
+        let y = (index / usize::from(W)) as f64;
+        if x >= button.x0 - 2.0 && x <= button.x1 + 2.0 && y >= button.y0 - 2.0 && y <= button.y1 + 2.0 {
+            inside += 1;
+        } else {
+            outside += 1;
+        }
+    }
+    assert!(inside >= 8, "copy/check feedback must actually be rendered: {inside} changed pixels");
+    assert_eq!(outside, 0, "copy must not repaint different text or surrounding pixels");
+    assert_eq!(text(&root), source);
+}
