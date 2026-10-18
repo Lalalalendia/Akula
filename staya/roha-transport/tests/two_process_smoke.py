@@ -40,7 +40,7 @@ def run_with_keys(folder):
         trusted = pathlib.Path(folder) / (name + ".trusted")
         exported = subprocess.run([str(BIN), "show-contact", peer_key],
                                   capture_output=True, text=True, check=True, timeout=15)
-        contact.write_text(exported.stdout, encoding="utf-8")
+        contact.write_bytes(exported.stdout.encode("utf-8"))
         examined = subprocess.run([str(BIN), "inspect-contact", str(contact)],
                                   capture_output=True, text=True, check=True, timeout=15)
         if "not_enrolled=true" not in examined.stdout:
