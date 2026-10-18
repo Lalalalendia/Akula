@@ -1,4 +1,6 @@
-use akula_roha_transport::transfer::{TransferManifest, VerifiedAssembly, MAX_CHUNK_BYTES, FRAME_HEADER_BYTES};
+use akula_roha_transport::transfer::{
+    FRAME_HEADER_BYTES, MAX_CHUNK_BYTES, TransferManifest, VerifiedAssembly,
+};
 use akula_roha_transport::{AllowedPeers, StayaTransport};
 use iroh::SecretKey;
 use std::time::Duration;
@@ -8,8 +10,12 @@ async fn multiple_files_and_reconnect_resume_verified_chunks() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let key_a = SecretKey::generate();
         let key_b = SecretKey::generate();
-        let a = StayaTransport::bind(key_a.clone(), AllowedPeers::new([key_b.public()])).await.unwrap();
-        let b = StayaTransport::bind(key_b, AllowedPeers::new([key_a.public()])).await.unwrap();
+        let a = StayaTransport::bind(key_a.clone(), AllowedPeers::new([key_b.public()]))
+            .await
+            .unwrap();
+        let b = StayaTransport::bind(key_b, AllowedPeers::new([key_a.public()]))
+            .await
+            .unwrap();
 
         for payload in [vec![], vec![7], vec![0x5a; MAX_CHUNK_BYTES * 3 + 13]] {
             let manifest = TransferManifest::for_bytes(&payload).unwrap();
@@ -17,7 +23,8 @@ async fn multiple_files_and_reconnect_resume_verified_chunks() {
             let mut connection_index = 0;
             let mut cursor = 0usize;
             loop {
-                let (incoming, outgoing) = tokio::try_join!(b.accept_one(), a.connect(b.address())).unwrap();
+                let (incoming, outgoing) =
+                    tokio::try_join!(b.accept_one(), a.connect(b.address())).unwrap();
                 for _ in 0..2 {
                     if cursor >= payload.len() && !(payload.is_empty() && cursor == 0) {
                         break;
@@ -28,7 +35,10 @@ async fn multiple_files_and_reconnect_resume_verified_chunks() {
                     let (receiver, sender) = tokio::join!(
                         async {
                             let (mut tx, mut rx) = incoming.accept_bi().await.unwrap();
-                            let data = rx.read_to_end(MAX_CHUNK_BYTES + FRAME_HEADER_BYTES).await.unwrap();
+                            let data = rx
+                                .read_to_end(MAX_CHUNK_BYTES + FRAME_HEADER_BYTES)
+                                .await
+                                .unwrap();
                             let next = assembly.accept_frame(&data).unwrap();
                             tx.write_all(&next.to_le_bytes()).await.unwrap();
                             tx.finish().unwrap();
@@ -64,5 +74,7 @@ async fn multiple_files_and_reconnect_resume_verified_chunks() {
         }
         a.close().await;
         b.close().await;
-    }).await.expect("bounded transfer and reconnect");
+    })
+    .await
+    .expect("bounded transfer and reconnect");
 }
