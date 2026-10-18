@@ -8,7 +8,7 @@ use anyhow::{bail, ensure, Context, Result};
 use iroh::EndpointId;
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -138,6 +138,7 @@ impl PersistentQuota {
         ensure!((len as usize - HEADER_LEN) % RECORD_LEN == 0, "truncated quota journal record");
 
         let mut bytes = Vec::with_capacity(len as usize);
+        journal.seek(SeekFrom::Start(0))?;
         journal.read_to_end(&mut bytes)?;
         ensure!(bytes.len() == len as usize, "quota journal changed while loading");
         let expected_header = header(owner, global, per_peer);
