@@ -10,6 +10,7 @@ use super::*;
 use crate::sync::{
     DocumentId, RevisionDag, RevisionOperation, RevisionRecord, S3ContractError,
     S3HeadPointerV1, S3ManifestShardV1, SyncRelativePath,
+    MAX_MANIFEST_BYTES, MAX_SHARD_BYTES,
 };
 use crate::sync::s3_transport::{
     AwsS3ProbeClient, S3ConnectionProfile, S3PutCondition, S3TransportError,
@@ -51,7 +52,7 @@ fn sample_revision(
             None => RevisionOperation::Tombstone { path },
         },
     };
-    SampleRevision { record, blob: content.map(str::to_owned).map(String::into_bytes) }
+    SampleRevision { record, blob: content.map(|bytes| bytes.to_vec()) }
 }
 
 struct Candidate {
@@ -253,11 +254,11 @@ fn verify_pack_members(
         require(record.id == member.reference.revision_id
             && record.document_id == member.reference.document_id,
             "wrong revision or document identity")?;
-        match record.operation {
+        match &record.operation {
             RevisionOperation::Content { ref blob_hash, .. }
             | RevisionOperation::Rename { ref blob_hash, .. } => {
                 require(member.reference.blob_bytes == Some(blob_len as u64)
-                    && digest(blob) == *blob_hash, "blob content integrity failure")?;
+                    && digest(blob).as_str() == blob_hash.as_str(), "blob content integrity failure")?;
             },
             RevisionOperation::Tombstone { .. } => {
                 require(blob_len == 0 && member.reference.blob_bytes.is_none(),
@@ -454,12 +455,13 @@ impl V2ProbeJournal {
             && observed.head.encode(ns).map_err(|e| format!("{e:?}"))?
                 == original.3,
             "different current root: lost ACK may not be retried blindly")?;
-        self.db.execute(
+        let updated = self.db.execute(
             "UPDATE v2_test_root_attempt SET observed_etag=?2
                WHERE op=?1 AND (observed_etag IS NULL OR observed_etag=?2)",
             params![op.to_string(), observed.etag],
         ).map_err(|e| format!("receipt verification failed: {e}"))?;
-        require(self.is_observed(op)?, "missing observed receipt")?;
+        require(updated == 1 && self.is_observed(op)?,
+            "conflicting persisted V2 receipt or unknown acknowledgement")?;
         Ok(())
     }
 }
@@ -488,7 +490,16 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     let a = AwsS3ProbeClient::connect(profile.clone(), ns.clone()).await.unwrap();
     let b = AwsS3ProbeClient::connect(profile, ns.clone()).await.unwrap();
     // Direct bucket creation is confined to this disposable local server.
-    a.client.create_bucket().bucket("akula-v2-cas-test").send().await.unwrap();
+    let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new("us-east-1")).load().await;
+    let bootstrap = aws_sdk_s3::Client::from_conf(
+        aws_sdk_s3::config::Builder::from(&shared)
+            .force_path_style(true)
+            .endpoint_url(std::env::var("AQ_S3_TEST_ENDPOINT").unwrap())
+            .build(),
+    );
+    bootstrap.create_bucket().bucket("akula-v2-cas-test")
+        .send().await.unwrap();
 
     let doc = DocumentId::new();
     let id0 = RevisionId::new();
