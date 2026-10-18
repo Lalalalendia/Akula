@@ -198,6 +198,14 @@ impl SharedHostCustodyRegistry {
             tx.commit()?;
             return Ok(());
         }
+        // The same physical host registry must not register a parent and a
+        // nested workspace as independently authorized S3 participants.
+        // Check INSIDE the same BEGIN IMMEDIATE used by ordinary writers:
+        // alternate appdata and different inode identities cannot race in
+        // a conflicting hierarchy after both received positive enrollment.
+        if has_registered_path_overlap(&tx, Path::new(&record.root_path))? {
+            return Err(HostCustodyError::ConflictingEnrollment);
+        }
         tx.execute(
             "INSERT INTO shared_custody(root_key, root_path, record_json, record_blake3)
              VALUES (?1, ?2, ?3, ?4)",
@@ -228,24 +236,10 @@ impl SharedHostCustodyRegistry {
         if lookup(&transaction, &root_identity.key(), &root)?.is_some() {
             return Err(HostCustodyError::ConflictingEnrollment);
         }
-        // Another Core may register a nested root with its OWN appdata and
-        // physical ID. Reject the parent/child overlap while the same host
-        // SQLite writer epoch is held, rather than treating B as unenrolled
-        // merely because the exact root key differs from A's protected root.
-        {
-            let mut statement = transaction.prepare(
-                "SELECT root_path FROM shared_custody"
-            )?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            for registered in rows {
-                let registered = registered?;
-                let registered = Path::new(&registered);
-                if Path::new(&root).starts_with(registered)
-                    || registered.starts_with(Path::new(&root))
-                {
-                    return Err(HostCustodyError::ConflictingEnrollment);
-                }
-            }
+        // The exact same, component-boundary overlap invariant must be used
+        // by BOTH enrollment and ordinary File Gate publication.
+        if has_registered_path_overlap(&transaction, Path::new(&root))? {
+            return Err(HostCustodyError::ConflictingEnrollment);
         }
         let outcome = operation();
         transaction.commit()?;
@@ -300,6 +294,29 @@ fn configure(conn: &Connection) -> Result<(), HostCustodyError> {
          PRAGMA foreign_keys = ON;",
     )?;
     Ok(())
+}
+
+/// Canonical host roots may have distinct device:file identities while
+/// overlapping as parent/child paths. Consult every registered root inside
+/// the caller's BEGIN IMMEDIATE transaction; never infer authority from an
+/// exact-only UUID or inode lookup. strip_root compares whole path components
+/// and normalizes Windows case/extended prefixes and Unicode spellings.
+fn has_registered_path_overlap(
+    conn: &Connection,
+    candidate: &Path,
+) -> Result<bool, HostCustodyError> {
+    let mut statement = conn.prepare("SELECT root_path FROM shared_custody")?;
+    let entries = statement.query_map([], |row| row.get::<_, String>(0))?;
+    for entry in entries {
+        let existing = entry?;
+        let existing = Path::new(&existing);
+        if crate::search::paths::strip_root(candidate, existing).is_some()
+            || crate::search::paths::strip_root(existing, candidate).is_some()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn lookup(
@@ -533,6 +550,52 @@ mod tests {
         assert!(!attempted.get(), "epoch ran a mutation after enrollment");
         assert_eq!(fs::read_to_string(&target).unwrap(), "prior content");
         assert_eq!(host.inspect(&vault, record.root_identity).unwrap(), Some(record));
+    }
+
+    #[test]
+    fn enrollment_refuses_nested_roots_in_either_order_but_allows_siblings() {
+        let (temp, db, vault, appdata, parent) = specimen();
+        let nested = vault.join("second-appdata-nested");
+        let sibling = temp.path().join("unrelated-root");
+        fs::create_dir(&nested).unwrap();
+        fs::create_dir(&sibling).unwrap();
+        let mut nested_record = parent.clone();
+        nested_record.root_path =
+            fs::canonicalize(&nested).unwrap().to_string_lossy().into_owned();
+        nested_record.root_identity.file += 1;
+        nested_record.vault_id = VaultId::new();
+
+        let mut sibling_record = parent.clone();
+        sibling_record.root_path =
+            fs::canonicalize(&sibling).unwrap().to_string_lossy().into_owned();
+        sibling_record.root_identity.file += 2;
+        sibling_record.vault_id = VaultId::new();
+
+        let mut host = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        host.enroll(&parent).unwrap();
+        assert!(matches!(host.enroll(&nested_record),
+            Err(HostCustodyError::ConflictingEnrollment)));
+        // A rejected nested insert must not poison the transaction or
+        // prohibit a genuinely distinct physical workspace.
+        host.enroll(&sibling_record).unwrap();
+        assert_eq!(host.inspect(Path::new(&sibling_record.root_path),
+            sibling_record.root_identity).unwrap(), Some(sibling_record));
+        assert_eq!(host.inspect(Path::new(&parent.root_path),
+            parent.root_identity).unwrap(), Some(parent.clone()));
+        drop(host);
+
+        // Reverse the order in a separate installer-provisioned database.
+        let reverse_db = db.with_file_name("reverse.sqlite");
+        let mut host = SharedHostCustodyRegistry::provision_new(
+            &reverse_db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        host.enroll(&nested_record).unwrap();
+        assert!(matches!(host.enroll(&parent),
+            Err(HostCustodyError::ConflictingEnrollment)));
+        assert_eq!(host.inspect(Path::new(&nested_record.root_path),
+            nested_record.root_identity).unwrap(), Some(nested_record));
     }
 
     #[test]
