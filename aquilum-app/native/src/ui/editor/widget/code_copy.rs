@@ -1,4 +1,5 @@
 use super::*;
+use aquilum_core::markdown::fence::{Fence, INDENT_LIMIT};
 
 impl TextEditor {
     // The popup carries only the opener offset; avoid cloning large code bodies
@@ -8,8 +9,13 @@ impl TextEditor {
             return None;
         }
         let (first, _) = self.run(index, Block::is_code, |block| matches!(block, Block::Code { first: true, .. }));
-        matches!(self.doc.block(first), Block::Code { first: true, fence: true, .. })
-            .then_some(self.doc.paragraph(first).start)
+        if !matches!(self.doc.block(first), Block::Code { first: true, fence: true, .. }) {
+            return None;
+        }
+        // Math ($) is a different code-style block. Never offer an action
+        // that would fail silently when clicked.
+        let opener = self.doc.paragraph(first);
+        Fence::open(self.doc.slice(opener.range()), INDENT_LIMIT).map(|_| opener.start)
     }
 
     // Indented-code normalization is not yet covered by our Markdown tests.
@@ -18,21 +24,12 @@ impl TextEditor {
         if !self.doc.block(index).is_code() {
             return None;
         }
-        let (first, last) = self.run(index, Block::is_code, |block| matches!(block, Block::Code { first: true, .. }));
+        let (first, _) = self.run(index, Block::is_code, |block| matches!(block, Block::Code { first: true, .. }));
         if !matches!(self.doc.block(first), Block::Code { first: true, fence: true, .. }) {
             return None;
         }
-        let start = first + 1;
-        // The last body line is included for an unclosed fence.
-        let end = last + usize::from(!matches!(self.doc.block(last), Block::Code { fence: true, .. }));
-        let mut body = String::new();
-        for line in start..end {
-            if line > start {
-                body.push('\n');
-            }
-            body.push_str(self.doc.slice(self.doc.paragraph(line).range()));
-        }
-        Some(body)
+        let opener = self.doc.paragraph(first).start;
+        self.doc.copy_fenced_body(opener)
     }
 
     pub fn fenced_code_body_from_start(&self, opener: usize) -> Option<String> {
@@ -42,6 +39,7 @@ impl TextEditor {
         {
             return None;
         }
+        self.fenced_code_start(index)?;
         self.fenced_code_body(index)
     }
 
@@ -84,6 +82,38 @@ mod tests {
         let empty = TextEditor::new("~~~\n~~~").markdown();
         assert_eq!(empty.fenced_code_body(0).as_deref(), Some(""));
         assert_eq!(empty.fenced_code_body(1).as_deref(), Some(""));
+    }
+
+
+    #[test]
+    fn large_windowed_fence_copies_the_full_rope_instead_of_loaded_excerpt() {
+        let lines: String = (0..5_000).map(|n| format!("println!(\"{n}\");\n")).collect();
+        let source = format!("\u{60}\u{60}\u{60}rust\n{lines}\u{60}\u{60}\u{60}\nпосле");
+        let editor = TextEditor::windowed(crop::Rope::from(source.as_str())).markdown();
+        assert!(
+            editor.doc.loaded().1.len() < source.len(),
+            "regression fixture must exceed the loaded editor window"
+        );
+        let copied = editor.fenced_code_body_from_start(0).expect("whole block");
+        assert_eq!(copied, lines.trim_end_matches('\n'));
+        assert!(copied.contains("println!(\"4999\");"), "must include unloaded tail");
+    }
+
+    #[test]
+    fn longer_fence_does_not_close_on_inner_shorter_fences() {
+        let source = "\u{60}\u{60}\u{60}\u{60}markdown\n\u{60}\u{60}\u{60}js\ninside\n\u{60}\u{60}\u{60}\n\u{60}\u{60}\u{60}\u{60}\nafter";
+        let editor = TextEditor::new(source).markdown();
+        assert_eq!(
+            editor.fenced_code_body_from_start(0).as_deref(),
+            Some("\u{60}\u{60}\u{60}js\ninside\n\u{60}\u{60}\u{60}")
+        );
+    }
+
+    #[test]
+    fn math_block_does_not_offer_the_fenced_code_command() {
+        let editor = TextEditor::new("$\nx^2 + y^2\n$").markdown();
+        assert_eq!(editor.fenced_code_start(0), None);
+        assert_eq!(editor.fenced_code_body_from_start(0), None);
     }
 
     #[test]
