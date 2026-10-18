@@ -81,3 +81,48 @@ jobs:
       - name: Verify real second OS process and host-held note/history epoch
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --no-default-features --features host-custody host_core_epoch_tests -- --nocapture
+
+
+  native-installed-host:
+    name: Native Workspace::open host gate / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: p0-native-host-${{ matrix.os }}
+          cache-workspace-crates: true
+      - name: Install native Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Ensure native installed-host policy does not activate AWS
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo tree --locked -p aquilum-native --no-default-features --features installed,sync-installed-host > native-installed-tree.txt
+          if grep -E 'aws-(config|sdk-s3|sdk-sts) ' native-installed-tree.txt; then
+            echo 'Native host-only safety mode unexpectedly activated AWS'
+            exit 1
+          fi
+      - name: Test native Workspace open and independent appdata child process
+        working-directory: aquilum-app
+        env:
+          AKULA_INSTALLED_HOST_CUSTODY_DB: ''
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --no-default-features --features installed,sync-installed-host workspace::installed_host_native_tests -- --nocapture

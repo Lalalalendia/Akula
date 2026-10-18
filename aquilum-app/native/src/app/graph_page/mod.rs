@@ -149,7 +149,9 @@ impl App {
         self.graph.data.is_none() && self.graph.view.is_none()
     }
 
-    #[cfg(not(feature = "installed"))]
+    // UI graph tests compile the installed native test binary as well.
+    // Keep the replay accessor absent from installed production builds.
+    #[cfg(any(test, not(feature = "installed")))]
     pub fn graph_view(&self) -> Option<WidgetId> {
         self.graph.view.map(|v| v.id())
     }

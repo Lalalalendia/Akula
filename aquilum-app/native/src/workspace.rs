@@ -102,3 +102,134 @@ mod host_custody_feature_tests {
         );
     }
 }
+
+
+/// P0-B4a: exercise the real native Workspace::open entrypoint (the route
+/// behind --data-dir), not just an internal Core fixture. This only proves
+/// fail-closed behavior in an explicitly installed-host binary with NO
+/// compiled host database. Successful installer provisioning and authority
+/// over the DB/WAL directory remain separate release blockers.
+#[cfg(all(test, feature = "sync-installed-host"))]
+mod installed_host_native_tests {
+    use super::*;
+    use aquilum_core::files::gate;
+    use aquilum_core::history::{NoteWrite, Source};
+    use std::fs;
+    use std::process::Command;
+
+    const CHILD: &str = "workspace::installed_host_native_tests::child_probe";
+
+    fn needs_missing_host_test() -> bool {
+        !option_env!("AKULA_INSTALLED_HOST_CUSTODY_DB")
+            .is_some_and(|v| Path::new(v).is_absolute())
+    }
+
+    fn attempted_mutations(
+        appdata: &Path, root: &Path,
+    ) -> Result<[bool; 4], String> {
+        let workspace = Workspace::open(Some(appdata), Some(root), || {})?;
+        let note = root.join("Original.md");
+        let created = root.join("New.md");
+        let copied = root.join("Copy.md");
+        let overwrite = gate::write(
+            &workspace.core, &note, "forbidden", None, Source::Me, None,
+        ).is_ok();
+        let create = gate::create(
+            &workspace.core, &created, "forbidden", Source::Me, None,
+        ).is_ok();
+        let copy = gate::copy(&workspace.core, &note, &copied).is_ok();
+        let direct_history = workspace.core.history.try_saved(
+            &|| workspace.core.known_roots(),
+            &note,
+            NoteWrite {
+                disk_before: None,
+                text: "forbidden",
+                hash: "invalid-host-permit",
+                source: Source::Me,
+                name: None,
+            },
+        ).is_ok();
+        Ok([overwrite, create, copy, direct_history])
+    }
+
+    #[test]
+    fn child_probe() {
+        if std::env::var_os("AKULA_INSTALLED_NATIVE_CHILD").is_none() {
+            return;
+        }
+        let appdata = PathBuf::from(
+            std::env::var_os("AKULA_INSTALLED_NATIVE_APPDATA").unwrap(),
+        );
+        let root = PathBuf::from(
+            std::env::var_os("AKULA_INSTALLED_NATIVE_ROOT").unwrap(),
+        );
+        let report = PathBuf::from(
+            std::env::var_os("AKULA_INSTALLED_NATIVE_REPORT").unwrap(),
+        );
+        let attempts = attempted_mutations(&appdata, &root).unwrap();
+        fs::write(report, format!(
+            "{}|{}|{}|{}",
+            attempts[0], attempts[1], attempts[2], attempts[3],
+        )).unwrap();
+    }
+
+    #[test]
+    fn real_two_process_native_workspace_refuses_alternate_appdata() {
+        if !needs_missing_host_test() {
+            // Other CI lanes cover the positive, populated compile-time
+            // source. Never overwrite or provision an operator host path.
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let app_a = temp.path().join("app-a");
+        let app_b = temp.path().join("app-b");
+        for dir in [&root, &app_a, &app_b] {
+            fs::create_dir(dir).unwrap();
+        }
+        let root = fs::canonicalize(root).unwrap();
+        let note = root.join("Original.md");
+        fs::write(&note, "original bytes").unwrap();
+
+        // This is the ordinary native entrypoint, with a user-supplied
+        // data-dir. Its core must not silently become a legacy writer.
+        let first = attempted_mutations(&app_a, &root).unwrap();
+        assert_eq!(first, [false; 4]);
+        assert_eq!(fs::read_to_string(&note).unwrap(), "original bytes");
+        assert!(!root.join("New.md").exists());
+        assert!(!root.join("Copy.md").exists());
+
+        // A truly separate OS process opens the SAME workspace through a
+        // DIFFERENT appdata. A runtime environment override must not change
+        // the compile-time trusted host policy.
+        let report = temp.path().join("second-process-result");
+        let runtime_fake_host = temp.path().join("fake-host.sqlite");
+        fs::write(&runtime_fake_host, b"untrusted").unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact").arg(CHILD).arg("--nocapture")
+            .env("AKULA_INSTALLED_NATIVE_CHILD", "1")
+            .env("AKULA_INSTALLED_NATIVE_APPDATA", &app_b)
+            .env("AKULA_INSTALLED_NATIVE_ROOT", &root)
+            .env("AKULA_INSTALLED_NATIVE_REPORT", &report)
+            .env("AKULA_INSTALLED_HOST_CUSTODY_DB", &runtime_fake_host)
+            .output().unwrap();
+
+        assert!(output.status.success(),
+            "native child exited unsuccessfully: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).contains(
+            "workspace::installed_host_native_tests::child_probe ... ok"
+        ), "native child test did not execute: {}",
+            String::from_utf8_lossy(&output.stdout));
+        assert_eq!(
+            fs::read_to_string(&report).unwrap(),
+            "false|false|false|false",
+        );
+        assert_eq!(fs::read_to_string(&note).unwrap(), "original bytes");
+        assert!(!root.join("New.md").exists());
+        assert!(!root.join("Copy.md").exists());
+        assert_eq!(fs::read(runtime_fake_host).unwrap(), b"untrusted");
+    }
+}
