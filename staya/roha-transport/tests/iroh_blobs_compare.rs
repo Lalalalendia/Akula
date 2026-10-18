@@ -1214,8 +1214,13 @@ async fn bounded_ext4_fsstore_seed() {
     std::fs::create_dir(&path).expect("private real FsStore staging inside bounded mount");
     let payload = bytes(1024 * 1024 + 17);
     let hash = Hash::new(&payload);
-    let store = FsStore::load(&path).await.expect("start real FsStore on bounded ext4");
-    let tag = store.add_slice(&payload).await.expect("write content and Bao outboard");
+    let store = FsStore::load(&path)
+        .await
+        .expect("start real FsStore on bounded ext4");
+    let tag = store
+        .add_slice(&payload)
+        .await
+        .expect("write content and Bao outboard");
     assert_eq!(tag.hash, hash);
     let exact = store.get_bytes(hash).await.expect("read Bao-verified seed");
     assert_eq!(exact.as_ref(), payload.as_slice());
@@ -1247,9 +1252,19 @@ async fn bounded_ext4_fsstore_reopen() {
     let store = FsStore::load(root.join("real-fsstore"))
         .await
         .expect("reopen actual FsStore database after unmount");
-    let status = store.remote().local(hash).await.expect("reopen local verified status");
-    assert!(status.is_complete(), "on-disk FsStore metadata lost across remount");
-    let data = store.get_bytes(hash).await.expect("read persisted verified data");
+    let status = store
+        .remote()
+        .local(hash)
+        .await
+        .expect("reopen local verified status");
+    assert!(
+        status.is_complete(),
+        "on-disk FsStore metadata lost across remount"
+    );
+    let data = store
+        .get_bytes(hash)
+        .await
+        .expect("read persisted verified data");
     assert_eq!(data.as_ref(), payload.as_slice());
     assert_eq!(Hash::new(data.as_ref()), hash);
     store.shutdown().await.expect("flush reopened FsStore");
