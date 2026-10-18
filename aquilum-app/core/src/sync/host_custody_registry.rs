@@ -207,40 +207,41 @@ impl SharedHostCustodyRegistry {
         Ok(())
     }
 
-    /// A checked read only. If either the physical object or its previously
-    /// approved pathname has a conflicting identity, return HOLD/error.
-    /// Missing records are NOT a write permit; a later OS-epoch admission
-    /// must serialize this observation with protected File Gate publication.
+    /// A cooperating host-configured admission epoch, NOT write permission.
+    /// BEGIN IMMEDIATE takes the SAME host-wide SQLite writer lock as enroll.
+    /// The caller must retain this lease over primary bytes AND HistoryService
+    /// and separately enforce physical root pinning and all File Gate policy.
+    /// Normal Core does not use this yet; PR #251 remains release-blocking.
+    pub(crate) fn with_unenrolled_epoch<T>(
+        &mut self,
+        root_path: &Path,
+        root_identity: PhysicalObjectId,
+        operation: impl FnOnce() -> T,
+    ) -> Result<T, HostCustodyError> {
+        if !root_identity.valid() {
+            return Err(HostCustodyError::InvalidRecord);
+        }
+        let root = normalized_root_for_lookup(root_path)?;
+        let transaction =
+            self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Enrollment cannot commit between lookup and the full publication.
+        if lookup(&transaction, &root_identity.key(), &root)?.is_some() {
+            return Err(HostCustodyError::ConflictingEnrollment);
+        }
+        let outcome = operation();
+        transaction.commit()?;
+        Ok(outcome)
+    }
+
+    /// A checked read only. A missing record is never write authorization.
     pub(crate) fn inspect(
         &self, root_path: &Path, root_identity: PhysicalObjectId,
     ) -> Result<Option<HostCustodyRecord>, HostCustodyError> {
         if !root_identity.valid() {
             return Err(HostCustodyError::InvalidRecord);
         }
-        // Inspecting through a final-component symlink/junction would make
-        // two distinct registered workspace names look interchangeable.
-        // Unlike fs::canonicalize (used below for spelling normalization),
-        // symlink_metadata observes the selected entry itself. A physical
-        // registry lookup must never turn a reparse alias into positive proof.
-        let selected = fs::symlink_metadata(root_path)?;
-        if !selected.is_dir() || selected.file_type().is_symlink() {
-            return Err(HostCustodyError::InvalidRecord);
-        }
-        #[cfg(windows)]
-        if {
-            use std::os::windows::fs::MetadataExt;
-            selected.file_attributes() & 0x0000_0400 != 0
-        } {
-            return Err(HostCustodyError::InvalidRecord);
-        }
-        // Registrations store fs::canonicalize() spelling. macOS may resolve
-        // /var -> /private/var and Windows adds its extended \\?\\ prefix;
-        // raw pathname comparison could falsely return None (not enrolled).
-        // Canonicalize for the *lookup*, retaining the separately pinned
-        // physical identity as mandatory evidence, never as write authority.
-        let physical_path = fs::canonicalize(root_path)?;
-        let root = physical_path.to_str().ok_or(HostCustodyError::InvalidRecord)?;
-        let found = lookup(&self.conn, &root_identity.key(), root)?;
+        let root = normalized_root_for_lookup(root_path)?;
+        let found = lookup(&self.conn, &root_identity.key(), &root)?;
         if let Some(ref record) = found {
             if record.root_path != root || record.root_identity != root_identity {
                 return Err(HostCustodyError::ConflictingEnrollment);
@@ -248,6 +249,28 @@ impl SharedHostCustodyRegistry {
         }
         Ok(found)
     }
+}
+
+
+fn normalized_root_for_lookup(root_path: &Path) -> Result<String, HostCustodyError> {
+    // Refuse symlink/junction leaves; a full production admission must also
+    // pin trusted host directory and ancestry handles.
+    let selected = fs::symlink_metadata(root_path)?;
+    if !selected.is_dir() || selected.file_type().is_symlink() {
+        return Err(HostCustodyError::InvalidRecord);
+    }
+    #[cfg(windows)]
+    if {
+        use std::os::windows::fs::MetadataExt;
+        selected.file_attributes() & 0x0000_0400 != 0
+    } {
+        return Err(HostCustodyError::InvalidRecord);
+    }
+    // macOS /var and /private/var, and Windows extended path spellings,
+    // must never become alternate, falsely-unregistered lookup keys.
+    let physical_path = fs::canonicalize(root_path)?;
+    Ok(physical_path.to_str()
+        .ok_or(HostCustodyError::InvalidRecord)?.to_owned())
 }
 
 fn configure(conn: &Connection) -> Result<(), HostCustodyError> {
@@ -373,6 +396,20 @@ mod tests {
             return;
         };
         let root = std::env::var_os("AKULA_HOST_CUSTODY_CHILD_ROOT").unwrap();
+        if let Some(json) = std::env::var_os("AKULA_HOST_CUSTODY_CHILD_ENROLL_JSON") {
+            let record: HostCustodyRecord =
+                serde_json::from_str(&json.to_string_lossy()).unwrap();
+            let report = std::path::PathBuf::from(
+                std::env::var_os("AKULA_HOST_CUSTODY_CHILD_ENROLL_REPORT").unwrap()
+            );
+            let mut registry = SharedHostCustodyRegistry::open_existing(Path::new(&db)).unwrap();
+            assert_eq!(fs::canonicalize(Path::new(&root)).unwrap().to_str().unwrap(),
+                record.root_path);
+            fs::write(report.with_extension("ready"), b"ready").unwrap();
+            registry.enroll(&record).unwrap();
+            fs::write(&report, b"enrolled").unwrap();
+            return;
+        }
         let registry = SharedHostCustodyRegistry::open_existing(Path::new(&db)).unwrap();
         let value = registry.inspect(
             Path::new(&root),
@@ -407,6 +444,76 @@ mod tests {
         assert!(String::from_utf8_lossy(&output.stdout).contains(
             "host_custody_process_child_entrypoint ... ok"
         ), "child did not actually run the expected test: {:?}", output.status);
+    }
+
+    /// Real child OS process and one installer-owned SQLite writer epoch:
+    /// ordinary primary+history finishes before another process can enroll
+    /// this physical root. Enrollment subsequently forbids the operation.
+    /// The ordinary Core entrypoint does not yet acquire this lease itself.
+    #[test]
+    fn cross_process_enrollment_waits_for_host_epoch_and_denies_later_write() {
+        use crate::app_core::{Core, CoreEvent};
+        use crate::files::gate;
+        use crate::history::Source;
+        use crate::sync::filegate_lock_probe::PinnedProbeRoot;
+        use std::cell::Cell;
+        use std::process::Command;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        const CHILD: &str =
+            "sync::host_custody_registry::tests::host_custody_process_child_entrypoint";
+        let (temp, db, vault, appdata, mut record) = specimen();
+        let observed = PinnedProbeRoot::open(&vault).unwrap().identity();
+        record.root_identity = PhysicalObjectId {
+            device: observed.0, file: observed.1,
+        };
+        let mut host = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        let core_b = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        core_b.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
+        let target = vault.join("PriorOrdinary.md");
+        let report = temp.path().join("enrollment-finished.txt");
+
+        let mut child = host.with_unenrolled_epoch(&vault, record.root_identity, || {
+            let child = Command::new(std::env::current_exe().unwrap())
+                .arg("--exact").arg(CHILD).arg("--nocapture")
+                .env("AKULA_HOST_CUSTODY_CHILD_DB", &db)
+                .env("AKULA_HOST_CUSTODY_CHILD_ROOT", &record.root_path)
+                .env("AKULA_HOST_CUSTODY_CHILD_ENROLL_JSON",
+                     serde_json::to_string(&record).unwrap())
+                .env("AKULA_HOST_CUSTODY_CHILD_ENROLL_REPORT", &report)
+                .spawn().unwrap();
+            let start = Instant::now();
+            while !report.with_extension("ready").exists() {
+                assert!(start.elapsed() < Duration::from_secs(15),
+                    "separate enrollment process failed to start");
+                thread::sleep(Duration::from_millis(10));
+            }
+            thread::sleep(Duration::from_millis(180));
+            assert!(!report.exists(),
+                "enrollment committed while ordinary primary/history held host epoch");
+            gate::create(&core_b, &target, "prior content", Source::Me, None)
+                .unwrap();
+            child
+        }).unwrap();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(fs::read_to_string(&report).unwrap(), "enrolled");
+
+        let attempted = Cell::new(false);
+        assert!(matches!(
+            host.with_unenrolled_epoch(&vault, record.root_identity, || {
+                attempted.set(true);
+                gate::write(&core_b, &target, "forbidden after enrollment",
+                    None, Source::Me, None)
+            }),
+            Err(HostCustodyError::ConflictingEnrollment)
+        ));
+        assert!(!attempted.get(), "epoch ran a mutation after enrollment");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "prior content");
+        assert_eq!(host.inspect(&vault, record.root_identity).unwrap(), Some(record));
     }
 
     #[test]
