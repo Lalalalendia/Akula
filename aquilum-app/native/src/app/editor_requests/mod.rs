@@ -19,8 +19,8 @@ impl App {
                 self.open_table_menu(root, at, commands);
                 false
             }
-            Request::ContextMenu { at, has_selection } => {
-                self.open_editor_context_menu(root, at, has_selection);
+            Request::ContextMenu { at, has_selection, code } => {
+                self.open_editor_context_menu(root, at, has_selection, code);
                 false
             }
             Request::Suggest(view) => {

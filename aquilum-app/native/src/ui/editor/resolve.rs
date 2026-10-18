@@ -64,7 +64,7 @@ pub enum Request {
     Read { file: std::path::PathBuf, page: Option<std::path::PathBuf>, title: String },
     Suggest(Option<Suggestions>),
     LinkTitle { editor: masonry::core::WidgetId, placeholder: String, url: String },
-    ContextMenu { at: Point, has_selection: bool },
+    ContextMenu { at: Point, has_selection: bool, code: Option<String> },
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -38,6 +38,7 @@
     "closeSearch": "Close search",
     "insertBook": "Insert book",
     "insertTable": "Insert table",
+    "copyCode": "Copy code",
     "insertFrontmatter": "Insert metadata",
     "table": {
       "menuAria": "Table actions",

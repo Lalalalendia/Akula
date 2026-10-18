@@ -97,6 +97,7 @@ impl TextEditor {
                         resolver.request(crate::ui::editor::resolve::Request::ContextMenu {
                             at,
                             has_selection: !self.selection().is_empty(),
+                            code: self.fenced_code_body_at(point),
                         });
                     }
                 }
