@@ -7,6 +7,7 @@ on:
       - 'aquilum-app/native/src/render/paint/mod.rs'
       - 'aquilum-app/native/src/render/renderer/**'
       - 'aquilum-app/native/src/app/tests/perf/worker_router.rs'
+      - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
       - '.github/workflows/native-vello-single-region-gate.yml'
   workflow_dispatch:
 
@@ -66,3 +67,22 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native hinted_fractional_scroll_remains_pixel_stable -- --nocapture --test-threads=1
+      - name: Three real guard96 all-frame runs with actual adaptive 2/4-worker defaults
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AKULA_VELLO_SINGLE_RECT: '1'
+          AQ_CROSSOVER_ADAPTIVE: '1'
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -euo pipefail
+          for trial in 1 2 3; do
+            echo "VELLO_ADAPTIVE_GUARD96_BEGIN trial=$trial"
+            cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1
+            echo "VELLO_ADAPTIVE_GUARD96_PASS trial=$trial"
+          done
+          echo "Adaptive default against fixed serial: 3/3 all-frame strict guard96 runs" >> "$GITHUB_STEP_SUMMARY"
+
