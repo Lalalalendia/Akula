@@ -845,4 +845,93 @@ mod tests {
         assert!(SharedHostCustodyRegistry::open_existing(&db).is_err());
         assert!(db.exists(), "broken host ledger must never be silently removed");
     }
+
+    #[test]
+    fn host_database_hardlink_is_never_a_second_ledger_identity() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let owner = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        let alias = temp.path().join("forged-hardlink.sqlite");
+        fs::hard_link(&db, &alias).unwrap();
+
+        // Even an already open Core must stop before an unenrolled admission.
+        assert!(matches!(
+            owner.inspect(&vault, record.root_identity),
+            Err(HostCustodyError::InvalidHostLocation),
+        ));
+        assert!(matches!(
+            SharedHostCustodyRegistry::open_existing(&alias),
+            Err(HostCustodyError::InvalidHostLocation),
+        ));
+        fs::remove_file(alias).unwrap();
+        assert_eq!(owner.inspect(&vault, record.root_identity).unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_wal_or_shm_never_becomes_an_installer_host_member() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let mut owner = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        owner.enroll(&record).unwrap();
+        drop(owner);
+        let other = temp.path().join("external-fake-journal");
+        fs::write(&other, b"untrusted journal bytes").unwrap();
+
+        for suffix in ["-wal", "-shm"] {
+            let mut filename = db.as_os_str().to_os_string();
+            filename.push(suffix);
+            let sidecar = std::path::PathBuf::from(filename);
+            assert!(!sidecar.exists(),
+                "the fixture must first close/flush all real SQLite sidecars");
+            std::os::unix::fs::symlink(&other, &sidecar).unwrap();
+            assert!(matches!(
+                SharedHostCustodyRegistry::open_existing(&db),
+                Err(HostCustodyError::InvalidHostLocation),
+            ), "aliased {suffix} must HOLD before SQLite opens");
+            fs::remove_file(sidecar).unwrap();
+        }
+        assert_eq!(fs::read(&other).unwrap(), b"untrusted journal bytes");
+        let reopened = SharedHostCustodyRegistry::open_existing(&db).unwrap();
+        assert_eq!(reopened.inspect(&vault, record.root_identity).unwrap(), Some(record));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn in_flight_host_database_name_swap_refuses_epoch_before_commit() {
+        use std::cell::Cell;
+        use crate::sync::filegate_lock_probe::PinnedProbeRoot;
+
+        let (temp, db, vault, appdata, _) = specimen();
+        let mut owner = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        let alt = temp.path().join("another-valid-empty.sqlite");
+        drop(SharedHostCustodyRegistry::provision_new(
+            &alt, &[vault.as_path(), appdata.as_path()],
+        ).unwrap());
+        let moved = temp.path().join("old-ledger-kept.sqlite");
+        let (device, file) = PinnedProbeRoot::open(&vault).unwrap().identity();
+        let reached = Cell::new(false);
+
+        let result = owner.with_unenrolled_epoch(
+            &vault, PhysicalObjectId { device, file }, || {
+                reached.set(true);
+                // The SQLite connection stays attached to the original
+                // physical object, while its pathname points at a NEW
+                // valid-but-empty registry: a split-lock hazard.
+                fs::rename(&db, &moved).unwrap();
+                fs::rename(&alt, &db).unwrap();
+            },
+        );
+        assert!(reached.get(), "must exercise replacement inside live epoch");
+        assert!(matches!(result, Err(HostCustodyError::InvalidHostLocation)),
+            "epoch must not report success after the installer name moved");
+        assert!(moved.exists(), "original ledger bytes must remain for review");
+        assert!(db.exists(), "the attack fixture actually replaced the name");
+    }
+
+
 }
