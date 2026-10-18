@@ -1,4 +1,5 @@
-use super::{announce, paths_changed, record, report_history_move_failure, NoteMove, Relocation};
+use super::{announce, paths_changed, report_history_move_failure, report_record, NoteMove, Relocation};
+use crate::history::service::HistoryMoveFailure;
 use crate::app_core::Core;
 use crate::files::entries::rename_file_impl;
 use crate::files::error::FileCommandError;
@@ -10,6 +11,15 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
 
+// Keep host events outside the full primary/history publication lease.
+type DeferredMoves = Vec<(PathBuf, PathBuf, HistoryMoveFailure)>;
+
+fn report_deferred_moves(core: &Core, failures: DeferredMoves) {
+    for (from, to, error) in failures {
+        report_history_move_failure(core, &from, &to, &error);
+    }
+}
+
 pub fn rename(
     core: &Core,
     from: &Path,
@@ -19,16 +29,35 @@ pub fn rename(
 }
 
 fn rename_now(core: &Core, from: &Path, to: &Path) -> Result<FileRenameResult, FileCommandError> {
-    let (renamed, relocation) = relocating(core, from, to, || rename_with_links(&core.search, from, to))?;
-    for rewrite in &renamed.rewritten {
-        let write = NoteWrite {
-            disk_before: Some((rewrite.before.clone(), SystemTime::now())),
-            text: &rewrite.after,
-            hash: &rewrite.hash,
-            source: Source::Links,
-            name: None,
-        };
-        record(core, &rewrite.path, write);
+    let (renamed, relocation, failures, rewritten_history) = {
+        // Publication custody must span BOTH the primary rename/link rewrites
+        // AND history transfer and snapshots. Activation takes the exclusive
+        // epoch before it publishes participant HOLD.
+        #[cfg(feature = "sync-s3")]
+        let _publication = core.ordinary_note_publication_lease()?;
+        let (renamed, relocation, failures) =
+            relocating(core, from, to, || rename_with_links(&core.search, from, to))?;
+        let mut rewritten_history = Vec::with_capacity(renamed.rewritten.len());
+        for rewrite in &renamed.rewritten {
+            let write = NoteWrite {
+                disk_before: Some((rewrite.before.clone(), SystemTime::now())),
+                text: &rewrite.after,
+                hash: &rewrite.hash,
+                source: Source::Links,
+                name: None,
+            };
+            rewritten_history.push((
+                rewrite.path.clone(),
+                core.history.try_saved(&|| core.known_roots(), &rewrite.path, write),
+            ));
+        }
+        (renamed, relocation, failures, rewritten_history)
+    };
+    // No host callback, event, search update or DocumentHub reconciliation
+    // while holding the publication epoch or File Gate / HistoryFiles mutex.
+    report_deferred_moves(core, failures);
+    for (path, outcome) in rewritten_history {
+        report_record(core, &path, outcome);
     }
     let rewritten: Vec<PathBuf> = renamed.result.updated_paths.iter().map(PathBuf::from).collect();
     let mut changed = vec![from.to_path_buf(), to.to_path_buf()];
@@ -44,7 +73,12 @@ pub fn move_across(core: &Core, from: &Path, to: &Path) -> Result<(), FileComman
 }
 
 fn move_across_now(core: &Core, from: &Path, to: &Path) -> Result<(), FileCommandError> {
-    let ((), relocation) = relocating(core, from, to, || rename_file_impl(from, to))?;
+    let ((), relocation, failures) = {
+        #[cfg(feature = "sync-s3")]
+        let _publication = core.ordinary_note_publication_lease()?;
+        relocating(core, from, to, || rename_file_impl(from, to))?
+    };
+    report_deferred_moves(core, failures);
     announce(core, relocation);
     paths_changed(core, vec![from.to_path_buf(), to.to_path_buf()]);
     Ok(())
@@ -124,7 +158,7 @@ fn relocating<T>(
     from: &Path,
     to: &Path,
     run: impl FnOnce() -> Result<T, FileCommandError>,
-) -> Result<(T, Relocation), FileCommandError> {
+) -> Result<(T, Relocation, DeferredMoves), FileCommandError> {
     let (done, relocation) = {
         // Lock preflight enumeration, rename and all link rewrites as one
         // in-process filesystem critical section. History and UI callbacks
@@ -137,14 +171,15 @@ fn relocating<T>(
         let done = run()?;
         (done, relocated(&notes, from, to))
     };
+    let mut failures = DeferredMoves::new();
     for step in &relocation.moves {
         let from = Path::new(&step.from);
         let to = Path::new(&step.to);
         if let Err(error) = core.history.try_moved(&|| core.known_roots(), from, to) {
-            report_history_move_failure(core, from, to, &error);
+            failures.push((from.to_path_buf(), to.to_path_buf(), error));
         }
     }
-    Ok((done, relocation))
+    Ok((done, relocation, failures))
 }
 
 pub(super) fn notes_under(path: &Path) -> Vec<PathBuf> {

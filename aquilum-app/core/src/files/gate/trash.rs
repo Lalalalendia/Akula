@@ -2,9 +2,19 @@ use super::{announce, paths_changed, report_history_move_failure, Relocation};
 use crate::app_core::Core;
 use crate::files::deletions::deletion_files;
 use crate::files::error::FileCommandError;
+use crate::history::service::HistoryMoveFailure;
 use crate::files::trash::{ensure_trash_impl, move_to_trash_impl, restore_from_trash_impl};
 use crate::search::paths::is_note;
 use std::path::{Path, PathBuf};
+
+// External host reports must not run while the publication epoch is held.
+type DeferredHistoryFailures = Vec<(PathBuf, PathBuf, HistoryMoveFailure)>;
+
+fn report_deferred_history_failures(core: &Core, failures: DeferredHistoryFailures) {
+    for (from, to, error) in failures {
+        report_history_move_failure(core, &from, &to, &error);
+    }
+}
 
 /// A user-initiated trash-folder creation through the process-wide File Gate.
 /// Opening the directory in the OS shell happens only after this guard drops.
@@ -62,17 +72,25 @@ pub fn trash(
 }
 
 fn trash_now(core: &Core, workspace: &Path, path: &Path) -> Result<PathBuf, FileCommandError> {
-    let moved = {
-        let _guard = core.file_mutation_guard_for_write()?;
-        move_to_trash_impl(workspace, path)?
-    };
-    let notes = note_moves(&moved.files);
-    let history = &core.history;
-    for (note, trashed_at) in &notes {
-        if let Err(error) = history.try_trashed(&|| core.known_roots(), note, trashed_at) {
-            report_history_move_failure(core, note, trashed_at, &error);
+    let (moved, notes, failures) = {
+        // An enrollment must wait until BOTH primary trash move and history
+        // have completed; callbacks remain outside the publication lease.
+        #[cfg(feature = "sync-s3")]
+        let _publication = core.ordinary_note_publication_lease()?;
+        let moved = {
+            let _guard = core.file_mutation_guard_for_write()?;
+            move_to_trash_impl(workspace, path)?
+        };
+        let notes = note_moves(&moved.files);
+        let mut failures = DeferredHistoryFailures::new();
+        for (note, trashed_at) in &notes {
+            if let Err(error) = core.history.try_trashed(&|| core.known_roots(), note, trashed_at) {
+                failures.push((note.clone(), trashed_at.clone(), error));
+            }
         }
-    }
+        (moved, notes, failures)
+    };
+    report_deferred_history_failures(core, failures);
     announce(core, removed(notes.iter().map(|(note, _)| note)));
     paths_changed(core, vec![path.to_path_buf(), moved.root.clone()]);
     Ok(moved.root)
@@ -100,29 +118,37 @@ fn restore_all(
     workspace: &Path,
     trashed: &[PathBuf],
 ) -> Result<Vec<PathBuf>, FileCommandError> {
-    let history = &core.history;
-    let mut roots = Vec::new();
-    let mut failure = None;
-    for path in trashed {
-        let attempt = {
-            let _guard = core.file_mutation_guard_for_write()?;
-            restore_from_trash_impl(workspace, path)
-        };
-        match attempt {
-            Ok(restored) => {
-                for (trashed_note, back) in note_moves(&restored.files) {
-                    if let Err(error) = history.try_restored(&|| core.known_roots(), &trashed_note, &back) {
-                        report_history_move_failure(core, &trashed_note, &back, &error);
+    let (roots, failure, history_failures) = {
+        #[cfg(feature = "sync-s3")]
+        let _publication = core.ordinary_note_publication_lease()?;
+        let mut roots = Vec::new();
+        let mut failure = None;
+        let mut history_failures = DeferredHistoryFailures::new();
+        for path in trashed {
+            let attempt = {
+                let _guard = core.file_mutation_guard_for_write()?;
+                restore_from_trash_impl(workspace, path)
+            };
+            match attempt {
+                Ok(restored) => {
+                    for (trashed_note, back) in note_moves(&restored.files) {
+                        if let Err(error) = core.history.try_restored(
+                            &|| core.known_roots(), &trashed_note, &back,
+                        ) {
+                            history_failures.push((trashed_note, back, error));
+                        }
                     }
+                    roots.push(restored.root);
                 }
-                roots.push(restored.root);
-            }
-            Err(error) => {
-                failure = Some(error);
-                break;
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
             }
         }
-    }
+        (roots, failure, history_failures)
+    };
+    report_deferred_history_failures(core, history_failures);
     paths_changed(core, trashed.iter().chain(&roots).cloned().collect());
     failure.map_or(Ok(roots), Err)
 }
