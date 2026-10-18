@@ -74,7 +74,9 @@ fn save_key_file(path: &Path, key: &SecretKey) -> Result<(), String> {
 /// Bounded read of an untrusted public contact. It never grants access.
 fn read_contact_file(path: &str) -> Result<EndpointId, String> {
     let file = File::open(path).map_err(|e| format!("cannot open contact file: {e}"))?;
-    let meta = file.metadata().map_err(|e| format!("cannot inspect contact file: {e}"))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| format!("cannot inspect contact file: {e}"))?;
     if !meta.is_file() || meta.len() > pairing::MAX_RECORD_BYTES as u64 {
         return Err("invalid contact file type or size".into());
     }
@@ -98,7 +100,9 @@ fn read_trusted_peer_file(path: &str) -> Result<EndpointId, String> {
         return Err("trusted peer record requires owner-only permissions".into());
     }
     let file = File::open(path).map_err(|e| format!("cannot open trusted peer record: {e}"))?;
-    let meta = file.metadata().map_err(|e| format!("cannot inspect trusted peer record: {e}"))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| format!("cannot inspect trusted peer record: {e}"))?;
     if !meta.is_file() || meta.len() > pairing::MAX_RECORD_BYTES as u64 {
         return Err("invalid trusted peer record type or size".into());
     }
