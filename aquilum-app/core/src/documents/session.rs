@@ -99,6 +99,11 @@ pub struct DocumentSession {
     synced_content: String,
     synced_hash: String,
     dirty: bool,
+    /// Sticky process-local HOLD after a native write may have changed file
+    /// bytes but did not produce a trustworthy ACK. Only an explicit
+    /// operator-reviewed recovery can clear this in a future release.
+    /// No automatic retry, merge, disk-hash probe or sync-point promotion.
+    needs_review: Option<String>,
 }
 
 impl DocumentSession {
@@ -113,6 +118,7 @@ impl DocumentSession {
             synced_content: snapshot.content.clone(),
             synced_hash: snapshot.hash.clone(),
             dirty: false,
+            needs_review: None,
         };
         let doc_text = session.replica.text();
         let verdict = resolve_sync(
@@ -147,6 +153,22 @@ impl DocumentSession {
 
     pub fn dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// A sticky no-replay boundary for ambiguous guarded writes. In-memory
+    /// only; do NOT activate guarded editor saves across restart until the
+    /// HOLD can be recovered durably from app-data.
+    pub(crate) fn requires_review(&self) -> bool {
+        self.needs_review.is_some()
+    }
+
+    fn refuse_held_write(&self) -> Result<(), SessionError> {
+        if let Some(message) = &self.needs_review {
+            return Err(SessionError::Disk {
+                code: "needs_review", message: message.clone(),
+            });
+        }
+        Ok(())
     }
 
     pub fn state(&self) -> Vec<u8> {
@@ -238,6 +260,10 @@ impl DocumentSession {
     }
 
     pub fn reconcile(&mut self, io: &impl SessionIo) -> Result<(), SessionError> {
+        // A disk file may be the result of our earlier ambiguous publication.
+        // Hash equality, re-read, merge, or a new sync point CANNOT decide
+        // provenance or release a native HOLD.
+        self.refuse_held_write()?;
         if io.hash().map_err(disk_failure)? == self.synced_hash {
             return Ok(());
         }
@@ -260,6 +286,9 @@ impl DocumentSession {
     }
 
     pub fn write(&mut self, io: &impl SessionIo) -> Result<(), SessionError> {
+        // Must run before dirty/blank/conflict checks: no automatic disk I/O
+        // may follow an ambiguous post-publish ACK, even if state changed.
+        self.refuse_held_write()?;
         for _ in 0..2 {
             if !self.dirty {
                 return Ok(());
@@ -283,6 +312,16 @@ impl DocumentSession {
                     return Ok(());
                 }
                 Err(DiskError::Conflict) => self.reconcile(io)?,
+                Err(DiskError::Other { code: "needs_review", message }) => {
+                    // Native file and HistoryService may already have changed.
+                    // Leave the last confirmed sync point and user edits
+                    // untouched. An ordinary retry would risk a second write.
+                    self.needs_review = Some(message.clone());
+                    self.dirty = true;
+                    return Err(SessionError::Disk {
+                        code: "needs_review", message,
+                    });
+                }
                 Err(error) => return Err(disk_failure(error)),
             }
         }
