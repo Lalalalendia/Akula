@@ -28,6 +28,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 [features]
 installed = []
 memory-probe = []
+# Installer-enforced local custody flavor; does not pull in AWS/S3.
+sync-installed-host = ["aquilum-core/sync-installed-host"]
 
 [dependencies]
 aquilum-core = { path = "../core", features = ["host-custody"] }

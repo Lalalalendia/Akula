@@ -6,6 +6,7 @@ on:
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/core/src/app_core.rs'
+      - 'aquilum-app/core/src/app_core_installed_host_tests.rs'
       - 'aquilum-app/core/src/files/gate/write.rs'
       - 'aquilum-app/core/src/history/service.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
@@ -53,6 +54,27 @@ jobs:
             echo 'Unexpected AWS SDK in local host-only feature'
             exit 1
           fi
+      - name: Verify mandatory installed Core is AWS-free
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo tree --locked -p aquilum-core --no-default-features --features sync-installed-host > installed-host-tree.txt
+          if grep -E 'aws-(config|sdk-s3|sdk-sts) ' installed-host-tree.txt; then
+            echo 'Installed local custody unexpectedly activated an AWS SDK'
+            exit 1
+          fi
+      - name: Verify installed Core.open fails closed with no build-time ledger
+        working-directory: aquilum-app
+        env:
+          AKULA_INSTALLED_HOST_CUSTODY_DB: ''
+        run: cargo test --locked -p aquilum-core --no-default-features --features sync-installed-host installed_host_tests -- --nocapture
+      - name: Verify two default Core.open processes share REAL installed ledger
+        working-directory: aquilum-app
+        env:
+          AKULA_INSTALLED_HOST_CUSTODY_DB: ${{ runner.temp }}/akula-ci-installed-host.sqlite3
+          AKULA_INSTALLED_HOST_TEST_ALLOW_PROVISION: '1'
+        run: cargo test --locked -p aquilum-core --no-default-features --features sync-installed-host mandatory_installed_host_core_open_uses_real_compiled_shared_ledger -- --nocapture
       - name: Verify installer host registry and different appdata cases
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --no-default-features --features host-custody host_custody_registry::tests -- --nocapture

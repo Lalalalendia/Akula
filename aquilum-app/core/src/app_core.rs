@@ -92,6 +92,10 @@ impl std::fmt::Display for TaskFailed {
 pub struct Core {
     #[cfg(feature = "host-custody")]
     installed_host_custody_db: Option<PathBuf>,
+    /// Mandatory compiled policy survives missing or damaged shared ledger.
+    /// Never infer local fallback from an empty Option.
+    #[cfg(feature = "host-custody")]
+    installed_host_required: bool,
     pub settings: SettingsManager,
     pub ui_state: UiStateService,
     pub search: SearchService,
@@ -134,9 +138,20 @@ impl HostUnenrolledEpochPermit<'_> {
 }
 
 impl Core {
-    /// Opens all stores under `app_data_dir`, which the host picks.
+    /// Open a Core. The separately selected installed-host product mode
+    /// always requires the ONE build-time custody ledger for ALL processes.
+    /// A missing path is a persistent read-only HOLD, not legacy File Gate.
+    /// Runtime environment, appdata, and workspace settings cannot override it.
     pub fn open(app_data_dir: &Path, events: Arc<dyn EventSink>) -> Arc<Self> {
-        Self::open_inner(app_data_dir, events, None)
+        #[cfg(feature = "sync-installed-host")]
+        {
+            let trusted = option_env!("AKULA_INSTALLED_HOST_CUSTODY_DB")
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute() && path.file_name().is_some());
+            return Self::open_inner(app_data_dir, events, trusted, true);
+        }
+        #[cfg(not(feature = "sync-installed-host"))]
+        Self::open_inner(app_data_dir, events, None, false)
     }
 
     /// P0-B2a *explicit* host-bound Core for a cooperating installer-owned
@@ -148,16 +163,26 @@ impl Core {
     pub fn open_with_installed_host(
         app_data_dir: &Path, host_custody_db: &Path, events: Arc<dyn EventSink>,
     ) -> Arc<Self> {
-        Self::open_inner(app_data_dir, events, Some(host_custody_db.to_path_buf()))
+        // Compiled-installed binaries must not let even this constructor
+        // substitute a caller-provisioned empty private SQLite registry.
+        #[cfg(feature = "sync-installed-host")]
+        let trusted = option_env!("AKULA_INSTALLED_HOST_CUSTODY_DB")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute() && path.file_name().is_some())
+            .filter(|path| path == host_custody_db);
+        #[cfg(not(feature = "sync-installed-host"))]
+        let trusted = host_custody_db.is_absolute().then(|| host_custody_db.to_path_buf());
+        Self::open_inner(app_data_dir, events, trusted, true)
     }
 
     fn open_inner(
         app_data_dir: &Path,
         events: Arc<dyn EventSink>,
         installed_host_custody_db: Option<PathBuf>,
+        installed_host_required: bool,
     ) -> Arc<Self> {
         #[cfg(not(feature = "host-custody"))]
-        let _ = &installed_host_custody_db;
+        let _ = (&installed_host_custody_db, installed_host_required);
         let core = Arc::new_cyclic(|this: &Weak<Core>| {
             let changed = Arc::clone(&events);
             let notifier: ChangeNotifier = Arc::new(move |paths| {
@@ -176,6 +201,8 @@ impl Core {
             Core {
                 #[cfg(feature = "host-custody")]
                 installed_host_custody_db,
+                #[cfg(feature = "host-custody")]
+                installed_host_required,
                 settings: SettingsManager::new(app_data_dir),
                 ui_state: UiStateService::open(&app_data_dir.join("ui-state.sqlite3")),
                 search: SearchService::new(app_data_dir.join("search-v2"), notifier, index_notifier),
@@ -197,7 +224,7 @@ impl Core {
         // before publishing the Core to hosts, watchers or editor workers.
         core.history.bind_guarded_participant_policy(core.documents.guarded_history_policy());
         #[cfg(feature = "host-custody")]
-        if core.installed_host_custody_db.is_some() {
+        if core.installed_host_required {
             // Every direct HistoryService mutator must refuse until routed
             // through the host epoch; do so before exposing workers/hosts.
             core.history.require_installed_host_epoch();
@@ -256,12 +283,21 @@ impl Core {
     /// No other File Gate operation may use this exception. This is not a
     /// remote sync overwrite/delete capability or a generic write permit.
     pub(crate) fn file_mutation_guard_for_custody_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+        // The S3 custody permit is scoped to appdata/OS lock, not to the
+        // installer-wide SQLite epoch. Forbid this independent bypass in an
+        // installed-host binary until the verified host writer exists.
+        #[cfg(feature = "host-custody")]
+        if self.installed_host_required {
+            return Err(FileCommandError::Task {
+                message: "host policy HOLD: S3 custody writer lacks shared host admission".into(),
+            });
+        }
         self.file_mutation_guard_for_write_mode(true, false)
     }
 
     #[cfg(feature = "host-custody")]
     pub(crate) fn requires_installed_host_epoch(&self) -> bool {
-        self.installed_host_custody_db.is_some()
+        self.installed_host_required
     }
 
     /// Only the still-held host SQLite enrollment epoch can invoke this
@@ -285,7 +321,7 @@ impl Core {
     ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
         let guard = self.file_mutation_guard()?;
         #[cfg(feature = "host-custody")]
-        if !proven_custody && !host_epoch_held && self.installed_host_custody_db.is_some() {
+        if !proven_custody && !host_epoch_held && self.installed_host_required {
             return Err(FileCommandError::Task {
                 message: "host custody is HOLD: mutation has no held shared enrollment epoch".into(),
             });
@@ -478,3 +514,7 @@ fn path_names(paths: &[PathBuf]) -> Vec<String> {
 #[cfg(test)]
 #[path = "app_core_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "sync-installed-host"))]
+#[path = "app_core_installed_host_tests.rs"]
+mod installed_host_tests;
