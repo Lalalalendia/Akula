@@ -83,6 +83,12 @@ impl S3PinnedRevisionSnapshot {
     pub fn len(&self) -> usize { self.revisions.len() }
     pub fn is_empty(&self) -> bool { self.revisions.is_empty() }
 
+    /// Exact refs from a fully pinned V1 remote snapshot. Only the V2
+    /// read-only sidecar verifier may reuse them; not a File Gate receipt.
+    pub(crate) fn references_for_coord_v2(&self) -> &[S3RevisionRefV1] {
+        &self.revisions
+    }
+
     /// Index-based paging is meaningful only for this exact *immutable*,
     /// cryptographically checked snapshot. A cursor from another generation,
     /// a repeated/empty cursor or a page over 1000 items is rejected.
@@ -134,6 +140,14 @@ impl S3PinnedRevisionSnapshot {
     pub(crate) fn for_remote_anchor_test(snapshot_id: String, count: usize) -> Self {
         assert_eq!(count, 0, "only empty verified-DAG test fixtures are supported");
         Self { snapshot_id, revisions: Vec::new() }
+    }
+
+    /// Synthetic test fixture only: production snapshots are built by the
+    /// canonical full remote verifier, never by untrusted metadata slices.
+    pub(crate) fn for_coord_v2_test(
+        snapshot_id: String, revisions: Vec<S3RevisionRefV1>,
+    ) -> Self {
+        Self { snapshot_id, revisions }
     }
 }
 
