@@ -339,7 +339,7 @@ fn note_publication_epoch_spans_primary_and_history_before_enrollment() {
     // Hold the history-files lock, while the real File Gate writer publishes
     // the primary note and then waits to record its history. This reproduces
     // exactly the gap that the old File Gate mutex did NOT cover.
-    let (writer, enrollment) = core.history.with_participant_enrollment_fence(|| {
+    let (writer, enrollment, finished_rx) = core.history.with_participant_enrollment_fence(|| {
         let core_write = Arc::clone(&core);
         let writer_note = note.clone();
         let replacement = next.clone();
@@ -369,13 +369,116 @@ fn note_publication_epoch_spans_primary_and_history_before_enrollment() {
             finished_rx.recv_timeout(Duration::from_millis(150)),
             Err(mpsc::RecvTimeoutError::Timeout)
         ), "enrollment bypassed a legacy write between primary and history");
-        Ok::<_, FileCommandError>((worker, admission))
+        // Keep the completion receiver alive across release of the HistoryFiles
+        // fence. Dropping it here makes the enrollment worker panic on send
+        // after it correctly waits for the writer, giving a false CI failure.
+        Ok::<_, FileCommandError>((worker, admission, finished_rx))
     }).unwrap();
 
     assert!(writer.join().unwrap().is_ok(),
         "ordinary note publication failed after HistoryService lock released");
+    assert!(finished_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+        "enrollment did not finish successfully after the history write");
     enrollment.join().unwrap();
     assert_eq!(fs::read_to_string(&note).unwrap(), next);
     assert!(core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0,
         "enrollment fence must wait for recorded history, not just primary bytes");
+}
+
+
+/// Real primary-file operations may finish while their history transfer is
+/// waiting for PROCESS_HISTORY_FILES. The S3 enrollment writer must wait for
+/// the complete operation, not just the File Gate's primary disk mutex.
+/// These are cooperative single-process tests, NOT an OS custody guarantee.
+#[cfg(feature = "sync-s3")]
+#[test]
+fn relocation_trash_and_restore_hold_publication_epoch_until_history_finishes() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::files::error::FileCommandError;
+    use crate::history::Source;
+    use std::sync::{mpsc, Arc};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    fn prove_lease<T, Run, Changed>(core: &Arc<Core>, run: Run, primary_changed: Changed) -> T
+    where
+        T: Send + 'static,
+        Run: FnOnce() -> Result<T, FileCommandError> + Send + 'static,
+        Changed: Fn() -> bool,
+    {
+        let (worker, enrollment, done_rx) = core.history.with_participant_enrollment_fence(|| {
+            let worker = thread::spawn(run);
+            let start = Instant::now();
+            while !(primary_changed() && core.file_mutations.try_lock().is_ok()) {
+                assert!(start.elapsed() < Duration::from_secs(15),
+                    "primary disk operation did not reach the history-only gap");
+                thread::sleep(Duration::from_millis(5));
+            }
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let (done_tx, done_rx) = mpsc::channel();
+            let enrolling_core = Arc::clone(core);
+            let enrollment = thread::spawn(move || {
+                ready_tx.send(()).unwrap();
+                let acquired = enrolling_core.ordinary_note_enrollment_fence().is_ok();
+                done_tx.send(acquired).unwrap();
+            });
+            ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            assert!(matches!(
+                done_rx.recv_timeout(Duration::from_millis(120)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ), "participant enrollment bypassed an in-flight primary/history transfer");
+            // A genuinely blocked enrollment sends only after this callback
+            // releases the history fence; retain its receiver until then.
+            Ok::<_, FileCommandError>((worker, enrollment, done_rx))
+        }).unwrap();
+        let result = worker.join().unwrap().unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "participant enrollment must complete after primary+history");
+        enrollment.join().unwrap();
+        result
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("appdata");
+    let root = temp.path().join("vault");
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+    core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+    let original = root.join("Original.md");
+    super::write::create(&core, &original, "important version", Source::Me, None).unwrap();
+
+    let renamed = root.join("Renamed.md");
+    let (a, b, c) = (Arc::clone(&core), original.clone(), renamed.clone());
+    prove_lease(&core, move || super::moves::rename(&a, &b, &c), || {
+        !original.exists() && renamed.exists()
+    });
+    assert_eq!(fs::read_to_string(&renamed).unwrap(), "important version");
+
+    let moved = root.join("Moved.md");
+    let (a, b, c) = (Arc::clone(&core), renamed.clone(), moved.clone());
+    prove_lease(&core, move || super::moves::move_across(&a, &b, &c), || {
+        !renamed.exists() && moved.exists()
+    });
+    assert_eq!(fs::read_to_string(&moved).unwrap(), "important version");
+
+    let (a, r, note) = (Arc::clone(&core), root.clone(), moved.clone());
+    let trashed = prove_lease(&core, move || super::trash::trash(&a, &r, &note), || {
+        !moved.exists()
+    });
+    assert!(!moved.exists());
+    assert!(trashed.exists());
+
+    let (a, r, note) = (Arc::clone(&core), root.clone(), trashed.clone());
+    let restored = prove_lease(&core, move || super::trash::restore(&a, &r, &note), || {
+        moved.exists()
+    });
+    // Windows can return an extended \\?\\-prefixed path for the same file.
+    // Compare Akula's normalized path identity, not textual path spelling.
+    assert!(crate::search::paths::same_path(&restored, &moved),
+        "restore returned a different physical note path: {restored:?} vs {moved:?}");
+    assert_eq!(fs::read_to_string(&moved).unwrap(), "important version");
+    assert!(core.history.page(&|| vec![root.clone()], &moved, 0, 8).total > 0,
+        "history must be restored before the participant admission completes");
 }

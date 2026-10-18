@@ -44,6 +44,8 @@ mod coord_selective_packs;
 pub use coord_selective_packs::S3CoordSelectivePacksPreview;
 // Immutable V1-manifest-ID keyed advisory locator discovery; never S3 LIST.
 mod coord_locator;
+// V2 immutable packs/letter/locator prepublication; never mutable CAS.
+mod coord_immutable_publish;
 mod selective_snapshot;
 mod offline_retention;
 pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};

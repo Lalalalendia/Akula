@@ -12,6 +12,9 @@ on:
       - "aquilum-app/core/src/sync/guarded_editor.rs"
       - "aquilum-app/core/src/app_core.rs"
       - "aquilum-app/core/src/files/gate/write.rs"
+      - "aquilum-app/core/src/files/gate/moves.rs"
+      - "aquilum-app/core/src/files/gate/trash.rs"
+      - "aquilum-app/core/src/files/gate/tests.rs"
       - "aquilum-app/core/src/files/error.rs"
       - "aquilum-app/core/src/documents/io.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
@@ -58,3 +61,8 @@ jobs:
       - name: Verify real editor HubIo save under registered S3 cooperative custody
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3 guarded_editor::tests -- --nocapture
+      - name: Verify actual primary/history publication epochs before S3 enrollment
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --features sync-s3 note_publication_epoch_spans_primary_and_history_before_enrollment -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 relocation_trash_and_restore_hold_publication_epoch_until_history_finishes -- --nocapture
