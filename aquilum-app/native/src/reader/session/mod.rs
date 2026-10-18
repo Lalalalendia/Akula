@@ -60,9 +60,11 @@ impl Session {
     #[cfg(feature = "memory-probe")]
     pub fn probe_stats(&self) -> String {
         format!(
-            "reader_section={} reader_page={} reader_layouts={} reader_blocks={} reader_visible_items={}",
+            "reader_section={} reader_page={} reader_scroll_px={:.1} reader_scrolled={} reader_layouts={} reader_blocks={} reader_visible_items={}",
             self.section,
             self.page,
+            self.scroll,
+            self.scrolled(),
             self.layouts.len(),
             self.blocks.len(),
             self.on_screen().len(),
