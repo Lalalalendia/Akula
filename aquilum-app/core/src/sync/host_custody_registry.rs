@@ -92,6 +92,27 @@ pub(crate) struct SharedHostCustodyRegistry {
 }
 
 #[allow(dead_code)]
+// Preliminary namespace rejection only. This guards the *immediate*
+// host-ledger parent against a symlink/junction substitution, but does NOT
+// pin ancestor directories, inode identity, owner/ACL or SQLite WAL/SHM.
+fn checked_host_parent(path: &Path) -> Result<&Path, HostCustodyError> {
+    let parent = path.parent().ok_or(HostCustodyError::InvalidHostLocation)?;
+    let entry = fs::symlink_metadata(parent)?;
+    if !entry.is_dir() || entry.file_type().is_symlink() {
+        return Err(HostCustodyError::InvalidHostLocation);
+    }
+    #[cfg(windows)]
+    if {
+        use std::os::windows::fs::MetadataExt;
+        entry.file_attributes() & 0x0000_0400 != 0
+    } {
+        // Windows directory reparse points (including junctions) cannot
+        // redirect a compiler-pinned host ledger to a private empty DB.
+        return Err(HostCustodyError::InvalidHostLocation);
+    }
+    Ok(parent)
+}
+
 impl SharedHostCustodyRegistry {
     /// INSTALLER ONLY. Provision in a *pre-existing*, non-symlink host
     /// directory, and explicitly prohibit creating it in any local workspace
@@ -101,11 +122,7 @@ impl SharedHostCustodyRegistry {
     pub(crate) fn provision_new(
         path: &Path, forbidden_roots: &[&Path],
     ) -> Result<Self, HostCustodyError> {
-        let parent = path.parent().ok_or(HostCustodyError::InvalidHostLocation)?;
-        if fs::symlink_metadata(parent)?.file_type().is_symlink() {
-            return Err(HostCustodyError::InvalidHostLocation);
-        }
-        let parent = fs::canonicalize(parent)?;
+        let parent = fs::canonicalize(checked_host_parent(path)?)?;
         for forbidden in forbidden_roots {
             let other = fs::canonicalize(forbidden)?;
             if parent.starts_with(other) {
@@ -138,6 +155,9 @@ impl SharedHostCustodyRegistry {
     /// migrate, automatically clear corruption, or infer an empty registry
     /// from a missing shared host database.
     pub(crate) fn open_existing(path: &Path) -> Result<Self, HostCustodyError> {
+        // Never follow a substituted parent alias into another, freshly
+        // provisioned but empty registry. Missing/untrusted path stays HOLD.
+        checked_host_parent(path)?;
         let entry = fs::symlink_metadata(path)?;
         if !entry.is_file() || entry.file_type().is_symlink() {
             return Err(HostCustodyError::InvalidHostLocation);
@@ -739,6 +759,41 @@ mod tests {
         assert!(matches!(reader.inspect(&alias, record.root_identity),
             Err(HostCustodyError::InvalidRecord)));
         assert_eq!(reader.inspect(&vault, record.root_identity).unwrap(), Some(record));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn substituted_host_parent_symlink_cannot_select_a_private_empty_ledger() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let mut installer = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        installer.enroll(&record).unwrap();
+        drop(installer);
+
+        let old_parent = db.parent().unwrap().to_path_buf();
+        let preserved_parent = temp.path().join("preserved-host");
+        fs::rename(&old_parent, &preserved_parent).unwrap();
+
+        // An attacker places a syntactically valid, empty registry in another
+        // directory and swaps the compiler-pinned parent name to a symlink.
+        let private_parent = temp.path().join("private-host");
+        fs::create_dir(&private_parent).unwrap();
+        let private_db = private_parent.join("approved.sqlite");
+        drop(SharedHostCustodyRegistry::provision_new(
+            &private_db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap());
+        std::os::unix::fs::symlink(&private_parent, &old_parent).unwrap();
+
+        assert!(matches!(
+            SharedHostCustodyRegistry::open_existing(&db),
+            Err(HostCustodyError::InvalidHostLocation),
+        ), "parent symlink must HOLD instead of reading an empty foreign ledger");
+
+        // Prove enrollment was not erased, migrated or reset by the refusal.
+        let preserved_db = preserved_parent.join("approved.sqlite");
+        let original = SharedHostCustodyRegistry::open_existing(&preserved_db).unwrap();
+        assert_eq!(original.inspect(&vault, record.root_identity).unwrap(), Some(record));
     }
 
     #[test]
