@@ -66,10 +66,58 @@ def setup_network():
         ip("-n", ns, "addr", "add", f"{address}/30", "dev", link)
         ip("-n", ns, "link", "set", "lo", "up")
         ip("-n", ns, "link", "set", link, "up")
+        # An offline network namespace has no default route. IPv4 multicast
+        # (224.0.0.251:5353) requires an explicit link-local route.
+        ip("-n", ns, "route", "add", "224.0.0.0/4", "dev", link, "src", address)
+        multicast_route = inside(ns, "ip", "route", "get", "224.0.0.251")
+        if multicast_route.returncode != 0 or link not in multicast_route.stdout:
+            raise AssertionError("mDNS multicast route not reachable on veth")
         if ip("-n", ns, "route", "show", "default").stdout.strip():
             raise AssertionError(f"unexpected default route in {ns}")
         if inside(ns, "ip", "route", "get", "1.1.1.1").returncode == 0:
             raise AssertionError(f"unexpected external route in {ns}")
+
+
+def probe_multicast_link():
+    """Prove multicast delivery without involving the mDNS library."""
+    receiver = r"""
+import socket, sys
+group, local = "224.0.0.251", sys.argv[1]
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("", 53921))
+sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
+                socket.inet_aton(group) + socket.inet_aton(local))
+sock.settimeout(6)
+data, _ = sock.recvfrom(256)
+if data != b"staya-multicast-probe-v0":
+    sys.exit(2)
+"""
+    sender = r"""
+import socket, sys
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                socket.inet_aton(sys.argv[1]))
+sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+sock.sendto(b"staya-multicast-probe-v0", ("224.0.0.251", 53921))
+"""
+    waiting = subprocess.Popen(
+        ["sudo", "-n", "ip", "netns", "exec", NS_A, sys.executable, "-c",
+         receiver, IP_A],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        time.sleep(0.6)
+        sent = inside(NS_B, sys.executable, "-c", sender, IP_B, timeout=8)
+        if sent.returncode != 0:
+            raise AssertionError("test multicast sender failed: " + sent.stderr[-500:])
+        _, err = waiting.communicate(timeout=9)
+        if waiting.returncode != 0:
+            raise AssertionError("no IPv4 multicast UDP delivery over veth: " + err[-500:])
+        print("STAYA_MULTICAST_LINK_PASS: independent UDP probe over offline veth", flush=True)
+    finally:
+        if waiting.poll() is None:
+            waiting.kill()
+            waiting.communicate(timeout=5)
 
 
 def kill_server(server):
@@ -108,6 +156,7 @@ def run_with_keys(folder):
     server = None
     try:
         setup_network()
+        probe_multicast_link()
         server = subprocess.Popen(
             ["sudo", "-n", "ip", "netns", "exec", NS_B, str(BIN),
              "serve-mdns", b_key, a_id, peer_address, IP_B],
