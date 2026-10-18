@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use crate::ui::editor::change::Change;
 use crate::ui::editor::highlight::Lang;
-use super::{Block, Rect, TextEditor};
+use super::{Affinity, Block, Cursor, EventCtx, Point, Rect, TextEditor};
 
 const MAX_TRACKED_BLOCKS: usize = 512;
 
@@ -221,6 +221,95 @@ impl TextEditor {
         let top = self.doc.top(line);
         let bottom = self.doc.bottom(line);
         (right > left && bottom > top).then(|| Rect::new(left, top, right, bottom))
+    }
+
+
+    /// Find the opening fence in the mounted document window. Never borrow an
+    /// offset from a previous code block if the actual opener is not mounted.
+    fn code_opener_at(&self, line: usize) -> Option<usize> {
+        if !self.doc.fenced_code(line) {
+            return None;
+        }
+        let mut at = line;
+        loop {
+            if matches!(self.doc.block(at), Block::Code { first: true, fence: true, .. }) {
+                return Some(self.doc.paragraph(at).start);
+            }
+            if at == 0 || !self.doc.fenced_code(at - 1) {
+                return None;
+            }
+            at -= 1;
+        }
+    }
+
+    pub(super) fn code_offset_at(&self, line: usize) -> f64 {
+        self.code_opener_at(line).map_or(0.0, |opener| self.code_scrolls.get(opener))
+    }
+
+    /// Natural, unwrapped width of mounted paragraphs in this one fence run.
+    fn code_content_width(&self, opener: usize) -> f64 {
+        let mut max: f64 = 0.0;
+        let mut at = self.doc.at_offset(opener);
+        while at < self.doc.line_count() && self.doc.fenced_code(at) {
+            if at != self.doc.at_offset(opener)
+                && matches!(self.doc.block(at), Block::Code { first: true, .. })
+            {
+                break;
+            }
+            if let Some(layout) = self.doc.paragraph(at).laid() {
+                max = max.max(f64::from(layout.width()));
+            }
+            at += 1;
+        }
+        max
+    }
+
+    pub(super) fn code_scroll_wheel(&mut self, ctx: &mut EventCtx<'_>, point: Point, delta: f64) -> bool {
+        let Some(line) = self.index_at(point) else { return false };
+        let Some(viewport) = self.code_viewport(line).filter(|rect| rect.contains(point)) else { return false };
+        let Some(opener) = self.code_opener_at(line) else { return false };
+        let content = self.code_content_width(opener);
+        if self.code_scrolls.advance(opener, delta, content, viewport.width()) {
+            ctx.request_render();
+            return true;
+        }
+        false
+    }
+
+    /// Keep a code caret visible after a keyboard edit or navigation. Unlike
+    /// the global single-line scroll, this adjusts only the enclosing fence.
+    pub(super) fn reveal_code_caret(&mut self) {
+        if !self.laid_out() {
+            return;
+        }
+        let index = self.doc.at_offset(self.focus);
+        let Some(viewport) = self.code_viewport(index) else { return };
+        let Some(opener) = self.code_opener_at(index) else { return };
+        let paragraph = self.doc.paragraph(index);
+        let Some(layout) = paragraph.laid() else { return };
+        let local = self.focus.saturating_sub(paragraph.start).min(paragraph.len as usize);
+        let natural = f64::from(Cursor::from_byte_index(layout, local, Affinity::Downstream)
+            .geometry(layout, 0.0).x0)
+            + self.shift().x + self.doc.origin(index).x;
+        let before = self.code_scrolls.get(opener);
+        let visible = natural - before;
+        let gutter = 4.0;
+        let delta = if visible < viewport.x0 + gutter {
+            visible - (viewport.x0 + gutter)
+        } else if visible > viewport.x1 - gutter {
+            visible - (viewport.x1 - gutter)
+        } else {
+            0.0
+        };
+        if delta != 0.0 {
+            let content = self.code_content_width(opener);
+            self.code_scrolls.advance(opener, delta, content, viewport.width());
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::ui::editor) fn code_scroll_for_test(&self, opener: usize) -> f64 {
+        self.code_scrolls.get(opener)
     }
 
     #[cfg(test)]
