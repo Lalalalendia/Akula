@@ -387,9 +387,9 @@ fn initial_layout_reuse_abba_profile() {
                 let mut session = Session::open(&path, Target::Start).unwrap();
                 let start = Instant::now();
                 if reuse {
-                    session.ensure(VIEW, &settings, &mut fcx, &mut lcx);
+                    session.ensure(VIEW, &settings, fcx, lcx);
                 } else {
-                    session.ensure_without_reuse(VIEW, &settings, &mut fcx, &mut lcx);
+                    session.ensure_without_reuse(VIEW, &settings, fcx, lcx);
                 }
                 let elapsed = start.elapsed().as_secs_f64() * 1000.0;
                 assert!(!session.needs_layout());
