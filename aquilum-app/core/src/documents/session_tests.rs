@@ -15,6 +15,8 @@ struct FakeIo {
     writes: Cell<usize>,
     /// Simulate a successful physical file write followed by a lost ACK.
     ambiguous_after_write: Cell<bool>,
+    guarded_native_writer: Cell<bool>,
+    durable_intent: RefCell<Option<(String, String)>>,
     reads: Cell<usize>,
     hash_checks: Cell<usize>,
     fail_preserve: Cell<bool>,
@@ -110,6 +112,36 @@ impl SessionIo for FakeIo {
         }
         *self.point.borrow_mut() = Some(point);
         self.remembered.set(self.remembered.get() + 1);
+        Ok(())
+    }
+
+    fn unresolved_native_write(&self) -> Result<Option<String>, DiskError> {
+        Ok(self.durable_intent.borrow().as_ref().map(|_| "unknown native publication".into()))
+    }
+
+    fn begin_guarded_write(&self, content: &str, base_hash: &str) -> Result<bool, DiskError> {
+        if !self.guarded_native_writer.get() { return Ok(false); }
+        let mut intent = self.durable_intent.borrow_mut();
+        if intent.is_some() {
+            return Err(DiskError::Other {
+                code: "needs_review", message: "unresolved previous attempt".into(),
+            });
+        }
+        *intent = Some((base_hash.to_owned(), hash_of(content)));
+        Ok(true)
+    }
+
+    fn complete_guarded_write(&self, base_hash: &str, new_hash: &str)
+        -> Result<(), DiskError>
+    {
+        let current = self.durable_intent.borrow();
+        if current.as_ref() != Some(&(base_hash.to_owned(), new_hash.to_owned())) {
+            return Err(DiskError::Other {
+                code: "needs_review", message: "prewrite intent not matched".into(),
+            });
+        }
+        drop(current);
+        *self.durable_intent.borrow_mut() = None;
         Ok(())
     }
 }
@@ -315,6 +347,54 @@ fn native_lost_ack_sticks_as_hold_across_reconcile_retry_and_new_edits() {
     assert!(session.write(&io).is_err());
     assert_eq!(io.writes.get(), 1);
     assert_eq!(io.point.borrow().as_ref().unwrap().file_hash, confirmed);
+}
+
+#[test]
+fn guarded_write_completes_only_after_sync_point_is_durable() {
+    let io = FakeIo::with_file("old");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    io.guarded_native_writer.set(true);
+    session.replace_text("new text", "editor", &io).unwrap();
+    session.write(&io).unwrap();
+    assert_eq!(io.file(), "new text");
+    assert!(io.durable_intent.borrow().is_none());
+    assert_eq!(
+        io.point.borrow().as_ref().unwrap().file_hash, hash_of("new text"),
+    );
+    assert!(!session.requires_review());
+    assert!(!session.dirty());
+}
+
+#[test]
+fn guarded_metadata_failure_preserves_crash_intent_and_blocks_reopen() {
+    let io = FakeIo::with_file("old");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    io.guarded_native_writer.set(true);
+    session.replace_text("new content", "editor", &io).unwrap();
+    io.fail_remember.set(true);
+    let result = session.write(&io);
+    assert!(matches!(
+        result, Err(SessionError::Disk { code: "needs_review", .. })
+    ));
+    assert!(session.requires_review());
+    assert_eq!(io.file(), "new content");
+    assert_eq!(io.writes.get(), 1);
+    assert_eq!(
+        io.point.borrow().as_ref().unwrap().file_hash, hash_of("old"),
+    );
+    assert_eq!(io.durable_intent.borrow().as_ref(), Some(&(
+        hash_of("old"), hash_of("new content"),
+    )));
+    // Even a fresh DocumentSession cannot silently treat the visible disk
+    // file as an authenticated completed write.
+    let before_reads = io.reads.get();
+    assert!(matches!(
+        DocumentSession::open(&[], &io),
+        Err(SessionError::Disk { code: "needs_review", .. })
+    ));
+    assert_eq!(io.reads.get(), before_reads);
+    assert!(session.write(&io).is_err());
+    assert_eq!(io.writes.get(), 1);
 }
 
 #[test]

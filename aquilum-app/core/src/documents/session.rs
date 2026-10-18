@@ -34,6 +34,30 @@ pub trait SessionIo {
     fn append(&self, update: &[u8]) -> Result<(), DiskError>;
     fn sync_point(&self) -> SyncPointLookup;
     fn remember(&self, point: SyncPoint) -> Result<(), DiskError>;
+
+    /// Before opening/reconciling a file, detect any native write whose
+    /// crash-durable intent was not explicitly acknowledged. Test fakes and
+    /// non-Hub adapters opt out; the real HubIo always queries app-data.
+    fn unresolved_native_write(&self) -> Result<Option<String>, DiskError> {
+        Ok(None)
+    }
+
+    /// Called before a guarded native write. A true result means a unique
+    /// FULL-synced app-data intent exists BEFORE the primary file may change.
+    /// Unarmed ordinary editors return false without extra filesystem I/O.
+    fn begin_guarded_write(&self, _content: &str, _base_hash: &str)
+        -> Result<bool, DiskError>
+    {
+        Ok(false)
+    }
+
+    /// Clear only the exact confirmed native write after both file/history
+    /// and persisted sync point succeeded. A crash before this retains HOLD.
+    fn complete_guarded_write(&self, _base_hash: &str, _new_hash: &str)
+        -> Result<(), DiskError>
+    {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -108,6 +132,12 @@ pub struct DocumentSession {
 
 impl DocumentSession {
     pub fn open(blobs: &[Vec<u8>], io: &impl SessionIo) -> Result<Self, SessionError> {
+        // MUST check app-data *before* reading/merging disk: an interrupted
+        // guarded CAS may already have changed the primary note, but was not
+        // acknowledged. A matching digest is NOT proof of safe recovery.
+        if let Some(reason) = io.unresolved_native_write().map_err(disk_failure)? {
+            return Err(SessionError::Disk { code: "needs_review", message: reason });
+        }
         let replica = Replica::restore(blobs)?;
         let snapshot = io.read().map_err(disk_failure)?;
         let mut session = Self {
@@ -297,30 +327,61 @@ impl DocumentSession {
             if is_blank(&content) && !is_blank(&self.synced_content) {
                 io.preserve(&self.synced_content, self.truncation_report()).map_err(disk_failure)?;
             }
+            // For an explicitly armed guarded editor the SQLite write-intent
+            // is committed with FULL fsync *before* invoking File Gate.
+            // Any failure after entering this window is conservative HOLD.
+            let guarded = match io.begin_guarded_write(&content, &self.synced_hash) {
+                Ok(armed) => armed,
+                Err(error) => {
+                    let message = format!("cannot establish durable native write intent: {error:?}");
+                    self.needs_review = Some(message.clone());
+                    self.dirty = true;
+                    return Err(SessionError::Disk { code: "needs_review", message });
+                }
+            };
             match io.write(&content, &self.synced_hash) {
                 Ok(hash) => {
                     let text_hash = io.text_hash(&content);
-                    // Disk bytes may be safely written while SQLite is still
-                    // unavailable. Leave the previously confirmed baseline and
-                    // dirty retry state untouched until remember() succeeds.
-                    // On retry, a changed disk hash triggers reconcile first.
-                    io.remember(SyncPoint { file_hash: hash.clone(), text_hash })
-                        .map_err(disk_failure)?;
+                    // A lost acknowledgment AFTER file+history publication
+                    // must never be interpreted as permission to replay.
+                    let confirmed = io.remember(SyncPoint {
+                        file_hash: hash.clone(), text_hash,
+                    });
+                    if let Err(error) = confirmed {
+                        if guarded {
+                            let message = format!("guarded native sync-point confirmation uncertain: {error:?}");
+                            self.needs_review = Some(message.clone());
+                            self.dirty = true;
+                            return Err(SessionError::Disk { code: "needs_review", message });
+                        }
+                        return Err(disk_failure(error));
+                    }
+                    if guarded {
+                        if let Err(error) = io.complete_guarded_write(&self.synced_hash, &hash) {
+                            let message = format!("cannot retire durable native write intent: {error:?}");
+                            self.needs_review = Some(message.clone());
+                            self.dirty = true;
+                            return Err(SessionError::Disk { code: "needs_review", message });
+                        }
+                    }
                     self.synced_content = content;
                     self.synced_hash = hash;
                     self.dirty = false;
                     return Ok(());
                 }
-                Err(DiskError::Conflict) => self.reconcile(io)?,
-                Err(DiskError::Other { code: "needs_review", message }) => {
-                    // Native file and HistoryService may already have changed.
-                    // Leave the last confirmed sync point and user edits
-                    // untouched. An ordinary retry would risk a second write.
+                Err(DiskError::Conflict) if !guarded => self.reconcile(io)?,
+                Err(error) if guarded => {
+                    // With an armed pre-intent, even a reported precondition
+                    // failure cannot safely clear an UNKNOWN native attempt.
+                    let message = format!("guarded native publication requires review: {error:?}");
                     self.needs_review = Some(message.clone());
                     self.dirty = true;
-                    return Err(SessionError::Disk {
-                        code: "needs_review", message,
-                    });
+                    return Err(SessionError::Disk { code: "needs_review", message });
+                }
+                Err(DiskError::Other { code: "needs_review", message }) => {
+                    self.needs_review = Some(message.clone());
+                    self.dirty = true;
+                    return Err(SessionError::Disk { code: "needs_review", message });
                 }
                 Err(error) => return Err(disk_failure(error)),
             }

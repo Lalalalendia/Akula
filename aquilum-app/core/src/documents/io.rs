@@ -18,6 +18,7 @@ pub struct HubIo<'a> {
     pub path: &'a Path,
     pub key: &'a str,
     pub store: &'a Mutex<Option<DocumentStore>>,
+    pub guarded_write_roots: &'a Mutex<Vec<PathBuf>>,
     pub offset_seconds: i64,
     pub source: Source,
 }
@@ -79,6 +80,33 @@ impl HubIo<'_> {
     fn with_store<T>(&self, operation: impl FnOnce(&DocumentStore) -> T) -> Option<T> {
         let guard = self.store.lock().ok()?;
         guard.as_ref().map(operation)
+    }
+
+    fn durable_intent_store<T>(
+        &self, operation: impl FnOnce(&DocumentStore) -> super::store::StoreResult<T>,
+    ) -> Result<T, DiskError> {
+        let guard = self.store.lock().map_err(|_| DiskError::Other {
+            code: "hold_unavailable", message: "document store lock poisoned".into(),
+        })?;
+        let store = guard.as_ref().ok_or_else(|| DiskError::Other {
+            code: "hold_unavailable", message: "document app-data journal unavailable".into(),
+        })?;
+        operation(store).map_err(|error| DiskError::Other {
+            code: "hold_unavailable", message: format!("document intent journal: {error}"),
+        })
+    }
+
+    fn guarded_root_armed(&self) -> Result<bool, DiskError> {
+        let roots = self.guarded_write_roots.lock().map_err(|_| DiskError::Other {
+            code: "hold_unavailable", message: "guarded root registry poisoned".into(),
+        })?;
+        if roots.is_empty() { return Ok(false); }
+        // Match both a lexical in-vault path and an aliased path pointing
+        // into the same root. The downstream guarded File Gate still refuses
+        // aliases; this step guarantees it never skips its prewrite intent.
+        let physical = std::fs::canonicalize(self.path).ok();
+        Ok(roots.iter().any(|root| self.path.starts_with(root)
+            || physical.as_ref().is_some_and(|path| path.starts_with(root))))
     }
 }
 
@@ -150,5 +178,35 @@ impl SessionIo for HubIo<'_> {
                 message: "document store unavailable; sync point cannot be confirmed".into(),
             }),
         }
+    }
+
+    fn unresolved_native_write(&self) -> Result<Option<String>, DiskError> {
+        self.durable_intent_store(|store| store.write_intent(self.key)).map(|record| {
+            record.map(|intent| format!(
+                "unresolved native write before restart: old={} new={}; review required",
+                intent.base_hash, intent.proposed_hash,
+            ))
+        })
+    }
+
+    fn begin_guarded_write(&self, content: &str, base_hash: &str)
+        -> Result<bool, DiskError>
+    {
+        if !self.guarded_root_armed()? { return Ok(false); }
+        // A complete BLAKE3 digest is stored before the file can be changed,
+        // so restart recovery can identify which precise attempt is unknown.
+        let proposed = hash_bytes(content.as_bytes());
+        self.durable_intent_store(|store|
+            store.begin_write_intent(self.key, base_hash, &proposed)
+        )?;
+        Ok(true)
+    }
+
+    fn complete_guarded_write(&self, base_hash: &str, new_hash: &str)
+        -> Result<(), DiskError>
+    {
+        self.durable_intent_store(|store|
+            store.complete_write_intent(self.key, base_hash, new_hash)
+        )
     }
 }
