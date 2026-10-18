@@ -299,6 +299,43 @@ impl Core {
     pub(crate) fn requires_installed_host_epoch(&self) -> bool {
         self.installed_host_required
     }
+    /// The only installed-host registry opener used by BOTH ordinary File Gate
+    /// publications and enrolled S3 activation. A witnessing build must read
+    /// the independently provisioned expected IDs *before* opening SQLite.
+    /// Missing or changed witness always means HOLD, never an empty roster.
+    #[cfg(feature = "host-custody")]
+    fn open_installed_host_registry(
+        &self,
+    ) -> Result<crate::sync::host_custody_registry::SharedHostCustodyRegistry, FileCommandError> {
+        use crate::sync::host_custody_registry::SharedHostCustodyRegistry;
+
+        let refused = |message| FileCommandError::Task { message };
+        let db = self.installed_host_custody_db.as_ref()
+            .ok_or_else(|| refused("host custody HOLD: installer ledger missing".into()))?;
+
+        #[cfg(feature = "sync-installed-host-witness")]
+        {
+            let path = option_env!("AKULA_INSTALLED_HOST_WITNESS_PATH")
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute() && path.file_name().is_some())
+                .ok_or_else(|| refused(
+                    "host custody witness HOLD: compiler-pinned install witness missing".into()
+                ))?;
+            let expected = crate::sync::host_install_witness::read_installer_witness(db, &path)
+                .map_err(|error| refused(format!(
+                    "host custody witness HOLD: install witness unavailable/invalid: {error:?}"
+                )))?;
+            return SharedHostCustodyRegistry::open_existing_with_expected(db, expected)
+                .map_err(|error| refused(format!(
+                    "host custody witness HOLD: registered SQLite identity invalid: {error:?}"
+                )));
+        }
+        #[cfg(not(feature = "sync-installed-host-witness"))]
+        SharedHostCustodyRegistry::open_existing(db).map_err(|error| refused(format!(
+            "shared custody registry unavailable: {error:?}"
+        )))
+    }
+
     /// A verified S3 editor can enter host-wide custody ONLY by persisting
     /// the same root/profile/VaultId/OS-lock identity under the shared SQLite
     /// enrollment transaction. The caller must already hold the process
@@ -312,22 +349,15 @@ impl Core {
         &self,
         record: &crate::sync::host_custody_registry::HostCustodyRecord,
     ) -> Result<(), FileCommandError> {
-        use crate::sync::host_custody_registry::SharedHostCustodyRegistry;
         if !self.installed_host_required {
             return Err(FileCommandError::Task {
                 message: "host S3 enrollment requires the mandatory installed-host policy".into(),
             });
         }
-        let path = self.installed_host_custody_db.as_ref()
-            .ok_or_else(|| FileCommandError::Task {
-                message: "cannot enroll host custody: installer ledger missing".into(),
-            })?;
-        let refused = |error| FileCommandError::Task {
+        let mut host = self.open_installed_host_registry()?;
+        host.enroll(record).map_err(|error| FileCommandError::Task {
             message: format!("host custody enrollment HOLD: {error:?}"),
-        };
-        let mut host = SharedHostCustodyRegistry::open_existing(path)
-            .map_err(refused)?;
-        host.enroll(record).map_err(refused)?;
+        })?;
         Ok(())
     }
 
@@ -410,14 +440,11 @@ impl Core {
         operation: impl FnOnce(&HostUnenrolledEpochPermit<'_>) -> Result<T, FileCommandError>,
     ) -> Result<T, FileCommandError> {
         use crate::sync::filegate_lock_probe::PinnedProbeRoot;
-        use crate::sync::host_custody_registry::{
-            PhysicalObjectId, SharedHostCustodyRegistry,
-        };
+        use crate::sync::host_custody_registry::PhysicalObjectId;
         use std::fs;
 
         let refused = |message: String| FileCommandError::Task { message };
-        let db = self.installed_host_custody_db.as_ref()
-            .ok_or_else(|| refused("no installer-issued shared custody source".into()))?;
+
         let roots = self.ui_state.workspace_roots()
             .map_err(|error| refused(format!("host root registration unavailable: {error:?}")))?;
         // Only a registered, unique, existing physical workspace can be
@@ -461,8 +488,7 @@ impl Core {
         let root = owners.pop().unwrap();
         let pinned = PinnedProbeRoot::open(&root)?;
         let (device, file) = pinned.identity();
-        let mut registry = SharedHostCustodyRegistry::open_existing(db)
-            .map_err(|error| refused(format!("shared custody registry unavailable: {error:?}")))?;
+        let mut registry = self.open_installed_host_registry()?;
         let mut entered = false;
         let outcome = registry.with_unenrolled_epoch(
             &root, PhysicalObjectId { device, file }, || {
