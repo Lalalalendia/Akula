@@ -11,9 +11,12 @@ This diagnostic deliberately **reuses** the existing native executable,
 It does not create a new benchmark renderer or change the shipping 350,000-
 pixel region limit, worker-count defaults, glyph rendering or visual fidelity.
 
-The only replay instrumentation correction is that a no-op redraw with zero
-changed regions no longer counts as a "presented" replay frame. A real
+The replay instrumentation corrects two pre-existing issues: a no-op redraw
+with zero changed regions no longer counts as a submitted frame; and a long
+interval above 30 ms is serialized as a valid JSON [index, milliseconds]
+pair, rather than a Rust tuple that makes the entire report invalid. A real
 nonempty-damage frame is recorded after the existing surface present call.
+The second case is covered by a deterministic Rust regression test.
 
 ## Automated Linux Xvfb A/B
 
