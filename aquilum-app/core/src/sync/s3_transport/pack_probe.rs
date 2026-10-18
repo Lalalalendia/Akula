@@ -386,4 +386,31 @@ mod tests {
         assert_eq!(PackBuilder::new().seal(&ns).unwrap_err(),
             PackProbeError::Invalid);
     }
+    #[cfg(feature = "sync-text-delta")]
+    #[test]
+    fn new_text_delta_is_not_a_legacy_pack() {
+        use crate::sync::text_delta_codec;
+        let (ns, reference, _, _) = fixture();
+        let target = text_delta_codec::encode(
+            reference.revision_id,
+            "A future independent text envelope".as_bytes(),
+            None,
+        ).unwrap();
+        assert!(target.bytes.starts_with(b"AKTDLT01"));
+        let digest = blake3::hash(&target.bytes).to_hex().to_string();
+        let descriptor = PackDescriptor {
+            key: ns.immutable_blob_key(&digest).unwrap(),
+            digest,
+            references: vec![reference],
+        };
+        assert_eq!(
+            ingest_verified_pack(
+                &target.bytes, &descriptor,
+                &mut RevisionDag::new(), &mut BTreeSet::new(),
+            ),
+            Err(PackProbeError::Invalid),
+            "a future content codec must never be misidentified as AKPKEXP1",
+        );
+    }
+
 }
