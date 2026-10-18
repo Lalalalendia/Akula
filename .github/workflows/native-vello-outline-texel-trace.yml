@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/native-vello-outline-texel-trace.yml'
       - 'aquilum-app/native/vendor/vello_cpu/src/fine/mod.rs'
+      - 'aquilum-app/native/src/render/paint/mod.rs'
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
   workflow_dispatch:
 
