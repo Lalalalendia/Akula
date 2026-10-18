@@ -242,6 +242,26 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
                 eprintln!("VELLO_ATLAS_PASS case={case} workload={workload} step={step} kind=full");
             }
             let full = render_full(&layers, w, hh, scale);
+            // Opt-in A/B only: save the exact fresh full-frame pixels from
+            // identical editor events before and after changing vello_common.
+            // Defaults to no filesystem writes; no production render path.
+            if matches!(step, 0 | 31)
+                && let Some(dir) = std::env::var_os("AQ_CROSSOVER_DUMP_REFERENCE_DIR")
+            {
+                let dir = std::path::PathBuf::from(dir);
+                std::fs::create_dir_all(&dir).expect("create frame A/B diagnostic directory");
+                let path = dir.join(format!("{case}-step{step:02}.u32le"));
+                let mut data = Vec::with_capacity(full.frame_pixels().len() * 4);
+                for pixel in full.frame_pixels() {
+                    data.extend_from_slice(&pixel.to_le_bytes());
+                }
+                std::fs::write(&path, &data).expect("save exact full-frame Vello A/B bytes");
+                eprintln!(
+                    "VELLO_FULL_FRAME_AB case={case} step={step} pixels={} bytes={}",
+                    full.frame_pixels().len(),
+                    data.len()
+                );
+            }
             let peak = max_pixel_channel_delta(renderers[0].frame_pixels(), full.frame_pixels());
             if peak > 1 {
                 let previous = previous_full.as_ref().and_then(|(previous_step, pixels)| {
