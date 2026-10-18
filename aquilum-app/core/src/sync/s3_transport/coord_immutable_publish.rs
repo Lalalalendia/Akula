@@ -131,7 +131,7 @@ impl AwsS3ProbeClient {
             || declared == 0 || declared > MAX_OFFLINE_PACK_BYTES
             || declared != prepared.packed_bytes as u64
             || prepared.packs.len() != letter.packs().len()
-            || prepared.references != letter.revisions()
+            || prepared.references.as_slice() != letter.revisions()
             || prepared.packs.iter().zip(letter.packs()).any(|(pack, index)| {
                 let start = pack.index.first_revision_index as usize;
                 let end = start.checked_add(pack.index.revision_count as usize);
