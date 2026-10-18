@@ -128,6 +128,12 @@ impl<'a> RegisteredReadAdmission<'a> {
         Ok(admission)
     }
 
+    /// The Core that actually established this registration. A guarded
+    /// writer must never accept an unrelated Core for the same pathname.
+    pub(crate) fn registered_core(&self) -> &Core {
+        self.core
+    }
+
     pub(crate) fn registered_workspace_id(&self) -> Uuid {
         self.workspace_id
     }

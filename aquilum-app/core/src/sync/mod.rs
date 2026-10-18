@@ -13,6 +13,7 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
+mod guarded_note_write;
 #[cfg(test)]
 mod cooperative_gate_tests;
 pub(crate) mod filegate_lock_probe;

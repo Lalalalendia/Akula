@@ -10,6 +10,7 @@ mod interprocess_probe;
 pub use moves::{move_across, rename};
 pub use trash::{cleanup_retention, ensure_trash, restore, restore_deletion, trash};
 pub use write::{copy, create, create_binary, create_folder, ensure_folder_tree, name_version, write};
+pub(crate) use write::{write_checked_history, CheckedHistoryError};
 
 use super::attachments::forget_attachments_if_touched;
 use crate::app_core::{Core, CoreEvent};

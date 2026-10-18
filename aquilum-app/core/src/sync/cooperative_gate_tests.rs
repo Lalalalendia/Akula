@@ -3,6 +3,8 @@
 //! experiment: it does NOT make normal Akula writers interprocess-safe.
 
 use super::filegate_custody_identity::{CustodyBindingError, SqliteCustodyIdentityStore};
+use super::guarded_note_write::{save_existing_note_under_custody, GuardedNoteWriteError};
+use super::SyncRelativePath;
 use super::filegate_lock_custody::scoped_leaf;
 use super::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
 use super::{RegisteredReadAdmission, VaultId};
@@ -166,6 +168,16 @@ fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_k
     assert!(matches!(contested, Err(CustodyBindingError::Admission(_))));
     assert!(!attempted.get(), "the losing Core executed a File Gate write");
     assert_eq!(fs::read(&note).unwrap(), b"original-untouched");
+    // The explicit registered-note API must ALSO refuse the child OS lock;
+    // no local mutation or history ticket may be attempted by this Core.
+    let blocked_note = save_existing_note_under_custody(
+        &admitted, &receipt, vault_id, &scope,
+        &SyncRelativePath::parse("Shared.md").unwrap(),
+        "must-never-be-written", &blake3::hash(b"original-untouched").to_hex().to_string(),
+        Source::Me, Some("blocked-parent"),
+    );
+    assert!(matches!(blocked_note, Err(GuardedNoteWriteError::Denied(_))));
+    assert_eq!(fs::read(&note).unwrap(), b"original-untouched");
 
     fs::write(report.with_extension("go"), b"go").unwrap();
     until_child_reports(&mut child.0, &report, b"saved-with-history");
@@ -187,13 +199,16 @@ fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_k
     // A hard kill releases the OS lock. A second independently registered
     // Core can now perform BOTH primary save and history work under the
     // SAME existing physical lock object.
-    receipt.with_cooperative_writer_lifetime(&admitted, vault_id, &scope, || {
-        gate::write(
-            &parent_core, &note, &"parent edit ".repeat(90),
-            None, Source::Me, Some("cooperative-parent"),
-        ).unwrap();
-        assert!(parent_core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0);
-    }).unwrap();
+    let prior = "child edit ".repeat(90);
+    let updated = save_existing_note_under_custody(
+        &admitted, &receipt, vault_id, &scope,
+        &SyncRelativePath::parse("Shared.md").unwrap(),
+        &"parent edit ".repeat(90),
+        &blake3::hash(prior.as_bytes()).to_hex().to_string(),
+        Source::Me, Some("cooperative-parent"),
+    );
+    assert!(updated.is_ok(), "guarded parent note write failed: {updated:?}");
+    assert!(parent_core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0);
     assert_eq!(fs::read_to_string(&note).unwrap(), "parent edit ".repeat(90));
     assert_eq!(
         fs::read(scope.join(LOCK_NAME)).unwrap(),
