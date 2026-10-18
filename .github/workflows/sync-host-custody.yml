@@ -1,0 +1,61 @@
+name: Local host custody without AWS
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/core/src/app_core.rs'
+      - 'aquilum-app/core/src/files/gate/write.rs'
+      - 'aquilum-app/core/src/history/service.rs'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/host_custody_registry.rs'
+      - 'aquilum-app/core/src/sync/host_core_epoch_tests.rs'
+      - 'aquilum-app/native/src/workspace.rs'
+      - '.github/workflows/sync-host-custody.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-host-light-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-host-custody:
+    name: Local-only cross-appdata host gate / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: p0-host-custody-light-${{ matrix.os }}
+          cache-workspace-crates: true
+      - name: Check that the local host feature does not activate AWS SDKs
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo tree --locked -p aquilum-core --no-default-features --features host-custody > host-only-tree.txt
+          if grep -E 'aws-(config|sdk-s3|sdk-sts) ' host-only-tree.txt; then
+            echo 'Unexpected AWS SDK in local host-only feature'
+            exit 1
+          fi
+      - name: Verify installer host registry and different appdata cases
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --no-default-features --features host-custody host_custody_registry::tests -- --nocapture
+      - name: Verify real second OS process and host-held note/history epoch
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --no-default-features --features host-custody host_core_epoch_tests -- --nocapture
