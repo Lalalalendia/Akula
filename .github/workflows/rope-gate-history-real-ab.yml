@@ -23,9 +23,10 @@ jobs:
       CARGO_INCREMENTAL: "0"
       CARGO_TARGET_DIR: ./target/akula-real-save-target
     steps:
-      - name: Candidate checkout (includes unchanged diagnostic)
+      - name: Candidate checkout at the exact proposed commit
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate
           persist-credentials: false
       - name: Pinned baseline before PR 266 (exact Core)
