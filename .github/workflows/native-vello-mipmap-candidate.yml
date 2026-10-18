@@ -43,3 +43,5 @@ jobs:
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             render::paint::mipmap::tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_integration_tests -- --nocapture --test-threads=1
