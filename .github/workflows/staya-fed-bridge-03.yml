@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: Lalalalendia/Akula
-          ref: 6c92e111f3e783c12642de0ef1233859b8b4f3bb
+          ref: 4bc7ad9f61e8ee191af4505ba988e40c77878753
           path: deps
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
