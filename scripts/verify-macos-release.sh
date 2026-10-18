@@ -7,12 +7,14 @@ set -euo pipefail
 # exact Git checkout. Ad-hoc signed packages are not release candidates.
 die() { printf 'Akula macOS release HOLD: %s\n' "$*" >&2; exit 1; }
 
-[[ "$#" -eq 2 ]] || die 'usage: verify-macos-release.sh <source-installer> <packaged-dmg>'
+[[ "$#" -eq 3 ]] || die 'usage: verify-macos-release.sh <source-installer> <packaged-dmg> <updater-app.tar.gz>'
 installer="$1"
 dmg="$2"
+archive="$3"
 [[ "$(uname -s)" == Darwin ]] || die 'real macOS verification is mandatory'
 [[ -f "$installer" && ! -L "$installer" ]] || die 'source installer absent or a symlink'
 [[ -f "$dmg" && ! -L "$dmg" ]] || die 'DMG absent or a symlink'
+[[ -f "$archive" && ! -L "$archive" ]] || die 'updater TAR missing or a symlink'
 
 # Parse exactly one unambiguous literal assignment. Never source/eval a script
 # or inherit publisher identity from the release, a secret, or appdata.
@@ -69,4 +71,11 @@ codesign --verify --deep --strict -R "$requirement" "$app" ||
 spctl --assess --type execute "$app" ||
   die 'packaged app did not pass macOS Gatekeeper assessment'
 
-printf 'Akula macOS release: pinned publisher and stapled DMG verified\n'
+# Compare the exact archive updater will install while the *verified*
+# read-only DMG is still mounted. Never extract TAR members here.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! python3 "$script_dir/verify_mac_tar_parity.py" "$app" "$archive"; then
+  die 'Updater TAR and notarized DMG bundles differ'
+fi
+
+printf 'Akula macOS release: pinned publisher, notarized DMG and updater TAR parity verified\n'

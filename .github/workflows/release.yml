@@ -231,7 +231,12 @@ jobs:
             echo "::error::Expected precisely one macOS DMG for ${{ matrix.arch }}"
             exit 1
           fi
-          bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}"
+          archives=(dist/Aquilum_${{ matrix.arch }}.app.tar.gz)
+          if [[ "${#archives[@]}" -ne 1 || ! -f "${archives[0]}" || -L "${archives[0]}" ]]; then
+            echo "::error::Expected precisely one regular signed-updater TAR for ${{ matrix.arch }}"
+            exit 1
+          fi
+          bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}" "${archives[0]}"
 
       - name: Install from DMG, launch, quit with Cmd+Q
         timeout-minutes: 10
