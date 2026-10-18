@@ -36,6 +36,10 @@ For this integration the disposable MinIO test deliberately uploads **both** the
 - **Stale-generation attack:** V1 is atomically advanced again to generation 3. The old one-generation letter cannot be used to skip generation 2; it must be rejected by V1 ancestry gates. Durable previous SQLite anchor never advances from exploratory sidecar reading.
 - Existing pure strict tests verify foreign vault/root, noncanonical schema, UUID rewrite/missing sibling or tombstone, pack range holes/repeats and missing history. All old MinIO/Windows/macOS/Linux File Gate checks remain in effect.
 
+## Interaction with the separate inert V2 packed-index proposal
+
+The repository also contains an **inert** S3PackedHeadV2 / S3PackIndexRootV2 / S3PackDescriptorV2 schema in [s3_pack_index.rs](https://github.com/Lalalalendia/Akula/blob/main/aquilum-app/core/src/sync/s3_pack_index.rs). That is a possible **whole-snapshot packed index**, distinct from this **per-generation compact change letter**. Neither is an active root or writer. This PR does not introduce an alternative mutable V2 root, enable two independent authoritative indexes or alter V1 keyspace. A later protocol integration must unify these components under **one** authenticated, capability-negotiated CAS root and a single retention/migration design, rather than maintain competing user-visible sync engines.
+
 ## Known limitations, admission rules
 
 - **No request reduction claimed.** This bridge runs V1 full pinning first; use an independent later benchmark after a proven selective pack reader can replace new JSON/blob GETs *without* weakening old head, CAS, per-generation history or current availability proofs.
