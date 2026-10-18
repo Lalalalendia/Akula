@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 const BLOCK: usize = 512;
 const MAX_ENTRIES: usize = 40_000;
 const MAX_NAME: usize = 4096;
+const MAX_PATH_INDEX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEPTH: usize = 64;
 const MAX_FILE: u64 = 256 * 1024 * 1024;
 const MAX_TOTAL: u64 = 1024 * 1024 * 1024;
@@ -203,6 +204,7 @@ fn register(
     relative: &str,
     names: &mut HashMap<String, String>,
     explicit: &mut HashSet<String>,
+    index_bytes: &mut usize,
 ) -> Result<(), String> {
     if !explicit.insert(relative.to_owned()) {
         return Err(error("duplicate TAR entry"));
@@ -219,6 +221,14 @@ fn register(
                 return Err(error("case-colliding TAR path"));
             }
         } else {
+            let next = index_bytes
+                .checked_add(key.len())
+                .and_then(|sum| sum.checked_add(prefix.len()))
+                .ok_or_else(|| error("TAR path index byte budget overflow"))?;
+            if next > MAX_PATH_INDEX_BYTES {
+                return Err(error("TAR path index byte budget exceeded"));
+            }
+            *index_bytes = next;
             names.insert(key, prefix.clone());
         }
     }
@@ -277,6 +287,7 @@ pub(super) fn unpack(mut reader: impl Read, root: &Path) -> Result<(), String> {
     let mut total = 0u64;
     let mut names = HashMap::new();
     let mut explicit = HashSet::new();
+    let mut index_bytes = 0usize;
     let mut dirs = BTreeMap::<PathBuf, u32>::new();
     let app_root = root.join("Aquilum.app");
     let (mut path_override, mut link_override) = (None, None);
@@ -361,7 +372,7 @@ pub(super) fn unpack(mut reader: impl Read, root: &Path) -> Result<(), String> {
         if !has_root {
             return Err(error("TAR app entries must follow the bundle root"));
         }
-        register(&relative, &mut names, &mut explicit)?;
+        register(&relative, &mut names, &mut explicit, &mut index_bytes)?;
         let target = ensure_parent(&app_root, &relative)?;
         match kind {
             b'5' => {
