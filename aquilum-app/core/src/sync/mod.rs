@@ -147,6 +147,7 @@ pub use s3_head_probe::{
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
     AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
+    S3AwsAccountProofError, S3AwsVerifiedAccountScope,
     S3ObservedObject, S3PutCondition, S3TransportError,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,

@@ -12,6 +12,8 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod manifest;
+mod principal;
+pub use principal::{S3AwsAccountProofError, S3AwsVerifiedAccountScope};
 mod v2_readonly;
 pub use v2_readonly::{S3PinnedV2ReadError, S3PinnedV2ReadPreview};
 // Bounded, opt-in read-only pack verifier. The sender/builder stays
@@ -215,6 +217,9 @@ pub struct AwsS3ProbeClient {
     keyspace: S3Keyspace,
     /// Non-secret endpoint/bucket/region identity used to bind durable anchors.
     profile: S3ConnectionProfile,
+    /// Same resolved SDK provider as S3, but ONLY available for real AWS endpoints.
+    /// No STS session or credential bytes are persisted.
+    sts_client: Option<aws_sdk_sts::Client>,
     #[cfg(test)]
     test_io: Arc<S3TestIoCounters>,
 }
@@ -245,11 +250,21 @@ impl AwsS3ProbeClient {
             // validation. No custom endpoint means *AWS regional S3*.
             config.set_endpoint_url(None);
         }
+        let sts_client = if profile.endpoint.is_none() {
+            let mut sts_config = aws_sdk_sts::config::Builder::from(&shared);
+            // A shared AWS_ENDPOINT_URL[_STS] must never redirect identity
+            // checks to a caller-controlled endpoint returning forged IDs.
+            sts_config.set_endpoint_url(None);
+            Some(aws_sdk_sts::Client::from_conf(sts_config.build()))
+        } else {
+            None
+        };
         Ok(Self {
             client: aws_sdk_s3::Client::from_conf(config.build()),
             bucket: profile.bucket.clone(),
             keyspace,
             profile,
+            sts_client,
             #[cfg(test)]
             test_io: Arc::new(S3TestIoCounters::default()),
         })
