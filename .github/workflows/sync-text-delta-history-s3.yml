@@ -1,0 +1,111 @@
+name: SYNC-TEXT-DELTA-02 real Git Markdown revisions
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/benchmarks/sync-text-delta-history-s3.py'
+      - '.github/workflows/sync-text-delta-history-s3.yml'
+      - 'docs/sync/text-delta-02-real-git-and-minio.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  history-delta:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install isolated comparison tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+          python -m pip install 'boto3>=1.35,<2'
+      - name: Start disposable loopback-only MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          CI_KEY=$(openssl rand -hex 24)
+          echo "AQ_MINIO_TEST_PASSWORD=$CI_KEY" >> "$GITHUB_ENV"
+          docker run -d --rm --name akula-text-delta-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
+            -e MINIO_ROOT_USER=akula_test_local \
+            -e MINIO_ROOT_PASSWORD="$CI_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs akula-text-delta-minio
+          exit 1
+      - name: Compare actual consecutive Git Markdown versions
+        env:
+          AWS_ACCESS_KEY_ID: akula_test_local
+          AWS_SECRET_ACCESS_KEY: ${{ env.AQ_MINIO_TEST_PASSWORD }}
+          AWS_REGION: us-east-1
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_EC2_METADATA_DISABLED: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/benchmarks/sync-text-delta-history-s3.py \
+            --repo . --max-per-file 4 --max-pairs 20 \
+            --minio-endpoint http://127.0.0.1:9000 \
+            --output text-delta-real-git-minio.jsonl | tee text-delta-real-git-minio.log
+      - name: Assert each independently verified S3 cache path and real commit pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path("text-delta-real-git-minio.jsonl").read_text().splitlines()]
+          assert 9 <= len(rows) <= 20, len(rows)
+          assert len({x["public_file"] for x in rows}) >= 3
+          assert all(x["kind"] == "actual_adjacent_git_commits" for x in rows)
+          assert all(x["old_sha256"] != x["new_sha256"] for x in rows)
+          assert all(x["selected_wire_bytes"] <= x["full_wire_bytes"] for x in rows)
+          assert any(x["selected"] != "full_zstd" for x in rows)
+          for x in rows:
+              s = x["real_two_client_minio"]
+              assert s["full_baseline"]["get"] == s["warm_cached_old"]["get"] == 1
+              assert s["cold_fetch_old"]["get"] == (1 if x["selected"] == "full_zstd" else 2)
+              assert s["warm_cached_old"]["payload_bytes"] == x["selected_wire_bytes"]
+              assert s["full_baseline"]["payload_bytes"] == x["full_wire_bytes"]
+              assert s["missing_base_full_fallback"]["payload_bytes"] == x["full_wire_bytes"]
+              assert s["sidecar_plus_required_v1_full_bytes"] == x["new_bytes"] + x["selected_wire_bytes"]
+              assert s["full_sidecar_plus_required_v1_full_bytes"] == x["new_bytes"] + x["full_wire_bytes"]
+          lines = [x.split("DELTA_REAL_SUMMARY ", 1)[1] for x in
+                   Path("text-delta-real-git-minio.log").read_text().splitlines()
+                   if x.startswith("DELTA_REAL_SUMMARY ")]
+          assert len(lines) == 1
+          summary = json.loads(lines[0])
+          assert summary["pairs"] == len(rows)
+          assert summary["uses_real_two_client_minio"]
+          assert summary["actual_minio_get_requests"]["warm_cached_old"] == len(rows)
+          assert summary["actual_minio_read_payload_bytes"]["missing_base_full_fallback"] == summary["sidecar_full_bytes"]
+          print("DELTA_REAL_GIT_S3_ACCEPTED: verified real Git pairs, warm/cold/missing bases, tampered S3 objects refused")
+          PY
+      - name: Upload numeric comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-text-delta-02-real-history
+          path: |
+            text-delta-real-git-minio.jsonl
+            text-delta-real-git-minio.log
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Stop disposable MinIO
+        if: always()
+        shell: bash
+        run: docker rm -f akula-text-delta-minio 2>/dev/null || true
