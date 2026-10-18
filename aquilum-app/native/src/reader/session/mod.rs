@@ -3,6 +3,8 @@ mod navigate;
 mod select;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod epub_acceptance;
 
 use std::collections::HashMap;
 use std::path::Path;
