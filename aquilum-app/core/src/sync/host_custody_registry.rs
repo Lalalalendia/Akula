@@ -13,7 +13,7 @@
 //! schema is an error, not an empty enrollment roster.
 
 use super::VaultId;
-use super::host_ledger_identity::HostLedgerIdentity;
+use super::host_ledger_identity::{HostLedgerIdentity, HostLedgerObjectIds};
 use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -160,6 +160,24 @@ impl SharedHostCustodyRegistry {
     /// migrate, automatically clear corruption, or infer an empty registry
     /// from a missing shared host database.
     pub(crate) fn open_existing(path: &Path) -> Result<Self, HostCustodyError> {
+        Self::open_existing_checked(path, None)
+    }
+
+    /// Lower-level primitive for future installer integration, NOT an
+    /// authorization API: 'expected' must come from an OS-protected, independent
+    /// trust anchor. The ordinary Core deliberately does not call this yet.
+    #[allow(dead_code)]
+    pub(super) fn open_existing_with_expected(
+        path: &Path,
+        expected: HostLedgerObjectIds,
+    ) -> Result<Self, HostCustodyError> {
+        Self::open_existing_checked(path, Some(expected))
+    }
+
+    fn open_existing_checked(
+        path: &Path,
+        expected: Option<HostLedgerObjectIds>,
+    ) -> Result<Self, HostCustodyError> {
         // Never follow a substituted parent alias into another, freshly
         // provisioned but empty registry. Missing/untrusted path stays HOLD.
         checked_host_parent(path)?;
@@ -168,6 +186,11 @@ impl SharedHostCustodyRegistry {
             return Err(HostCustodyError::InvalidHostLocation);
         }
         let identity = HostLedgerIdentity::capture(path)?;
+        // Fail before SQLite opens a write-capable handle if a true external
+        // installer witness identifies a DIFFERENT physical host namespace.
+        if let Some(expected) = expected {
+            identity.require_expected(expected)?;
+        }
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&conn)?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -196,6 +219,9 @@ impl SharedHostCustodyRegistry {
             }
         }
         identity.recheck()?;
+        if let Some(expected) = expected {
+            identity.require_expected(expected)?;
+        }
         Ok(Self { conn, identity })
     }
 
@@ -933,5 +959,8 @@ mod tests {
         assert!(db.exists(), "the attack fixture actually replaced the name");
     }
 
+
+    // Additional real cold-start/foreign-ledger falsifiers share the registry fixture.
+    include!("host_cold_identity_tests.rs");
 
 }
