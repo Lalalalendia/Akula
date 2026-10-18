@@ -92,12 +92,27 @@ pub struct Renderer {
     pub causes: Vec<masonry::kurbo::Rect>,
 }
 
-/// Provisional bound from test-only Akula #166. No automatic routing in
-/// production until CPU/RSS/fidelity gates justify it.
-const EXPERIMENTAL_SERIAL_MAX_PIXELS: u64 = 350_000;
+/// A single small final dirty rectangle costs less with a zero-worker Vello
+/// context than with thread handoff. Large or fragmented damage still uses
+/// the original parallel context. See the measured #218 RSS/latency gate and
+/// the fixed real-glyph guard96 fidelity gate #260.
+const SMALL_SERIAL_MAX_PIXELS: u64 = 350_000;
+
+/// A rollout escape hatch; a value of "0" disables the extra serial context.
+/// The former experimental variable stays supported for existing deployments.
+fn single_rect_route_enabled(current: Option<&str>, legacy: Option<&str>) -> bool {
+    current != Some("0") && legacy != Some("0")
+}
 
 impl Renderer {
     pub fn new(threads: u16) -> Self {
+        let current = std::env::var("AKULA_VELLO_SINGLE_RECT").ok();
+        let legacy = std::env::var("AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT").ok();
+        let adaptive = single_rect_route_enabled(current.as_deref(), legacy.as_deref());
+        Self::new_with_serial_route(threads, adaptive)
+    }
+
+    fn new_with_serial_route(threads: u16, adaptive: bool) -> Self {
         let mut renderer = Renderer {
             painter: Painter::new(1, 1, super::paint::settings(threads)),
             scratch: Vec::new(),
@@ -127,24 +142,29 @@ impl Renderer {
             #[cfg(test)]
             causes: Vec::new(),
         };
-        // OFF by default. Enable only for controlled platform acceptance:
-        // AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT=1
-        if std::env::var("AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT").as_deref() == Ok("1") {
-            renderer.painter.enable_serial_for_single_damage(EXPERIMENTAL_SERIAL_MAX_PIXELS);
+        if adaptive {
+            renderer.painter.enable_serial_for_single_damage(SMALL_SERIAL_MAX_PIXELS);
         }
         renderer
+    }
+
+    /// In benchmarks, preserve a true fixed-worker control even when small
+    /// single-rectangle routing is the product default.
+    #[cfg(test)]
+    pub(crate) fn new_fixed_for_test(threads: u16) -> Self {
+        Self::new_with_serial_route(threads, false)
     }
 
     /// Construct a renderer with an explicitly detected SIMD level for parity/perf
     /// experiments. Production still uses the conservative paint::settings cap.
     #[cfg(test)]
     pub(crate) fn with_simd_level_for_test(threads: u16, level: vello_cpu::Level) -> Self {
-        let mut renderer = Self::new(threads);
+        let mut renderer = Self::new_fixed_for_test(threads);
         renderer.painter = Painter::new(1, 1, vello_cpu::RenderSettings { num_threads: threads, level });
         renderer
     }
 
-    /// Test-only dual-dispatch prototype; production renderer is unchanged.
+    /// Test-only explicit dual-dispatch route for a fixed-policy benchmark control.
     #[cfg(test)]
     pub(crate) fn enable_dual_dispatch_for_test(&mut self, max_serial_pixels: u64) {
         self.painter.enable_dual_dispatch_for_test(max_serial_pixels);
@@ -223,5 +243,22 @@ impl Renderer {
         let faded = self.fade(layers, canvas)?;
         let shown = self.decorate(canvas);
         Ok([restored, live, faded, shown].into_iter().flatten().collect())
+    }
+}
+
+
+#[cfg(test)]
+mod small_rect_policy_tests {
+    use super::single_rect_route_enabled;
+
+    #[test]
+    fn adaptive_small_rect_default_has_explicit_rollback() {
+        assert!(single_rect_route_enabled(None, None));
+        assert!(single_rect_route_enabled(Some("1"), None));
+        assert!(single_rect_route_enabled(None, Some("1")));
+        assert!(!single_rect_route_enabled(Some("0"), None));
+        assert!(!single_rect_route_enabled(None, Some("0")));
+        assert!(!single_rect_route_enabled(Some("1"), Some("0")));
+        assert!(!single_rect_route_enabled(Some("0"), Some("1")));
     }
 }
