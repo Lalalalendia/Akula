@@ -747,7 +747,7 @@ mod tests {
         let service = Server::new(book.clone(), allowed, QuotaState::new(100_000, 100_000))
             .with_request_timeouts(Duration::from_millis(250), Duration::from_millis(250));
         let active = service.active_per_peer.clone();
-        let worker = tokio::spawn(service.run(server_ep.clone()));
+        let worker = tokio::spawn(service.clone().run(server_ep.clone()));
         let first = attacker_ep.connect(addr.clone(), ALPN).await?;
         let second = attacker_ep.connect(addr.clone(), ALPN).await?;
         // The first two authorized connections hold slots but send no streams.
@@ -779,7 +779,7 @@ mod tests {
             HashSet::from([peer_ep.id()]), QuotaState::new(100_000,100_000))
             .with_request_timeouts(Duration::from_millis(500), Duration::from_millis(150));
         let active = service.active_per_peer.clone();
-        let worker = tokio::spawn(service.run(server_ep.clone()));
+        let worker = tokio::spawn(service.clone().run(server_ep.clone()));
         let conn = peer_ep.connect(addr, ALPN).await?;
         let (mut send, _recv) = conn.open_bi().await?;
         send.write_all(&[OP_CHUNK]).await?; // Never sends the rest of request.
