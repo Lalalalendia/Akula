@@ -17,6 +17,43 @@ pub fn write(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
+    // Explicit installer-host Core: ONLY write/create have a scoped shared
+    // unenrolled epoch in this stage. All other ordinary mutation entrypoints
+    // remain HOLD. This must precede guarded_editor::maybe_write: host-mode
+    // cannot silently use that independent per-appdata custody route.
+    #[cfg(feature = "sync-s3")]
+    if core.requires_installed_host_epoch() {
+        let (result, history_changed) = {
+            let _publication = core.ordinary_note_publication_lease()?;
+            core.with_unenrolled_host_epoch(path, |permit| {
+                let (before, result) = {
+                    let _guard = core.file_mutation_guard_for_host_write(permit)?;
+                    let before = core.history.disk_before(path, expected_hash);
+                    let result = write_file_atomic_impl(path, content, expected_hash)?;
+                    (before, result)
+                };
+                let write = NoteWrite {
+                    disk_before: before, text: content, hash: &result.hash,
+                    source, name: version_name,
+                };
+                let changed = core.history.try_saved_with_host_epoch(
+                    permit, &|| core.known_roots(), path, write,
+                ).map_err(|error| FileCommandError::NeedsReview {
+                    message: format!(
+                        "host-bound primary save may have committed but history failed: {error}; review before retry"
+                    ),
+                })?;
+                Ok((result, changed))
+            })?
+        };
+        // Callbacks and search are deliberately AFTER SQLite COMMIT.
+        report_record(core, path, Ok(history_changed));
+        if is_markdown(path) {
+            core.search.notify_content_path(path.to_path_buf());
+        }
+        return Ok(result);
+    }
+
     // Opt-in S3-registered editor mode reuses a held external OS lock across
     // primary bytes AND HistoryService. It must run before the ordinary
     // process-global File Gate mutex to preserve the lock order.
@@ -106,6 +143,39 @@ pub fn create(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
+    #[cfg(feature = "sync-s3")]
+    if core.requires_installed_host_epoch() {
+        let (result, changed) = {
+            let _publication = core.ordinary_note_publication_lease()?;
+            core.with_unenrolled_host_epoch(path, |permit| {
+                let result = {
+                    let _guard = core.file_mutation_guard_for_host_write(permit)?;
+                    create_file_impl(path, content)?
+                };
+                let history = if is_note(path) {
+                    let write = NoteWrite {
+                        disk_before: Some((String::new(), SystemTime::now())),
+                        text: content, hash: &result.hash, source, name: version_name,
+                    };
+                    Some(core.history.try_saved_with_host_epoch(
+                        permit, &|| core.known_roots(), path, write,
+                    ).map_err(|error| FileCommandError::NeedsReview {
+                        message: format!(
+                            "host-bound create may have committed but history failed: {error}; review before retry"
+                        ),
+                    })?)
+                } else {
+                    None
+                };
+                Ok((result, history))
+            })?
+        };
+        if let Some(changed) = changed {
+            report_record(core, path, Ok(changed));
+        }
+        paths_changed(core, vec![path.to_path_buf()]);
+        return Ok(result);
+    }
     let (result, history_outcome) = {
         #[cfg(feature = "sync-s3")]
         let _publication = core.ordinary_note_publication_lease()?;

@@ -17,6 +17,8 @@ mod filegate_custody_identity;
 // ordinary File Gate/HistoryService do NOT use this yet.
 #[cfg(feature = "sync-s3")]
 pub(crate) mod host_custody_registry;
+#[cfg(all(test, feature = "sync-s3"))]
+mod host_core_epoch_tests;
 pub(crate) mod guarded_note_write;
 #[cfg(feature = "sync-s3")]
 pub(crate) mod guarded_editor;
