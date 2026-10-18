@@ -948,7 +948,7 @@ mod tests {
                 let result = timeout(Duration::from_secs(14), manifest_from(&ep, remote)).await;
                 // Unauthorized book publication is a security failure. A timeout is
                 // a rejection for this bounded lab test, not proof of a permanent ban.
-                (matches!(result, Ok(Ok(_))), result.is_err(), started.elapsed())
+                (matches!(&result, Ok(Ok(_))), result.is_err(), started.elapsed())
             }));
         }
         barrier.wait().await;
