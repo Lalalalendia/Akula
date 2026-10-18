@@ -627,6 +627,70 @@ mod tests {
         assert_eq!(ledger.snapshot().unwrap(), snapshot);
     }
 
+    #[test]
+    fn per_peer_byte_and_slot_limits_survive_restart() {
+        let dir = temp_root();
+        let policy = AdmissionLimits {
+            max_object_bytes: 500,
+            max_tracked_bytes: 1500,
+            max_peer_bytes: 600,
+            max_active: 3,
+            max_peer_active: 2,
+        };
+        let a = peer();
+        let b = peer();
+        {
+            let mut ledger = DurableLedger::open(dir.path(), policy).unwrap();
+            ledger.reserve(a, digest(b"a1"), 500).unwrap();
+            ledger.reserve(b, digest(b"b1"), 500).unwrap();
+        }
+        let mut recovered = DurableLedger::open(dir.path(), policy).unwrap();
+        assert!(matches!(
+            recovered.reserve(a, digest(b"a oversized"), 200),
+            Err(DurableError::PeerBytesExhausted)
+        ));
+        recovered.reserve(a, digest(b"a2"), 100).unwrap();
+        assert!(matches!(
+            recovered.reserve(a, digest(b"a3"), 1),
+            Err(DurableError::SlotsExhausted)
+        ));
+        assert_eq!(recovered.snapshot().unwrap().reserved_bytes, 1100);
+    }
+
+    /// Separate operating-system process must be refused while another
+    /// process already holds the OS file lock; this helper is never run
+    /// as a standalone normal unit test.
+    #[test]
+    #[ignore = "private competing-owner subprocess helper"]
+    fn process_competing_owner_helper() {
+        let root = PathBuf::from(std::env::var("AKULA_LEDGER_TEST_ROOT").unwrap());
+        assert!(matches!(
+            DurableLedger::open(&root, limits()),
+            Err(DurableError::CompetingOwner)
+        ));
+    }
+
+    #[test]
+    fn simultaneously_opened_second_os_process_is_refused() {
+        let dir = temp_root();
+        let ledger = DurableLedger::open(dir.path(), limits()).unwrap();
+        let child = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("durable_admission::tests::process_competing_owner_helper")
+            .arg("--ignored")
+            .arg("--nocapture")
+            .env("AKULA_LEDGER_TEST_ROOT", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "another process bypassed exclusive journal lock: {} {}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr),
+        );
+        drop(ledger);
+    }
+
     /// Spawned solely by killed_owner_ledger_survives; not a standalone test.
     #[test]
     #[ignore = "private child OS process, killed by test parent"]
