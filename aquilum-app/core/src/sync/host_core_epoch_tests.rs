@@ -185,6 +185,25 @@ fn independent_nested_workspace_cannot_create_inside_enrolled_parent() {
     drop(held);
 }
 
+/// Windows UiState can store C:\\... while a caller uses the kernel's
+/// canonical \\\\?\\C:\\... spelling. This must remain admitted for the
+/// SAME physical root, without admitting a symlink or another root.
+#[cfg(windows)]
+#[test]
+fn windows_ui_lexical_root_and_canonical_target_share_host_epoch() {
+    let (_tmp, root, app_a, _app_b, db, _external) = prep();
+    let _installed = provision(&db, &root, &app_a);
+    let raw = root.to_string_lossy();
+    let normal = raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string();
+    let core = Core::open_with_installed_host(&app_a, &db, events());
+    core.ui_state.resolve_workspace(&normal, 1).unwrap();
+    let path = root.join("WindowsCanonical.md");
+    gate::create(&core, &path, "safe", Source::Me, None).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "safe");
+    gate::write(&core, &path, "safe again", None, Source::Me, None).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "safe again");
+}
+
 #[test]
 fn missing_host_registry_is_not_an_empty_unenrolled_roster() {
     let (_tmp, root, app_a, _app_b, db, _external) = prep();
