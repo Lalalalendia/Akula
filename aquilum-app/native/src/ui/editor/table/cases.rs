@@ -176,7 +176,7 @@ fn table_context_copy_is_read_only_and_preserves_exact_markdown() {
     let before = model.clone();
     let view = blank_view(&model);
     let mut session = Session::new(0);
-    let items = session.context(&view, 2, 1);
+    let items = session.context(&view, 1, 1);
     assert_eq!(items[0], (Command::Copy, true));
     let selected = session.range;
     let Outcome::Copy(copied) = session.run(&view, Command::Copy) else {
