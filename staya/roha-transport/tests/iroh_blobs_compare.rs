@@ -26,7 +26,7 @@ use iroh_blobs::{
         AbortReason, ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage,
         RequestMode, ThrottleMode,
     },
-    store::mem::MemStore,
+    store::{fs::FsStore, mem::MemStore},
 };
 
 const TEST_DEADLINE: Duration = Duration::from_secs(45);
@@ -443,4 +443,119 @@ async fn resume_missing_verified_ranges_after_new_quic_connection() {
         peer.close().await;
         worker.abort();
     }).await.expect("bounded QUIC resume fixture");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn disk_staging_survives_graceful_store_shutdown_then_resumes() {
+    tokio::time::timeout(Duration::from_secs(75), async {
+        // A disposable directory only. Do not authorize any Akula workspace
+        // path, user file, canonical V1 blob or File Gate mutation.
+        let dir = tempfile::tempdir().expect("private disposable disk staging directory");
+        let data = bytes(2 * 1024 * 1024 + 13);
+        assert!(data.len() <= MAX_OBJECT_BYTES);
+
+        let provider_key = SecretKey::generate();
+        let peer_key = SecretKey::generate();
+        let source = MemStore::new();
+        let tag = source.add_slice(&data).await.expect("seed verified source");
+        let hash = tag.hash;
+        let (events, worker) = restricted_events(peer_key.public(), HashSet::from([hash]));
+        let server = local_endpoint(provider_key).await;
+        let router = Router::builder(server)
+            .accept(iroh_blobs::ALPN, BlobsProtocol::new(&source, Some(events)))
+            .spawn();
+        let peer = local_endpoint(peer_key).await;
+
+        let disk = FsStore::load(dir.path()).await.expect("create isolated FsStore");
+        let initial = peer
+            .connect(router.endpoint().addr(), iroh_blobs::ALPN)
+            .await
+            .expect("connect initial");
+        let prefix_request = GetRequest::builder()
+            .root(ChunkRanges::bytes(..(64 * 1024)))
+            .build(hash);
+        let prefix_stats = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            disk.remote()
+                .execute_get(initial.clone(), prefix_request)
+                .complete(),
+        )
+        .await
+        .expect("prefix fetch timed out")
+        .expect("prefix fetch");
+        let before_close = disk
+            .remote()
+            .local(hash)
+            .await
+            .expect("inspect verified on-disk ranges");
+        let recorded_bytes = before_close.local_bytes();
+        assert_eq!(recorded_bytes, 64 * 1024, "verified prefix was unexpected size");
+        assert!(!before_close.is_complete(), "partial prefix marked complete");
+        initial.close(0u8.into(), b"close initial");
+        drop(initial);
+
+        // FsStore itself explicitly disclaims crash-durable latest writes.
+        // We must shut down cleanly and allow all its state to be persisted.
+        disk.shutdown().await.expect("flush and shut down disk staging");
+        drop(disk);
+
+        let reopened = FsStore::load(dir.path()).await.expect("reopen same disk staging");
+        let restored_prefix = reopened
+            .remote()
+            .local(hash)
+            .await
+            .expect("recover verified on-disk prefix");
+        assert_eq!(
+            restored_prefix.local_bytes(),
+            recorded_bytes,
+            "restart lost verified committed range"
+        );
+        assert!(
+            !restored_prefix.is_complete(),
+            "partial object already claimed complete after restart"
+        );
+        let missing = restored_prefix.missing();
+        let replacement = peer
+            .connect(router.endpoint().addr(), iroh_blobs::ALPN)
+            .await
+            .expect("connect replacement");
+
+        let resume_stats = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            reopened.remote()
+                .execute_get(replacement.clone(), missing)
+                .complete(),
+        )
+        .await
+        .expect("range resume timed out")
+        .expect("range resume");
+        assert!(
+            reopened
+                .remote()
+                .local(hash)
+                .await
+                .expect("final range observation")
+                .is_complete(),
+            "on-disk recovered blob is not complete"
+        );
+        let rebuilt = reopened.get_bytes(hash).await.expect("read restored blob");
+        assert_eq!(rebuilt.as_ref(), data.as_slice(), "restored bytes changed");
+        assert_eq!(Hash::new(rebuilt.as_ref()), hash, "full BLAKE3 digest changed");
+
+        println!(
+            "P2P_BLOB_FS_RESTART size={} durable_verified_prefix={} prefix_response_bytes={} resume_response_bytes={} clean_shutdown=true new_fs_store=true new_quic_connection=true crash_restart=false file_gate=false",
+            data.len(),
+            recorded_bytes,
+            prefix_stats.total_bytes_read(),
+            resume_stats.total_bytes_read()
+        );
+        replacement.close(0u8.into(), b"done");
+        reopened.shutdown().await.expect("flush final complete disk store");
+        router.shutdown().await.expect("provider shutdown");
+        peer.close().await;
+        worker.abort();
+        drop(tag);
+    })
+    .await
+    .expect("durable staging laboratory timed out");
 }
