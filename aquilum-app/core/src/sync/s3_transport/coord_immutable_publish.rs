@@ -137,6 +137,8 @@ impl AwsS3ProbeClient {
                 let end = start.checked_add(pack.index.revision_count as usize);
                 &pack.index != index
                     || pack.index.pack_blake3 != pack.descriptor.digest
+                    || ns.immutable_blob_key(&pack.index.pack_blake3)
+                        .ok().as_deref() != Some(pack.descriptor.key.as_str())
                     || end.and_then(|end| prepared.references.get(start..end))
                         != Some(pack.descriptor.references.as_slice())
                     || blake3::hash(&pack.payload).to_hex().as_str()
