@@ -43,10 +43,19 @@ jobs:
           }
           # One and only one write: create Cargo.lock on this experimental branch.
           # No checkout token is persisted and no tests/build scripts run with GH_TOKEN.
+          python3 - <<'PY'
+          import base64
+          import json
+          from pathlib import Path
+          payload = {
+              "message": "build(staya): pin verified iroh-blobs/roha/noq dependency graph",
+              "branch": "experiment/staya-iroh-blobs-compare-20261018",
+              "content": base64.b64encode(Path("Cargo.lock").read_bytes()).decode("ascii"),
+          }
+          Path("request.json").write_text(json.dumps(payload))
+          PY
           gh api --method PUT \
             -H "Accept: application/vnd.github+json" \
+            --input request.json \
             repos/Lalalalendia/Akula/contents/staya/roha-transport/Cargo.lock \
-            -f message="build(staya): pin verified iroh-blobs/roha/noq dependency graph" \
-            -f branch="experiment/staya-iroh-blobs-compare-20261018" \
-            -f content="$(base64 -w0 Cargo.lock)" \
             --jq .commit.sha
