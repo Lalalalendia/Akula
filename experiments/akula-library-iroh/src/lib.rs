@@ -6,9 +6,10 @@ use anyhow::{bail, ensure, Context, Result};
 pub mod durable;
 pub mod persistent_quota;
 pub mod rate_limit;
-use iroh::{endpoint::{presets, Connection}, Endpoint, EndpointAddr, EndpointId, SecretKey};
+pub mod preauth;
+use iroh::{endpoint::{presets, Connection, IncomingAddr}, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, Mutex}};
-use tokio::{sync::Semaphore, time::{timeout, Duration}};
+use tokio::{sync::Semaphore, time::{timeout, Duration, Instant}};
 
 pub const ALPN: &[u8] = b"akula-library/iroh-lab/1";
 pub const CHUNK_SIZE: usize = 256 * 1024;
@@ -24,6 +25,7 @@ pub const MAX_CONNECTIONS_PER_PRINCIPAL: usize = 8;
 const MAX_STREAMS_PER_CONNECTION: usize = 128;
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const OP_MANIFEST: u8 = 1;
@@ -250,18 +252,47 @@ impl Server {
         *state.per_principal.entry(principal).or_default() += 1;
         Some(ActivePeerLease { counts: self.active.clone(), id: peer, principal })
     }
-    /// Run until the endpoint is closed; bounded to 32 concurrent accepted connections.
+    /// Admission on Incoming: no TLS handshake is awaited until an IP budget,
+    /// address validation and a bounded handshake slot have been considered.
     pub async fn run(self, endpoint: Endpoint) {
         let slots = Arc::new(Semaphore::new(MAX_ACTIVE_CONNECTIONS));
+        let mut preauth = preauth::PreAuthGate::new(Instant::now());
         loop {
-            let Ok(permit) = slots.clone().acquire_owned().await else { break };
             let Some(incoming) = endpoint.accept().await else { break };
+            let peer_ip = match incoming.remote_addr() {
+                IncomingAddr::Ip(addr) => addr.ip(),
+                _ => {
+                    // The isolated direct-UDP lab does not expose relays/custom
+                    // transports; future transports require their own policy.
+                    incoming.ignore();
+                    continue;
+                }
+            };
+            if !preauth.admit(peer_ip, Instant::now()) {
+                incoming.ignore();
+                continue;
+            }
+            let Ok(permit) = slots.clone().try_acquire_owned() else {
+                preauth.no_slot();
+                incoming.ignore();
+                continue;
+            };
+            if !incoming.remote_addr_validated() {
+                // QUIC address validation is a separate pre-handshake round-trip.
+                // It does not verify an EndpointId or grant application ACL access.
+                preauth.retry();
+                if incoming.retry().is_err() {
+                    continue;
+                }
+                continue;
+            }
+            preauth.started();
             let server = self.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                match incoming.await {
-                    Ok(conn) => { let _ = server.handle_connection(conn).await; },
-                    Err(_e) => (),
+                match timeout(HANDSHAKE_TIMEOUT, incoming).await {
+                    Ok(Ok(conn)) => { let _ = server.handle_connection(conn).await; },
+                    _ => (),
                 }
             });
         }
