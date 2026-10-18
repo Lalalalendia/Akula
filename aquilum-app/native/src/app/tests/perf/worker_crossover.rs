@@ -153,7 +153,10 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
                 WORKERS[index],
             );
         }
-        if matches!(step, 0 | 10 | 20 | 31) {
+        // The strict guard96 reproduction checks ALL actual frames, not just
+        // four checkpoints. The normal performance profiler retains its cheap
+        // default sampled references to avoid disturbing benchmark timings.
+        if matches!(step, 0 | 10 | 20 | 31) || std::env::var_os("AQ_CROSSOVER_EVERY_FRAME").is_some() {
             let full = render_full(&layers, w, hh, scale);
             let peak = max_pixel_channel_delta(renderers[0].frame_pixels(), full.frame_pixels());
             assert!(
