@@ -96,6 +96,10 @@ pub struct Core {
     /// activation, implicit S3 bootstrap or remote sync write permission.
     #[cfg(feature = "sync-s3")]
     pub(crate) guarded_editors: Mutex<Vec<crate::sync::guarded_editor::ActiveEditorGuard>>,
+    /// Never reuse a live one-shot prewrite ticket from an earlier Core in
+    /// the same thread, even if the host reconstructs a Core without exiting.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) guarded_instance_nonce: uuid::Uuid,
     pub wikixiv: WikixivService,
     pub watcher: WorkspaceWatcher,
     /// The note open in the UI, reported by the host; MCP tools use it for «эта заметка».
@@ -131,6 +135,8 @@ impl Core {
                 file_mutations: &PROCESS_FILE_MUTATIONS,
                 #[cfg(feature = "sync-s3")]
                 guarded_editors: Mutex::new(Vec::new()),
+                #[cfg(feature = "sync-s3")]
+                guarded_instance_nonce: uuid::Uuid::new_v4(),
                 wikixiv: WikixivService::new(),
                 watcher: WorkspaceWatcher::new(watch_sink),
                 active_note: ActiveNote::default(),

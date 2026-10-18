@@ -199,6 +199,16 @@ impl SessionIo for HubIo<'_> {
         self.durable_intent_store(|store|
             store.begin_write_intent(self.key, base_hash, &proposed)
         )?;
+        // This short-lived permission can only be minted by the thread which
+        // just recorded the durable intent; a restarted process has no token.
+        // If arming fails, leave the SQLite row as HOLD, never erase it.
+        #[cfg(feature = "sync-s3")]
+        crate::sync::guarded_editor::arm_live_document_attempt(
+            self.core.guarded_instance_nonce, self.path, base_hash, &proposed,
+        ).map_err(|error| DiskError::Other {
+            code: "needs_review",
+            message: format!("cannot arm one-shot guarded writer: {error}"),
+        })?;
         Ok(true)
     }
 
