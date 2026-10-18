@@ -46,6 +46,10 @@ impl Inventory {
     }
 
     pub fn entries(&self) -> &[Revision] { &self.entries }
+
+    /// Public scope for callers to bind a signed event to the same inventory.
+    /// This is a fixture byte-array, NOT proof of a genuine Akula VaultId grant.
+    pub fn vault_scope(&self) -> [u8; 16] { self.vault }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
