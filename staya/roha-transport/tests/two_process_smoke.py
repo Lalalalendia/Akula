@@ -40,7 +40,8 @@ def main():
                                     text=True, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, timeout=22)
             if (result.returncode == 0) != expect_ok:
-                raise AssertionError(f"unexpected ping result: exit={result.returncode}")
+                diagnostic = result.stderr.replace(a_key, "[secret-redacted]").replace(b_key, "[secret-redacted]")
+                raise AssertionError(f"unexpected ping result: exit={result.returncode}; client={diagnostic[-1000:]!r}; server_running={server.poll() is None}")
             if expect_ok and "direct_lan_ping_ok" not in result.stdout:
                 raise AssertionError("missing direct LAN success marker")
         ping(b_id, True)
