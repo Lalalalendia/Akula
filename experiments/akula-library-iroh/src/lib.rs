@@ -312,16 +312,23 @@ async fn ask(conn: &Connection, req: &[u8], max_reply: usize) -> Result<Vec<u8>>
 }
 
 /// One authenticated connection; every request is bounded and its payload verified.
-pub async fn manifest_from(endpoint: &Endpoint, remote: EndpointAddr) -> Result<Manifest> {
+/// Return a verified manifest and a best-effort UDP byte snapshot for this connection.
+pub async fn manifest_from_with_usage(endpoint: &Endpoint, remote: EndpointAddr) -> Result<(Manifest, WireUsage)> {
     let conn = timeout(CONNECT_TIMEOUT, endpoint.connect(remote, ALPN)).await??;
     let payload = ask(&conn, &[OP_MANIFEST], MAX_MANIFEST_BYTES).await?;
+    let manifest = Manifest::decode(&payload)?;
+    let usage = WireUsage::sample(&conn);
     conn.close(0u32.into(), b"done");
-    Manifest::decode(&payload)
+    Ok((manifest, usage))
+}
+pub async fn manifest_from(endpoint: &Endpoint, remote: EndpointAddr) -> Result<Manifest> {
+    Ok(manifest_from_with_usage(endpoint, remote).await?.0)
 }
 
-/// Resume the missing parts from a verified in-memory partial download.
-/// `max_parts` models a deliberate interruption; use None for all remaining parts.
-pub async fn get_parts(endpoint: &Endpoint, remote: EndpointAddr, partial: &mut PartialDownload, max_parts: Option<usize>) -> Result<usize> {
+/// Resume verified missing parts, including an observation of this connection's
+/// UDP traffic (not a full-host network or billable-byte counter).
+pub async fn get_parts_with_usage(endpoint: &Endpoint, remote: EndpointAddr,
+    partial: &mut PartialDownload, max_parts: Option<usize>) -> Result<(usize, WireUsage)> {
     let conn = timeout(CONNECT_TIMEOUT, endpoint.connect(remote, ALPN)).await??;
     let remote_manifest = Manifest::decode(&ask(&conn, &[OP_MANIFEST], MAX_MANIFEST_BYTES).await?)?;
     ensure!(remote_manifest == partial.manifest, "remote manifest changed");
@@ -336,8 +343,13 @@ pub async fn get_parts(endpoint: &Endpoint, remote: EndpointAddr, partial: &mut 
         partial.add_part(index, bytes)?;
         count += 1;
     }
+    let usage = WireUsage::sample(&conn);
     conn.close(0u32.into(), b"done");
-    Ok(count)
+    Ok((count, usage))
+}
+pub async fn get_parts(endpoint: &Endpoint, remote: EndpointAddr,
+    partial: &mut PartialDownload, max_parts: Option<usize>) -> Result<usize> {
+    Ok(get_parts_with_usage(endpoint, remote, partial, max_parts).await?.0)
 }
 
 pub async fn download(endpoint: &Endpoint, remote: EndpointAddr) -> Result<Vec<u8>> {
