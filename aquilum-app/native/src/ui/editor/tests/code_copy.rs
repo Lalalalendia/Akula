@@ -113,6 +113,9 @@ fn copy_header_is_not_offered_for_prose_math_or_occluded_long_info() {
 
 #[test]
 fn code_header_feedback_changes_only_its_control_pixels() {
+    // Other native render tests switch the process-wide theme while running
+    // concurrently. Compare both frames under the same theme generation.
+    let _theme_lock = crate::ui::theme::test_lock();
     use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
     use masonry::core::NewWidget;
     use masonry::dpi::PhysicalSize;
