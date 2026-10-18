@@ -125,6 +125,13 @@ impl Painter {
     }
 
     pub fn begin(&mut self, x: u16, y: u16, width: u16, height: u16) {
+        #[cfg(test)]
+        if std::env::var_os("AQ_TRACE_ATLAS_PIXEL").is_some() {
+            // The render context's (0, 0) maps to screen (x, y) in Akula.
+            // The atlas texel probe needs this to compare partial and full
+            // renders at the exact same physical pixel.
+            vello_cpu::fine::set_diagnostic_screen_origin(x, y);
+        }
         if self.ctx.width() != width || self.ctx.height() != height {
             self.ctx.reset_and_resize(width, height);
             self.mask_cache.clear();
