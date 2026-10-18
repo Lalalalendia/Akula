@@ -405,6 +405,31 @@ mod tests {
         assert_eq!(q.used(),10); assert_eq!(q.used_for(&a),5);
     }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn real_noq_udp_connection_counters() -> Result<()> {
+        let server_ep = private_endpoint(None).await?;
+        let client_ep = private_endpoint(None).await?;
+        let addr = loopback_addr(&server_ep)?;
+        let (task, _) = start(server_ep.clone(), Book::new(vec![42; 1000])?,
+                              client_ep.id(), 1_000_000, 1_000_000);
+        let conn = client_ep.connect(addr, ALPN).await?;
+        let reply = ask(&conn, &[OP_MANIFEST], MAX_MANIFEST_BYTES).await?;
+        let _manifest = Manifest::decode(&reply)?;
+        let usage = WireUsage::sample(&conn);
+        assert!(usage.udp_tx_bytes > 0, "QUIC request generates outgoing UDP");
+        assert!(usage.udp_rx_bytes > 0, "QUIC response generates incoming UDP");
+        assert!(usage.udp_tx_datagrams > 0 && usage.udp_rx_datagrams > 0);
+        assert_eq!(usage.connections, 1);
+        let mut sum = WireUsage::default();
+        sum.add(usage);
+        sum.add(usage);
+        assert_eq!(sum.udp_tx_bytes, usage.udp_tx_bytes * 2);
+        conn.close(0u32.into(), b"done");
+        client_ep.close().await;
+        server_ep.close().await;
+        task.abort();
+        Ok(())
+    }
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn real_iroh_direct_loopback_and_resume() -> Result<()> {
         let server_ep = private_endpoint(None).await?;
         let client_ep = private_endpoint(None).await?;
