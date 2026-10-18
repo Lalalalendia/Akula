@@ -51,3 +51,23 @@ The last command is expected to exit non-zero; the dedicated CI step examines it
 - This lab **does not replace** [Akula Sync Core](https://github.com/Lalalalendia/Akula/blob/main/aquilum-app/core/src/sync/dag.rs) or [PR #301 blob laboratory](https://github.com/Lalalalendia/Akula/pull/301).
 
 **Next acceptance:** read the exact CI run and amend this document with results; only then consider an authorized, authenticated read-only candidate exchange between three peers and FED-GOSSIP-02.
+
+
+## Verified GitHub Actions results (19.10.2026)
+
+[CI #39162935229](https://github.com/Lalalalendia/Akula/actions/runs/39162935229), exact head 4091dc71a5cf5dbf18ac8b089f7827a550a12cac: **two successful jobs**.
+
+- Inventory: **12/12 real Rust tests passed**, including 64 deterministic mixed inventory comparisons, identical/prefix-edge/empty inventories, ID/hash collisions, wrong Vault, revoked simulated grant and late work-budget exhaustion; every successful output matched the independent full-list implementation.
+- Upstream iroh-docs 0.101.0: same-timestamp AuthorHeads intentionally RED with **actual 1, expected 2**, exact assertion STAYA_EXPECTED_HEADS_COLLISION_LEN2; different-timestamp control GREEN. The wrapper marks this expected, verified RED as a successful research result.
+- [First CI #39162511816](https://github.com/Lalalalendia/Akula/actions/runs/39162511816) passed initial inventory 8/8, but upstream failed to compile because crate iroh-base was duplicated from crates.io and our git fork. Patched iroh-base to own Roha on the *experiment-only* crate; [retest #39162776452](https://github.com/Lalalalendia/Akula/actions/runs/39162776452) then confirmed real upstream RED. No claims of defect in upstream when used with its own compatible dependency graph.
+
+| Scenario | Prefix nodes | Leaves | Estimated protocol B | Full-list B |
+|:--|--:|--:|--:|--:|
+| Identical 10,000 | 1 | 0 | 80 | 1,280,016 |
+| Missing one | 17 | 1 | 5,152 | 1,279,952 |
+| Missing 100 | 509 | 88 | 283,920 | 1,273,616 |
+| Missing 100, extra 50 | 645 | 129 | 403,872 | 1,276,816 |
+| Missing half | 951 | 476 | 1,043,696 | 960,016 |
+| Disjoint | 1,029 | 515 | 1,370,560 | 1,280,016 |
+
+**Caveats:** modeled protocol fields, not measured QUIC or UDP bytes. Full-list fallback is better when differences are large, but must be selected before excessive partial exchange; no tested adaptive network mechanism yet. No ACL signatures, durable file commits, 2+ physical servers, relay, or WAN evidence. The AuthorHeads defect concerns a serialized summary, not proven loss of actual signed records. Contribution to upstream remains on pause.
