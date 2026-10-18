@@ -516,6 +516,17 @@ fn insert_and_render_colr(
     CacheResult::CachedAndRendered
 }
 
+// Diagnostic only: test the outline mask image sampling path without
+// changing the atlas key, outline rasterization, or color/bitmap glyphs.
+// This is an experimental branch switch, not a supported shipping option.
+#[cfg(feature = "std")]
+static OUTLINE_SAMPLER_PROBE: std::sync::LazyLock<ImageQuality> =
+    std::sync::LazyLock::new(|| match std::env::var("AQ_TEST_OUTLINE_ATLAS_SAMPLER").as_deref() {
+        Ok("medium") => ImageQuality::Medium,
+        Ok("high") => ImageQuality::High,
+        _ => ImageQuality::Low,
+    });
+
 /// Render an outline glyph from the atlas using bearing-based positioning.
 #[inline]
 fn render_outline_glyph_from_atlas(
@@ -535,7 +546,16 @@ fn render_outline_glyph_from_atlas(
         atlas_slot,
         rect_transform,
         area,
-        ImageQuality::Low,
+        {
+            #[cfg(feature = "std")]
+            {
+                *OUTLINE_SAMPLER_PROBE
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                ImageQuality::Low
+            }
+        },
         Some(Tint {
             color: tint_color,
             mode: TintMode::AlphaMask,
