@@ -268,10 +268,14 @@ fn render_uncached_colr_glyph(
     // 2) We do the clipping as a temporary measure to allow the Vello renderers to get a bounding box
     // of the glyph, necessary to keep the cost of blending operations with
     // destructive blend modes to a minimum.
+    // A clip exactly at the ink bounds multiplies two antialiased edges and
+    // lightens COLR glyphs without ClipBox (upstream Vello #1983). Pad the
+    // *temporary* isolation/extent clip; the glyph outline stays unchanged.
+    let safe_bounds = glyph.area.inflate(1.0, 1.0);
     if glyph.has_non_default_blend {
-        renderer.push_clip_layer(&glyph.area.to_path(0.1));
+        renderer.push_clip_layer(&safe_bounds.to_path(0.1));
     } else {
-        renderer.push_clip_rect(&glyph.area);
+        renderer.push_clip_rect(&safe_bounds);
     }
 
     // TODO: Maybe ColrPainter can be reused across glyphs?
@@ -369,12 +373,13 @@ fn render_colr_to_atlas(
         atlas_slot.x as f64,
         atlas_slot.y as f64,
     )));
-    // See the comment in `render_uncached_colr_glyph` for why we wrap COLR glyphs
-    // in a clip layer.
+    // Also pad the atlas recording's temporary clip; the atlas slot is still
+    // bounded by its own allocation. See upstream Vello #1983.
+    let safe_bounds = glyph.area.inflate(1.0, 1.0);
     if glyph.has_non_default_blend {
-        recorder.push_clip_layer(&glyph.area.to_path(0.1));
+        recorder.push_clip_layer(&safe_bounds.to_path(0.1));
     } else {
-        recorder.push_clip_rect(&glyph.area);
+        recorder.push_clip_rect(&safe_bounds);
     }
 
     // TODO: Maybe ColrPainter can be reused across glyphs?
@@ -495,7 +500,10 @@ fn insert_and_render_colr(
         bearing_y: 0,
     };
 
-    let area = glyph.area;
+    // Already-AA atlas pixels must not be clipped a second time at exact
+    // fractional ink bounds. Include the existing transparent atlas guard
+    // band without modifying the cached glyph's geometric transform.
+    let area = glyph.area.inflate(1.0, 1.0).ceil();
 
     let context_color = cache_key.context_color;
     let Some((atlas_slot, recorder)) = glyph_atlas.insert(image_cache, cache_key, raster_metrics)
@@ -572,11 +580,13 @@ fn render_colr_glyph_from_atlas(
     transform: Affine,
     area: Rect,
 ) {
+    // Match initial cached draw: use transparent padding outside ink bounds.
+    let image_area = area.inflate(1.0, 1.0).ceil();
     render_from_atlas(
         renderer,
         atlas_slot,
         transform,
-        area,
+        image_area,
         quality_for_skew(&transform),
         None,
     );

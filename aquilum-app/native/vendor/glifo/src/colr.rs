@@ -360,9 +360,10 @@ impl ColorPainter for ColrPainter<'_, '_> {
     }
 
     fn fill(&mut self, brush: Brush<'_>) {
-        // Ceil so that we don't apply unnecessary anti-aliasing in case the
-        // glyph area is at a sub-pixel position.
-        let fill_rect = &self.colr_glyph.area.ceil();
+        // The paint rect must extend past the ink's antialiased edge. Ceil
+        // alone may still meet that edge exactly at an integer coordinate;
+        // padding avoids double coverage with the outer clip (Vello #1983).
+        let fill_rect = &self.colr_glyph.area.inflate(1.0, 1.0).ceil();
 
         match brush {
             Brush::Solid {
