@@ -170,6 +170,10 @@ mod tests {
     fn guarded_note_write_denies_casefolded_private_history_namespace() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
+        fs::create_dir_all(&root).unwrap();
+        // macOS exposes /var as a symlink to /private/var: compare physical,
+        // canonical paths, not two different spellings of the same object.
+        let root = fs::canonicalize(root).unwrap();
         let history = root.join(".aquilum").join("history");
         fs::create_dir_all(&history).unwrap();
         let protected = history.join("Protected.md");
@@ -221,6 +225,11 @@ mod tests {
             fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         }
+
+        // Custody policy rejects aliased ancestors such as macOS /var.
+        // Use the real scope path in both app-private binding and OS checks.
+        #[cfg(unix)]
+        let scope = fs::canonicalize(scope).unwrap();
 
         let seen = Arc::new(AtomicBool::new(false));
         let seen_from_callback = Arc::clone(&seen);
@@ -282,6 +291,11 @@ mod tests {
             fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         }
+
+        // Custody policy rejects aliased ancestors such as macOS /var.
+        // Use the real scope path in both app-private binding and OS checks.
+        #[cfg(unix)]
+        let scope = fs::canonicalize(scope).unwrap();
 
         let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
         let mut custody = SqliteCustodyIdentityStore::open(
