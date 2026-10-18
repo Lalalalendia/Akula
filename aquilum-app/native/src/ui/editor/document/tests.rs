@@ -249,3 +249,15 @@ fn native_fenced_code_has_one_visual_line_while_prose_still_wraps() {
     assert!(f64::from(doc.paragraph(2).layout().width()) > 160.0, "code keeps its natural pixel width");
     assert!(doc.paragraph(4).layout().lines().count() > 1, "following prose still wraps");
 }
+
+#[test]
+fn indented_code_and_math_keep_existing_wrapping() {
+    let long = "abcde".repeat(140);
+    let source = format!("start\n\n    {long}\n\n$\n{long}\n$\nafter");
+    let mut doc = markdown(&source);
+    doc.keep = (0.0, 20_000.0);
+    doc.layout(&mut FontContext::default(), &mut LayoutContext::new(), &StyleSet::new(16.0), Some(150.0), None, None);
+    assert!(!doc.fenced_code(2), "indented code must not be treated as a fence");
+    assert!(!doc.fenced_code(5), "math must remain excluded");
+    assert!(doc.paragraph(2).layout().lines().count() > 1, "indented code preserves wrapping");
+}
