@@ -58,7 +58,7 @@ fn read_book(path: &Path) -> Result<Book> {
     ensure!(meta.len() <= akula_library_iroh_lab::MAX_BOOK_BYTES as u64, "book too large");
     let mut src = fs::File::open(path)?;
     let mut bytes = vec![];
-    src.by_ref().take((akula_library_iroh_lab::MAX_BOOK_BYTES+1) as u64).read_to_end(&mut bytes)?;
+    std::io::Read::by_ref(&mut src).take((akula_library_iroh_lab::MAX_BOOK_BYTES+1) as u64).read_to_end(&mut bytes)?;
     Book::new(bytes)
 }
 fn hex_digest(bytes: &[u8;32]) -> String { bytes.iter().map(|v| format!("{v:02x}")).collect() }
