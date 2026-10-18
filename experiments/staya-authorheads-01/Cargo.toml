@@ -13,6 +13,8 @@ resolver = "2"
 iroh-docs = { version = "=0.101.0", default-features = false }
 
 [patch.crates-io]
+# Unify iroh-base type identity across iroh-gossip/iroh-blobs and pinned Roha.
+iroh-base = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49" }
 # Preserve our own forks even while testing an external library.
 iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49" }
 noq = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
