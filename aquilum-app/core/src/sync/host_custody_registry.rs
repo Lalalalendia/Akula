@@ -13,6 +13,7 @@
 //! schema is an error, not an empty enrollment roster.
 
 use super::VaultId;
+use super::host_ledger_identity::HostLedgerIdentity;
 use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -89,6 +90,8 @@ impl From<rusqlite::Error> for HostCustodyError {
 #[allow(dead_code)]
 pub(crate) struct SharedHostCustodyRegistry {
     conn: Connection,
+    /// Pinned DB name+parent; detects namespace switches, not hostile ACL bypass.
+    identity: HostLedgerIdentity,
 }
 
 #[allow(dead_code)]
@@ -135,6 +138,7 @@ impl SharedHostCustodyRegistry {
         #[cfg(unix)]
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         drop(file);
+        let identity = HostLedgerIdentity::capture(path)?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&conn)?;
         conn.execute_batch(
@@ -148,7 +152,8 @@ impl SharedHostCustodyRegistry {
              PRAGMA user_version = 1;
              COMMIT;",
         )?;
-        Ok(Self { conn })
+        identity.recheck()?;
+        Ok(Self { conn, identity })
     }
 
     /// Ordinary Core must use this method: NEVER open with CREATE, auto
@@ -162,6 +167,7 @@ impl SharedHostCustodyRegistry {
         if !entry.is_file() || entry.file_type().is_symlink() {
             return Err(HostCustodyError::InvalidHostLocation);
         }
+        let identity = HostLedgerIdentity::capture(path)?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&conn)?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -189,7 +195,8 @@ impl SharedHostCustodyRegistry {
                 decode_row(row)?;
             }
         }
-        Ok(Self { conn })
+        identity.recheck()?;
+        Ok(Self { conn, identity })
     }
 
     /// Insert-only registration by physically identified root, with
@@ -207,15 +214,23 @@ impl SharedHostCustodyRegistry {
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(HostCustodyError::InvalidRecord);
         }
+        self.identity.recheck()?;
         let key = record.root_identity.key();
         let digest = blake3::hash(&bytes).to_hex().to_string();
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let sidecars = self.identity.sidecars()?;
+        self.identity.recheck()?;
         let existing = lookup(&tx, &key, &record.root_path)?;
         if let Some(previous) = existing {
             if previous != *record {
                 return Err(HostCustodyError::ConflictingEnrollment);
             }
+            self.identity.recheck()?;
+            if self.identity.sidecars()? != sidecars {
+                return Err(HostCustodyError::InvalidHostLocation);
+            }
             tx.commit()?;
+            self.identity.recheck()?;
             return Ok(());
         }
         // The same physical host registry must not register a parent and a
@@ -231,7 +246,12 @@ impl SharedHostCustodyRegistry {
              VALUES (?1, ?2, ?3, ?4)",
             params![key, record.root_path, bytes, digest],
         )?;
+        self.identity.recheck()?;
+        if self.identity.sidecars()? != sidecars {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
         tx.commit()?;
+        self.identity.recheck()?;
         Ok(())
     }
 
@@ -249,9 +269,12 @@ impl SharedHostCustodyRegistry {
         if !root_identity.valid() {
             return Err(HostCustodyError::InvalidRecord);
         }
+        self.identity.recheck()?;
         let root = normalized_root_for_lookup(root_path)?;
         let transaction =
             self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let sidecars = self.identity.sidecars()?;
+        self.identity.recheck()?;
         // Enrollment cannot commit between lookup and the full publication.
         if lookup(&transaction, &root_identity.key(), &root)?.is_some() {
             return Err(HostCustodyError::ConflictingEnrollment);
@@ -262,7 +285,18 @@ impl SharedHostCustodyRegistry {
             return Err(HostCustodyError::ConflictingEnrollment);
         }
         let outcome = operation();
+        // Fail closed if the shared host ledger or WAL/SHM name changed while
+        // the primary note and HistoryService were in flight. The caller must
+        // treat an error after operation() as ambiguous/NeedsReview, not retry.
+        self.identity.recheck()?;
+        if self.identity.sidecars()? != sidecars {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
         transaction.commit()?;
+        self.identity.recheck()?;
+        if self.identity.sidecars()? != sidecars {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
         Ok(outcome)
     }
 
@@ -273,6 +307,7 @@ impl SharedHostCustodyRegistry {
         if !root_identity.valid() {
             return Err(HostCustodyError::InvalidRecord);
         }
+        self.identity.recheck()?;
         let root = normalized_root_for_lookup(root_path)?;
         let found = lookup(&self.conn, &root_identity.key(), &root)?;
         if let Some(ref record) = found {
@@ -280,6 +315,7 @@ impl SharedHostCustodyRegistry {
                 return Err(HostCustodyError::ConflictingEnrollment);
             }
         }
+        self.identity.recheck()?;
         Ok(found)
     }
 }
@@ -809,4 +845,93 @@ mod tests {
         assert!(SharedHostCustodyRegistry::open_existing(&db).is_err());
         assert!(db.exists(), "broken host ledger must never be silently removed");
     }
+
+    #[test]
+    fn host_database_hardlink_is_never_a_second_ledger_identity() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let owner = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        let alias = temp.path().join("forged-hardlink.sqlite");
+        fs::hard_link(&db, &alias).unwrap();
+
+        // Even an already open Core must stop before an unenrolled admission.
+        assert!(matches!(
+            owner.inspect(&vault, record.root_identity),
+            Err(HostCustodyError::InvalidHostLocation),
+        ));
+        assert!(matches!(
+            SharedHostCustodyRegistry::open_existing(&alias),
+            Err(HostCustodyError::InvalidHostLocation),
+        ));
+        fs::remove_file(alias).unwrap();
+        assert_eq!(owner.inspect(&vault, record.root_identity).unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_wal_or_shm_never_becomes_an_installer_host_member() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let mut owner = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        owner.enroll(&record).unwrap();
+        drop(owner);
+        let other = temp.path().join("external-fake-journal");
+        fs::write(&other, b"untrusted journal bytes").unwrap();
+
+        for suffix in ["-wal", "-shm"] {
+            let mut filename = db.as_os_str().to_os_string();
+            filename.push(suffix);
+            let sidecar = std::path::PathBuf::from(filename);
+            assert!(!sidecar.exists(),
+                "the fixture must first close/flush all real SQLite sidecars");
+            std::os::unix::fs::symlink(&other, &sidecar).unwrap();
+            assert!(matches!(
+                SharedHostCustodyRegistry::open_existing(&db),
+                Err(HostCustodyError::InvalidHostLocation),
+            ), "aliased {suffix} must HOLD before SQLite opens");
+            fs::remove_file(sidecar).unwrap();
+        }
+        assert_eq!(fs::read(&other).unwrap(), b"untrusted journal bytes");
+        let reopened = SharedHostCustodyRegistry::open_existing(&db).unwrap();
+        assert_eq!(reopened.inspect(&vault, record.root_identity).unwrap(), Some(record));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn in_flight_host_database_name_swap_refuses_epoch_before_commit() {
+        use std::cell::Cell;
+        use crate::sync::filegate_lock_probe::PinnedProbeRoot;
+
+        let (temp, db, vault, appdata, _) = specimen();
+        let mut owner = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        let alt = temp.path().join("another-valid-empty.sqlite");
+        drop(SharedHostCustodyRegistry::provision_new(
+            &alt, &[vault.as_path(), appdata.as_path()],
+        ).unwrap());
+        let moved = temp.path().join("old-ledger-kept.sqlite");
+        let (device, file) = PinnedProbeRoot::open(&vault).unwrap().identity();
+        let reached = Cell::new(false);
+
+        let result = owner.with_unenrolled_epoch(
+            &vault, PhysicalObjectId { device, file }, || {
+                reached.set(true);
+                // The SQLite connection stays attached to the original
+                // physical object, while its pathname points at a NEW
+                // valid-but-empty registry: a split-lock hazard.
+                fs::rename(&db, &moved).unwrap();
+                fs::rename(&alt, &db).unwrap();
+            },
+        );
+        assert!(reached.get(), "must exercise replacement inside live epoch");
+        assert!(matches!(result, Err(HostCustodyError::InvalidHostLocation)),
+            "epoch must not report success after the installer name moved");
+        assert!(moved.exists(), "original ledger bytes must remain for review");
+        assert!(db.exists(), "the attack fixture actually replaced the name");
+    }
+
+
 }

@@ -16,6 +16,8 @@ mod filegate_custody_identity;
 // Installer-provisioned local custody epoch: independent of S3 transport.
 // Legacy unhosted Core::open remains a release blocker until native binding.
 #[cfg(feature = "host-custody")]
+mod host_ledger_identity;
+#[cfg(feature = "host-custody")]
 pub(crate) mod host_custody_registry;
 #[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
