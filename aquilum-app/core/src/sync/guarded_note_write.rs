@@ -43,6 +43,16 @@ fn existing_note(
     {
         return Err(deny("cooperative note write requires bounded content and a BLAKE3 CAS hash"));
     }
+    // HistoryService owns .aquilum below each vault, not the editor or a
+    // remote revision. Windows casefolds this name; deny portable case
+    // aliases and nested instances BEFORE resolving or opening any file.
+    // An immutable path/lock check must never authorize writes into the
+    // internal version store or its metadata.
+    if relative.as_str().split('/').any(|part|
+        part.eq_ignore_ascii_case(crate::history::AQUILUM_FOLDER))
+    {
+        return Err(deny("cooperative note write refuses the private .aquilum history namespace"));
+    }
     let path = resolve_no_symlinks(root, relative)
         .map_err(|error| deny(format!("unsafe registered note path: {error:?}")))?;
     if !is_note(&path) {
