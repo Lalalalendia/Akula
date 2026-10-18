@@ -1,0 +1,213 @@
+//! Standalone, manually addressed LAN proof-of-concept. No files or Sync Core.
+use akula_roha_transport::{AllowedPeers, StayaTransport};
+use iroh::{EndpointAddr, EndpointId, SecretKey};
+use std::{
+    env,
+    fs::{File, OpenOptions},
+    io::{Read, Write},
+    net::SocketAddr,
+    path::Path,
+    str::FromStr,
+    time::Duration,
+};
+
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+fn decode_key(s: &str) -> Result<SecretKey, String> {
+    if s.len() != 64 {
+        return Err("secret key must be 64 hex characters".into());
+    }
+    let mut raw = [0u8; 32];
+    for (i, byte) in raw.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).map_err(|_| "invalid secret hex")?;
+    }
+    Ok(SecretKey::from_bytes(&raw))
+}
+
+fn key_hex(key: &SecretKey) -> String {
+    key.to_bytes().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Only file-backed private keys are accepted. Never put private key hex
+/// in shell arguments; command-line arguments are visible to other processes.
+fn secret_from_arg(value: &str) -> Result<SecretKey, String> {
+    let Some(path) = value.strip_prefix('@') else {
+        return Err("private key must be supplied as @KEY_PATH".into());
+    };
+    if path.is_empty() {
+        return Err("missing secret key file path".into());
+    }
+    let file = File::open(path).map_err(|e| format!("cannot open key file: {e}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| format!("cannot inspect key file: {e}"))?;
+    if !metadata.is_file() || metadata.len() > 128 {
+        return Err("invalid key file type or size".into());
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err("key file must not be readable by group or others (mode 0600)".into());
+    }
+    let mut encoded = String::new();
+    file.take(129)
+        .read_to_string(&mut encoded)
+        .map_err(|e| format!("cannot read key file: {e}"))?;
+    decode_key(encoded.trim_end_matches(&['\r', '\n'][..]))
+}
+
+fn save_key_file(path: &Path, key: &SecretKey) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(path)
+        .map_err(|e| format!("cannot create key file: {e}"))?;
+    file.write_all(key_hex(key).as_bytes())
+        .and_then(|_| file.write_all(b"\n"))
+        .and_then(|_| file.sync_all())
+        .map_err(|e| format!("cannot save secret key: {e}"))
+}
+
+fn parse_id(s: &str) -> Result<EndpointId, String> {
+    EndpointId::from_str(s).map_err(|e| format!("invalid peer id: {e}"))
+}
+
+fn usage() -> &'static str {
+    "usage:\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\nDo not publish or commit the private key files.\n"
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), String> {
+    let args: Vec<String> = env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("gen-key-file") if args.len() == 3 => {
+            let key = SecretKey::generate();
+            save_key_file(Path::new(&args[2]), &key)?;
+            println!("endpoint_id={}", key.public());
+            eprintln!("Private key saved. Protect its location; never upload it.");
+        }
+        Some("serve") if args.len() == 5 => {
+            let key = secret_from_arg(&args[2])?;
+            let allowed = parse_id(&args[3])?;
+            let socket: SocketAddr = args[4].parse().map_err(|_| "invalid bind socket")?;
+            let transport =
+                StayaTransport::bind_on(key, AllowedPeers::new([allowed]), socket).await?;
+            println!("endpoint_id={}", transport.id());
+            println!("local_udp_sockets={:?}", transport.bound_sockets());
+            println!("relay=disabled discovery=disabled allowed_peer={allowed}");
+            loop {
+                let conn = transport.accept_one().await?;
+                let (mut send, mut recv) =
+                    tokio::time::timeout(Duration::from_secs(15), conn.accept_bi())
+                        .await
+                        .map_err(|_| "stream accept timeout")?
+                        .map_err(|e| e.to_string())?;
+                let msg = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(64))
+                    .await
+                    .map_err(|_| "receive timeout")?
+                    .map_err(|e| e.to_string())?;
+                if msg.as_slice() != b"akula-ping-v0" {
+                    conn.close(1u8.into(), b"unexpected payload");
+                    continue;
+                }
+                send.write_all(b"akula-pong-v0")
+                    .await
+                    .map_err(|e| e.to_string())?;
+                send.finish().map_err(|e| e.to_string())?;
+                // Keep the QUIC connection alive while the reply is delivered.
+                // The client closes its side only after reading the entire reply.
+                let _ = tokio::time::timeout(Duration::from_secs(15), conn.closed()).await;
+                println!("ping_ok remote={}", conn.remote_id());
+            }
+        }
+        Some("ping") if args.len() == 5 => {
+            let key = secret_from_arg(&args[2])?;
+            let server = parse_id(&args[3])?;
+            let socket: SocketAddr = args[4].parse().map_err(|_| "invalid peer socket")?;
+            let local = StayaTransport::bind(key, AllowedPeers::new([server])).await?;
+            let addr = EndpointAddr::new(server).with_ip_addr(socket);
+            let conn = local.connect(addr).await?;
+            let (mut send, mut recv) = conn.open_bi().await.map_err(|e| e.to_string())?;
+            send.write_all(b"akula-ping-v0")
+                .await
+                .map_err(|e| e.to_string())?;
+            send.finish().map_err(|e| e.to_string())?;
+            let received = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(64))
+                .await
+                .map_err(|_| "reply timeout")?
+                .map_err(|e| e.to_string())?;
+            if received.as_slice() != b"akula-pong-v0" {
+                return Err("wrong response".into());
+            }
+            println!("direct_lan_ping_ok peer={server} relay=disabled");
+            conn.close(0u8.into(), b"ping complete");
+            local.close().await;
+        }
+        _ => return Err(usage().into()),
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn secret_hex_roundtrip_and_bad_keys() {
+        let k = SecretKey::generate();
+        let hex: String = k.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(decode_key(&hex).unwrap().public(), k.public());
+        assert!(decode_key("bad").is_err());
+        assert!(decode_key(&"gg".repeat(32)).is_err());
+    }
+
+    #[test]
+    fn key_file_roundtrip_rejects_overwrite_and_raw_argument() {
+        let key = SecretKey::generate();
+        let path = env::temp_dir().join(format!(
+            "staya-lan-key-{}-{}.key",
+            std::process::id(),
+            key.public()
+        ));
+        save_key_file(&path, &key).expect("create private key file");
+        let reference = format!("@{}", path.display());
+        assert_eq!(
+            secret_from_arg(&reference)
+                .expect("read secret file")
+                .public(),
+            key.public()
+        );
+        assert!(save_key_file(&path, &SecretKey::generate()).is_err());
+        assert!(secret_from_arg(&key_hex(&key)).is_err());
+        #[cfg(unix)]
+        {
+            use std::fs::Permissions;
+            std::fs::set_permissions(&path, Permissions::from_mode(0o644))
+                .expect("make key file insecure");
+            assert!(secret_from_arg(&reference).is_err());
+        }
+        std::fs::remove_file(path).expect("remove test key");
+    }
+
+    #[test]
+    fn key_file_rejects_invalid_bytes_and_missing_path() {
+        let key = SecretKey::generate();
+        let path = env::temp_dir().join(format!(
+            "staya-lan-bad-key-{}-{}.key",
+            std::process::id(),
+            key.public()
+        ));
+        let mut opts = OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        let mut file = opts.open(&path).expect("create key file");
+        file.write_all(&[b'x'; 129]).expect("write oversized input");
+        drop(file);
+        let reference = format!("@{}", path.display());
+        assert!(secret_from_arg(&reference).is_err());
+        assert!(secret_from_arg("@").is_err());
+        std::fs::remove_file(path).expect("remove invalid key");
+    }
+}

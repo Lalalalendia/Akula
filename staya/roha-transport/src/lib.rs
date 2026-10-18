@@ -4,6 +4,7 @@
 //! An authenticated QUIC peer is not automatically authorized to see files.
 
 use std::collections::BTreeSet;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::presets};
@@ -38,13 +39,38 @@ impl StayaTransport {
     /// Bind a local endpoint; the caller owns key persistence and peer enrollment.
     /// Does not start a background sync worker or use n0 public services.
     pub async fn bind(secret: SecretKey, peers: AllowedPeers) -> Result<Self, String> {
-        let endpoint = Endpoint::builder(presets::Minimal)
+        Self::bind_inner(secret, peers, None).await
+    }
+
+    /// Bind an explicit socket for a LAN-only, manually addressed experiment.
+    ///
+    /// A fixed UDP port is necessary when the other physical PC must enter the
+    /// address by hand. No rendezvous, address lookup, or relay is enabled.
+    pub async fn bind_on(
+        secret: SecretKey,
+        peers: AllowedPeers,
+        socket: SocketAddr,
+    ) -> Result<Self, String> {
+        Self::bind_inner(secret, peers, Some(socket)).await
+    }
+
+    async fn bind_inner(
+        secret: SecretKey,
+        peers: AllowedPeers,
+        socket: Option<SocketAddr>,
+    ) -> Result<Self, String> {
+        let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(secret)
             .alpns(vec![STAYA_ALPN.to_vec()])
-            .relay_mode(RelayMode::Disabled)
-            .bind()
-            .await
-            .map_err(|err| format!("bind: {err}"))?;
+            .relay_mode(RelayMode::Disabled);
+
+        if let Some(socket) = socket {
+            builder = builder
+                .bind_addr(socket)
+                .map_err(|err| format!("bind address: {err}"))?;
+        }
+
+        let endpoint = builder.bind().await.map_err(|err| format!("bind: {err}"))?;
         Ok(Self { endpoint, peers })
     }
 
@@ -56,18 +82,30 @@ impl StayaTransport {
         self.endpoint.id()
     }
 
+    /// Actual bound UDP socket addresses (not a public discovery service).
+    pub fn bound_sockets(&self) -> Vec<SocketAddr> {
+        self.endpoint.bound_sockets()
+    }
+
     /// Open a connection only when its expected key has already been admitted.
     pub async fn connect(&self, addr: EndpointAddr) -> Result<iroh::endpoint::Connection, String> {
         if !self.peers.contains(&addr.id) {
             return Err("peer not admitted".into());
         }
-        tokio::time::timeout(
+        let expected = addr.id;
+        let conn = tokio::time::timeout(
             Duration::from_secs(15),
             self.endpoint.connect(addr, STAYA_ALPN),
         )
         .await
         .map_err(|_| "connect timeout".to_owned())?
-        .map_err(|err| format!("connect: {err}"))
+        .map_err(|err| format!("connect: {err}"))?;
+
+        if conn.remote_id() != expected {
+            conn.close(1u8.into(), b"unexpected peer");
+            return Err("remote endpoint id mismatch".into());
+        }
+        Ok(conn)
     }
 
     /// Wait for one authorized incoming connection. Unknown keys are closed.

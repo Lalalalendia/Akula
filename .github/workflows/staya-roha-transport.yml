@@ -30,6 +30,17 @@ jobs:
           cargo tree -i noq
           cargo tree -i noq-proto
           cargo tree -i noq-udp
+      - name: Independent process LAN smoke test
+        working-directory: staya/roha-transport
+        run: |
+          cargo build --bin staya-lan
+          python3 tests/two_process_smoke.py
+      - name: Offline two-namespace LAN smoke test
+        working-directory: staya/roha-transport
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y iproute2
+          python3 tests/two_namespace_smoke.py
       - name: Format
         working-directory: staya/roha-transport
         run: cargo fmt --all -- --check
