@@ -37,6 +37,7 @@ impl TextEditor {
             table: None,
             hovered_table: None,
             table_scrolls: std::collections::HashMap::new(),
+            code_scrolls: code_scroll::Offsets::default(),
             media: media::MediaState::default(),
             videos: crate::video::Owned::default(),
             pointer_hover: false,

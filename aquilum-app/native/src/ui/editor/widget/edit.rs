@@ -43,6 +43,9 @@ impl TextEditor {
         let removed = self.doc.copy(range.clone());
         self.doc.replace(range.clone(), &inserted);
         let change = Change { at: range.start, removed, inserted };
+        // Keep code-view offsets bound to their opening fence, never to a
+        // line index that can be reused after an edit or document replacement.
+        self.code_scrolls.remap(&change);
         let map = |at: usize| change.map(at);
         for (anchor, focus) in &mut self.extra_cursors {
             (*anchor, *focus) = (map(*anchor), map(*focus));

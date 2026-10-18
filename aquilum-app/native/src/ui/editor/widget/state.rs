@@ -21,6 +21,7 @@ pub struct TextEditor {
     pub(super) table: Option<crate::ui::editor::table::Session>,
     pub(super) hovered_table: Option<usize>,
     pub(super) table_scrolls: std::collections::HashMap<usize, f64>,
+    pub(super) code_scrolls: code_scroll::Offsets,
     pub(super) media: media::MediaState,
     pub(super) videos: crate::video::Owned,
     pub(super) pointer_hover: bool,
