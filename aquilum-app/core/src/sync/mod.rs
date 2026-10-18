@@ -42,6 +42,8 @@ mod protocol;
 mod provider;
 mod s3;
 mod s3_manifest;
+// Inert V2 contract only: no S3 pack writer, reader or auto-sync activation.
+mod s3_pack_index;
 mod s3_manifest_delta;
 #[cfg(feature = "sync-s3")]
 mod s3_anchored_delta;
@@ -110,6 +112,14 @@ pub use s3_manifest::{
     S3ManifestError, S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
     S3RevisionRefV1, MAX_MANIFEST_BYTES, MAX_REVISIONS, MAX_SHARD_BYTES,
     MAX_SHARD_ENTRIES, MAX_SHARDS,
+};
+pub use s3_pack_index::{
+    S3PackedHeadV2, S3PackIndexRootV2, S3PackIndexShardV2,
+    S3PackDescriptorV2, S3PackMemberV2, S3PackShardRefV2,
+    S3PackIndexV2Error, MAX_PACK_V2_ROOT_BYTES,
+    MAX_PACK_V2_INDEX_BYTES, MAX_PACK_V2_SHARD_BYTES,
+    MAX_PACK_V2_SHARDS, MAX_PACK_V2_PACKS_PER_SHARD,
+    MAX_PACK_V2_MEMBERS_PER_PACK, MAX_PACK_V2_BYTES,
 };
 #[cfg(feature = "sync-s3")]
 pub use s3_head_probe::{
