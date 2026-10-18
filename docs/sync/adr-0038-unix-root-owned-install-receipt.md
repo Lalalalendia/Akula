@@ -37,7 +37,15 @@ validation in this change. An unimplemented platform is not a green result
 and cannot fall back to B6b-1 policy within the stricter feature.
 
 This is an **observation** of owner/mode/path, not trusted installation
-issuance. The existing fixture generator remains `#[cfg(test)]` and
+issuance. **Crucially, the stricter Core remains HOLD for all ordinary File
+Gate creates/writes and protected S3 enrollment even if the root-owned
+receipt preflight succeeds:** no installer-controlled SQLite broker exists
+yet, so a user-writable database could still be modified in place without
+changing its physical ID. This flavor can validate trust prerequisites,
+but cannot grant a writer capability. An explicit negative test verifies
+that a missing broker leaves existing Markdown unchanged.
+
+The existing fixture generator remains `#[cfg(test)]` and
 continues to be rejected by the strict mode. The stage changes no normal
 installer, package or updater and creates nothing at Core startup.
 
