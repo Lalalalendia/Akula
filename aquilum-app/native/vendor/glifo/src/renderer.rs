@@ -357,6 +357,8 @@ fn render_outline_to_atlas(
     // Disabled by default; this never changes shipping glyph rendering.
     #[cfg(feature = "std")]
     if std::env::var_os("AQ_TEST_ATLAS_SLOT_INVARIANT").is_some() {
+        static PROBE_ACTIVE: std::sync::Once = std::sync::Once::new();
+        PROBE_ACTIVE.call_once(|| std::eprintln!("GLIFO_ATLAS_SLOT_INVARIANT_ACTIVE grid=4096"));
         // Compute the shape once in glyph-local pixel coordinates and round
         // all control points onto an exact binary grid BEFORE adding the
         // integer atlas slot origin. Float32 then represents the fraction
