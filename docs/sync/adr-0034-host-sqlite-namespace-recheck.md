@@ -20,6 +20,12 @@ The existing [host-custody CI](../../.github/workflows/sync-host-custody.yml) ru
 
 New registry falsifiers verify: (1) an existing DB handle refuses admission while its path has a second hard link; (2) already-substituted `-wal`/`-shm` symlinks refuse before SQLite can use a redirected sidecar (Unix); and (3) a different valid-empty DB swapped under the same filename **inside** an active transaction fails with no apparent successful epoch, keeping old bytes for inspection (Unix). Only the test fixture manipulates its own temporary host namespace.
 
+## POSIX lock lifetime: CI-discovered regression and correction
+
+The first exact-head [macOS host-custody run #39140350239](https://github.com/Lalalalendia/Akula/actions/runs/39140350239) **failed** the pre-existing real-child `cross_process_enrollment_waits_for_host_epoch_and_denies_later_write` test: the enrolling child committed while the parent believed it still owned `BEGIN IMMEDIATE`. This is a critical correctness gate, not a flaky speed benchmark. Initial code repeatedly opened and **closed** read-only SQLite main/WAL/SHM file descriptors inside the transaction. On Unix, POSIX advisory `fcntl` record locks are process-associated, and closing another descriptor for the same inode may release SQLite's writer lock.
+
+Corrective head `060471bb9ff37c9ab31f9042ecf5bf24d501681d` uses metadata-only `lstat`/inode/link-count checks **inside Unix SQLite transactions**, with no additional open+close. Only one main-db pin is opened *before* SQLite and stays held *until after* SQLite closes. Windows uses handle-scoped locks and may reopen safely for physical ID checks. The original cross-process enrollment test remains mandatory on Linux/macOS/Windows. **Do not merge until the complete exact-head two-process matrix demonstrates lock preservation.**
+
 ## Remaining mandatory P0
 
 These are **point-in-time rechecks**, not a secure namespace against an attacker who can swap directory entries between checks. A new cold-open into a replacement *valid* empty database is still possible until an installer or privileged broker supplies an immutable/pinned expected ledger ID. Neither owner/ACL guarantees nor physical identity of every ancestor, WAL and SHM from live kernel handles across their full lifetime are proven. Same-user malicious writers, crash/ambiguous ACK, durable PREPARED/PUBLISHED/VERIFIED receipt, correctly enrolled S3 custody and installed two-device end-to-end are not admitted. Do not enable S3 overwrite/delete, GC, Sync Beta, or treat this as a production release gate.
