@@ -64,6 +64,12 @@ impl StagingVolumeGuard {
         })
     }
 
+    /// Borrow the pinned staging mount root for read-only inventory checks.
+    /// Path-based child lookup still needs independent race-free custody.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// Fail closed when the mount disappears, gets replaced or the directory
     /// becomes accessible to unrelated local users between operations.
     pub fn check(&self) -> Result<(), VolumeError> {
