@@ -229,6 +229,67 @@ mod tests {
     }
 
     #[test]
+    fn empty_and_singleton_inventories_are_exact() {
+        check(vec![], vec![]);
+        check(vec![sample_revision(7)], vec![]);
+        check(vec![], vec![sample_revision(8)]);
+        check(vec![sample_revision(7)], vec![sample_revision(8)]);
+    }
+
+    #[test]
+    fn nonuniform_prefixes_keep_exact_revision_boundaries() {
+        // Concentrate 257 distinct entries into a common first 28 bytes.
+        // Prefix splits must be positional, not based on per-peer medians.
+        let all: Vec<_> = (0..257u64).map(|i| {
+            let mut id = [0u8; 32];
+            id[28..].copy_from_slice(&(i as u32).to_be_bytes());
+            Revision {
+                id,
+                content_digest: sample_revision(i).content_digest,
+            }
+        }).collect();
+        let fewer: Vec<_> = all.iter().copied().filter(|x| x.id != all[211].id).collect();
+        let got = check(all, fewer);
+        assert_eq!(got.missing_from_b.len(), 1);
+        assert_eq!(got.missing_from_b[0].id[28..], 211u32.to_be_bytes());
+    }
+
+    #[test]
+    fn deterministic_mixed_set_matrix_matches_independent_baseline() {
+        let entries: Vec<_> = (0..1200).map(sample_revision).collect();
+        for seed in 0u64..64 {
+            let a: Vec<_> = entries.iter().copied()
+                .filter(|r| ((r.id[0] as u64 + seed * 19) % 11) >= (seed % 5))
+                .collect();
+            let mut b: Vec<_> = entries.iter().copied()
+                .filter(|r| ((r.id[1] as u64 + seed * 7) % 13) >= (seed % 7))
+                .collect();
+            if seed % 3 == 0 {
+                let id = sample_revision(999);
+                if let Some(v) = b.iter_mut().find(|r| r.id == id.id) {
+                    v.content_digest[0] ^= 0x55;
+                }
+            }
+            let _ = check(a, b);
+        }
+    }
+
+    #[test]
+    fn exhaustion_after_partial_leaf_work_is_all_or_nothing() {
+        let a = Inventory::fixture(
+            TEST_VAULT,
+            true,
+            (0..10_000).map(sample_revision).collect(),
+        ).unwrap();
+        let b = Inventory::fixture(
+            TEST_VAULT,
+            true,
+            (1..10_000).map(sample_revision).collect(),
+        ).unwrap();
+        assert_eq!(compare(&a, &b, 10), Err(InventoryError::VisitBudgetExceeded));
+    }
+
+    #[test]
     fn identical_inventories_exchange_just_one_digest_pair() {
         let a: Vec<_> = (0..10_000).map(sample_revision).collect();
         let got = check(a.clone(), a);
