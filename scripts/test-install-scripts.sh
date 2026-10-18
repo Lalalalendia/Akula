@@ -61,6 +61,20 @@ grep -Fq 'publisher identity is not provisioned' "$error_log"
 [[ ! -e "$calls" ]]
 [[ "$(cat "$temporary_home/Applications/Aquilum.app/Keep.txt")" == 'installed app remains' ]]
 
+# Pinned publisher identity only blocks NEW downloads. Recovering a previous
+# app after an interrupted rename must remain possible with no signing root.
+recover_stage="$temporary_home/Applications/.akula-install.SIGNER1"
+mkdir -p "$recover_stage"
+/bin/mv "$temporary_home/Applications/Aquilum.app" "$recover_stage/Aquilum.previous.app"
+if HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" AKULA_INSTALL_CURL_CALLS="$calls" \
+    bash "$script_dir/install.sh" > /dev/null 2> "$error_log"; then
+  echo 'Recovery unexpectedly initiated a new remote installer' >&2
+  exit 1
+fi
+grep -Fq 'Recovered interrupted install' "$error_log"
+[[ ! -e "$recover_stage" && ! -e "$calls" ]]
+[[ "$(cat "$temporary_home/Applications/Aquilum.app/Keep.txt")" == 'installed app remains' ]]
+
 # TEST-ONLY COPY: replace precisely TWO source literals in an isolated file.
 # No production environment override or release-supplied signing root exists.
 # This runs the same Bash installer, with synthetic pinned identity for the
