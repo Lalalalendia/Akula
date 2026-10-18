@@ -114,6 +114,12 @@ impl S3PackedHeadV2 {
     }
 
     pub fn generation(&self) -> u64 { self.generation }
+    /// Metadata only: obtaining it does not authenticate any remote writer.
+    pub fn manifest_id(&self) -> OperationId { self.manifest_id }
+    pub fn manifest_blake3(&self) -> &str { &self.manifest_blake3 }
+    pub fn index_id(&self) -> OperationId { self.index_id }
+    pub fn index_blake3(&self) -> &str { &self.index_blake3 }
+
 
     /// A protocol proposal for later CAS+journal integration. The old root
     /// is authenticated by caller, not by this in-memory predicate.
