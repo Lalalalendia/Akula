@@ -41,7 +41,8 @@ impl App {
             }
             Step::CloseReader => {
                 if let Some(super::Popup::Reader(state)) = self.popup.take() {
-                    root.remove_layer(state.layer);
+                    // Exercise the exact same teardown as the visible close button.
+                    self.close_reader_layer(root, state);
                 }
             }
             Step::ReaderMove(forward) => {
