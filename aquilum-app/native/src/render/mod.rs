@@ -18,6 +18,8 @@ mod surface;
 mod testing;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod colr_bounds_tests;
 
 pub use offscreen::offscreen;
 pub use pixels::{brush, from_rgba};
