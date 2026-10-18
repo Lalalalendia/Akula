@@ -64,10 +64,19 @@ impl TextEditor {
             self.paint_link_hover(painter, i);
         }
         for i in texts {
-            if markdown {
-                self.paint_marks(painter, i, &palette);
+            let paint_line = |painter: &mut Painter<'_>| {
+                if markdown {
+                    self.paint_marks(painter, i, &palette);
+                }
+                render_text(painter, Affine::translate(self.shift() + self.doc.origin(i)), self.doc.paragraph(i).layout(), &palette, true);
+            };
+            if let Some(viewport) = self.code_viewport(i) {
+                // Balanced clip in the retained scene; no glyphs may escape
+                // the panel or overlap neighboring text.
+                painter.with_fill_clip(viewport, paint_line);
+            } else {
+                paint_line(painter);
             }
-            render_text(painter, Affine::translate(self.shift() + self.doc.origin(i)), self.doc.paragraph(i).layout(), &palette, true);
         }
     }
 
@@ -85,8 +94,16 @@ impl TextEditor {
         if !self.caret_visible {
             return;
         }
-        painter.fill(RoundedRect::from_rect(self.caret(), size::CARET_RADIUS), theme::current().caret_color).draw();
-        self.paint_extra_carets(painter, theme::current().caret_color);
+        let caret = self.caret();
+        let ink = theme::current().caret_color;
+        if let Some(viewport) = self.code_viewport(self.doc.at_offset(self.focus)) {
+            painter.with_fill_clip(viewport, |p| {
+                p.fill(RoundedRect::from_rect(caret, size::CARET_RADIUS), ink).draw();
+            });
+        } else {
+            painter.fill(RoundedRect::from_rect(caret, size::CARET_RADIUS), ink).draw();
+        }
+        self.paint_extra_carets(painter, ink);
     }
 
     pub(super) fn paint_range(&self, painter: &mut Painter<'_>, shown: RangeInclusive<usize>, range: Range<usize>, color: masonry::peniko::Color) {
@@ -99,12 +116,19 @@ impl TextEditor {
             let layout = p.layout();
             let a = range.start.max(p.start) - p.start;
             let b = range.end.min(p.end()) - p.start;
-            for (bounds, _) in markdown::range_rects(layout, a, b) {
-                painter.fill(super::rect(BoundingBox::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1), 0.0) + origin + self.shift(), color).draw();
-            }
-            if range.end > p.end() && b == p.len as usize {
-                let end = Cursor::from_byte_index(layout, p.len as usize, Affinity::Upstream).geometry(layout, 1.0);
-                painter.fill(super::rect(BoundingBox::new(end.x0, end.y0, end.x0 + 8.0, end.y1), 0.0) + origin + self.shift(), color).draw();
+            let draw_selection = |painter: &mut Painter<'_>| {
+                for (bounds, _) in markdown::range_rects(layout, a, b) {
+                    painter.fill(super::rect(BoundingBox::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1), 0.0) + origin + self.shift(), color).draw();
+                }
+                if range.end > p.end() && b == p.len as usize {
+                    let end = Cursor::from_byte_index(layout, p.len as usize, Affinity::Upstream).geometry(layout, 1.0);
+                    painter.fill(super::rect(BoundingBox::new(end.x0, end.y0, end.x0 + 8.0, end.y1), 0.0) + origin + self.shift(), color).draw();
+                }
+            };
+            if let Some(viewport) = self.code_viewport(i) {
+                painter.with_fill_clip(viewport, draw_selection);
+            } else {
+                draw_selection(painter);
             }
         }
     }

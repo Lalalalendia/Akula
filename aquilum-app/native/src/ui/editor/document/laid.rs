@@ -3,7 +3,8 @@ use std::borrow::Cow;
 use masonry::core::{BrushIndex, StyleSet};
 use masonry::parley::{Alignment, FontContext, Layout, LayoutContext};
 
-use super::super::markdown::{self, Decor, Fonts};
+use super::super::markdown::{self, Block, Decor, Fonts};
+use super::super::highlight::Lang;
 use super::{Document, text};
 
 pub(super) static PLAIN: Decor = Decor { x: 0.0, inset: 0.0, pad: (0.0, 0.0), hang: None, codes: Vec::new(), marks: Vec::new(), tags: Vec::new(), links: Vec::new(), caret: None, boxes: Vec::new(), pictures: Vec::new() };
@@ -41,7 +42,11 @@ impl Document {
         };
         let context = self.markdown.as_ref().map(|fonts| self.context(fonts));
         let markdown = context.as_ref().map(|context| (context, self.blocks.get(line), self.local_caret(line, caret)));
-        let (layout, decor) = text::build(fcx, lcx, styles, &text, underline, self.width, Alignment::Start, markdown);
+        // Native fenced code has one horizontal visual line; math keeps its
+        // existing layout. The editor separately clips unwrapped code text.
+        let no_wrap = matches!(self.blocks.get(line), Block::Code { lang, .. } if *lang != Some(Lang::Math));
+        let width = if no_wrap { None } else { self.width };
+        let (layout, decor) = text::build(fcx, lcx, styles, &text, underline, width, Alignment::Start, markdown);
         Laid { layout, decor }
     }
 }

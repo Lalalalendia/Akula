@@ -232,3 +232,20 @@ fn tags_get_palette_colors_or_the_accent_when_colors_are_off() {
     let plain = laid_out("#один #два", false);
     assert!(plain.paragraph(0).decor().tags.iter().all(|(_, slot)| slot.is_none()), "при выключенных цветах теги не акцентные");
 }
+
+
+#[test]
+fn native_fenced_code_has_one_visual_line_while_prose_still_wraps() {
+    let long = "longword".repeat(90);
+    let source = format!("{long}\n~~~rust\n{long}\n~~~\n{long}");
+    let mut doc = markdown(&source);
+    doc.keep = (0.0, 20_000.0);
+    doc.layout(
+        &mut FontContext::default(), &mut LayoutContext::new(),
+        &StyleSet::new(16.0), Some(160.0), None, None,
+    );
+    assert!(doc.paragraph(0).layout().lines().count() > 1, "ordinary text must wrap");
+    assert_eq!(doc.paragraph(2).layout().lines().count(), 1, "code body must not wrap");
+    assert!(f64::from(doc.paragraph(2).layout().width()) > 160.0, "code keeps its natural pixel width");
+    assert!(doc.paragraph(4).layout().lines().count() > 1, "following prose still wraps");
+}

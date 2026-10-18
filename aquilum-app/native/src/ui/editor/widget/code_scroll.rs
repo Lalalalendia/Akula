@@ -6,6 +6,8 @@
 
 use std::collections::BTreeMap;
 use crate::ui::editor::change::Change;
+use crate::ui::editor::highlight::Lang;
+use super::{Block, Rect, TextEditor};
 
 const MAX_TRACKED_BLOCKS: usize = 512;
 
@@ -202,5 +204,30 @@ mod tests {
         assert_eq!(offsets.get(103), 45.0);
         offsets.remap(&change(101, "very long removed", ""));
         assert_eq!(offsets.get(103), 0.0);
+    }
+}
+
+
+impl TextEditor {
+    /// Text-only viewport: the code panel background/border are not clipped.
+    /// It remains in editor-local coordinates, even as document bytes shift.
+    pub(in crate::ui::editor) fn code_viewport(&self, line: usize) -> Option<Rect> {
+        if self.doc.markdown.is_none()
+            || !matches!(self.doc.block(line), Block::Code { lang, .. } if *lang != Some(Lang::Math))
+        {
+            return None;
+        }
+        const PAD: f64 = 12.0; // Same as markdown::metrics::CODE_PADDING.
+        let left = self.shift().x + PAD;
+        let right = self.shift().x + self.inner_width() - PAD;
+        let top = self.doc.top(line);
+        let bottom = self.doc.bottom(line);
+        (right > left && bottom > top).then(|| Rect::new(left, top, right, bottom))
+    }
+
+    #[cfg(test)]
+    pub(in crate::ui::editor) fn code_line_shape_for_test(&self, line: usize) -> Option<(f64, usize)> {
+        let layout = self.doc.paragraph(line).laid()?;
+        Some((f64::from(layout.width()), layout.lines().count()))
     }
 }
