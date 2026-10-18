@@ -569,6 +569,28 @@ impl AwsS3ProbeClient {
         }))
     }
 
+    /// Pin one historical V1 immutable manifest independently by its
+    /// externally BLAKE3-linked identity. Used only by bounded read-only
+    /// offline-chain verification after the durable scoped anchor walker has
+    /// checked every predecessor and the stable mutable S3 head.
+    ///
+    /// This is deliberately the FULL conservative pin: every shard, JSON,
+    /// blob and DAG is rechecked before a derived snapshot is usable. It is
+    /// expensive and has no File Gate or confirmed-baseline authority.
+    pub(super) async fn pin_historical_manifest_snapshot(
+        &self,
+        manifest_id: OperationId,
+        digest: &str,
+    ) -> Result<(S3ManifestV1, S3PinnedRevisionSnapshot), S3HeadError> {
+        let manifest = self.read_verified_manifest(manifest_id, digest).await?;
+        let refs = self.revision_index(&manifest).await?;
+        let pin = S3PinnedRevisionSnapshot {
+            snapshot_id: format!("{}:{}", manifest_id, digest),
+            revisions: refs.into_values().collect(),
+        };
+        Ok((manifest, pin))
+    }
+
     /// Unknown/inaccessible roots are errors, NEVER an empty page. The caller
     /// may discard a pinned snapshot when false, but cannot use this alone as
     /// deletion authority.
