@@ -84,9 +84,31 @@ impl AffineExt for Affine {
     }
 }
 
+
+/* Diagnostic adaptation of linebender/vello PR #1785.
+ * A tiny bias aligns discrete atlas pixel decisions across equivalent
+ * floating-point transform orders. This is NOT an approximate geometry
+ * tolerance for ordinary layout or glyph positioning.
+ */
+const PIXEL_DECISION_BIAS: f64 = 1e-6;
+
+/// Integer component of the atlas glyph origin. Always pair with
+/// biased_fract when forming the glyph's subpixel cache key.
+#[inline]
+pub(crate) fn biased_floor(v: f64) -> f64 {
+    (v + PIXEL_DECISION_BIAS).floor()
+}
+
+/// Fractional component in [0, 1) corresponding to biased_floor.
+#[inline]
+pub(crate) fn biased_fract(v: f64) -> f64 {
+    let adjusted = v + PIXEL_DECISION_BIAS;
+    adjusted - adjusted.floor()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::AffineExt;
+    use super::{AffineExt, biased_floor, biased_fract};
     use peniko::kurbo::Affine;
 
     #[test]
@@ -142,4 +164,28 @@ mod tests {
         assert!(!flip_y.has_non_unit_skew_or_scale());
         assert!(!flip_xy.has_non_unit_skew_or_scale());
     }
+
+    #[test]
+    fn glyph_atlas_origin_split_stable_across_float_noise() {
+        for integer in [-2000.0, -29.0, -1.0, 0.0, 1.0, 29.0, 2000.0] {
+            for deviation in [-1e-8, 0.0, 1e-8] {
+                let value = integer + deviation;
+                assert_eq!(biased_floor(value), integer, "integer={integer}, value={value}");
+                assert!(
+                    biased_fract(value) >= 0.0 && biased_fract(value) < 1e-5,
+                    "integer={integer}, value={value}: fract={}",
+                    biased_fract(value)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn glyph_atlas_origin_split_preserves_non_boundary_positions() {
+        for value in [-29.75, -12.25, -0.5, 0.125, 1.25, 29.75] {
+            assert_eq!(biased_floor(value), value.floor());
+            assert!((biased_floor(value) + biased_fract(value) - value).abs() < 2e-6);
+        }
+    }
+
 }
