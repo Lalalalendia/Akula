@@ -1,5 +1,5 @@
 //! Standalone, manually addressed LAN proof-of-concept. No files or Sync Core.
-use akula_roha_transport::{AllowedPeers, StayaTransport, lan_discovery};
+use akula_roha_transport::{AllowedPeers, StayaTransport, lan_discovery, pairing};
 use iroh::{EndpointAddr, EndpointId, SecretKey};
 use std::{
     collections::BTreeSet,
@@ -76,7 +76,7 @@ fn parse_id(s: &str) -> Result<EndpointId, String> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\n  staya-lan serve-mdns @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT ANNOUNCE_IPV4\n  staya-lan ping-discovered @KEY_PATH ALLOWED_PEER_ID SECONDS_1_TO_20\nDiscovery only runs on explicit request; mDNS broadcasts your public endpoint ID on the LAN.\nDo not publish or commit the private key files.\n"
+    "usage:\n  staya-lan show-contact @KEY_PATH > contact.txt\n  staya-lan inspect-contact CONTACT_PATH\n  staya-lan confirm-contact CONTACT_PATH VERIFIED_FULL_ENDPOINT_ID > trusted-peer.txt\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\n  staya-lan serve-mdns @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT ANNOUNCE_IPV4\n  staya-lan ping-discovered @KEY_PATH ALLOWED_PEER_ID SECONDS_1_TO_20\nDiscovery only runs on explicit request; mDNS broadcasts your public endpoint ID on the LAN.\nDo not publish or commit the private key files.\n"
 }
 
 /// The received mDNS address is never trusted as authentication. QUIC
@@ -146,6 +146,33 @@ async fn serve(
 async fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("show-contact") if args.len() == 3 => {
+            let key = secret_from_arg(&args[2])?;
+            print!("{}", pairing::export_contact(key.public()));
+        }
+        Some("inspect-contact") if args.len() == 3 => {
+            let file = std::fs::read_to_string(&args[2])
+                .map_err(|e| format!("cannot read public contact: {e}"))?;
+            if file.len() > pairing::MAX_RECORD_BYTES {
+                return Err("contact too large".into());
+            }
+            let id = pairing::parse_contact(&file)?;
+            println!("untrusted_contact_endpoint_id={id}");
+            println!("not_enrolled=true; verify independently before trusting");
+        }
+        Some("confirm-contact") if args.len() == 4 => {
+            let file = std::fs::read_to_string(&args[2])
+                .map_err(|e| format!("cannot read public contact: {e}"))?;
+            if file.len() > pairing::MAX_RECORD_BYTES {
+                return Err("contact too large".into());
+            }
+            let id = pairing::parse_contact(&file)?;
+            let expected = parse_id(&args[3])?;
+            if id != expected {
+                return Err("contact ID mismatch: no trust record created".into());
+            }
+            print!("{}", pairing::export_trusted_peer(id));
+        }
         Some("gen-key-file") if args.len() == 3 => {
             let key = SecretKey::generate();
             save_key_file(Path::new(&args[2]), &key)?;
