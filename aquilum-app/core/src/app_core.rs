@@ -15,7 +15,9 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 #[cfg(feature = "host-custody")]
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLock, RwLockReadGuard};
+#[cfg(feature = "sync-s3")]
+use std::sync::RwLockWriteGuard;
 
 // Conservatively serialize all Core-managed mutations and protected original
 // captures within this process, even when two distinct Core instances use
