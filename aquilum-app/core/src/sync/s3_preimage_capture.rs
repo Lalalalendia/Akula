@@ -12,9 +12,11 @@ use std::path::Path;
 
 use super::{
     ConfirmedBaseline, JournalAction, JournalError, JournalPhase, JournalRecord,
-    OperationId, S3ConnectionProfile, S3Keyspace, SqliteSyncJournal,
+    OperationId, S3ConnectionProfile, S3Keyspace, SqliteDagStore,
+    SqliteSyncJournal,
     VaultPortError,
 };
+use super::journal::ReadOnlyExistingReplaceAttempt;
 use super::filegate_custody_identity::{
     CustodyBindingError, SqliteCustodyIdentityStore,
 };
@@ -212,6 +214,94 @@ pub(crate) fn capture_registered_s3_update_preimage(
     outcome
 }
 
+
+/// Register an irreversible, read-only update attempt AFTER a durable
+/// protected original and verified staged S3 blob already exist.
+///
+/// The external cooperative OS lock spans BOTH pinned original revalidation
+/// and the conditional SQLite WAL/FULL attempt claim. All missing proofs fail
+/// closed. A committed claim followed by lost ACK or failed post-check stays
+/// HOLD, never automatically replayed. This function creates NO file and
+/// does not mint a native mutation receipt or promote a baseline.
+#[allow(dead_code)]
+pub(crate) fn fence_registered_s3_replace_attempt_once(
+    admission: &RegisteredReadAdmission<'_>,
+    bindings: &SqliteRegisteredS3Bindings,
+    profile: &S3ConnectionProfile,
+    keyspace: &S3Keyspace,
+    custody: &SqliteCustodyIdentityStore,
+    custody_scope: &Path,
+    journal: &mut SqliteSyncJournal,
+    cache: &SqliteDagStore,
+    protected: &SqliteProtectionStore,
+    operation: OperationId,
+    expected_local_hash: &str,
+) -> Result<ReadOnlyExistingReplaceAttempt, S3ProtectedPreimageError> {
+    admission.recheck_registered_root()?;
+    let root = admission.registered_root_path();
+    journal.require_appdata_outside_vault(root)?;
+    cache.require_appdata_outside_vault(root)
+        .map_err(|_| S3ProtectedPreimageError::UnsafeAppdata)?;
+    profile_binding::validate_appdata_location(
+        admission, protected.database_path(),
+    ).map_err(|_| S3ProtectedPreimageError::UnsafeAppdata)?;
+
+    let binding = bindings.load_for_registered(admission)
+        .map_err(|_| S3ProtectedPreimageError::InvalidRegisteredProfile)?
+        .ok_or(S3ProtectedPreimageError::InvalidRegisteredProfile)?;
+    if !binding.matches_remote(profile,keyspace) {
+        return Err(S3ProtectedPreimageError::InvalidRegisteredProfile);
+    }
+    let record = eligible_update(
+        journal,operation,&binding,keyspace,expected_local_hash,
+    )?;
+    // Hash-checked staged blob is a necessary gate but NEVER an executor
+    // capability. A missing/oversized cache entry cannot claim an attempt.
+    let staged = cache.verified_blob(&record.intent.expected_content_hash)
+        .map_err(|_| S3ProtectedPreimageError::InvalidStagedUpdate)?;
+    if staged.len() > super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES
+        || blake3::hash(&staged).to_hex().as_str()
+            != record.intent.expected_content_hash
+    {
+        return Err(S3ProtectedPreimageError::InvalidStagedUpdate);
+    }
+    let result = custody.with_cooperative_writer_lifetime(
+        admission,binding.vault_id,custody_scope,|| {
+            if bindings.load_for_registered(admission).ok().flatten().as_ref()
+                != Some(&binding)
+            {
+                return Err(S3ProtectedPreimageError::InvalidRegisteredProfile);
+            }
+            if eligible_update(
+                journal,operation,&binding,keyspace,expected_local_hash,
+            )?.intent != record.intent {
+                return Err(S3ProtectedPreimageError::InvalidStagedUpdate);
+            }
+            // Core reserves a CLOSED editor document and uses pinned OS
+            // reads under the real File Gate for exact file identity.
+            admission.revalidate_bound_preimage(
+                &record.intent.path,expected_local_hash,operation,protected,
+            )?;
+            let preimage=protected.read_bound_preimage(operation)?
+                .ok_or(ProtectionStoreError::UnboundOriginal)?;
+            let claim=journal.record_existing_replace_attempt_once(
+                &record.intent,&preimage,
+            )?;
+            // Uncertainty after claim does NOT release the fence.
+            admission.revalidate_bound_preimage(
+                &record.intent.path,expected_local_hash,operation,protected,
+            )?;
+            if eligible_update(
+                journal,operation,&binding,keyspace,expected_local_hash,
+            )?.intent != record.intent {
+                return Err(S3ProtectedPreimageError::PreviousBaselineChanged);
+            }
+            Ok(claim)
+        },
+    )?;
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +438,109 @@ mod tests {
 
         Fixture { _dir: dir, core, root, appdata, scope, profile, keyspace,
             operation, old_hash }
+    }
+
+
+    #[test]
+    fn guarded_s3_replace_attempt_fences_same_baseline_without_file_write() {
+        let f=fixture();
+        let admission=f.admission();
+        let bindings=SqliteRegisteredS3Bindings::open(
+            &admission,&f.appdata.join("profile.sqlite"),
+        ).unwrap();
+        let custody=SqliteCustodyIdentityStore::open(
+            &admission,&f.appdata.join("custody.sqlite"),
+        ).unwrap();
+        let mut journal=SqliteSyncJournal::open(
+            &f.appdata.join("operation.sqlite"),
+        ).unwrap();
+        let mut cache=SqliteDagStore::open(
+            &f.appdata.join("cache.sqlite"),
+        ).unwrap();
+        let new_bytes=b"new cloud content";
+        cache.store_blob(new_bytes).unwrap();
+        let mut copy=SqliteProtectionStore::open(
+            &f.appdata.join("originals.sqlite"),
+        ).unwrap();
+        assert!(fence_registered_s3_replace_attempt_once(
+            &admission,&bindings,&f.profile,&f.keyspace,
+            &custody,&f.scope,&mut journal,&cache,&copy,
+            f.operation,&f.old_hash,
+        ).is_err());
+        assert!(journal.read_existing_replace_attempt(f.operation)
+            .unwrap().is_none());
+        capture_registered_s3_update_preimage(
+            &admission,&bindings,&f.profile,&f.keyspace,
+            &custody,&f.scope,&journal,&mut copy,
+            f.operation,&f.old_hash,
+        ).unwrap();
+        let old_baseline=journal.baseline(f.keyspace.vault_id(),
+            journal.get(f.operation).unwrap().unwrap().intent.document_id,
+        ).unwrap();
+        let recorded=fence_registered_s3_replace_attempt_once(
+            &admission,&bindings,&f.profile,&f.keyspace,
+            &custody,&f.scope,&mut journal,&cache,&copy,
+            f.operation,&f.old_hash,
+        ).unwrap();
+        assert_eq!(recorded.preimage_hash,f.old_hash);
+        assert!(matches!(fence_registered_s3_replace_attempt_once(
+            &admission,&bindings,&f.profile,&f.keyspace,
+            &custody,&f.scope,&mut journal,&cache,&copy,
+            f.operation,&f.old_hash,
+        ),Err(S3ProtectedPreimageError::Journal(
+            JournalError::ExistingReplaceAttemptAlreadyRecorded
+        ))));
+        assert_eq!(fs::read(f.root.join("notes/source.md")).unwrap(),
+            b"unchanged original");
+        assert_eq!(journal.baseline(f.keyspace.vault_id(),
+            journal.get(f.operation).unwrap().unwrap().intent.document_id,
+        ).unwrap(),old_baseline);
+        assert!(matches!(journal.mark_applied(f.operation),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)));
+        drop(journal);
+        let recovered=SqliteSyncJournal::open(
+            &f.appdata.join("operation.sqlite"),
+        ).unwrap();
+        assert_eq!(recovered.read_existing_replace_attempt(f.operation)
+            .unwrap(),Some(recorded));
+    }
+
+    #[test]
+    fn guarded_replace_attempt_holds_after_local_inode_replacement() {
+        let f=fixture();
+        let admission=f.admission();
+        let bindings=SqliteRegisteredS3Bindings::open(
+            &admission,&f.appdata.join("profile.sqlite"),
+        ).unwrap();
+        let custody=SqliteCustodyIdentityStore::open(
+            &admission,&f.appdata.join("custody.sqlite"),
+        ).unwrap();
+        let mut journal=SqliteSyncJournal::open(
+            &f.appdata.join("operation.sqlite"),
+        ).unwrap();
+        let mut cache=SqliteDagStore::open(
+            &f.appdata.join("cache.sqlite"),
+        ).unwrap();
+        cache.store_blob(b"new cloud content").unwrap();
+        let mut copy=SqliteProtectionStore::open(
+            &f.appdata.join("originals.sqlite"),
+        ).unwrap();
+        capture_registered_s3_update_preimage(
+            &admission,&bindings,&f.profile,&f.keyspace,
+            &custody,&f.scope,&journal,&mut copy,
+            f.operation,&f.old_hash,
+        ).unwrap();
+        let path=f.root.join("notes/source.md");
+        fs::rename(&path,f.root.join("notes/previous.md")).unwrap();
+        fs::write(&path,b"unchanged original").unwrap();
+        assert!(fence_registered_s3_replace_attempt_once(
+            &admission,&bindings,&f.profile,&f.keyspace,
+            &custody,&f.scope,&mut journal,&cache,&copy,
+            f.operation,&f.old_hash,
+        ).is_err());
+        assert!(journal.read_existing_replace_attempt(f.operation)
+            .unwrap().is_none());
+        assert_eq!(fs::read(&path).unwrap(),b"unchanged original");
     }
 
     #[test]
