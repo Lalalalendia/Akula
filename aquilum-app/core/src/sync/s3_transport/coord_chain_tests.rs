@@ -3,6 +3,8 @@
 //! All buckets/vaults are disposable; no native Akula files are modified.
 
 use super::*;
+use std::collections::BTreeSet;
+use std::time::Instant;
 use super::super::{
     pack_probe::PackBuilder, S3ConnectionProfile, S3PutCondition,
 };
@@ -220,9 +222,15 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     ).await;
 
     let letters = vec![letter2.clone(), letter3.clone()];
+    // First measure the conservative reference: every missed V1 generation
+    // is fully pinned before any V2 letter/pack is accepted.
+    let chain_before = reader.test_io_snapshot();
+    let chain_started = Instant::now();
     let accepted = reader.inspect_v2_offline_chain_against_pinned_v1(
         &scope, &journal, &pinned, &cache, &letters,
     ).await.unwrap();
+    let chain_micros = chain_started.elapsed().as_micros();
+    let chain_io = reader.test_io_snapshot().since(chain_before);
     assert_eq!(accepted.from_generation, 1);
     assert_eq!(accepted.to_generation, 3);
     assert_eq!(accepted.verified_generations, 2);
@@ -232,6 +240,83 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     assert!(accepted.new_revision_ids.contains(&changed.0.revision_id));
     assert!(accepted.new_revision_ids.contains(&tombstone.0.revision_id));
     assert!(accepted.requires_full_apply_gate);
+
+    // 02d shadow experiment: reuse the SAME real MinIO root and durable
+    // SQLite anchor, but compare the already-existing selective V1 advisory
+    // reader against the independently full-verified V2 letter/pack chain.
+    // Neither preview can authorize local file writes or a new baseline.
+    let selective_before = reader.test_io_snapshot();
+    let selective_started = Instant::now();
+    let selected = reader.inspect_selective_s3_revision_changes(
+        &scope, &journal, &cache,
+        MAX_S3_REVISION_METADATA_CACHE_BYTES,
+        S3ManifestDeltaLimits {
+            max_frames: MAX_OFFLINE_GENERATIONS,
+            max_total_shard_refs: MAX_OFFLINE_GENERATIONS * 256,
+        },
+    ).await.unwrap();
+    let selective_micros = selective_started.elapsed().as_micros();
+    let selective_io = reader.test_io_snapshot().since(selective_before);
+
+    // Separately re-pin the latest complete V1 inventory as a third
+    // reference. The selective/packed modes are NOT interchangeable apply
+    // receipts: they reuse prior verified blobs and have weaker availability
+    // guarantees than a fresh full remote pin.
+    let full_before = reader.test_io_snapshot();
+    let full_started = Instant::now();
+    let full = reader.pin_revision_snapshot().await.unwrap().unwrap();
+    let full_micros = full_started.elapsed().as_micros();
+    let full_io = reader.test_io_snapshot().since(full_before);
+
+    let chain_new: BTreeSet<_> =
+        accepted.new_revision_ids.iter().copied().collect();
+    let selective_new: BTreeSet<_> =
+        selected.new_revision_ids.iter().copied().collect();
+    let old_ids: BTreeSet<_> = pinned.references_for_coord_v2()
+        .iter().map(|r| r.revision_id).collect();
+    let full_ids: BTreeSet<_> = full.references_for_coord_v2()
+        .iter().map(|r| r.revision_id).collect();
+    let expected_full: BTreeSet<_> =
+        old_ids.union(&chain_new).copied().collect();
+    assert_eq!(chain_new.len(), accepted.new_revision_ids.len());
+    assert!(old_ids.is_disjoint(&chain_new));
+    assert_eq!(chain_new, selective_new, "selective reader lost an offline branch");
+    assert_eq!(expected_full, full_ids, "full V1 inventory diverged");
+    assert_eq!(selected.remote_snapshot_id, full.snapshot_id);
+    assert_eq!(selected.total_revisions, full.len());
+    assert!(selected.requires_full_apply_gate);
+
+    // Machine-readable AWS SDK method attempts and received bytes, not
+    // provider HTTP/TCP request counts. The three modes intentionally offer
+    // DIFFERENT assurance; no speedup for full file sync is claimed here.
+    println!("AKULA_COORD_02D_PARITY {}", serde_json::json!({
+        "assurance": "read-only-shared-v1-anchor-no-file-gate",
+        "from_generation": accepted.from_generation,
+        "to_generation": accepted.to_generation,
+        "total_revisions": full.len(),
+        "new_revisions": chain_new.len(),
+        "tombstone_and_sibling_retained": true,
+        "conservative_chain": {
+            "get": chain_io.get,
+            "head": chain_io.head,
+            "bytes": chain_io.payload_bytes,
+            "elapsed_us": chain_micros
+        },
+        "selective_v1": {
+            "get": selective_io.get,
+            "head": selective_io.head,
+            "bytes": selective_io.payload_bytes,
+            "elapsed_us": selective_micros,
+            "reused_revision_json": selected.reused_revision_json,
+            "downloaded_revision_json": selected.downloaded_revision_json
+        },
+        "full_current_v1": {
+            "get": full_io.get,
+            "head": full_io.head,
+            "bytes": full_io.payload_bytes,
+            "elapsed_us": full_micros
+        }
+    }));
 
     // No missing/reordered generation may silently become an empty delta.
     assert!(reader.inspect_v2_offline_chain_against_pinned_v1(
@@ -261,6 +346,16 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     forged.push(no_change);
     assert!(reader.inspect_v2_offline_chain_against_pinned_v1(
         &scope, &journal, &pinned, &cache, &forged,
+    ).await.is_err());
+    // The selective reader must also inspect the full immutable history:
+    // a plausible final root that silently drops the gen3 tombstone is HOLD.
+    assert!(reader.inspect_selective_s3_revision_changes(
+        &scope, &journal, &cache,
+        MAX_S3_REVISION_METADATA_CACHE_BYTES,
+        S3ManifestDeltaLimits {
+            max_frames: MAX_OFFLINE_GENERATIONS,
+            max_total_shard_refs: MAX_OFFLINE_GENERATIONS * 256,
+        },
     ).await.is_err());
     assert_eq!(journal.load(&scope).unwrap().unwrap().pointer(), &genesis_head);
 }
