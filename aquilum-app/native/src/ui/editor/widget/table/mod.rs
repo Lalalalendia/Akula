@@ -57,7 +57,7 @@ impl TextEditor {
     fn apply(&mut self, ctx: &mut EventCtx<'_>, outcome: Outcome) {
         self.remember_scroll();
         match outcome {
-            Outcome::None => return,
+            Outcome::None | Outcome::Copy(_) => return,
             Outcome::Repaint => {}
             Outcome::Write(model) => {
                 self.write_table(&model);
@@ -97,7 +97,14 @@ impl TextEditor {
     pub fn table_command(this: &mut WidgetMut<'_, Self>, command: Command) {
         let widget = &mut *this.widget;
         let Some((session, view)) = widget.table_parts() else { return };
-        match session.run(view, command) {
+        let outcome = session.run(view, command);
+        // Clipboard-only actions must not emit TextAction::Changed, create
+        // undo entries, or notify autosave/history of a fictitious edit.
+        if let Outcome::Copy(text) = outcome {
+            this.ctx.set_clipboard(text);
+            return;
+        }
+        match outcome {
             Outcome::Write(model) => widget.write_table(&model),
             Outcome::Remove => widget.remove_table(),
             _ => {}
