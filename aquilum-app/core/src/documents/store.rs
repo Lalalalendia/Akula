@@ -3,7 +3,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::fmt;
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -11,6 +11,7 @@ pub enum StoreError {
     UnsupportedSchema(i64),
     HoldPresent,
     HoldMissing,
+    ConflictingParticipant,
 }
 
 impl fmt::Display for StoreError {
@@ -22,6 +23,7 @@ impl fmt::Display for StoreError {
             }
             Self::HoldPresent => formatter.write_str("document has an unresolved native write intent"),
             Self::HoldMissing => formatter.write_str("durable native write intent is missing or changed"),
+            Self::ConflictingParticipant => formatter.write_str("guarded workspace enrollment already exists with different custody"),
         }
     }
 }
@@ -41,6 +43,17 @@ pub type StoreResult<T> = Result<T, StoreError>;
 pub(crate) struct DurableWriteIntent {
     pub(crate) base_hash: String,
     pub(crate) proposed_hash: String,
+}
+
+/// Durable, insert-only cooperative participant marker. It is a restart
+/// safety interlock, NOT authentication against another same-user process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GuardedParticipant {
+    pub(crate) root: String,
+    pub(crate) vault_id: String,
+    pub(crate) profile_db: String,
+    pub(crate) custody_db: String,
+    pub(crate) custody_scope: String,
 }
 
 pub struct DocumentStore {
@@ -83,6 +96,13 @@ impl DocumentStore {
                      base_hash TEXT NOT NULL,
                      proposed_hash TEXT NOT NULL
                  );
+                 CREATE TABLE guarded_participants (
+                     root TEXT PRIMARY KEY NOT NULL,
+                     vault_id TEXT NOT NULL,
+                     profile_db TEXT NOT NULL,
+                     custody_db TEXT NOT NULL,
+                     custody_scope TEXT NOT NULL
+                 );
                  PRAGMA user_version = {SCHEMA_VERSION};"
             ))?,
             1 => connection.execute_batch(
@@ -92,13 +112,98 @@ impl DocumentStore {
                      base_hash TEXT NOT NULL,
                      proposed_hash TEXT NOT NULL
                  );
-                 PRAGMA user_version = 2;
+                 CREATE TABLE guarded_participants (
+                     root TEXT PRIMARY KEY NOT NULL,
+                     vault_id TEXT NOT NULL,
+                     profile_db TEXT NOT NULL,
+                     custody_db TEXT NOT NULL,
+                     custody_scope TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
+                 COMMIT;"
+            )?,
+            2 => connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE guarded_participants (
+                     root TEXT PRIMARY KEY NOT NULL,
+                     vault_id TEXT NOT NULL,
+                     profile_db TEXT NOT NULL,
+                     custody_db TEXT NOT NULL,
+                     custody_scope TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 3;
                  COMMIT;"
             )?,
             SCHEMA_VERSION => {}
             newer => return Err(StoreError::UnsupportedSchema(newer)),
         }
         Ok(Self { connection })
+    }
+
+    /// Inspect enrolled roots on every Core startup, before any File Gate
+    /// mutator may run. Query failures are NOT interpreted as empty registry.
+    pub(crate) fn guarded_participants(&self) -> StoreResult<Vec<GuardedParticipant>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT root, vault_id, profile_db, custody_db, custody_scope
+             FROM guarded_participants ORDER BY root",
+        )?;
+        let records = stmt.query_map([], |row| {
+            Ok(GuardedParticipant {
+                root: row.get(0)?, vault_id: row.get(1)?,
+                profile_db: row.get(2)?, custody_db: row.get(3)?,
+                custody_scope: row.get(4)?,
+            })
+        })?;
+        let mut all = Vec::new();
+        for record in records {
+            let record = record?;
+            if [&record.root, &record.vault_id, &record.profile_db,
+                &record.custody_db, &record.custody_scope]
+                .iter().any(|field| field.is_empty())
+            {
+                return Err(StoreError::ConflictingParticipant);
+            }
+            all.push(record);
+        }
+        Ok(all)
+    }
+
+    /// Insert-only: never UPDATE/REPLACE the identity of an enrolled root.
+    /// Committed with FULL sync *before* its in-memory guarded route can be
+    /// activated. A failed or uncertain insert must leave the Core on HOLD.
+    pub(crate) fn enroll_guarded_participant(
+        &self, entry: &GuardedParticipant,
+    ) -> StoreResult<()> {
+        if [&entry.root, &entry.vault_id, &entry.profile_db,
+            &entry.custody_db, &entry.custody_scope]
+            .iter().any(|field| field.is_empty())
+        {
+            return Err(StoreError::ConflictingParticipant);
+        }
+        self.with_full_sync(|connection| {
+            connection.execute(
+                "INSERT OR IGNORE INTO guarded_participants
+                 (root, vault_id, profile_db, custody_db, custody_scope)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![entry.root, entry.vault_id, entry.profile_db,
+                    entry.custody_db, entry.custody_scope],
+            )?;
+            let recorded = connection.query_row(
+                "SELECT root, vault_id, profile_db, custody_db, custody_scope
+                 FROM guarded_participants WHERE root = ?1",
+                [&entry.root], |row| {
+                    Ok(GuardedParticipant {
+                        root: row.get(0)?, vault_id: row.get(1)?,
+                        profile_db: row.get(2)?, custody_db: row.get(3)?,
+                        custody_scope: row.get(4)?,
+                    })
+                },
+            ).optional()?;
+            if recorded.as_ref() != Some(entry) {
+                return Err(StoreError::ConflictingParticipant);
+            }
+            Ok(())
+        })
     }
 
     /// Inspect durable HOLD evidence before reading/merging the live disk.

@@ -1,6 +1,6 @@
 use super::io::HubIo;
 use super::session::{DocumentSession, LoggedChange, Pull, SessionError, SYSTEM_CLIENT};
-use super::store::DocumentStore;
+use super::store::{DocumentStore, GuardedParticipant};
 use crate::history::Source;
 use crate::search::paths::{canonical_path, identity};
 use super::resolve::SyncPoint;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -116,6 +116,11 @@ pub struct DocumentHub {
     /// normal desktop mode arms them; the S3-bound editor integration must
     /// call this BEFORE enabling its guarded File Gate writer.
     guarded_write_roots: Mutex<Vec<PathBuf>>,
+    /// Boot-persistent fail-closed policy. True for any enrolled root OR if
+    /// the app-data document store/registry is unreadable. No auto-clear on
+    /// restart or rebind; an explicit custody-verified guarded writer is the
+    /// sole exception inside File Gate.
+    guarded_participant_hold: AtomicBool,
     writes: Mutex<Option<Sender<(String, Instant)>>>,
     offset_seconds: AtomicI64,
 }
@@ -125,14 +130,64 @@ impl DocumentHub {
         let store = DocumentStore::open(path)
             .map_err(|error| eprintln!("[aquilum:documents] локальная копия документов не открылась: {error}"))
             .ok();
+        let guarded_participant_hold = match store.as_ref() {
+            Some(store) => match store.guarded_participants() {
+                Ok(participants) => !participants.is_empty(),
+                Err(error) => {
+                    eprintln!("[aquilum:documents] cannot read enrolled workspace safety state: {error}");
+                    true
+                }
+            },
+            None => true, // an unreadable journal cannot mean no enrollment
+        };
         Self {
             store: Mutex::new(store),
             sessions: Mutex::new(HashMap::new()),
             sync_reservations: Mutex::new(HashSet::new()),
             guarded_write_roots: Mutex::new(Vec::new()),
+            guarded_participant_hold: AtomicBool::new(guarded_participant_hold),
             writes: Mutex::new(None),
             offset_seconds: AtomicI64::new(0),
         }
+    }
+
+    /// Any ordinary Core File Gate mutation must refuse while at least one
+    /// workspace has been explicitly enrolled, INCLUDING after Core restart.
+    /// Until all mutation types have their own OS-locked admission, the
+    /// conservative policy pauses ALL ordinary File Gate writes in this Core,
+    /// including other workspace roots. Read-only inspection remains possible.
+    pub(crate) fn requires_guarded_participant_hold(&self) -> bool {
+        self.guarded_participant_hold.load(Ordering::Acquire)
+    }
+
+    /// Called only AFTER verifying a registered S3 profile and pinned custody,
+    /// and BEFORE exposing a writer route. Insert-only FULL-synced appdata
+    /// state; this marker survives Core destruction and reopens. No expiry,
+    /// auto-clear or silently different VaultId/OS lock is permitted.
+    pub(crate) fn enroll_guarded_participant(
+        &self, root: &Path, vault_id: &str,
+        profile_db: &Path, custody_db: &Path, custody_scope: &Path,
+    ) -> Result<(), crate::files::error::FileCommandError> {
+        use crate::files::error::FileCommandError;
+        let deny = |message: String| FileCommandError::Task { message };
+        let to_str = |path: &Path| path.to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| deny("participant path has invalid Unicode".into()));
+        let participant = GuardedParticipant {
+            root: to_str(root)?, vault_id: vault_id.to_owned(),
+            profile_db: to_str(profile_db)?,
+            custody_db: to_str(custody_db)?,
+            custody_scope: to_str(custody_scope)?,
+        };
+        // Set process-local HOLD *before* committing. If the write fails,
+        // the current Core must not fall back to an ordinary mutation.
+        self.guarded_participant_hold.store(true, Ordering::Release);
+        let store = self.store.lock()
+            .map_err(|_| deny("participant appdata SQLite mutex poisoned".into()))?;
+        let store = store.as_ref()
+            .ok_or_else(|| deny("participant appdata SQLite unavailable".into()))?;
+        store.enroll_guarded_participant(&participant)
+            .map_err(|error| deny(format!("participant registration unavailable/conflicting: {error}")))
     }
 
     /// Reserve an editor-closed document identity for a future sync File Gate

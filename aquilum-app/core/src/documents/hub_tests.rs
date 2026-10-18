@@ -185,3 +185,83 @@ fn armed_document_write_crash_intent_blocks_reopen_before_automatic_reconcile() 
     ));
     assert_eq!(store.sync_point(&key), SyncPointLookup::Absent);
 }
+
+
+#[test]
+fn participant_enrollment_refuses_ordinary_file_gate_mutations_after_core_restart() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::files::gate;
+    use crate::history::Source;
+    use std::sync::Arc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let appdata = temp.path().join("appdata");
+    let root = temp.path().join("notes");
+    let other_root = temp.path().join("another-vault");
+    for path in [&appdata, &root, &other_root] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let root = std::fs::canonicalize(&root).unwrap();
+    let note = root.join("Original.md");
+    std::fs::write(&note, b"preserve").unwrap();
+    {
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        assert!(!core.documents.requires_guarded_participant_hold());
+        core.documents.enroll_guarded_participant(
+            &root, "vault-not-local-uuid",
+            &appdata.join("profiles.sqlite"),
+            &appdata.join("custody.sqlite"),
+            &temp.path().join("external-scope"),
+        ).unwrap();
+        assert!(core.documents.requires_guarded_participant_hold());
+        assert!(gate::write(&core, &note, "unapproved", None, Source::Me, None).is_err());
+        assert_eq!(std::fs::read(&note).unwrap(), b"preserve");
+    }
+    let second = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    assert!(second.documents.requires_guarded_participant_hold(),
+        "cold Core restart must never discard participant enrollment");
+    let denied = gate::write(&second, &note, "unapproved", None, Source::Me, None);
+    assert!(denied.is_err(), "cold Core re-entered ordinary File Gate");
+    assert_eq!(std::fs::read(&note).unwrap(), b"preserve");
+    let created = root.join("ShouldNotExist.md");
+    assert!(gate::create(&second, &created, "no", Source::Me, None).is_err());
+    assert!(!created.exists());
+    // Until path-scoped isolation and all File Gate mutation paths are proved,
+    // even an unrelated root in the SAME Core remains on conservative HOLD.
+    let unrelated = other_root.join("AlsoHeld.md");
+    assert!(gate::create(&second, &unrelated, "no", Source::Me, None).is_err());
+    assert!(!unrelated.exists());
+    assert!(second.empty_trash_guarded(&root).is_err());
+}
+
+#[test]
+fn unreadable_documents_sqlite_never_downgrades_participant_policy_to_empty() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::files::gate;
+    use crate::history::Source;
+    use std::sync::Arc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let appdata = temp.path().join("appdata");
+    let root = temp.path().join("root");
+    std::fs::create_dir_all(&appdata).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    let note = root.join("Keep.md");
+    std::fs::write(&note, b"keep").unwrap();
+    {
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        core.documents.enroll_guarded_participant(
+            &root, "vault-id", &appdata.join("profiles.sqlite"),
+            &appdata.join("custody.sqlite"), &temp.path().join("scope"),
+        ).unwrap();
+    }
+    // Simulate a corrupt app-data database after shutdown. Recovery must
+    // inspect evidence, never open with an empty protection list.
+    std::fs::write(appdata.join("documents.sqlite3"), b"corrupt sqlite").unwrap();
+    let reopened = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    assert!(reopened.documents.requires_guarded_participant_hold());
+    assert!(gate::write(&reopened, &note, "overwrite", None, Source::Me, None).is_err());
+    assert_eq!(std::fs::read(&note).unwrap(), b"keep");
+}
