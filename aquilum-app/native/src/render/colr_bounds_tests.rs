@@ -95,3 +95,227 @@ fn colr_without_clipbox_matches_identical_outline() {
         }
     }
 }
+
+/// Render one glyph at a *noninteger pen position*. Unlike the integral
+/// ClipBox regression above, these resources are supplied by the caller:
+/// one resource set is shared across phases to exercise cross-phase cache hits.
+fn positioned_glyph(
+    font: &FontData,
+    glyph_id: u32,
+    size: u16,
+    workers: u16,
+    phase_x: f32,
+    phase_y: f32,
+    atlas_cache: bool,
+    resources: &mut Resources,
+) -> Vec<u8> {
+    let canvas = size + 32;
+    let settings = RenderSettings { num_threads: workers, ..RenderSettings::default() };
+    let mut ctx = RenderContext::new_with(canvas, canvas, settings);
+    if glyph_id == 1 {
+        ctx.set_paint(AlphaColor::<Srgb>::from_rgba8(242, 177, 52, 255));
+    }
+    // Constant integral scene origin, fractional *glyph* pen coordinates:
+    // this varies DrawProps::positioned_transform, rather than pixel copying.
+    ctx.set_transform(Affine::translate((0.0, f64::from(size) + 8.0)));
+    ctx.glyph_run(resources, font)
+        .font_size(f32::from(size))
+        .atlas_cache(atlas_cache)
+        .hint(false)
+        .fill_glyphs(std::iter::once(Glyph {
+            id: glyph_id,
+            x: 8.0 + phase_x,
+            y: phase_y,
+        }))
+        .expect("render synthetic fractional COLRv1 glyph");
+    ctx.flush();
+    let mut pixmap = Pixmap::new(canvas, canvas);
+    ctx.render_with(
+        &mut pixmap,
+        resources,
+        RasterizerSettings {
+            target_init: TargetInit::Clear(WHITE),
+            ..RasterizerSettings::default()
+        },
+    );
+    pixmap.data_as_u8_slice().to_vec()
+}
+
+fn fractional_pixel_difference(a: &[u8], b: &[u8]) -> (usize, u8) {
+    assert_eq!(a.len(), b.len(), "comparison must use the same framebuffer size");
+    a.chunks_exact(4)
+        .zip(b.chunks_exact(4))
+        .map(|(a, b)| a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap())
+        .fold((0, 0), |(count, worst), difference| {
+            (count + usize::from(difference > 2), worst.max(difference))
+        })
+}
+
+/// Falsifier for the remaining production risk after Akula PR #289:
+///
+/// A COLR atlas key uses a constant SUBPIXEL_COLR, while a real text cursor
+/// may position the same color glyph at different fractional x/y pen offsets.
+/// Test true cold/cache-hit rendering against the uncached reference, for all
+/// four quarter-pixel phases in both axes. Do not substitute a pixel-shifted
+/// integer render for an actual fractional glyph pen coordinate.
+#[test]
+fn colr_fractional_pen_atlas_matches_uncached() {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(TEST_COLR_FONT_BASE64).expect("decode upstream synthetic font");
+    let font = FontData::new(Blob::new(Arc::new(bytes)), 0);
+    const PHASES: [f32; 4] = [0.0, 0.25, 0.5, 0.75];
+    let mut mismatches = Vec::new();
+    let mut examined = 0usize;
+    for workers in [0u16, 2] {
+        for size in [20u16, 80u16] {
+            for glyph_id in [2u32, 3] {
+                let mut cached_resources = Resources::default();
+                let mut integer_phase_atlas_entries: Option<usize> = None;
+                for phase_x in PHASES {
+                    for phase_y in PHASES {
+                        let mut direct_resources = Resources::default();
+                        let direct = positioned_glyph(
+                            &font, glyph_id, size, workers,
+                            phase_x, phase_y, false, &mut direct_resources,
+                        );
+                        let first = positioned_glyph(
+                            &font, glyph_id, size, workers,
+                            phase_x, phase_y, true, &mut cached_resources,
+                        );
+                        let first_stats = cached_resources.glyph_atlas_summary()
+                            .expect("atlas must be initialized for cached COLR");
+                        assert!(first_stats.2 > 0, "pixel-aligned COLR should have an atlas entry");
+                        if phase_x == 0.0 && phase_y == 0.0 {
+                            integer_phase_atlas_entries = Some(first_stats.2);
+                        } else {
+                            assert_eq!(
+                                Some(first_stats.2), integer_phase_atlas_entries,
+                                "fractional COLR must not allocate/cache an unkeyed phase"
+                            );
+                        }
+                        let second = positioned_glyph(
+                            &font, glyph_id, size, workers,
+                            phase_x, phase_y, true, &mut cached_resources,
+                        );
+                        let second_stats = cached_resources.glyph_atlas_summary()
+                            .expect("atlas still initialized");
+                        assert_eq!(first_stats.2, second_stats.2,
+                            "repeating a pen phase must not allocate more atlas slots");
+                        // For integral phase this is the cache miss/hit pair;
+                        // at fractional phase both calls intentionally bypass
+                        // the atlas because the key has no X/Y phase slots.
+                        let hit_parity = fractional_pixel_difference(&first, &second);
+                        let direct_parity = fractional_pixel_difference(&direct, &second);
+                        examined += 1;
+                        if hit_parity.0 > 0 || direct_parity.0 > 0 {
+                            if mismatches.len() < 24 {
+                                eprintln!(
+                                    "COLR_FRACTIONAL_MISMATCH gid={glyph_id} size={size} \
+                                     workers={workers} x={phase_x:.2} y={phase_y:.2} \
+                                     first_vs_hit_pixels={} first_vs_hit_worst={} \
+                                     direct_vs_hit_pixels={} direct_vs_hit_worst={}",
+                                    hit_parity.0, hit_parity.1,
+                                    direct_parity.0, direct_parity.1,
+                                );
+                            }
+                            mismatches.push((glyph_id, size, workers, phase_x, phase_y,
+                                hit_parity, direct_parity));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(examined, 2 * 2 * 2 * 4 * 4, "must exercise entire phase matrix");
+    assert!(
+        mismatches.is_empty(),
+        "COLR cached vs uncached fractional pen mismatch in {} / {examined} cases \
+         (channel tolerance 2/255); first examples above",
+        mismatches.len(),
+    );
+}
+
+/// Diagnostic CPU cost only; ignored in ordinary functional test runs.
+/// Uses the same synthetic COLRv1 font and production GPU-free Vello path.
+/// Compares a warm integral atlas hit, a fractional production (direct)
+/// rendering, and explicit uncached controls. This is NOT UI FPS.
+#[test]
+#[ignore = "opt-in release profiling; no CI time threshold"]
+fn benchmark_colr_fractional_fallback_cpu() {
+    use std::time::Instant;
+    use std::hint::black_box;
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(TEST_COLR_FONT_BASE64).expect("decode synthetic font");
+    let font = FontData::new(Blob::new(Arc::new(bytes)), 0);
+
+    for workers in [0u16, 2] {
+        for size in [20u16, 80u16] {
+            for glyph_id in [2u32, 3] {
+                let count = if size == 20 { 20u16 } else { 6u16 };
+                let advance = if size == 20 { 27.0f32 } else { 98.0 };
+                for (mode, phase, cache_enabled) in [
+                    ("integer_cached", 0.0f32, true),
+                    ("integer_direct", 0.0f32, false),
+                    ("fractional_policy", 0.25f32, true),
+                    ("fractional_direct", 0.25f32, false),
+                ] {
+                    let mut resources = Resources::default();
+                    let mut times = Vec::<u64>::with_capacity(96);
+                    let mut guard = 0u64;
+                    for iteration in 0..104 {
+                        let started = Instant::now();
+                        let mut ctx = RenderContext::new_with(
+                            640, 224,
+                            RenderSettings { num_threads: workers, ..RenderSettings::default() },
+                        );
+                        ctx.set_transform(Affine::translate((0.0, f64::from(size) + 12.0)));
+                        let glyphs: Vec<Glyph> = (0..count)
+                            .map(|i| Glyph {
+                                id: glyph_id,
+                                x: 10.0 + f32::from(i) * advance + phase,
+                                y: 0.0,
+                            })
+                            .collect();
+                        ctx.glyph_run(&mut resources, &font)
+                            .font_size(f32::from(size))
+                            .atlas_cache(cache_enabled)
+                            .hint(false)
+                            .fill_glyphs(glyphs.into_iter())
+                            .expect("batch synthetic COLR glyphs");
+                        ctx.flush();
+                        let mut pixmap = Pixmap::new(640, 224);
+                        ctx.render_with(
+                            &mut pixmap, &mut resources,
+                            RasterizerSettings {
+                                target_init: TargetInit::Clear(WHITE),
+                                ..RasterizerSettings::default()
+                            },
+                        );
+                        let elapsed = started.elapsed().as_micros() as u64;
+                        guard ^= u64::from(pixmap.data_as_u8_slice()[1091]);
+                        if iteration >= 8 {
+                            times.push(elapsed);
+                        }
+                    }
+                    black_box(guard);
+                    times.sort_unstable();
+                    let summary = resources.glyph_atlas_summary();
+                    let slots = summary.map_or(0, |(_, _, n)| n);
+                    if mode == "integer_cached" {
+                        assert!(slots > 0, "integer aligned COLR should populate atlas");
+                    } else if mode == "fractional_policy" {
+                        assert_eq!(slots, 0, "fractional COLR must not allocate unkeyed atlas slots");
+                    }
+                    println!(
+                        "AKULA_COLR_CPU_PROFILE gid={glyph_id} size={size} threads={workers} \
+                         mode={mode} glyphs_per_frame={count} frames={} p50_us={} p95_us={} \
+                         atlas_slots={slots}",
+                        times.len(), times[times.len() / 2],
+                        times[(times.len() * 95 / 100).min(times.len() - 1)],
+                    );
+                }
+            }
+        }
+    }
+}

@@ -28,6 +28,39 @@ impl Document {
         crate::rope::floor(&self.full, at)
     }
 
+
+    /// Return the complete body of a fenced Markdown block directly from the
+    /// persistent Rope. The editor only keeps a bounded text window for large
+    /// notes, so assembling the body from visible paragraphs would truncate it.
+    pub(in crate::ui::editor) fn copy_fenced_body(&self, opener: usize) -> Option<String> {
+        use aquilum_core::markdown::fence::Fence;
+        let first = self.line_of(opener);
+        if self.line_start(first) != opener {
+            return None;
+        }
+        let open_line = self.copy(opener..self.line_end(first));
+        let fence = Fence::open(&open_line, usize::MAX)?;
+        let first_body = first + 1;
+        if first_body >= self.count() {
+            return Some(String::new());
+        }
+        let start = self.line_start(first_body);
+        let mut end = self.len();
+        for line in first_body..self.count() {
+            let candidate = self.copy(self.line_start(line)..self.line_end(line));
+            if fence.closes(&candidate) {
+                end = if line == first_body { start } else { self.line_end(line - 1) };
+                // A CRLF line has \r just before the excluded final \n.
+                // Do not leave a stray carriage return at the copied end.
+                if end > start && self.byte(end - 1) == b'\r' {
+                    end -= 1;
+                }
+                break;
+            }
+        }
+        Some(self.copy(start..end))
+    }
+
     pub fn whole(&self) -> String {
         self.full.to_string()
     }

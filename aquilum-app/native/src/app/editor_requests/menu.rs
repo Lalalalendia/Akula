@@ -12,6 +12,7 @@ use crate::ui::menu::{Entry, Menu, MenuChoice};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditorCommand {
     Copy,
+    CopyCode { editor: WidgetId, opener: usize },
     Paste,
     InsertBook,
     InsertTable,
@@ -45,22 +46,37 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn open_editor_context_menu(&mut self, root: &mut RenderRoot, at: Point, has_selection: bool) {
+    pub(in crate::app) fn open_editor_context_menu(&mut self, root: &mut RenderRoot, at: Point, has_selection: bool, code: Option<(WidgetId, usize)>) {
         let has_frontmatter = frontmatter::end_of(&self.text).is_some();
-        let commands = vec![
-            EditorCommand::Copy,
+        let mut commands = vec![EditorCommand::Copy];
+        if let Some((editor, opener)) = code {
+            commands.push(EditorCommand::CopyCode { editor, opener });
+        }
+        commands.extend([
             EditorCommand::Paste,
             EditorCommand::InsertBook,
             EditorCommand::InsertTable,
             EditorCommand::InsertFrontmatter,
-        ];
-        let entries = [
-            Entry { label: &t("common.copy"), icon: Some(icons::COPY), disabled: !has_selection },
-            Entry { label: &t("common.paste"), icon: Some(icons::CLIPBOARD), disabled: false },
-            Entry { label: &t("editor.insertBook"), icon: Some(icons::BOOK_OPEN), disabled: false },
-            Entry { label: &t("editor.insertTable"), icon: Some(icons::TABLE), disabled: false },
-            Entry { label: &t("editor.insertFrontmatter"), icon: Some(icons::TAG), disabled: has_frontmatter },
-        ];
+        ]);
+        let labels: Vec<String> = commands.iter().map(|command| t(match command {
+            EditorCommand::Copy => "common.copy",
+            EditorCommand::CopyCode { .. } => "editor.copyCode",
+            EditorCommand::Paste => "common.paste",
+            EditorCommand::InsertBook => "editor.insertBook",
+            EditorCommand::InsertTable => "editor.insertTable",
+            EditorCommand::InsertFrontmatter => "editor.insertFrontmatter",
+        })).collect();
+        let entries: Vec<Entry<'_>> = commands.iter().zip(&labels).map(|(command, label)| {
+            let (icon, disabled) = match command {
+                EditorCommand::Copy => (icons::COPY, !has_selection),
+                EditorCommand::CopyCode { .. } => (icons::COPY, false),
+                EditorCommand::Paste => (icons::CLIPBOARD, false),
+                EditorCommand::InsertBook => (icons::BOOK_OPEN, false),
+                EditorCommand::InsertTable => (icons::TABLE, false),
+                EditorCommand::InsertFrontmatter => (icons::TAG, has_frontmatter),
+            };
+            Entry { label, icon: Some(icon), disabled }
+        }).collect();
         let menu = Menu::entries(&t("editor.actions"), &entries);
         let layer = menu.id();
         root.add_layer(menu, Menu::context_origin(at, entries.len(), self.window));
@@ -75,7 +91,7 @@ impl App {
         };
         let MenuChoice::Item(item) = choice else { return };
         root.remove_layer(layer);
-        let Some(&command) = commands.get(*item) else { return };
+        let Some(command) = commands.get(*item) else { return };
         let Some(ids) = &self.note_ids else { return };
         let body = ids.body;
         root.focus_on(Some(body.id()));
@@ -86,6 +102,20 @@ impl App {
                     && let Ok(mut cb) = arboard::Clipboard::new()
                 {
                     let _ = cb.set_text(text);
+                }
+            }
+            EditorCommand::CopyCode { editor, opener } => {
+                // Resolve lazily against the exact editor that opened this menu.
+                // Large code bodies are allocated only after the user chooses Copy.
+                let source = if body.id() == *editor {
+                    body.get(root).and_then(|widget| widget.inner().fenced_code_body_from_start(*opener))
+                } else {
+                    None
+                };
+                if let Some(source) = source
+                    && let Ok(mut cb) = arboard::Clipboard::new()
+                {
+                    let _ = cb.set_text(source);
                 }
             }
             EditorCommand::Paste => {

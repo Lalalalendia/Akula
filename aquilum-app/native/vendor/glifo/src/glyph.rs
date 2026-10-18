@@ -543,9 +543,23 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 );
                 let outline_transform = calculate_colr_transform(&metrics);
 
-                // COLR glyphs are never hinted and have no sub-pixel offset;
-                // context_color is part of the key because it affects painted layers.
-                let cache_key = colr_bitmap_cache_enabled.then(|| GlyphCacheKey {
+                // A cached COLR image is rasterized at an integer pen phase,
+                // whereas direct COLR geometry is antialiased at the actual
+                // subpixel position. Our COLR atlas key has only a sentinel,
+                // not an X/Y phase. Reusing the integer sprite at a fractional
+                // position can differ by >2/255 (Akula #305, Vello #1983).
+                //
+                // Preserve the atlas for pixel-aligned glyphs, and render
+                // fractional glyphs directly until a phase-aware COLR key and
+                // rasterization are proven pixel-correct *and* economical.
+                // Outline and bitmap glyph cache policy is not changed.
+                let placement = outline_transform.translation();
+                let colr_pixel_aligned = placement.x.is_finite()
+                    && placement.y.is_finite()
+                    && placement.x.fract() == 0.0
+                    && placement.y.fract() == 0.0;
+                let cache_key = (colr_bitmap_cache_enabled && colr_pixel_aligned)
+                    .then(|| GlyphCacheKey {
                     font_id: font_info.id,
                     font_index: font_info.index,
                     glyph_id: glyph.id,

@@ -20,6 +20,9 @@ pub use list::Item;
 pub enum Callout {
     Quote,
     Book,
+    /// Index into the existing 7-color Markdown callout palette.
+    /// Unlike the upstream Frame/Nest rewrite this keeps Akula's Quote model.
+    Typed(u8),
     Other,
 }
 

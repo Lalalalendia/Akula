@@ -38,6 +38,7 @@
     "closeSearch": "Закрыть поиск",
     "insertBook": "Вставить книгу",
     "insertTable": "Вставить таблицу",
+    "copyCode": "Копировать код",
     "insertFrontmatter": "Вставить метаданные",
     "table": {
       "menuAria": "Действия с таблицей",

@@ -56,8 +56,12 @@ impl TextEditor {
                     painter.stroke(border, &Stroke::new(size::BORDER_1), tm.block_border).draw();
                 }
             } else if !matches!(self.doc.block(a), Block::Quote { callout: Some((_, Callout::Book)), .. }) {
+                let ink = match self.doc.block(a) {
+                    Block::Quote { callout: Some((_, Callout::Typed(tone))), .. } => markdown::tone(&tm, *tone),
+                    _ => tm.bg_accent,
+                };
                 for (dx, from, to) in self.quote_bars(a, b) {
-                    painter.fill(RoundedRect::new(x + dx, from + QUOTE_INSET, x + dx + QUOTE_BAR, to - QUOTE_INSET, QUOTE_BAR / 2.0), tm.bg_accent).draw();
+                    painter.fill(RoundedRect::new(x + dx, from + QUOTE_INSET, x + dx + QUOTE_BAR, to - QUOTE_INSET, QUOTE_BAR / 2.0), ink).draw();
                 }
             }
             i = b + 1;

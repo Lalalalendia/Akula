@@ -68,8 +68,8 @@ fn quotes_nest_and_callouts_keep_their_kind() {
     assert_eq!(block(&doc, "> Простая цитата в одну строку."), &Block::Quote { marker: 2, depth: 1, callout: None, item: None });
     assert_eq!(block(&doc, "> > > Третий уровень"), &Block::Quote { marker: 6, depth: 3, callout: None, item: None });
     assert!(matches!(block(&doc, "> [!quote] Цитата"), Block::Quote { callout: Some((_, Callout::Quote)), .. }));
-    assert!(matches!(block(&doc, "> [!NOTE]"), Block::Quote { callout: Some((_, Callout::Other)), .. }));
-    assert!(matches!(block(&doc, "> [!note]+ Раскрытая по умолчанию"), Block::Quote { callout: Some((range, Callout::Other)), .. } if range.end == 11));
+    assert!(matches!(block(&doc, "> [!NOTE]"), Block::Quote { callout: Some((_, Callout::Typed(4))), .. }));
+    assert!(matches!(block(&doc, "> [!note]+ Раскрытая по умолчанию"), Block::Quote { callout: Some((range, Callout::Typed(4))), .. } if range.end == 11));
     assert!(matches!(block(&doc, "> [!custom-type] Пользовательский тип"), Block::Quote { callout: Some((_, Callout::Other)), .. }));
     assert_eq!(block(&doc, "> Цитата"), &Block::Quote { marker: 2, depth: 1, callout: None, item: None });
 }

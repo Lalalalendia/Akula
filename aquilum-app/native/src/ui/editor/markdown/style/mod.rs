@@ -92,6 +92,9 @@ pub fn style(builder: &mut RangedBuilder<'_, BrushIndex>, block: &Block, text: &
             push(builder, StyleProperty::Brush(if inside { SYNTAX } else { HIDDEN }), 0..*marker);
             match callout {
                 Some((range, Callout::Quote)) if !inside => hide(builder, range.clone(), 0.0),
+                Some((range, Callout::Typed(tone))) if !inside => {
+                    push(builder, StyleProperty::Brush(BrushIndex(TOKENS + usize::from(*tone))), range.clone());
+                }
                 Some((range, _)) if inside => push(builder, StyleProperty::Brush(SYNTAX), range.clone()),
                 _ => {}
             }
