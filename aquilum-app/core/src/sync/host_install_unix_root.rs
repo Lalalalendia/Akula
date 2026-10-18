@@ -110,6 +110,35 @@ mod tests {
     }
 
     #[test]
+    fn owner_only_flavor_never_grants_host_writer_without_privileged_broker() {
+        use crate::app_core::{Core, CoreEvent};
+        use crate::files::gate;
+        use crate::history::Source;
+        use std::sync::Arc;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("real-vault");
+        let appdata = temp.path().join("private-appdata");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&appdata).unwrap();
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        assert!(core.requires_installed_host_epoch());
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let target = root.join("MustNotCreate.md");
+        let original = root.join("Original.md");
+        fs::write(&original, b"unchanged").unwrap();
+        let error = gate::create(&core, &target, "forbidden",
+            Source::Me, None).unwrap_err();
+        assert!(format!("{error:?}").contains("privileged SQLite broker"),
+            "strict owner-only build must refuse before any host writer");
+        let error = gate::write(&core, &original, "forbidden", None,
+            Source::Me, None).unwrap_err();
+        assert!(format!("{error:?}").contains("privileged SQLite broker"));
+        assert!(!target.exists());
+        assert_eq!(fs::read(&original).unwrap(), b"unchanged");
+    }
+
+    #[test]
     fn root_owned_receipt_second_process() {
         if std::env::var_os("AKULA_B6B2_CHILD").is_none() { return; }
         let path = PathBuf::from(
