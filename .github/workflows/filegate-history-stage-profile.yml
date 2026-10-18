@@ -1,0 +1,191 @@
+name: File Gate History stages (diagnostic)
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/files/document.rs"
+      - "aquilum-app/core/src/files/gate/write.rs"
+      - "aquilum-app/core/src/history/service.rs"
+      - "aquilum-app/core/src/history/store.rs"
+      - ".github/workflows/filegate-history-stage-profile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: filegate-stage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stages:
+    name: Real gated note + two history writes stage profile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Enable diagnostic-only Rust Core feature in copied benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path(".github/bench/rope-gate-history-e2e/Cargo.toml")
+          source = manifest.read_text()
+          original = 'aquilum-core = { path = "../../../aquilum-app/core" }'
+          changed = 'aquilum-core = { path = "../../../aquilum-app/core", features = ["save-stage-probe"] }'
+          assert source.count(original) == 1
+          manifest.write_text(source.replace(original, changed))
+          PY
+          cp aquilum-app/Cargo.lock .github/bench/rope-gate-history-e2e/Cargo.lock
+          {
+            git rev-parse HEAD
+            rustc --version
+            cargo --version
+            grep -m 1 'model name' /proc/cpuinfo || true
+          } | tee environment.txt
+      - name: Build release probe (ordinary File Gate, NOT a second writer)
+        run: |
+          set -euo pipefail
+          cargo build --release --locked \
+            --manifest-path .github/bench/rope-gate-history-e2e/Cargo.toml
+      - name: Six fresh Core processes per note size
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > stage-log.txt
+          bin="target/release/akula-rope-gate-history-e2e"
+          for size in 1 8; do
+            for attempt in 1 2 3 4 5 6; do
+              "$bin" after "$size" 2>&1 | tee -a stage-log.txt
+            done
+          done
+      - name: Summarize stage distribution and verify event sequence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from collections import defaultdict
+          from pathlib import Path
+          import os
+          import re
+          import statistics
+
+          data = defaultdict(list)
+          events = []
+          expected = ("AKULA_SAVE_ATOMIC", "AKULA_SAVE_VERSION",
+                      "AKULA_SAVE_HISTORY", "AKULA_SAVE_GATE")
+          for line in Path("stage-log.txt").read_text().splitlines():
+              if line.startswith(expected):
+                  event, _, pairs = line.partition(" ")
+                  fields = dict(re.findall(r"([a-z_]+)=([^\s]+)", pairs))
+                  events.append((event, fields))
+                  continue
+              if not line.startswith("REAL_GATE_SAVE "):
+                  continue
+              outer = dict(re.findall(r"([a-z_]+)=([^\s]+)", line))
+              size = int(outer["mib"])
+              assert size in (1, 8), size
+              atomic = [d for e, d in events if e == "AKULA_SAVE_ATOMIC"]
+              versions = [d for e, d in events if e == "AKULA_SAVE_VERSION"]
+              history = [d for e, d in events if e == "AKULA_SAVE_HISTORY"]
+              gate = [d for e, d in events if e == "AKULA_SAVE_GATE"]
+              assert len(atomic) == 3, events
+              assert len(versions) == 2 and len(history) == len(gate) == 1, events
+              assert [x["kind"] for x in versions] == ["baseline", "current"]
+              assert [x["cas"] for x in atomic] == ["1", "0", "0"]
+              assert history[0]["ok"] == gate[0]["history_ok"] == "1"
+              assert int(history[0]["versions"]) == 0
+              primary = float(gate[0]["primary_ms"])
+              hist = float(gate[0]["history_ms"])
+              primary_atomic = float(atomic[0]["total_ms"])
+              inspect = float(history[0]["inspect_ms"])
+              persist = float(history[0]["persistence_ms"])
+              version_atomic = sum(float(a["total_ms"]) for a in atomic[1:])
+              version_list = sum(float(v["listing_ms"]) for v in versions)
+              note_total = float(outer["total_ms"])
+              assert primary >= primary_atomic, (primary, primary_atomic)
+              assert hist >= 0 and note_total >= primary
+              assert persist >= 0 and version_atomic >= 0 and version_list >= 0
+              data[size].append(dict(
+                  total=note_total,
+                  flatten=float(outer["flatten_ms"]),
+                  primary=primary,
+                  primary_prep=primary - primary_atomic,
+                  primary_atomic=primary_atomic,
+                  history=hist,
+                  history_inspect=inspect,
+                  history_persist=persist,
+                  history_version_atomic=version_atomic,
+                  history_version_listing=version_list,
+                  atomic_commit=sum(float(a["commit_ms"]) for a in atomic),
+                  atomic_write=sum(float(a["write_ms"]) for a in atomic),
+                  atomic_hash=sum(float(a["hash_ms"]) for a in atomic),
+                  atomic_cas=sum(float(a["cas_ms"]) for a in atomic),
+              ))
+              events.clear()
+          assert not events, "unpaired stage events"
+          assert all(len(data[size]) == 6 for size in (1, 8)), {
+              size: len(data[size]) for size in (1, 8)
+          }
+          measurements = [
+              ("total", "Real Rope → File Gate → HistoryService"),
+              ("flatten", "Rope.to_string"),
+              ("primary", "File Gate primary block"),
+              ("primary_prep", "Primary other (lock + read baseline)"),
+              ("primary_atomic", "Atomic primary publication"),
+              ("history", "HistoryService total (inside Gate)"),
+              ("history_inspect", "History inspect/catalog/load"),
+              ("history_persist", "History version actions"),
+              ("history_version_listing", "History directory listings"),
+              ("history_version_atomic", "Atomic baseline + new versions"),
+              ("atomic_hash", "BLAKE3 of three atomics"),
+              ("atomic_write", "Three atomic byte writes"),
+              ("atomic_cas", "Three atomic CAS reads"),
+              ("atomic_commit", "Three durable atomic commits"),
+          ]
+          out = [
+              "## Real save stage profile (feature-gated, diagnostic only)",
+              "",
+              "Each of six independent samples checks exact note bytes/hash,",
+              "both history versions and rejected stale-CAS with no overwrite.",
+              "",
+              "| Stage | 1 MiB p50 (ms) | 8 MiB p50 (ms) |",
+              "|---|---:|---:|",
+          ]
+          for key, title in measurements:
+              median_1 = statistics.median(x[key] for x in data[1])
+              median_8 = statistics.median(x[key] for x in data[8])
+              out.append(f"| {title} | {median_1:.3f} | {median_8:.3f} |")
+          out += [
+              "",
+              "Sub-stages are nested and **must not all be summed**.",
+              "Timing includes opt-in event logging; its overhead can distort totals.",
+              "This covers only legacy unarmed Core File Gate, never installed-host",
+              "custody/OS locks/HOLD, fault injection, UI queue or crash/restart.",
+              "Production binaries do NOT enable save-stage-probe; no new writer",
+              "or altered durability behavior is introduced.",
+              "",
+          ]
+          summary = "\n".join(out)
+          print(summary)
+          Path("stage-summary.md").write_text(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+      - name: Retain raw samples and toolchain evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: filegate-stage-profile-${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            stage-log.txt
+            stage-summary.md
+            environment.txt
