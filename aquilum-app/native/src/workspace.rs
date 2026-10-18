@@ -238,3 +238,7 @@ mod installed_host_native_tests {
 #[cfg(all(test, feature = "sync-installed-host"))]
 #[path = "workspace_host_positive_tests.rs"]
 mod installed_host_positive_tests;
+
+#[cfg(all(test, feature = "sync-installed-host-witness"))]
+#[path = "workspace_installed_witness_tests.rs"]
+mod installed_host_witness_tests;

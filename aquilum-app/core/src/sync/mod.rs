@@ -19,6 +19,8 @@ mod filegate_custody_identity;
 mod host_ledger_identity;
 #[cfg(feature = "host-custody")]
 pub(crate) mod host_custody_registry;
+#[cfg(feature = "sync-installed-host-witness")]
+pub(crate) mod host_install_witness;
 #[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
 pub(crate) mod guarded_note_write;
