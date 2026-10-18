@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
+      - 'aquilum-app/native/src/app/tests/harness.rs'
       - '.github/scripts/summarize-vello-half-tie-frame-ab.py'
       - '.github/workflows/native-vello-half-tie-frame-ab.yml'
   workflow_dispatch:
@@ -45,6 +46,7 @@ jobs:
         shell: bash
         env:
           AQ_CROSSOVER_WORKLOAD: normal
+          AQ_CROSSOVER_AB_STABLE_VAULT: '1'
           AQ_CROSSOVER_DUMP_REFERENCE_DIR: "${{ github.workspace }}/frame-ab-original"
         run: |
           set -euo pipefail
@@ -59,10 +61,14 @@ jobs:
         shell: bash
         env:
           AQ_CROSSOVER_WORKLOAD: normal
+          AQ_CROSSOVER_AB_STABLE_VAULT: '1'
           AQ_CROSSOVER_DUMP_REFERENCE_DIR: "${{ github.workspace }}/frame-ab-patched"
         run: |
           set -euo pipefail
           cargo test --release -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 2>&1 | tee "$GITHUB_WORKSPACE/half-tie-ab-patched.log"
+          # A/B is invalid if either run used a random display path.
+          test "$(grep -c 'VELLO_AB_FIXED_VAULT ' "$GITHUB_WORKSPACE/half-tie-ab-original.log")" -eq 4
+          test "$(grep -c 'VELLO_AB_FIXED_VAULT ' "$GITHUB_WORKSPACE/half-tie-ab-patched.log")" -eq 4
       - name: Quantify every channel change across 8 full frames
         shell: bash
         run: |
