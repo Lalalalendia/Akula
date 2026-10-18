@@ -1,0 +1,78 @@
+name: SYNC-TEXT-DELTA-01 local byte A/B (no S3)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/benchmarks/sync-text-delta-ab.py'
+      - '.github/workflows/sync-text-delta-ab.yml'
+      - 'docs/sync/text-delta-01-representation-ab.md'
+      - 'docs/sync/adr-0001-built-in-sync-contract.md'
+      - 'docs/sync/coord-02f-10k-parity.md'
+      - 'docs/sync/adr-0017-cooperative-os-lock-writer-lifetime.md'
+      - 'docs/sync/s3-minio-pr05-implementation.md'
+      - 'docs/performance-roadmap.md'
+      - 'aquilum-app/native/testdata/markdown-test.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-text-delta-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-text-delta:
+    name: Three bounded codecs / 42 public Markdown edits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install test-only Zstd CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+          zstd --version
+          python3 --version
+      - name: Reject bad base, corrupt bytes, oversized and two offline siblings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/sync-text-delta-ab.py --self-test-only
+      - name: Compare exact wire sizes and encode/decode on public Markdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/sync-text-delta-ab.py \
+            --repo . --output sync-text-delta-ab.jsonl --repetitions 3 \
+            | tee sync-text-delta-ab.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path("sync-text-delta-ab.jsonl").read_text().splitlines()]
+          assert len(rows) == 6 * 7, len(rows)
+          assert len({r["fixture"] for r in rows}) == 6
+          assert len({r["scenario"] for r in rows}) == 7
+          assert all(r["assurance"] == "isolated-local-roundtrip-no-V1-V2-wire-no-S3-no-File-Gate" for r in rows)
+          assert all(r["includes_envelope"] is True and r["fixture_is_public_repo_markdown"] is True for r in rows)
+          methods = {"full_zstd", "splice_zstd", "zstd_patch"}
+          assert all(set(r["modes"]) == methods for r in rows)
+          assert all(r["target_bytes"] <= 2 * 1024 * 1024 for r in rows)
+          assert all(
+            r["modes"][r["example_policy_selected"]]["wire_bytes"] <=
+            r["modes"]["full_zstd"]["wire_bytes"] for r in rows
+          )
+          assert any(r["example_policy_selected"] != "full_zstd" for r in rows)
+          assert any(r["example_policy_selected"] == "full_zstd" for r in rows)
+          print("DELTA_TEXT_AB_ACCEPTED: complete safe public-repo fixture; not a sync benchmark")
+          PY
+      - name: Upload numerical results without source content
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-sync-text-delta-01-jsonl
+          path: sync-text-delta-ab.jsonl
+          retention-days: 14
+          if-no-files-found: ignore
