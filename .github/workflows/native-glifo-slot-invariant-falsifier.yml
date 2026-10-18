@@ -1,0 +1,106 @@
+name: Glifo atlas slot translation invariance (diagnostic)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/vendor/glifo/src/renderer.rs'
+      - '.github/workflows/native-glifo-slot-invariant-falsifier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glifo-slot-invariant-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ab:
+    name: Exact all-frame guard96 A/B with unmodified renderer baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-glifo-slot-invariance-v1
+          cache-workspace-crates: true
+      - name: Install native build libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record hardware and build diagnostic once
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          rustc --version
+          grep -m1 'model name' /proc/cpuinfo || true
+          cargo test --release --locked -p aquilum-native --bin aquilum-native --no-run
+      - name: Twenty fresh real-editor all-frame guard96 processes per mode
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -uo pipefail
+          failures_base=0
+          failures_grid=0
+          unexpected=0
+          for trial in $(seq 1 20); do
+            # Rotate order across attempts to avoid test-runner thermal bias.
+            if [ "$((trial % 2))" -eq 0 ]; then order="grid base"; else order="base grid"; fi
+            for mode in $order; do
+              log="$GITHUB_WORKSPACE/glifo-slot-$mode-$trial.log"
+              if [ "$mode" = grid ]; then
+                AQ_TEST_ATLAS_SLOT_INVARIANT=1 cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
+                rc=$?
+                if ! grep -q 'GLIFO_ATLAS_SLOT_INVARIANT_ACTIVE grid=4096' "$log"; then
+                  echo "EXPERIMENT_NOT_ENABLED mode=grid trial=$trial"
+                  unexpected=$((unexpected + 1))
+                fi
+              else
+                env -u AQ_TEST_ATLAS_SLOT_INVARIANT cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
+                rc=$?
+                if grep -q 'GLIFO_ATLAS_SLOT_INVARIANT_ACTIVE' "$log"; then
+                  echo "CONTROL_CONTAMINATED trial=$trial"
+                  unexpected=$((unexpected + 1))
+                fi
+              fi
+              if [ "$rc" -eq 0 ]; then
+                echo "GLIFO_SLOT_AB_SUCCESS mode=$mode trial=$trial"
+              elif grep -q 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
+                if [ "$mode" = grid ]; then
+                  failures_grid=$((failures_grid + 1))
+                else
+                  failures_base=$((failures_base + 1))
+                fi
+                echo "GLIFO_SLOT_AB_PIXEL_FAIL mode=$mode trial=$trial"
+              else
+                unexpected=$((unexpected + 1))
+                echo "GLIFO_SLOT_AB_UNEXPECTED mode=$mode trial=$trial rc=$rc"
+                tail -n 30 "$log"
+              fi
+            done
+          done
+          echo "GLIFO_SLOT_AB baseline=$failures_base/20 normalized=$failures_grid/20 unexpected=$unexpected" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo 'Green only if baseline reproduces the pre-existing failure and normalized atlas path passes strict <=1/255 on every frame.' >> "$GITHUB_STEP_SUMMARY"
+          test "$unexpected" -eq 0
+          test "$failures_base" -gt 0
+          test "$failures_grid" -eq 0
+      - name: Preserve all release-test logs regardless of outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glifo-slot-invariance-${{ github.sha }}
+          path: glifo-slot-*.log
+          retention-days: 14
+          if-no-files-found: warn
