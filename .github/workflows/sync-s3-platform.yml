@@ -13,6 +13,7 @@ on:
       - "aquilum-app/core/src/sync/guarded_note_write.rs"
       - "aquilum-app/core/src/sync/guarded_editor.rs"
       - "aquilum-app/core/src/app_core.rs"
+      - "aquilum-app/core/src/history/service.rs"
       - "aquilum-app/core/src/files/gate/write.rs"
       - "aquilum-app/core/src/files/gate/moves.rs"
       - "aquilum-app/core/src/files/gate/trash.rs"
@@ -54,6 +55,11 @@ jobs:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: sync-s3-native-${{ matrix.os }}-v1
           cache-workspace-crates: true
+      - name: Prove local host custody without AWS SDK on Windows and macOS
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --features host-custody host_custody_registry::tests -- --nocapture
+          cargo test --locked -p aquilum-core --features host-custody host_core_epoch_tests -- --nocapture
       - name: Compile real S3 feature and verify registered custody / child OS process
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3 profile_binding::tests -- --nocapture
