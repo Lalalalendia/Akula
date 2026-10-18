@@ -6,6 +6,7 @@ on:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
       - 'aquilum-app/core/src/sync/profile_binding.rs'
       - 'aquilum-app/core/src/sync/host_admission.rs'
+      - 'aquilum-app/core/src/sync/s3_preimage_capture.rs'
       - 'aquilum-app/core/src/sync/host_custody_registry.rs'
       - 'aquilum-app/core/src/sync/journal.rs'
       - 'aquilum-app/core/src/sync/local_create_tests.rs'
@@ -227,6 +228,12 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 profile_binding::tests
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::guarded_update_plan::tests
+      - name: Verify S3-bound protected original capture and denial cases
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 s3_preimage_capture::tests -- --nocapture
       - name: Two independent S3 clients CAS, conflicts and lost ACK
         shell: bash
         working-directory: aquilum-app

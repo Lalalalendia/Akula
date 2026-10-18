@@ -76,4 +76,5 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_JOB_TIMING_SAMPLE: '1'
         run: node .github/scripts/ci-run-budget.cjs
