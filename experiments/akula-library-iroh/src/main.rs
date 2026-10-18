@@ -1,6 +1,6 @@
 //! Akula Library research tool: explicit two-process, direct-UDP transfer only.
 //! NO discovery, NO public relay, NO production File Gate integration.
-use akula_library_iroh_lab::{Book, QuotaState, Server, direct_endpoint, get_parts, manifest_from, durable::DurableDownload};
+use akula_library_iroh_lab::{Book, QuotaState, Server, direct_endpoint, get_parts, manifest_from, durable::DurableDownload, persistent_quota::PersistentQuota};
 use anyhow::{Context, Result, bail, ensure};
 use iroh::{EndpointAddr, EndpointId, SecretKey};
 use std::{collections::{HashMap, HashSet}, env, fs, io::{Read, Write}, net::SocketAddr, path::Path, str::FromStr};
@@ -77,16 +77,19 @@ async fn main() -> Result<()> {
             let key = read_key(Path::new(&take(&mut flags, "key")?))?;
             let book = read_book(Path::new(&take(&mut flags, "book")?))?;
             let receiver = EndpointId::from_str(&take(&mut flags, "allow")?)?;
+            let quota_dir = take(&mut flags, "quota-state")?;
             let bind_addr: SocketAddr = take_or(&mut flags, "bind", "127.0.0.1:0").parse()?;
             let global_quota: u64 = take_or(&mut flags, "global-quota", "67108864").parse()?;
             let peer_quota: u64 = take_or(&mut flags, "peer-quota", "33554432").parse()?;
             assert_no_flags(&flags)?;
+            // Open and lock the journal before allowing any connections.
+            let quota = PersistentQuota::open(Path::new(&quota_dir), key.public(), global_quota, peer_quota)?;
             let endpoint = direct_endpoint(key, bind_addr).await?;
             let sock = endpoint.bound_sockets().into_iter().find(|s| s.is_ipv4()).context("IPv4 bind failed")?;
             // The listener may bind 0.0.0.0; for another host the operator must use the host's routable IP.
             println!("READY id={} addr={} hash={}", endpoint.id(), sock, hex_digest(&book.manifest.digest));
             std::io::stdout().flush()?;
-            let server = Server::new(book, HashSet::from([receiver]), QuotaState::new(global_quota, peer_quota));
+            let server = Server::new(book, HashSet::from([receiver]), QuotaState::new(global_quota, peer_quota)).with_persistent_quota(quota);
             server.run(endpoint).await;
         }
         "fetch" => {
