@@ -221,6 +221,18 @@ jobs:
           tar -tzf Aquilum_${{ matrix.arch }}.app.tar.gz | head -1 | grep -q '^Aquilum.app/'
           ls -la
 
+      - name: Verify pinned Akula publisher and notarized DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(dist/Aquilum_*_${{ matrix.arch }}.dmg)
+          if [[ "${#dmgs[@]}" -ne 1 ]]; then
+            echo "::error::Expected precisely one macOS DMG for ${{ matrix.arch }}"
+            exit 1
+          fi
+          bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}"
+
       - name: Install from DMG, launch, quit with Cmd+Q
         timeout-minutes: 10
         run: |
