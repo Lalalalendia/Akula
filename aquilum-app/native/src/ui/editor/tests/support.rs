@@ -121,6 +121,24 @@ pub(super) fn click(root: &mut RenderRoot, x: f64, y: f64) {
     gesture(root, (x, y), (x, y), 1);
 }
 
+pub(super) fn right_click(root: &mut RenderRoot, x: f64, y: f64) {
+    let mut state = pointer_state((x, y), 1);
+    pointer_move(root, &state);
+    state.buttons.insert(PointerButton::Secondary);
+    root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+        pointer: mouse(),
+        button: Some(PointerButton::Secondary),
+        state: state.clone(),
+    }));
+    state.buttons.remove(PointerButton::Secondary);
+    root.handle_pointer_event(PointerEvent::Up(PointerButtonEvent {
+        pointer: mouse(),
+        button: Some(PointerButton::Secondary),
+        state,
+    }));
+    let _ = root.redraw();
+}
+
 pub(super) fn drag(root: &mut RenderRoot, from: (f64, f64), to: (f64, f64)) {
     gesture(root, from, to, 1);
 }

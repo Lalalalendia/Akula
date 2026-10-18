@@ -28,6 +28,7 @@ use crate::ui::theme;
 mod api;
 mod build;
 mod caret;
+mod code_copy;
 mod edit;
 mod find;
 mod matching;
