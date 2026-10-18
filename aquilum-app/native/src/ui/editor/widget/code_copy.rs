@@ -1,6 +1,17 @@
 use super::*;
 
 impl TextEditor {
+    // The popup carries only the opener offset; avoid cloning large code bodies
+    // when the user merely right-clicks or opens an unrelated menu action.
+    fn fenced_code_start(&self, index: usize) -> Option<usize> {
+        if !self.doc.block(index).is_code() {
+            return None;
+        }
+        let (first, _) = self.run(index, Block::is_code, |block| matches!(block, Block::Code { first: true, .. }));
+        matches!(self.doc.block(first), Block::Code { first: true, fence: true, .. })
+            .then_some(self.doc.paragraph(first).start)
+    }
+
     // Indented-code normalization is not yet covered by our Markdown tests.
     // Restrict the copy action to fenced blocks where the body is unambiguous.
     fn fenced_code_body(&self, index: usize) -> Option<String> {
@@ -24,7 +35,17 @@ impl TextEditor {
         Some(body)
     }
 
-    pub(super) fn fenced_code_body_at(&self, point: Point) -> Option<String> {
+    pub fn fenced_code_body_from_start(&self, opener: usize) -> Option<String> {
+        let index = self.doc.at_offset(opener);
+        if self.doc.paragraph(index).start != opener
+            || !matches!(self.doc.block(index), Block::Code { first: true, fence: true, .. })
+        {
+            return None;
+        }
+        self.fenced_code_body(index)
+    }
+
+    pub(super) fn fenced_code_start_at(&self, point: Point) -> Option<usize> {
         let index = self.index_at(point)?;
         let paragraph = self.doc.paragraph(index);
         if point.y < self.doc.top(index) || point.y >= self.doc.bottom(index)
@@ -32,7 +53,7 @@ impl TextEditor {
         {
             return None;
         }
-        self.fenced_code_body(index)
+        self.fenced_code_start(index)
     }
 }
 
@@ -50,6 +71,9 @@ mod tests {
         }
         assert_eq!(editor.fenced_code_body(0), None);
         assert_eq!(editor.fenced_code_body(6), None);
+        let opener = editor.fenced_code_start(3).expect("code opener");
+        assert_eq!(editor.fenced_code_body_from_start(opener).as_deref(), Some(expected));
+        assert_eq!(editor.fenced_code_body_from_start(opener + 1), None);
         assert_eq!(editor.text(), source, "copying must not edit the note");
     }
 

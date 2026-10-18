@@ -9,10 +9,10 @@ use crate::ui::editor::{TableCommand, TextEditor};
 use crate::ui::icons;
 use crate::ui::menu::{Entry, Menu, MenuChoice};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditorCommand {
     Copy,
-    CopyCode(String),
+    CopyCode { editor: WidgetId, opener: usize },
     Paste,
     InsertBook,
     InsertTable,
@@ -46,11 +46,11 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn open_editor_context_menu(&mut self, root: &mut RenderRoot, at: Point, has_selection: bool, code: Option<String>) {
+    pub(in crate::app) fn open_editor_context_menu(&mut self, root: &mut RenderRoot, at: Point, has_selection: bool, code: Option<(WidgetId, usize)>) {
         let has_frontmatter = frontmatter::end_of(&self.text).is_some();
         let mut commands = vec![EditorCommand::Copy];
-        if let Some(source) = code {
-            commands.push(EditorCommand::CopyCode(source));
+        if let Some((editor, opener)) = code {
+            commands.push(EditorCommand::CopyCode { editor, opener });
         }
         commands.extend([
             EditorCommand::Paste,
@@ -60,7 +60,7 @@ impl App {
         ]);
         let labels: Vec<String> = commands.iter().map(|command| t(match command {
             EditorCommand::Copy => "common.copy",
-            EditorCommand::CopyCode(_) => "editor.copyCode",
+            EditorCommand::CopyCode { .. } => "editor.copyCode",
             EditorCommand::Paste => "common.paste",
             EditorCommand::InsertBook => "editor.insertBook",
             EditorCommand::InsertTable => "editor.insertTable",
@@ -69,7 +69,7 @@ impl App {
         let entries: Vec<Entry<'_>> = commands.iter().zip(&labels).map(|(command, label)| {
             let (icon, disabled) = match command {
                 EditorCommand::Copy => (icons::COPY, !has_selection),
-                EditorCommand::CopyCode(_) => (icons::COPY, false),
+                EditorCommand::CopyCode { .. } => (icons::COPY, false),
                 EditorCommand::Paste => (icons::CLIPBOARD, false),
                 EditorCommand::InsertBook => (icons::BOOK_OPEN, false),
                 EditorCommand::InsertTable => (icons::TABLE, false),
@@ -104,10 +104,18 @@ impl App {
                     let _ = cb.set_text(text);
                 }
             }
-            EditorCommand::CopyCode(text) => {
-                // Clipboard-only: do not signal a document edit or autosave.
-                if let Ok(mut cb) = arboard::Clipboard::new() {
-                    let _ = cb.set_text(text.clone());
+            EditorCommand::CopyCode { editor, opener } => {
+                // Resolve lazily against the exact editor that opened this menu.
+                // Large code bodies are allocated only after the user chooses Copy.
+                let source = if body.id() == *editor {
+                    body.get(root).and_then(|widget| widget.inner().fenced_code_body_from_start(*opener))
+                } else {
+                    None
+                };
+                if let Some(source) = source
+                    && let Ok(mut cb) = arboard::Clipboard::new()
+                {
+                    let _ = cb.set_text(source);
                 }
             }
             EditorCommand::Paste => {
