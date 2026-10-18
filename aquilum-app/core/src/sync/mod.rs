@@ -6,6 +6,9 @@
 mod core_scan;
 mod dag;
 mod delta;
+// Deliberately isolated, versioned content representation. Not V1/V2 or File Gate.
+#[cfg(feature = "sync-text-delta")]
+pub(crate) mod text_delta_codec;
 mod download;
 mod dag_store;
 pub mod fake;
