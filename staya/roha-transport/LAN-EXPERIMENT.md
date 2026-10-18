@@ -68,3 +68,42 @@ cargo clippy --all-targets -- -D warnings
 ## Scope
 
 No persistent key vault, QR enrollment, discovery, file access, multi-device group, NAT punch, dynamic address selection or automatic sync. These belong to NET-DIRECT-13b through 13g. CI executes isolated process tests; tests involving different physical computers still require a separate report.
+
+## Two physical computers: acceptance checklist (NET-DIRECT-13b)
+
+The pre-built **laboratory** executables are available as GitHub Actions artifacts for seven days, for successful checks on this branch: `staya-lan-windows-x86_64-lab` and `staya-lan-linux-x86_64-lab`. They are not an installer or production build. Each bundle contains an executable and its SHA-256 digest. Verify the digest before use, and do not run binaries from failed or unknown workflow revisions.
+
+### Setup
+
+1. Place Akula-1 and Akula-2 on the **same trusted LAN**, preferably wired to the same router or switch. Turn off Wi-Fi client isolation. Keep the local network working while disconnecting the router's WAN uplink. Do not turn off the local router or DHCP service.
+2. Create a separate, private working directory on each PC, and **do not place key files in a shared folder**. On Windows use a private directory restricted to your user account; the laboratory CLI does not yet enforce Windows ACLs. Do not reuse these experimental keys for real content.
+3. Run `staya-lan gen-key-file ./akula1.key` on A and `staya-lan gen-key-file ./akula2.key` on B (use `staya-lan.exe` on Windows). Write down **only** their displayed public endpoint IDs, and exchange them by a trusted channel. Never exchange `*.key`.
+4. Verify both PCs have LAN IPv4 addresses and can exchange ordinary packets. Permit *inbound UDP 42424 only from A's LAN IP* to B; permit mDNS UDP 5353 on the trusted local interface as needed. Do not forward ports through the internet-facing router.
+
+### Test L01: manual direct QUIC without internet
+
+On B: `staya-lan serve @./akula2.key A_ENDPOINT_ID 0.0.0.0:42424`.
+On A: `staya-lan ping @./akula1.key B_ENDPOINT_ID B_LAN_IPV4:42424`.
+
+Pass condition: A displays `direct_lan_ping_ok`, B displays `ping_ok`, relay remains disabled. Record both operating systems and both LAN IP ranges, but omit precise personal IPs from any public report.
+
+### Test L02: automatic discovery → QUIC
+
+Stop B's manual server, then on B start:
+`staya-lan serve-mdns @./akula2.key A_ENDPOINT_ID 0.0.0.0:42424 B_LAN_IPV4`.
+
+On A (knowing only the **already authorized** B EndpointId, not its current IP):
+`staya-lan ping-discovered @./akula1.key B_ENDPOINT_ID 10`.
+
+Pass condition: A displays `direct_lan_ping_ok peer=... via=mdns relay=disabled` and B displays `ping_ok` with the same peer; traffic is direct. A discovery response alone is **not** sufficient.
+
+### Negative tests and fallback
+
+- With an incorrect B EndpointId on A, neither a manual nor automatic ping may succeed.
+- With a different A identity not in B's allowlist, the connection must fail; this test does not grant file access.
+- Disable multicast on the LAN or block mDNS on a test network: `ping-discovered` must fail safely; manual `ping` by the known direct IP must still work.
+- Block inbound UDP 42424 on B: connection must fail in bounded time. Restore the firewall afterward.
+- Restart both endpoints using the **same protected local key files**, then repeat the direct test. Never delete a real synchronized file during laboratory tests.
+- Record the exact Git commit, artifact SHA256, operating systems, test name, exit codes, presence/absence of relay, firewall state, and whether WAN was disconnected. Report success only if both endpoints exchanged QUIC PING/PONG.
+
+**Not yet demonstrated:** cross-provider NAT traversal, two true physical PCs, safe product-grade enrollment and key storage, or file synchronization. None of these is implied by virtual network-namespace success.
