@@ -153,7 +153,7 @@ fn armed_document_write_crash_intent_blocks_reopen_before_automatic_reconcile() 
     let result = core.documents.open(&core, &note, 0);
     assert!(matches!(result, Err(HubError::Session(SessionError::Disk {
         code: "needs_review", ..
-    }))), "reopen bypassed durable write HOLD: {result:?}");
+    }))), "reopen bypassed durable write HOLD");
     assert_eq!(std::fs::read(&note).unwrap(), b"published-but-unconfirmed");
     let store = DocumentStore::open(&data.join("documents.sqlite3")).unwrap();
     assert_eq!(store.write_intent(&key).unwrap().unwrap().proposed_hash, proposed);
