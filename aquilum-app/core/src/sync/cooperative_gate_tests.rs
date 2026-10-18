@@ -219,6 +219,70 @@ fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_k
 }
 
 #[test]
+fn guarded_note_write_notifies_host_after_releasing_external_os_lock() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let temp = tempfile::tempdir().unwrap();
+    let selected_root = temp.path().join("registered-vault");
+    fs::create_dir(&selected_root).unwrap();
+    let root = crate::search::paths::canonical_path(&selected_root);
+    let note = root.join("Guarded.md");
+    fs::write(&note, b"existing-not-overwritten-until-admitted").unwrap();
+    let scope = anchor_for(&temp, &root);
+    let appdata = temp.path().join("appdata");
+    fs::create_dir_all(&appdata).unwrap();
+
+    let event_seen = Arc::new(AtomicBool::new(false));
+    let seen = Arc::clone(&event_seen);
+    let for_callback = scope.clone();
+    let core = Core::open(&appdata, Arc::new(move |event: CoreEvent| {
+        if matches!(event, CoreEvent::NoteHistoryChanged(_)) {
+            // A real synchronous UI callback may launch another operation.
+            // Holding the non-recursive external OS lock here would deadlock
+            // or cause a false "busy" refusal.
+            let pin = PinnedProbeRoot::open(&for_callback).unwrap();
+            let guard = pin.try_lock().unwrap();
+            assert!(guard.is_some(), "host callback executed under held OS lock");
+            seen.store(true, Ordering::SeqCst);
+        }
+    }));
+    core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+    let admitted = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let vault = VaultId::new();
+    let mut receipt = SqliteCustodyIdentityStore::open(
+        &admitted, &appdata.join("custody.sqlite"),
+    ).unwrap();
+    receipt.bind_observed(&admitted, vault, &scope).unwrap();
+    let content = "new content with substantial history ".repeat(100);
+    gate::write_with_registered_custody(
+        &core, &admitted, &receipt, vault, &scope,
+        &note, &content, None, Source::Me, Some("guarded"),
+    ).unwrap();
+    assert_eq!(fs::read_to_string(&note).unwrap(), content);
+    assert!(core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0);
+    assert!(event_seen.load(Ordering::SeqCst),
+        "successful history persistence must announce after OS release");
+
+    // Reject an aliased parent with the same reachable bytes; the external
+    // custody identity does not authorize following note-folder symlinks.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        fs::create_dir(root.join("genuine")).unwrap();
+        fs::write(root.join("genuine").join("Other.md"), b"still safe").unwrap();
+        symlink(root.join("genuine"), root.join("alias")).unwrap();
+        assert!(gate::write_with_registered_custody(
+            &core, &admitted, &receipt, vault, &scope,
+            &root.join("alias").join("Other.md"), "forbidden",
+            None, Source::Me, None,
+        ).is_err());
+        assert_eq!(
+            fs::read(root.join("genuine").join("Other.md")).unwrap(),
+            b"still safe"
+        );
+    }
+}
+
+#[test]
 fn oslock_cooperative_held_receipt_rejects_a_replaced_lock_before_any_closure() {
     let temp = tempfile::tempdir().unwrap();
     let selected_root = temp.path().join("vault");
