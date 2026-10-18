@@ -1,0 +1,94 @@
+name: Vello outline atlas physical-pixel trace
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-outline-texel-trace.yml'
+      - 'aquilum-app/native/vendor/vello_cpu/src/fine/mod.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-outline-texel-trace-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  outline-texel:
+    name: Trace cached mask lookup at first bad guard96 pixel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-guard96-repro
+          cache-workspace-crates: true
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Capture environment
+        shell: bash
+        run: |
+          {
+            git rev-parse HEAD
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+          } | tee vello-atlas-pixel-runner.txt
+      - name: Twelve independent guarded UI frames with atlas neighborhood logs
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+          AQ_TRACE_ATLAS_PIXEL: '444,537'
+        run: |
+          set -uo pipefail
+          failures=0
+          unexpected=0
+          traced=0
+          for attempt in $(seq 1 12); do
+            log="$GITHUB_WORKSPACE/vello-atlas-pixel-$attempt.log"
+            if AQ_CROSSOVER_OUT="$GITHUB_WORKSPACE/vello-texel-png/attempt-$attempt" cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+              rc=0
+            else
+              rc=$?
+            fi
+            if [ "$rc" -eq 0 ]; then
+              :
+            elif grep -q 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
+              failures=$((failures + 1))
+            else
+              unexpected=$((unexpected + 1))
+              echo "ATLAS_PIXEL_UNEXPECTED trial=$attempt rc=$rc"
+              tail -n 25 "$log"
+            fi
+            if grep -q 'VELLO_ATLAS_TEXEL target=(444,537)' "$log"; then
+              traced=$((traced + 1))
+            fi
+          done
+          echo "ATLAS_PIXEL diagnostic_red=$failures/12 traced_processes=$traced/12 unexpected=$unexpected" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo 'Green means the diagnostic produced valid evidence; a red strict-pixel test remains a product failure.' >> "$GITHUB_STEP_SUMMARY"
+          grep -h 'VELLO_ATLAS_TEXEL target=(444,537)' "$GITHUB_WORKSPACE"/vello-atlas-pixel-*.log | head -n 60 >> "$GITHUB_STEP_SUMMARY" || true
+          test "$unexpected" -eq 0
+          test "$traced" -gt 0
+          test "$failures" -gt 0
+      - name: Preserve logs and pixel-difference screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-atlas-texel-${{ github.sha }}
+          path: |
+            vello-atlas-pixel-runner.txt
+            vello-atlas-pixel-*.log
+            vello-texel-png/**/*.png
+          retention-days: 14
+          if-no-files-found: warn
