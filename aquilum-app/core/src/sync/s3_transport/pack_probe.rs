@@ -1,8 +1,8 @@
-//! SYNC-05d2f experiment: bounded immutable packed objects (TEST-ONLY).
+//! SYNC-COORD-02b: bounded immutable pack verification, read-only only.
 //!
-//! This is NOT an Akula S3 pack protocol, manifest type, file writer, or
-//! RemoteStore. It only benchmarks whether fetching 128 revision+blob pairs
-//! as one content-addressed S3 object reduces the 20k-object cold read cost.
+//! The pure parser is used by a V1-pinned advisory S3 sidecar verifier;
+//! the pack sender/builder is kept test-only. This is NOT a new remote
+//! manifest, authenticated writer, File Gate operation or cloud publisher.
 //! Each member and the envelope must match the caller's independently
 //! verified immutable S3 manifest references. The in-memory test descriptor
 //! is not a durable trust root and may NOT grant deletion, publication,
@@ -10,9 +10,11 @@
 
 use crate::sync::{
     DagError, RevisionDag, RevisionId, RevisionOperation, RevisionRecord,
-    S3Keyspace, S3RevisionRefV1,
+    S3RevisionRefV1,
 };
 use std::collections::BTreeSet;
+#[cfg(test)]
+use crate::sync::S3Keyspace;
 
 const MAGIC: &[u8; 8] = b"AKPKEXP1";
 pub(super) const MAX_PACK_BYTES: usize = 512 * 1024;
@@ -47,11 +49,13 @@ impl From<DagError> for PackProbeError {
 ///   }
 /// The pack does not include user filenames or any power to create/delete
 /// an Akula file. The canonical RevisionRecord JSON is checked when read.
+#[cfg(test)]
 pub(super) struct PackBuilder {
     bytes: Vec<u8>,
     references: Vec<S3RevisionRefV1>,
 }
 
+#[cfg(test)]
 impl PackBuilder {
     pub fn new() -> Self {
         let mut bytes = Vec::with_capacity(HEADER_BYTES);
