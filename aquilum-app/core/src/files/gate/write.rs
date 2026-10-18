@@ -137,6 +137,14 @@ pub fn name_version(
     version: Option<&str>,
     name: &str,
 ) -> Option<String> {
+    // Naming a version mutates durable .aquilum history metadata. The
+    // cooperative writer authorizes only an existing-note CAS save, not
+    // arbitrary history edits. A cold Core with enrolled custody must deny
+    // this entrypoint as well; its Option API represents refusal as None.
+    // This does not fence direct HistoryService users or concurrent activation.
+    if core.documents.requires_guarded_participant_hold() {
+        return None;
+    }
     let named = core.history.name(&|| core.known_roots(), path, version, name);
     if named.is_some() {
         announce_history(core, path);
