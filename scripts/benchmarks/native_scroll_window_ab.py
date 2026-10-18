@@ -32,7 +32,7 @@ def fixture(cover: bool, emoji_colrv1: bool = False) -> str:
         f"Text {n}: Akula scrolling Unicode and кириллица. "
         "Some **bold** and *italic* Markdown, [[Akula]] links, "
         "and a long sentence that must wrap across the editor column. "
-        f"The second line keeps the document scrollable. {emoji}\n\n"
+        f"The second line keeps the document scrollable.{(' ' + emoji) if emoji else ''}\n\n"
         for n in range(300)
     )
     return header + paragraphs
