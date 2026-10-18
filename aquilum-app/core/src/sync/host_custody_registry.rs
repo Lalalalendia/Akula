@@ -214,15 +214,23 @@ impl SharedHostCustodyRegistry {
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(HostCustodyError::InvalidRecord);
         }
+        self.identity.recheck()?;
         let key = record.root_identity.key();
         let digest = blake3::hash(&bytes).to_hex().to_string();
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let sidecars = self.identity.sidecars()?;
+        self.identity.recheck()?;
         let existing = lookup(&tx, &key, &record.root_path)?;
         if let Some(previous) = existing {
             if previous != *record {
                 return Err(HostCustodyError::ConflictingEnrollment);
             }
+            self.identity.recheck()?;
+            if self.identity.sidecars()? != sidecars {
+                return Err(HostCustodyError::InvalidHostLocation);
+            }
             tx.commit()?;
+            self.identity.recheck()?;
             return Ok(());
         }
         // The same physical host registry must not register a parent and a
@@ -238,7 +246,12 @@ impl SharedHostCustodyRegistry {
              VALUES (?1, ?2, ?3, ?4)",
             params![key, record.root_path, bytes, digest],
         )?;
+        self.identity.recheck()?;
+        if self.identity.sidecars()? != sidecars {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
         tx.commit()?;
+        self.identity.recheck()?;
         Ok(())
     }
 
@@ -256,9 +269,12 @@ impl SharedHostCustodyRegistry {
         if !root_identity.valid() {
             return Err(HostCustodyError::InvalidRecord);
         }
+        self.identity.recheck()?;
         let root = normalized_root_for_lookup(root_path)?;
         let transaction =
             self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let sidecars = self.identity.sidecars()?;
+        self.identity.recheck()?;
         // Enrollment cannot commit between lookup and the full publication.
         if lookup(&transaction, &root_identity.key(), &root)?.is_some() {
             return Err(HostCustodyError::ConflictingEnrollment);
@@ -269,7 +285,18 @@ impl SharedHostCustodyRegistry {
             return Err(HostCustodyError::ConflictingEnrollment);
         }
         let outcome = operation();
+        // Fail closed if the shared host ledger or WAL/SHM name changed while
+        // the primary note and HistoryService were in flight. The caller must
+        // treat an error after operation() as ambiguous/NeedsReview, not retry.
+        self.identity.recheck()?;
+        if self.identity.sidecars()? != sidecars {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
         transaction.commit()?;
+        self.identity.recheck()?;
+        if self.identity.sidecars()? != sidecars {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
         Ok(outcome)
     }
 
@@ -280,6 +307,7 @@ impl SharedHostCustodyRegistry {
         if !root_identity.valid() {
             return Err(HostCustodyError::InvalidRecord);
         }
+        self.identity.recheck()?;
         let root = normalized_root_for_lookup(root_path)?;
         let found = lookup(&self.conn, &root_identity.key(), &root)?;
         if let Some(ref record) = found {
@@ -287,6 +315,7 @@ impl SharedHostCustodyRegistry {
                 return Err(HostCustodyError::ConflictingEnrollment);
             }
         }
+        self.identity.recheck()?;
         Ok(found)
     }
 }
