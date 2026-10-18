@@ -43,6 +43,16 @@ fn existing_note(
     {
         return Err(deny("cooperative note write requires bounded content and a BLAKE3 CAS hash"));
     }
+    // HistoryService owns .aquilum below each vault, not the editor or a
+    // remote revision. Windows casefolds this name; deny portable case
+    // aliases and nested instances BEFORE resolving or opening any file.
+    // An immutable path/lock check must never authorize writes into the
+    // internal version store or its metadata.
+    if relative.as_str().split('/').any(|part|
+        part.eq_ignore_ascii_case(crate::history::AQUILUM_FOLDER))
+    {
+        return Err(deny("cooperative note write refuses the private .aquilum history namespace"));
+    }
     let path = resolve_no_symlinks(root, relative)
         .map_err(|error| deny(format!("unsafe registered note path: {error:?}")))?;
     if !is_note(&path) {
@@ -157,6 +167,107 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn guarded_note_write_denies_casefolded_private_history_namespace() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        fs::create_dir_all(&root).unwrap();
+        // macOS exposes /var as a symlink to /private/var: compare physical,
+        // canonical paths, not two different spellings of the same object.
+        let root = fs::canonicalize(root).unwrap();
+        let history = root.join(".aquilum").join("history");
+        fs::create_dir_all(&history).unwrap();
+        let protected = history.join("Protected.md");
+        fs::write(&protected, b"immutable-internal-version").unwrap();
+        let expected = blake3::hash(b"immutable-internal-version").to_hex().to_string();
+        // Exact private path, NTFS case alias, and nested hidden history
+        // names must be rejected BEFORE any protected file is opened.
+        for relative in [
+            ".aquilum/history/Protected.md",
+            ".AQUILUM/history/Protected.md",
+            ".AqUiLuM/history/Protected.md",
+            "notes/.aquilum/Protected.md",
+        ] {
+            let path = SyncRelativePath::parse(relative).unwrap();
+            assert!(existing_note(&root, &path, &expected, "forbidden").is_err(),
+                "{relative} was accepted as an editable note");
+            assert_eq!(fs::read(&protected).unwrap(), b"immutable-internal-version");
+        }
+        let note = root.join("Normal.md");
+        fs::write(&note, b"normal user note").unwrap();
+        let expected = blake3::hash(b"normal user note").to_hex().to_string();
+        assert_eq!(
+            existing_note(&root, &SyncRelativePath::parse("Normal.md").unwrap(),
+                &expected, "ordinary edit").unwrap(),
+            note,
+            "deny the private namespace without blocking ordinary notes",
+        );
+    }
+
+    #[test]
+    fn guarded_note_write_delivers_history_event_only_after_os_unlock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("appdata");
+        let selected_root = temp.path().join("vault");
+        fs::create_dir_all(&selected_root).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        let root = crate::search::paths::canonical_path(&selected_root);
+        let note = root.join("Guarded.md");
+        fs::write(&note, b"old note").unwrap();
+        let physical = PinnedProbeRoot::open(&root).unwrap().identity();
+        let scope = temp.path().join("external").join(scoped_leaf(physical));
+        fs::create_dir_all(&scope).unwrap();
+        let lock = scope.join(LOCK_NAME);
+        fs::write(&lock, b"existing cooperative lock").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        // Custody policy rejects aliased ancestors such as macOS /var.
+        // Use the real scope path in both app-private binding and OS checks.
+        #[cfg(unix)]
+        let scope = fs::canonicalize(scope).unwrap();
+
+        let seen = Arc::new(AtomicBool::new(false));
+        let seen_from_callback = Arc::clone(&seen);
+        let scope_from_callback = scope.clone();
+        let core = Core::open(&data, Arc::new(move |event: CoreEvent| {
+            if matches!(event, CoreEvent::NoteHistoryChanged(_)) {
+                // A synchronous native host listener must be allowed to
+                // start another custody operation without reentrant deadlock.
+                let pinned = PinnedProbeRoot::open(&scope_from_callback).unwrap();
+                let held = pinned.try_lock().unwrap();
+                assert!(held.is_some(), "history event emitted under the held OS lock");
+                seen_from_callback.store(true, Ordering::SeqCst);
+            }
+        }));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut custody = SqliteCustodyIdentityStore::open(
+            &admission, &data.join("custody.sqlite"),
+        ).unwrap();
+        let vault = VaultId::new();
+        custody.bind_observed(&admission, vault, &scope).unwrap();
+
+        let content = "changed guarded note and history ".repeat(100);
+        let receipt = save_existing_note_under_custody(
+            &admission, &custody, vault, &scope,
+            &SyncRelativePath::parse("Guarded.md").unwrap(),
+            &content, &blake3::hash(b"old note").to_hex().to_string(),
+            Source::Me, Some("guarded-saved-version"),
+        );
+        assert!(receipt.is_ok(), "guarded CAS publication failed: {receipt:?}");
+        assert_eq!(fs::read_to_string(&note).unwrap(), content);
+        assert!(core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0);
+        assert!(seen.load(Ordering::SeqCst),
+            "HistoryService must publish its event after OS custody is released");
+        assert_eq!(fs::read(&lock).unwrap(), b"existing cooperative lock");
+    }
+
+    #[test]
     fn guarded_note_write_requires_receipt_and_reports_history_failure_as_uncertain() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
@@ -180,6 +291,11 @@ mod tests {
             fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         }
+
+        // Custody policy rejects aliased ancestors such as macOS /var.
+        // Use the real scope path in both app-private binding and OS checks.
+        #[cfg(unix)]
+        let scope = fs::canonicalize(scope).unwrap();
 
         let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
         let mut custody = SqliteCustodyIdentityStore::open(
