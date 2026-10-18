@@ -13,6 +13,12 @@ use crate::sync::{
 };
 use crate::sync::host_admission::RegisteredReadAdmission;
 use crate::sync::profile_binding::SqliteRegisteredS3Bindings;
+use crate::sync::filegate_custody_identity::SqliteCustodyIdentityStore;
+use crate::sync::protection_store::{ProtectionOutcome, SqliteProtectionStore};
+use crate::sync::s3_preimage_capture::{
+    capture_registered_s3_update_preimage, S3ProtectedPreimageError,
+};
+use std::path::Path;
 
 #[derive(Debug)]
 pub(crate) enum S3ExistingStageError {
@@ -159,6 +165,58 @@ impl AwsS3ProbeClient {
 }
 
 
+/// Joined private preparation for an existing remote Markdown update.
+/// The result is information, NOT File Gate authority, a native receipt or
+/// a remote/confirmed document-baseline promotion. A failure after S3 stage
+/// may leave a verified blob + STAGED journal, but can NEVER update the vault.
+#[allow(dead_code)]
+pub(crate) struct S3ExistingPreparedReadOnly {
+    pub staged: StagedDownload,
+    pub protected_original: ProtectionOutcome,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) enum S3ExistingPrepareError {
+    Stage(S3ExistingStageError),
+    Protection(S3ProtectedPreimageError),
+}
+
+impl AwsS3ProbeClient {
+    /// Real immutable S3 V1 DAG + HTTP read, followed by pinned local
+    /// ORIGINAL preservation under the previously enrolled external OS lock.
+    /// Caller must NOT treat an Ok as permission for File Gate publication.
+    /// No asynchronous OS custody lock is held over the network fetch.
+    #[allow(dead_code)]
+    pub(crate) async fn stage_and_protect_verified_existing_s3_read_only(
+        &self,
+        verified: &S3VerifiedRevisionMetadataStore,
+        admission: &RegisteredReadAdmission<'_>,
+        bindings: &SqliteRegisteredS3Bindings,
+        custody: &SqliteCustodyIdentityStore,
+        custody_scope: &Path,
+        journal: &mut SqliteSyncJournal,
+        cache: &mut SqliteDagStore,
+        protected: &mut SqliteProtectionStore,
+        intent: OperationIntent,
+        expected_local_hash: &str,
+        max_blob_bytes: u64,
+    ) -> Result<S3ExistingPreparedReadOnly, S3ExistingPrepareError> {
+        let operation_id = intent.operation_id;
+        let staged = self.stage_verified_existing_s3_for_registered_core(
+            verified, admission, bindings, journal, cache, intent,
+            max_blob_bytes,
+        ).await.map_err(S3ExistingPrepareError::Stage)?;
+        let protected_original = capture_registered_s3_update_preimage(
+            admission, bindings, self.bound_profile(), self.bound_keyspace(),
+            custody, custody_scope, journal, protected, operation_id,
+            expected_local_hash,
+        ).map_err(S3ExistingPrepareError::Protection)?;
+        Ok(S3ExistingPreparedReadOnly { staged, protected_original })
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +229,8 @@ mod tests {
         SyncRelativePath, VaultId,
     };
     use aws_sdk_s3::error::ProvideErrorMetadata;
+    use crate::sync::filegate_lock_custody::scoped_leaf;
+    use crate::sync::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
     use std::{fs, sync::Arc};
 
     #[tokio::test]
@@ -336,16 +396,81 @@ mod tests {
         assert_eq!(staged.byte_length, updated.len() as u64);
         assert_eq!(cache.verified_blob(&new_hash).unwrap(), updated);
         assert_eq!(fs::read(root.join(relative.as_str())).unwrap(), original);
-        assert_eq!(journal.baseline(ns.vault_id(), doc).unwrap(), Some(old_baseline));
+        assert_eq!(journal.baseline(ns.vault_id(), doc).unwrap(), Some(old_baseline.clone()));
         assert_eq!(journal.get(operation_id).unwrap().unwrap().phase,
             JournalPhase::Staged);
         assert!(matches!(journal.mark_applied(operation_id),
             Err(JournalError::LocalDownloadNeedsNativeReceipt)));
         let repeated = reader.stage_verified_existing_s3_for_registered_core(
             &verified, &admission, &bindings,
-            &mut journal, &mut cache, intent, 4096,
+            &mut journal, &mut cache, intent.clone(), 4096,
         ).await.unwrap();
         assert!(repeated.was_already_staged);
         assert_eq!(fs::read(root.join(relative.as_str())).unwrap(), original);
+
+        // Real S3 fetch + locally confirmed baseline are now joined with a
+        // pinned external cooperative OS lock and a FULL/WAL protected BLOB,
+        // while the registered user's Markdown remains byte-for-byte intact.
+        let scope = temp.path().join("external-lock")
+            .join(scoped_leaf(PinnedProbeRoot::open(&root).unwrap().identity()));
+        fs::create_dir_all(&scope).unwrap();
+        fs::write(scope.join(LOCK_NAME), b"existing custody lock").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(scope.join(LOCK_NAME),
+                fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        #[cfg(unix)]
+        let scope = fs::canonicalize(scope).unwrap();
+        let mut custody = SqliteCustodyIdentityStore::open(
+            &admission, &app.join("custody.sqlite"),
+        ).unwrap();
+        custody.bind_registered_s3(&admission, &bindings, &scope).unwrap();
+        let originals_db = app.join("protected-originals.sqlite");
+        let mut originals = SqliteProtectionStore::open(&originals_db).unwrap();
+
+        // A local write between remote stage and protected preimage
+        // MUST fail closed, leaving only private STAGED evidence.
+        fs::write(root.join(relative.as_str()), b"unreviewed concurrent local edit").unwrap();
+        assert!(matches!(
+            reader.stage_and_protect_verified_existing_s3_read_only(
+                &verified, &admission, &bindings, &custody, &scope,
+                &mut journal, &mut cache, &mut originals,
+                intent.clone(), &old_hash, 4096,
+            ).await,
+            Err(S3ExistingPrepareError::Protection(_))
+        ));
+        assert!(originals.read_bound_preimage(operation_id).unwrap().is_none());
+        assert_eq!(journal.get(operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert_eq!(journal.baseline(ns.vault_id(), doc).unwrap(),
+            Some(old_baseline.clone()));
+        assert_eq!(fs::read(root.join(relative.as_str())).unwrap(),
+            b"unreviewed concurrent local edit");
+
+        fs::write(root.join(relative.as_str()), original).unwrap();
+        let prepared = reader.stage_and_protect_verified_existing_s3_read_only(
+            &verified, &admission, &bindings, &custody, &scope,
+            &mut journal, &mut cache, &mut originals,
+            intent.clone(), &old_hash, 4096,
+        ).await.unwrap();
+        assert!(prepared.staged.was_already_staged);
+        assert_eq!(prepared.staged.content_hash, new_hash);
+        assert_eq!(prepared.protected_original, ProtectionOutcome::Stored);
+        drop(originals);
+        let originals = SqliteProtectionStore::open(&originals_db).unwrap();
+        let saved = originals.read_bound_preimage(operation_id).unwrap().unwrap();
+        assert_eq!(saved.original.bytes, original);
+        assert_eq!(saved.original.content_hash, old_hash);
+        assert_eq!(saved.original.path, relative);
+        assert_eq!(fs::read(root.join(relative.as_str())).unwrap(), original);
+        assert_eq!(journal.baseline(ns.vault_id(), doc).unwrap(),
+            Some(old_baseline));
+        assert_eq!(journal.get(operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(matches!(journal.mark_applied(operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)));
     }
 }
