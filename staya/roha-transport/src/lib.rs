@@ -13,6 +13,8 @@ pub const STAYA_ALPN: &[u8] = b"akula/staya/transport/0";
 
 pub mod admission;
 #[cfg(target_os = "linux")]
+pub mod bounded_staging;
+#[cfg(target_os = "linux")]
 pub mod durable_admission;
 pub mod transfer;
 
