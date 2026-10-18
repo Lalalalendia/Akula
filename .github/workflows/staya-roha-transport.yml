@@ -39,8 +39,63 @@ jobs:
         working-directory: staya/roha-transport
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y iproute2
+          sudo apt-get install -y iproute2 tcpdump
           python3 tests/two_namespace_smoke.py
+      - name: Offline mDNS discovery and authorized QUIC across namespaces
+        working-directory: staya/roha-transport
+        timeout-minutes: 4
+        run: python3 tests/mdns_namespace_smoke.py
       - name: Format
         working-directory: staya/roha-transport
         run: cargo fmt --all -- --check
+      - name: SHA256 of offline LAN lab executable
+        working-directory: staya/roha-transport
+        run: |
+          sha256sum target/debug/staya-lan > target/debug/staya-lan.sha256
+      - name: Upload Linux two-PC lab executable (not a production release)
+        uses: actions/upload-artifact@v7
+        with:
+          name: staya-lan-linux-x86_64-lab
+          path: |
+            staya/roha-transport/target/debug/staya-lan
+            staya/roha-transport/target/debug/staya-lan.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-lan:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91.0"
+          components: rustfmt
+      - name: Verify Windows compilation and key-file unit tests
+        working-directory: staya/roha-transport
+        run: |
+          cargo test --all-targets
+          cargo build --bin staya-lan
+      - name: Two Windows processes communicate over loopback
+        working-directory: staya/roha-transport
+        run: python tests/two_process_smoke.py
+      - name: Verify Rust formatting
+        working-directory: staya/roha-transport
+        run: cargo fmt --all -- --check
+      - name: SHA256 of Windows lab executable
+        shell: pwsh
+        working-directory: staya/roha-transport
+        run: |
+          $hash = (Get-FileHash -Path "target/debug/staya-lan.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  staya-lan.exe" | Set-Content -Encoding Ascii -Path "target/debug/staya-lan.sha256"
+      - name: Upload Windows two-PC lab executable (not a production release)
+        uses: actions/upload-artifact@v7
+        with:
+          name: staya-lan-windows-x86_64-lab
+          path: |
+            staya/roha-transport/target/debug/staya-lan.exe
+            staya/roha-transport/target/debug/staya-lan.sha256
+          if-no-files-found: error
+          retention-days: 7

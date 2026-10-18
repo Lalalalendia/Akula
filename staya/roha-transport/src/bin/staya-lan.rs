@@ -1,11 +1,12 @@
 //! Standalone, manually addressed LAN proof-of-concept. No files or Sync Core.
-use akula_roha_transport::{AllowedPeers, StayaTransport};
+use akula_roha_transport::{AllowedPeers, StayaTransport, lan_discovery};
 use iroh::{EndpointAddr, EndpointId, SecretKey};
 use std::{
+    collections::BTreeSet,
     env,
     fs::{File, OpenOptions},
     io::{Read, Write},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::Path,
     str::FromStr,
     time::Duration,
@@ -75,7 +76,70 @@ fn parse_id(s: &str) -> Result<EndpointId, String> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\nDo not publish or commit the private key files.\n"
+    "usage:\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\n  staya-lan serve-mdns @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT ANNOUNCE_IPV4\n  staya-lan ping-discovered @KEY_PATH ALLOWED_PEER_ID SECONDS_1_TO_20\nDiscovery only runs on explicit request; mDNS broadcasts your public endpoint ID on the LAN.\nDo not publish or commit the private key files.\n"
+}
+
+/// The received mDNS address is never trusted as authentication. QUIC
+/// verifies the explicitly enrolled endpoint key before accepting PONG.
+async fn send_probe(local: &StayaTransport, addr: EndpointAddr) -> Result<(), String> {
+    let conn = local.connect(addr).await?;
+    let (mut send, mut recv) = conn.open_bi().await.map_err(|e| e.to_string())?;
+    send.write_all(b"akula-ping-v0")
+        .await
+        .map_err(|e| e.to_string())?;
+    send.finish().map_err(|e| e.to_string())?;
+    let received = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(64))
+        .await
+        .map_err(|_| "reply timeout")?
+        .map_err(|e| e.to_string())?;
+    if received.as_slice() != b"akula-pong-v0" {
+        conn.close(1u8.into(), b"wrong response");
+        return Err("wrong response".into());
+    }
+    conn.close(0u8.into(), b"ping complete");
+    Ok(())
+}
+
+async fn serve(
+    key: SecretKey,
+    allowed: EndpointId,
+    socket: SocketAddr,
+    announce_ip: Option<IpAddr>,
+) -> Result<(), String> {
+    let transport = StayaTransport::bind_on(key, AllowedPeers::new([allowed]), socket).await?;
+    let _mdns = if let Some(ip) = announce_ip {
+        let advertised = SocketAddr::new(ip, socket.port());
+        Some(lan_discovery::advertise(transport.id(), advertised)?)
+    } else {
+        None
+    };
+    println!("endpoint_id={}", transport.id());
+    println!("local_udp_sockets={:?}", transport.bound_sockets());
+    println!(
+        "relay=disabled discovery={} allowed_peer={allowed}",
+        _mdns.is_some()
+    );
+    loop {
+        let conn = transport.accept_one().await?;
+        let (mut send, mut recv) = tokio::time::timeout(Duration::from_secs(15), conn.accept_bi())
+            .await
+            .map_err(|_| "stream accept timeout")?
+            .map_err(|e| e.to_string())?;
+        let msg = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(64))
+            .await
+            .map_err(|_| "receive timeout")?
+            .map_err(|e| e.to_string())?;
+        if msg.as_slice() != b"akula-ping-v0" {
+            conn.close(1u8.into(), b"unexpected payload");
+            continue;
+        }
+        send.write_all(b"akula-pong-v0")
+            .await
+            .map_err(|e| e.to_string())?;
+        send.finish().map_err(|e| e.to_string())?;
+        let _ = tokio::time::timeout(Duration::from_secs(15), conn.closed()).await;
+        println!("ping_ok remote={}", conn.remote_id());
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -92,35 +156,14 @@ async fn main() -> Result<(), String> {
             let key = secret_from_arg(&args[2])?;
             let allowed = parse_id(&args[3])?;
             let socket: SocketAddr = args[4].parse().map_err(|_| "invalid bind socket")?;
-            let transport =
-                StayaTransport::bind_on(key, AllowedPeers::new([allowed]), socket).await?;
-            println!("endpoint_id={}", transport.id());
-            println!("local_udp_sockets={:?}", transport.bound_sockets());
-            println!("relay=disabled discovery=disabled allowed_peer={allowed}");
-            loop {
-                let conn = transport.accept_one().await?;
-                let (mut send, mut recv) =
-                    tokio::time::timeout(Duration::from_secs(15), conn.accept_bi())
-                        .await
-                        .map_err(|_| "stream accept timeout")?
-                        .map_err(|e| e.to_string())?;
-                let msg = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(64))
-                    .await
-                    .map_err(|_| "receive timeout")?
-                    .map_err(|e| e.to_string())?;
-                if msg.as_slice() != b"akula-ping-v0" {
-                    conn.close(1u8.into(), b"unexpected payload");
-                    continue;
-                }
-                send.write_all(b"akula-pong-v0")
-                    .await
-                    .map_err(|e| e.to_string())?;
-                send.finish().map_err(|e| e.to_string())?;
-                // Keep the QUIC connection alive while the reply is delivered.
-                // The client closes its side only after reading the entire reply.
-                let _ = tokio::time::timeout(Duration::from_secs(15), conn.closed()).await;
-                println!("ping_ok remote={}", conn.remote_id());
-            }
+            serve(key, allowed, socket, None).await?;
+        }
+        Some("serve-mdns") if args.len() == 6 => {
+            let key = secret_from_arg(&args[2])?;
+            let allowed = parse_id(&args[3])?;
+            let socket: SocketAddr = args[4].parse().map_err(|_| "invalid bind socket")?;
+            let ip: IpAddr = args[5].parse().map_err(|_| "invalid LAN advertise IP")?;
+            serve(key, allowed, socket, Some(ip)).await?;
         }
         Some("ping") if args.len() == 5 => {
             let key = secret_from_arg(&args[2])?;
@@ -128,22 +171,41 @@ async fn main() -> Result<(), String> {
             let socket: SocketAddr = args[4].parse().map_err(|_| "invalid peer socket")?;
             let local = StayaTransport::bind(key, AllowedPeers::new([server])).await?;
             let addr = EndpointAddr::new(server).with_ip_addr(socket);
-            let conn = local.connect(addr).await?;
-            let (mut send, mut recv) = conn.open_bi().await.map_err(|e| e.to_string())?;
-            send.write_all(b"akula-ping-v0")
-                .await
-                .map_err(|e| e.to_string())?;
-            send.finish().map_err(|e| e.to_string())?;
-            let received = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(64))
-                .await
-                .map_err(|_| "reply timeout")?
-                .map_err(|e| e.to_string())?;
-            if received.as_slice() != b"akula-pong-v0" {
-                return Err("wrong response".into());
+            let outcome = send_probe(&local, addr).await;
+            if outcome.is_ok() {
+                println!("direct_lan_ping_ok peer={server} relay=disabled");
             }
-            println!("direct_lan_ping_ok peer={server} relay=disabled");
-            conn.close(0u8.into(), b"ping complete");
             local.close().await;
+            outcome?;
+        }
+        Some("ping-discovered") if args.len() == 5 => {
+            let key = secret_from_arg(&args[2])?;
+            let server = parse_id(&args[3])?;
+            let seconds: u64 = args[4].parse().map_err(|_| "invalid discovery duration")?;
+            if !(1..=20).contains(&seconds) {
+                return Err("discovery window must be 1..20 seconds".into());
+            }
+            // This blocking discovery is intentionally done BEFORE opening the
+            // current-thread Tokio endpoint, so QUIC timers are never stalled.
+            let peers = BTreeSet::from([server]);
+            let candidates = lan_discovery::scan(&peers, Duration::from_secs(seconds))?;
+            if candidates.is_empty() {
+                return Err("no permitted peers were discovered; use manual ping".into());
+            }
+            let local = StayaTransport::bind(key, AllowedPeers::new([server])).await?;
+            let mut connected = false;
+            for candidate in candidates {
+                let addr = EndpointAddr::new(server).with_ip_addr(candidate.address);
+                if send_probe(&local, addr).await.is_ok() {
+                    println!("direct_lan_ping_ok peer={server} via=mdns relay=disabled");
+                    connected = true;
+                    break;
+                }
+            }
+            local.close().await;
+            if !connected {
+                return Err("all discovered addresses failed QUIC verification".into());
+            }
         }
         _ => return Err(usage().into()),
     }

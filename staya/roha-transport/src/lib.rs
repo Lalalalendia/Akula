@@ -12,6 +12,7 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::p
 /// Network protocol reserved for a Staya connection, not a file-write capability.
 pub const STAYA_ALPN: &[u8] = b"akula/staya/transport/0";
 
+pub mod lan_discovery;
 pub mod transfer;
 
 /// Explicitly authorized endpoint keys. The pairing workflow owns this list.
