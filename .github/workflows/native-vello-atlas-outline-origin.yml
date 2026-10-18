@@ -33,4 +33,4 @@ jobs:
         working-directory: aquilum-app
         run: |
           set -euo pipefail
-          cargo test --release --locked -p vello_cpu --lib atlas_like_outline_coverage_is_crop_origin_invariant -- --nocapture
+          cargo test --release --locked -p vello_cpu --lib atlas_like_outline_coverage_is_ -- --nocapture
