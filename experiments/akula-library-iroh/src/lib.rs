@@ -833,6 +833,39 @@ mod tests {
         worker.abort();
         Ok(())
     }
+    #[test]
+    fn many_rotated_keys_share_principal_admission_and_payload_budget() -> Result<()> {
+        let keys: Vec<_> = (0..12).map(|_| SecretKey::generate().public()).collect();
+        let principal = keys[0];
+        let allowed: HashSet<_> = keys.iter().copied().collect();
+        let mapping: HashMap<_,_> = keys.iter().map(|id| (*id, principal)).collect::<Vec<_>>()
+            .into_iter().chain([(principal, principal)]).collect();
+        let book=Book::new(bytes(CHUNK_SIZE))?;
+        let server=Server::new(book.clone(), allowed, QuotaState::new((CHUNK_SIZE*2) as u64, CHUNK_SIZE as u64))
+            .with_trusted_principals(mapping)?;
+        let mut leases=Vec::new();
+        for key in &keys[..8] { leases.push(server.admit_peer(*key).expect("first 8 admitted")); }
+        for key in &keys[8..] { assert!(server.admit_peer(*key).is_none(), "rotated key bypassed principal cap"); }
+        drop(leases);
+        assert!(server.admit_peer(keys[11]).is_some(), "freed group capacity not reusable");
+        let req=request_part(book.manifest.digest,0);
+        assert_eq!(server.reply(principal,&req)[0],OK);
+        assert_eq!(server.reply(principal,&req)[0],QUOTA);
+        assert_eq!(server.quota.lock().unwrap().used(),CHUNK_SIZE as u64);
+        Ok(())
+    }
+    #[test]
+    fn untrusted_principal_configuration_fails_closed() -> Result<()> {
+        let a=SecretKey::generate().public();
+        let b=SecretKey::generate().public();
+        let book=Book::new(vec![1,2,3])?;
+        let mk=||Server::new(book.clone(),HashSet::from([a,b]),QuotaState::new(100,100));
+        assert!(mk().with_trusted_principals(HashMap::from([(a,a)])).is_err());
+        assert!(mk().with_trusted_principals(HashMap::from([(a,b),(b,a)])).is_err());
+        let unknown=SecretKey::generate().public();
+        assert!(mk().with_trusted_principals(HashMap::from([(a,unknown),(b,b)])).is_err());
+        Ok(())
+    }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn real_iroh_direct_loopback_and_resume() -> Result<()> {
         let server_ep = private_endpoint(None).await?;
