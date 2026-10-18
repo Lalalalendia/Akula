@@ -812,7 +812,7 @@ async fn child_receives_unflushed_ranges_until_sigkill() {
     for offset in (64 * 1024..CRASH_SIZE).step_by(64 * 1024) {
         let end = (offset + 64 * 1024).min(CRASH_SIZE);
         let next = GetRequest::builder()
-            .root(ChunkRanges::bytes(offset..end))
+            .root(ChunkRanges::bytes((offset as u64)..(end as u64)))
             .build(expected_hash);
         tokio::time::timeout(
             NET_STEP_DEADLINE,
