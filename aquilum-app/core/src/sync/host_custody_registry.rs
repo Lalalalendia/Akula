@@ -228,6 +228,25 @@ impl SharedHostCustodyRegistry {
         if lookup(&transaction, &root_identity.key(), &root)?.is_some() {
             return Err(HostCustodyError::ConflictingEnrollment);
         }
+        // Another Core may register a nested root with its OWN appdata and
+        // physical ID. Reject the parent/child overlap while the same host
+        // SQLite writer epoch is held, rather than treating B as unenrolled
+        // merely because the exact root key differs from A's protected root.
+        {
+            let mut statement = transaction.prepare(
+                "SELECT root_path FROM shared_custody"
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            for registered in rows {
+                let registered = registered?;
+                let registered = Path::new(&registered);
+                if Path::new(&root).starts_with(registered)
+                    || registered.starts_with(Path::new(&root))
+                {
+                    return Err(HostCustodyError::ConflictingEnrollment);
+                }
+            }
+        }
         let outcome = operation();
         transaction.commit()?;
         Ok(outcome)
@@ -514,6 +533,23 @@ mod tests {
         assert!(!attempted.get(), "epoch ran a mutation after enrollment");
         assert_eq!(fs::read_to_string(&target).unwrap(), "prior content");
         assert_eq!(host.inspect(&vault, record.root_identity).unwrap(), Some(record));
+    }
+
+    #[test]
+    fn nested_workspaces_cannot_evade_an_enrolled_parent_under_host_epoch() {
+        let (_temp, db, vault, appdata, record) = specimen();
+        let child = vault.join("independent-appdata-child");
+        fs::create_dir(&child).unwrap();
+        let mut host = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        host.enroll(&record).unwrap();
+        let mut changed = false;
+        let child_identity = PhysicalObjectId { device: 9000, file: 9999 };
+        assert!(matches!(host.with_unenrolled_epoch(
+            &child, child_identity, || { changed = true; },
+        ), Err(HostCustodyError::ConflictingEnrollment)));
+        assert!(!changed, "nested Core escaped enrolled parent");
     }
 
     #[test]
