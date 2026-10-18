@@ -33,7 +33,7 @@ function validateRelease(yaml) {
   }
 
   const pinnedRef = /ref: \$\{\{\s*needs\.source\.outputs\.sha\s*\}\}/g;
-  const builds = /^\s*cargo build --release -p aquilum-native[^\n]*$/gm;
+  const builds = /^\s*run:\s*cargo build --release -p aquilum-native[^\n]*$/gm;
   for (const job of ['windows', 'macos', 'linux', 'manifest']) {
     const body = section(yaml, job);
     if (!body) {
@@ -55,7 +55,7 @@ function validateRelease(yaml) {
     }
 
     if (job !== 'manifest') {
-      const found = [...body.matchAll(builds)].map(m => m[0].trim());
+      const found = [...body.matchAll(builds)].map(m => m[0].trim().replace(/^run:\s*/, ''));
       const expected = 'cargo build --release -p aquilum-native --features installed'
         + (job === 'macos' ? ' --target ${{ matrix.target }}' : '');
       if (found.length !== 1 || found[0] !== expected) {
