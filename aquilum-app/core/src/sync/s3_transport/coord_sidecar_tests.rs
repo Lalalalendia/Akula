@@ -7,7 +7,7 @@ use super::super::{
 };
 use crate::sync::{
     DocumentId, OperationId, RevisionOperation, S3DeltaPackRefV2,
-    S3ManifestShardV1, S3ManifestV1, S3RevisionRefV1,
+    S3Keyspace, S3ManifestShardV1, S3ManifestV1, S3RevisionRefV1,
     SyncRelativePath, VaultId, MAX_S3_REVISION_METADATA_CACHE_BYTES,
 };
 
