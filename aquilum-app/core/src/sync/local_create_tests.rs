@@ -945,3 +945,46 @@ fn m1dc_review_requires_registered_host_and_archive_outside_vault() {
     assert!(journal.recovery_review_history(op).unwrap().is_empty());
     assert!(journal.baseline(vault, doc).unwrap().is_none());
 }
+
+#[cfg(feature = "host-custody")]
+#[test]
+fn mandatory_host_epoch_refuses_unadmitted_internal_staged_create() {
+    // A normal Core may still exercise the opt-in additive experiment.
+    // An explicitly installed-host Core lacks a shared enrollment epoch for
+    // this internal method, even though it takes the process File Gate mutex.
+    // Previously this was an alternate path around Core's mandatory HOLD.
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let appdata = temp.path().join("appdata");
+    let hostdir = temp.path().join("installer-host");
+    for d in [&root, &appdata, &hostdir] {
+        fs::create_dir(d).unwrap();
+    }
+    let root = fs::canonicalize(&root).unwrap();
+    fs::create_dir(root.join("notes")).unwrap();
+    let outside_db = hostdir.join("approved-host.sqlite3");
+    let core = Core::open_with_installed_host(
+        &appdata, &outside_db, Arc::new(|_: CoreEvent| {}),
+    );
+    assert!(core.requires_installed_host_epoch());
+    core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+
+    let operation = OperationId::new();
+    let (journal, cache, vault, doc) = staged(
+        &core, &appdata, "notes/Protected.md", b"do not publish", operation,
+    );
+    let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+    assert!(matches!(
+        admission.create_staged_if_absent(operation, &journal, &cache),
+        Err(LocalCreateError::Admission(VaultPortError::PermissionDenied))
+    ), "staged local create escaped mandatory shared-host HOLD");
+    assert!(!root.join("notes/Protected.md").exists());
+    assert_eq!(journal.get(operation).unwrap().unwrap().phase, JournalPhase::Staged);
+    assert!(journal.baseline(vault, doc).unwrap().is_none());
+
+    // Archive recovery evidence is stored in appdata SQLite, never written
+    // into the user's vault, so it remains an independent read/capture route.
+    assert!(!root.join("notes/Protected.md").exists());
+    assert!(!outside_db.exists(),
+        "a refusal must not bootstrap its own valid-empty host ledger");
+}

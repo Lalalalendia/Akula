@@ -469,6 +469,16 @@ impl<'a> RegisteredReadAdmission<'a> {
         cache: &SqliteDagStore, expected_vault: super::VaultId,
         expected_profile_id: Option<&str>, before_publish: impl FnOnce(),
     ) -> Result<UnconfirmedLocalCreate, LocalCreateError> {
+        // This internal additive publisher takes Core.file_mutations directly
+        // rather than the installed-host SQLite enrollment epoch. Until a
+        // verified shared host epoch spans the ENTIRE primary publication,
+        // the mandatory installed-host flavor MUST refuse before disk writes.
+        // This also covers the S3-bound additive receiver (#296); a private
+        // OS lock in its own appdata is not machine-wide write authorization.
+        #[cfg(feature = "host-custody")]
+        if self.core.requires_installed_host_epoch() {
+            return Err(LocalCreateError::Admission(VaultPortError::PermissionDenied));
+        }
         let record = journal.get(operation)?
             .ok_or(LocalCreateError::InvalidStagedIntent)?;
         if record.phase != JournalPhase::Staged
