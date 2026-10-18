@@ -40,6 +40,8 @@ pub enum Outcome {
     Write(Table),
     Leave,
     Remove,
+    /// A read-only clipboard action, never a document edit.
+    Copy(String),
 }
 
 pub(super) fn caret_in(cell: &Cell, value: &str, at: Point) -> usize {

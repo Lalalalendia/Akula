@@ -1,3 +1,4 @@
+use super::commands::Command;
 use super::markdown::{parse, parse_with};
 use super::model::{Align, Range2, Table};
 use super::session::{Outcome, Session};
@@ -165,4 +166,41 @@ fn words_with_spaces_can_be_typed_one_key_at_a_time() {
     }
     assert_eq!(table(&text).value(0, 0), "a hello  world");
     assert_eq!(session.caret, "a hello  world".len());
+}
+
+
+#[test]
+fn table_context_copy_is_read_only_and_preserves_exact_markdown() {
+    let source = "| Заголовок | [[документ\\|имя]] |\n| --- | --- |\n| 1 | 😀漢字 |";
+    let model = table(source);
+    let before = model.clone();
+    let view = blank_view(&model);
+    let mut session = Session::new(0);
+    let items = session.context(&view, 1, 1);
+    assert_eq!(items[0], (Command::Copy, true));
+    let selected = session.range;
+    let Outcome::Copy(copied) = session.run(&view, Command::Copy) else {
+        panic!("copy must produce a clipboard-only result");
+    };
+    assert_eq!(copied, before.serialize());
+    assert_eq!(view.model, before, "copy must not mutate table bytes");
+    assert_eq!(session.range, selected, "copy must not reset selection");
+}
+
+#[test]
+fn table_copy_works_for_empty_and_merged_tables_without_mutating_them() {
+    for model in [
+        Table::empty(2, 2),
+        table("| A | B |\n| --- | --- |\n| x | y |\n| ^^ | ^^ |"),
+    ] {
+        let before = model.serialize();
+        let view = blank_view(&model);
+        let mut session = Session::new(0);
+        assert_eq!(session.context(&view, 0, 0)[0], (Command::Copy, true));
+        assert!(matches!(
+            session.run(&view, Command::Copy),
+            Outcome::Copy(copied) if copied == before
+        ));
+        assert_eq!(view.model.serialize(), before);
+    }
 }
