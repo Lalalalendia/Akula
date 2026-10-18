@@ -352,6 +352,38 @@ fn render_outline_to_atlas(
             atlas_slot.x as f64 - raster_metrics.bearing_x as f64 + subpixel_offset as f64,
             atlas_slot.y as f64 - raster_metrics.bearing_y as f64,
         ));
+    // Experimental falsifier for guard96: rasterized coverage should not
+    // depend on which integer (x, y) atlas slot receives the same outline.
+    // Disabled by default; this never changes shipping glyph rendering.
+    #[cfg(feature = "std")]
+    if std::env::var_os("AQ_TEST_ATLAS_SLOT_INVARIANT").is_some() {
+        // Compute the shape once in glyph-local pixel coordinates and round
+        // all control points onto an exact binary grid BEFORE adding the
+        // integer atlas slot origin. Float32 then represents the fraction
+        // exactly for normal (512px) glyph atlas pages.
+        let mut local_path = Affine::scale_non_uniform(scale, -scale) * path.as_ref();
+        local_path.apply_affine(Affine::translate((f64::from(subpixel_offset), 0.0)));
+        for element in local_path.elements_mut() {
+            let q = |p: &mut kurbo::Point| {
+                const GRID: f64 = 4096.0;
+                p.x = (p.x * GRID).round() / GRID;
+                p.y = (p.y * GRID).round() / GRID;
+            };
+            match element {
+                kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => q(p),
+                kurbo::PathEl::QuadTo(p0, p1) => { q(p0); q(p1); }
+                kurbo::PathEl::CurveTo(p0, p1, p2) => { q(p0); q(p1); q(p2); }
+                kurbo::PathEl::ClosePath => {}
+            }
+        }
+        recorder.set_transform(Affine::translate((
+            f64::from(atlas_slot.x) - f64::from(raster_metrics.bearing_x),
+            f64::from(atlas_slot.y) - f64::from(raster_metrics.bearing_y),
+        )));
+        recorder.set_paint(BLACK.into());
+        recorder.fill_path(&local_path);
+        return;
+    }
     recorder.set_transform(outline_transform);
     recorder.set_paint(BLACK.into());
     recorder.fill_path(path);
