@@ -61,7 +61,7 @@ def main():
             assert stage.joinpath("part-0000.bin").is_file()
             final = cmd(binary, *args)
             assert "COMPLETE bytes=620001 chunks=3 new=2" in final.stdout, final.stdout
-            metric = re.search(r"CLIENT_WIRE_METRICS udp_tx_bytes=(\\d+) udp_rx_bytes=(\\d+) udp_tx_datagrams=(\\d+) udp_rx_datagrams=(\\d+) connections=(\\d+) payload_verified=(\\d+) udp_rx_to_payload_ratio=([0-9.]+)", final.stdout)
+            metric = re.search(r"CLIENT_WIRE_METRICS udp_tx_bytes=(\d+) udp_rx_bytes=(\d+) udp_tx_datagrams=(\d+) udp_rx_datagrams=(\d+) connections=(\d+) payload_verified=(\d+) udp_rx_to_payload_ratio=([0-9.]+)", final.stdout)
             assert metric, final.stdout
             tx_bytes, rx_bytes, tx_packets, rx_packets, connections, payload, ratio = metric.groups()
             assert min(int(tx_bytes), int(rx_bytes), int(tx_packets), int(rx_packets)) > 0
