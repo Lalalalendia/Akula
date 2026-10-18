@@ -559,3 +559,197 @@ async fn disk_staging_survives_graceful_store_shutdown_then_resumes() {
     .await
     .expect("durable staging laboratory timed out");
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "private child of two-process P2P FsStore recovery test"]
+async fn child_process_downloads_missing_verified_ranges() {
+    // A distinct test binary process, invoked by the parent using --ignored.
+    // No secrets or user paths are persisted; the test key is ephemeral.
+    let directory = std::env::var("AKULA_TEST_BLOB_DISK").expect("child disk root");
+    let remote_id: EndpointId = std::env::var("AKULA_TEST_PROVIDER_ID")
+        .expect("child source id")
+        .parse()
+        .expect("valid provider id");
+    let address_hints = std::env::var("AKULA_TEST_PROVIDER_IPS").expect("child IP hints");
+    let ephemeral_key: SecretKey = std::env::var("AKULA_TEST_PEER_KEY")
+        .expect("child ephemeral key")
+        .parse()
+        .expect("valid test-only peer key");
+
+    let mut remote = iroh::EndpointAddr::new(remote_id);
+    let mut total_hints = 0usize;
+    for hint in address_hints.split(';').filter(|s| !s.is_empty()) {
+        remote = remote.with_ip_addr(hint.parse().expect("valid local QUIC address hint"));
+        total_hints += 1;
+    }
+    assert!(total_hints > 0, "no direct-only address hints");
+
+    let size = 2 * 1024 * 1024 + 13;
+    let original = bytes(size);
+    let hash = Hash::new(&original);
+    let disk = FsStore::load(&directory)
+        .await
+        .expect("separate process reopened private FsStore");
+    let partial = disk
+        .remote()
+        .local(hash)
+        .await
+        .expect("read persistent verified range");
+    assert_eq!(partial.local_bytes(), 64 * 1024);
+    assert!(!partial.is_complete(), "prefix reported complete");
+
+    let peer = local_endpoint(ephemeral_key).await;
+    let connection = peer
+        .connect(remote, iroh_blobs::ALPN)
+        .await
+        .expect("separate process QUIC connection");
+    let stats = tokio::time::timeout(
+        NET_STEP_DEADLINE,
+        disk.remote()
+            .execute_get(connection.clone(), partial.missing())
+            .complete(),
+    )
+    .await
+    .expect("cross-process resume time budget")
+    .expect("cross-process missing range fetch");
+
+    assert!(
+        disk.remote()
+            .local(hash)
+            .await
+            .expect("new process final status")
+            .is_complete(),
+        "reassembled FsStore blob still incomplete"
+    );
+    let finished = disk.get_bytes(hash).await.expect("read complete child blob");
+    assert_eq!(finished.as_ref(), original.as_slice());
+    assert_eq!(Hash::new(finished.as_ref()), hash);
+    println!(
+        "P2P_BLOB_OS_PROCESS_RESUME size={} restored_prefix={} resumed_protocol_bytes={} physical_process_restart=true crash_durable=false granted_vault=false user_file_mutation=false",
+        size,
+        partial.local_bytes(),
+        stats.total_bytes_read(),
+    );
+    connection.close(0u8.into(), b"child done");
+    disk.shutdown().await.expect("persist full bytes after child");
+    peer.close().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fs_verified_prefix_is_resumed_in_a_distinct_client_os_process() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        // Two actual client processes share only this ephemeral test directory.
+        // Parent retains the QUIC source; a separate test binary reopens the
+        // receiver's disk store and downloads all missing verified ranges.
+        let dir = tempfile::tempdir().expect("disposable test directory");
+        let data = bytes(2 * 1024 * 1024 + 13);
+        assert!(data.len() <= MAX_OBJECT_BYTES);
+
+        let provider_key = SecretKey::generate();
+        let peer_key = SecretKey::generate();
+        let source = MemStore::new();
+        let source_tag = source.add_slice(&data).await.expect("seed source");
+        let hash = source_tag.hash;
+        let (events, worker) = restricted_events(peer_key.public(), HashSet::from([hash]));
+        let provider = local_endpoint(provider_key).await;
+        let router = Router::builder(provider)
+            .accept(iroh_blobs::ALPN, BlobsProtocol::new(&source, Some(events)))
+            .spawn();
+        let provider_addr = router.endpoint().addr();
+        let address_hints = provider_addr
+            .ip_addrs()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(";");
+        assert!(!address_hints.is_empty(), "local provider has no direct IP hints");
+
+        let stage_peer = local_endpoint(peer_key.clone()).await;
+        let disk = FsStore::load(dir.path()).await.expect("start parent FsStore");
+        let first = stage_peer
+            .connect(provider_addr.clone(), iroh_blobs::ALPN)
+            .await
+            .expect("first connection");
+        let prefix = GetRequest::builder()
+            .root(ChunkRanges::bytes(..(64 * 1024)))
+            .build(hash);
+        tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            disk.remote().execute_get(first.clone(), prefix).complete(),
+        )
+        .await
+        .expect("verified prefix deadline")
+        .expect("verified prefix accepted");
+        assert_eq!(
+            disk.remote()
+                .local(hash)
+                .await
+                .expect("parent prefix status")
+                .local_bytes(),
+            64 * 1024
+        );
+        first.close(0u8.into(), b"parent stage done");
+        drop(first);
+        disk.shutdown().await.expect("graceful durable receiver checkpoint");
+        drop(disk);
+        stage_peer.close().await;
+
+        let binary = std::env::current_exe().expect("absolute integration-test binary");
+        let directory = dir.path().to_path_buf();
+        let provider_id = provider_addr.id.to_string();
+        let peer_secret = peer_key
+            .to_bytes()
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect::<String>();
+        let output = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(binary)
+                .arg("--exact")
+                .arg("child_process_downloads_missing_verified_ranges")
+                .arg("--ignored")
+                .arg("--nocapture")
+                .env("AKULA_TEST_BLOB_DISK", directory)
+                .env("AKULA_TEST_PROVIDER_ID", provider_id)
+                .env("AKULA_TEST_PROVIDER_IPS", address_hints)
+                .env("AKULA_TEST_PEER_KEY", peer_secret)
+                .output()
+                .expect("spawn separate receiver process")
+        })
+        .await
+        .expect("join isolated child process");
+        assert!(
+            output.status.success(),
+            "child receiver failed: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("P2P_BLOB_OS_PROCESS_RESUME"),
+            "child did not verify disk recovery"
+        );
+
+        // Parent's independent reopened store confirms the child persisted
+        // complete hash-checked canonical bytes before returning.
+        let final_disk = FsStore::load(dir.path())
+            .await
+            .expect("parent inspect child-committed FS store");
+        let complete = final_disk
+            .remote()
+            .local(hash)
+            .await
+            .expect("post-process status");
+        assert!(complete.is_complete(), "child did not save complete blob");
+        let final_data = final_disk.get_bytes(hash).await.expect("completed bytes");
+        assert_eq!(final_data.as_ref(), data.as_slice());
+        final_disk.shutdown().await.expect("final storage shutdown");
+        println!(
+            "P2P_BLOB_PROCESS_BOUNDARY size={} verified=true independent_client_process=true clean_shutdown_before_crash=false quota_enforced=false file_gate=false",
+            data.len()
+        );
+        router.shutdown().await.expect("source shutdown");
+        worker.abort();
+        drop(source_tag);
+    })
+    .await
+    .expect("two-process durable laboratory timed out");
+}
