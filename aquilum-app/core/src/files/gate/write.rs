@@ -31,6 +31,47 @@ pub fn write(
     Ok(result)
 }
 
+/// A narrow internal File Gate variant for an already-held external custody
+/// OS lock. It does NOT acquire that lock itself and must never be called
+/// outside a verified cooperative writer lifetime. Unlike the legacy editor
+/// route, a failed HistoryService write is returned explicitly. The primary
+/// bytes might already have changed on ANY failure after writer entry.
+#[derive(Debug)]
+pub(crate) enum CheckedHistoryError {
+    Primary(FileCommandError),
+    History(crate::history::service::HistorySaveFailure),
+}
+
+#[allow(dead_code)]
+pub(crate) fn write_checked_history(
+    core: &Core,
+    path: &Path,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+) -> Result<(FileWriteResult, bool), CheckedHistoryError> {
+    // Only Core's own File Gate mutex is held here, after the external OS
+    // lock. Release it BEFORE taking HistoryService's files/state mutexes.
+    let (before, result) = {
+        let _guard = core.file_mutation_guard_for_write()
+            .map_err(CheckedHistoryError::Primary)?;
+        let before = core.history.disk_before(path, Some(expected_hash));
+        let result = write_file_atomic_impl(path, content, Some(expected_hash))
+            .map_err(CheckedHistoryError::Primary)?;
+        (before, result)
+    };
+    let write = NoteWrite {
+        disk_before: before, text: content, hash: &result.hash,
+        source, name: version_name,
+    };
+    let history_changed = core.history.try_saved(&|| core.known_roots(), path, write)
+        .map_err(CheckedHistoryError::History)?;
+    // The outer custody wrapper announces changes and notifies search only
+    // AFTER releasing its external OS lock, even if postflight failed.
+    Ok((result, history_changed))
+}
+
 pub fn create(
     core: &Core,
     path: &Path,
