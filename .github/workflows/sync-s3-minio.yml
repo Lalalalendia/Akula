@@ -226,6 +226,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 profile_binding::tests
+          cargo test --locked -p aquilum-core --features sync-s3 s3_transport::guarded_update_plan::tests
       - name: Two independent S3 clients CAS, conflicts and lost ACK
         shell: bash
         working-directory: aquilum-app
