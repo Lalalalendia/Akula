@@ -2,6 +2,7 @@ pub(super) mod convert;
 mod cull;
 mod error;
 mod mask;
+mod mipmap;
 mod runs;
 mod sink;
 
