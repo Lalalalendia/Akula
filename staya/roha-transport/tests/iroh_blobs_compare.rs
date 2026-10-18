@@ -758,3 +758,238 @@ async fn fs_verified_prefix_is_resumed_in_a_distinct_client_os_process() {
     .await
     .expect("two-process durable laboratory timed out");
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "private child, forcibly SIGKILLed by parent before Store::shutdown"]
+async fn child_receives_unflushed_ranges_until_sigkill() {
+    use std::path::PathBuf;
+    let root = PathBuf::from(std::env::var("AKULA_CRASH_DISK").expect("private child directory"));
+    let marker = root.join("verified-prefix.ready");
+    let server_id: EndpointId = std::env::var("AKULA_CRASH_PROVIDER_ID")
+        .expect("remote id")
+        .parse()
+        .expect("valid remote id");
+    let key: SecretKey = std::env::var("AKULA_CRASH_PEER_SECRET")
+        .expect("ephemeral secret")
+        .parse()
+        .expect("valid ephemeral secret");
+    let addrs = std::env::var("AKULA_CRASH_PROVIDER_IPS").expect("private address hints");
+    let mut remote = iroh::EndpointAddr::new(server_id);
+    let mut count = 0;
+    for hint in addrs.split(';').filter(|s| !s.is_empty()) {
+        remote = remote.with_ip_addr(hint.parse().expect("valid local UDP address"));
+        count += 1;
+    }
+    assert!(count > 0, "direct address required: never use public discovery");
+    const CRASH_SIZE: usize = 8 * 1024 * 1024 + 13;
+    let expected_hash = Hash::new(&bytes(CRASH_SIZE));
+    let store = FsStore::load(&root).await.expect("child private disk store");
+    let peer = local_endpoint(key).await;
+    let conn = peer
+        .connect(remote, iroh_blobs::ALPN)
+        .await
+        .expect("child QUIC connection");
+    let initial = GetRequest::builder()
+        .root(ChunkRanges::bytes(..(64 * 1024)))
+        .build(expected_hash);
+    tokio::time::timeout(
+        NET_STEP_DEADLINE,
+        store.remote().execute_get(conn.clone(), initial).complete(),
+    )
+    .await
+    .expect("initial range timeout")
+    .expect("initial verified range");
+
+    let local = store.remote().local(expected_hash).await.expect("verified range status");
+    assert_eq!(local.local_bytes(), 64 * 1024);
+    assert!(!local.is_complete());
+    // Parent sees this marker only after Bao verification. No Store::shutdown
+    // or FsStore actor flush is called on this execution path.
+    std::fs::write(&marker, b"verified-and-not-shutdown").expect("notify supervising process");
+    // Keep receiving bounded ranges, with minimum 20ms between requests,
+    // so the supervisor kills a real incomplete transfer, not a completed blob.
+    for offset in (64 * 1024..CRASH_SIZE).step_by(64 * 1024) {
+        let end = (offset + 64 * 1024).min(CRASH_SIZE);
+        let next = GetRequest::builder()
+            .root(ChunkRanges::bytes(offset..end))
+            .build(expected_hash);
+        tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            store.remote().execute_get(conn.clone(), next).complete(),
+        )
+        .await
+        .expect("subsequent range timeout")
+        .expect("subsequent range verification");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("supervisor failed to SIGKILL the active partial receiver");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+async fn kill_receiver_during_unflushed_partial_and_fail_closed() {
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Command, Stdio};
+
+    tokio::time::timeout(Duration::from_secs(95), async {
+        const CRASH_SIZE: usize = 8 * 1024 * 1024 + 13;
+        assert!(CRASH_SIZE < MAX_OBJECT_BYTES);
+        let dir = tempfile::tempdir().expect("disposable crash lab only");
+        let data = bytes(CRASH_SIZE);
+        let hash = Hash::new(&data);
+        let provider_key = SecretKey::generate();
+        let peer_key = SecretKey::generate();
+        let source = MemStore::new();
+        let source_tag = source.add_slice(&data).await.expect("seed accepted source");
+        let (events, worker) = restricted_events(peer_key.public(), HashSet::from([hash]));
+        let provider = local_endpoint(provider_key).await;
+        let router = Router::builder(provider)
+            .accept(iroh_blobs::ALPN, BlobsProtocol::new(&source, Some(events)))
+            .spawn();
+        let provider_addr = router.endpoint().addr();
+        let addr_hints = provider_addr
+            .ip_addrs()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(";");
+        assert!(!addr_hints.is_empty(), "expected private direct-only address");
+
+        let child_binary = std::env::current_exe().expect("absolute test binary");
+        let secret = peer_key
+            .to_bytes()
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect::<String>();
+        let mut receiver = Command::new(child_binary)
+            .arg("--exact")
+            .arg("child_receives_unflushed_ranges_until_sigkill")
+            .arg("--ignored")
+            .arg("--nocapture")
+            .env("AKULA_CRASH_DISK", dir.path())
+            .env("AKULA_CRASH_PROVIDER_ID", provider_addr.id.to_string())
+            .env("AKULA_CRASH_PROVIDER_IPS", &addr_hints)
+            .env("AKULA_CRASH_PEER_SECRET", &secret)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn separate crashable receiver OS process");
+
+        let mut observed_verified_prefix = false;
+        for _ in 0..1200 {
+            if dir.path().join("verified-prefix.ready").is_file() {
+                observed_verified_prefix = true;
+                break;
+            }
+            if let Some(status) = receiver.try_wait().expect("child process status") {
+                panic!("receiver exited before SIGKILL test: {status}");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // Always terminate a child before panic/cleanup if it missed readiness.
+        if !observed_verified_prefix {
+            let _ = receiver.kill();
+            let _ = receiver.wait();
+            panic!("crashable receiver never acknowledged first verified range");
+        }
+        receiver.kill().expect("force SIGKILL of incomplete receiver");
+        let killed = receiver.wait().expect("reap killed receiver");
+        assert_eq!(killed.signal(), Some(9), "receiver must die by SIGKILL");
+
+        // FsStore docs explicitly warn of losing recent writes on a hard kill.
+        // Accepted recovery: use only validated local ranges, or QUARANTINE
+        // crashed staging and request the entire object into a new directory.
+        let reopened = tokio::time::timeout(Duration::from_secs(10), FsStore::load(dir.path()))
+            .await
+            .ok()
+            .and_then(Result::ok);
+        let mut recovered_bytes = 0u64;
+        let mut discarded_crash_state = reopened.is_none();
+        let mut disk = if let Some(reopened) = reopened {
+            reopened
+        } else {
+            FsStore::load(dir.path().join("fresh-fallback"))
+                .await
+                .expect("isolated fallback FsStore")
+        };
+        let observation = tokio::time::timeout(
+            Duration::from_secs(10),
+            disk.remote().local(hash),
+        )
+        .await;
+        let mut request = match observation {
+            Ok(Ok(local)) if !local.is_complete() && local.local_bytes() <= CRASH_SIZE as u64 => {
+                recovered_bytes = local.local_bytes();
+                local.missing()
+            }
+            _ => {
+                // The crashed store may be unopenable or report invalid state.
+                // Never mutate a user's file or treat this as a complete blob.
+                let _ = disk.shutdown().await;
+                discarded_crash_state = true;
+                disk = FsStore::load(dir.path().join("fresh-after-invalid"))
+                    .await
+                    .expect("separate fallback store");
+                GetRequest::builder().root(ChunkRanges::all()).build(hash)
+            }
+        };
+        let peer = local_endpoint(peer_key.clone()).await;
+        let connection = peer
+            .connect(provider_addr.clone(), iroh_blobs::ALPN)
+            .await
+            .expect("recovery QUIC");
+
+        let mut valid = false;
+        let mut response_bytes = 0usize;
+        if let Ok(Ok(stats)) = tokio::time::timeout(
+            Duration::from_secs(25),
+            disk.remote().execute_get(connection.clone(), request.clone()).complete(),
+        )
+        .await
+        {
+            response_bytes = stats.total_bytes_read();
+            if let Ok(finished) = disk.get_bytes(hash).await {
+                valid = finished.as_ref() == data.as_slice()
+                    && Hash::new(finished.as_ref()) == hash;
+            }
+        }
+        if !valid {
+            // If the recovered bitfield was incomplete/incorrect after the
+            // crash, explicitly discard it and re-fetch from known hash.
+            let _ = disk.shutdown().await;
+            discarded_crash_state = true;
+            request = GetRequest::builder().root(ChunkRanges::all()).build(hash);
+            disk = FsStore::load(dir.path().join("verified-full-fallback"))
+                .await
+                .expect("new isolated fallback after invalid partial");
+            let stats = tokio::time::timeout(
+                Duration::from_secs(25),
+                disk.remote().execute_get(connection.clone(), request).complete(),
+            )
+            .await
+            .expect("full fallback deadline")
+            .expect("full fallback verified download");
+            response_bytes += stats.total_bytes_read();
+        }
+
+        let result = disk.get_bytes(hash).await.expect("full reconstructed bytes");
+        assert_eq!(result.as_ref(), data.as_slice(), "crashed data was never trusted");
+        assert_eq!(Hash::new(result.as_ref()), hash, "wrong BLAKE3 after crash");
+        assert!(
+            disk.remote().local(hash).await.expect("recovery status").is_complete(),
+            "partial blob is not accepted as complete"
+        );
+        disk.shutdown().await.expect("persist verified completed fallback");
+        println!(
+            "P2P_BLOB_SIGKILL size={} killed_signal=9 marker_after_verified_prefix=true recovered_verified_bytes={} fallback_used={} receiver_protocol_bytes={} exact_b3=true user_file_gate=false force_killed_before_store_shutdown=true",
+            data.len(), recovered_bytes, discarded_crash_state, response_bytes,
+        );
+        connection.close(0u8.into(), b"end crash fixture");
+        peer.close().await;
+        router.shutdown().await.expect("source shutdown");
+        worker.abort();
+        drop(source_tag);
+    })
+    .await
+    .expect("SIGKILL crash-recovery fixture exceeded hard deadline");
+}
