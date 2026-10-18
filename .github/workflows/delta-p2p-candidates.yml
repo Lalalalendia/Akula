@@ -1,0 +1,43 @@
+name: P2P-DELTA-04 Rust candidate A/B (research only)
+
+on:
+  pull_request:
+    paths:
+      - "experiments/p2p-delta-candidates/**"
+      - "docs/sync/delta-p2p-04-candidate-audit.md"
+      - ".github/workflows/delta-p2p-candidates.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-comparison:
+    name: Real Git Zstd vs copia + hostile-base tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: SwatinEm/rust-cache@v2
+        with:
+          workspaces: experiments/p2p-delta-candidates
+          key: p2p-delta-candidates
+      - name: Check isolated Rust unit tests and fail-closed base validation
+        run: cargo test --manifest-path experiments/p2p-delta-candidates/Cargo.toml -- --nocapture
+      - name: Compare on genuine adjacent public Git Markdown edits
+        run: |
+          set -o pipefail
+          cargo run --release --manifest-path experiments/p2p-delta-candidates/Cargo.toml -- "$GITHUB_WORKSPACE" | tee experiments/p2p-delta-candidates/p2p-delta-results.txt
+      - name: Retain dependency resolution and numeric results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2p-delta-04-candidates
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            experiments/p2p-delta-candidates/Cargo.lock
+            experiments/p2p-delta-candidates/p2p-delta-results.txt
