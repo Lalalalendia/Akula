@@ -33,6 +33,9 @@ use peniko::color::{AlphaColor, Srgb};
 use vello_common::fearless_simd::Level;
 use vello_common::paint::ImageId;
 
+#[cfg(feature = "std")]
+mod slot_probe;
+
 fn atlas_page_image_id(page_index: u32) -> ImageId {
     ImageId::new(ATLAS_IMAGE_ID_BASE + page_index)
 }
@@ -252,6 +255,16 @@ impl Resources {
                 );
                 let page = Arc::get_mut(&mut glyph_resources.pixmaps[page_index])
                     .expect("atlas page pixmap must be uniquely owned during replay");
+
+                // Probe the exact real font outlines and unshifted atlas
+                // transforms before dirty-bounds translation mutates them.
+                // This is an isolated diagnostic; no writes to real pages.
+                #[cfg(feature = "std")]
+                slot_probe::run(
+                    &recorder.commands,
+                    glyph_renderer.render_settings().level,
+                    recorder.page_index,
+                );
 
                 let Some((x0, y0, w, h)) = dirty_bounds(&recorder.commands, page.width(), page.height()) else {
                     recorder.commands.clear();
