@@ -525,6 +525,20 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
 #[tokio::test]
 #[ignore = "requires disposable localhost MinIO; no production sync authority"]
 async fn live_minio_v2_twenty_offline_generations_locator_windows_missing_letter_hold() {
+    run_long_offline_minio_fixture(20, true).await;
+}
+
+#[tokio::test]
+#[ignore = "requires disposable localhost MinIO; manual high-generation A/B"]
+async fn live_minio_v2_hundred_offline_generations_vs_full_v1_ab() {
+    run_long_offline_minio_fixture(100, false).await;
+}
+
+async fn run_long_offline_minio_fixture(
+    offline_generations: u64,
+    missing_locator: bool,
+) {
+    assert!((20..=128).contains(&offline_generations));
     let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").unwrap();
     assert!(endpoint.starts_with("http://127.0.0.1:")
         || endpoint.starts_with("http://localhost:"));
@@ -580,9 +594,9 @@ async fn live_minio_v2_twenty_offline_generations_locator_windows_missing_letter
     let mut expected_new = BTreeSet::new();
     let mut missing: Option<(S3HeadPointerV1, S3HeadPointerV1, Item)> = None;
 
-    // Twenty separate real CAS generations, including two content/tombstone
-    // sibling heads from the same previously accepted genesis revision.
-    for generation in 2_u64..=21 {
+    // Real CAS generations, keeping every competing sibling/tombstone
+    // rooted at the original revision. No flattened last-writer-wins state.
+    for generation in 2_u64..=offline_generations + 1 {
         let revision = RevisionId::new();
         let version = if generation == 3 {
             item(doc, revision, vec![original_id], None)
@@ -604,7 +618,7 @@ async fn live_minio_v2_twenty_offline_generations_locator_windows_missing_letter
             Some(last_manifest.manifest_id),
         ).unwrap();
 
-        if generation == 10 {
+        if generation == 10 && missing_locator {
             // Simulate a producer that exposed its V1 root too early:
             // receiver must HOLD until the exact V1-bound locator chain
             // becomes complete, even though future generations are visible.
@@ -623,33 +637,74 @@ async fn live_minio_v2_twenty_offline_generations_locator_windows_missing_letter
         prior_head = next_head;
     }
 
-    assert!(reader.inspect_v2_long_offline_selective_packs_discovered(
-        &scope, &journal, &original_pin, &verified_metadata,
-    ).await.is_err(), "missing generation-ten locator must HOLD");
-    let (head9, head10, delayed_version) = missing.unwrap();
-    publish_letter(
-        &writer, &ns, &head9, &head10, &[delayed_version],
-    ).await;
+    if missing_locator {
+        assert!(reader.inspect_v2_long_offline_selective_packs_discovered(
+            &scope, &journal, &original_pin, &verified_metadata,
+        ).await.is_err(), "missing generation-ten locator must HOLD");
+        let (head9, head10, delayed_version) = missing.unwrap();
+        publish_letter(
+            &writer, &ns, &head9, &head10, &[delayed_version],
+        ).await;
+    }
 
     // Existing eight-generation entrypoint remains intentionally strict.
     assert!(reader.inspect_v2_offline_selective_packs_discovered(
         &scope, &journal, &original_pin, &verified_metadata,
     ).await.is_err(), "old public entrypoint unexpectedly relaxed its bound");
 
+    let packed_before = reader.test_io_snapshot();
+    let packed_start = Instant::now();
     let accepted = reader.inspect_v2_long_offline_selective_packs_discovered(
         &scope, &journal, &original_pin, &verified_metadata,
     ).await.unwrap();
+    let packed_ms = packed_start.elapsed().as_millis();
+    let packed_io = reader.test_io_snapshot().since(packed_before);
     assert_eq!(accepted.from_generation, 1);
-    assert_eq!(accepted.to_generation, 21);
-    assert_eq!(accepted.verified_generations, 20);
-    assert_eq!(accepted.verified_packs, 20);
-    assert_eq!(accepted.total_revisions, 21);
+    assert_eq!(accepted.to_generation, offline_generations + 1);
+    assert_eq!(accepted.verified_generations, offline_generations as usize);
+    assert_eq!(accepted.verified_packs, offline_generations as usize);
+    assert_eq!(accepted.total_revisions, offline_generations as usize + 1);
     assert_eq!(accepted.new_revision_ids.iter().copied().collect::<BTreeSet<_>>(),
         expected_new);
     assert!(accepted.requires_full_apply_gate);
     assert!(accepted.checked_pack_bytes <= 16 * 1024 * 1024);
 
-    // Read-only preview never "checkpoints" the receiver into gen 21.
+    // Compare DIFFERENT assurances: V2 reuses old full-pin evidence,
+    // while a fresh V1 pin rechecks current availability of all old blobs.
+    // The benchmark reports raw values, never assumes V2 is faster.
+    let full_before = reader.test_io_snapshot();
+    let full_start = Instant::now();
+    let full = reader.pin_revision_snapshot().await.unwrap().unwrap();
+    let full_ms = full_start.elapsed().as_millis();
+    let full_io = reader.test_io_snapshot().since(full_before);
+    let final_ids: BTreeSet<_> = full.references_for_coord_v2().iter()
+        .map(|row| row.revision_id).collect();
+    assert_eq!(final_ids.len(), offline_generations as usize + 1);
+    assert!(final_ids.contains(&original_id));
+    assert!(expected_new.is_subset(&final_ids));
+    println!("AKULA_COORD_04B_LONG_OFFLINE {}", serde_json::json!({
+        "offline_generations": offline_generations,
+        "revisions": final_ids.len(),
+        "identical_inventory": true,
+        "anchor_unmodified": true,
+        "assurance": "V2 advisory previously pinned old blobs; full V1 rechecks old availability",
+        "v2_selective": {
+            "elapsed_ms": packed_ms,
+            "sdk_get": packed_io.get,
+            "sdk_head": packed_io.head,
+            "payload_bytes": packed_io.payload_bytes,
+            "reused_shards": accepted.reused_shards,
+            "downloaded_shards": accepted.downloaded_shards,
+            "verified_packs": accepted.verified_packs,
+        },
+        "full_current_v1": {
+            "elapsed_ms": full_ms,
+            "sdk_get": full_io.get,
+            "sdk_head": full_io.head,
+            "payload_bytes": full_io.payload_bytes,
+        },
+    }));
+    // An advisory preview never advances the durable saved anchor.
     let after = journal.load(&scope).unwrap().unwrap();
     assert_eq!(after.pointer(), &genesis_head);
 }
