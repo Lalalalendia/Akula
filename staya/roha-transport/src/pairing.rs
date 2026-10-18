@@ -24,7 +24,11 @@ fn parse_record(text: &str, marker: &str) -> Result<EndpointId, String> {
         return Err("identity record has a wrong format/version".into());
     }
     let raw = lines.next().ok_or("missing endpoint identity")?;
-    if raw.len() != 64 || !raw.bytes().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+    if raw.len() != 64
+        || !raw
+            .bytes()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    {
         return Err("identity must be exactly 64 lowercase hexadecimal characters".into());
     }
     if lines.next() != Some("") || lines.next().is_some() {
