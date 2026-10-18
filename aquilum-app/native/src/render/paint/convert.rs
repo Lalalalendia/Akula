@@ -148,6 +148,14 @@ fn brush_to_paint_candidate(
     let level = mipmap::level_for_transform(effective_geometry * brush_transform);
     if level == 0 { return (paint, brush_transform); }
     if let Some(reduced) = images.mip_source(id, &image.image, level) {
+        // A real GUI A/B is invalid without evidence that an image took this path.
+        // Emit once only in explicit developer diagnostic mode.
+        if !cfg!(feature = "installed")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF").ok().as_deref() == Some("1")
+        {
+            static FIRST_APPLIED: std::sync::Once = std::sync::Once::new();
+            FIRST_APPLIED.call_once(|| eprintln!("AKULA_MIP_APPLIED level={level}"));
+        }
         image.image = reduced;
         // Compensate the reduced image inside the existing brush transform.
         // Geometry, clipping, draw alpha and alignment stay unchanged.
