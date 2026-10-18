@@ -7,22 +7,27 @@ use std::{
 };
 
 use akula_roha_transport::{
-    transfer::{FRAME_HEADER_BYTES, MAX_CHUNK_BYTES, MAX_OBJECT_BYTES, TransferManifest, VerifiedAssembly},
     AllowedPeers, StayaTransport,
+    transfer::{
+        FRAME_HEADER_BYTES, MAX_CHUNK_BYTES, MAX_OBJECT_BYTES, TransferManifest, VerifiedAssembly,
+    },
 };
-use iroh::{endpoint::presets, protocol::Router, Endpoint, EndpointId, RelayMode, SecretKey};
+use futures_util::StreamExt;
+use iroh::{Endpoint, EndpointId, RelayMode, SecretKey, endpoint::presets, protocol::Router};
 use iroh_blobs::{
+    BlobsProtocol, Hash,
     api::blobs::BlobStatus,
     get::request::get_blob,
-    protocol::{ChunkRanges, ChunkRangesExt, ChunkRangesSeq, GetManyRequest, GetRequest, ObserveRequest, PushRequest},
+    protocol::{
+        ChunkRanges, ChunkRangesExt, ChunkRangesSeq, GetManyRequest, GetRequest, ObserveRequest,
+        PushRequest,
+    },
     provider::events::{
         AbortReason, ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage,
         RequestMode, ThrottleMode,
     },
     store::mem::MemStore,
-    BlobsProtocol, Hash,
 };
-use futures_util::StreamExt;
 
 const TEST_DEADLINE: Duration = Duration::from_secs(45);
 const NET_STEP_DEADLINE: Duration = Duration::from_secs(8);
@@ -122,10 +127,12 @@ async fn a_get_can_be_allowed_without_enabling_push_or_other_reads() {
         let store = MemStore::new();
         let allowed_data = bytes(64 * 1024 + 17);
         let allowed_tag = store.add_slice(&allowed_data).await.expect("seed allowed");
-        let secret_tag = store.add_slice(b"other secret blob").await.expect("seed denied");
-        let (events, worker) = restricted_events(
-            allowed_key.public(), HashSet::from([allowed_tag.hash]),
-        );
+        let secret_tag = store
+            .add_slice(b"other secret blob")
+            .await
+            .expect("seed denied");
+        let (events, worker) =
+            restricted_events(allowed_key.public(), HashSet::from([allowed_tag.hash]));
         let server = local_endpoint(server_key).await;
         let router = Router::builder(server)
             .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, Some(events)))
@@ -138,47 +145,83 @@ async fn a_get_can_be_allowed_without_enabling_push_or_other_reads() {
             .expect("transport connect");
 
         let received = tokio::time::timeout(
-            NET_STEP_DEADLINE, get_blob(connection.clone(), allowed_tag.hash).bytes(),
-        ).await.expect("allowed GET bounded").expect("allowed GET succeeds");
+            NET_STEP_DEADLINE,
+            get_blob(connection.clone(), allowed_tag.hash).bytes(),
+        )
+        .await
+        .expect("allowed GET bounded")
+        .expect("allowed GET succeeds");
         assert_eq!(received.as_ref(), allowed_data.as_slice());
 
         let forbidden = tokio::time::timeout(
-            NET_STEP_DEADLINE, get_blob(connection.clone(), secret_tag.hash).bytes(),
-        ).await.expect("hash refusal timely");
+            NET_STEP_DEADLINE,
+            get_blob(connection.clone(), secret_tag.hash).bytes(),
+        )
+        .await
+        .expect("hash refusal timely");
         assert!(forbidden.is_err(), "unlisted blob was readable");
 
         let local = MemStore::new();
-        let malicious = local.add_slice(b"unsolicited remote push").await.expect("attacker local blob");
-        let get_many = tokio::time::timeout(NET_STEP_DEADLINE, local.remote().execute_get_many(
-            connection.clone(),
-            GetManyRequest::new(vec![allowed_tag.hash], ChunkRangesSeq::all()),
-        ).complete()).await.expect("get-many must settle");
-        assert!(get_many.is_err(), "get-many bypassed single-hash authorization");
+        let malicious = local
+            .add_slice(b"unsolicited remote push")
+            .await
+            .expect("attacker local blob");
+        let get_many = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            local
+                .remote()
+                .execute_get_many(
+                    connection.clone(),
+                    GetManyRequest::new(vec![allowed_tag.hash], ChunkRangesSeq::all()),
+                )
+                .complete(),
+        )
+        .await
+        .expect("get-many must settle");
+        assert!(
+            get_many.is_err(),
+            "get-many bypassed single-hash authorization"
+        );
 
-        let observe = local.remote().observe(connection.clone(), ObserveRequest::new(allowed_tag.hash));
+        let observe = local
+            .remote()
+            .observe(connection.clone(), ObserveRequest::new(allowed_tag.hash));
         futures_util::pin_mut!(observe);
-        let observation = tokio::time::timeout(
-            NET_STEP_DEADLINE, observe.next(),
-        ).await.expect("observe must settle");
+        let observation = tokio::time::timeout(NET_STEP_DEADLINE, observe.next())
+            .await
+            .expect("observe must settle");
         assert!(!matches!(observation, Some(Ok(_))), "observe leaked state");
 
         // Upstream notes a denied PUSH may appear successful to the sender:
         // receiving-store non-mutation, not client status, is the ground truth.
-        let _ = tokio::time::timeout(NET_STEP_DEADLINE, local.remote().execute_push(
-            connection.clone(), PushRequest::new(malicious.hash, ChunkRangesSeq::root()),
-        ).complete()).await;
+        let _ = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            local
+                .remote()
+                .execute_push(
+                    connection.clone(),
+                    PushRequest::new(malicious.hash, ChunkRangesSeq::root()),
+                )
+                .complete(),
+        )
+        .await;
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(matches!(
-            store.blobs().status(malicious.hash).await.expect("status"),
-            BlobStatus::NotFound
-        ), "unauthorized PUSH inserted data");
+        assert!(
+            matches!(
+                store.blobs().status(malicious.hash).await.expect("status"),
+                BlobStatus::NotFound
+            ),
+            "unauthorized PUSH inserted data"
+        );
 
         let outsider = local_endpoint(unknown_key).await;
         if let Ok(unknown_connection) = outsider.connect(remote, iroh_blobs::ALPN).await {
             let attempt = tokio::time::timeout(
                 NET_STEP_DEADLINE,
                 get_blob(unknown_connection, allowed_tag.hash).bytes(),
-            ).await.expect("unknown peer request must settle");
+            )
+            .await
+            .expect("unknown peer request must settle");
             assert!(attempt.is_err(), "unknown transport peer read blob");
         }
         drop(connection);
@@ -194,11 +237,13 @@ async fn a_get_can_be_allowed_without_enabling_push_or_other_reads() {
 /// Uses the EXACT existing Staya encoder/receiver and QUIC stream framing,
 /// with one application-level receipt per 64KiB fragment.
 async fn roundtrip_staya(
-    source: &StayaTransport, receiver: &StayaTransport, payload: &[u8],
+    source: &StayaTransport,
+    receiver: &StayaTransport,
+    payload: &[u8],
 ) -> (usize, u128, u64, u64, u64, u64) {
-    let (incoming, outgoing) = tokio::try_join!(
-        receiver.accept_one(), source.connect(receiver.address()),
-    ).expect("local Staya QUIC connected");
+    let (incoming, outgoing) =
+        tokio::try_join!(receiver.accept_one(), source.connect(receiver.address()),)
+            .expect("local Staya QUIC connected");
     let manifest = TransferManifest::for_bytes(payload).expect("bounded source");
     let mut staged = VerifiedAssembly::new(manifest).expect("staging");
     let mut accounting = 0usize;
@@ -211,8 +256,10 @@ async fn roundtrip_staya(
         let (rx_offset, tx_offset) = tokio::join!(
             async {
                 let (mut send, mut recv) = incoming.accept_bi().await.expect("accept");
-                let wire = recv.read_to_end(MAX_CHUNK_BYTES + FRAME_HEADER_BYTES)
-                    .await.expect("read Staya frame");
+                let wire = recv
+                    .read_to_end(MAX_CHUNK_BYTES + FRAME_HEADER_BYTES)
+                    .await
+                    .expect("read Staya frame");
                 let result = staged.accept_frame(&wire).expect("verify Staya frame");
                 send.write_all(&result.to_le_bytes()).await.expect("ack");
                 send.finish().expect("finish receipt");
@@ -228,13 +275,29 @@ async fn roundtrip_staya(
         );
         assert_eq!(rx_offset, tx_offset, "Staya wrong receipt");
     }
-    assert_eq!(staged.complete_bytes(), Some(payload), "Staya restored wrong bytes");
+    assert_eq!(
+        staged.complete_bytes(),
+        Some(payload),
+        "Staya restored wrong bytes"
+    );
     let us = start.elapsed().as_micros();
     let traffic_after = outgoing.stats();
-    let tx_bytes = traffic_after.udp_tx.bytes.saturating_sub(traffic_before.udp_tx.bytes);
-    let rx_bytes = traffic_after.udp_rx.bytes.saturating_sub(traffic_before.udp_rx.bytes);
-    let tx_packets = traffic_after.udp_tx.datagrams.saturating_sub(traffic_before.udp_tx.datagrams);
-    let rx_packets = traffic_after.udp_rx.datagrams.saturating_sub(traffic_before.udp_rx.datagrams);
+    let tx_bytes = traffic_after
+        .udp_tx
+        .bytes
+        .saturating_sub(traffic_before.udp_tx.bytes);
+    let rx_bytes = traffic_after
+        .udp_rx
+        .bytes
+        .saturating_sub(traffic_before.udp_rx.bytes);
+    let tx_packets = traffic_after
+        .udp_tx
+        .datagrams
+        .saturating_sub(traffic_before.udp_tx.datagrams);
+    let rx_packets = traffic_after
+        .udp_rx
+        .datagrams
+        .saturating_sub(traffic_before.udp_rx.datagrams);
     outgoing.close(0u8.into(), b"test done");
     incoming.close(0u8.into(), b"test done");
     (accounting, us, tx_bytes, rx_bytes, tx_packets, rx_packets)
@@ -311,7 +374,6 @@ async fn compare_real_quic_verified_stream_against_existing_staya_frames() {
     .await
     .expect("bounded benchmark did not finish");
 }
-
 
 #[tokio::test(flavor = "current_thread")]
 async fn resume_missing_verified_ranges_after_new_quic_connection() {
