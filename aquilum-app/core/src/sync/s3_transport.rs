@@ -12,6 +12,8 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod manifest;
+mod v2_readonly;
+pub use v2_readonly::{S3PinnedV2ReadError, S3PinnedV2ReadPreview};
 // Bounded, opt-in read-only pack verifier. The sender/builder stays
 // test-only; no new remote writer or local file apply is enabled.
 mod pack_probe;
