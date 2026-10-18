@@ -181,6 +181,17 @@ mod tests {
                     thread::park_timeout(Duration::from_secs(60));
                 }
             }
+            "hold-with-visible-empty-report" => {
+                let _pair = try_both(&left, &right).unwrap().expect("uncontended pair");
+                // Deterministically model macOS observing create() before
+                // the following write() in fs::write has completed.
+                fs::write(&report, b"").unwrap();
+                thread::sleep(Duration::from_millis(100));
+                fs::write(&report, b"held").unwrap();
+                loop {
+                    thread::park_timeout(Duration::from_secs(60));
+                }
+            }
             "try-hold-after-decline" => {
                 assert!(try_both(&left, &right).unwrap().is_none());
                 fs::write(report, b"busy").unwrap();
@@ -240,6 +251,18 @@ mod tests {
             }
             other => panic!("unknown test-only child mode: {other}"),
         }
+    }
+
+    #[test]
+    fn oslock_report_can_exist_before_child_finishes_writing_state() {
+        let (temp, left, right) = fixture();
+        let report = temp.path().join("delayed-report");
+        let mut child = KillChild(
+            child_command("hold-with-visible-empty-report", &left, &right, &report)
+                .spawn().unwrap(),
+        );
+        wait_for_report(&mut child, &report, b"held");
+        child.terminate();
     }
 
     #[test]
