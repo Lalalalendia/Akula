@@ -116,7 +116,7 @@ jobs:
         working-directory: aquilum-app
         run: |
           set -euo pipefail
-          cargo tree --locked -p aquilum-native --no-default-features --features sync-installed-host > native-installed-tree.txt
+          cargo tree --locked -p aquilum-native --no-default-features --features installed,sync-installed-host > native-installed-tree.txt
           if grep -E 'aws-(config|sdk-s3|sdk-sts) ' native-installed-tree.txt; then
             echo 'Native host-only safety mode unexpectedly activated AWS'
             exit 1
@@ -125,4 +125,4 @@ jobs:
         working-directory: aquilum-app
         env:
           AKULA_INSTALLED_HOST_CUSTODY_DB: ''
-        run: cargo test --locked -p aquilum-native --bin aquilum-native --no-default-features --features sync-installed-host workspace::installed_host_native_tests -- --nocapture
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --no-default-features --features installed,sync-installed-host workspace::installed_host_native_tests -- --nocapture
