@@ -1,8 +1,9 @@
 //! SYNC-COORD-02b: bounded immutable pack verification, read-only only.
 //!
-//! The pure parser is used by a V1-pinned advisory S3 sidecar verifier;
-//! the pack sender/builder is kept test-only. This is NOT a new remote
-//! manifest, authenticated writer, File Gate operation or cloud publisher.
+//! The pure parser is used by a V1-pinned advisory S3 sidecar verifier.
+//! The bounded pack byte builder is also production-compiled as an inert
+//! serializer for a future authorized sender. It has NO S3 I/O or ability
+//! to publish a root, authenticate a writer or write through File Gate.
 //! Each member and the envelope must match the caller's independently
 //! verified immutable S3 manifest references. The in-memory test descriptor
 //! is not a durable trust root and may NOT grant deletion, publication,
@@ -13,7 +14,6 @@ use crate::sync::{
     S3RevisionRefV1,
 };
 use std::collections::BTreeSet;
-#[cfg(test)]
 use crate::sync::S3Keyspace;
 
 const MAGIC: &[u8; 8] = b"AKPKEXP1";
@@ -49,13 +49,12 @@ impl From<DagError> for PackProbeError {
 ///   }
 /// The pack does not include user filenames or any power to create/delete
 /// an Akula file. The canonical RevisionRecord JSON is checked when read.
-#[cfg(test)]
+/// An internal pure encoder does not grant S3 PUT, writer authority or File Gate.
 pub(super) struct PackBuilder {
     bytes: Vec<u8>,
     references: Vec<S3RevisionRefV1>,
 }
 
-#[cfg(test)]
 impl PackBuilder {
     pub fn new() -> Self {
         let mut bytes = Vec::with_capacity(HEADER_BYTES);
@@ -111,8 +110,8 @@ impl PackBuilder {
             return Err(PackProbeError::Invalid);
         }
         let digest = blake3::hash(&self.bytes).to_hex().to_string();
-        // TEST FIXTURE ONLY: content-addressed opaque blob under a disposable
-        // vault. Production manifests do NOT know or accept packed members.
+        // Only derives an immutable content-addressed blob key. No network I/O,
+        // writer authentication, provider publication or File Gate authority.
         let key = keyspace.immutable_blob_key(&digest)
             .map_err(|_| PackProbeError::Invalid)?;
         Ok((PackDescriptor { key, digest, references: self.references }, self.bytes))

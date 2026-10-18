@@ -19,6 +19,8 @@ pub use v2_readonly::{S3PinnedV2ReadError, S3PinnedV2ReadPreview};
 // Bounded, opt-in read-only pack verifier. The sender/builder stays
 // test-only; no new remote writer or local file apply is enabled.
 mod pack_probe;
+// Pure bounded pack encoder for future host-admitted sender; no S3 writer.
+mod coord_pack_encode;
 // SYNC-COORD-01 stays test-only: no production S3 format or file writes.
 #[cfg(test)]
 mod coord_probe;
