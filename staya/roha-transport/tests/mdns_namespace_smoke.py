@@ -123,6 +123,44 @@ sock.sendto(b"staya-multicast-probe-v0", ("224.0.0.251", int(sys.argv[2])))
                 waiting.communicate(timeout=5)
 
 
+def start_mdns_captures(folder):
+    """Capture only UDP/5353 packet headers, never application/key payload."""
+    result = []
+    for ns, link, label in [(NS_A, LINK_A, "a"), (NS_B, LINK_B, "b")]:
+        path = pathlib.Path(folder) / ("mdns-" + label + ".txt")
+        with path.open("w", encoding="utf-8") as output:
+            proc = subprocess.Popen(
+                ["sudo", "-n", "ip", "netns", "exec", ns,
+                 "tcpdump", "-n", "-l", "-q", "-i", link, "udp", "port", "5353"],
+                stdout=output, stderr=subprocess.PIPE, text=True)
+        result.append((label, path, proc))
+    time.sleep(0.7)
+    for label, path, proc in result:
+        if proc.poll() is not None:
+            _, error = proc.communicate(timeout=5)
+            raise AssertionError("mDNS header capture failed on " + label + ": " + error[-500:])
+    return result
+
+
+def report_mdns_captures(captures):
+    """Summarize traffic direction without exposing host names or endpoint IDs."""
+    for label, path, proc in captures:
+        if proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate(timeout=5)
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        packets = [line for line in lines if " IP " in line and "> " in line]
+        from_a = sum(1 for line in packets if "IP " + IP_A + "." in line)
+        from_b = sum(1 for line in packets if "IP " + IP_B + "." in line)
+        print(
+            f"STAYA_MDNS_WIRE ns={label} packets={len(packets)} from_a={from_a} from_b={from_b}",
+            flush=True)
+
+
 def kill_server(server):
     if server is not None and server.poll() is None:
         server.terminate()
@@ -157,9 +195,11 @@ def run_with_keys(folder):
     unknown_id, unknown_key = identity(folder, 'unknown')
     peer_address = f"{IP_B}:{PORT}"
     server = None
+    captures = []
     try:
         setup_network()
         probe_multicast_link()
+        captures = start_mdns_captures(folder)
         server = subprocess.Popen(
             ["sudo", "-n", "ip", "netns", "exec", NS_B, str(BIN),
              "serve-mdns", b_key, a_id, peer_address, IP_B],
@@ -211,6 +251,7 @@ def run_with_keys(folder):
             raise AssertionError("mDNS allowed an unrelated endpoint identity")
         print("STAYA_MDNS_PASS: offline mDNS discovery and QUIC; foreign keys and IDs rejected")
     finally:
+        report_mdns_captures(captures)
         kill_server(server)
         cleanup()
 
