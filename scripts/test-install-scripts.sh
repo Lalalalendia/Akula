@@ -150,7 +150,22 @@ cat > "$temporary_home/tools/codesign" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${AKULA_TEST_CODESIGN_FAIL:-0}" == 1 ]]; then exit 28; fi
-[[ "$1" == --verify && "$2" == --deep && "$3" == --strict ]]
+[[ "$#" -eq 6 && "$1" == --verify && "$2" == --deep &&
+   "$3" == --strict && "$4" == -R ]]
+# The code under test must require Apple chain, Developer ID APPLICATION OID,
+# issuer extension, pinned Team ID and bundle ID (not just codesign integrity).
+[[ "$5" == '=anchor apple generic '* ]]
+[[ "$5" == *'identifier "com.lalalalendia.akula"'* ]]
+[[ "$5" == *'certificate 1[field.1.2.840.113635.100.6.2.6] exists'* ]]
+[[ "$5" == *'certificate leaf[field.1.2.840.113635.100.6.1.13] exists'* ]]
+[[ "$5" == *'certificate leaf[subject.OU] = "AB12CD34EF"'* ]]
+[[ -f "$6/Contents/MacOS/aquilum-app" ]]
+EOF
+cat > "$temporary_home/tools/spctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" -eq 4 && "$1" == --assess && "$2" == --type && "$3" == execute ]]
+if [[ "${AKULA_TEST_NOTARIZATION_FAIL:-0}" == 1 ]]; then exit 39; fi
 [[ -f "$4/Contents/MacOS/aquilum-app" ]]
 EOF
 cat > "$temporary_home/tools/mv" <<'EOF'
@@ -220,7 +235,13 @@ unset AKULA_TEST_MISSING_BINARY
 
 export AKULA_TEST_CODESIGN_FAIL=1
 must_fail_without_changing_old
+grep -Fq 'failed pinned Akula Developer ID signature checks' "$error_log"
 unset AKULA_TEST_CODESIGN_FAIL
+
+export AKULA_TEST_NOTARIZATION_FAIL=1
+must_fail_without_changing_old
+grep -Fq 'failed macOS security assessment' "$error_log"
+unset AKULA_TEST_NOTARIZATION_FAIL
 
 export AKULA_TEST_PROMOTION_FAIL=1
 must_fail_without_changing_old
