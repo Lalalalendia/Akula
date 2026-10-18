@@ -14,10 +14,12 @@ use super::{
 use super::coord_chain::MAX_OFFLINE_PACK_BYTES;
 use super::coord_locator::S3CoordLetterLocatorV2;
 use super::coord_pack_encode::PreparedDeltaPacksV2;
+use super::pack_probe::ingest_verified_pack;
 use crate::sync::{
-    S3DeltaEnvelopeV2, S3DeltaEnvelopeV2Error, S3HeadPointerV1,
-    S3ManifestV1, S3RemoteAnchorScope,
+    RevisionDag, S3DeltaEnvelopeV2, S3DeltaEnvelopeV2Error,
+    S3HeadPointerV1, S3ManifestV1, S3RemoteAnchorScope,
 };
+use std::collections::BTreeSet;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -172,6 +174,27 @@ impl AwsS3ProbeClient {
             || coverage.required_pack_count != prepared.packs.len()
         {
             return Err(S3CoordImmutablePublishError::InvalidCandidate);
+        }
+
+        // Do not rely on the fact that a caller happened to use our
+        // production encoder: independently decode every supplied packed
+        // member and verify JSON/blob hashes and complete exact new UUID
+        // membership before the FIRST write. Parent closure is separately
+        // established by the canonical fully pinned candidate V1 DAG.
+        let mut pack_dag = RevisionDag::new();
+        let mut packed_seen = BTreeSet::new();
+        for pack in &prepared.packs {
+            ingest_verified_pack(
+                &pack.payload, &pack.descriptor,
+                &mut pack_dag, &mut packed_seen,
+            ).map_err(|_| S3CoordImmutablePublishError::InvalidPack)?;
+        }
+        let expected: BTreeSet<_> =
+            coverage.added_revision_ids.iter().copied().collect();
+        if packed_seen != expected
+            || pack_dag.active_len() + pack_dag.pending_len() != expected.len()
+        {
+            return Err(S3CoordImmutablePublishError::InvalidPack);
         }
 
         // Publication ordering is critical: bytes -> letter -> locator.
