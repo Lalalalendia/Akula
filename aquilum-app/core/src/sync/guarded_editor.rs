@@ -216,6 +216,11 @@ mod tests {
             fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
         }
+        // macOS tempfile paths often use /var -> /private/var.
+        // The production custody gate correctly rejects aliased ancestors;
+        // canonicalize the fixture's pre-existing scope, never the gate.
+        #[cfg(unix)]
+        let scope = fs::canonicalize(&scope).unwrap();
         let namespace = S3Keyspace::new("akula/optin-editor", VaultId::new()).unwrap();
         let profile = S3ConnectionProfile {
             bucket: "akula-guarded-editor-test".into(),
