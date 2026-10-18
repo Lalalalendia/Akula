@@ -1,0 +1,127 @@
+name: SYNC-COORD-02f real S3 selective packed parity
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/src/sync/s3_transport/coord_scale_probe.rs'
+      - '.github/workflows/sync-coord-02f-scale.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coord-02f-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packed-scale-parity:
+    name: Real MinIO / ${{ matrix.notes }} revisions / ${{ matrix.edits }} edits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - notes: 64
+            edits: 7
+          - notes: 10000
+            edits: 0
+          - notes: 10000
+            edits: 7
+          - notes: 10000
+            edits: 1000
+    env:
+      AWS_ACCESS_KEY_ID: akula_coord_02f_test
+      AWS_SECRET_ACCESS_KEY: disposable_scale_ci_no_production_access
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_MAX_ATTEMPTS: '1'
+      AQ_S3_TEST_ENDPOINT: http://127.0.0.1:9000
+      AQ_COORD_02F_NOTES: ${{ matrix.notes }}
+      AQ_COORD_02F_EDITS: ${{ matrix.edits }}
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore shared Rust cache without PR cache publication
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Start disposable local MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --rm --name akula-coord-02f-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,size=512m,uid=65532,gid=65532,mode=0700 \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs akula-coord-02f-minio
+          exit 1
+      - name: Compare real V1/V2 full, selective and packed S3 reads
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 \
+            minio_coord_02f_10k_revision_offline_parity \
+            -- --ignored --test-threads=1 --nocapture 2>&1 | tee coord-02f.log
+          grep 'AKULA_COORD_02F_SCALE {' coord-02f.log \
+            | sed 's/^.*AKULA_COORD_02F_SCALE //' \
+            > coord-02f-result.jsonl
+          test "$(wc -l < coord-02f-result.jsonl)" -eq 1
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          r = json.loads(Path("coord-02f-result.jsonl").read_text())
+          assert r["notes"] == int(os.environ["AQ_COORD_02F_NOTES"])
+          assert r["edits"] == int(os.environ["AQ_COORD_02F_EDITS"])
+          assert r["identical_inventory"] is True
+          assert r["anchor_unmodified"] is True
+          assert r["cold_anchor"]["get"] > 0
+          assert r["cold_anchor"]["head"] == 2 * r["cold_anchor"]["get"]
+          if r["edits"]:
+              assert r["offline_generations"] == 2
+              assert r["selective_v2_packs"]["verified_packs"] >= 2
+              assert r["selective_v2_packs"]["io"]["get"] > 0
+              assert r["selective_v2_packs"]["io"]["head"] == 2 * r["selective_v2_packs"]["io"]["get"]
+              assert r["selective_v2_packs"]["checked_pack_bytes"] <= 16 * 1024 * 1024
+              assert r["publication"]["new_v1_revision_objects"] == r["edits"]
+              assert r["publication"]["final_v1_shards"] <= 256
+              assert r["selective_v2_packs"]["verified_packs"] == r["publication"]["new_v2_pack_objects"]
+              assert r["selective_v2_packs"]["io"]["get"] < r["conservative_chain_v2"]["get"]
+              assert r["conservative_chain_v2"]["head"] == 2 * r["conservative_chain_v2"]["get"]
+          else:
+              assert r["offline_generations"] == 0
+              assert r["v2_letter_mode"] == "not-applicable-without-new-generation"
+          PY
+      - name: Preserve machine-readable comparable results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coord-02f-${{ matrix.notes }}-notes-${{ matrix.edits }}-edits
+          path: aquilum-app/coord-02f-result.jsonl
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Stop disposable loopback MinIO
+        if: always()
+        shell: bash
+        run: |
+          docker stop akula-coord-02f-minio >/dev/null 2>&1 || true
