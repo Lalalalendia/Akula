@@ -8,7 +8,7 @@ use std::time::Instant;
 use super::super::{
     coord_locator::S3CoordLetterLocatorV2,
     pack_probe::PackBuilder, S3ConnectionProfile, S3PutCondition,
-    S3TransportError,
+    S3TransportError, S3HeadJournal, S3HeadPublication,
 };
 use crate::sync::{
     DocumentId, OperationId, RevisionOperation, S3DeltaPackRefV2,
@@ -285,13 +285,21 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     assert_eq!(before_cas.to_generation, 2);
     assert_eq!(before_cas.new_revision_ids.len(), 1);
 
-    // Root change is performed ONLY through a separate server-side CAS.
-    // In production the existing SQLite S3HeadJournal must be used; this
-    // test's isolated writer uses direct guarded CAS as in 02c.
-    let third_put = writer.put_conditionally(
-        &ns.current_head_key(), &head3.encode(&ns).unwrap(),
-        S3PutCondition::IfMatch(second_put.etag),
-    ).await.unwrap();
+    // The ONLY mutable step now uses the existing real SQLite WAL-backed
+    // CAS publisher, rather than introducing an independent root writer.
+    let mut root_journal = S3HeadJournal::open(
+        &temp.path().join("gen3-root-cas.sqlite"),
+    ).unwrap();
+    assert_eq!(writer.publish_head_cas(
+        &mut root_journal, gen3.manifest_id,
+        head3.clone(), Some(&verified_gen2),
+    ).await.unwrap(), S3HeadPublication::Published);
+    assert_eq!(writer.publish_head_cas(
+        &mut root_journal, gen3.manifest_id,
+        head3.clone(), Some(&verified_gen2),
+    ).await.unwrap(), S3HeadPublication::Recovered);
+    let third_put = writer.read_verified_head().await.unwrap().unwrap();
+    assert_eq!(third_put.pointer, head3);
     let letter3 = staged.letter_blake3;
 
     let letters = vec![letter2.clone(), letter3.clone()];
