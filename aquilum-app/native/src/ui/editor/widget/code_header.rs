@@ -15,7 +15,11 @@ impl TextEditor {
             return None;
         }
         let paragraph = self.doc.paragraph(index);
+        // Reject non-opening lines before asking which block contains them:
+        // a hover over the middle of a 50,000-line fence must be O(1), not
+        // scan backwards through the full loaded run on every pointer move.
         if !matches!(paragraph.fold, Fold::None | Fold::Above)
+            || !matches!(paragraph.block, Block::Code { first: true, fence: true, .. })
             || self.fenced_code_start(index) != Some(paragraph.start)
         {
             return None;
