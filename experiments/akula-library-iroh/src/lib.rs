@@ -441,6 +441,34 @@ mod tests {
         task.abort();
         Ok(())
     }
+    #[tokio::test(flavor="multi_thread",worker_threads=4)]
+    async fn two_parallel_readers_share_global_quota_and_rate() -> Result<()> {
+        let server_ep = private_endpoint(None).await?;
+        let reader_a = private_endpoint(None).await?;
+        let reader_b = private_endpoint(None).await?;
+        let addr = loopback_addr(&server_ep)?;
+        let book = Book::new(bytes(CHUNK_SIZE))?;
+        let limits = QuotaState::new((CHUNK_SIZE * 2) as u64, CHUNK_SIZE as u64);
+        let server = Server::new(book.clone(),
+                HashSet::from([reader_a.id(), reader_b.id()]), limits)
+            .with_rate_limit(rate_limit::RateGate::new(1024 * 1024, 512 * 1024)?);
+        let quota = server.quota();
+        let task = tokio::spawn(server.run(server_ep.clone()));
+        let (a, b) = tokio::join!(
+            download(&reader_a, addr.clone()),
+            download(&reader_b, addr.clone())
+        );
+        assert_eq!(a?, book.bytes.as_ref().clone());
+        assert_eq!(b?, book.bytes.as_ref().clone());
+        assert_eq!(quota.lock().unwrap().used(), (CHUNK_SIZE * 2) as u64);
+        assert_eq!(quota.lock().unwrap().used_for(&reader_a.id()), CHUNK_SIZE as u64);
+        assert_eq!(quota.lock().unwrap().used_for(&reader_b.id()), CHUNK_SIZE as u64);
+        assert!(download(&reader_a, addr.clone()).await.is_err(),
+                "repeat download cannot exceed per-peer or global quota");
+        reader_a.close().await; reader_b.close().await;
+        server_ep.close().await; task.abort();
+        Ok(())
+    }
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn real_iroh_direct_loopback_and_resume() -> Result<()> {
         let server_ep = private_endpoint(None).await?;
