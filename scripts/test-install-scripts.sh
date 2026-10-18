@@ -5,15 +5,19 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 temporary_home="$(mktemp -d)"
 trap 'rm -rf "$temporary_home"' EXIT
 
-# The actual macOS lockf works on fd 9; Ubuntu CI adapts it using flock.
+# macOS tests exercise the real BSD lockf utility. Ubuntu CI adapts
+# its fd-lock interface to util-linux flock without changing install code.
 mkdir -p "$temporary_home/tools"
-cat > "$temporary_home/tools/lockf" <<'EOF'
+if [[ "$(uname -s)" != Darwin ]]; then
+  cat > "$temporary_home/tools/lockf" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$#" -eq 4 && "$1" == -s && "$2" == -t && "$3" == 0 && "$4" == 9 ]] || exit 60
-exec /usr/bin/flock -n 9
+[[ "$#" -eq 4 && "$1" == -s && "$2" == -t && "$3" == 0 ]] || exit 60
+[[ "$4" =~ ^[0-9]+$ ]] || exit 60
+exec /usr/bin/flock -n "$4"
 EOF
-chmod +x "$temporary_home/tools/lockf"
+  chmod +x "$temporary_home/tools/lockf"
+fi
 
 mkdir -p "$temporary_home/Applications/Aquilum.app" "$temporary_home/Notes"
 printf 'keep\n' > "$temporary_home/Notes/Keep.md"
@@ -199,7 +203,7 @@ unset AKULA_TEST_PROMOTION_FAIL
 # Both installer and uninstaller use the same kernel lock. A held descriptor
 # must cause immediate refusal without touching the active application.
 exec 8>>"$temporary_home/Applications/.akula-install.lock"
-/usr/bin/flock -n 8
+PATH="$temporary_home/tools:$PATH" lockf -s -t 0 8
 if run_installer; then
   echo 'Installer bypassed another process holding the lock' >&2
   exit 1
@@ -212,7 +216,6 @@ if HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" \
 fi
 grep -Fq 'holds the Applications lock' "$error_log"
 old_intact
-/usr/bin/flock -u 8
 exec 8>&-
 
 # Test genuine parallel installers: first one is paused inside its API fetch,
