@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(staged.byte_length, updated.len() as u64);
         assert_eq!(cache.verified_blob(&new_hash).unwrap(), updated);
         assert_eq!(fs::read(root.join(relative.as_str())).unwrap(), original);
-        assert_eq!(journal.baseline(ns.vault_id(), doc).unwrap(), Some(old_baseline));
+        assert_eq!(journal.baseline(ns.vault_id(), doc).unwrap(), Some(old_baseline.clone()));
         assert_eq!(journal.get(operation_id).unwrap().unwrap().phase,
             JournalPhase::Staged);
         assert!(matches!(journal.mark_applied(operation_id),
