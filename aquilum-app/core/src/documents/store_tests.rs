@@ -95,3 +95,76 @@ fn reopening_keeps_what_was_written() {
     drop(store);
     let _ = std::fs::remove_dir_all(&directory);
 }
+
+
+#[test]
+fn migrates_v1_document_store_and_keeps_existing_replica_data() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("documents.sqlite3");
+    {
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE replicas (key TEXT PRIMARY KEY, state BLOB NOT NULL);
+             CREATE TABLE replica_updates (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL,
+                data BLOB NOT NULL
+             );
+             CREATE INDEX replica_updates_key ON replica_updates (key, seq);
+             CREATE TABLE sync_points (
+                key TEXT PRIMARY KEY, file_hash TEXT NOT NULL, text_hash TEXT NOT NULL
+             );
+             INSERT INTO replicas VALUES ('legacy', X'010203');
+             PRAGMA user_version = 1;"
+        ).unwrap();
+    }
+    let store = DocumentStore::open(&path).unwrap();
+    assert_eq!(store.load("legacy").unwrap(), vec![vec![1, 2, 3]]);
+    assert!(store.write_intent("legacy").unwrap().is_none());
+    assert_eq!(
+        store.connection.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
+        2
+    );
+}
+
+#[test]
+fn durable_intent_survives_restart_and_cannot_be_overwritten_or_silently_forgotten() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("documents.sqlite3");
+    let base = blake3::hash(b"before").to_hex().to_string();
+    let proposed = blake3::hash(b"after").to_hex().to_string();
+    {
+        let mut store = DocumentStore::open(&path).unwrap();
+        store.append("note", b"unsaved CRDT edit").unwrap();
+        store.remember_sync_point("note", &point(&base, &base)).unwrap();
+        store.begin_write_intent("note", &base, &proposed).unwrap();
+        assert!(matches!(
+            store.begin_write_intent("note", &base, &proposed),
+            Err(StoreError::HoldPresent)
+        ));
+        assert!(matches!(store.forget("note"), Err(StoreError::HoldPresent)));
+        assert!(matches!(store.relocate("note", "renamed"), Err(StoreError::HoldPresent)));
+    }
+    {
+        // Pretend the process crashed after changing primary bytes and
+        // before seeing an ACK from native File Gate/HistoryService.
+        let mut store = DocumentStore::open(&path).unwrap();
+        assert_eq!(store.write_intent("note").unwrap(), Some(DurableWriteIntent {
+            base_hash: base.clone(), proposed_hash: proposed.clone(),
+        }));
+        assert_eq!(store.load("note").unwrap(), vec![b"unsaved CRDT edit".to_vec()]);
+        assert_eq!(store.sync_point("note"), SyncPointLookup::Found(point(&base, &base)));
+        assert!(matches!(
+            store.complete_write_intent("note", &base, &base),
+            Err(StoreError::HoldMissing)
+        ));
+        assert!(matches!(store.relocate("else", "note"), Err(StoreError::HoldPresent)));
+        assert!(store.write_intent("note").unwrap().is_some());
+        // Only the exact successful, independently confirmed attempt may
+        // retire its evidence. This is an explicit low-level test API; the
+        // production editor does NOT automatically clear on startup.
+        store.complete_write_intent("note", &base, &proposed).unwrap();
+        assert!(store.write_intent("note").unwrap().is_none());
+        store.forget("note").unwrap();
+    }
+}
