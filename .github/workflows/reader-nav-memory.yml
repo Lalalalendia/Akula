@@ -80,6 +80,8 @@ jobs:
                 --book "$RUNNER_TEMP/reader-nav-samples/$mode.epub" \
                 --out "$READER_NAV_OUT/$mode" \
                 --count 60 --pause-ms 65 --checkpoint-every 20 --timeout-s 110
+              # Exactly two real Reader closures: after navigation and after reopen.
+              test "$(grep -c "READER_POSTCLOSE_TRIM released=" "$READER_NAV_OUT/$mode/app.log")" -eq 2
             done
           '
 
