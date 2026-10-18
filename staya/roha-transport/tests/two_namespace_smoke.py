@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import time
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = ROOT / "target" / "debug" / "staya-lan"
@@ -40,16 +41,13 @@ def inside(ns, *args, timeout=40):
     )
 
 
-def identity():
-    result = subprocess.run(
-        [str(BIN), "gen-key"], capture_output=True,
-        text=True, timeout=15, check=True
-    )
-    peer = re.search(r"^endpoint_id=(\S+)$", result.stdout, re.M)
-    secret = re.search(r"^secret_hex=([a-f0-9]{64})$", result.stdout, re.M)
-    if not peer or not secret:
-        raise AssertionError("unexpected identity response")
-    return peer.group(1), secret.group(1)
+def identity(folder, label):
+    key_path = pathlib.Path(folder) / (label + ".key")
+    result = subprocess.run([str(BIN), "gen-key-file", str(key_path)], capture_output=True, text=True, timeout=15, check=True)
+    match = re.search(r"^endpoint_id=(\S+)$", result.stdout, re.M)
+    if not match:
+        raise AssertionError("identity generation failed")
+    return match.group(1), "@" + str(key_path)
 
 
 def sanitized(output, secrets):
@@ -98,9 +96,14 @@ def cleanup():
 
 
 def main():
-    a_id, a_key = identity()
-    b_id, b_key = identity()
-    _, unknown_key = identity()
+    with tempfile.TemporaryDirectory(prefix='staya-private-') as folder:
+        return run_with_keys(folder)
+
+
+def run_with_keys(folder):
+    a_id, a_key = identity(folder, 'a')
+    b_id, b_key = identity(folder, 'b')
+    _, unknown_key = identity(folder, 'unknown')
     peer_address = f"{IP_B}:{PORT}"
     server = None
     try:
