@@ -8,7 +8,7 @@ mod trace;
 pub use counting::Counting;
 pub use probe::Probe;
 pub use reader_frame::ReaderFrame;
-pub use reader_frame::{mark_text_painted, reset_frame, take_text_painted};
+pub use reader_frame::{mark_text_painted, reset_frame, take_text_painted, navigation_sample};
 pub use script::Step;
 
 #[cfg(test)]

@@ -66,6 +66,22 @@ fn process_memory() -> Memory {
     Memory::default()
 }
 
+// RSS and VmHWM are process-wide. VmHWM is cumulative since process start.
+pub fn navigation_sample(label: &str, reader_state: Option<&str>) -> String {
+    let memory = process_memory();
+    let mib = |bytes: usize| bytes as f64 / 1_048_576.0;
+    format!(
+        "READER_NAV_SAMPLE label={} reader_active={} heap_current_mib={:.3} heap_peak_mib={:.3} rss_kib={} process_hwm_kib={} {}",
+        label.replace(' ', "_"),
+        reader_state.is_some(),
+        mib(CURRENT.load(Ordering::Relaxed)),
+        mib(PEAK.load(Ordering::Relaxed)),
+        memory.rss_kib,
+        memory.hwm_kib,
+        reader_state.unwrap_or(""),
+    )
+}
+
 pub struct ReaderFrame {
     began: Instant,
     sync_open_ms: f64,

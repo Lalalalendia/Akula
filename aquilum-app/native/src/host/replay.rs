@@ -101,6 +101,10 @@ impl Host {
             }
             if let crate::memory_probe::Step::Mark(name) | crate::memory_probe::Step::Evict(name) = &step {
                 probe.record(name, &self.app.probe_stats(root));
+                // Compact machine-readable rows, avoiding costly Windows
+                // memory breakdown on each intermediate navigation step.
+                let state = self.app.probe_reader_state(root);
+                probe.append_frame(&crate::memory_probe::navigation_sample(name, state.as_deref()));
             }
             self.handle_signals(event_loop);
             self.request_redraw();
