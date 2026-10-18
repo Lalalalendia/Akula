@@ -7,6 +7,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Replace obsolete PR experiment runs after new commits; keep manual runs.
+concurrency:
+  group: akula-fed-gossip-02-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   gossip:
     runs-on: ubuntu-24.04
