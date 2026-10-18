@@ -561,4 +561,137 @@ mod tests {
         assert_eq!(fs::read(&lock_note).unwrap(), b"lock original");
         assert_eq!(fs::read(&old).unwrap(), b"stable existing OS lock");
     }
+
+    /// S3 activation must itself publish host-wide enrollment. Merely
+    /// inserting into DocumentHub's private appdata would leave Core B free
+    /// to write the same physical vault through the shared host epoch.
+    #[test]
+    fn verified_editor_activation_enrolls_shared_host_before_other_appdata_can_write() {
+        use super::super::host_custody_registry::{
+            PhysicalObjectId, SharedHostCustodyRegistry,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let app_a = temp.path().join("app-a");
+        let app_b = temp.path().join("app-b");
+        let shared = temp.path().join("installed-host");
+        for dir in [&root, &app_a, &app_b, &shared] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let root = fs::canonicalize(&root).unwrap();
+        let original = root.join("Original.md");
+        fs::write(&original, b"unchanged").unwrap();
+        let host_db = shared.join("custody.sqlite");
+        let installer = SharedHostCustodyRegistry::provision_new(
+            &host_db, &[root.as_path(), app_a.as_path(), app_b.as_path()],
+        ).unwrap();
+        drop(installer);
+
+        let core_a = Core::open_with_installed_host(
+            &app_a, &host_db, Arc::new(|_: CoreEvent| {}),
+        );
+        core_a.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
+        let scope = temp.path().join("external").join(scoped_leaf(root_id));
+        fs::create_dir_all(&scope).unwrap();
+        let lock = scope.join(LOCK_NAME);
+        fs::write(&lock, b"existing OS lock").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&scope, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let scope = fs::canonicalize(scope).unwrap();
+        let namespace = S3Keyspace::new("akula/host-editor-enrollment", VaultId::new()).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-host-enrollment-fixture".into(),
+            region: "us-east-1".into(),
+            endpoint: Some("http://127.0.0.1:9000".into()),
+            force_path_style: true,
+        };
+        let manifest = S3ManifestV1::new(
+            &namespace, OperationId::new(), 1, None, vec![],
+        ).unwrap();
+        let pointer = S3HeadPointerV1::new(
+            &namespace, 1, manifest.manifest_id,
+            &manifest.digest(&namespace).unwrap(), None,
+        ).unwrap();
+        let head = S3VerifiedHead {
+            pointer, manifest, etag: "\"test-host-enrollment\"".into(),
+        };
+        let profile_db = app_a.join("s3-profile.sqlite");
+        let custody_db = app_a.join("local-custody.sqlite");
+        {
+            let admission = RegisteredReadAdmission::open(&core_a, &root).unwrap();
+            let mut profiles = SqliteRegisteredS3Bindings::open(
+                &admission, &profile_db,
+            ).unwrap();
+            profiles.bind_existing_verified_s3(
+                &admission, "host-editor", &profile, &namespace, &head,
+            ).unwrap();
+            let mut custody = SqliteCustodyIdentityStore::open(
+                &admission, &custody_db,
+            ).unwrap();
+            custody.bind_registered_s3(&admission, &profiles, &scope).unwrap();
+        }
+
+        // A itself performs the live activation. NO explicit host.enroll()
+        // may appear in this test: that would hide the original bug.
+        activate_registered_s3_editor(
+            &core_a, &root, &profile_db, &custody_db, &scope,
+        ).unwrap();
+        assert!(core_a.documents.requires_guarded_participant_hold());
+        let root_id = PinnedProbeRoot::open(&root).unwrap().identity();
+        let readback = SharedHostCustodyRegistry::open_existing(&host_db).unwrap();
+        let durable = readback.inspect(
+            &root,
+            PhysicalObjectId { device: root_id.0, file: root_id.1 },
+        ).unwrap().expect("guarded editor activation must enroll shared host");
+        assert_eq!(durable.vault_id, namespace.vault_id());
+        assert_eq!(durable.profile_id, "host-editor");
+        drop(readback);
+
+        let core_b = Core::open_with_installed_host(
+            &app_b, &host_db, Arc::new(|_: CoreEvent| {}),
+        );
+        core_b.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        assert!(gate::write(
+            &core_b, &original, "FORBIDDEN", None, Source::Me, None,
+        ).is_err());
+        let new_note = root.join("Foreign.md");
+        assert!(gate::create(
+            &core_b, &new_note, "FORBIDDEN", Source::Me, None,
+        ).is_err());
+        assert_eq!(fs::read(&original).unwrap(), b"unchanged");
+        assert!(!new_note.exists());
+    }
+
+    #[test]
+    fn missing_shared_host_database_refuses_s3_editor_activation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let appdata = temp.path().join("appdata");
+        for dir in [&root, &appdata] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let root = fs::canonicalize(root).unwrap();
+        let host_db = temp.path().join("no-installed-ledger.sqlite");
+        let core = Core::open_with_installed_host(
+            &appdata, &host_db, Arc::new(|_: CoreEvent| {}),
+        );
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        // No valid S3 profile or custody identities exist either: activation
+        // must refuse without creating the missing installer database.
+        assert!(activate_registered_s3_editor(
+            &core, &root, &appdata.join("s3.sqlite"),
+            &appdata.join("custody.sqlite"), &temp.path().join("scope"),
+        ).is_err());
+        assert!(!host_db.exists());
+        let forbidden = root.join("NoFallback.md");
+        assert!(gate::create(
+            &core, &forbidden, "FORBIDDEN", Source::Me, None,
+        ).is_err());
+        assert!(!forbidden.exists());
+    }
 }
