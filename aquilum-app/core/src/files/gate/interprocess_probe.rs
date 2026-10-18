@@ -112,17 +112,28 @@ mod tests {
     fn wait_for_report(child: &mut KillChild, report: &Path, expected: &[u8]) {
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
-            if report.exists() {
-                assert_eq!(fs::read(report).unwrap(), expected);
-                return;
+            // The child creates the report pathname BEFORE write_all has
+            // necessarily made the small payload visible to this process.
+            // Especially on macOS, existence is not a completion barrier.
+            // Tolerate only a prefix of the expected value; reject an actual
+            // wrong nonempty state instead of silently polling over it.
+            match fs::read(report) {
+                Ok(bytes) if bytes == expected => return,
+                Ok(bytes) if expected.starts_with(bytes.as_slice()) => {}
+                Ok(bytes) => panic!(
+                    "unexpected OS-lock child state: got {:?}, expected {:?}",
+                    bytes, expected,
+                ),
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => panic!("cannot read OS-lock child report: {error}"),
             }
             assert!(
                 child.0.try_wait().unwrap().is_none(),
-                "child exited before reporting its lock state"
+                "child exited before completing its lock-state report"
             );
             thread::sleep(Duration::from_millis(15));
         }
-        panic!("child failed to report its lock state before deadline");
+        panic!("child failed to complete its lock state report before deadline");
     }
 
     #[test]
