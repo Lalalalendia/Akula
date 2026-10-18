@@ -1,0 +1,58 @@
+name: Snapshot exact registry Vello Common 0.3.0 for vendored patch
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-common-registry-snapshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Verify and archive original Cargo registry Vello Common
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch locked crate sources
+        run: cargo fetch --locked --manifest-path aquilum-app/Cargo.toml
+      - name: Archive exact source with Cargo source checksum manifest
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import hashlib
+          import io
+          import json
+          import os
+          import pathlib
+          import tarfile
+
+          candidates = glob.glob(os.path.expanduser("~/.cargo/registry/src/*/vello_common-0.3.0"))
+          if len(candidates) != 1:
+              raise SystemExit(f"Expected one Cargo registry source, got {candidates!r}")
+          src = pathlib.Path(candidates[0])
+          manifest = json.loads((src / ".cargo-checksum.json").read_text())
+          if not manifest.get("files") or "src/strip.rs" not in manifest["files"]:
+              raise SystemExit("Missing registry source checksums")
+          for rel, expected in manifest["files"].items():
+              actual = hashlib.sha256((src / rel).read_bytes()).hexdigest()
+              if actual != expected:
+                  raise SystemExit(f"Package corruption: {rel} {actual} != {expected}")
+          strip = (src / "src/strip.rs").read_text()
+          if strip.count("Fill::NonZero => {\n                    let p1 = f32x4::splat(s, 0.5);") != 1:
+              raise SystemExit("Vello Common registry does not match diagnosed NonZero alpha conversion")
+          with tarfile.open("vello_common-0.3.0-registry.tar.gz", "w:gz") as tar:
+              tar.add(src, arcname="vello_common-0.3.0", recursive=True)
+          print("VELLO_REGISTRY_SNAPSHOT_VALIDATED files=", len(manifest["files"]))
+          print("VELLO_REGISTRY_SNAPSHOT_SHA256=", hashlib.sha256(pathlib.Path("vello_common-0.3.0-registry.tar.gz").read_bytes()).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-vello-common-registry-source
+          path: vello_common-0.3.0-registry.tar.gz
+          retention-days: 3
+          if-no-files-found: error
