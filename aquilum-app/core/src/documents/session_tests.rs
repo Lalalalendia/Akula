@@ -13,6 +13,10 @@ struct FakeIo {
     fail_remember: Cell<bool>,
     remembered: Cell<usize>,
     writes: Cell<usize>,
+    /// Simulate a successful physical file write followed by a lost ACK.
+    ambiguous_after_write: Cell<bool>,
+    reads: Cell<usize>,
+    hash_checks: Cell<usize>,
     fail_preserve: Cell<bool>,
     changed_on_next_write: RefCell<Option<String>>,
 }
@@ -37,11 +41,13 @@ impl FakeIo {
 
 impl SessionIo for FakeIo {
     fn read(&self) -> Result<DiskSnapshot, DiskError> {
+        self.reads.set(self.reads.get() + 1);
         let content = self.file.borrow().clone().ok_or(DiskError::Missing)?;
         Ok(DiskSnapshot { hash: hash_of(&content), text_hash: hash_of(&content), content })
     }
 
     fn hash(&self) -> Result<String, DiskError> {
+        self.hash_checks.set(self.hash_checks.get() + 1);
         self.file.borrow().as_deref().map(hash_of).ok_or(DiskError::Missing)
     }
 
@@ -55,6 +61,12 @@ impl SessionIo for FakeIo {
         }
         self.writes.set(self.writes.get() + 1);
         self.edit_file(content);
+        if self.ambiguous_after_write.replace(false) {
+            return Err(DiskError::Other {
+                code: "needs_review",
+                message: "native postflight ambiguous: file may be written".into(),
+            });
+        }
         Ok(hash_of(content))
     }
 
@@ -254,6 +266,55 @@ fn a_deleted_note_is_not_resurrected_by_saving() {
     *io.file.borrow_mut() = None;
     assert!(matches!(session.write(&io), Err(SessionError::Missing)));
     assert!(io.file.borrow().is_none());
+}
+
+#[test]
+fn native_lost_ack_sticks_as_hold_across_reconcile_retry_and_new_edits() {
+    let io = FakeIo::with_file("abc");
+    let mut session = DocumentSession::open(&[], &io).unwrap();
+    session.replace_text("abcd", "editor", &io).unwrap();
+    let confirmed = io.point.borrow().as_ref().unwrap().file_hash.clone();
+    assert_eq!(confirmed, hash_of("abc"));
+
+    io.ambiguous_after_write.set(true);
+    let first = session.write(&io);
+    assert!(matches!(first,
+        Err(SessionError::Disk { code: "needs_review", .. })));
+    assert!(session.requires_review());
+    assert!(session.dirty());
+    assert_eq!(io.writes.get(), 1);
+    // The primary file MAY already have been published by the failed call.
+    assert_eq!(io.file(), "abcd");
+    // Neither the presumed file nor a failed history postflight is a
+    // trustworthy newly confirmed sync point.
+    assert_eq!(io.point.borrow().as_ref().unwrap().file_hash, confirmed);
+
+    // Even if an external process changes the file, neither reconcile nor
+    // a repeated write can infer provenance or attempt a second publication.
+    io.edit_file("outside concurrent write");
+    let before_reads = io.reads.get();
+    let before_hashes = io.hash_checks.get();
+    assert!(matches!(session.reconcile(&io),
+        Err(SessionError::Disk { code: "needs_review", .. })));
+    assert_eq!(io.reads.get(), before_reads);
+    assert_eq!(io.hash_checks.get(), before_hashes);
+    assert_eq!(session.text(), "abcd");
+    assert!(matches!(session.write(&io),
+        Err(SessionError::Disk { code: "needs_review", .. })));
+    assert_eq!(io.writes.get(), 1);
+    assert_eq!(io.file(), "outside concurrent write");
+
+    // New user changes are still durably appended to the local CRDT log,
+    // but they cannot implicitly clear the HOLD or touch the disk.
+    let appends_before = io.appended.get();
+    let v = session.version();
+    assert!(session.push("editor", v, &[insert_at(4, "!", 4)], &io).unwrap());
+    assert_eq!(session.text(), "abcd!");
+    assert_eq!(io.appended.get(), appends_before + 1);
+    assert!(session.requires_review());
+    assert!(session.write(&io).is_err());
+    assert_eq!(io.writes.get(), 1);
+    assert_eq!(io.point.borrow().as_ref().unwrap().file_hash, confirmed);
 }
 
 #[test]
