@@ -339,7 +339,7 @@ fn note_publication_epoch_spans_primary_and_history_before_enrollment() {
     // Hold the history-files lock, while the real File Gate writer publishes
     // the primary note and then waits to record its history. This reproduces
     // exactly the gap that the old File Gate mutex did NOT cover.
-    let (writer, enrollment) = core.history.with_participant_enrollment_fence(|| {
+    let (writer, enrollment, finished_rx) = core.history.with_participant_enrollment_fence(|| {
         let core_write = Arc::clone(&core);
         let writer_note = note.clone();
         let replacement = next.clone();
@@ -369,11 +369,16 @@ fn note_publication_epoch_spans_primary_and_history_before_enrollment() {
             finished_rx.recv_timeout(Duration::from_millis(150)),
             Err(mpsc::RecvTimeoutError::Timeout)
         ), "enrollment bypassed a legacy write between primary and history");
-        Ok::<_, FileCommandError>((worker, admission))
+        // Keep the completion receiver alive across release of the HistoryFiles
+        // fence. Dropping it here makes the enrollment worker panic on send
+        // after it correctly waits for the writer, giving a false CI failure.
+        Ok::<_, FileCommandError>((worker, admission, finished_rx))
     }).unwrap();
 
     assert!(writer.join().unwrap().is_ok(),
         "ordinary note publication failed after HistoryService lock released");
+    assert!(finished_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+        "enrollment did not finish successfully after the history write");
     enrollment.join().unwrap();
     assert_eq!(fs::read_to_string(&note).unwrap(), next);
     assert!(core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0,
@@ -401,7 +406,7 @@ fn relocation_trash_and_restore_hold_publication_epoch_until_history_finishes() 
         Run: FnOnce() -> Result<T, FileCommandError> + Send + 'static,
         Changed: Fn() -> bool,
     {
-        let (worker, enrollment) = core.history.with_participant_enrollment_fence(|| {
+        let (worker, enrollment, done_rx) = core.history.with_participant_enrollment_fence(|| {
             let worker = thread::spawn(run);
             let start = Instant::now();
             while !(primary_changed() && core.file_mutations.try_lock().is_ok()) {
@@ -422,9 +427,13 @@ fn relocation_trash_and_restore_hold_publication_epoch_until_history_finishes() 
                 done_rx.recv_timeout(Duration::from_millis(120)),
                 Err(mpsc::RecvTimeoutError::Timeout)
             ), "participant enrollment bypassed an in-flight primary/history transfer");
-            Ok::<_, FileCommandError>((worker, enrollment))
+            // A genuinely blocked enrollment sends only after this callback
+            // releases the history fence; retain its receiver until then.
+            Ok::<_, FileCommandError>((worker, enrollment, done_rx))
         }).unwrap();
         let result = worker.join().unwrap().unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "participant enrollment must complete after primary+history");
         enrollment.join().unwrap();
         result
     }
