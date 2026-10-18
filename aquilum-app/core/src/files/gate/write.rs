@@ -48,7 +48,10 @@ fn checked_registered_note(root: &Path, path: &Path) -> Result<(), FileCommandEr
     let components: Vec<_> = relative.components().collect();
     if components.is_empty()
         || components.iter().any(|c| !matches!(c, Component::Normal(_)))
-        || components[0].as_os_str() == std::ffi::OsStr::new(crate::history::AQUILUM_FOLDER)
+        // NTFS may resolve .AQUILUM to the internal .aquilum history root;
+        // block casefold aliases on every OS, not just exact spelling.
+        || components[0].as_os_str().to_string_lossy()
+            .eq_ignore_ascii_case(crate::history::AQUILUM_FOLDER)
     {
         return Err(denied());
     }
