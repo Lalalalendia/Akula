@@ -1,7 +1,18 @@
 //! Standalone, manually addressed LAN proof-of-concept. No files or Sync Core.
 use akula_roha_transport::{AllowedPeers, StayaTransport};
 use iroh::{EndpointAddr, EndpointId, SecretKey};
-use std::{env, net::SocketAddr, str::FromStr, time::Duration};
+use std::{
+    env,
+    fs::{File, OpenOptions},
+    io::{Read, Write},
+    net::SocketAddr,
+    path::Path,
+    str::FromStr,
+    time::Duration,
+};
+
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 fn decode_key(s: &str) -> Result<SecretKey, String> {
     if s.len() != 64 {
@@ -14,12 +25,57 @@ fn decode_key(s: &str) -> Result<SecretKey, String> {
     Ok(SecretKey::from_bytes(&raw))
 }
 
+fn key_hex(key: &SecretKey) -> String {
+    key.to_bytes().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// File-backed keys do not appear in process arguments. Hex arguments remain
+/// temporarily supported for existing laboratory tests, never for production.
+fn secret_from_arg(value: &str) -> Result<SecretKey, String> {
+    let Some(path) = value.strip_prefix('@') else {
+        return decode_key(value);
+    };
+    if path.is_empty() {
+        return Err("missing secret key file path".into());
+    }
+    let file = File::open(path).map_err(|e| format!("cannot open key file: {e}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| format!("cannot inspect key file: {e}"))?;
+    if !metadata.is_file() || metadata.len() > 128 {
+        return Err("invalid key file type or size".into());
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err("key file must not be readable by group or others (mode 0600)".into());
+    }
+    let mut encoded = String::new();
+    file.take(129)
+        .read_to_string(&mut encoded)
+        .map_err(|e| format!("cannot read key file: {e}"))?;
+    decode_key(encoded.trim_end_matches(&['\r', '\n'][..]))
+}
+
+fn save_key_file(path: &Path, key: &SecretKey) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(path)
+        .map_err(|e| format!("cannot create key file: {e}"))?;
+    file.write_all(key_hex(key).as_bytes())
+        .and_then(|_| file.write_all(b"\n"))
+        .and_then(|_| file.sync_all())
+        .map_err(|e| format!("cannot save secret key: {e}"))
+}
+
 fn parse_id(s: &str) -> Result<EndpointId, String> {
     EndpointId::from_str(s).map_err(|e| format!("invalid peer id: {e}"))
 }
 
 fn usage() -> &'static str {
-    "usage:\n  staya-lan gen-key\n  staya-lan serve SECRET_HEX ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping SECRET_HEX SERVER_PEER_ID SERVER_IP:UDP_PORT\nWARNING: SECRET_HEX is sensitive. Do not paste into reports, logs or shared terminals.\n"
+    "usage:\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\nlegacy LAB ONLY: gen-key and raw SECRET_HEX instead of @KEY_PATH\nDo not publish key files or include secret arguments in shared logs.\n"
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -28,13 +84,18 @@ async fn main() -> Result<(), String> {
     match args.get(1).map(String::as_str) {
         Some("gen-key") if args.len() == 2 => {
             let key = SecretKey::generate();
-            let hex: String = key.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
             println!("endpoint_id={}", key.public());
-            println!("secret_hex={hex}");
-            eprintln!("Keep secret_hex private. This prototype has no OS key storage.");
+            println!("secret_hex={}", key_hex(&key));
+            eprintln!("LAB ONLY: secret exposed to terminal output; do not reuse in production.");
+        }
+        Some("gen-key-file") if args.len() == 3 => {
+            let key = SecretKey::generate();
+            save_key_file(Path::new(&args[2]), &key)?;
+            println!("endpoint_id={}", key.public());
+            eprintln!("Private key saved. Protect its location; never upload it.");
         }
         Some("serve") if args.len() == 5 => {
-            let key = decode_key(&args[2])?;
+            let key = secret_from_arg(&args[2])?;
             let allowed = parse_id(&args[3])?;
             let socket: SocketAddr = args[4].parse().map_err(|_| "invalid bind socket")?;
             let transport =
@@ -68,7 +129,7 @@ async fn main() -> Result<(), String> {
             }
         }
         Some("ping") if args.len() == 5 => {
-            let key = decode_key(&args[2])?;
+            let key = secret_from_arg(&args[2])?;
             let server = parse_id(&args[3])?;
             let socket: SocketAddr = args[4].parse().map_err(|_| "invalid peer socket")?;
             let local = StayaTransport::bind(key, AllowedPeers::new([server])).await?;
