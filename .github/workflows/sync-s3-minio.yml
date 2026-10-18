@@ -139,6 +139,7 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::v2_readonly::tests
           cargo test --locked -p aquilum-core --features sync-s3 coord_chain::tests -- --skip live_minio_
+          cargo test --locked -p aquilum-core --features sync-s3 coord_selective_packs::tests
       - name: Prove V2 pack index CAS-binding and fail-closed ancestry contracts
         shell: bash
         working-directory: aquilum-app

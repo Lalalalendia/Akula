@@ -241,6 +241,24 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     assert!(accepted.new_revision_ids.contains(&tombstone.0.revision_id));
     assert!(accepted.requires_full_apply_gate);
 
+    // 02e optimized reader: reconstruct each real immutable V1 shard
+    // inventory and verify new revision JSON/blob bytes from the V2 packs,
+    // without repeatedly loading prior individual objects.
+    let packed_before = reader.test_io_snapshot();
+    let packed_started = Instant::now();
+    let packed = reader.inspect_v2_offline_selective_packs_against_pinned_v1(
+        &scope, &journal, &pinned, &cache, &letters,
+    ).await.unwrap();
+    let packed_micros = packed_started.elapsed().as_micros();
+    let packed_io = reader.test_io_snapshot().since(packed_before);
+    assert_eq!(packed.from_generation, 1);
+    assert_eq!(packed.to_generation, 3);
+    assert_eq!(packed.verified_generations, 2);
+    assert_eq!(packed.new_revision_ids.len(), 2);
+    assert_eq!(packed.verified_packs, 2);
+    assert_eq!(packed.total_revisions, 3);
+    assert!(packed.requires_full_apply_gate);
+
     // 02d shadow experiment: reuse the SAME real MinIO root and durable
     // SQLite anchor, but compare the already-existing selective V1 advisory
     // reader against the independently full-verified V2 letter/pack chain.
@@ -272,6 +290,10 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
         accepted.new_revision_ids.iter().copied().collect();
     let selective_new: BTreeSet<_> =
         selected.new_revision_ids.iter().copied().collect();
+    let packed_new: BTreeSet<_> =
+        packed.new_revision_ids.iter().copied().collect();
+    assert_eq!(chain_new, packed_new, "packed reader omitted offline revision");
+    assert_eq!(packed.total_revisions, accepted.newly_verified_revisions + pinned.len());
     let old_ids: BTreeSet<_> = pinned.references_for_coord_v2()
         .iter().map(|r| r.revision_id).collect();
     let full_ids: BTreeSet<_> = full.references_for_coord_v2()
@@ -285,6 +307,35 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     assert_eq!(selected.remote_snapshot_id, full.snapshot_id);
     assert_eq!(selected.total_revisions, full.len());
     assert!(selected.requires_full_apply_gate);
+
+    // 02e differs from 02c in assurance: old blobs are NOT re-probed.
+    println!("AKULA_COORD_02E_PARITY {}", serde_json::json!({
+        "assurance": "advisory-shard-and-pack-membership-no-old-blob-availability",
+        "conservative_chain": {
+            "get": chain_io.get, "head": chain_io.head,
+            "bytes": chain_io.payload_bytes, "elapsed_us": chain_micros
+        },
+        "selective_packs": {
+            "get": packed_io.get, "head": packed_io.head,
+            "bytes": packed_io.payload_bytes, "elapsed_us": packed_micros,
+            "downloaded_shards": packed.downloaded_shards,
+            "reused_shards": packed.reused_shards,
+            "verified_packs": packed.verified_packs,
+            "checked_pack_bytes": packed.checked_pack_bytes
+        },
+        "selective_v1": {
+            "get": selective_io.get, "head": selective_io.head,
+            "bytes": selective_io.payload_bytes, "elapsed_us": selective_micros
+        },
+        "full_current_v1": {
+            "get": full_io.get, "head": full_io.head,
+            "bytes": full_io.payload_bytes, "elapsed_us": full_micros
+        },
+        "new_revisions": chain_new.len(),
+        "total_revisions": full.len(),
+        "tombstone_and_sibling_retained": true,
+        "requires_full_apply_gate": packed.requires_full_apply_gate
+    }));
 
     // Machine-readable AWS SDK method attempts and received bytes, not
     // provider HTTP/TCP request counts. The three modes intentionally offer
@@ -326,6 +377,16 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
         &scope, &journal, &pinned, &cache, &[letter3.clone(),letter2.clone()],
     ).await.is_err());
 
+    // The optimized V2 pack reader must reject the same missing/reversed
+    // immutable letters; never use the final manifest as a shortcut.
+    assert!(reader.inspect_v2_offline_selective_packs_against_pinned_v1(
+        &scope, &journal, &pinned, &cache, &[letter2.clone()],
+    ).await.is_err());
+    assert!(reader.inspect_v2_offline_selective_packs_against_pinned_v1(
+        &scope, &journal, &pinned, &cache,
+        &[letter3.clone(), letter2.clone()],
+    ).await.is_err());
+
     // Gen4 is a valid-looking, self-consistent V1 DAG but *silently drops*
     // the earlier tombstone. A later no-op sidecar must NOT conceal it.
     let gen4 = publish_manifest(
@@ -345,6 +406,11 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     let mut forged = letters.clone();
     forged.push(no_change);
     assert!(reader.inspect_v2_offline_chain_against_pinned_v1(
+        &scope, &journal, &pinned, &cache, &forged,
+    ).await.is_err());
+    // 02e must also HOLD when a later valid-looking generation hides an
+    // earlier tombstone. The saved durable root remains unchanged.
+    assert!(reader.inspect_v2_offline_selective_packs_against_pinned_v1(
         &scope, &journal, &pinned, &cache, &forged,
     ).await.is_err());
     // The selective reader must also inspect the full immutable history:

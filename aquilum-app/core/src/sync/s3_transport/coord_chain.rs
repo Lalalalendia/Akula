@@ -24,8 +24,8 @@ use crate::sync::{
     MAX_DELTA_ENVELOPE_BYTES,
 };
 
-const MAX_OFFLINE_GENERATIONS: usize = 8;
-const MAX_OFFLINE_PACK_BYTES: u64 = 16 * 1024 * 1024;
+pub(super) const MAX_OFFLINE_GENERATIONS: usize = 8;
+pub(super) const MAX_OFFLINE_PACK_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug)]
 pub enum S3CoordOfflineChainError {
