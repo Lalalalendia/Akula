@@ -146,3 +146,93 @@ fn benchmark_vello_dual_dispatch_route() {
         }
     }
 }
+
+
+/// Single renderer per PROCESS: unlike the 3-way parity test, this can
+/// compare process peak RSS attributable to the additional parked context.
+/// Linux /proc VmHWM includes UI/font/allocator memory in all variants; it
+/// is not a measure of the extra RenderContext allocation alone.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "Linux release process-level RSS and mixed-frame wall time A/B"]
+fn benchmark_vello_single_region_process_rss() {
+    const FRAME_COUNT: u32 = 72;
+    let mode = std::env::var("AQ_SINGLE_REGION_RSS_MODE").expect("select serial, parallel2 or routed");
+    let (threads, routed) = match mode.as_str() {
+        "serial" => (0, false),
+        "parallel2" => (2, false),
+        "routed" => (2, true),
+        other => panic!("unknown single-region process mode: {other}"),
+    };
+    assert_eq!(
+        std::env::var("AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT").as_deref() == Ok("1"),
+        routed,
+        "only the routed variant may enable the production opt-in"
+    );
+    let (scale, width, height) = (1.75, 1750_u32, 1051_u32);
+    let mut h = Harness::with(None, scale);
+    h.root.handle_window_event(masonry::core::WindowEvent::Resize(PhysicalSize::new(width, height)));
+    h.app.window_resized(&mut h.root, Size::new(f64::from(width) / scale, f64::from(height) / scale));
+    let body: String = (0..250).map(|i| format!(
+        "Абзац {i}: текст Akula с кириллицей, **жирным**, *курсивом*, ссылками [[Akula]] \
+         и длинным предложением для переноса строк через Parley.\n\n"
+    )).collect();
+    let path = h.write_note("single-region-process-rss.md", &body);
+    h.app.open(&mut h.root, path);
+    let _ = h.root.redraw();
+    let (w, hh) = (width as u16, height as u16);
+    let mut renderer = Renderer::new(threads);
+    let mut sampled = Vec::new();
+    let (mut actual_shifts, mut full_frames, mut small_region_frames) = (0usize, 0usize, 0usize);
+    for step in 0..FRAME_COUNT {
+        if step % 8 == 7 {
+            h.pointer_move(f64::from(70 + step * 8), f64::from(95 + step * 9));
+        } else {
+            h.scroll(
+                (f64::from(width) * 0.6, f64::from(height) * 0.5),
+                scale,
+                (0.0, if step < 45 { -29.0 } else { 23.0 }),
+            );
+        }
+        h.anim(Duration::from_millis(16));
+        let (layers, _) = h.root.redraw();
+        let full = step == 0 || step % 8 == 0;
+        let started = Instant::now();
+        renderer.draw_frame(&layers, w, hh, scale, theme::background(), full).unwrap();
+        let elapsed = started.elapsed().as_secs_f64() * 1e6;
+        if step == 0 { continue; }
+        actual_shifts += usize::from(renderer.last_stages.damage.shifts > 0);
+        full_frames += usize::from(full);
+        small_region_frames += usize::from(!full
+            && renderer.last_stages.raster_rects == 1
+            && renderer.last_stages.raster_pixels <= 350_000
+            && renderer.last_stages.raster_pixels > 0);
+        if full || renderer.last_stages.damage.shifts > 0 {
+            sampled.push(elapsed);
+        }
+    }
+    assert!(actual_shifts >= 40, "not enough natural scroll candidates");
+    assert!(full_frames >= 6, "full redrawing not exercised");
+    assert!(small_region_frames >= 30, "single small region not exercised");
+    let switches = renderer.dual_dispatch_switches_for_test();
+    if routed {
+        assert!(switches >= 8, "no actual serial/parallel transitions: {switches}");
+    } else {
+        assert_eq!(switches, 0, "static renderer switched contexts");
+    }
+    let peak_rss_kib = std::fs::read_to_string("/proc/self/status")
+        .expect("proc status for this test process")
+        .lines()
+        .find_map(|line| line.strip_prefix("VmHWM:"))
+        .and_then(|line| line.split_whitespace().next())
+        .and_then(|num| num.parse::<u64>().ok())
+        .expect("Linux VmHWM must report process RSS in KiB");
+    let [p50, p95] = percentiles(&sampled, [0.50, 0.95]);
+    let total: f64 = sampled.iter().sum();
+    eprintln!(
+        "VELLO_SINGLE_REGION_PROCESS_RSS mode={mode} frames={} shifts={actual_shifts} \
+         full_frames={full_frames} small_frames={small_region_frames} switches={switches} \
+         peak_kib={peak_rss_kib} p50_us={p50:.2} p95_us={p95:.2} total_us={total:.2}",
+        sampled.len(),
+    );
+}

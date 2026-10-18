@@ -135,6 +135,7 @@ impl Renderer {
         }
         let painter = &mut self.painter;
         painter.seconds = seconds;
+        painter.route_for_damage(&damage.areas);
         let mut result = Ok(());
         #[cfg(test)]
         let mut encoding = Duration::ZERO;
@@ -156,8 +157,6 @@ impl Renderer {
                 let encoding_started = Instant::now();
                 {
                     let _zone = aq_trace::zone("кодирование");
-                    #[cfg(test)]
-                    painter.route_for_test(w, h);
                     #[cfg(test)]
                     let reset_started = Instant::now();
                     painter.begin(x, y, w, h);

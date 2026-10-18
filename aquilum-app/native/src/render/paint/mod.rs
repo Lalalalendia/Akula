@@ -36,12 +36,11 @@ pub struct Painter {
     pub(super) culled: u32,
     pub(super) seconds: f64,
     pub(super) regions: Vec<Rect>,
-    #[cfg(test)]
-    test_serial_ctx: Option<RenderContext>,
-    #[cfg(test)]
-    test_serial_active: bool,
-    #[cfg(test)]
-    test_route_limit_px: Option<u64>,
+    /// Optional persistent zero-worker Vello context sharing Resources with the
+    /// parallel renderer. Allocated only when the experimental route is enabled.
+    serial_ctx: Option<RenderContext>,
+    serial_active: bool,
+    serial_limit_px: Option<u64>,
     #[cfg(test)]
     pub(super) test_route_switches: usize,
 }
@@ -62,12 +61,9 @@ impl Painter {
             culled: 0,
             seconds: 0.0,
             regions: Vec::new(),
-            #[cfg(test)]
-            test_serial_ctx: None,
-            #[cfg(test)]
-            test_serial_active: false,
-            #[cfg(test)]
-            test_route_limit_px: None,
+            serial_ctx: None,
+            serial_active: false,
+            serial_limit_px: None,
             #[cfg(test)]
             test_route_switches: 0,
         }
@@ -75,12 +71,12 @@ impl Painter {
 
     pub fn trim(&mut self) {
         self.ctx = RenderContext::new_with(1, 1, self.settings);
+        self.serial_ctx = self.serial_limit_px.map(|_| RenderContext::new_with(
+            1, 1, RenderSettings { num_threads: 0, ..self.settings },
+        ));
+        self.serial_active = false;
         #[cfg(test)]
         {
-            self.test_serial_ctx = self.test_route_limit_px.map(|_| RenderContext::new_with(
-                1, 1, RenderSettings { num_threads: 0, ..self.settings },
-            ));
-            self.test_serial_active = false;
             self.test_route_switches = 0;
         }
         self.resources = Resources::new();
@@ -96,32 +92,54 @@ impl Painter {
         self.ctx.height()
     }
 
-    /// Experimental context routing: keep both dispatchers hot, sharing
-    /// image/glyph resources and masks. Never enabled in production builds.
+    /// Experimental opt-in: retain one serial context next to the existing
+    /// parallel context. Both use the same glyph/image Resources; do not create
+    /// Rayon pools or caches while switching frames. Does nothing for 0 workers.
+    pub(crate) fn enable_serial_for_single_damage(&mut self, max_serial_pixels: u64) {
+        if self.settings.num_threads == 0 || max_serial_pixels == 0 {
+            return;
+        }
+        if self.serial_ctx.is_none() {
+            self.serial_ctx = Some(RenderContext::new_with(
+                1, 1, RenderSettings { num_threads: 0, ..self.settings },
+            ));
+        }
+        self.serial_limit_px = Some(max_serial_pixels);
+        self.serial_active = false;
+        #[cfg(test)]
+        {
+            self.test_route_switches = 0;
+        }
+    }
+
+    /// Route once for the ENTIRE frame, before encoding its first dirty region.
+    /// Never route fragmented or empty damage to serial even if each individual
+    /// rectangle is small: that case was falsified by Akula #173/#187.
+    pub(crate) fn route_for_damage(&mut self, areas: &[(u16, u16, u16, u16)]) {
+        let Some(limit) = self.serial_limit_px else { return };
+        let use_serial = match areas {
+            &[(_, _, w, h)] if w > 0 && h > 0 => u64::from(w) * u64::from(h) <= limit,
+            _ => false,
+        };
+        if use_serial != self.serial_active {
+            // The previous frame called finish() before rasterizing. Each
+            // context retains its own dispatcher and allocations when inactive.
+            let alternate = self.serial_ctx.as_mut().expect("serial companion context");
+            std::mem::swap(&mut self.ctx, alternate);
+            self.serial_active = use_serial;
+            #[cfg(test)]
+            {
+                self.test_route_switches += 1;
+            }
+        }
+    }
+
+    /// Existing #166 test caller; routing now has the single-rectangle guard.
     #[cfg(test)]
     pub(crate) fn enable_dual_dispatch_for_test(&mut self, max_serial_pixels: u64) {
         assert!(self.settings.num_threads > 0, "a parallel baseline is required");
-        assert!(self.test_serial_ctx.is_none(), "route experiment enabled twice");
-        self.test_serial_ctx = Some(RenderContext::new_with(
-            1, 1, RenderSettings { num_threads: 0, ..self.settings },
-        ));
-        self.test_route_limit_px = Some(max_serial_pixels);
-        self.test_serial_active = false;
-        self.test_route_switches = 0;
-    }
-
-    /// Select the persistent dispatcher *before* encoding a fresh damage rect.
-    /// RenderContext is always flushed in finish() before this can be called.
-    #[cfg(test)]
-    pub(crate) fn route_for_test(&mut self, width: u16, height: u16) {
-        let Some(limit) = self.test_route_limit_px else { return };
-        let use_serial = u64::from(width) * u64::from(height) <= limit;
-        if use_serial != self.test_serial_active {
-            let alternate = self.test_serial_ctx.as_mut().expect("route companion context");
-            std::mem::swap(&mut self.ctx, alternate);
-            self.test_serial_active = use_serial;
-            self.test_route_switches += 1;
-        }
+        assert!(self.serial_ctx.is_none(), "route experiment enabled twice");
+        self.enable_serial_for_single_damage(max_serial_pixels);
     }
 
     pub fn begin(&mut self, x: u16, y: u16, width: u16, height: u16) {
@@ -162,5 +180,54 @@ impl Painter {
         if self.error.is_none() {
             self.error = Some(err);
         }
+    }
+}
+
+#[cfg(test)]
+mod adaptive_route_tests {
+    use super::*;
+
+    #[test]
+    fn adaptive_serial_only_for_single_small_damage() {
+        let mut painter = Painter::new(1, 1, settings(2));
+        let small = [(0, 0, 100, 100)];
+        painter.route_for_damage(&small);
+        assert!(!painter.serial_active, "the experimental route must default off");
+
+        painter.enable_serial_for_single_damage(350_000);
+        assert!(painter.serial_ctx.is_some());
+        painter.route_for_damage(&small);
+        assert!(painter.serial_active);
+        assert_eq!(painter.test_route_switches, 1);
+
+        // Two individually tiny touching strips must NEVER trigger the
+        // single-rectangle fast path.
+        painter.route_for_damage(&[(0, 0, 100, 100), (100, 0, 100, 100)]);
+        assert!(!painter.serial_active);
+        painter.route_for_damage(&[(0, 0, 100, 100), (0, 0, 100, 100)]);
+        assert!(!painter.serial_active, "overlap is also fragmented damage");
+        painter.route_for_damage(&[(0, 0, 1000, 600)]);
+        assert!(!painter.serial_active);
+        painter.route_for_damage(&[]);
+        assert!(!painter.serial_active);
+        painter.route_for_damage(&[(0, 0, 0, 100)]);
+        assert!(!painter.serial_active);
+
+        painter.route_for_damage(&small);
+        assert!(painter.serial_active);
+        painter.trim();
+        assert!(!painter.serial_active, "trim must restore the parallel primary context");
+        assert!(painter.serial_ctx.is_some(), "trim retains experimental mode");
+        painter.route_for_damage(&small);
+        assert!(painter.serial_active, "routing must still work after trim");
+    }
+
+    #[test]
+    fn zero_worker_renderer_never_allocates_a_companion() {
+        let mut painter = Painter::new(1, 1, settings(0));
+        painter.enable_serial_for_single_damage(350_000);
+        assert!(painter.serial_ctx.is_none());
+        painter.route_for_damage(&[(0, 0, 100, 100)]);
+        assert!(!painter.serial_active);
     }
 }
