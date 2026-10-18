@@ -210,6 +210,11 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
     let mut partial_full_max_channel = 0u8;
     let (start, end) = trace_marks(case);
     let diagnostic = std::env::var_os("AQ_PIXEL_DIAG").is_some();
+    // Timing-only diagnostic: preserve and report the independent full-frame
+    // parity failure, but finish all performance cases and image captures.
+    // The default test remains a hard <=1/255 fidelity gate. This switch
+    // must never be used for an acceptance/merge test.
+    let sampler_timing_only = std::env::var_os("AQ_SAMPLER_TIMING_ONLY").is_some();
     let mut first_missed_step = None;
     let mut previous_moved = Vec::new();
     let mut previous_rastered = Vec::new();
@@ -324,10 +329,18 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
             // corruption without misreporting existing glyph edge 1-LSB
             // rounding as byte-identical incremental output.
             // Serial/parallel renderer parity above stays byte-exact.
-            assert!(
-                max_delta <= 1,
-                "{case}: partial/full exceeded 1-LSB channel difference on frame {step}: {bad} pixels, max={max_delta}"
-            );
+            if max_delta > 1 && sampler_timing_only {
+                eprintln!(
+                    "VELLO_SAMPLER_TIMING_PARITY_BREACH case={case} step={step} \
+                     bad_pixels={bad} max_channel={max_delta} tolerance=1 \
+                     fidelity_accepted=false"
+                );
+            } else {
+                assert!(
+                    max_delta <= 1,
+                    "{case}: partial/full exceeded 1-LSB channel difference on frame {step}: {bad} pixels, max={max_delta}"
+                );
+            }
             parity_checks += 1;
         }
         if step != 0 {
