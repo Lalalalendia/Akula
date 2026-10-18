@@ -11,44 +11,67 @@ permissions:
 
 jobs:
   source:
-    name: Verify and archive original Cargo registry Vello Common
+    name: Verify original Cargo registry tarball and export source blobs
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch locked crate sources
+      - name: Fetch pinned crate package
         run: cargo fetch --locked --manifest-path aquilum-app/Cargo.toml
-      - name: Archive exact source with Cargo source checksum manifest
+      - name: Verify archive checksum against Cargo.lock and emit source blobs
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import base64
           import glob
           import hashlib
-          import io
-          import json
           import os
           import pathlib
+          import shutil
           import tarfile
+          import tomllib
 
-          candidates = glob.glob(os.path.expanduser("~/.cargo/registry/src/*/vello_common-0.3.0"))
-          if len(candidates) != 1:
-              raise SystemExit(f"Expected one Cargo registry source, got {candidates!r}")
-          src = pathlib.Path(candidates[0])
-          manifest = json.loads((src / ".cargo-checksum.json").read_text())
-          if not manifest.get("files") or "src/strip.rs" not in manifest["files"]:
-              raise SystemExit("Missing registry source checksums")
-          for rel, expected in manifest["files"].items():
-              actual = hashlib.sha256((src / rel).read_bytes()).hexdigest()
-              if actual != expected:
-                  raise SystemExit(f"Package corruption: {rel} {actual} != {expected}")
-          strip = (src / "src/strip.rs").read_text()
+          packages = tomllib.loads(pathlib.Path("aquilum-app/Cargo.lock").read_text())["package"]
+          matches = [p for p in packages if p["name"] == "vello_common" and p["version"] == "0.3.0"]
+          if len(matches) != 1 or not matches[0]["source"].startswith("registry+"):
+              raise SystemExit(f"Missing unique locked crates.io vello_common 0.3.0: {matches!r}")
+          cache = glob.glob(os.path.expanduser("~/.cargo/registry/cache/*/vello_common-0.3.0.crate"))
+          if len(cache) != 1:
+              raise SystemExit(f"Expected one Cargo registry archive, got {cache!r}")
+          raw = pathlib.Path(cache[0]).read_bytes()
+          digest = hashlib.sha256(raw).hexdigest()
+          if digest != matches[0]["checksum"]:
+              raise SystemExit(f"Locked package checksum does not match! {digest}")
+          shutil.copyfile(cache[0], "vello_common-0.3.0-registry.tar.gz")
+
+          files = []
+          with tarfile.open(cache[0], mode="r:gz") as tar:
+              for member in tar.getmembers():
+                  if not member.isfile():
+                      continue
+                  prefix = "vello_common-0.3.0/"
+                  if not member.name.startswith(prefix):
+                      raise SystemExit(f"Unexpected package path: {member.name}")
+                  rel = member.name[len(prefix):]
+                  if not (rel.startswith(("src/", "assets/")) or rel in (
+                      "Cargo.toml", "LICENSE-APACHE", "LICENSE-MIT"
+                  )):
+                      continue
+                  data = tar.extractfile(member).read()
+                  files.append((rel, data))
+          if not any(rel == "src/strip.rs" for rel, _ in files):
+              raise SystemExit("Missing analytic coverage implementation in package")
+          strip = next(data.decode("utf8") for rel, data in files if rel == "src/strip.rs")
           if strip.count("Fill::NonZero => {\n                    let p1 = f32x4::splat(s, 0.5);") != 1:
-              raise SystemExit("Vello Common registry does not match diagnosed NonZero alpha conversion")
-          with tarfile.open("vello_common-0.3.0-registry.tar.gz", "w:gz") as tar:
-              tar.add(src, arcname="vello_common-0.3.0", recursive=True)
-          print("VELLO_REGISTRY_SNAPSHOT_VALIDATED files=", len(manifest["files"]))
-          print("VELLO_REGISTRY_SNAPSHOT_SHA256=", hashlib.sha256(pathlib.Path("vello_common-0.3.0-registry.tar.gz").read_bytes()).hexdigest())
+              raise SystemExit("Published strip.rs does not match proven numeric site")
+          print(f"VCC_MANIFEST|{digest}|{len(files)}", flush=True)
+          for rel, data in sorted(files):
+              b64 = base64.b64encode(data).decode("ascii")
+              chunks = [b64[i:i+2048] for i in range(0, len(b64), 2048)] or [""]
+              for i, chunk in enumerate(chunks):
+                  print(f"VCC_BLOB|{rel}|{i}|{len(chunks)}|{chunk}", flush=True)
+          print(f"VCC_EXPORT_COMPLETE|{digest}|{len(files)}", flush=True)
           PY
       - uses: actions/upload-artifact@v4
         with:
