@@ -8,7 +8,6 @@ use lesha_replication::{
     ReplicaPlacementPolicy, ReplicaTopology, RepairBudget, RepairCandidate,
     RepairCandidateState, RepairPlanState, RepairWorkCandidate, VerifiedReplicaReceipt,
 };
-use lesha_types::{NodeId, NodeRef};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -110,7 +109,7 @@ fn crash_after_signed_receipt_before_ack_is_recoverable_and_idempotent() {
     assert_eq!(out.status.code(), Some(82), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(fs::read(file_path(temp.path(), 1)).unwrap(), TEXT.as_bytes());
     let accepted = admit_after_restart(temp.path(), 1).expect("receipt survived process exit");
-    assert_eq!(accepted.node, node(1));
+    assert_eq!(accepted.destination, node(1));
     let second_read = admit_after_restart(temp.path(), 1).expect("repeat must be safe");
     assert_eq!(accepted, second_read);
     let once = evidence(1, accepted, Some(1), true);
