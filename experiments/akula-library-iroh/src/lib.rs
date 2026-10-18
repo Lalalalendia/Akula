@@ -9,7 +9,7 @@ pub mod rate_limit;
 pub mod preauth;
 use iroh::{endpoint::{presets, Connection, IncomingAddr}, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, Mutex}};
-use tokio::{sync::Semaphore, time::{timeout, Duration, Instant}};
+use tokio::{sync::Semaphore, time::{timeout, Duration}};
 
 pub const ALPN: &[u8] = b"akula-library/iroh-lab/1";
 pub const CHUNK_SIZE: usize = 256 * 1024;
@@ -256,7 +256,7 @@ impl Server {
     /// address validation and a bounded handshake slot have been considered.
     pub async fn run(self, endpoint: Endpoint) {
         let slots = Arc::new(Semaphore::new(MAX_ACTIVE_CONNECTIONS));
-        let mut preauth = preauth::PreAuthGate::new(Instant::now());
+        let mut preauth = preauth::PreAuthGate::new(std::time::Instant::now());
         loop {
             let Some(incoming) = endpoint.accept().await else { break };
             let peer_ip = match incoming.remote_addr() {
@@ -268,7 +268,7 @@ impl Server {
                     continue;
                 }
             };
-            if !preauth.admit(peer_ip, Instant::now()) {
+            if !preauth.admit(peer_ip, std::time::Instant::now()) {
                 incoming.ignore();
                 continue;
             }
