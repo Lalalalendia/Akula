@@ -75,9 +75,13 @@ impl Host {
                 probe.append_frame(&line);
             }
         }
+        // Replay sample = a non-empty CPU frame handed to the output surface.
+        // No-op redraws must not inflate the diagnostic "present" count.
         #[cfg(not(feature = "installed"))]
-        if let Some(replay) = &mut self.replay {
-            replay.frame(Instant::now(), t0.elapsed());
+        if !drawn.is_empty() {
+            if let Some(replay) = &mut self.replay {
+                replay.frame(Instant::now(), t0.elapsed());
+            }
         }
         if self.metrics.frame(self.started, [scene, raster, present, t0.elapsed()]) {
             self.show_title();
