@@ -57,7 +57,32 @@ pub fn reader_settings(config: &AppConfig) -> page::Settings {
     }
 }
 
+// Only glibc exposes malloc_trim. Reader creates large temporary Parley
+// allocations, and Linux may keep their freed pages resident long after close.
+// Keep the trim at the *end* of a Reader lifecycle rather than changing global
+// allocator tunables that would affect every layout and editor allocation.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_reader_heap_after_close() {
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> i32;
+    }
+    // SAFETY: glibc documents malloc_trim as MT-Safe; zero requests that
+    // available whole free pages be returned to the OS.
+    let _ = unsafe { malloc_trim(0) };
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn trim_reader_heap_after_close() {}
+
 impl App {
+    pub(super) fn close_reader_layer(&mut self, root: &mut RenderRoot, state: Box<ReaderState>) {
+        root.remove_layer(state.layer);
+        drop(state);
+        // All Reader resources have been detached and dropped before asking
+        // glibc to return its free pages. This does not evict live font caches.
+        trim_reader_heap_after_close();
+    }
+
     pub(super) fn open_reader(&mut self, root: &mut RenderRoot, opening: Opening) {
         let Opening { file, page, title, initial, peek } = opening;
         let file = file.as_path();
@@ -107,13 +132,13 @@ impl App {
         if let Some(action) = action.downcast_ref::<ReaderAction>() {
             match action {
                 ReaderAction::Close => {
-                    root.remove_layer(state.layer);
+                    self.close_reader_layer(root, state);
                     return Outcome::default();
                 }
                 ReaderAction::Settings => self.toggle_reader_settings(root, &mut state),
                 ReaderAction::Moved { cfi, fraction } => self.reader_moved(root, &state, cfi, *fraction),
                 ReaderAction::QuoteRef(cfi) => {
-                    root.remove_layer(state.layer);
+                    self.close_reader_layer(root, state);
                     self.reveal_quote(root, cfi);
                     return Outcome::default();
                 }
@@ -124,7 +149,7 @@ impl App {
                 self.add_quote(root, &state, &text, &cfi);
             }
         } else if action.downcast_ref::<Pressed>().is_some() && id == state.ids.close {
-            root.remove_layer(state.layer);
+            self.close_reader_layer(root, state);
             return Outcome::default();
         } else if action.downcast_ref::<Pressed>().is_some() && id == state.ids.settings {
             self.toggle_reader_settings(root, &mut state);
