@@ -234,3 +234,88 @@ fn colr_fractional_pen_atlas_matches_uncached() {
         mismatches.len(),
     );
 }
+
+/// Diagnostic CPU cost only; ignored in ordinary functional test runs.
+/// Uses the same synthetic COLRv1 font and production GPU-free Vello path.
+/// Compares a warm integral atlas hit, a fractional production (direct)
+/// rendering, and explicit uncached controls. This is NOT UI FPS.
+#[test]
+#[ignore = "opt-in release profiling; no CI time threshold"]
+fn benchmark_colr_fractional_fallback_cpu() {
+    use std::time::Instant;
+    use std::hint::black_box;
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(TEST_COLR_FONT_BASE64).expect("decode synthetic font");
+    let font = FontData::new(Blob::new(Arc::new(bytes)), 0);
+
+    for workers in [0u16, 2] {
+        for size in [20u16, 80u16] {
+            for glyph_id in [2u32, 3] {
+                let count = if size == 20 { 20u16 } else { 6u16 };
+                let advance = if size == 20 { 27.0f32 } else { 98.0 };
+                for (mode, phase, cache_enabled) in [
+                    ("integer_cached", 0.0f32, true),
+                    ("integer_direct", 0.0f32, false),
+                    ("fractional_policy", 0.25f32, true),
+                    ("fractional_direct", 0.25f32, false),
+                ] {
+                    let mut resources = Resources::default();
+                    let mut times = Vec::<u64>::with_capacity(96);
+                    let mut guard = 0u64;
+                    for iteration in 0..104 {
+                        let started = Instant::now();
+                        let mut ctx = RenderContext::new_with(
+                            640, 224,
+                            RenderSettings { num_threads: workers, ..RenderSettings::default() },
+                        );
+                        ctx.set_transform(Affine::translate((0.0, f64::from(size) + 12.0)));
+                        let glyphs: Vec<Glyph> = (0..count)
+                            .map(|i| Glyph {
+                                id: glyph_id,
+                                x: 10.0 + f32::from(i) * advance + phase,
+                                y: 0.0,
+                            })
+                            .collect();
+                        ctx.glyph_run(&mut resources, &font)
+                            .font_size(f32::from(size))
+                            .atlas_cache(cache_enabled)
+                            .hint(false)
+                            .fill_glyphs(glyphs.into_iter())
+                            .expect("batch synthetic COLR glyphs");
+                        ctx.flush();
+                        let mut pixmap = Pixmap::new(640, 224);
+                        ctx.render_with(
+                            &mut pixmap, &mut resources,
+                            RasterizerSettings {
+                                target_init: TargetInit::Clear(WHITE),
+                                ..RasterizerSettings::default()
+                            },
+                        );
+                        let elapsed = started.elapsed().as_micros() as u64;
+                        guard ^= u64::from(pixmap.data_as_u8_slice()[1091]);
+                        if iteration >= 8 {
+                            times.push(elapsed);
+                        }
+                    }
+                    black_box(guard);
+                    times.sort_unstable();
+                    let summary = resources.glyph_atlas_summary();
+                    let slots = summary.map_or(0, |(_, _, n)| n);
+                    if mode == "integer_cached" {
+                        assert!(slots > 0, "integer aligned COLR should populate atlas");
+                    } else if mode == "fractional_policy" {
+                        assert_eq!(slots, 0, "fractional COLR must not allocate unkeyed atlas slots");
+                    }
+                    println!(
+                        "AKULA_COLR_CPU_PROFILE gid={glyph_id} size={size} threads={workers} \
+                         mode={mode} glyphs_per_frame={count} frames={} p50_us={} p95_us={} \
+                         atlas_slots={slots}",
+                        times.len(), times[times.len() / 2],
+                        times[(times.len() * 95 / 100).min(times.len() - 1)],
+                    );
+                }
+            }
+        }
+    }
+}
