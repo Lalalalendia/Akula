@@ -112,17 +112,28 @@ mod tests {
     fn wait_for_report(child: &mut KillChild, report: &Path, expected: &[u8]) {
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
-            if report.exists() {
-                assert_eq!(fs::read(report).unwrap(), expected);
-                return;
+            // The child creates the report pathname BEFORE write_all has
+            // necessarily made the small payload visible to this process.
+            // Especially on macOS, existence is not a completion barrier.
+            // Tolerate only a prefix of the expected value; reject an actual
+            // wrong nonempty state instead of silently polling over it.
+            match fs::read(report) {
+                Ok(bytes) if bytes == expected => return,
+                Ok(bytes) if expected.starts_with(bytes.as_slice()) => {}
+                Ok(bytes) => panic!(
+                    "unexpected OS-lock child state: got {:?}, expected {:?}",
+                    bytes, expected,
+                ),
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => panic!("cannot read OS-lock child report: {error}"),
             }
             assert!(
                 child.0.try_wait().unwrap().is_none(),
-                "child exited before reporting its lock state"
+                "child exited before completing its lock-state report"
             );
             thread::sleep(Duration::from_millis(15));
         }
-        panic!("child failed to report its lock state before deadline");
+        panic!("child failed to complete its lock state report before deadline");
     }
 
     #[test]
@@ -166,6 +177,17 @@ mod tests {
             "hold" => {
                 let _pair = try_both(&left, &right).unwrap().expect("uncontended pair");
                 fs::write(report, b"held").unwrap();
+                loop {
+                    thread::park_timeout(Duration::from_secs(60));
+                }
+            }
+            "hold-with-visible-empty-report" => {
+                let _pair = try_both(&left, &right).unwrap().expect("uncontended pair");
+                // Deterministically model macOS observing create() before
+                // the following write() in fs::write has completed.
+                fs::write(&report, b"").unwrap();
+                thread::sleep(Duration::from_millis(100));
+                fs::write(&report, b"held").unwrap();
                 loop {
                     thread::park_timeout(Duration::from_secs(60));
                 }
@@ -229,6 +251,18 @@ mod tests {
             }
             other => panic!("unknown test-only child mode: {other}"),
         }
+    }
+
+    #[test]
+    fn oslock_report_can_exist_before_child_finishes_writing_state() {
+        let (temp, left, right) = fixture();
+        let report = temp.path().join("delayed-report");
+        let mut child = KillChild(
+            child_command("hold-with-visible-empty-report", &left, &right, &report)
+                .spawn().unwrap(),
+        );
+        wait_for_report(&mut child, &report, b"held");
+        child.terminate();
     }
 
     #[test]
