@@ -53,6 +53,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native adaptive_constructor_switches_only_when_enabled -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native adaptive_small_rect_default_has_explicit_rollback -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native adaptive_serial_only_for_single_small_damage -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native zero_worker_renderer_never_allocates_a_companion -- --nocapture --test-threads=1
       - name: Real editor 0/2/routed pixel parity under mixed scroll and full invalidation
