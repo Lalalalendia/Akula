@@ -21,7 +21,7 @@ pub fn write(
     // unenrolled epoch in this stage. All other ordinary mutation entrypoints
     // remain HOLD. This must precede guarded_editor::maybe_write: host-mode
     // cannot silently use that independent per-appdata custody route.
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     if core.requires_installed_host_epoch() {
         let (result, history_changed) = {
             let _publication = core.ordinary_note_publication_lease()?;
@@ -67,7 +67,7 @@ pub fn write(
         // This lease spans BOTH the primary file replacement and the history
         // attempt. Activation waits for it before flipping durable HOLD.
         // Only enabled for opt-in S3 builds; the unarmed route stays cheap.
-        #[cfg(feature = "sync-s3")]
+        #[cfg(feature = "host-custody")]
         let _publication = core.ordinary_note_publication_lease()?;
         let (before, result) = {
             let _guard = core.file_mutation_guard_for_write()?;
@@ -143,7 +143,7 @@ pub fn create(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     if core.requires_installed_host_epoch() {
         let (result, changed) = {
             let _publication = core.ordinary_note_publication_lease()?;
@@ -177,7 +177,7 @@ pub fn create(
         return Ok(result);
     }
     let (result, history_outcome) = {
-        #[cfg(feature = "sync-s3")]
+        #[cfg(feature = "host-custody")]
         let _publication = core.ordinary_note_publication_lease()?;
         let result = {
             let _guard = core.file_mutation_guard_for_write()?;
