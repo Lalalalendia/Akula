@@ -26,7 +26,7 @@ jobs:
         working-directory: staya/roha-transport
         run: |
           cargo check
-          cargo test --lib
+          cargo test --all-targets
           cargo tree -i noq
           cargo tree -i noq-proto
           cargo tree -i noq-udp
