@@ -47,6 +47,18 @@ fi
 # release. Restore the one unambiguous missing app, then stop so the caller
 # can independently retry the update. Never silently erase a backup when a
 # destination already exists: publication may have completed before SIGKILL.
+# Multiple abandoned stages may represent different generations. Do not
+# pick the first lexical match and restore an arbitrary, possibly older app.
+stale_count=0
+for item in "$APP_DIR"/.akula-install.*; do
+  [[ "$item" == "$lock_file" ]] && continue
+  [[ -e "$item" || -L "$item" ]] || continue
+  stale_count=$((stale_count + 1))
+done
+if (( stale_count > 1 )); then
+  printf 'Multiple interrupted install generations (%s); manual recovery required. No files removed.\n' "$stale_count" >&2
+  exit 1
+fi
 for stale in "$APP_DIR"/.akula-install.*; do
   [[ "$stale" == "$lock_file" ]] && continue
   [[ -e "$stale" || -L "$stale" ]] || continue
