@@ -56,7 +56,9 @@ pub fn advertise(id: EndpointId, address: SocketAddr) -> Result<ServiceDaemon, S
             match monitor.recv_timeout(left) {
                 Ok(DaemonEvent::Announce(_, _)) => announces += 1,
                 Ok(DaemonEvent::Error(_)) => errors += 1,
-                Err(mdns_sd::RecvTimeoutError::Timeout | mdns_sd::RecvTimeoutError::Disconnected) => break,
+                Err(
+                    mdns_sd::RecvTimeoutError::Timeout | mdns_sd::RecvTimeoutError::Disconnected,
+                ) => break,
                 _ => {}
             }
         }
@@ -163,8 +165,14 @@ mod tests {
         assert_eq!(known.to_string().len(), 64);
         assert_eq!(known.to_z32().len(), 52);
         assert_eq!(EndpointId::from_z32(&id).unwrap(), known);
-        assert!(candidate(
-            &known.to_string(), 42424, "192.168.1.3".parse().unwrap(), &allow
-        ).is_none());
+        assert!(
+            candidate(
+                &known.to_string(),
+                42424,
+                "192.168.1.3".parse().unwrap(),
+                &allow
+            )
+            .is_none()
+        );
     }
 }
