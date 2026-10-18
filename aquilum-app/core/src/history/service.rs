@@ -47,6 +47,10 @@ pub struct HistoryService {
     /// Set once by Core::open before exposing any direct HistoryService API.
     /// Standalone HistoryService in legacy tests has no enrolled Core policy.
     guarded_participant: OnceLock<Arc<AtomicBool>>,
+    // Once a Core is host-bound, direct history mutation without its held
+    // shared enrollment epoch is forbidden, even in fresh private appdata.
+    #[cfg(feature = "sync-s3")]
+    installed_host_requires_epoch: AtomicBool,
     #[cfg(test)]
     next_fault: Mutex<Option<HistoryFault>>,
 }
@@ -221,6 +225,8 @@ impl HistoryService {
             device: device_id(app_data),
             state: Mutex::default(),
             guarded_participant: OnceLock::new(),
+            #[cfg(feature = "sync-s3")]
+            installed_host_requires_epoch: AtomicBool::new(false),
             #[cfg(test)]
             next_fault: Mutex::new(None),
         }
@@ -233,9 +239,18 @@ impl HistoryService {
             "history participant safety policy already installed");
     }
 
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn require_installed_host_epoch(&self) {
+        self.installed_host_requires_epoch.store(true, Ordering::Release);
+    }
+
     fn denies_unverified_history_writes(&self) -> bool {
-        self.guarded_participant.get()
-            .is_some_and(|flag| flag.load(Ordering::Acquire))
+        let enrolled = self.guarded_participant.get()
+            .is_some_and(|flag| flag.load(Ordering::Acquire));
+        #[cfg(feature = "sync-s3")]
+        { enrolled || self.installed_host_requires_epoch.load(Ordering::Acquire) }
+        #[cfg(not(feature = "sync-s3"))]
+        { enrolled }
     }
 
     /// Serialize the transition into participant HOLD with every in-flight
@@ -301,6 +316,23 @@ impl HistoryService {
             ));
         }
         self.try_saved_impl(roots, note, write, false)
+    }
+
+    /// A host-bound ordinary File Gate note write is admitted only while the
+    /// same physical Core holds the installer-wide unenrolled SQLite epoch.
+    /// No direct history caller can construct this lexical capability.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn try_saved_with_host_epoch(
+        &self,
+        permit: &crate::app_core::HostUnenrolledEpochPermit<'_>,
+        roots: Roots<'_>,
+        note: &Path,
+        write: NoteWrite<'_>,
+    ) -> Result<bool, HistorySaveFailure> {
+        if !permit.binds_history(self) {
+            return Err(HistorySaveFailure::new("host history epoch", "wrong Core owner"));
+        }
+        self.try_saved_impl(roots, note, write, true)
     }
 
     /// Narrow checked File Gate exception. The sealed token can be created
