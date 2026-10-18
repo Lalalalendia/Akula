@@ -44,6 +44,20 @@ impl App {
                     root.remove_layer(state.layer);
                 }
             }
+            Step::ReaderMove(forward) => {
+                if let Some(super::Popup::Reader(state)) = &self.popup {
+                    root.edit_widget(state.layer, |mut w| {
+                        crate::ui::reader::ReaderView::probe_move(&mut w.downcast(), *forward);
+                    });
+                }
+            }
+            Step::ReaderMode(scrolled) => {
+                if let Some(super::Popup::Reader(state)) = &self.popup {
+                    root.edit_widget(state.layer, |mut w| {
+                        crate::ui::reader::ReaderView::probe_scrolled(&mut w.downcast(), *scrolled);
+                    });
+                }
+            }
             Step::Scroll(fraction) => {
                 if let Some(ids) = &self.note_ids {
                     let scroll = ids.scroll;
@@ -63,6 +77,13 @@ impl App {
             }
             Step::Wait | Step::Mark(_) | Step::Minimize(_) => {}
         }
+    }
+
+    pub fn probe_reader_state(&self, root: &RenderRoot) -> Option<String> {
+        let Some(super::Popup::Reader(state)) = &self.popup else { return None };
+        root.get_widget(state.layer)
+            .and_then(|widget| widget.downcast::<crate::ui::reader::ReaderView>())
+            .map(|widget| widget.inner().probe_stats())
     }
 
     pub fn probe_stats(&self, root: &RenderRoot) -> String {
