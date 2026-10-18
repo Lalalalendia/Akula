@@ -31,22 +31,26 @@ Existing package signatures and smoke tests remain required independently.
 
 ## Distribution identity is a separate release blocker
 
-The fork's checkout and package names still inherit Aquilum's default
-branding and the `Freaction/Aquilum` release origin. Old upstream v0.2.6
-packages used for explicit upgrade smoke tests are historical fixtures,
-not Akula distribution. Before a public Akula installer exists, separately
-migrate its release/download/update origin and signing/provenance chain,
-prove first-install/update/uninstall against Akula's own published artifacts,
-and prevent installer scripts from silently downloading upstream binaries.
-This PR deliberately does not publish a release or switch those URLs.
+The fork's current package names and UI still inherit Aquilum branding.
+This PR updates the **shell installer** and generated release manifest to
+`Lalalalendia/Akula`, and refuses to generate a release manifest when its
+Akula signing public key is missing. The in-app updater already targets this
+fork but stays disabled until a dedicated Akula key/channel is provisioned.
+Old upstream v0.2.6 packages in explicit upgrade smoke tests remain historical
+fixtures, not the new release channel. The fork's GitHub Releases API returned
+no published release at this checkpoint. A separately signed and manually
+smoke-tested first Akula release plus working upgrade/uninstall path are still
+required; this PR does not create or publish one.
 
 ## Three different properties — do not mix them
 
 1. **Local-only installer recipe (NOT a published Akula release)** —
    `installed`; no mandatory host registry, no S3 writes. The fork's GitHub
-   Releases API returned no published releases at this checkpoint, and the
-   inherited `scripts/install.sh` and update-manifest URLs still point at
-   `Freaction/Aquilum`. They must not be represented as Akula distribution.
+   Releases API returned no published releases at this checkpoint.
+   This PR switches the inherited shell install and generated download URLs
+   to `Lalalalendia/Akula`, so no upstream binary is mislabeled as Akula.
+   Until the first signed Akula release exists, install fails without
+   modifying the already installed application or the vault.
    Normal local editor behavior must remain available without S3.
 2. **Cooperative installed-host prototype** — opt-in
    `installed,sync-installed-host`; `Core::open` uses one compiler-selected
