@@ -373,3 +373,59 @@ fn arithmetic(left: Value, right: Value, apply: fn(f64, f64) -> f64) -> Value {
         _ => Value::Null,
     }
 }
+
+#[cfg(test)]
+mod ascii_property_tests {
+    use super::{file_property, member, Link, Row, Value};
+
+    fn note() -> Row {
+        Row {
+            relative: "Folder/Книга.md".into(),
+            source: "/tmp/Книга.md".into(),
+            name: "Книга".into(),
+            folder: "Folder".into(),
+            created: 1,
+            modified: 2,
+            size: 42,
+            fields: Vec::new(),
+            tasks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ascii_builtin_properties_keep_case_insensitive_lookup() {
+        let note = note();
+        assert!(matches!(file_property("SIZE", &note), Ok(Value::Number(42.0))));
+        assert!(matches!(file_property("PaTh", &note), Ok(Value::Text(path)) if path == "Folder/Книга.md"));
+        assert!(matches!(file_property("TAGS", &note), Ok(Value::List(tags)) if tags.is_empty()));
+        assert!(matches!(member(&Value::List(vec![Value::Bool(true), Value::Bool(false)]), "LENGTH"), Value::Number(2.0)));
+        let link = Value::Link(Link { target: "Folder/Книга.md".into(), display: Some("Test".into()) });
+        assert!(matches!(member(&link, "PATH"), Value::Text(path) if path == "Folder/Книга.md"));
+        assert!(matches!(member(&link, "dIsPlAy"), Value::Text(display) if display == "Test"));
+    }
+
+    #[test]
+    fn unicode_builtin_lowercase_and_unknown_error_are_unchanged() {
+        let note = note();
+        // U+212A lowercases to ASCII 'k'; an ASCII-only comparison would
+        // silently change a valid file.link property into an error.
+        assert!(matches!(file_property("linK", &note), Ok(Value::Link(_))));
+        let unknown = match file_property("MISSING", &note) {
+            Err(error) => error,
+            Ok(_) => panic!("unknown file property unexpectedly admitted"),
+        };
+        assert!(unknown.contains("«missing»"), "{unknown}");
+        assert!(file_property("İINK", &note).is_err());
+    }
+
+    #[test]
+    fn object_properties_still_prefer_exact_match_before_ascii_fallback() {
+        let object = Value::Object(vec![
+            ("Name".into(), Value::Number(1.0)),
+            ("name".into(), Value::Number(2.0)),
+        ]);
+        assert!(matches!(member(&object, "Name"), Value::Number(1.0)));
+        assert!(matches!(member(&object, "name"), Value::Number(2.0)));
+        assert!(matches!(member(&object, "NAME"), Value::Number(1.0)));
+    }
+}
