@@ -1364,6 +1364,20 @@ mod tests {
         }
     }
 
+    /// A curved, antialiased, glyph-like outline with fractional geometry.
+    /// Shared by tests that vary the raster crop and atlas-page placement.
+    fn atlas_probe_outline() -> vello_common::kurbo::BezPath {
+        use vello_common::kurbo::BezPath;
+
+        let mut outline = BezPath::new();
+        outline.move_to((0.25, 0.5));
+        outline.curve_to((6.25, -0.125), (16.75, 3.3), (15.5, 10.25));
+        outline.curve_to((14.75, 17.4), (7.25, 19.25), (1.125, 15.75));
+        outline.curve_to((5.75, 15.125), (8.5, 8.25), (0.25, 0.5));
+        outline.close_path();
+        outline
+    }
+
     /// This reproduces the two coordinate systems used when rasterizing an
     /// outline into the glyph atlas: full-page preparation and a shifted
     /// dirty-union crop with a destination offset. It deliberately leaves the
@@ -1405,12 +1419,7 @@ mod tests {
             page
         }
 
-        let mut outline = BezPath::new();
-        outline.move_to((0.25, 0.5));
-        outline.curve_to((6.25, -0.125), (16.75, 3.3), (15.5, 10.25));
-        outline.curve_to((14.75, 17.4), (7.25, 19.25), (1.125, 15.75));
-        outline.curve_to((5.75, 15.125), (8.5, 8.25), (0.25, 0.5));
-        outline.close_path();
+        let outline = atlas_probe_outline();
 
         for phase in [0.0, 0.25, 0.5, 0.75] {
             let full_page = paint_outline(&outline, (0, 0), (80, 80), phase);
@@ -1434,5 +1443,59 @@ mod tests {
         }
     }
 
+
+    /// A cache entry for the same outlined glyph can occupy different atlas
+    /// slots when preceding visible glyphs differ. An integer slot translation
+    /// must not change the normalized antialias coverage of that outline.
+    #[test]
+    fn atlas_like_outline_coverage_is_slot_position_invariant() {
+        use vello_common::kurbo::Affine;
+
+        fn render_in_slot(path: &vello_common::kurbo::BezPath, x: i32, y: i32, phase: f64) -> Pixmap {
+            let mut ctx = RenderContext::new(80, 80);
+            ctx.set_transform(Affine::new([
+                1.0,
+                0.0,
+                0.0,
+                -1.0,
+                f64::from(x) + phase,
+                f64::from(y),
+            ]));
+            ctx.set_paint(vello_common::color::palette::css::BLACK);
+            ctx.fill_path(path);
+            ctx.flush();
+            let mut page = Pixmap::new(80, 80);
+            ctx.render_with(
+                &mut page,
+                &mut Resources::new(),
+                RasterizerSettings {
+                    target_init: TargetInit::SrcOver,
+                    ..Default::default()
+                },
+            );
+            page
+        }
+
+        let outline = atlas_probe_outline();
+        for phase in [0.0, 0.25, 0.5, 0.75] {
+            let reference = render_in_slot(&outline, 8, 28, phase);
+            // Straddle Vello's tile boundaries and use different packing
+            // offsets, all sufficiently far from the atlas page edge.
+            for (x, y) in [(16, 24), (23, 42), (31, 35), (48, 57)] {
+                let candidate = render_in_slot(&outline, x, y, phase);
+                for dy in -23..4 {
+                    for dx in -2..20 {
+                        let expected = reference.sample((8 + dx) as u16, (28 + dy) as u16);
+                        let actual = candidate.sample((x + dx) as u16, (y + dy) as u16);
+                        assert_eq!(
+                            actual,
+                            expected,
+                            "phase={phase}, slot=({x},{y}), relative_pixel=({dx},{dy})"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
 }
