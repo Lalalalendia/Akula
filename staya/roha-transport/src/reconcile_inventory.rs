@@ -9,16 +9,16 @@
 
 #![cfg(target_os = "linux")]
 
+use crate::{
+    bounded_staging::{StagingVolumeGuard, VolumeError},
+    durable_admission::{DurableError, DurableLedger, ReservedBlobAudit},
+};
 use std::{
     collections::BTreeMap,
     fs::{self, File, Metadata},
     io::{self, Read},
     os::unix::fs::MetadataExt,
     path::Path,
-};
-use crate::{
-    bounded_staging::{StagingVolumeGuard, VolumeError},
-    durable_admission::{DurableError, DurableLedger, ReservedBlobAudit},
 };
 
 const MAX_DIR_FILES: usize = 4096;
@@ -44,13 +44,19 @@ pub enum AuditHold {
     WrongVerifiedDataHash(String),
 }
 impl From<io::Error> for AuditHold {
-    fn from(err: io::Error) -> Self { Self::Io(err) }
+    fn from(err: io::Error) -> Self {
+        Self::Io(err)
+    }
 }
 impl From<VolumeError> for AuditHold {
-    fn from(err: VolumeError) -> Self { Self::Volume(err) }
+    fn from(err: VolumeError) -> Self {
+        Self::Volume(err)
+    }
 }
 impl From<DurableError> for AuditHold {
-    fn from(err: DurableError) -> Self { Self::Ledger(err) }
+    fn from(err: DurableError) -> Self {
+        Self::Ledger(err)
+    }
 }
 
 /// Read-only external-path evidence. Both safety flags stay false/true even
@@ -76,11 +82,20 @@ struct ExternalRoles {
 }
 
 #[derive(Clone, Copy)]
-enum Suffix { Data, Outboard, Sizes, Bitfield }
+enum Suffix {
+    Data,
+    Outboard,
+    Sizes,
+    Bitfield,
+}
 
 fn parse_data_name(name: &str) -> Option<(&str, Suffix)> {
     let (stem, suffix) = name.rsplit_once('.')?;
-    if stem.len() != 64 || !stem.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) {
+    if stem.len() != 64
+        || !stem
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    {
         return None;
     }
     let suffix = match suffix {
@@ -124,9 +139,15 @@ fn full_hash_matches(path: &Path, size: u64, hash: &[u8; 32]) -> Result<bool, Au
     let mut block = [0u8; 64 * 1024];
     loop {
         let read = file.read(&mut block)?;
-        if read == 0 { break; }
-        total = total.checked_add(read as u64).ok_or(AuditHold::TooManyFiles)?;
-        if total > size { return Ok(false); }
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or(AuditHold::TooManyFiles)?;
+        if total > size {
+            return Ok(false);
+        }
         digest.update(&block[..read]);
     }
     Ok(total == size && digest.finalize().as_bytes() == hash)
@@ -141,8 +162,11 @@ pub fn audit_external_inventory(
     ledger: &DurableLedger,
     store_child: &str,
 ) -> Result<InventoryEvidenceOnly, AuditHold> {
-    if store_child.is_empty() || store_child == "." || store_child == ".."
-        || store_child.contains('/') || store_child.contains('\\')
+    if store_child.is_empty()
+        || store_child == "."
+        || store_child == ".."
+        || store_child.contains('/')
+        || store_child.contains('\\')
     {
         return Err(AuditHold::UnsafeStoreRoot);
     }
@@ -159,7 +183,9 @@ pub fn audit_external_inventory(
     let mut expected = BTreeMap::<String, ReservedBlobAudit>::new();
     for item in records {
         let hex = blake3::Hash::from_bytes(item.hash).to_hex().to_string();
-        if expected.insert(hex, item).is_some() { return Err(AuditHold::TooManyFiles); }
+        if expected.insert(hex, item).is_some() {
+            return Err(AuditHold::TooManyFiles);
+        }
     }
 
     let mut seen_db = false;
@@ -168,16 +194,21 @@ pub fn audit_external_inventory(
     let mut count = 0usize;
     for item in fs::read_dir(&root)? {
         count += 1;
-        if count > 3 { return Err(AuditHold::TooManyFiles); }
+        if count > 3 {
+            return Err(AuditHold::TooManyFiles);
+        }
         let item = item?;
-        let name = item.file_name().into_string().map_err(|_| {
-            AuditHold::UnexpectedStoreEntry("non-UTF8".to_owned())
-        })?;
+        let name = item
+            .file_name()
+            .into_string()
+            .map_err(|_| AuditHold::UnexpectedStoreEntry("non-UTF8".to_owned()))?;
         let meta = fs::symlink_metadata(item.path())?;
         match name.as_str() {
             "blobs.db" => {
                 checked_regular_file(&meta, dev, &name)?;
-                if meta.len() == 0 { return Err(AuditHold::MissingOrUnsafeDatabase); }
+                if meta.len() == 0 {
+                    return Err(AuditHold::MissingOrUnsafeDatabase);
+                }
                 seen_db = true;
             }
             "data" => {
@@ -191,16 +222,22 @@ pub fn audit_external_inventory(
             _ => return Err(AuditHold::UnexpectedStoreEntry(name)),
         }
     }
-    if !seen_db { return Err(AuditHold::MissingOrUnsafeDatabase); }
-    if !seen_data || !seen_temp { return Err(AuditHold::UnsafeStoreRoot); }
+    if !seen_db {
+        return Err(AuditHold::MissingOrUnsafeDatabase);
+    }
+    if !seen_data || !seen_temp {
+        return Err(AuditHold::UnsafeStoreRoot);
+    }
 
     // After clean shutdown ANY leftover temporary file is a HOLD, regardless
     // of whether its prefix appears to belong to a known journal object.
     for (index, entry) in fs::read_dir(root.join("temp"))?.enumerate() {
-        if index >= MAX_DIR_FILES { return Err(AuditHold::TooManyFiles); }
+        if index >= MAX_DIR_FILES {
+            return Err(AuditHold::TooManyFiles);
+        }
         let entry = entry?;
         return Err(AuditHold::ResidualTemp(
-            entry.file_name().to_string_lossy().to_string()
+            entry.file_name().to_string_lossy().to_string(),
         ));
     }
 
@@ -208,17 +245,19 @@ pub fn audit_external_inventory(
     let mut external_files = 0usize;
     for item in fs::read_dir(root.join("data"))? {
         external_files += 1;
-        if external_files > MAX_DIR_FILES { return Err(AuditHold::TooManyFiles); }
+        if external_files > MAX_DIR_FILES {
+            return Err(AuditHold::TooManyFiles);
+        }
         let item = item?;
-        let name = item.file_name().into_string().map_err(|_| {
-            AuditHold::UnexpectedDataEntry("non-UTF8".to_owned())
-        })?;
-        let (stem, kind) = parse_data_name(&name).ok_or_else(|| {
-            AuditHold::UnexpectedDataEntry(name.clone())
-        })?;
-        let expectation = expected.get(stem).ok_or_else(|| {
-            AuditHold::OrphanExternalHash(name.clone())
-        })?;
+        let name = item
+            .file_name()
+            .into_string()
+            .map_err(|_| AuditHold::UnexpectedDataEntry("non-UTF8".to_owned()))?;
+        let (stem, kind) =
+            parse_data_name(&name).ok_or_else(|| AuditHold::UnexpectedDataEntry(name.clone()))?;
+        let expectation = expected
+            .get(stem)
+            .ok_or_else(|| AuditHold::OrphanExternalHash(name.clone()))?;
         let meta = fs::symlink_metadata(item.path())?;
         checked_regular_file(&meta, dev, &name)?;
         let seen = roles.entry(stem.to_owned()).or_default();
@@ -239,20 +278,29 @@ pub fn audit_external_inventory(
     let mut verified_external = 0usize;
     let mut verified_bytes = 0u64;
     for (name, entry) in &expected {
-        if !entry.verified { continue; }
+        if !entry.verified {
+            continue;
+        }
         // A verified object may be validly inlined into redb. We cannot
         // prove that without a trusted DB parser, so leave it in HOLD.
-        let len = roles.get(name).and_then(|r| r.data_len).ok_or_else(|| {
-            AuditHold::MissingVerifiedExternalData(name.clone())
-        })?;
+        let len = roles
+            .get(name)
+            .and_then(|r| r.data_len)
+            .ok_or_else(|| AuditHold::MissingVerifiedExternalData(name.clone()))?;
         if len != entry.expected_bytes {
             return Err(AuditHold::WrongVerifiedDataSize(name.clone()));
         }
-        bytes_to_hash = bytes_to_hash.checked_add(len).ok_or(AuditHold::TooManyFiles)?;
+        bytes_to_hash = bytes_to_hash
+            .checked_add(len)
+            .ok_or(AuditHold::TooManyFiles)?;
         if bytes_to_hash > MAX_VERIFIED_BYTES_TO_HASH {
             return Err(AuditHold::TooManyFiles);
         }
-        if !full_hash_matches(&root.join("data").join(format!("{name}.data")), len, &entry.hash)? {
+        if !full_hash_matches(
+            &root.join("data").join(format!("{name}.data")),
+            len,
+            &entry.hash,
+        )? {
             return Err(AuditHold::WrongVerifiedDataHash(name.clone()));
         }
         verified_external += 1;
