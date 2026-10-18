@@ -10,7 +10,7 @@ permissions:
 jobs:
   iroh-standalone-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 16
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -19,6 +19,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: experiments/akula-library-iroh
+      - name: Resolve dependencies and validate fork chain
+        working-directory: experiments/akula-library-iroh
+        run: |
+          cargo generate-lockfile
+          cargo metadata --locked --format-version 1 > metadata.json
+          python3 check_dependency_chain.py metadata.json Cargo.lock
+          cargo tree --locked -i noq
+          cargo tree --locked -i noq-proto
+          cargo tree --locked -i noq-udp
       - name: Compile and test real QUIC loopback endpoints
         working-directory: experiments/akula-library-iroh
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
+      - name: Archive resolved dependencies
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-library-iroh-dependency-evidence
+          path: |
+            experiments/akula-library-iroh/Cargo.lock
+            experiments/akula-library-iroh/metadata.json
+          if-no-files-found: ignore
