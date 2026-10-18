@@ -1,0 +1,24 @@
+name: Akula Library iroh direct transfer lab
+on:
+  pull_request:
+    paths:
+      - 'experiments/akula-library-iroh/**'
+      - '.github/workflows/akula-library-iroh.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  iroh-standalone-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.91.1'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: experiments/akula-library-iroh
+      - name: Compile and test real QUIC loopback endpoints
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --all-targets
