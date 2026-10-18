@@ -112,6 +112,40 @@ fn checked_member(path: &Path) -> Result<Option<(File, FileId)>, HostCustodyErro
     Ok(Some((file, id)))
 }
 
+/// CRITICAL: on Unix, never open AND CLOSE an additional descriptor for the
+/// SQLite main DB, -wal or -shm while a SQLite connection holds fcntl locks.
+/// POSIX record locks are per-PROCESS and closing ANY descriptor for the same
+/// inode can release that connection's writer lock. In-epoch checks therefore
+/// use lstat metadata only; the one opened main DB handle stays live until
+/// after rusqlite::Connection is dropped. Windows SQLite uses HANDLE-scoped
+/// locks, so a fresh opened ID remains safe for this point-in-time check.
+fn checked_named_id(path: &Path) -> Result<Option<FileId>, HostCustodyError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let named = match fs::symlink_metadata(path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        if !named.is_file() || named.file_type().is_symlink()
+            || named.ino() == 0 || named.nlink() != 1
+        {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
+        return Ok(Some(FileId { device: named.dev(), inode: named.ino() }));
+    }
+    #[cfg(windows)]
+    {
+        return Ok(checked_member(path)?.map(|(_, id)| id));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Err(HostCustodyError::InvalidHostLocation)
+    }
+}
+
 fn sidecar_path(db: &Path, suffix: &str) -> PathBuf {
     let mut name = db.as_os_str().to_os_string();
     name.push(OsStr::new(suffix));
@@ -150,15 +184,15 @@ impl HostLedgerIdentity {
 
     pub(super) fn sidecars(&self) -> Result<SidecarIds, HostCustodyError> {
         self.pinned_parent.recheck_root()?;
-        let wal = checked_member(&sidecar_path(&self.path, "-wal"))?.map(|(_, id)| id);
-        let shm = checked_member(&sidecar_path(&self.path, "-shm"))?.map(|(_, id)| id);
+        let wal = checked_named_id(&sidecar_path(&self.path, "-wal"))?;
+        let shm = checked_named_id(&sidecar_path(&self.path, "-shm"))?;
         self.pinned_parent.recheck_root()?;
         Ok(SidecarIds { wal, shm })
     }
 
     pub(super) fn recheck(&self) -> Result<(), HostCustodyError> {
         self.pinned_parent.recheck_root()?;
-        if checked_member(&self.path)?.map(|(_, id)| id) != Some(self.db) {
+        if checked_named_id(&self.path)? != Some(self.db) {
             return Err(HostCustodyError::InvalidHostLocation);
         }
         // Malformed / aliased sidecars must fail even without a write epoch.
