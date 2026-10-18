@@ -187,20 +187,17 @@ pub(crate) fn pack_color(color: AlphaColor<Srgb>) -> u32 {
 /// Values near 1.0 (>= 0.875 with 4 buckets) are clamped to the last bucket
 /// rather than wrapping to 0. Wrapping to bucket 0 without also incrementing the
 /// integer pixel coordinate would shift the glyph by ~0.75px in the wrong
-/// direction. Clamping keeps the worst-case error to 0.125px.
+/// direction. Clamping keeps the worst-case error to 0.25px.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "result is clamped to SUBPIXEL_BUCKETS-1 which fits in u8"
 )]
 #[inline]
 fn quantize_subpixel(frac: f32) -> u8 {
-    let normalized = frac.fract();
-    let normalized = if normalized < 0.0 {
-        normalized + 1.0
-    } else {
-        normalized
-    };
-    ((normalized * SUBPIXEL_BUCKETS as f32).round() as u8).min(SUBPIXEL_BUCKETS - 1)
+    // The caller already paired this fraction with biased_floor. Repeating
+    // fract() here would wrap a rounded-to-f32 value of 1.0 back to 0
+    // while the integer pixel in the atlas quad stays unchanged.
+    ((frac * SUBPIXEL_BUCKETS as f32).round() as u8).min(SUBPIXEL_BUCKETS - 1)
 }
 
 /// Convert a quantized bucket index back to the fractional pixel offset it represents.
@@ -228,7 +225,7 @@ mod tests {
         assert_eq!(quantize_subpixel(0.7), 3);
         assert_eq!(quantize_subpixel(0.75), 3);
         assert_eq!(quantize_subpixel(0.9), 3);
-        assert_eq!(quantize_subpixel(1.0), 0);
+        assert_eq!(quantize_subpixel(1.0), 3);
     }
 
     #[test]
