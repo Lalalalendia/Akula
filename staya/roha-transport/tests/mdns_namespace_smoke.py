@@ -171,9 +171,22 @@ def run_with_keys(folder):
         # The client knows only B's enrolled public key, not B's IP.
         good = inside(NS_A, BIN, "ping-discovered", a_key, b_id, "12", timeout=50)
         if good.returncode != 0 or "via=mdns relay=disabled" not in good.stdout:
+            # Publisher-side monitor reports whether DNS-SD was actually
+            # announced and whether its daemon encountered any errors.
+            # It normally stays silent in GitHub Actions because stderr is
+            # redirected to a pipe. Collect that pipe *only on failure*.
+            if server.poll() is None:
+                server.terminate()
+            try:
+                _, publisher_error = server.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                _, publisher_error = server.communicate(timeout=5)
             raise AssertionError(
                 "mDNS-resolved QUIC ping failed: " +
-                sanitized(good.stderr, [a_key, b_key, unknown_key])
+                sanitized(good.stderr, [a_key, b_key, unknown_key]) +
+                " publisher: " +
+                sanitized(publisher_error, [a_key, b_key, unknown_key])
             )
 
         # A foreign secret key can discover B's public record but must never
