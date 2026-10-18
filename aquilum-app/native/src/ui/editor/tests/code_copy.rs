@@ -57,3 +57,55 @@ fn right_click_uses_clicked_fence_not_unrelated_selection_or_caret() {
     assert_eq!(selected(&root), "до");
     assert_eq!(text(&root), source, "opening copy menus must not alter source");
 }
+
+
+#[test]
+fn visible_header_copy_buttons_target_the_correct_fence_without_edits() {
+    use super::support::{click, editor_id, focused};
+
+    let source = "начало\n~~~rust\nlet a = 1;\n~~~\nмежду\n\u{60}\u{60}\u{60}python\nprint('🐱')\n\u{60}\u{60}\u{60}\nконец";
+    let first = source.find("~~~rust").unwrap();
+    let second = source.find("\u{60}\u{60}\u{60}python").unwrap();
+    let mut root = focused(TextEditor::new(source).markdown(), 640, 480);
+    let id = editor_id(&root);
+    root.edit_widget(id, |mut widget| TextEditor::select_byte_range(&mut widget.downcast(), 0, "начало".len()));
+    let _ = root.redraw();
+
+    let (first_button, second_button) = {
+        let widget = root.get_widget_with_tag(TAG).unwrap();
+        let editor = widget.inner();
+        (
+            editor.code_header_button_for_test(first).expect("first code header"),
+            editor.code_header_button_for_test(second).expect("second code header"),
+        )
+    };
+    assert!(first_button.y1 < second_button.y0);
+    click(&mut root, first_button.center().x, first_button.center().y);
+    assert_eq!(
+        root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
+        Some(first),
+        "first click must copy the first fenced body"
+    );
+    click(&mut root, second_button.center().x, second_button.center().y);
+    assert_eq!(
+        root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
+        Some(second),
+        "second click must target the second body"
+    );
+    assert_eq!(selected(&root), "начало", "copy button must not move the caret or selection");
+    assert_eq!(text(&root), source, "copy button must not edit Markdown");
+}
+
+#[test]
+fn copy_header_is_not_offered_for_prose_math_or_occluded_long_info() {
+    let source = format!(
+        "обычный текст\n\u{60}\u{60}\u{60}{}\nbody\n\u{60}\u{60}\u{60}\n$$\nx^2\n$$",
+        "language".repeat(60)
+    );
+    let root = unfocused(TextEditor::new(&source).markdown(), 340, 380);
+    let editor = root.get_widget_with_tag(TAG).unwrap();
+    let editor = editor.inner();
+    assert_eq!(editor.code_header_button_for_test(0), None);
+    assert_eq!(editor.code_header_button_for_test(source.find("\u{60}\u{60}\u{60}").unwrap()), None);
+    assert_eq!(editor.code_header_button_for_test(source.find("$$").unwrap()), None);
+}

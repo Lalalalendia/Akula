@@ -38,7 +38,8 @@ impl TextEditor {
     }
 
     pub(super) fn hover_text(&mut self, ctx: &mut EventCtx<'_>, point: Point) {
-        self.pointer_hover = self.link_at(point).is_some() || self.task_at(point).is_some() || self.card_action_at(point).is_some();
+        let hovering_copy = self.code_header_hover(ctx, point);
+        self.pointer_hover = hovering_copy || self.link_at(point).is_some() || self.task_at(point).is_some() || self.card_action_at(point).is_some();
         let link = self.card_link_at(point);
         if link != self.hovered_link {
             self.hovered_link = link;
