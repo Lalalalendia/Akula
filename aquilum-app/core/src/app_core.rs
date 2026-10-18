@@ -321,13 +321,9 @@ impl Core {
                 .ok_or_else(|| refused(
                     "host custody witness HOLD: compiler-pinned install witness missing".into()
                 ))?;
-            let expected = crate::sync::host_install_witness::read_installer_witness(db, &path)
+            return SharedHostCustodyRegistry::open_existing_installer_witness(db, &path)
                 .map_err(|error| refused(format!(
-                    "host custody witness HOLD: install witness unavailable/invalid: {error:?}"
-                )))?;
-            return SharedHostCustodyRegistry::open_existing_with_expected(db, expected)
-                .map_err(|error| refused(format!(
-                    "host custody witness HOLD: registered SQLite identity invalid: {error:?}"
+                    "host custody witness HOLD: install witness or SQLite identity invalid: {error:?}"
                 )));
         }
         #[cfg(not(feature = "sync-installed-host-witness"))]
