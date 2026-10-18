@@ -14,7 +14,13 @@ iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d3939
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 blake3 = "1.8.5"
 
+[dev-dependencies]
+# Lab-only, disabled in native Akula. 0.103.1 contains the mandatory push EventMask fix.
+iroh-blobs = { version = "=0.103.1", default-features = false }
+
 [patch.crates-io]
+# Critical: iroh-blobs depends on crates.io iroh; unify it with our pinned Roha.
+iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49" }
 noq = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
 noq-proto = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
 noq-udp = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
