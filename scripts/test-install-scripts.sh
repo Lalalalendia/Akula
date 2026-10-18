@@ -64,6 +64,10 @@ cat > "$temporary_home/tools/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$AKULA_INSTALL_CURL_CALLS"
+if [[ "${AKULA_TEST_CURL_PAUSE:-0}" == 1 && "$*" == *"/releases/latest"* ]]; then
+  touch "$AKULA_TEST_CURL_READY"
+  until [[ -e "$AKULA_TEST_CURL_CONTINUE" ]]; do sleep 0.05; done
+fi
 dest="${@: -1}"
 if [[ "$*" == *"/releases/latest"* ]]; then
   cat > "$dest" <<JSON
@@ -120,6 +124,20 @@ EOF
 cat > "$temporary_home/tools/mv" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${AKULA_TEST_KILL_AFTER_BACKUP:-0}" == 1
+   && "$1" == "$HOME/Applications/Aquilum.app"
+   && "$2" == "$HOME/Applications"/.akula-install.*/Aquilum.previous.app ]]; then
+  /bin/mv "$@"
+  kill -KILL "$PPID"
+  exit 137
+fi
+if [[ "${AKULA_TEST_KILL_AFTER_PROMOTION:-0}" == 1
+   && "$1" == "$HOME/Applications"/.akula-install.*/Aquilum.app
+   && "$2" == "$HOME/Applications/Aquilum.app" ]]; then
+  /bin/mv "$@"
+  kill -KILL "$PPID"
+  exit 137
+fi
 if [[ "${AKULA_TEST_PROMOTION_FAIL:-0}" == 1
    && "$1" == *"/.akula-install."*"/Aquilum.app"
    && "$2" == "$HOME/Applications/Aquilum.app" ]]; then
