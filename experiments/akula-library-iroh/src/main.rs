@@ -1,6 +1,6 @@
 //! Akula Library research tool: explicit two-process, direct-UDP transfer only.
 //! NO discovery, NO public relay, NO production File Gate integration.
-use akula_library_iroh_lab::{Book, QuotaState, Server, direct_endpoint, get_parts, manifest_from, durable::DurableDownload, persistent_quota::PersistentQuota, rate_limit::RateGate};
+use akula_library_iroh_lab::{Book, QuotaState, Server, direct_endpoint, get_parts_with_usage, manifest_from_with_usage, WireUsage, durable::DurableDownload, persistent_quota::PersistentQuota, rate_limit::RateGate};
 use anyhow::{Context, Result, bail, ensure};
 use iroh::{EndpointAddr, EndpointId, SecretKey};
 use std::{collections::{HashMap, HashSet}, env, fs, io::{Read, Write}, net::SocketAddr, path::Path, str::FromStr};
@@ -107,12 +107,15 @@ async fn main() -> Result<()> {
             assert_no_flags(&flags)?;
             let endpoint = direct_endpoint(key, "127.0.0.1:0".parse()?).await?;
             let remote = EndpointAddr::new(remote_id).with_ip_addr(remote_addr);
-            let manifest = manifest_from(&endpoint, remote.clone()).await?;
+            let (manifest, first_usage) = manifest_from_with_usage(&endpoint, remote.clone()).await?;
+            let mut wire = WireUsage::default();
+            wire.add(first_usage);
             let mut durable = DurableDownload::open(Path::new(&stage), manifest)?;
             let mut received = 0usize;
             while received < max_parts {
                 let Some(idx) = durable.first_missing() else { break };
-                let n = get_parts(&endpoint, remote.clone(), &mut durable.partial, Some(1)).await?;
+                let (n, usage) = get_parts_with_usage(&endpoint, remote.clone(), &mut durable.partial, Some(1)).await?;
+                wire.add(usage);
                 ensure!(n == 1 && durable.partial.verified_part(idx).is_some(), "missing requested part");
                 durable.commit_verified_part(idx)?;
                 received += 1;
@@ -126,6 +129,11 @@ async fn main() -> Result<()> {
                 println!("PARTIAL verified={} total={} new={}", durable.partial.verified_count(),
                     durable.partial.manifest.parts.len(), received);
             }
+            println!("CLIENT_WIRE_METRICS udp_tx_bytes={} udp_rx_bytes={} udp_tx_datagrams={} udp_rx_datagrams={} connections={} payload_verified={} udp_rx_to_payload_ratio={:.5}",
+                wire.udp_tx_bytes, wire.udp_rx_bytes, wire.udp_tx_datagrams,
+                wire.udp_rx_datagrams, wire.connections,
+                durable.partial.manifest.len,
+                (wire.udp_rx_bytes as f64) / (durable.partial.manifest.len.max(1) as f64));
             endpoint.close().await;
         }
         _ => bail!("unknown command; use identity|serve|fetch"),
