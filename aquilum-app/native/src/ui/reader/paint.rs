@@ -126,5 +126,14 @@ impl ReaderView {
             box_shadow(painter, shape, tm.shadow_ring);
             painter.fill(shape, tm.dialog_bg).draw();
         }
+        // Diagnostic-only: the reader actually painted visible text with
+        // nontrivial intro opacity. Merely constructing a ReaderView or
+        // presenting the app's first window does not satisfy this condition.
+        #[cfg(feature = "memory-probe")]
+        if self.intro.value() >= 0.25
+            && self.session.on_screen().iter().any(|&item| self.session.layout(item).is_some())
+        {
+            crate::memory_probe::mark_text_painted();
+        }
     }
 }
