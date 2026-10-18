@@ -44,7 +44,7 @@ impl Document {
         let markdown = context.as_ref().map(|context| (context, self.blocks.get(line), self.local_caret(line, caret)));
         // Native fenced code has one horizontal visual line; math keeps its
         // existing layout. The editor separately clips unwrapped code text.
-        let no_wrap = matches!(self.blocks.get(line), Block::Code { lang, .. } if *lang != Some(Lang::Math));
+        let no_wrap = self.fenced_code(line);
         let width = if no_wrap { None } else { self.width };
         let (layout, decor) = text::build(fcx, lcx, styles, &text, underline, width, Alignment::Start, markdown);
         Laid { layout, decor }
