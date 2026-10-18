@@ -103,9 +103,12 @@ async fn main() -> Result<()> {
             let stage = take(&mut flags, "stage")?;
             let output = take(&mut flags, "output")?;
             let max_parts: usize = take_or(&mut flags, "max-parts", "64").parse()?;
+            // Test-only explicit source address; 127/8 aliases can emulate independent
+            // ingress IPs on one Linux runner without external traffic.
+            let client_bind: SocketAddr = take_or(&mut flags, "bind", "127.0.0.1:0").parse()?;
             ensure!(max_parts <= akula_library_iroh_lab::MAX_CHUNKS, "max-parts too high");
             assert_no_flags(&flags)?;
-            let endpoint = direct_endpoint(key, "127.0.0.1:0".parse()?).await?;
+            let endpoint = direct_endpoint(key, client_bind).await?;
             let remote = EndpointAddr::new(remote_id).with_ip_addr(remote_addr);
             let (manifest, first_usage) = manifest_from_with_usage(&endpoint, remote.clone()).await?;
             let mut wire = WireUsage::default();
