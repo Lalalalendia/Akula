@@ -209,6 +209,41 @@ def minio_case(codec, writer, reader, bucket, i, base, target,
     if selected != "full_zstd":
         codec.must_reject(chosen_wire, target, folder)
         codec.must_reject(chosen_wire, None, folder)
+
+    if i == 0:
+        # Exercise the SECOND S3 SDK client's refusal of corrupted immutable
+        # sidecar/base bytes and absent base objects, not merely local codecs.
+        forged_sidecar = prefix + "attack/sidecar-modified"
+        damaged = bytearray(chosen_wire)
+        damaged[-1] ^= 1
+        store(writer, bucket, forged_sidecar, bytes(damaged))
+        try:
+            S3Counters(reader, bucket).verified_fetch(
+                forged_sidecar, hash_bytes(chosen_wire))
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("damaged S3 sidecar accepted")
+        forged_base = prefix + "attack/base-modified"
+        store(writer, bucket, forged_base, base + b"-unverified")
+        try:
+            S3Counters(reader, bucket).verified_fetch(
+                forged_base, hash_bytes(base))
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("wrong S3 base accepted")
+        from botocore.exceptions import ClientError
+        try:
+            reader.head_object(Bucket=bucket,
+                               Key=prefix + "v1/missing-parent-blob")
+        except ClientError as exc:
+            if exc.response.get("Error",{}).get("Code") not in (
+                "404", "NotFound", "NoSuchKey"):
+                raise
+        else:
+            raise AssertionError("absent S3 base was reported present")
+
     if full_remote["get"] != 1 or warm_remote["get"] != 1:
         raise AssertionError("unexpected S3 read request accounting")
     if cold_remote["get"] != (1 if selected=="full_zstd" else 2):
