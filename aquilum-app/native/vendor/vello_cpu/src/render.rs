@@ -1482,4 +1482,84 @@ mod tests {
     }
 
 
+    /// A controlled numerical falsifier, never a production glyph transform:
+    /// ideal alpha for local (8,1) is exactly 255 * 5/6 = 212.5. A binary
+    /// +/- 1/1024 pixel X displacement moves the ideal alpha to ~212.749 or
+    /// ~212.251, beyond plausible single-precision error at this position.
+    /// If both biases remove the slot/crop discrepancy, the half-integer
+    /// quantizer threshold is causal; we must still fix coverage rounding
+    /// rather than shifting glyph geometry in shipping code.
+    #[test]
+    fn guard96_real_glyph_495_half_tie_perturbation() {
+        use vello_common::color::palette::css::BLACK;
+        use vello_common::kurbo::Affine;
+
+        fn paint(slot: (u16, u16), crop: bool, dx: f64) -> Pixmap {
+            let origin = if crop { (slot.0 - 2, slot.1 - 2) } else { (0, 0) };
+            let extent = if crop { (15, 13) } else { (512, 512) };
+            let mut ctx = RenderContext::new(extent.0, extent.1);
+            ctx.set_transform(Affine::new([
+                1.0, 0.0, 0.0, -1.0,
+                f64::from(slot.0) + dx - f64::from(origin.0),
+                f64::from(slot.1) + 9.0 - f64::from(origin.1),
+            ]));
+            ctx.set_paint(BLACK);
+            ctx.fill_path(&guard96_real_glyph_495_outline());
+            ctx.flush();
+            let mut page = Pixmap::new(512, 512);
+            ctx.render_with(
+                &mut page,
+                &mut Resources::new(),
+                RasterizerSettings {
+                    target_init: TargetInit::SrcOver,
+                    offset: origin,
+                    ..Default::default()
+                },
+            );
+            page
+        }
+
+        let slots = [(381, 24), (416, 24), (24, 149), (34, 83), (105, 11)];
+        for bias in [1.0 / 1024.0, -1.0 / 1024.0] {
+            let reference = paint(slots[0], false, bias);
+            let mut expected = alloc::vec::Vec::with_capacity(99);
+            for y in 0..9 {
+                for x in 0..11 {
+                    expected.push(reference.sample(slots[0].0 + x, slots[0].1 + y));
+                }
+            }
+            let mut all_differences = 0;
+            for slot in slots {
+                for crop in [false, true] {
+                    let page = paint(slot, crop, bias);
+                    let mut changed = 0_usize;
+                    let mut first = None;
+                    for y in 0..9 {
+                        for x in 0..11 {
+                            let index = usize::from(y) * 11 + usize::from(x);
+                            let actual = page.sample(slot.0 + x, slot.1 + y);
+                            if actual != expected[index] {
+                                changed += 1;
+                                if first.is_none() {
+                                    first = Some((x, y, expected[index], actual));
+                                }
+                            }
+                        }
+                    }
+                    all_differences += changed;
+                    std::eprintln!(
+                        "GUARD96_HALF_TIE_BIAS bias={bias} slot={slot:?} crop={crop} \
+                         differs={changed} first={first:?} critical={:?}",
+                        page.sample(slot.0 + 8, slot.1 + 1)
+                    );
+                }
+            }
+            assert_eq!(
+                all_differences, 0,
+                "bias={bias}: even moving exact coverage off the 212.5 tie \
+                 left mismatches; inspect strip accumulation rather than guessing"
+            );
+        }
+    }
+
 }
