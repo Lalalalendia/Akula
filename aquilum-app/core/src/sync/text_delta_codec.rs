@@ -515,6 +515,73 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Run only in the dedicated complete-Git-history codec A/B workflow"]
+    fn real_git_markdown_pairs_numeric_ab() {
+        use std::{path::Path, process::Command};
+
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap().parent().unwrap();
+        let git = |args: &[&str]| -> Vec<u8> {
+            let output = Command::new("git")
+                .current_dir(repo)
+                .args(args).output().expect("Git unavailable for actual history A/B");
+            assert!(output.status.success(), "Git revision read failed: {:?}",
+                    String::from_utf8_lossy(&output.stderr));
+            output.stdout
+        };
+        let paths = [
+            "docs/performance-roadmap.md",
+            "README.ru.md",
+            "docs/sync/adr-0006-cross-process-mutation-boundary.md",
+            "docs/sync/adr-0005-inprocess-history-files-interlock.md",
+            "aquilum-app/native/testdata/markdown-test.md",
+        ];
+        let mut cases = 0usize;
+        let mut full_bytes = 0usize;
+        let mut selected_bytes = 0usize;
+        let mut full_count = 0usize;
+        let mut splice_count = 0usize;
+        let mut dictionary_count = 0usize;
+        for path in paths {
+            let raw_log = git(&["log", "--format=%H", "--", path]);
+            let commits = std::str::from_utf8(&raw_log).unwrap()
+                .lines().take(5).collect::<Vec<_>>();
+            for pair in commits.windows(2) {
+                let previous = format!("{}:{path}", pair[1]);
+                let next = format!("{}:{path}", pair[0]);
+                let old = git(&["show", &previous]);
+                let new = git(&["show", &next]);
+                if old.len() < 64 || new.len() < 64 || old == new
+                    || old.len() > MAX_TEXT_BYTES || new.len() > MAX_TEXT_BYTES
+                    || std::str::from_utf8(&old).is_err()
+                    || std::str::from_utf8(&new).is_err()
+                {
+                    continue;
+                }
+                let base = RevisionId::new();
+                let target = RevisionId::new();
+                let chosen = encode(target, &new, Some((base, &old))).unwrap();
+                let full = encode(target, &new, None).unwrap();
+                assert_eq!(decode(&chosen.bytes, target, Some((base, &old))).unwrap(), new);
+                assert_eq!(decode(&full.bytes, target, None).unwrap(), new);
+                assert!(chosen.bytes.len() <= full.bytes.len());
+                cases += 1;
+                full_bytes += full.bytes.len();
+                selected_bytes += chosen.bytes.len();
+                match chosen.mode {
+                    TextDeltaMode::FullZstd => full_count += 1,
+                    TextDeltaMode::SpliceZstd => splice_count += 1,
+                    TextDeltaMode::DictionaryZstd => dictionary_count += 1,
+                }
+            }
+        }
+        assert!(cases >= 9, "test requires checkout fetch-depth: 0");
+        println!(
+            "DELTA_TEXT_RUST_REAL_GIT pairs={cases} full_wire={full_bytes} selected_wire={selected_bytes} full={full_count} splice={splice_count} dictionary={dictionary_count}"
+        );
+    }
+
+    #[test]
     fn forged_splice_offsets_and_trailing_bytes_refused() {
         let base=b"Unicode \xF0\x9F\x99\x82 content".to_vec();
         assert_eq!(splice_apply(&base,&[0;7]),Err(TextDeltaError::InvalidEnvelope));
