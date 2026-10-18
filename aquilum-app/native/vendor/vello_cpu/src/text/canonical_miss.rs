@@ -15,6 +15,7 @@
 // must pass full fidelity + benchmark gates before any shipping equivalent.
 
 use super::*;
+use kurbo::Shape as _;
 
 #[derive(Clone)]
 struct LocalGlyph {
