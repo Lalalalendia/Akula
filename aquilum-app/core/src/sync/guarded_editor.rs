@@ -138,10 +138,13 @@ pub(crate) fn activate_registered_s3_editor(
     // still cannot fall back: they require a one-shot receipt, and the
     // unactivated guarded route explicitly refuses that receipt.
     core.documents.arm_durable_intents_for_root(&config.root)?;
-    // Close the admission transition against an ordinary File Gate operation
-    // already inside its process-wide primary-file critical section. Take
-    // this FIRST, before the HistoryService barrier, to preserve the
-    // established File Gate -> HistoryFiles ordering.
+    // An ordinary write can be BETWEEN its primary bytes and HistoryService
+    // after releasing the File Gate. Drain those complete publications first.
+    // This follows the DocumentHub sessions check; never invert that order.
+    let _publication_fence = core.ordinary_note_enrollment_fence()?;
+    // Keep the narrower primary-File Gate fence for the other (not yet
+    // publication-leased) mutation entrypoints. Preserve File Gate ->
+    // HistoryFiles ordering, and never acquire an OS lock while holding it.
     let _file_gate_fence = core.file_mutation_guard()?;
     let mut registry = core.guarded_editors.lock()
         .map_err(|_| refused("cooperative editor registry poisoned"))?;

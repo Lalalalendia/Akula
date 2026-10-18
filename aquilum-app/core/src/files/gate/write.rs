@@ -1,4 +1,4 @@
-use super::{announce_history, paths_changed, record};
+use super::{announce_history, paths_changed, record, report_record};
 use crate::app_core::Core;
 use crate::files::document::write_file_atomic_impl;
 use crate::files::entries::{copy_file_impl, create_binary_file_impl, create_file_impl};
@@ -26,14 +26,27 @@ pub fn write(
     ) {
         return guarded;
     }
-    let (before, result) = {
-        let _guard = core.file_mutation_guard_for_write()?;
-        let before = core.history.disk_before(path, expected_hash);
-        let result = write_file_atomic_impl(path, content, expected_hash)?;
-        (before, result)
+    let (result, history_outcome) = {
+        // This lease spans BOTH the primary file replacement and the history
+        // attempt. Activation waits for it before flipping durable HOLD.
+        // Only enabled for opt-in S3 builds; the unarmed route stays cheap.
+        #[cfg(feature = "sync-s3")]
+        let _publication = core.ordinary_note_publication_lease()?;
+        let (before, result) = {
+            let _guard = core.file_mutation_guard_for_write()?;
+            let before = core.history.disk_before(path, expected_hash);
+            let result = write_file_atomic_impl(path, content, expected_hash)?;
+            (before, result)
+        };
+        let write = NoteWrite {
+            disk_before: before, text: content, hash: &result.hash, source,
+            name: version_name,
+        };
+        let outcome = core.history.try_saved(&|| core.known_roots(), path, write);
+        (result, outcome)
     };
-    let write = NoteWrite { disk_before: before, text: content, hash: &result.hash, source, name: version_name };
-    record(core, path, write);
+    // Do NOT invoke any host callback while holding the publication epoch.
+    report_record(core, path, history_outcome);
     if is_markdown(path) {
         core.search.notify_content_path(path.to_path_buf());
     }
@@ -93,19 +106,26 @@ pub fn create(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, FileCommandError> {
-    let result = {
-        let _guard = core.file_mutation_guard_for_write()?;
-        create_file_impl(path, content)?
-    };
-    if is_note(path) {
-        let write = NoteWrite {
-            disk_before: Some((String::new(), SystemTime::now())),
-            text: content,
-            hash: &result.hash,
-            source,
-            name: version_name,
+    let (result, history_outcome) = {
+        #[cfg(feature = "sync-s3")]
+        let _publication = core.ordinary_note_publication_lease()?;
+        let result = {
+            let _guard = core.file_mutation_guard_for_write()?;
+            create_file_impl(path, content)?
         };
-        record(core, path, write);
+        let history = if is_note(path) {
+            let write = NoteWrite {
+                disk_before: Some((String::new(), SystemTime::now())),
+                text: content, hash: &result.hash, source, name: version_name,
+            };
+            Some(core.history.try_saved(&|| core.known_roots(), path, write))
+        } else {
+            None
+        };
+        (result, history)
+    };
+    if let Some(history) = history_outcome {
+        report_record(core, path, history);
     }
     paths_changed(core, vec![path.to_path_buf()]);
     Ok(result)
