@@ -91,3 +91,14 @@ fn platform_data_dir() -> Option<PathBuf> {
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
     }
 }
+
+#[cfg(test)]
+mod host_custody_feature_tests {
+    #[test]
+    fn native_compiles_the_shared_host_gate_even_without_s3_transport() {
+        assert!(
+            aquilum_core::sync::HOST_CUSTODY_FEATURE_ENABLED,
+            "the native shell must not compile a Core without the host custody capability"
+        );
+    }
+}
