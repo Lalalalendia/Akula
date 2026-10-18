@@ -54,6 +54,9 @@ jobs:
       - name: Bounded-rate QUIC loopback transfer
         working-directory: experiments/akula-library-iroh
         run: python3 tests/rate_smoke.py --binary target/debug/akula-library-iroh-lab
+      - name: Distinct local IP ingress and unknown-key isolation
+        working-directory: experiments/akula-library-iroh
+        run: python3 tests/multi_source_loopback.py --binary target/debug/akula-library-iroh-lab
       - name: Archive resolved dependencies
         if: always()
         uses: actions/upload-artifact@v4
