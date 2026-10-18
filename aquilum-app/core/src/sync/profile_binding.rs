@@ -273,7 +273,9 @@ fn load(
     Ok(Some(binding))
 }
 
-fn validate_appdata_location(
+// Reuse the same canonical-root/reparse/hardlink checks for a separate
+// private V2 observation journal. Do not put trust receipts in user vaults.
+pub(super) fn validate_appdata_location(
     admission: &RegisteredReadAdmission<'_>,
     database_path: &Path,
 ) -> Result<(), S3BindingError> {
