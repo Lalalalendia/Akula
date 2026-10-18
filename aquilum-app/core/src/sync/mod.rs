@@ -55,6 +55,10 @@ mod s3_anchored_delta;
 mod s3_delta_walker;
 #[cfg(feature = "sync-s3")]
 mod s3_remote_anchor;
+// App-data-only V2 trust checkpoints: explicit genesis pin and monotonic
+// remote observation, never a per-document or user-write baseline.
+#[cfg(feature = "sync-s3")]
+mod s3_v2_trust_anchor;
 #[cfg(feature = "sync-s3")]
 mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
@@ -107,6 +111,11 @@ pub use s3_anchored_delta::{
 pub use s3_remote_anchor::{
     S3RemoteAnchor, S3RemoteAnchorError, S3RemoteAnchorJournal,
     S3RemoteAnchorOutcome, S3RemoteAnchorScope,
+};
+#[cfg(feature = "sync-s3")]
+pub use s3_v2_trust_anchor::{
+    S3V2TrustAnchorError, S3V2TrustAnchorOutcome,
+    S3V2TrustedAnchor, S3V2TrustedAnchorJournal,
 };
 #[cfg(feature = "sync-s3")]
 pub use s3_delta_walker::{
