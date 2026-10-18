@@ -55,8 +55,8 @@ pub fn scan(allowed: &BTreeSet<EndpointId>, duration: Duration) -> Result<Vec<La
             Ok(ServiceEvent::ServiceResolved(info)) => {
                 if info.get_property_val_str("version") != Some("0") { continue; }
                 let Some((text_id, _)) = info.get_fullname().split_once('.') else { continue; };
-                for ip in info.get_addresses() {
-                    if let Some(c) = candidate(text_id, info.get_port(), *ip, allowed) {
+                for ip in info.get_addresses_v4() {
+                    if let Some(c) = candidate(text_id, info.get_port(), IpAddr::V4(ip), allowed) {
                         result.insert((c.id, c.address));
                     }
                 }
