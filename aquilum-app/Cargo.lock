@@ -191,6 +191,7 @@ dependencies = [
  "atomic-write-file",
  "aws-config",
  "aws-sdk-s3",
+ "aws-sdk-sts",
  "blake3",
  "httparse",
  "memchr",
