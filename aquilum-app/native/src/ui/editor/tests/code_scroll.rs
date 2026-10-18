@@ -72,3 +72,58 @@ fn keyboard_caret_follow_reveals_the_end_of_a_long_fence() {
     assert!(root.get_widget_with_tag(TAG).unwrap().inner().code_scroll_for_test(opener) > 0.0,
         "placing caret at the end of a long unwrapped code line must reveal it");
 }
+
+
+#[test]
+fn native_pixels_outside_code_viewport_are_unchanged_by_long_code_text() {
+    use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
+    use masonry::core::NewWidget;
+    use masonry::dpi::PhysicalSize;
+    use std::sync::Arc;
+
+    let _theme_lock = crate::ui::theme::test_lock();
+    const W: u16 = 250;
+    const H: u16 = 220;
+    fn frame(source: &str) -> (Vec<u32>, masonry::kurbo::Rect) {
+        let opts = RenderRootOptions {
+            default_properties: Arc::new(masonry::theme::default_property_set()),
+            use_system_fonts: true,
+            size_policy: WindowSizePolicy::User,
+            size: PhysicalSize::new(u32::from(W), u32::from(H)),
+            scale_factor: 1.0,
+            test_font: None,
+        };
+        let mut root = RenderRoot::new(
+            NewWidget::new(TextEditor::new(source).markdown()).with_tag(TAG).erased(),
+            |_| {}, opts,
+        );
+        let (layers, _) = root.redraw();
+        let clip = root.get_widget_with_tag(TAG).unwrap().inner()
+            .code_viewport(1).expect("code body viewport");
+        let mut renderer = crate::render::Renderer::new(2);
+        renderer.render(&layers, W, H, 1.0, crate::ui::theme::background())
+            .expect("native frame");
+        (renderer.frame_pixels().to_vec(), clip)
+    }
+
+    let short = "~~~rust\nx\n~~~\nfollowing";
+    let long = format!("~~~rust\n{}\n~~~\nfollowing", "W".repeat(500));
+    let (short_pixels, before) = frame(short);
+    let (long_pixels, after) = frame(&long);
+    assert_eq!(before, after, "long lines must not alter block geometry");
+    assert_eq!(short_pixels.len(), long_pixels.len());
+    let mut changed_inside = 0;
+    for y in (after.y0.ceil() as usize + 2)..(after.y1.floor() as usize - 2) {
+        for x in 0..usize::from(W) {
+            let index = y * usize::from(W) + x;
+            if short_pixels[index] == long_pixels[index] {
+                continue;
+            }
+            if (x as f64) < after.x0 - 1.0 || (x as f64) > after.x1 + 1.0 {
+                panic!("code glyphs leaked beyond viewport at {x},{y}");
+            }
+            changed_inside += 1;
+        }
+    }
+    assert!(changed_inside > 8, "control: changed source must alter visible code glyphs");
+}
