@@ -5,9 +5,19 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 temporary_home="$(mktemp -d)"
 trap 'rm -rf "$temporary_home"' EXIT
 
+# The actual macOS lockf works on fd 9; Ubuntu CI adapts it using flock.
+mkdir -p "$temporary_home/tools"
+cat > "$temporary_home/tools/lockf" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" -eq 4 && "$1" == -s && "$2" == -t && "$3" == 0 && "$4" == 9 ]] || exit 60
+exec /usr/bin/flock -n 9
+EOF
+chmod +x "$temporary_home/tools/lockf"
+
 mkdir -p "$temporary_home/Applications/Aquilum.app" "$temporary_home/Notes"
 printf 'keep\n' > "$temporary_home/Notes/Keep.md"
-HOME="$temporary_home" bash "$script_dir/uninstall.sh" >/dev/null
+HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" bash "$script_dir/uninstall.sh" >/dev/null
 
 [[ ! -e "$temporary_home/Applications/Aquilum.app" ]]
 [[ "$(cat "$temporary_home/Notes/Keep.md")" == keep ]]
