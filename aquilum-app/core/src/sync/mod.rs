@@ -6,7 +6,7 @@
 mod core_scan;
 mod dag;
 mod delta;
-// Deliberately isolated, versioned content representation. Not V1/V2 or File Gate.
+// Experimental and opt-in versioned codec; never an S3 writer or File Gate.
 #[cfg(feature = "sync-text-delta")]
 pub(crate) mod text_delta_codec;
 mod download;
@@ -18,6 +18,8 @@ mod filegate_lock_custody;
 mod filegate_custody_identity;
 // Installer-provisioned local custody epoch: independent of S3 transport.
 // Legacy unhosted Core::open remains a release blocker until native binding.
+#[cfg(feature = "host-custody")]
+mod host_ledger_identity;
 #[cfg(feature = "host-custody")]
 pub(crate) mod host_custody_registry;
 #[cfg(all(test, feature = "host-custody"))]
