@@ -119,6 +119,26 @@ fn sync_reservation_blocks_windows_junction_alias() {
 
 
 #[test]
+fn cannot_arm_durable_editor_with_active_document_buffers() {
+    use crate::app_core::{Core, CoreEvent};
+    use std::sync::Arc;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("vault");
+    let data = temp.path().join("appdata");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    let root = std::fs::canonicalize(root).unwrap();
+    let note = root.join("Open.md");
+    std::fs::write(&note, b"existing").unwrap();
+    let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+    core.documents.open(&core, &note, 0).unwrap();
+    assert!(core.documents.arm_durable_intents_for_root(&root).is_err(),
+        "arming cannot race an unsubmitted CRDT editor buffer");
+    core.documents.release(&core, &note);
+    core.documents.arm_durable_intents_for_root(&root).unwrap();
+}
+
+#[test]
 fn armed_document_write_crash_intent_blocks_reopen_before_automatic_reconcile() {
     use crate::app_core::{Core, CoreEvent};
     use crate::documents::session::{SessionIo, SessionError};
