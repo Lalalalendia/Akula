@@ -116,6 +116,29 @@ impl ReaderView {
         }
     }
 
+    #[cfg(feature = "memory-probe")]
+    pub fn probe_move(this: &mut WidgetMut<'_, Self>, forward: bool) {
+        let changed = if forward { this.widget.session.next() } else { this.widget.session.prev() };
+        if changed {
+            this.widget.report = true;
+            // Run the ordinary Reader::arrange / Session::ensure / paint path.
+            // One scripted step is paired with a real frame before the next.
+            this.ctx.request_layout();
+        }
+    }
+
+    #[cfg(feature = "memory-probe")]
+    pub fn probe_scrolled(this: &mut WidgetMut<'_, Self>, scrolled: bool) {
+        let mut settings = this.widget.settings.clone();
+        settings.scrolled = scrolled;
+        Self::set_settings(this, settings);
+    }
+
+    #[cfg(feature = "memory-probe")]
+    pub fn probe_stats(&self) -> String {
+        self.session.probe_stats()
+    }
+
     #[cfg(test)]
     pub fn label_rects(&self) -> Vec<Rect> {
         self.labels.iter().map(|(r, _)| *r).collect()
