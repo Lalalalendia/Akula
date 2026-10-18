@@ -12,8 +12,8 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::p
 /// Network protocol reserved for a Staya connection, not a file-write capability.
 pub const STAYA_ALPN: &[u8] = b"akula/staya/transport/0";
 
-pub mod transfer;
 pub mod admission;
+pub mod transfer;
 
 /// Explicitly authorized endpoint keys. The pairing workflow owns this list.
 #[derive(Debug, Default, Clone)]
@@ -73,7 +73,11 @@ impl StayaTransport {
         }
 
         let endpoint = builder.bind().await.map_err(|err| format!("bind: {err}"))?;
-        Ok(Self { endpoint, peers, admission: admission::HandshakeGate::new() })
+        Ok(Self {
+            endpoint,
+            peers,
+            admission: admission::HandshakeGate::new(),
+        })
     }
 
     pub fn address(&self) -> EndpointAddr {
