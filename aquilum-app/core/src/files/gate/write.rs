@@ -64,6 +64,8 @@ pub fn write(
         return guarded;
     }
     let (result, history_outcome) = {
+        #[cfg(feature = "save-stage-probe")]
+        let profile_start = std::time::Instant::now();
         // This lease spans BOTH the primary file replacement and the history
         // attempt. Activation waits for it before flipping durable HOLD.
         // Only enabled for opt-in S3 builds; the unarmed route stays cheap.
@@ -75,11 +77,24 @@ pub fn write(
             let result = write_file_atomic_impl(path, content, expected_hash)?;
             (before, result)
         };
+        #[cfg(feature = "save-stage-probe")]
+        let profile_primary = profile_start.elapsed();
         let write = NoteWrite {
             disk_before: before, text: content, hash: &result.hash, source,
             name: version_name,
         };
         let outcome = core.history.try_saved(&|| core.known_roots(), path, write);
+        #[cfg(feature = "save-stage-probe")]
+        {
+            let profile_done = profile_start.elapsed();
+            eprintln!(
+                "AKULA_SAVE_GATE primary_ms={:.4} history_ms={:.4} total_ms={:.4} history_ok={}",
+                profile_primary.as_secs_f64() * 1000.0,
+                (profile_done - profile_primary).as_secs_f64() * 1000.0,
+                profile_done.as_secs_f64() * 1000.0,
+                u8::from(outcome.is_ok()),
+            );
+        }
         (result, outcome)
     };
     // Do NOT invoke any host callback while holding the publication epoch.
