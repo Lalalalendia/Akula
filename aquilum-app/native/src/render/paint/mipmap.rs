@@ -2,8 +2,8 @@
 //!
 //! No glyph-atlas image interception. No global change to Vello sampling.
 //! A 2x2 premultiplied RGBA box reduction costs O(source pixels) at each level.
-//! Only whole-power-of-two dimensions are admitted; odd dimensions fall back
-//! to the original sampler instead of silently distorting image geometry.
+//! Non-power-of-two dimensions use edge-clamped 2x2 blocks. Source-space
+//! geometry remains unchanged; the image brush transform compensates the mip.
 
 use vello_cpu::{PixelMetadata, Pixmap};
 use vello_cpu::peniko::ImageAlphaType;
@@ -14,24 +14,27 @@ pub const MAX_EXTRA_BYTES: usize = 32 * 1024 * 1024;
 
 pub fn half(source: &Pixmap) -> Option<Pixmap> {
     let (width, height) = (source.width(), source.height());
-    if width < 2 || height < 2 || width % 2 != 0 || height % 2 != 0 {
+    if width == 0 || height == 0 || (width == 1 && height == 1) {
         return None;
     }
-    let (dst_w, dst_h) = (width / 2, height / 2);
+    let (dst_w, dst_h) = (width.div_ceil(2), height.div_ceil(2));
     let src = source.data_as_u8_slice();
     let stride = usize::from(width) * 4;
+    let (max_x, max_y) = (usize::from(width) - 1, usize::from(height) - 1);
     let mut out = Vec::with_capacity(usize::from(dst_w) * usize::from(dst_h) * 4);
     // Derive the opacity hint from the reduced pixels, not from stale source
     // metadata. Vello's opaque-image fast path depends on this exact flag.
     let mut may_have_transparency = false;
     for y in 0..usize::from(dst_h) {
         for x in 0..usize::from(dst_w) {
-            let top = (y * 2) * stride + x * 8;
+            // Extend::Pad semantics at odd right/bottom edges: repeat the
+            // final source texel instead of rejecting real-world image sizes.
+            let (x0, y0) = (x * 2, y * 2);
+            let (x1, y1) = ((x0 + 1).min(max_x), (y0 + 1).min(max_y));
+            let offsets = [y0 * stride + x0 * 4, y0 * stride + x1 * 4,
+                           y1 * stride + x0 * 4, y1 * stride + x1 * 4];
             for channel in 0..4 {
-                let sum = u16::from(src[top + channel])
-                    + u16::from(src[top + 4 + channel])
-                    + u16::from(src[top + stride + channel])
-                    + u16::from(src[top + stride + 4 + channel]);
+                let sum: u16 = offsets.iter().map(|&at| u16::from(src[at + channel])).sum();
                 let averaged = ((sum + 2) / 4) as u8;
                 if channel == 3 && averaged != 255 {
                     may_have_transparency = true;
@@ -207,6 +210,22 @@ mod tests {
         let reduced_alpha = half(&translucent).expect("valid 2x2");
         assert!(reduced_alpha.may_have_transparency());
         assert_eq!(reduced_alpha.data_as_u8_slice(), &[16, 0, 0, 16]);
+    }
+
+
+    #[test]
+    fn odd_size_edges_follow_pad_semantics_without_losing_rows() {
+        let src: Vec<u8> = [0u8, 40, 80, 120, 160, 200, 240, 220, 180]
+            .into_iter()
+            .flat_map(|v| [v, v, v, 255])
+            .collect();
+        let input = Pixmap::from_parts(src, 3, 3,
+            PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, false));
+        let image = half(&input).expect("odd dimensions must be supported");
+        assert_eq!((image.width(), image.height()), (2, 2));
+        let red: Vec<_> = image.data().iter().map(|pixel| pixel.r).collect();
+        assert_eq!(red, [80, 140, 230, 180]);
+        assert!(!image.may_have_transparency());
     }
 
 }
