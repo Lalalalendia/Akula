@@ -13,6 +13,8 @@ impl Host {
             report(&err);
             return;
         }
+        #[cfg(feature = "memory-probe")]
+        crate::memory_probe::reset_frame();
         let (layers, access_update) = {
             let _zone = aq_trace::zone("сцена");
             root.run_rewrite_passes();
@@ -53,6 +55,8 @@ impl Host {
         };
         let raster = raster_start.elapsed();
         let present_start = Instant::now();
+        #[cfg(feature = "memory-probe")]
+        let presented = !drawn.is_empty();
         if !drawn.is_empty() {
             output.present(&drawn);
         }
@@ -60,6 +64,17 @@ impl Host {
         self.schedule_live();
         self.reveal();
         let present = present_start.elapsed();
+        #[cfg(feature = "memory-probe")]
+        if presented && crate::memory_probe::take_text_painted()
+            && let Some(sample) = self.reader_frame.take()
+        {
+            let ms = |time: Duration| time.as_secs_f64() * 1000.0;
+            let line = sample.finish(ms(scene), ms(raster), ms(present));
+            eprintln!("{line}");
+            if let Some(probe) = &self.probe {
+                probe.append_frame(&line);
+            }
+        }
         #[cfg(not(feature = "installed"))]
         if let Some(replay) = &mut self.replay {
             replay.frame(Instant::now(), t0.elapsed());

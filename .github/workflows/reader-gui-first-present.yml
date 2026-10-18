@@ -1,0 +1,149 @@
+name: Reader real GUI first-text-present and RSS
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/memory_probe/**"
+      - "aquilum-app/native/src/host/frame.rs"
+      - "aquilum-app/native/src/host/mod.rs"
+      - "aquilum-app/native/src/host/launch.rs"
+      - "aquilum-app/native/src/host/replay.rs"
+      - "aquilum-app/native/src/app/probe.rs"
+      - "aquilum-app/native/src/ui/reader/paint.rs"
+      - "scripts/benchmarks/reader_gui_probe.py"
+      - ".github/workflows/reader-gui-first-present.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-gui-first-frame-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  first-content-frame:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+
+      - name: Install Linux GUI and font dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            xvfb openbox imagemagick
+
+      - name: Build the actual window executable with instrumentation
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p aquilum-native --features memory-probe
+          test -x ../.artifacts/cargo-native/release/aquilum-native
+
+      - name: Generate copyright-free EPUB and record runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reader-gui-results
+          python3 scripts/benchmarks/reader_epub_shape.py --out "$RUNNER_TEMP/reader-gui-fixtures" | tee reader-gui-results/fixtures.log
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            lscpu | grep -E 'Model name:|CPU\(s\):'
+            rustc --version
+            cargo --version
+            ldd .artifacts/cargo-native/release/aquilum-native
+          } | tee reader-gui-results/environment.log
+
+      - name: First visible glyph frame in Xvfb (real Winit/Masonry/softbuffer)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export READER_GUI_BINARY="$PWD/.artifacts/cargo-native/release/aquilum-native"
+          export READER_GUI_OUT="$PWD/reader-gui-results"
+          xvfb-run -a -s "-screen 0 1366x768x24" bash -c '
+            set -euo pipefail
+            openbox >/dev/null 2>&1 &
+            sleep 1
+            python3 scripts/benchmarks/reader_gui_probe.py \
+              --binary "$READER_GUI_BINARY" \
+              --book "$RUNNER_TEMP/reader-gui-fixtures/single-br.epub" \
+              --out "$READER_GUI_OUT/single-br" --screenshot
+            python3 scripts/benchmarks/reader_gui_probe.py \
+              --binary "$READER_GUI_BINARY" \
+              --book "$RUNNER_TEMP/reader-gui-fixtures/split-br.epub" \
+              --out "$READER_GUI_OUT/split-br" --screenshot
+            python3 scripts/benchmarks/reader_gui_probe.py \
+              --binary "$READER_GUI_BINARY" \
+              --book "$RUNNER_TEMP/reader-gui-fixtures/single-p.epub" \
+              --out "$READER_GUI_OUT/single-p" --screenshot
+          '
+
+      - name: Summarize actual GUI (not a GPU/photons metric)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          base = Path("reader-gui-results")
+          rows = [
+              "## Real Akula window, first text-containing submitted frame",
+              "",
+              "Linux Xvfb 1366×768, native Winit/Masonry/softbuffer release binary",
+              "with opt-in memory-probe feature. Three synthetic copyright-free EPUBs.",
+              "",
+              "| Shape | First text frame ms | Sync open ms | Rust heap peak MiB | RSS at frame KiB | Process high-water KiB |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          for mode in ("single-br", "split-br", "single-p"):
+              path = base / mode
+              data = json.loads((path / "result.json").read_text())
+              assert (path / "reader.png").is_file()
+              rows.append(
+                  f'| {mode} | {data["first_text_present_ms"]:.2f} | '
+                  f'{data["sync_open_ms"]:.2f} | {data["heap_peak_mib"]:.2f} | '
+                  f'{data["rss_at_present_kib"]:.0f} | {data["process_hwm_kib"]:.0f} |'
+              )
+          rows += [
+              "",
+              "The first frame is counted only after ReaderView paints visible text",
+              "with intro opacity >= 0.25, and the renderer submits nonempty damage.",
+              "This is NOT monitor scanout, human-perceived first paint or GPU timing.",
+              "Linux VmHWM is a process-lifetime peak (not reset at book opening).",
+              "Rust heap peak is reset at reader-open; neither measures video memory.",
+              "The actual user-provided EPUB was never uploaded to GitHub.",
+          ]
+          summary = "\n".join(rows) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary)
+          PY
+
+      - name: Upload screenshots, samples, and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-gui-evidence-${{ github.sha }}
+          path: reader-gui-results/
+          retention-days: 21
+
+      - name: Upload instrumented Linux binary for local-only real-book testing
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reader-gui-binary-${{ github.sha }}
+          path: .artifacts/cargo-native/release/aquilum-native
+          retention-days: 7
