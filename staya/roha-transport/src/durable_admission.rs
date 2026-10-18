@@ -479,7 +479,11 @@ mod tests {
     }
 
     fn temp_root() -> tempfile::TempDir {
-        tempfile::tempdir().unwrap()
+        let root = tempfile::tempdir().unwrap();
+        // Never assume a particular tempfile version or runner umask gives
+        // private permissions. The production gate REQUIRES mode 0700.
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        root
     }
 
     #[test]
