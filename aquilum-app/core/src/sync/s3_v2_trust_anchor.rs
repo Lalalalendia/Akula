@@ -91,11 +91,13 @@ fn receipt_digest(
     let mut hasher = blake3::Hasher::new();
     hasher.update(RECORD_LABEL);
     let previous_flag = if previous_bytes.is_some() { b"1" } else { b"0" };
+    let vault = scope.keyspace().vault_id().to_string();
+    let head_key = scope.keyspace().current_head_key();
     for part in [
         scope.profile_id().as_bytes(),
-        scope.keyspace().vault_id().to_string().as_bytes(),
+        vault.as_bytes(),
         scope.binding_fingerprint().as_bytes(),
-        scope.keyspace().current_head_key().as_bytes(),
+        head_key.as_bytes(),
         root_bytes,
         etag.as_bytes(),
         previous_flag,
@@ -187,8 +189,8 @@ impl S3V2TrustedAnchorJournal {
                 .map_err(|_| S3V2TrustAnchorError::CorruptedAnchor)
         }).transpose()?;
         if root.encode(ns).ok().as_deref() != Some(root_json.as_slice())
-            || previous.as_ref().map(|head| head.encode(ns).ok())
-                != previous_json.as_ref().map(|data| Some(data.clone()))
+            || previous.as_ref().and_then(|head| head.encode(ns).ok())
+                .as_deref() != previous_json.as_deref()
             || (root.generation() == 1 && previous.is_some())
             || (root.generation() > 1
                 && !previous.as_ref().is_some_and(|old|
