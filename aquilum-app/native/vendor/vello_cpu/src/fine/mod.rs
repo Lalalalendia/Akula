@@ -58,6 +58,24 @@ pub use lowp::U8Kernel;
 /// Offset to shift from pixel corner to pixel center for sampling.
 const PIXEL_CENTER_OFFSET: f64 = 0.5;
 
+// Trace-only mapping between Akula's full framebuffer and the cropped
+// RenderContext coordinates. Atomic because Vello fine rasterization may run
+// on worker threads. Render calls are sequential in the guard96 harness.
+// No caller uses this setting in ordinary product rendering.
+#[cfg(feature = "std")]
+static TRACE_SCREEN_ORIGIN: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+#[cfg(feature = "std")]
+#[doc(hidden)]
+pub fn set_diagnostic_screen_origin(x: u16, y: u16) {
+    TRACE_SCREEN_ORIGIN.store(
+        u32::from(x) | (u32::from(y) << 16),
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
+
 /// Number of color components per pixel (RGBA).
 pub(crate) const COLOR_COMPONENTS: usize = 4;
 
@@ -1116,18 +1134,26 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                         Some((x.parse().ok()?, y.parse().ok()?))
                     });
                     if let Some((target_x, target_y)) = *target {
+                        let packed = TRACE_SCREEN_ORIGIN.load(
+                            std::sync::atomic::Ordering::SeqCst,
+                        );
+                        let screen_origin = (packed & 0xffff, packed >> 16);
+                        let screen_local = target_x
+                            .checked_sub(screen_origin.0)
+                            .zip(target_y.checked_sub(screen_origin.1));
+                        if let Some((local_x, local_y)) = screen_local {
                         if tint.is_some_and(|t| {
                             matches!(t.mode, vello_common::paint::TintMode::AlphaMask)
-                        }) && target_x >= u32::from(sample_x)
-                            && target_x < u32::from(sample_x) + width as u32
-                            && target_y >= u32::from(sample_y)
-                            && target_y < u32::from(sample_y) + Tile::HEIGHT as u32
+                        }) && local_x >= u32::from(sample_x)
+                            && local_x < u32::from(sample_x) + width as u32
+                            && local_y >= u32::from(sample_y)
+                            && local_y < u32::from(sample_y) + Tile::HEIGHT as u32
                             && pixmap.width() > 0
                             && pixmap.height() > 0
                         {
                             let world_pixel = vello_common::kurbo::Point::new(
-                                target_x as f64 + PIXEL_CENTER_OFFSET,
-                                target_y as f64 + PIXEL_CENTER_OFFSET,
+                                local_x as f64 + PIXEL_CENTER_OFFSET,
+                                local_y as f64 + PIXEL_CENTER_OFFSET,
                             );
                             let atlas_pixel = image.transform * world_pixel;
                             if atlas_pixel.x.is_finite() && atlas_pixel.y.is_finite() {
@@ -1155,7 +1181,8 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                                 };
                                 std::eprintln!(
                                     "VELLO_ATLAS_TEXEL target=({target_x},{target_y}) \
-                                     chunk=({sample_x},{sample_y}) origin={:?} \
+                                     local=({local_x},{local_y}) screen_origin={screen_origin:?} \
+                                     chunk=({sample_x},{sample_y}) fine_origin={:?} \
                                      page={}x{} image_id={} quality={:?} \
                                      uv=({:.9},{:.9}) texel=({texel_x},{texel_y}) \
                                      rgba9={neighborhood:08x?} tint={:?} \
@@ -1166,6 +1193,7 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                                     tint.map(|t| t.color), image.transform,
                                 );
                             }
+                        }
                         }
                     }
                 }
