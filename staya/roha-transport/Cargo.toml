@@ -11,7 +11,7 @@ resolver = "2"
 
 [dependencies]
 iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49", default-features = false, features = ["tls-ring"] }
-tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 blake3 = "1.8.5"
 
 [dev-dependencies]
