@@ -18,7 +18,7 @@ use crate::sync::{
     walk_s3_delta_from_saved_anchor, OperationId, RevisionDag, RevisionId,
     RevisionRecord, S3DeltaEnvelopeV2, S3HeadPointerV1,
     S3ManifestDeltaBase, S3ManifestDeltaLimits, S3ManifestDeltaOutcome,
-    S3ManifestShardRefV1, S3ManifestShardV1, S3ManifestV1,
+    S3ManifestShardV1, S3ManifestV1,
     S3RemoteAnchorJournal, S3RemoteAnchorScope, S3RevisionRefV1,
     S3Keyspace, MAX_DELTA_ENVELOPE_BYTES, MAX_SHARD_BYTES, MAX_REVISIONS,
 };
@@ -364,5 +364,37 @@ mod tests {
         };
         assert!(old_verified_shards(&ns, &manifest, &[wrong]).is_err());
         assert!(old_verified_shards(&ns, &manifest, &[]).is_ok());
+    }
+
+    #[test]
+    fn unchanged_shard_reuses_only_exact_canonical_cached_reference_bytes() {
+        let ns = S3Keyspace::new(
+            "akula/coord-02e-strict-shard", crate::sync::VaultId::new(),
+        ).unwrap();
+        let original = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            document_id: crate::sync::DocumentId::new(),
+            revision_blake3: blake3::hash(b"revision").to_hex().to_string(),
+            blob_bytes: Some(8),
+        };
+        let shard = S3ManifestShardV1::new(
+            &ns, OperationId::new(), vec![original.clone()],
+        ).unwrap();
+        let manifest = S3ManifestV1::new(
+            &ns, OperationId::new(), 1, None,
+            vec![shard.reference(&ns).unwrap()],
+        ).unwrap();
+        let accepted = old_verified_shards(
+            &ns, &manifest, &[original.clone()],
+        ).unwrap();
+        assert_eq!(accepted.len(), 1);
+        let mut edited = original.clone();
+        edited.revision_blake3 = blake3::hash(b"rewritten").to_hex().to_string();
+        assert!(old_verified_shards(&ns, &manifest, &[edited]).is_err());
+        let foreign = S3RevisionRefV1 {
+            revision_id: RevisionId::new(),
+            ..original
+        };
+        assert!(old_verified_shards(&ns, &manifest, &[foreign]).is_err());
     }
 }
