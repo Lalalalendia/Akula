@@ -960,7 +960,7 @@ mod tests {
     }
 
 
-    // Additional real cold-start/foreign-ledger falsifiers share this module\x27s fixture.
+    // Additional real cold-start/foreign-ledger falsifiers share the registry fixture.
     include!("host_cold_identity_tests.rs");
 
 }
