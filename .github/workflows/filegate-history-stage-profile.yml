@@ -49,11 +49,23 @@ jobs:
             cargo --version
             grep -m 1 'model name' /proc/cpuinfo || true
           } | tee environment.txt
-      - name: Build release probe (ordinary File Gate, NOT a second writer)
+      - name: Build release probe and prove no dependency version drift
         run: |
           set -euo pipefail
-          cargo build --release --locked \
+          cargo build --release \
             --manifest-path .github/bench/rope-gate-history-e2e/Cargo.toml
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          original = tomllib.loads(Path("aquilum-app/Cargo.lock").read_text())
+          diagnostic = tomllib.loads(Path(".github/bench/rope-gate-history-e2e/Cargo.lock").read_text())
+          source = {(p["name"], p["version"], p.get("source")) for p in original["package"]}
+          new = {(p["name"], p["version"], p.get("source")) for p in diagnostic["package"]}
+          extra = new - source
+          assert extra == {("akula-rope-gate-history-e2e", "0.0.1", None)}, extra
+          print(f"LOCK_PARITY diagnostic_packages={len(new)} extra_probe_only=1")
+          PY
+          sha256sum .github/bench/rope-gate-history-e2e/Cargo.lock >> environment.txt
       - name: Six fresh Core processes per note size
         shell: bash
         run: |
