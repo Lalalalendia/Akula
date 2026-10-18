@@ -15,6 +15,9 @@ mod manifest;
 // Strict pack framing is experimental and available to tests only.
 #[cfg(test)]
 mod pack_probe;
+// SYNC-COORD-01 stays test-only: no production S3 format or file writes.
+#[cfg(test)]
+mod coord_probe;
 // Heavy full-DAG benchmark is ignored unless explicitly run with MinIO.
 #[cfg(test)]
 mod scale_probe;
