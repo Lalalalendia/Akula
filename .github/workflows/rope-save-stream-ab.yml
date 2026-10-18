@@ -1,0 +1,125 @@
+name: Upstream Rope streamed save diagnostic
+
+on:
+  pull_request:
+    paths:
+      - ".github/bench/rope-save-stream.rs"
+      - ".github/workflows/rope-save-stream-ab.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rope-stream-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  abba:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build isolated benchmark (not product code)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rope-save-probe/src"
+          cp .github/bench/rope-save-stream.rs "$RUNNER_TEMP/rope-save-probe/src/main.rs"
+          cat > "$RUNNER_TEMP/rope-save-probe/Cargo.toml" <<'TOML'
+          [package]
+          name = "akula-rope-save-probe"
+          version = "0.0.1"
+          edition = "2024"
+
+          [dependencies]
+          crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
+          blake3 = "1.8.5"
+          TOML
+          {
+            echo "CHECKOUT=$(git rev-parse HEAD)"
+            echo "CPU=$(grep -m 1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+            cargo --version
+          } | tee environment.txt
+          cargo build --release --manifest-path "$RUNNER_TEMP/rope-save-probe/Cargo.toml"
+          cp "$RUNNER_TEMP/rope-save-probe/Cargo.lock" probe-Cargo.lock
+      - name: Same-runner isolated processes in ABBA order
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/rope-save-probe/target/release/akula-rope-save-probe"
+          : > measurements.txt
+          for size in 4 64; do
+            for round in 1 2 3; do
+              echo "round=$round size=$size MiB" | tee -a measurements.txt
+              for variant in flat stream batch batch stream flat; do
+                "$bin" "$variant" "$size" | tee -a measurements.txt
+              done
+            done
+          done
+      - name: Summarize timing, memory and exact-byte parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import collections
+          import os
+          import pathlib
+          import re
+          import statistics
+          pattern = re.compile(
+              r"^BENCH-ROPE-SAVE mode=(flat|stream|batch) mib=(4|64) bytes=(\d+) "
+              r"elapsed_ms=([\d.]+) rss_before_kib=(\d+) "
+              r"rss_after_kib=(\d+) peak_kib=(\d+) peak_extra_kib=(\d+)$"
+          )
+          rows = collections.defaultdict(list)
+          for line in pathlib.Path("measurements.txt").read_text().splitlines():
+              match = pattern.fullmatch(line)
+              if not match:
+                  continue
+              mode, size, bytes_, elapsed, before, after, peak, extra = match.groups()
+              assert int(bytes_) == int(size) * 1024 * 1024
+              rows[(int(size), mode)].append(
+                  (float(elapsed), int(before), int(after), int(peak), int(extra))
+              )
+          out = [
+              "## Isolated Akula Rope save boundary: flat vs streaming",
+              "",
+              "| MiB | Flat ms | Stream ms | Batch ms | Stream vs flat | Batch vs flat | Flat extra peak KiB | Stream extra peak KiB | Batch extra peak KiB |",
+              "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for size in (4, 64):
+              modes = {mode: rows[(size, mode)] for mode in ("flat", "stream", "batch")}
+              assert all(len(samples) == 6 for samples in modes.values()), (size, modes)
+              ms = {mode: statistics.median(x[0] for x in samples) for mode, samples in modes.items()}
+              peak = {mode: statistics.median(x[4] for x in samples) for mode, samples in modes.items()}
+              stream_change = (ms["stream"] / ms["flat"] - 1) * 100
+              batch_change = (ms["batch"] / ms["flat"] - 1) * 100
+              out.append(
+                  f'| {size} | {ms["flat"]:.3f} | {ms["stream"]:.3f} | {ms["batch"]:.3f} | '
+                  f'{stream_change:+.1f}% | {batch_change:+.1f}% | '
+                  f'{peak["flat"]:.0f} | {peak["stream"]:.0f} | {peak["batch"]:.0f} |'
+              )
+          out += [
+              "",
+              "6 samples per variant and size, separate processes, ABCCBA within the same runner.",
+              "Both implementations verified exact BLAKE3 digest and persisted UTF-8 bytes on every run.",
+              "Diagnostic only: excludes File Gate, history, concurrent writers, fsync and crash-recovery.",
+              "Peak-extra is Linux process VmHWM delta after the incrementally built Rope fixture; allocator effects remain.",
+              "No production optimization is authorized solely by this microbenchmark.",
+          ]
+          summary = "\n".join(out) + "\n"
+          print(summary)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out_file:
+              out_file.write(summary)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rope-save-upstream-ab-${{ github.sha }}
+          path: |
+            environment.txt
+            measurements.txt
+            probe-Cargo.lock
+          retention-days: 30
