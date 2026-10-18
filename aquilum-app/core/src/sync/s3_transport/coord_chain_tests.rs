@@ -8,6 +8,7 @@ use std::time::Instant;
 use super::super::{
     coord_locator::S3CoordLetterLocatorV2,
     pack_probe::PackBuilder, S3ConnectionProfile, S3PutCondition,
+    S3TransportError,
 };
 use crate::sync::{
     DocumentId, OperationId, RevisionOperation, S3DeltaPackRefV2,
@@ -228,13 +229,70 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
         &ns, 3, gen3.manifest_id, &gen3.digest(&ns).unwrap(),
         Some(gen2.manifest_id),
     ).unwrap();
+    // 03c: the real S3 writer must make all immutable V1 objects
+    // available BEFORE staging V2 packs, letter and deterministic locator.
+    // No mutable S3 root is written by the new production-compiled helper.
+    let verified_gen2 = writer.read_verified_head().await.unwrap().unwrap();
+    let pinned_gen2 = writer.pin_revision_snapshot().await.unwrap().unwrap();
+    let prepared = super::super::coord_pack_encode::prepare_delta_packs_v2(
+        &ns, &[tombstone.clone()],
+    ).unwrap();
+    let proposed_letter = S3DeltaEnvelopeV2::new(
+        &ns, &head2, &head3,
+        prepared.references.clone(),
+        prepared.packs.iter().map(|pack| pack.index.clone()).collect(),
+    ).unwrap();
+
+    // A modified pack cannot cause even one S3 PUT; no locator exists.
+    let mut forged_pack = super::super::coord_pack_encode::prepare_delta_packs_v2(
+        &ns, &[tombstone.clone()],
+    ).unwrap();
+    *forged_pack.packs[0].payload.last_mut().unwrap() ^= 1;
+    assert!(writer.prepublish_coord_v2_immutables(
+        &scope, &verified_gen2, &pinned_gen2,
+        &head3, &gen3, &proposed_letter, &forged_pack,
+    ).await.is_err());
+    assert!(matches!(
+        writer.head(&ns.immutable_coord_letter_locator_key(gen3.manifest_id)).await,
+        Err(S3TransportError::NotFound)
+    ));
+
+    let staged = writer.prepublish_coord_v2_immutables(
+        &scope, &verified_gen2, &pinned_gen2,
+        &head3, &gen3, &proposed_letter, &prepared,
+    ).await.unwrap();
+    assert_eq!(staged.pack_count, 1);
+    assert_eq!(staged.generation, 3);
+    assert!(staged.checked_pack_bytes > 0);
+    assert_eq!(staged.letter_blake3, proposed_letter.digest(&ns).unwrap());
+    // Independent retry reads exact immutable content after If-None-Match
+    // rejection. No overwrite and no mutable CAS is attempted.
+    let repeated = writer.prepublish_coord_v2_immutables(
+        &scope, &verified_gen2, &pinned_gen2,
+        &head3, &gen3, &proposed_letter, &prepared,
+    ).await.unwrap();
+    assert_eq!(staged, repeated);
+    assert_eq!(
+        writer.read_verified_head().await.unwrap().unwrap().pointer,
+        head2,
+        "immutable prepublication must not advance the S3 root",
+    );
+    // Reader still sees only gen2, even though gen3's immutable sidecar
+    // is ready. No phantom revision or future-gen root adoption.
+    let before_cas = reader.inspect_v2_offline_selective_packs_discovered(
+        &scope, &journal, &pinned, &cache,
+    ).await.unwrap();
+    assert_eq!(before_cas.to_generation, 2);
+    assert_eq!(before_cas.new_revision_ids.len(), 1);
+
+    // Root change is performed ONLY through a separate server-side CAS.
+    // In production the existing SQLite S3HeadJournal must be used; this
+    // test's isolated writer uses direct guarded CAS as in 02c.
     let third_put = writer.put_conditionally(
         &ns.current_head_key(), &head3.encode(&ns).unwrap(),
         S3PutCondition::IfMatch(second_put.etag),
     ).await.unwrap();
-    let letter3 = publish_letter(
-        &writer, &ns, &head2, &head3, &[tombstone.clone()],
-    ).await;
+    let letter3 = staged.letter_blake3;
 
     let letters = vec![letter2.clone(), letter3.clone()];
     // First measure the conservative reference: every missed V1 generation
