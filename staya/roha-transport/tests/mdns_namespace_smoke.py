@@ -131,7 +131,7 @@ def start_mdns_captures(folder):
         with path.open("w", encoding="utf-8") as output:
             proc = subprocess.Popen(
                 ["sudo", "-n", "ip", "netns", "exec", ns,
-                 "tcpdump", "-n", "-l", "-q", "-i", link, "udp", "port", "5353"],
+                 "tcpdump", "-n", "-l", "-v", "-i", link, "udp", "port", "5353"],
                 stdout=output, stderr=subprocess.PIPE, text=True)
         result.append((label, path, proc))
     time.sleep(0.7)
@@ -153,11 +153,28 @@ def report_mdns_captures(captures):
             proc.kill()
             proc.communicate(timeout=5)
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        packets = [line for line in lines if " IP " in line and "> " in line]
-        from_a = sum(1 for line in packets if "IP " + IP_A + "." in line)
-        from_b = sum(1 for line in packets if "IP " + IP_B + "." in line)
+        # With -v tcpdump includes IP TTL and DNS record types. Parse locally
+        # but publish *only aggregate counts* to avoid exposing endpoint IDs.
+        blocks = []
+        current = []
+        for line in lines:
+            if re.match(r"^\d\d:\d\d:\d\d\.\d+ IP(?:\s|\()", line):
+                if current:
+                    blocks.append(" ".join(current))
+                current = [line]
+            elif current:
+                current.append(line)
+        if current:
+            blocks.append(" ".join(current))
+        from_a = sum(IP_A + ".5353 >" in block for block in blocks)
+        from_b = sum(IP_B + ".5353 >" in block for block in blocks)
+        ttl255 = sum("ttl 255" in block for block in blocks)
+        service = sum("_akula-staya._udp.local." in block for block in blocks)
+        ptr_question = sum("PTR?" in block for block in blocks)
+        dns_response = sum("PTR " in block or "TXT " in block or "SRV " in block for block in blocks)
         print(
-            f"STAYA_MDNS_WIRE ns={label} packets={len(packets)} from_a={from_a} from_b={from_b}",
+            f"STAYA_MDNS_WIRE ns={label} packets={len(blocks)} from_a={from_a} from_b={from_b} "
+            f"ttl255={ttl255} service_mentions={service} ptr_question={ptr_question} dns_response={dns_response}",
             flush=True)
 
 
