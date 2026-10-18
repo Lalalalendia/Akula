@@ -45,10 +45,14 @@ above 1/255. This does not by itself prove the adaptive policy is faster.
 
 1. All platform CI, normal scroll frame parity and existing full/crop
    outline-glyph tests stay green (strict 1/255 channel tolerance).
-   In addition, three independent real `guard96` processes on each of
-   Linux/Windows/macOS must compare every frame of the *production adaptive*
-   2/4-worker route against fixed serial, with a witness that the adaptive
-   context was actually selected (not merely constructed).
+   On each of Linux/Windows/macOS, three independent real `guard96`
+   cover-scene processes compare all 32 frames of default-configured 2/4-worker
+   renderers against fixed serial and an independent full-frame reference.
+   Guard96 injects two edge bands on scroll moves: that fragmented damage is
+   deliberately NOT eligible for single-rectangle routing. Separately, three
+   natural-scroll text-scene processes on each OS compare every frame to the
+   same references and must witness the actual production serial route being
+   selected with both 2 and 4 configured workers.
 2. Test-only fixed-worker controls remain true *fixed-worker* renderers:
    `Renderer::new_fixed_for_test` bypasses the default route, so A/B cannot
    accidentally compare two adaptive contexts.

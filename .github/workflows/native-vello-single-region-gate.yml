@@ -69,22 +69,29 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native hinted_fractional_scroll_remains_pixel_stable -- --nocapture --test-threads=1
-      - name: Three real guard96 all-frame runs with actual adaptive 2/4-worker defaults
+      - name: Three real guard96 and natural-scroll adaptive pixel proofs
         working-directory: aquilum-app
         shell: bash
         env:
           AKULA_VELLO_SINGLE_RECT: '1'
           AQ_CROSSOVER_ADAPTIVE: '1'
-          AQ_CROSSOVER_ONLY_CASE: cover_1x
-          AQ_CROSSOVER_WORKLOAD: guard96
           AQ_CROSSOVER_EVERY_FRAME: '1'
-          AQ_TEST_SCROLL_EDGE_GUARD: '96'
         run: |
           set -euo pipefail
           for trial in 1 2 3; do
             echo "VELLO_ADAPTIVE_GUARD96_BEGIN trial=$trial"
-            cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1
+            # Two guard bands per row move: pixel parity must hold, but these
+            # fragmented frames must NOT be forced down the single-rect route.
+            AQ_CROSSOVER_ONLY_CASE=cover_1x AQ_CROSSOVER_WORKLOAD=guard96 \
+              AQ_TEST_SCROLL_EDGE_GUARD=96 \
+              cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1
             echo "VELLO_ADAPTIVE_GUARD96_PASS trial=$trial"
+            echo "VELLO_ADAPTIVE_NATURAL_BEGIN trial=$trial"
+            # Natural scrolling has actual single-small-rectangle damage.
+            # Both 2- and 4-worker production renderers must really switch.
+            AQ_CROSSOVER_ONLY_CASE=text_1x AQ_CROSSOVER_WORKLOAD=normal \
+              AQ_CROSSOVER_REQUIRE_SWITCH=1 \
+              cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1
+            echo "VELLO_ADAPTIVE_NATURAL_PASS trial=$trial"
           done
-          echo "Adaptive default against fixed serial: 3/3 all-frame strict guard96 runs" >> "$GITHUB_STEP_SUMMARY"
-
+          echo "Three strict all-frame guard96 proofs plus three actual-route natural-scroll proofs" >> "$GITHUB_STEP_SUMMARY"

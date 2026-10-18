@@ -178,11 +178,25 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
     }
 
     if route_trial {
-        for renderer in &renderers[1..] {
-            assert!(
-                renderer.dual_dispatch_switches_for_test() > 0,
-                "{case}: adaptive worker context was never selected"
-            );
+        let switches: Vec<usize> = renderers[1..]
+            .iter()
+            .map(Renderer::dual_dispatch_switches_for_test)
+            .collect();
+        eprintln!(
+            "VELLO_CROSSOVER_ADAPTIVE case={case} workload={workload} switches_2={} switches_4={}",
+            switches[0], switches[1]
+        );
+        // guard96 deliberately inserts TWO edge rectangles for every scroll
+        // move; routing them serial would break the one-rectangle policy.
+        // Exercise the actual serial companion separately with natural damage.
+        if std::env::var_os("AQ_CROSSOVER_REQUIRE_SWITCH").is_some() {
+            for (index, count) in switches.into_iter().enumerate() {
+                assert!(
+                    count > 0,
+                    "{case}/{workload}/workers={}: adaptive context never selected",
+                    WORKERS[index + 1]
+                );
+            }
         }
     }
     for (index, thread_count) in WORKERS.into_iter().enumerate() {
