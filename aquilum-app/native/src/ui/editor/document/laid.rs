@@ -21,6 +21,17 @@ impl Laid {
 }
 
 impl Document {
+    /// Fences and their body are unwrapped, but indented code and math retain
+    /// the historical layout. Avoid backwards scans on every paragraph paint.
+    pub(in crate::ui::editor) fn fenced_code(&self, line: usize) -> bool {
+        match self.blocks.get(line) {
+            Block::Code { lang: Some(Lang::Math), .. } => false,
+            Block::Code { fence: true, .. } => true,
+            Block::Code { fence: false, .. } => self.blocks.state(line).is_some_and(|state| state.has_open_fence()),
+            _ => false,
+        }
+    }
+
     pub(super) fn context<'a>(&'a self, fonts: &'a Fonts) -> markdown::Context<'a> {
         markdown::Context { fonts, unresolved: &self.unresolved.0, resolver: self.resolver.as_deref() }
     }
