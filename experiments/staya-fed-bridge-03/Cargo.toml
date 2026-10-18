@@ -1,0 +1,20 @@
+[package]
+name = "staya-fed-bridge-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Three-layer experiment only. No Akula sync or File Gate writes.
+[workspace]
+resolver = "2"
+
+[dependencies]
+staya-fed-gossip-lab = { path = "../staya-fed-gossip-02" }
+staya-fed-inventory-lab = { path = "../../deps/experiments/staya-fed-inventory-01" }
+iroh-gossip = { version = "=0.101.0", default-features = false, features = ["test-utils"] }
+rand = { version = "0.10", features = ["chacha"] }
+bytes = "1.7"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+
+[patch.crates-io]
+iroh-base = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49" }
