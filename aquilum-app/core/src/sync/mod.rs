@@ -13,6 +13,8 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
+/// Narrow internal custody type for File Gate's opt-in guarded writer.
+pub(crate) use filegate_custody_identity::SqliteCustodyIdentityStore;
 #[cfg(test)]
 mod cooperative_gate_tests;
 pub(crate) mod filegate_lock_probe;
