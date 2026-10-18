@@ -113,6 +113,12 @@ impl TextEditor {
     }
 
     #[cfg(test)]
+    pub(in crate::ui::editor) fn with_code_feedback_for_test(mut self, opener: usize) -> Self {
+        self.copied_code = Some((opener, std::time::Instant::now()));
+        self
+    }
+
+    #[cfg(test)]
     pub(in crate::ui::editor) fn code_header_button_for_test(&self, opener: usize) -> Option<Rect> {
         let index = self.doc.at_offset(opener);
         (self.doc.paragraph(index).start == opener).then(|| self.code_header_button(index)).flatten()
