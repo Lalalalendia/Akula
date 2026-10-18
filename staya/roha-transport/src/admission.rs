@@ -101,7 +101,10 @@ mod tests {
         for _ in 0..8 {
             held.push(gate.reserve_lan().expect("within LAN capacity"));
         }
-        assert!(matches!(gate.reserve_lan(), Err(AdmissionError::AtCapacity)));
+        assert!(matches!(
+            gate.reserve_lan(),
+            Err(AdmissionError::AtCapacity)
+        ));
         assert_eq!(gate.stats().unwrap().active, 8);
         drop(held);
         assert_eq!(gate.stats().unwrap().active, 0);
@@ -110,7 +113,10 @@ mod tests {
         for _ in 0..3 {
             drop(gate.reserve_lan().unwrap());
         }
-        assert!(matches!(gate.reserve_lan(), Err(AdmissionError::RateLimited)));
+        assert!(matches!(
+            gate.reserve_lan(),
+            Err(AdmissionError::RateLimited)
+        ));
     }
 
     #[test]
@@ -120,7 +126,10 @@ mod tests {
         for _ in 0..12 {
             drop(other.reserve_lan().unwrap());
         }
-        assert!(matches!(gate.reserve_lan(), Err(AdmissionError::RateLimited)));
+        assert!(matches!(
+            gate.reserve_lan(),
+            Err(AdmissionError::RateLimited)
+        ));
         assert_eq!(gate.stats().unwrap().attempts_this_tick, 12);
     }
 }
