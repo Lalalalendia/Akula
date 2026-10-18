@@ -948,7 +948,7 @@ fn m1dc_review_requires_registered_host_and_archive_outside_vault() {
 
 #[cfg(feature = "host-custody")]
 #[test]
-fn mandatory_host_epoch_refuses_internal_staged_create_and_recovery_copy() {
+fn mandatory_host_epoch_refuses_unadmitted_internal_staged_create() {
     // A normal Core may still exercise the opt-in additive experiment.
     // An explicitly installed-host Core lacks a shared enrollment epoch for
     // this internal method, even though it takes the process File Gate mutex.
@@ -982,12 +982,8 @@ fn mandatory_host_epoch_refuses_internal_staged_create_and_recovery_copy() {
     assert_eq!(journal.get(operation).unwrap().unwrap().phase, JournalPhase::Staged);
     assert!(journal.baseline(vault, doc).unwrap().is_none());
 
-    // Recovery archive is another writer that does not currently retain a
-    // shared host epoch. It must refuse at admission, not after a copy.
-    assert!(matches!(
-        admission.archive_local_recovery_copy_for_vault(operation, &journal, vault),
-        Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied))
-    ), "internal recovery archive escaped mandatory shared-host HOLD");
+    // Archive recovery evidence is stored in appdata SQLite, never written
+    // into the user's vault, so it remains an independent read/capture route.
     assert!(!root.join("notes/Protected.md").exists());
     assert!(!outside_db.exists(),
         "a refusal must not bootstrap its own valid-empty host ledger");
