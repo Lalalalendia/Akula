@@ -159,9 +159,13 @@ fn write_file_atomic_buffered_impl(
     let mut buffer = vec![0u8; WRITE_BATCH];
     let mut hasher = blake3::Hasher::new();
     let mut written = 0usize;
+    let mut filled = 0usize;
 
     loop {
-        let count = match source.read(&mut buffer) {
+        // Read may legally return tiny pieces (including one Rope chunk).
+        // Coalesce them before hashing and writing: per-chunk BLAKE3 updates
+        // were significantly slower than bounded batches in Akula's A/B.
+        let count = match source.read(&mut buffer[filled..]) {
             Err(error) if error.kind() == ErrorKind::Interrupted => continue,
             other => other?,
         };
@@ -176,8 +180,16 @@ fn write_file_atomic_buffered_impl(
                 message: "bounded atomic write source exceeded its announced length".to_owned(),
             });
         }
-        hasher.update(&buffer[..count]);
-        file.write_all(&buffer[..count])?;
+        filled += count;
+        if filled == WRITE_BATCH {
+            hasher.update(&buffer);
+            file.write_all(&buffer)?;
+            filled = 0;
+        }
+    }
+    if filled > 0 {
+        hasher.update(&buffer[..filled]);
+        file.write_all(&buffer[..filled])?;
     }
 
     let hash = hasher.finalize().to_hex().to_string();
