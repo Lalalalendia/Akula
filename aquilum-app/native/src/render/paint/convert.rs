@@ -235,7 +235,7 @@ mod mipmap_integration_tests {
         let mut images = Images::default();
         let geometry = Affine::scale(1.0 / 8.0);
         let (baseline, untouched) = brush_to_paint_candidate(
-            BrushRef::Image(&brush), Composite::default(), &mut images,
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
             geometry, Affine::IDENTITY, false,
         );
         assert_eq!(untouched, Affine::IDENTITY);
@@ -245,7 +245,7 @@ mod mipmap_integration_tests {
         assert!(images.mips.is_empty());
 
         let (enabled, image_transform) = brush_to_paint_candidate(
-            BrushRef::Image(&brush), Composite::default(), &mut images,
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
             geometry, Affine::IDENTITY, true,
         );
         assert_eq!(image_transform, Affine::scale(4.0));
@@ -256,7 +256,7 @@ mod mipmap_integration_tests {
         assert_eq!(images.mips.len(), 2);
 
         let (again, _) = brush_to_paint_candidate(
-            BrushRef::Image(&brush), Composite::default(), &mut images,
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
             geometry, Affine::IDENTITY, true,
         );
         let Brush::Image(again) = again else { panic!("expected cached image") };
@@ -273,7 +273,7 @@ mod mipmap_integration_tests {
         let brush = test_brush(127, 128);
         let mut images = Images::default();
         let (paint, transform) = brush_to_paint_candidate(
-            BrushRef::Image(&brush), Composite::default(), &mut images,
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
             Affine::scale(1.0 / 8.0), Affine::IDENTITY, true,
         );
         assert_eq!(transform, Affine::IDENTITY);
