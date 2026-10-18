@@ -52,13 +52,28 @@ fn local_glyph(
     // rasterization to the finished mask, not before coverage integration.
     let stable = Affine::new([a, b, c, d, tx - ix, ty - iy]);
     let bbox = stable.transform_rect_bbox(path.bounding_box());
-    let left = (bbox.x0.floor() - f64::from(RASTER_PAD)).floor();
-    let top = (bbox.y0.floor() - f64::from(RASTER_PAD)).floor();
-    let right = (bbox.x1.ceil() + f64::from(RASTER_PAD)).ceil();
-    let bottom = (bbox.y1.ceil() + f64::from(RASTER_PAD)).ceil();
-    if ![left, top, right, bottom].into_iter().all(f64::is_finite) {
+    let wanted_left = bbox.x0.floor() - f64::from(RASTER_PAD);
+    let wanted_top = bbox.y0.floor() - f64::from(RASTER_PAD);
+    let wanted_right = bbox.x1.ceil() + f64::from(RASTER_PAD);
+    let wanted_bottom = bbox.y1.ceil() + f64::from(RASTER_PAD);
+    if ![wanted_left, wanted_top, wanted_right, wanted_bottom]
+        .into_iter()
+        .all(f64::is_finite)
+    {
         return None;
     }
+
+    // The legacy experiment rejected an entire atlas page replay whenever
+    // the *extra two-pixel padding* crossed the page edge, even if the glyph
+    // itself was valid inside the allocated slot. In the first ABBA, this was
+    // the only reason for all 457 fallbacks. Clip the local staging window
+    // to the destination atlas page rather than rejecting a whole batch.
+    // The transform is still derived from the integer-translation-free
+    // outline; no absolute page coordinate reaches the raster geometry.
+    let left = wanted_left.max(-ix);
+    let top = wanted_top.max(-iy);
+    let right = wanted_right.min(f64::from(page_width) - ix);
+    let bottom = wanted_bottom.min(f64::from(page_height) - iy);
     let (w, h) = (right - left, bottom - top);
     let (dst_x, dst_y) = (ix + left, iy + top);
     if !(1.0..=256.0).contains(&w)
