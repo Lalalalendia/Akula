@@ -248,7 +248,25 @@ impl Renderer {
 
 #[cfg(test)]
 mod small_rect_policy_tests {
-    use super::single_rect_route_enabled;
+    use super::{Renderer, single_rect_route_enabled};
+
+    #[test]
+    fn adaptive_constructor_switches_only_when_enabled() {
+        let small = [(0, 0, 100, 100)];
+        let mut adaptive = Renderer::new_with_serial_route(2, true);
+        adaptive.painter.route_for_damage(&small);
+        assert_eq!(adaptive.dual_dispatch_switches_for_test(), 1);
+        adaptive.painter.route_for_damage(&[(0, 0, 1000, 600)]);
+        assert_eq!(adaptive.dual_dispatch_switches_for_test(), 2);
+
+        let mut fixed = Renderer::new_with_serial_route(2, false);
+        fixed.painter.route_for_damage(&small);
+        assert_eq!(fixed.dual_dispatch_switches_for_test(), 0);
+
+        let mut zero_workers = Renderer::new_with_serial_route(0, true);
+        zero_workers.painter.route_for_damage(&small);
+        assert_eq!(zero_workers.dual_dispatch_switches_for_test(), 0);
+    }
 
     #[test]
     fn adaptive_small_rect_default_has_explicit_rollback() {
