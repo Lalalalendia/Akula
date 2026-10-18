@@ -482,7 +482,7 @@ impl HistoryService {
         }
     }
 
-    fn write_version(&self, dir: &Path, snapshot: &milestone::Snapshot) -> Result<PathBuf, FileCommandError> {
+    fn write_version(&self, dir: &Path, snapshot: &milestone::Snapshot<'_>) -> Result<PathBuf, FileCommandError> {
         #[cfg(test)]
         self.fail_if_requested(HistoryFault::CreateVersion)?;
         store::write_version(dir, &self.device, snapshot)
