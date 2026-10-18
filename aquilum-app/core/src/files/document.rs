@@ -237,8 +237,10 @@ mod buffered_write_tests {
         fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
             if self.first {
                 self.first = false;
-                buffer[..3].copy_from_slice(b"bad");
-                Ok(3)
+                // Complete one buffered batch so a real temporary file write
+                // happens before the next read fails.
+                buffer.fill(b'b');
+                Ok(buffer.len())
             } else {
                 Err(io::Error::new(io::ErrorKind::Other, "injected source read fault"))
             }
@@ -337,7 +339,8 @@ mod buffered_write_tests {
         let path = temp.path().join("keep.md");
         fs::write(&path, b"original").unwrap();
         let err = write_file_atomic_buffered_impl(
-            &path, BrokenReader { first: true }, 6, &hash_bytes(b"badbad"), None,
+            &path, BrokenReader { first: true },
+            2 * 256 * 1024, &hash_bytes(&vec![b'b'; 2 * 256 * 1024]), None,
         ).unwrap_err();
         assert!(matches!(err, FileCommandError::Io { .. }));
         assert_eq!(fs::read(&path).unwrap(), b"original");
