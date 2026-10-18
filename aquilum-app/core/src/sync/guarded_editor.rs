@@ -254,8 +254,13 @@ mod tests {
         ).unwrap();
 
         let store = Mutex::new(None);
+        // HubIo now requires a separate crash-durable prewrite root registry.
+        // Keep this opt-in guarded workspace explicitly armed in the test,
+        // rather than silently falling back to the unguarded editor path.
+        let guarded_write_roots = Mutex::new(vec![fs::canonicalize(&vault).unwrap()]);
         let editor = HubIo {
             core: &core, path: &note, key: "Shared.md", store: &store,
+            guarded_write_roots: &guarded_write_roots,
             offset_seconds: 0, source: Source::Me,
         };
         let first = "first guarded edit ".repeat(90);
