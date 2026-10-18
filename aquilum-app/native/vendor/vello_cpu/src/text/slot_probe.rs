@@ -10,18 +10,30 @@
 // when its atlas slot or surrounding draw order changes.
 
 use super::*;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kurbo::Shape as _;
 
 const PAGE_WIDTH: u16 = 160;
 const PAGE_HEIGHT: u16 = 120;
-const TARGET_SLOTS: [(i32, i32); 4] = [(16, 16), (32, 24), (45, 37), (63, 51)];
+// slot_3 proved one genuine 35-element outline is translation-sensitive.
+// slot_4/5 vary X/Y independently; slot_6/7 probe integer/tile boundaries.
+const TARGET_SLOTS: [(i32, i32); 8] = [
+    (16, 16),
+    (32, 24),
+    (45, 37),
+    (63, 51),
+    (63, 16),
+    (16, 51),
+    (64, 51),
+    (63, 52),
+];
 const NEIGHBOR_SLOT: (i32, i32) = (116, 78);
 const WINDOW_START: i32 = -2;
 const WINDOW_END: i32 = 30;
 const MAX_REAL_OUTLINES_PER_PROCESS: usize = 80;
 
 static PROBED: AtomicUsize = AtomicUsize::new(0);
+static FIRST_REAL_FAILURE_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 struct RealOutline<'a> {
@@ -155,6 +167,21 @@ pub(super) fn run(commands: &[AtlasCommand], level: Level, page_index: u32) {
                 &candidate,
                 slot,
             );
+            if changed > 0 && !FIRST_REAL_FAILURE_LOGGED.swap(true, Ordering::Relaxed) {
+                // The first true source-font outline that fails exact slot
+                // invariance. Emit its full path once for a reusable fixture.
+                // Do not log font names or user document content.
+                std::eprintln!(
+                    "VELLO_REAL_OUTLINE_FIXTURE sample={sample} variant=slot_{variant} \
+                     src_transform={:?} src_bounds=({:.12},{:.12}) \
+                     page={page_index} cmd={} path_elements={:?}",
+                    outline.transform.as_coeffs(),
+                    outline.bound_x,
+                    outline.bound_y,
+                    outline.command_index,
+                    outline.path.elements(),
+                );
+            }
             std::eprintln!(
                 "VELLO_REAL_OUTLINE sample={sample} page={page_index} cmd={} \
                  elements={} variant=slot_{variant} slot={slot:?} \
