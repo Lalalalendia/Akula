@@ -22,6 +22,10 @@ KINDS = (
     "slot_1",
     "slot_2",
     "slot_3",
+    "slot_4",
+    "slot_5",
+    "slot_6",
+    "slot_7",
     "batch_before",
     "batch_after",
 )
@@ -47,8 +51,8 @@ def summarize(folder: pathlib.Path) -> str:
             per_variant[variant].append((int(changed), int(peak), first, int(elements)))
             all_samples.add((log.name, sample))
         counts = collections.Counter(sample for sample, _, _, _, _, _, _, _ in rows)
-        if any(count != 5 for count in counts.values()):
-            raise RuntimeError(f"{log.name}: not every shape got 3 slot + 2 batch comparisons: {counts}")
+        if any(count != len(KINDS) for count in counts.values()):
+            raise RuntimeError(f"{log.name}: not every shape got 7 slot + 2 batch comparisons: {counts}")
 
     lines = [
         "# Real outline glyph atlas slot and batch-order diagnostic",
@@ -80,7 +84,7 @@ def summarize(folder: pathlib.Path) -> str:
         "## Interpretation",
         "",
         "Comparisons normalize the same *real* glyph path, scale and fractional",
-        "phase to integer atlas slots; the batch tests draw a second real",
+        "phase to seven integer atlas slots; the batch tests draw a second real",
         "glyph at a non-overlapping position before/after the target.",
         "All comparisons are against the same isolated outline mask.",
         "",
