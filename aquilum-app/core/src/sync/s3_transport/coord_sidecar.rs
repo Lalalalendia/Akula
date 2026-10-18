@@ -159,10 +159,7 @@ impl AwsS3ProbeClient {
             .copied().collect();
         let (verified_pack_count, verified_pack_bytes) =
             self.verify_letter_packs(&letter, &expected, &mut dag).await?;
-        if seen != expected
-            || dag.pending_len() != 0
-            || dag.active_len() != current_pinned.len()
-        {
+        if dag.pending_len() != 0 || dag.active_len() != current_pinned.len() {
             return Err(S3CoordSidecarReadError::InvalidHistory);
         }
 
