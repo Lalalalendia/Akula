@@ -19,6 +19,11 @@ pub enum FileCommandError {
     Task {
         message: String,
     },
+    /// File/history may already have changed; client MUST reconcile before
+    /// retrying rather than treating this as a reversible save failure.
+    NeedsReview {
+        message: String,
+    },
 }
 
 impl From<std::io::Error> for FileCommandError {
@@ -42,7 +47,8 @@ impl std::fmt::Display for FileCommandError {
         match self {
             Self::Io { message }
             | Self::InvalidUtf8 { message }
-            | Self::Task { message } => formatter.write_str(message),
+            | Self::Task { message }
+            | Self::NeedsReview { message } => formatter.write_str(message),
             Self::Conflict { .. } => formatter.write_str("файл изменился на диске"),
             Self::AlreadyExists { path } => write!(formatter, "уже существует: {path}"),
         }

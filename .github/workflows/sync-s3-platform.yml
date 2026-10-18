@@ -8,6 +8,12 @@ on:
       - "aquilum-app/core/src/sync/filegate_lock_probe.rs"
       - "aquilum-app/core/src/sync/filegate_lock_custody.rs"
       - "aquilum-app/core/src/sync/host_admission.rs"
+      - "aquilum-app/core/src/sync/guarded_note_write.rs"
+      - "aquilum-app/core/src/sync/guarded_editor.rs"
+      - "aquilum-app/core/src/app_core.rs"
+      - "aquilum-app/core/src/files/gate/write.rs"
+      - "aquilum-app/core/src/files/error.rs"
+      - "aquilum-app/core/src/documents/io.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
       - "aquilum-app/core/src/sync/s3_transport/core_stage.rs"
       - "aquilum-app/core/Cargo.toml"
@@ -49,3 +55,6 @@ jobs:
       - name: Verify S3 immutable revision intent validation without network
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3 additive_gate_rejects_cross_vault_and_wrong_revision_or_path -- --nocapture
+      - name: Verify real editor HubIo save under registered S3 cooperative custody
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 guarded_editor::tests -- --nocapture
