@@ -13,11 +13,11 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
-// P0-A: inert installer-provisioned cross-appdata custody ledger;
-// ordinary File Gate/HistoryService do NOT use this yet.
-#[cfg(feature = "sync-s3")]
+// Installer-provisioned local custody epoch: independent of S3 transport.
+// Legacy unhosted Core::open remains a release blocker until native binding.
+#[cfg(feature = "host-custody")]
 pub(crate) mod host_custody_registry;
-#[cfg(all(test, feature = "sync-s3"))]
+#[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
 pub(crate) mod guarded_note_write;
 #[cfg(feature = "sync-s3")]
@@ -178,6 +178,8 @@ pub use vault::{
 /// No sync scheduler or external I/O is started by importing these contracts.
 /// Runtime activation/UI remain out of scope until the S3 slice is validated.
 pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
+/// Local custody checks can compile without an S3 SDK or sync scheduler.
+pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
 
 #[cfg(all(test, not(feature = "sync-engine")))]
 mod disabled_tests {
