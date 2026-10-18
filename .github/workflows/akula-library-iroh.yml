@@ -39,6 +39,9 @@ jobs:
       - name: Persistent quota across sender restarts
         working-directory: experiments/akula-library-iroh
         run: python3 tests/quota_restart_smoke.py --binary target/debug/akula-library-iroh-lab
+      - name: Bounded-rate QUIC loopback transfer
+        working-directory: experiments/akula-library-iroh
+        run: python3 tests/rate_smoke.py --binary target/debug/akula-library-iroh-lab
       - name: Archive resolved dependencies
         if: always()
         uses: actions/upload-artifact@v4
