@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           : > stage-log.txt
-          bin="target/release/akula-rope-gate-history-e2e"
+          bin=".github/bench/rope-gate-history-e2e/target/release/akula-rope-gate-history-e2e"
           for size in 1 8; do
             for attempt in 1 2 3 4 5 6; do
               "$bin" after "$size" 2>&1 | tee -a stage-log.txt
