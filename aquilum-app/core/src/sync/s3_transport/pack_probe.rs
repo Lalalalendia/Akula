@@ -13,7 +13,6 @@ use crate::sync::{
     S3RevisionRefV1,
 };
 use std::collections::BTreeSet;
-#[cfg(test)]
 use crate::sync::S3Keyspace;
 
 const MAGIC: &[u8; 8] = b"AKPKEXP1";
@@ -49,13 +48,12 @@ impl From<DagError> for PackProbeError {
 ///   }
 /// The pack does not include user filenames or any power to create/delete
 /// an Akula file. The canonical RevisionRecord JSON is checked when read.
-#[cfg(test)]
+/// An internal pure encoder does not grant S3 PUT, writer authority or File Gate.
 pub(super) struct PackBuilder {
     bytes: Vec<u8>,
     references: Vec<S3RevisionRefV1>,
 }
 
-#[cfg(test)]
 impl PackBuilder {
     pub fn new() -> Self {
         let mut bytes = Vec::with_capacity(HEADER_BYTES);
@@ -111,8 +109,8 @@ impl PackBuilder {
             return Err(PackProbeError::Invalid);
         }
         let digest = blake3::hash(&self.bytes).to_hex().to_string();
-        // TEST FIXTURE ONLY: content-addressed opaque blob under a disposable
-        // vault. Production manifests do NOT know or accept packed members.
+        // Only derives an immutable content-addressed blob key. No network I/O,
+        // writer authentication, provider publication or File Gate authority.
         let key = keyspace.immutable_blob_key(&digest)
             .map_err(|_| PackProbeError::Invalid)?;
         Ok((PackDescriptor { key, digest, references: self.references }, self.bytes))
