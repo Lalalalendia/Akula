@@ -23,6 +23,9 @@ mod coord_probe;
 // Heavy full-DAG benchmark is ignored unless explicitly run with MinIO.
 #[cfg(test)]
 mod scale_probe;
+// Isolated real MinIO scale A/B for anchored, read-only V2 pack discovery.
+#[cfg(test)]
+mod coord_scale_probe;
 mod replan;
 mod core_stage;
 pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError};
