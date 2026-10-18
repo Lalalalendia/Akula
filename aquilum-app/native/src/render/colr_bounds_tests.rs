@@ -170,6 +170,7 @@ fn colr_fractional_pen_atlas_matches_uncached() {
         for size in [20u16, 80u16] {
             for glyph_id in [2u32, 3] {
                 let mut cached_resources = Resources::default();
+                let mut integer_phase_atlas_entries: Option<usize> = None;
                 for phase_x in PHASES {
                     for phase_y in PHASES {
                         let mut direct_resources = Resources::default();
@@ -183,7 +184,15 @@ fn colr_fractional_pen_atlas_matches_uncached() {
                         );
                         let first_stats = cached_resources.glyph_atlas_summary()
                             .expect("atlas must be initialized for cached COLR");
-                        assert!(first_stats.2 > 0, "cached COLR must allocate an atlas entry");
+                        assert!(first_stats.2 > 0, "pixel-aligned COLR should have an atlas entry");
+                        if phase_x == 0.0 && phase_y == 0.0 {
+                            integer_phase_atlas_entries = Some(first_stats.2);
+                        } else {
+                            assert_eq!(
+                                Some(first_stats.2), integer_phase_atlas_entries,
+                                "fractional COLR must not allocate/cache an unkeyed phase"
+                            );
+                        }
                         let second = positioned_glyph(
                             &font, glyph_id, size, workers,
                             phase_x, phase_y, true, &mut cached_resources,
@@ -191,7 +200,10 @@ fn colr_fractional_pen_atlas_matches_uncached() {
                         let second_stats = cached_resources.glyph_atlas_summary()
                             .expect("atlas still initialized");
                         assert_eq!(first_stats.2, second_stats.2,
-                            "same glyph and pen phase must hit cache, not allocate again");
+                            "repeating a pen phase must not allocate more atlas slots");
+                        // For integral phase this is the cache miss/hit pair;
+                        // at fractional phase both calls intentionally bypass
+                        // the atlas because the key has no X/Y phase slots.
                         let hit_parity = fractional_pixel_difference(&first, &second);
                         let direct_parity = fractional_pixel_difference(&direct, &second);
                         examined += 1;
