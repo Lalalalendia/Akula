@@ -141,48 +141,79 @@ fn property(base: &Expr, name: &str, scope: &Scope<'_>) -> Result<Value, String>
     Ok(member(&value, name))
 }
 
+// Built-in property names are ASCII, but Unicode case conversion can produce
+// ASCII (e.g. U+212A KELVIN SIGN). Preserve full str::to_lowercase for those
+// uncommon inputs without allocating for the common ASCII property names.
+fn builtin_property_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.is_ascii() {
+        std::borrow::Cow::Borrowed(name)
+    } else {
+        std::borrow::Cow::Owned(name.to_lowercase())
+    }
+}
+
 fn member(value: &Value, name: &str) -> Value {
-    match (value, name.to_lowercase().as_str()) {
-        (Value::Link(link), "path") => Value::Text(link.target.clone()),
-        (Value::Link(link), "display") => match &link.display {
+    let property = builtin_property_name(name);
+    match value {
+        Value::Link(link) if property.eq_ignore_ascii_case("path") => Value::Text(link.target.clone()),
+        Value::Link(link) if property.eq_ignore_ascii_case("display") => match &link.display {
             Some(display) => Value::Text(display.clone()),
             None => Value::Null,
         },
-        (Value::List(items), "length") => Value::Number(items.len() as f64),
-        (Value::List(items), _) => Value::List(items.iter().map(|item| member(item, name)).collect()),
-        (Value::Object(fields), _) => fields
+        Value::List(items) if property.eq_ignore_ascii_case("length") => Value::Number(items.len() as f64),
+        Value::List(items) => Value::List(items.iter().map(|item| member(item, name)).collect()),
+        // Object member resolution deliberately retains exact-first key priority.
+        Value::Object(fields) => fields
             .iter()
             .find(|(key, _)| key == name)
             .or_else(|| fields.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)))
             .map(|(_, found)| found.clone())
             .unwrap_or(Value::Null),
-        (Value::Date(nanos), "year") => Value::Number(note_date::to_civil(*nanos).0 as f64),
-        (Value::Date(nanos), "month") => Value::Number(note_date::to_civil(*nanos).1 as f64),
-        (Value::Date(nanos), "day") => Value::Number(note_date::to_civil(*nanos).2 as f64),
-        (Value::Date(nanos), "weekday") => Value::Number(note_date::weekday(*nanos) as f64),
+        Value::Date(nanos) if property.eq_ignore_ascii_case("year") => {
+            Value::Number(note_date::to_civil(*nanos).0 as f64)
+        }
+        Value::Date(nanos) if property.eq_ignore_ascii_case("month") => {
+            Value::Number(note_date::to_civil(*nanos).1 as f64)
+        }
+        Value::Date(nanos) if property.eq_ignore_ascii_case("day") => {
+            Value::Number(note_date::to_civil(*nanos).2 as f64)
+        }
+        Value::Date(nanos) if property.eq_ignore_ascii_case("weekday") => {
+            Value::Number(note_date::weekday(*nanos) as f64)
+        }
         _ => Value::Null,
     }
 }
 
 fn file_property(name: &str, row: &Row) -> Result<Value, String> {
-    Ok(match name.to_lowercase().as_str() {
-        "link" => note_link(row),
-        "path" => Value::Text(row.relative.clone()),
-        "name" => Value::Text(row.name.clone()),
-        "folder" => Value::Text(row.folder.clone()),
-        "ctime" | "cday" => Value::Date(row.created),
-        "mtime" | "mday" => Value::Date(row.modified),
-        "size" => Value::Number(row.size as f64),
-        "tags" => match row.field("tags") {
+    let property = builtin_property_name(name);
+    let value = if property.eq_ignore_ascii_case("link") {
+        note_link(row)
+    } else if property.eq_ignore_ascii_case("path") {
+        Value::Text(row.relative.clone())
+    } else if property.eq_ignore_ascii_case("name") {
+        Value::Text(row.name.clone())
+    } else if property.eq_ignore_ascii_case("folder") {
+        Value::Text(row.folder.clone())
+    } else if property.eq_ignore_ascii_case("ctime") || property.eq_ignore_ascii_case("cday") {
+        Value::Date(row.created)
+    } else if property.eq_ignore_ascii_case("mtime") || property.eq_ignore_ascii_case("mday") {
+        Value::Date(row.modified)
+    } else if property.eq_ignore_ascii_case("size") {
+        Value::Number(row.size as f64)
+    } else if property.eq_ignore_ascii_case("tags") {
+        match row.field("tags") {
             Some(field) => field_value(field),
             None => Value::List(Vec::new()),
-        },
-        other => {
-            return Err(format!(
-                "У файла нет поля «{other}»: есть link, path, name, folder, ctime, mtime, size, tags"
-            ))
         }
-    })
+    } else {
+        // Keep the original lowercase diagnostic for unknown properties.
+        let other = name.to_lowercase();
+        return Err(format!(
+            "У файла нет поля «{other}»: есть link, path, name, folder, ctime, mtime, size, tags"
+        ));
+    };
+    Ok(value)
 }
 
 fn note_link(row: &Row) -> Value {
