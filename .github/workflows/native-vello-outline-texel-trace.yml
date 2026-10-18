@@ -91,12 +91,12 @@ jobs:
           test "$unexpected" -eq 0
           test "$traced" -gt 0
           test "$failures" -gt 0
-      - name: Test exact captured glyph 495 in original atlas slots, full and cropped
+      - name: Test exact glyph 495 atlas positions and numerical half-tie biases
         shell: bash
         working-directory: aquilum-app
         run: |
           set -euo pipefail
-          cargo test --release --locked -p vello_cpu --lib guard96_real_glyph_495_slot_and_crop_coverage -- --nocapture
+          cargo test --release --locked -p vello_cpu --lib guard96_real_glyph_495_ -- --nocapture
       - name: Preserve logs and pixel-difference screenshots
         if: always()
         uses: actions/upload-artifact@v4
