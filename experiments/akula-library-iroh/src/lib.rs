@@ -4,6 +4,7 @@
 
 use anyhow::{bail, ensure, Context, Result};
 pub mod durable;
+pub mod persistent_quota;
 use iroh::{endpoint::{presets, Connection}, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, Mutex}};
 use tokio::{sync::Semaphore, time::{timeout, Duration}};
@@ -122,12 +123,17 @@ pub struct Server {
     book: Book,
     allowed: Arc<HashSet<EndpointId>>,
     quota: Arc<Mutex<QuotaState>>,
+    disk_quota: Option<Arc<Mutex<persistent_quota::PersistentQuota>>>,
 }
 impl Server {
     pub fn new(book: Book, allowed: HashSet<EndpointId>, limits: QuotaState) -> Self {
-        Self { book, allowed: Arc::new(allowed), quota: Arc::new(Mutex::new(limits)) }
+        Self { book, allowed: Arc::new(allowed), quota: Arc::new(Mutex::new(limits)), disk_quota: None }
     }
     pub fn quota(&self) -> Arc<Mutex<QuotaState>> { self.quota.clone() }
+    pub fn with_persistent_quota(mut self, quota: persistent_quota::PersistentQuota) -> Self {
+        self.disk_quota = Some(Arc::new(Mutex::new(quota)));
+        self
+    }
     /// Run until the endpoint is closed; bounded to eight concurrent accepted connections.
     pub async fn run(self, endpoint: Endpoint) {
         let slots = Arc::new(Semaphore::new(8));
@@ -172,7 +178,14 @@ impl Server {
         if req[1..33] != self.book.manifest.digest[..] { return vec![NOT_FOUND]; }
         let index = u32::from_be_bytes(req[33..37].try_into().expect("validated request length")) as usize;
         let Ok(part) = self.book.part(index) else { return vec![NOT_FOUND] };
-        let permitted = self.quota.lock().expect("poisoned quota mutex").reserve(peer, part.len());
+        let permitted = if let Some(disk) = &self.disk_quota {
+            match disk.lock().expect("poisoned persistent quota mutex").reserve(peer, part.len()) {
+                Ok(permitted) => permitted,
+                Err(_) => return vec![QUOTA], // fail closed on storage error
+            }
+        } else {
+            self.quota.lock().expect("poisoned quota mutex").reserve(peer, part.len())
+        };
         if !permitted { return vec![QUOTA] }
         let mut out = Vec::with_capacity(part.len()+1);
         out.push(OK);
