@@ -5,12 +5,11 @@
 //! authenticated writer trust and local baselines are NEVER modified.
 
 use super::{
-    pack_probe::{PackBuilder, MAX_PACK_MEMBERS},
     AwsS3ProbeClient, S3ConnectionProfile, S3PutCondition, S3TestIoCounts,
 };
 use crate::sync::{
     DocumentId, OperationId, RevisionId, RevisionOperation, RevisionRecord,
-    S3DeltaEnvelopeV2, S3DeltaPackRefV2, S3HeadPointerV1, S3Keyspace,
+    S3DeltaEnvelopeV2, S3HeadPointerV1, S3Keyspace,
     S3ManifestDeltaLimits, S3ManifestShardRefV1, S3ManifestShardV1,
     S3ManifestV1, S3RemoteAnchorJournal, S3RemoteAnchorScope,
     S3RevisionRefV1, SyncRelativePath, VaultId,
@@ -201,32 +200,25 @@ async fn publish_letter_packs(
     current: &S3HeadPointerV1,
     additions: &[Entry],
 ) -> (String, usize, u64) {
-    let mut sorted = additions.to_vec();
-    sorted.sort_by_key(|r| r.reference.revision_id);
-    let mut pack_refs = Vec::new();
-    let mut bytes_published = 0_u64;
-    for (index, chunk) in sorted.chunks(MAX_PACK_MEMBERS).enumerate() {
-        let mut builder = PackBuilder::new();
-        for item in chunk {
-            builder.push(item.reference.clone(), &item.json, &item.blob).unwrap();
-        }
-        let (descriptor, payload) = builder.seal(ns).unwrap();
-        let offset = index * MAX_PACK_MEMBERS;
-        pack_refs.push(S3DeltaPackRefV2 {
-            pack_blake3: descriptor.digest.clone(),
-            byte_length: payload.len() as u32,
-            first_revision_index: offset as u16,
-            revision_count: chunk.len() as u16,
-        });
-        bytes_published += payload.len() as u64;
+    // Exercise the production-compiled pure V2 encoder on REAL
+    // disposable MinIO objects. Only this test fixture owns any S3 PUT.
+    let source: Vec<_> = additions.iter().map(|item| (
+        item.reference.clone(), item.json.clone(), item.blob.clone(),
+    )).collect();
+    let prepared = super::coord_pack_encode::prepare_delta_packs_v2(
+        ns, &source,
+    ).unwrap();
+    let count = prepared.packs.len();
+    let indexes: Vec<_> =
+        prepared.packs.iter().map(|p| p.index.clone()).collect();
+    let mut bytes_published = prepared.packed_bytes as u64;
+    for pack in &prepared.packs {
         client.put_conditionally(
-            &descriptor.key, &payload, S3PutCondition::IfAbsent,
+            &pack.descriptor.key, &pack.payload, S3PutCondition::IfAbsent,
         ).await.unwrap();
     }
     let letter = S3DeltaEnvelopeV2::new(
-        ns, prior, current,
-        sorted.iter().map(|e| e.reference.clone()).collect(),
-        pack_refs.clone(),
+        ns, prior, current, prepared.references, indexes,
     ).unwrap();
     let bytes = letter.encode(ns).unwrap();
     bytes_published += bytes.len() as u64;
@@ -235,7 +227,7 @@ async fn publish_letter_packs(
         &ns.immutable_blob_key(&digest).unwrap(),
         &bytes, S3PutCondition::IfAbsent,
     ).await.unwrap();
-    (digest, pack_refs.len(), bytes_published)
+    (digest, count, bytes_published)
 }
 
 #[derive(Clone, Copy)]

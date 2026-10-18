@@ -152,6 +152,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::pack_probe::tests
+      - name: Verify production-compiled bounded V2 sender pack serialization
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 coord_pack_encode::tests
       - name: Validate bounded read-only RemoteStore snapshot projection
         shell: bash
         working-directory: aquilum-app
