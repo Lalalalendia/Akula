@@ -355,10 +355,14 @@ impl HistoryService {
         write: NoteWrite<'_>,
         custody_verified: bool,
     ) -> Result<bool, HistorySaveFailure> {
+        #[cfg(feature = "save-stage-probe")]
+        let profile_start = std::time::Instant::now();
         let now = SystemTime::now();
         let Some(mut state) = self.files_lock() else {
             return Err(HistorySaveFailure::new("history lock", "poisoned"));
         };
+        #[cfg(feature = "save-stage-probe")]
+        let profile_locked = profile_start.elapsed();
         // Check again AFTER PROCESS_HISTORY_FILES: activation takes that same
         // mutex while publishing its durable HOLD. A direct writer that saw
         // a false flag before waiting cannot publish history after enrollment.
@@ -388,6 +392,8 @@ impl HistoryService {
         let previous_text = (versions.len() >= 2)
             .then(|| store::read_version(&located.dir, &versions[versions.len() - 2]))
             .flatten();
+        #[cfg(feature = "save-stage-probe")]
+        let profile_loaded = profile_start.elapsed();
         let disk = entry
             .pending_before
             .as_ref()
@@ -410,6 +416,8 @@ impl HistoryService {
             },
             now,
         );
+        #[cfg(feature = "save-stage-probe")]
+        let profile_planned = profile_start.elapsed();
         let quiet = matches!(&plan, MilestonePlan::Quiet);
         let dir = &located.dir;
         let outcome = (|| -> Result<bool, HistorySaveFailure> {
@@ -463,6 +471,21 @@ impl HistoryService {
                 }
             }
         })();
+        #[cfg(feature = "save-stage-probe")]
+        {
+            let profile_done = profile_start.elapsed();
+            let ms = |duration: std::time::Duration| duration.as_secs_f64() * 1000.0;
+            eprintln!(
+                "AKULA_SAVE_HISTORY lock_ms={:.4} inspect_ms={:.4} plan_ms={:.4} persistence_ms={:.4} total_ms={:.4} versions={} ok={}",
+                ms(profile_locked),
+                ms(profile_loaded - profile_locked),
+                ms(profile_planned - profile_loaded),
+                ms(profile_done - profile_planned),
+                ms(profile_done),
+                versions.len(),
+                u8::from(outcome.is_ok()),
+            );
+        }
         match outcome {
             Ok(changed) => {
                 // A quiet reader update must not discard a failed baseline

@@ -240,6 +240,8 @@ pub(super) fn write_version(
     device: &str,
     snapshot: &Snapshot<'_>,
 ) -> Result<PathBuf, FileCommandError> {
+    #[cfg(feature = "save-stage-probe")]
+    let profile_start = std::time::Instant::now();
     let label = snapshot.source.file_label();
     // Distinct source labels can otherwise share a millisecond, causing history
     // ordering to disagree with the order in which versions were written.
@@ -248,6 +250,8 @@ pub(super) fn write_version(
         .filter(|version| version.device == device)
         .map(|version| version.at_ms)
         .collect::<std::collections::HashSet<_>>();
+    #[cfg(feature = "save-stage-probe")]
+    let profile_scanned = profile_start.elapsed();
     let first_available = (millis(snapshot.at)..)
         .find(|at| !taken.contains(at))
         .unwrap_or_else(|| millis(snapshot.at));
@@ -255,7 +259,23 @@ pub(super) fn write_version(
         format!("{at:013}_{device}_{label}{VERSION_EXTENSION}")
     });
     fs::create_dir_all(dir)?;
+    #[cfg(feature = "save-stage-probe")]
+    let profile_named = profile_start.elapsed();
     write_file_atomic_impl(&path, snapshot.text.as_ref(), None)?;
+    #[cfg(feature = "save-stage-probe")]
+    {
+        let profile_end = profile_start.elapsed();
+        let ms = |duration: std::time::Duration| duration.as_secs_f64() * 1000.0;
+        eprintln!(
+            "AKULA_SAVE_VERSION kind={} bytes={} listing_ms={:.4} path_ms={:.4} atomic_ms={:.4} total_ms={:.4}",
+            if snapshot.source == Source::Start { "baseline" } else { "current" },
+            snapshot.text.len(),
+            ms(profile_scanned),
+            ms(profile_named - profile_scanned),
+            ms(profile_end - profile_named),
+            ms(profile_end),
+        );
+    }
     Ok(path)
 }
 
