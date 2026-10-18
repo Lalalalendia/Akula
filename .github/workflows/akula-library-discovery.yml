@@ -1,0 +1,33 @@
+name: Akula Library discovery lab
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'experiments/akula-library-discovery/**'
+      - '.github/workflows/akula-library-discovery.yml'
+permissions:
+  contents: read
+jobs:
+  udp-loopback-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: UDP process/socket tests
+        working-directory: experiments/akula-library-discovery
+        run: python -m unittest discover -v
+      - name: Index failure and address rebind test
+        working-directory: experiments/akula-library-discovery
+        run: python net_lab.py --nodes 3 6 10 --queries 24 --seed 20261018 --output results.json --markdown results.md
+      - name: Archive loopback measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-library-discovery-loopback
+          path: |
+            experiments/akula-library-discovery/results.json
+            experiments/akula-library-discovery/results.md
+          if-no-files-found: ignore
