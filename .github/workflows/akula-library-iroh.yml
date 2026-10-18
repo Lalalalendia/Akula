@@ -39,6 +39,9 @@ jobs:
       - name: Record 50-client backpressure metrics
         working-directory: experiments/akula-library-iroh
         run: cargo test --locked fifty_quic_clients_backpressure_and_measure -- --nocapture
+      - name: Unknown-key QUIC admission stress and CPU RSS metrics
+        working-directory: experiments/akula-library-iroh
+        run: cargo test --locked unknown_48_quic_peers_cannot_read_book_and_known_peer_recovers -- --nocapture
       - name: Build two-process laboratory binary
         working-directory: experiments/akula-library-iroh
         run: cargo build --locked --bin akula-library-iroh-lab
