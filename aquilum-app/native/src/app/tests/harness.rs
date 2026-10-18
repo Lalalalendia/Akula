@@ -6,31 +6,39 @@ impl Harness {
     }
 
     pub(super) fn with(real_vault: Option<&std::path::Path>, scale: f64) -> Self {
+        Self::with_ab_vault(real_vault, scale, None)
+    }
+
+    /// Test-only opt-in used by sequential cross-build pixel A/B.
+    /// Each scene has a distinct, deterministic *displayed vault basename*.
+    /// The config/index directory must stay random and process-local: reusing
+    /// its name allowed an old indexing task to race with the next scene.
+    pub(super) fn with_ab_vault(
+        real_vault: Option<&std::path::Path>,
+        scale: f64,
+        ab_case: Option<&str>,
+    ) -> Self {
         let theme = theme::test_lock();
-        // Frame-to-frame, cross-build A/B visual comparisons must not render
-        // two unrelated random tempfile basenames in the sidebar footer.
-        // This is strictly test-only and off unless explicitly requested by
-        // the single-process (and serially executed) Vello A/B workflow.
-        let stable_ab = std::env::var_os("AQ_CROSSOVER_AB_STABLE_VAULT").is_some();
-        let (vault, data) = if stable_ab {
+        let vault = if let Some(case) = ab_case {
+            assert!(
+                matches!(case, "text_1x" | "text_175" | "cover_1x" | "cover_175"),
+                "unrecognized deterministic A/B scene"
+            );
             let root = crate::workspace::normalize(&std::env::temp_dir());
-            // rand_bytes(0) is safe *only* for this CI-only, sequential,
-            // disposable fixture: create_new refuses to reuse stale dirs.
+            let name = format!("akula-vello-ab-vault-{case}");
+            // Single-process, serial CI fixture only. create_new refuses to
+            // reuse a stale directory instead of accepting someone else's data.
             let vault = tempfile::Builder::new()
-                .prefix("akula-vello-ab-vault")
+                .prefix(&name)
                 .rand_bytes(0)
-                .tempdir_in(&root)
-                .expect("create deterministic, isolated A/B vault");
-            let data = tempfile::Builder::new()
-                .prefix("akula-vello-ab-data")
-                .rand_bytes(0)
-                .tempdir_in(&root)
-                .expect("create deterministic, isolated A/B config");
+                .tempdir_in(root)
+                .expect("create unique per-scene deterministic A/B vault");
             eprintln!("VELLO_AB_FIXED_VAULT {}", vault.path().display());
-            (vault, data)
+            vault
         } else {
-            (crate::test_dir::tempdir(), crate::test_dir::tempdir())
+            crate::test_dir::tempdir()
         };
+        let data = crate::test_dir::tempdir();
         std::fs::write(vault.path().join("a.md"), "текст").unwrap();
         let mut config = AppConfig::default();
         config.ui.theme = if std::env::var_os("AQUILUM_BENCH_LIGHT").is_some() { "light".into() } else { "dark".into() };
