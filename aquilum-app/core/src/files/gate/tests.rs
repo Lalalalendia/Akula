@@ -376,6 +376,6 @@ fn note_publication_epoch_spans_primary_and_history_before_enrollment() {
         "ordinary note publication failed after HistoryService lock released");
     enrollment.join().unwrap();
     assert_eq!(fs::read_to_string(&note).unwrap(), next);
-    assert!(core.history.page(&|| vec![root], &note, 0, 8).total > 0,
+    assert!(core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0,
         "enrollment fence must wait for recorded history, not just primary bytes");
 }
