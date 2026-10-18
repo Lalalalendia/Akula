@@ -15,8 +15,9 @@
 use super::VaultId;
 use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::path::{Path, PathBuf};
+use super::filegate_lock_probe::PinnedProbeRoot;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -89,6 +90,92 @@ impl From<rusqlite::Error> for HostCustodyError {
 #[allow(dead_code)]
 pub(crate) struct SharedHostCustodyRegistry {
     conn: Connection,
+    // Keep the opened host namespace and database file pinned for this Core's
+    // lifetime, and compare them with the still-named path before ANY read,
+    // enrollment or ordinary file publication epoch. No file identity may be
+    // inferred solely from a mutable pathname after this point.
+    pin: HostLedgerPin,
+}
+
+struct HostLedgerPin {
+    path: PathBuf,
+    parent: PinnedProbeRoot,
+    opened_database: File,
+    original_identity: PhysicalObjectId,
+}
+
+/// Physical identity of the actual opened file handle, never of a path
+/// string. Windows std::fs::MetadataExt::file_index is unstable, so reuse
+/// the existing stable Win32 GetFileInformationByHandle implementation.
+fn opened_host_file_identity(file: &File) -> Result<PhysicalObjectId, HostCustodyError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let meta = file.metadata()?;
+        return Ok(PhysicalObjectId { device: meta.dev(), file: meta.ino() });
+    }
+    #[cfg(windows)]
+    {
+        let (volume, file_id) = super::pinned_windows::file_identity(file)
+            .map_err(|_| HostCustodyError::InvalidHostLocation)?;
+        return Ok(PhysicalObjectId { device: u64::from(volume), file: file_id });
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = file;
+        Err(HostCustodyError::InvalidHostLocation)
+    }
+}
+
+fn checked_host_leaf(path: &Path) -> Result<(), HostCustodyError> {
+    let entry = fs::symlink_metadata(path)?;
+    if !entry.is_file() || entry.file_type().is_symlink() {
+        return Err(HostCustodyError::InvalidHostLocation);
+    }
+    #[cfg(windows)]
+    if {
+        use std::os::windows::fs::MetadataExt;
+        entry.file_attributes() & 0x0000_0400 != 0
+    } {
+        return Err(HostCustodyError::InvalidHostLocation);
+    }
+    Ok(())
+}
+
+impl HostLedgerPin {
+    fn open(path: &Path) -> Result<Self, HostCustodyError> {
+        let selected_parent = checked_host_parent(path)?;
+        let parent = PinnedProbeRoot::open(selected_parent)?;
+        checked_host_leaf(path)?;
+        let opened_database = File::open(path)?;
+        let original_identity = opened_host_file_identity(&opened_database)?;
+        if !original_identity.valid() || !opened_database.metadata()?.is_file() {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
+        let pin = Self {
+            path: path.to_path_buf(), parent, opened_database,
+            original_identity,
+        };
+        pin.recheck()?;
+        Ok(pin)
+    }
+
+    fn recheck(&self) -> Result<(), HostCustodyError> {
+        // Re-prove BOTH the parent directory identity and the named file.
+        // A swapped real directory is not a symlink: checking just
+        // symlink_metadata, as the old code did, cannot detect it.
+        checked_host_parent(&self.path)?;
+        self.parent.recheck_root()?;
+        checked_host_leaf(&self.path)?;
+        let now_named = File::open(&self.path)?;
+        if opened_host_file_identity(&now_named)? != self.original_identity
+            || opened_host_file_identity(&self.opened_database)? != self.original_identity
+        {
+            return Err(HostCustodyError::InvalidHostLocation);
+        }
+        self.parent.recheck_root()?;
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -135,6 +222,7 @@ impl SharedHostCustodyRegistry {
         #[cfg(unix)]
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         drop(file);
+        let pin = HostLedgerPin::open(path)?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&conn)?;
         conn.execute_batch(
@@ -148,7 +236,8 @@ impl SharedHostCustodyRegistry {
              PRAGMA user_version = 1;
              COMMIT;",
         )?;
-        Ok(Self { conn })
+        pin.recheck()?;
+        Ok(Self { conn, pin })
     }
 
     /// Ordinary Core must use this method: NEVER open with CREATE, auto
@@ -157,11 +246,7 @@ impl SharedHostCustodyRegistry {
     pub(crate) fn open_existing(path: &Path) -> Result<Self, HostCustodyError> {
         // Never follow a substituted parent alias into another, freshly
         // provisioned but empty registry. Missing/untrusted path stays HOLD.
-        checked_host_parent(path)?;
-        let entry = fs::symlink_metadata(path)?;
-        if !entry.is_file() || entry.file_type().is_symlink() {
-            return Err(HostCustodyError::InvalidHostLocation);
-        }
+        let pin = HostLedgerPin::open(path)?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure(&conn)?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -189,7 +274,8 @@ impl SharedHostCustodyRegistry {
                 decode_row(row)?;
             }
         }
-        Ok(Self { conn })
+        pin.recheck()?;
+        Ok(Self { conn, pin })
     }
 
     /// Insert-only registration by physically identified root, with
@@ -199,6 +285,7 @@ impl SharedHostCustodyRegistry {
     pub(crate) fn enroll(
         &mut self, record: &HostCustodyRecord,
     ) -> Result<(), HostCustodyError> {
+        self.pin.recheck()?;
         if !record.strict_validate() {
             return Err(HostCustodyError::InvalidRecord);
         }
@@ -215,7 +302,9 @@ impl SharedHostCustodyRegistry {
             if previous != *record {
                 return Err(HostCustodyError::ConflictingEnrollment);
             }
+            self.pin.recheck()?;
             tx.commit()?;
+            self.pin.recheck()?;
             return Ok(());
         }
         // The same physical host registry must not register a parent and a
@@ -231,7 +320,9 @@ impl SharedHostCustodyRegistry {
              VALUES (?1, ?2, ?3, ?4)",
             params![key, record.root_path, bytes, digest],
         )?;
+        self.pin.recheck()?;
         tx.commit()?;
+        self.pin.recheck()?;
         Ok(())
     }
 
@@ -246,6 +337,7 @@ impl SharedHostCustodyRegistry {
         root_identity: PhysicalObjectId,
         operation: impl FnOnce() -> T,
     ) -> Result<T, HostCustodyError> {
+        self.pin.recheck()?;
         if !root_identity.valid() {
             return Err(HostCustodyError::InvalidRecord);
         }
@@ -261,8 +353,11 @@ impl SharedHostCustodyRegistry {
         if has_registered_path_overlap(&transaction, Path::new(&root))? {
             return Err(HostCustodyError::ConflictingEnrollment);
         }
+        self.pin.recheck()?;
         let outcome = operation();
+        self.pin.recheck()?;
         transaction.commit()?;
+        self.pin.recheck()?;
         Ok(outcome)
     }
 
@@ -270,6 +365,7 @@ impl SharedHostCustodyRegistry {
     pub(crate) fn inspect(
         &self, root_path: &Path, root_identity: PhysicalObjectId,
     ) -> Result<Option<HostCustodyRecord>, HostCustodyError> {
+        self.pin.recheck()?;
         if !root_identity.valid() {
             return Err(HostCustodyError::InvalidRecord);
         }
@@ -280,6 +376,7 @@ impl SharedHostCustodyRegistry {
                 return Err(HostCustodyError::ConflictingEnrollment);
             }
         }
+        self.pin.recheck()?;
         Ok(found)
     }
 }
