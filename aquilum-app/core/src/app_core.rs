@@ -117,6 +117,22 @@ pub struct Core {
     events: Arc<dyn EventSink>,
 }
 
+/// A non-cloneable, lexical capability valid only while the installer-wide
+/// SQLite enrollment epoch is held by Core::with_unenrolled_host_epoch.
+/// It is NOT remote S3 write authority, a protected-custody token or evidence
+/// against uncooperative same-user writers.
+#[cfg(feature = "sync-s3")]
+pub(crate) struct HostUnenrolledEpochPermit<'a> {
+    core: &'a Core,
+}
+
+#[cfg(feature = "sync-s3")]
+impl HostUnenrolledEpochPermit<'_> {
+    pub(crate) fn binds_history(&self, history: &HistoryService) -> bool {
+        std::ptr::eq(&self.core.history, history)
+    }
+}
+
 impl Core {
     /// Opens all stores under `app_data_dir`, which the host picks.
     pub fn open(app_data_dir: &Path, events: Arc<dyn EventSink>) -> Arc<Self> {
@@ -301,6 +317,95 @@ impl Core {
             }
         }
         Ok(guard)
+    }
+
+    /// P0-B2a: a host-BOUND Core's limited ordinary write/create adapter.
+    /// The SQLite BEGIN IMMEDIATE shares enrollment's writer lock, and is
+    /// retained across the entire primary + history closure. All other
+    /// File Gate and direct HistoryService mutations remain HOLD in this mode.
+    ///
+    /// This path is supplied by the installer contract, never from appdata;
+    /// Core::open (legacy) still bypasses this policy and MUST be migrated
+    /// before #251's real alternate-appdata release blocker can close.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn with_unenrolled_host_epoch<T>(
+        &self,
+        target: &Path,
+        operation: impl FnOnce(&HostUnenrolledEpochPermit<'_>) -> Result<T, FileCommandError>,
+    ) -> Result<T, FileCommandError> {
+        use crate::sync::filegate_lock_probe::PinnedProbeRoot;
+        use crate::sync::host_custody_registry::{
+            PhysicalObjectId, SharedHostCustodyRegistry,
+        };
+        use std::fs;
+
+        let refused = |message: String| FileCommandError::Task { message };
+        let db = self.installed_host_custody_db.as_ref()
+            .ok_or_else(|| refused("no installer-issued shared custody source".into()))?;
+        let roots = self.ui_state.workspace_roots()
+            .map_err(|error| refused(format!("host root registration unavailable: {error:?}")))?;
+        // Only a registered, unique, existing physical workspace can be
+        // observed. Reject symlinks (including nested directory aliases) and
+        // paths that resolve outside the selected root.
+        let target_meta = fs::symlink_metadata(target);
+        let resolved = match target_meta {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(refused("host-bound writer rejects symlink leaf".into()));
+            }
+            Ok(_) => fs::canonicalize(target)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let parent = target.parent()
+                    .ok_or_else(|| refused("target lacks a parent directory".into()))?;
+                fs::canonicalize(parent)?.join(target.file_name()
+                    .ok_or_else(|| refused("target lacks a file name".into()))?)
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let mut owners = Vec::new();
+        for root in roots {
+            if let Ok(relative) = target.strip_prefix(&root) {
+                let canonical = fs::canonicalize(&root)?;
+                if canonical.join(relative) != resolved {
+                    return Err(refused("host-bound path changed or used an ambiguous alias".into()));
+                }
+                owners.push(root);
+            }
+        }
+        if owners.len() != 1 {
+            return Err(refused("host-bound writer needs exactly one registered workspace".into()));
+        }
+        let root = owners.pop().unwrap();
+        let pinned = PinnedProbeRoot::open(&root)?;
+        let (device, file) = pinned.identity();
+        let mut registry = SharedHostCustodyRegistry::open_existing(db)
+            .map_err(|error| refused(format!("shared custody registry unavailable: {error:?}")))?;
+        let mut entered = false;
+        let outcome = registry.with_unenrolled_epoch(
+            &root, PhysicalObjectId { device, file }, || {
+                entered = true;
+                pinned.recheck_root()?;
+                if self.documents.requires_guarded_participant_hold() {
+                    return Err(refused("local participant already requires custody HOLD".into()));
+                }
+                let permit = HostUnenrolledEpochPermit { core: self };
+                let result = operation(&permit);
+                // If replacement is detected after publication, never tell
+                // the caller to blindly retry or assume unchanged bytes.
+                if pinned.recheck_root().is_err() {
+                    return Err(FileCommandError::NeedsReview {
+                        message: "physical root replaced during shared host publication; inspect before retry".into(),
+                    });
+                }
+                result
+            },
+        );
+        match outcome {
+            Ok(result) => result,
+            Err(error) if entered => Err(FileCommandError::NeedsReview {
+                message: format!("host epoch commit uncertain after operation; recover before retry: {error:?}"),
+            }),
+            Err(error) => Err(refused(format!("host custody admission refused: {error:?}"))),
+        }
     }
 
     /// MCP permanent trash purge must not race an ordinary File Gate restore
