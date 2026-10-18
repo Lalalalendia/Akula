@@ -1091,3 +1091,100 @@ async fn quota_requires_preflight_before_quic_get() {
     .await
     .expect("admitted QUIC transfer time budget");
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+async fn durable_admission_stays_charged_after_verified_quic_and_process_reopen() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    use akula_roha_transport::durable_admission::{DurableError, DurableLedger};
+
+    tokio::time::timeout(TEST_DEADLINE, async {
+        // Completely isolated Linux fixture. Directory containing the ledger
+        // is not the user's workspace or the FsStore data root.
+        let temp = tempfile::tempdir().expect("private test directory");
+        let meta = temp.path().join("reservation-metadata");
+        let stage = temp.path().join("verified-staging");
+        fs::create_dir(&meta).expect("create test-only journal directory");
+        fs::create_dir(&stage).expect("create test-only data directory");
+        fs::set_permissions(&meta, fs::Permissions::from_mode(0o700))
+            .expect("enforce private metadata permissions");
+        let source_data = bytes(64 * 1024 + 17);
+        let expected = *blake3::hash(&source_data).as_bytes();
+        let policy = AdmissionLimits {
+            max_object_bytes: source_data.len() as u64,
+            max_tracked_bytes: source_data.len() as u64,
+            max_peer_bytes: source_data.len() as u64,
+            max_active: 1,
+            max_peer_active: 1,
+        };
+        let server_key = SecretKey::generate();
+        let peer_key = SecretKey::generate();
+        let peer = peer_key.public();
+        let store = MemStore::new();
+        let tag = store.add_slice(&source_data).await.expect("trusted test object");
+        assert_eq!(tag.hash.as_bytes(), &expected);
+        let (events, worker) = restricted_events(peer, HashSet::from([tag.hash]));
+        let server = local_endpoint(server_key).await;
+        let router = Router::builder(server)
+            .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, Some(events)))
+            .spawn();
+
+        let mut durable = DurableLedger::open(&meta, policy).expect("strict private Linux ledger");
+        // Persist to disk BEFORE allocating memory or opening QUIC.
+        durable.reserve(peer, expected, source_data.len() as u64)
+            .expect("fsync reservation before network");
+        let live = StageBudget::new(policy).expect("independent in-memory cap");
+        let mut live_lease = live.reserve(peer, expected, source_data.len() as u64)
+            .expect("memory quota");
+        let receiver = local_endpoint(peer_key).await;
+        let connection = receiver.connect(router.endpoint().addr(), iroh_blobs::ALPN)
+            .await.expect("direct private QUIC");
+        let returned = tokio::time::timeout(
+            NET_STEP_DEADLINE,
+            get_blob(connection.clone(), tag.hash).bytes(),
+        ).await.expect("GET budget").expect("verified network fetch");
+        assert_eq!(returned.as_ref(), source_data.as_slice());
+        live_lease.verify(returned.as_ref()).expect("in-memory full hash");
+        let temp_file = stage.join("payload");
+        fs::write(&temp_file, returned.as_ref()).expect("test-only physical stage");
+        fs::File::open(&temp_file).expect("open stage").sync_all()
+            .expect("flush complete physical stage");
+        durable.verify_full(expected, returned.as_ref())
+            .expect("durably record verified byte length and BLAKE3");
+        drop(returned);
+        drop(durable);
+
+        // New independent file handle/ledger instance; the old verified
+        // staging still consumes the ENTIRE declared capacity.
+        let mut recovered = DurableLedger::open(&meta, policy).expect("reopen disk journal");
+        let snapshot = recovered.snapshot().expect("read persisted reservation");
+        assert_eq!(snapshot.objects, 1);
+        assert_eq!(snapshot.verified_objects, 1);
+        assert_eq!(snapshot.reserved_bytes, source_data.len() as u64);
+        assert!(matches!(
+            recovered.reserve(peer, *blake3::hash(b"competing").as_bytes(), 1),
+            Err(DurableError::SlotsExhausted)
+        ));
+        let repeated = fs::read(&temp_file).expect("read staged payload");
+        assert_eq!(repeated, source_data, "restarted staging must match trusted bytes");
+        // This callback can only be used by a real custody owner that verifies
+        // FULL backing-data removal. This fixture has only one payload file.
+        recovered.release_after_cleanup(expected, || {
+            fs::remove_file(&temp_file)?;
+            fs::File::open(&stage)?.sync_all()
+        }).expect("persist release only after physical test file cleanup");
+        assert_eq!(recovered.snapshot().expect("ledger after cleanup").reserved_bytes, 0);
+        drop(recovered);
+        drop(live_lease);
+        assert_eq!(live.snapshot().expect("local cleanup").tracked_bytes, 0);
+        println!(
+            "P2P_BLOB_DURABLE_LEDGER size={} before_network_fsync=true reopened_after_transfer=true retained_verified_bytes={} duplicate_and_excess_denied=true removed_before_release=true filesystem_quota=false file_gate=false",
+            source_data.len(), source_data.len()
+        );
+        connection.close(0u8.into(), b"end staging admission fixture");
+        router.shutdown().await.expect("source server shutdown");
+        receiver.close().await;
+        worker.abort();
+        drop(tag);
+    }).await.expect("durable ledger QUIC fixture timeout");
+}
