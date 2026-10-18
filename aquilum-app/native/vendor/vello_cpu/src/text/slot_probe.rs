@@ -11,6 +11,7 @@
 
 use super::*;
 use core::sync::atomic::{AtomicUsize, Ordering};
+use kurbo::Shape as _;
 
 const PAGE_WIDTH: u16 = 160;
 const PAGE_HEIGHT: u16 = 120;
