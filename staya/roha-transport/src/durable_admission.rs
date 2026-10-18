@@ -33,8 +33,7 @@ const MAX_RECORDS: usize = 256;
 const HEADER_LEN: usize = 8 + 2 + 8 + 4 + 5 * 8;
 const ENTRY_LEN: usize = 32 + 32 + 8 + 1;
 const CHECKSUM_LEN: usize = 32;
-const MAX_SNAPSHOT_BYTES: usize =
-    HEADER_LEN + MAX_RECORDS * ENTRY_LEN + CHECKSUM_LEN;
+const MAX_SNAPSHOT_BYTES: usize = HEADER_LEN + MAX_RECORDS * ENTRY_LEN + CHECKSUM_LEN;
 const OWNER_FILE: &str = "owner.lock";
 const SNAPSHOT_FILE: &str = "reservations.v1";
 const NEXT_FILE: &str = "reservations.next";
@@ -92,11 +91,7 @@ pub struct DurableLedger {
     poisoned: bool,
 }
 
-fn take<'a>(
-    content: &'a [u8],
-    cursor: &mut usize,
-    size: usize,
-) -> Result<&'a [u8], DurableError> {
+fn take<'a>(content: &'a [u8], cursor: &mut usize, size: usize) -> Result<&'a [u8], DurableError> {
     let end = cursor
         .checked_add(size)
         .ok_or(DurableError::CorruptOrUnknownSnapshot)?;
@@ -176,7 +171,8 @@ fn decode_snapshot(
         .try_into()
         .map_err(|_| DurableError::CorruptOrUnknownSnapshot)?;
     let count = u32::from_le_bytes(count_bytes) as usize;
-    if count > MAX_RECORDS || count > limits.max_active
+    if count > MAX_RECORDS
+        || count > limits.max_active
         || data.len() != HEADER_LEN + count * ENTRY_LEN
     {
         return Err(DurableError::CorruptOrUnknownSnapshot);
@@ -201,15 +197,31 @@ fn decode_snapshot(
         if expected_bytes == 0 || expected_bytes > limits.max_object_bytes || status > 1 {
             return Err(DurableError::CorruptOrUnknownSnapshot);
         }
-        total = total.checked_add(expected_bytes).ok_or(DurableError::CorruptOrUnknownSnapshot)?;
+        total = total
+            .checked_add(expected_bytes)
+            .ok_or(DurableError::CorruptOrUnknownSnapshot)?;
         let peer_total = per_peer.entry(peer).or_default();
-        peer_total.0 = peer_total.0.checked_add(expected_bytes)
+        peer_total.0 = peer_total
+            .0
+            .checked_add(expected_bytes)
             .ok_or(DurableError::CorruptOrUnknownSnapshot)?;
-        peer_total.1 = peer_total.1.checked_add(1)
+        peer_total.1 = peer_total
+            .1
+            .checked_add(1)
             .ok_or(DurableError::CorruptOrUnknownSnapshot)?;
-        if total > limits.max_tracked_bytes || peer_total.0 > limits.max_peer_bytes
+        if total > limits.max_tracked_bytes
+            || peer_total.0 > limits.max_peer_bytes
             || peer_total.1 > limits.max_peer_active
-            || entries.insert(hash, Record { peer, expected_bytes, verified: status == 1 }).is_some()
+            || entries
+                .insert(
+                    hash,
+                    Record {
+                        peer,
+                        expected_bytes,
+                        verified: status == 1,
+                    },
+                )
+                .is_some()
         {
             return Err(DurableError::CorruptOrUnknownSnapshot);
         }
@@ -268,7 +280,8 @@ impl DurableLedger {
             .mode(0o600)
             .open(&lock_path)?;
         let lock_meta = fs::symlink_metadata(&lock_path)?;
-        if !lock_meta.is_file() || lock_meta.nlink() != 1
+        if !lock_meta.is_file()
+            || lock_meta.nlink() != 1
             || lock_meta.permissions().mode() & 0o077 != 0
         {
             return Err(DurableError::UnsafeDirectory);
@@ -317,9 +330,13 @@ impl DurableLedger {
         if self.poisoned {
             return Err(DurableError::PoisonedWriter);
         }
-        let reserved_bytes = self.entries.values().try_fold(0u64, |total, record| {
-            total.checked_add(record.expected_bytes)
-        }).ok_or(DurableError::CorruptOrUnknownSnapshot)?;
+        let reserved_bytes = self
+            .entries
+            .values()
+            .try_fold(0u64, |total, record| {
+                total.checked_add(record.expected_bytes)
+            })
+            .ok_or(DurableError::CorruptOrUnknownSnapshot)?;
         Ok(DurableSnapshot {
             objects: self.entries.len(),
             reserved_bytes,
@@ -332,7 +349,9 @@ impl DurableLedger {
         if self.poisoned {
             return Err(DurableError::PoisonedWriter);
         }
-        let generation = self.generation.checked_add(1)
+        let generation = self
+            .generation
+            .checked_add(1)
             .ok_or(DurableError::CorruptOrUnknownSnapshot)?;
         let bytes = encode_snapshot(self.limits, generation, &next)?;
         let result = (|| -> Result<(), DurableError> {
@@ -382,31 +401,42 @@ impl DurableLedger {
         let mut peer_count = 0usize;
         let mut peer_total = 0u64;
         for record in self.entries.values() {
-            current = current.checked_add(record.expected_bytes)
+            current = current
+                .checked_add(record.expected_bytes)
                 .ok_or(DurableError::BytesExhausted)?;
             if record.peer == peer_bytes {
                 peer_count += 1;
-                peer_total = peer_total.checked_add(record.expected_bytes)
+                peer_total = peer_total
+                    .checked_add(record.expected_bytes)
                     .ok_or(DurableError::PeerBytesExhausted)?;
             }
         }
         if peer_count >= self.limits.max_peer_active {
             return Err(DurableError::PeerSlotsExhausted);
         }
-        if current.checked_add(expected_bytes)
+        if current
+            .checked_add(expected_bytes)
             .filter(|sum| *sum <= self.limits.max_tracked_bytes)
             .is_none()
         {
             return Err(DurableError::BytesExhausted);
         }
-        if peer_total.checked_add(expected_bytes)
+        if peer_total
+            .checked_add(expected_bytes)
             .filter(|sum| *sum <= self.limits.max_peer_bytes)
             .is_none()
         {
             return Err(DurableError::PeerBytesExhausted);
         }
         let mut next = self.entries.clone();
-        next.insert(hash, Record { peer: peer_bytes, expected_bytes, verified: false });
+        next.insert(
+            hash,
+            Record {
+                peer: peer_bytes,
+                expected_bytes,
+                verified: false,
+            },
+        );
         self.commit(next)
     }
 
@@ -453,12 +483,12 @@ impl DurableLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iroh::SecretKey;
     use std::{
         process::{Command, Stdio},
         thread,
         time::Duration,
     };
-    use iroh::SecretKey;
 
     fn limits() -> AdmissionLimits {
         AdmissionLimits {
@@ -501,15 +531,20 @@ mod tests {
             assert_eq!(ledger.snapshot().unwrap().verified_objects, 1);
         }
         let mut reopened = DurableLedger::open(dir.path(), limits()).unwrap();
-        assert_eq!(reopened.snapshot().unwrap().reserved_bytes, data.len() as u64);
+        assert_eq!(
+            reopened.snapshot().unwrap().reserved_bytes,
+            data.len() as u64
+        );
         assert_eq!(reopened.snapshot().unwrap().verified_objects, 1);
         assert_eq!(reopened.snapshot().unwrap().generation, generation);
         let staging = dir.path().join("test-only-staged-object");
         fs::write(&staging, data).unwrap();
-        reopened.release_after_cleanup(key, || {
-            fs::remove_file(&staging)?;
-            File::open(dir.path())?.sync_all()
-        }).unwrap();
+        reopened
+            .release_after_cleanup(key, || {
+                fs::remove_file(&staging)?;
+                File::open(dir.path())?.sync_all()
+            })
+            .unwrap();
         assert_eq!(reopened.snapshot().unwrap().reserved_bytes, 0);
     }
 
@@ -529,7 +564,9 @@ mod tests {
         ));
         assert_eq!(recovered.snapshot().unwrap().reserved_bytes, 800);
         assert!(matches!(
-            recovered.release_after_cleanup(digest(b"1"), || Err(io::Error::other("staging still exists"))),
+            recovered.release_after_cleanup(digest(b"1"), || Err(io::Error::other(
+                "staging still exists"
+            ))),
             Err(DurableError::Io(_))
         ));
         assert_eq!(recovered.snapshot().unwrap().reserved_bytes, 800);
@@ -562,7 +599,11 @@ mod tests {
             DurableLedger::open(dir.path(), limits()),
             Err(DurableError::CorruptOrUnknownSnapshot)
         ));
-        fs::write(dir.path().join(NEXT_FILE), b"orphaned uncommitted transaction").unwrap();
+        fs::write(
+            dir.path().join(NEXT_FILE),
+            b"orphaned uncommitted transaction",
+        )
+        .unwrap();
         assert!(matches!(
             DurableLedger::open(dir.path(), limits()),
             Err(DurableError::InterruptedTransaction)
@@ -573,7 +614,10 @@ mod tests {
     fn changed_limits_or_unknown_dir_entry_cannot_reset_accounting() {
         let dir = temp_root();
         DurableLedger::open(dir.path(), limits()).unwrap();
-        let stricter = AdmissionLimits { max_tracked_bytes: 512, ..limits() };
+        let stricter = AdmissionLimits {
+            max_tracked_bytes: 512,
+            ..limits()
+        };
         assert!(matches!(
             DurableLedger::open(dir.path(), stricter),
             Err(DurableError::InvalidPolicy)
@@ -600,7 +644,9 @@ mod tests {
         let dir = temp_root();
         {
             let mut ledger = DurableLedger::open(dir.path(), limits()).unwrap();
-            ledger.reserve(peer(), digest(b"cannot silently erase capacity"), 900).unwrap();
+            ledger
+                .reserve(peer(), digest(b"cannot silently erase capacity"), 900)
+                .unwrap();
         }
         fs::remove_file(dir.path().join(SNAPSHOT_FILE)).unwrap();
         assert!(matches!(
@@ -701,7 +747,9 @@ mod tests {
     fn process_crash_reservation_helper() {
         let root = PathBuf::from(std::env::var("AKULA_LEDGER_TEST_ROOT").unwrap());
         let mut ledger = DurableLedger::open(&root, limits()).unwrap();
-        ledger.reserve(peer(), digest(b"after hard kill"), 900).unwrap();
+        ledger
+            .reserve(peer(), digest(b"after hard kill"), 900)
+            .unwrap();
         fs::write(root.join("ready.flag"), b"reserved and synced").unwrap();
         loop {
             thread::sleep(Duration::from_millis(100));
