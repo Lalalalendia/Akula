@@ -195,13 +195,14 @@ async fn a_get_can_be_allowed_without_enabling_push_or_other_reads() {
 /// with one application-level receipt per 64KiB fragment.
 async fn roundtrip_staya(
     source: &StayaTransport, receiver: &StayaTransport, payload: &[u8],
-) -> (usize, u128) {
+) -> (usize, u128, u64, u64, u64, u64) {
     let (incoming, outgoing) = tokio::try_join!(
         receiver.accept_one(), source.connect(receiver.address()),
     ).expect("local Staya QUIC connected");
     let manifest = TransferManifest::for_bytes(payload).expect("bounded source");
     let mut staged = VerifiedAssembly::new(manifest).expect("staging");
     let mut accounting = 0usize;
+    let traffic_before = outgoing.stats();
     let start = Instant::now();
     for (i, data) in payload.chunks(MAX_CHUNK_BYTES).enumerate() {
         let offset = (i * MAX_CHUNK_BYTES) as u64;
@@ -229,9 +230,14 @@ async fn roundtrip_staya(
     }
     assert_eq!(staged.complete_bytes(), Some(payload), "Staya restored wrong bytes");
     let us = start.elapsed().as_micros();
+    let traffic_after = outgoing.stats();
+    let tx_bytes = traffic_after.udp_tx.bytes.saturating_sub(traffic_before.udp_tx.bytes);
+    let rx_bytes = traffic_after.udp_rx.bytes.saturating_sub(traffic_before.udp_rx.bytes);
+    let tx_packets = traffic_after.udp_tx.datagrams.saturating_sub(traffic_before.udp_tx.datagrams);
+    let rx_packets = traffic_after.udp_rx.datagrams.saturating_sub(traffic_before.udp_rx.datagrams);
     outgoing.close(0u8.into(), b"test done");
     incoming.close(0u8.into(), b"test done");
-    (accounting, us)
+    (accounting, us, tx_bytes, rx_bytes, tx_packets, rx_packets)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -268,21 +274,30 @@ async fn compare_real_quic_verified_stream_against_existing_staya_frames() {
         for (payload, hash) in inputs {
             // Both measurements exclude connection setup, store import,
             // File Gate, network-layer IP/TLS overhead, and durable receipt.
-            let (staya_bytes, staya_us) = roundtrip_staya(&a, &b, &payload).await;
+            let (staya_bytes, staya_us, staya_udp_tx, staya_udp_rx, staya_udp_tx_packets, staya_udp_rx_packets) =
+                roundtrip_staya(&a, &b, &payload).await;
             let connection = blob_peer
                 .connect(router.endpoint().addr(), iroh_blobs::ALPN)
                 .await.expect("blob QUIC");
+            let traffic_before = connection.stats();
             let started = Instant::now();
             let (received, stats) = get_blob(connection.clone(), hash)
                 .bytes_and_stats().await.expect("verified blob fetch");
             let blob_us = started.elapsed().as_micros();
+            let traffic_after = connection.stats();
+            let blob_udp_tx = traffic_after.udp_tx.bytes.saturating_sub(traffic_before.udp_tx.bytes);
+            let blob_udp_rx = traffic_after.udp_rx.bytes.saturating_sub(traffic_before.udp_rx.bytes);
+            let blob_udp_tx_packets = traffic_after.udp_tx.datagrams.saturating_sub(traffic_before.udp_tx.datagrams);
+            let blob_udp_rx_packets = traffic_after.udp_rx.datagrams.saturating_sub(traffic_before.udp_rx.datagrams);
             assert_eq!(received.as_ref(), payload.as_slice());
             // These counters have distinct scopes and MUST NOT be compared
             // as equivalent full IP/UDP wire bytes.
             println!(
-                "P2P_BLOB_AB source=isolated_quic size={} staya_application_bytes_including_receipts={} staya_elapsed_us={} blobs_receiver_protocol_bytes={} blobs_elapsed_us={} verified=true direct_only=true",
+                "P2P_BLOB_AB source=isolated_quic size={} staya_application_bytes_including_receipts={} staya_elapsed_us={} blobs_receiver_protocol_bytes={} blobs_elapsed_us={} staya_udp_tx_bytes={} staya_udp_rx_bytes={} staya_udp_tx_datagrams={} staya_udp_rx_datagrams={} blobs_udp_tx_bytes={} blobs_udp_rx_bytes={} blobs_udp_tx_datagrams={} blobs_udp_rx_datagrams={} verified=true direct_only=true",
                 payload.len(), staya_bytes, staya_us,
                 stats.total_bytes_read(), blob_us,
+                staya_udp_tx, staya_udp_rx, staya_udp_tx_packets, staya_udp_rx_packets,
+                blob_udp_tx, blob_udp_rx, blob_udp_tx_packets, blob_udp_rx_packets,
             );
             connection.close(0u8.into(), b"done");
         }
