@@ -156,6 +156,7 @@ pub use s3_transport::{
     S3SelectiveReadError, S3SelectiveRevisionPreview,
     S3CoordSidecarReadError, S3CoordSidecarPreview,
     S3PinnedV2ReadError, S3PinnedV2ReadPreview,
+    S3CoordOfflineChainError, S3CoordOfflineChainPreview,
     S3VerifiedHintsError, S3VerifiedHintsJournal,
     plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError,
 };

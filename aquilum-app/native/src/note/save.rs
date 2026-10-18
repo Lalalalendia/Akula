@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use aquilum_core::Core;
 use aquilum_core::documents::conflict::{ConflictCause, ConflictReport};
@@ -16,6 +17,36 @@ pub enum Outcome {
     Copied { copy: String, disk: Option<crop::Rope> },
     Unsaved,
     Failed(String),
+    /// The primary file/history may have changed; never resubmit this save.
+    NeedsReview(String),
+}
+
+/// Serialize all saves already queued for a single note. If any write returns
+/// an uncertain result, subsequent queued jobs refuse BEFORE File Gate I/O.
+/// UI reads only the atomic flag; it never waits on the disk-write mutex.
+#[derive(Default)]
+pub(super) struct SaveSafety {
+    writer: Mutex<Option<String>>,
+    needs_review: AtomicBool,
+}
+
+impl SaveSafety {
+    pub(super) fn held(&self) -> bool {
+        self.needs_review.load(Ordering::Acquire)
+    }
+
+    pub(super) fn run(&self, operation: impl FnOnce() -> Outcome) -> Outcome {
+        let mut state = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(reason) = state.as_ref() {
+            return Outcome::NeedsReview(reason.clone());
+        }
+        let result = operation();
+        if let Outcome::NeedsReview(reason) = &result {
+            *state = Some(reason.clone());
+            self.needs_review.store(true, Ordering::Release);
+        }
+        result
+    }
 }
 
 fn write(core: &Core, path: &PathBuf, text: &crop::Rope, hash: &Mutex<String>) -> Outcome {
@@ -27,6 +58,7 @@ fn write(core: &Core, path: &PathBuf, text: &crop::Rope, hash: &Mutex<String>) -
             *hash.lock().unwrap_or_else(PoisonError::into_inner) = result.hash;
             Outcome::Saved
         }
+        Err(FileCommandError::NeedsReview { message }) => Outcome::NeedsReview(message),
         Err(FileCommandError::Conflict { .. }) => {
             let report = ConflictReport { cause: ConflictCause::Diverged, disk_hash: None, synced_hash: Some(expected) };
             let offset = i64::from(chrono::Local::now().offset().local_minus_utc());
@@ -52,24 +84,51 @@ fn write(core: &Core, path: &PathBuf, text: &crop::Rope, hash: &Mutex<String>) -
 
 fn guard_save(write: impl FnOnce() -> Outcome) -> Outcome {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(write))
-        .unwrap_or_else(|_| Outcome::Failed("background save panicked".to_owned()))
+        // Panic location is unknown: the primary bytes might already have
+        // been replaced. Retrying is unsafe even if the worker recovered.
+        .unwrap_or_else(|_| Outcome::NeedsReview("background save panicked; disk state uncertain".to_owned()))
 }
 
-pub fn queue(core: Arc<Core>, path: PathBuf, text: crop::Rope, hash: Arc<Mutex<String>>, done: Sender<Outcome>) {
+pub fn queue(
+    core: Arc<Core>, path: PathBuf, text: crop::Rope,
+    hash: Arc<Mutex<String>>, done: Sender<Outcome>,
+    safety: Arc<SaveSafety>,
+) {
     crate::disk::run(move || {
-        // Always acknowledge the job, including a panic in a storage adapter.
-        // Otherwise Note::queued never drains and the editor cannot retry.
-        let _ = done.send(guard_save(|| write(&core, &path, &text, &hash)));
+        // Hold one per-note serialization guard ACROSS the real File Gate and
+        // HistoryService call, not just when processing the response. A second
+        // already-queued save cannot race ahead of an uncertain first result.
+        let outcome = safety.run(|| guard_save(|| write(&core, &path, &text, &hash)));
+        let _ = done.send(outcome);
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{guard_save, Outcome};
+    use super::{guard_save, Outcome, SaveSafety};
+    use std::cell::Cell;
 
     #[test]
-    fn panicking_save_is_reported_as_failure_instead_of_losing_its_acknowledgement() {
+    fn panicking_save_is_a_non_replayable_uncertain_result() {
         let outcome = guard_save(|| panic!("intentional failing save"));
-        assert!(matches!(outcome, Outcome::Failed(reason) if reason == "background save panicked"));
+        assert!(matches!(outcome, Outcome::NeedsReview(reason) if reason.contains("disk state uncertain")));
+    }
+
+    #[test]
+    fn queued_saves_are_refused_after_first_ambiguous_ack() {
+        let safety = SaveSafety::default();
+        let calls = Cell::new(0);
+        let first = safety.run(|| {
+            calls.set(calls.get() + 1);
+            Outcome::NeedsReview("primary bytes may be published".into())
+        });
+        assert!(matches!(first, Outcome::NeedsReview(_)));
+        assert!(safety.held());
+        let later = safety.run(|| {
+            calls.set(calls.get() + 1);
+            Outcome::Saved
+        });
+        assert!(matches!(later, Outcome::NeedsReview(_)));
+        assert_eq!(calls.get(), 1, "already queued worker must not replay File Gate");
     }
 }
