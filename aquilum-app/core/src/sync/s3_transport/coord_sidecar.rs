@@ -155,32 +155,10 @@ impl AwsS3ProbeClient {
             return Err(S3CoordSidecarReadError::InvalidHistory);
         }
 
-        let mut seen = BTreeSet::new();
-        let mut verified_pack_bytes = 0_u64;
-        for pack in letter.packs() {
-            let start = pack.first_revision_index as usize;
-            let end = start + pack.revision_count as usize;
-            let key = keyspace.immutable_blob_key(&pack.pack_blake3)?;
-            let payload = self.get_bounded(&key, MAX_PACK_BYTES as u64).await?;
-            if payload.blake3 != pack.pack_blake3
-                || payload.object.byte_length != pack.byte_length as u64
-            {
-                return Err(S3CoordSidecarReadError::InvalidPackPayload);
-            }
-            let descriptor = PackDescriptor {
-                key, digest: pack.pack_blake3.clone(),
-                references: letter.revisions()[start..end].to_vec(),
-            };
-            ingest_verified_pack(
-                &payload.bytes, &descriptor, &mut dag, &mut seen,
-            ).map_err(|_| S3CoordSidecarReadError::InvalidPackPayload)?;
-            verified_pack_bytes = verified_pack_bytes
-                .checked_add(payload.bytes.len() as u64)
-                .ok_or(S3CoordSidecarReadError::InvalidPackPayload)?;
-        }
-
         let expected: BTreeSet<_> = coverage.added_revision_ids.iter()
             .copied().collect();
+        let (verified_pack_count, verified_pack_bytes) =
+            self.verify_letter_packs(&letter, &expected, &mut dag).await?;
         if seen != expected
             || dag.pending_len() != 0
             || dag.active_len() != current_pinned.len()
@@ -199,11 +177,53 @@ impl AwsS3ProbeClient {
         Ok(S3CoordSidecarPreview {
             generation: coverage.generation,
             newly_verified_revisions: coverage.added_revision_ids.len(),
-            newly_verified_packs: coverage.required_pack_count,
+            newly_verified_packs: verified_pack_count,
             checked_pack_bytes: verified_pack_bytes,
             new_revision_ids: coverage.added_revision_ids,
             requires_full_apply_gate: true,
         })
+    }
+}
+
+
+impl AwsS3ProbeClient {
+    /// One implementation of strict SDK pack/membership verification for both
+    /// direct and multi-generation read-only V1-bound envelope paths.
+    /// No caller can turn this result into a File Gate write receipt.
+    pub(super) async fn verify_letter_packs(
+        &self,
+        letter: &S3DeltaEnvelopeV2,
+        expected: &BTreeSet<RevisionId>,
+        dag: &mut RevisionDag,
+    ) -> Result<(usize, u64), S3CoordSidecarReadError> {
+        let keyspace = self.bound_keyspace();
+        let mut seen = BTreeSet::new();
+        let mut verified_pack_bytes = 0_u64;
+        for pack in letter.packs() {
+            let start = pack.first_revision_index as usize;
+            let end = start + pack.revision_count as usize;
+            let key = keyspace.immutable_blob_key(&pack.pack_blake3)?;
+            let payload = self.get_bounded(&key, MAX_PACK_BYTES as u64).await?;
+            if payload.blake3 != pack.pack_blake3
+                || payload.object.byte_length != pack.byte_length as u64
+            {
+                return Err(S3CoordSidecarReadError::InvalidPackPayload);
+            }
+            let descriptor = PackDescriptor {
+                key, digest: pack.pack_blake3.clone(),
+                references: letter.revisions()[start..end].to_vec(),
+            };
+            ingest_verified_pack(
+                &payload.bytes, &descriptor, dag, &mut seen,
+            ).map_err(|_| S3CoordSidecarReadError::InvalidPackPayload)?;
+            verified_pack_bytes = verified_pack_bytes
+                .checked_add(payload.bytes.len() as u64)
+                .ok_or(S3CoordSidecarReadError::InvalidPackPayload)?;
+        }
+        if &seen != expected || dag.pending_len() != 0 {
+            return Err(S3CoordSidecarReadError::InvalidHistory);
+        }
+        Ok((letter.packs().len(), verified_pack_bytes))
     }
 }
 
