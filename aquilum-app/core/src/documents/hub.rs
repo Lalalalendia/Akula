@@ -179,6 +179,19 @@ impl DocumentHub {
         {
             return Err(refused("durable editor registration requires a real directory".into()));
         }
+        // Do not arm a root while DocumentHub already holds live editor
+        // sessions or unsent CRDT buffers there. Keep sessions locked through
+        // registering the root, preserving sessions -> store -> roots order.
+        // A future host must additionally quiesce standalone/native writers
+        // before enabling its File Gate guarded route.
+        let sessions = self.sessions.lock()
+            .map_err(|_| refused("document sessions lock poisoned".into()))?;
+        if sessions.values().any(|entry| {
+            entry.path.starts_with(&physical) || std::fs::canonicalize(&entry.path)
+                .is_ok_and(|note| note.starts_with(&physical))
+        }) {
+            return Err(refused("cannot arm durable editor while its documents are open".into()));
+        }
         {
             let store = self.store.lock()
                 .map_err(|_| refused("document store lock poisoned".into()))?;
