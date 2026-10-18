@@ -304,6 +304,39 @@ mod mipmap_integration_tests {
     }
 
     #[test]
+    fn multiple_damage_regions_share_one_image_cache_epoch() {
+        let mut painter = super::super::Painter::new(128, 128, super::super::settings(0));
+        let brush = test_brush(128, 128);
+
+        painter.begin(0, 0, 128, 128);
+        let (first, _) = brush_to_paint_candidate(
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut painter.images,
+            Affine::scale(1.0 / 8.0), Affine::IDENTITY, true,
+        );
+        let Brush::Image(first) = first else { panic!("expected mip image") };
+        let ImageSource::Pixmap(first) = first.image else { panic!("expected pixmap") };
+        assert_eq!(painter.images.mips.len(), 2);
+        let epoch = painter.images.frame;
+
+        // Same visual frame, second dirty rectangle. Both Vello context and
+        // clip reset, but the very same mip source must remain reusable.
+        painter.begin_region(16, 0, 64, 128);
+        assert_eq!(painter.images.frame, epoch);
+        let (second, _) = brush_to_paint_candidate(
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut painter.images,
+            Affine::scale(1.0 / 8.0), Affine::IDENTITY, true,
+        );
+        let Brush::Image(second) = second else { panic!("expected mip image") };
+        let ImageSource::Pixmap(second) = second.image else { panic!("expected pixmap") };
+        assert!(Arc::ptr_eq(&first, &second), "do not rebuild mip per dirty region");
+
+        // New frame advances the epoch, but the latest mip may still be used.
+        painter.begin(0, 0, 128, 128);
+        assert_eq!(painter.images.frame, epoch + 1);
+        assert_eq!(painter.images.mips.len(), 2);
+    }
+
+    #[test]
     fn denied_mip_request_does_not_allocate_intermediate_levels() {
         let brush = test_brush(128, 128);
         let mut images = Images::default();
