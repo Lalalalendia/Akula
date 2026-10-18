@@ -1,0 +1,89 @@
+# B6b-2a diagnostic only. Never used to package the public Akula build.
+name: Installed host Unix owner preflight (non-release)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/host_install_unix_root.rs'
+      - 'aquilum-app/core/src/sync/host_install_witness.rs'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - '.github/workflows/sync-installed-os-owner-witness.yml'
+      - 'docs/sync/adr-0038-unix-root-owned-install-receipt.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix-root-receipt:
+    name: OS root receipt preflight / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-b6b2a
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-b6b2a
+          key: b6b2a-${{ matrix.os }}
+          cache-workspace-crates: true
+      - name: Independent OS-root test receipt (no production issuance)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Disposable CI-owned proof only: the receipt deliberately contains
+          # no host IDs or authority, and does not open the user's SQLite DB.
+          # No privilege is requested by the release installer or app.
+          parent="/opt/akula-b6b2a-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if test -e "$parent" || test -L "$parent"; then
+            echo 'A prior OS-owner fixture exists; do not adopt or reset it'
+            exit 1
+          fi
+          sudo mkdir -m 0755 "$parent"
+          receipt="$parent/receipt.json"
+          printf 'CI-only root-owner probe; NOT a valid Akula receipt\n' |
+            sudo tee "$receipt" >/dev/null
+          sudo chown 0 "$parent" "$receipt"
+          sudo chmod 0755 "$parent"
+          sudo chmod 0444 "$receipt"
+          echo "AKULA_B6B2_ROOT_RECEIPT=$receipt" >> "$GITHUB_ENV"
+      - name: No AWS dependency in Unix-root witness-only build
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo tree --locked -p aquilum-core --no-default-features \
+            --features sync-installed-host-unix-root-witness > owner-deps.txt
+          if grep -E 'aws-(config|sdk-s3|sdk-sts) ' owner-deps.txt; then
+            echo 'Unexpected AWS dependency in owner-only receipt gate'
+            exit 1
+          fi
+      - name: Real physical paths, user-owned rejection and independent process
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --no-default-features --features sync-installed-host-unix-root-witness host_install_unix_root::tests -- --nocapture
+      - name: Confirm ordinary unwitnessed installed-host feature compiles independently
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --no-default-features --features sync-installed-host
+      - name: Remove only this disposable elevated test witness
+        if: always() && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent="/opt/akula-b6b2a-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if test -f "$parent/receipt.json" && ! test -L "$parent/receipt.json"; then
+            sudo rm -f "$parent/receipt.json"
+          fi
+          if test -d "$parent" && ! test -L "$parent"; then
+            sudo rmdir "$parent"
+          fi
