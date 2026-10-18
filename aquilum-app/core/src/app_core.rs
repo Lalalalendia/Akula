@@ -136,7 +136,7 @@ impl HostUnenrolledEpochPermit<'_> {
 impl Core {
     /// Opens all stores under `app_data_dir`, which the host picks.
     pub fn open(app_data_dir: &Path, events: Arc<dyn EventSink>) -> Arc<Self> {
-        Self::open_inner(app_data_dir, events, #[cfg(feature = "sync-s3")] None)
+        Self::open_inner(app_data_dir, events, None)
     }
 
     /// P0-B2a *explicit* host-bound Core for a cooperating installer-owned
@@ -154,8 +154,10 @@ impl Core {
     fn open_inner(
         app_data_dir: &Path,
         events: Arc<dyn EventSink>,
-        #[cfg(feature = "sync-s3")] installed_host_custody_db: Option<PathBuf>,
+        installed_host_custody_db: Option<PathBuf>,
     ) -> Arc<Self> {
+        #[cfg(not(feature = "sync-s3"))]
+        let _ = &installed_host_custody_db;
         let core = Arc::new_cyclic(|this: &Weak<Core>| {
             let changed = Arc::clone(&events);
             let notifier: ChangeNotifier = Arc::new(move |paths| {
