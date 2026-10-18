@@ -1101,6 +1101,75 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                 };
                 let tint = image.tint.as_ref();
 
+                // Strictly opt-in diagnostic of one *screen* pixel. A global
+                // lookup target is cached to keep this out of the shipping
+                // fast path when no env switch is supplied. The sampled atlas
+                // texel and its neighborhood distinguish sampling coordinates
+                // from changes to the glyph cache page and final compositing.
+                #[cfg(feature = "std")]
+                {
+                    static TRACE_PIXEL: std::sync::OnceLock<Option<(u32, u32)>> =
+                        std::sync::OnceLock::new();
+                    let target = TRACE_PIXEL.get_or_init(|| {
+                        let raw = std::env::var("AQ_TRACE_ATLAS_PIXEL").ok()?;
+                        let (x, y) = raw.split_once(',')?;
+                        Some((x.parse().ok()?, y.parse().ok()?))
+                    });
+                    if let Some((target_x, target_y)) = *target {
+                        if tint.is_some_and(|t| {
+                            matches!(t.mode, vello_common::paint::TintMode::AlphaMask)
+                        }) && target_x >= u32::from(sample_x)
+                            && target_x < u32::from(sample_x) + width as u32
+                            && target_y >= u32::from(sample_y)
+                            && target_y < u32::from(sample_y) + Tile::HEIGHT as u32
+                            && pixmap.width() > 0
+                            && pixmap.height() > 0
+                        {
+                            let world_pixel = vello_common::kurbo::Point::new(
+                                target_x as f64 + PIXEL_CENTER_OFFSET,
+                                target_y as f64 + PIXEL_CENTER_OFFSET,
+                            );
+                            let atlas_pixel = image.transform * world_pixel;
+                            if atlas_pixel.x.is_finite() && atlas_pixel.y.is_finite() {
+                                let texel_x = ((atlas_pixel.x as f32).max(0.0)
+                                    .min(f32::from(pixmap.width() - 1))) as u32;
+                                let texel_y = ((atlas_pixel.y as f32).max(0.0)
+                                    .min(f32::from(pixmap.height() - 1))) as u32;
+                                let mut neighborhood = [0_u32; 9];
+                                for (index, (dx, dy)) in [
+                                    (-1_i32, -1_i32), (0, -1), (1, -1),
+                                    (-1, 0), (0, 0), (1, 0),
+                                    (-1, 1), (0, 1), (1, 1),
+                                ].into_iter().enumerate() {
+                                    let nx = (i64::from(texel_x) + i64::from(dx))
+                                        .clamp(0, i64::from(pixmap.width() - 1)) as u32;
+                                    let ny = (i64::from(texel_y) + i64::from(dy))
+                                        .clamp(0, i64::from(pixmap.height() - 1)) as u32;
+                                    neighborhood[index] = pixmap
+                                        .sample_idx(ny * u32::from(pixmap.width()) + nx)
+                                        .to_u32();
+                                }
+                                let image_id = match &image.source {
+                                    ImageSource::OpaqueId { id, .. } => format!("{id:?}"),
+                                    _ => "inline".to_string(),
+                                };
+                                eprintln!(
+                                    "VELLO_ATLAS_TEXEL target=({target_x},{target_y}) \
+                                     chunk=({sample_x},{sample_y}) origin={:?} \
+                                     page={}x{} image_id={} quality={:?} \
+                                     uv=({:.9},{:.9}) texel=({texel_x},{texel_y}) \
+                                     rgba9={neighborhood:08x?} tint={:?} \
+                                     transform={:?}",
+                                    self.origin, pixmap.width(), pixmap.height(),
+                                    image_id, image.sampler.quality,
+                                    atlas_pixel.x, atlas_pixel.y,
+                                    tint.map(|t| t.color), image.transform,
+                                );
+                            }
+                        }
+                    }
+                }
+
                 match (image.has_skew(), image.nearest_neighbor()) {
                     (false, false) => {
                         // Axis-aligned with filtering - use optimized plain painters
