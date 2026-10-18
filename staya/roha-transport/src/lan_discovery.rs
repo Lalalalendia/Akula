@@ -4,7 +4,6 @@ use mdns_sd::{DaemonEvent, ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::{
     collections::BTreeSet,
     net::{IpAddr, SocketAddr},
-    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -27,7 +26,9 @@ pub fn candidate(
     if port == 0 || ip.is_unspecified() || ip.is_multicast() || ip.is_loopback() {
         return None;
     }
-    let id = EndpointId::from_str(id).ok()?;
+    // Roha displays EndpointId as 64 hex chars, exceeding DNS's 63-byte
+    // limit for a single instance label. z-base-32 is 52 characters.
+    let id = EndpointId::from_z32(id).ok()?;
     allowed.contains(&id).then_some(LanCandidate {
         id,
         address: SocketAddr::new(ip, port),
@@ -61,7 +62,8 @@ pub fn advertise(id: EndpointId, address: SocketAddr) -> Result<ServiceDaemon, S
         }
         eprintln!("mdns_publisher_diagnostics announced={announces} daemon_errors={errors}");
     });
-    let name = id.to_string();
+    let name = id.to_z32();
+    debug_assert!(name.len() <= 63);
     let hostname = format!("staya-{}.local.", &name[..12]);
     let service = ServiceInfo::new(
         SERVICE,
@@ -141,11 +143,11 @@ mod tests {
         let known = iroh::SecretKey::generate().public();
         let stranger = iroh::SecretKey::generate().public();
         let allow = BTreeSet::from([known]);
-        let id = known.to_string();
+        let id = known.to_z32();
         assert!(candidate(&id, 42424, "192.168.1.3".parse().unwrap(), &allow).is_some());
         assert!(
             candidate(
-                &stranger.to_string(),
+                &stranger.to_z32(),
                 42424,
                 "192.168.1.3".parse().unwrap(),
                 &allow
@@ -156,5 +158,13 @@ mod tests {
         assert!(candidate(&id, 42424, "127.0.0.1".parse().unwrap(), &allow).is_none());
         assert!(candidate(&id, 42424, "0.0.0.0".parse().unwrap(), &allow).is_none());
         assert!(candidate("bad", 42424, "192.168.1.3".parse().unwrap(), &allow).is_none());
+        // RFC 1035 DNS labels are at most 63 octets; EndpointId::Display
+        // produces 64-character lowercase hex, unsuitable as an instance name.
+        assert_eq!(known.to_string().len(), 64);
+        assert_eq!(known.to_z32().len(), 52);
+        assert_eq!(EndpointId::from_z32(&id).unwrap(), known);
+        assert!(candidate(
+            &known.to_string(), 42424, "192.168.1.3".parse().unwrap(), &allow
+        ).is_none());
     }
 }
