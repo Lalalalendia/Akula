@@ -62,6 +62,49 @@ pub struct S3PinnedV2ReadPreview {
     pub verified_pack_bytes: u64,
     pub document_head_count: usize,
     pub requires_explicit_file_gate_review: bool,
+    // Internal evidence minted ONLY after the complete bounded S3 V2 read.
+    // These fields are not a signature, principal credential, or TOFU grant.
+    verified_root_blake3: String,
+    verified_root_etag: String,
+    verified_scope_fingerprint: String,
+}
+
+impl S3PinnedV2ReadPreview {
+    /// Only an exact full-verification receipt for this independent account
+    /// binding, immutable root bytes and opaque S3 ETag may update a
+    /// separate private SQLite *remote observation anchor*.
+    pub(crate) fn attests_exact_root(
+        &self,
+        scope: &S3RemoteAnchorScope,
+        root: &S3PackedHeadV2,
+        etag: &str,
+    ) -> bool {
+        self.requires_explicit_file_gate_review
+            && self.generation == root.generation()
+            && self.verified_scope_fingerprint == scope.binding_fingerprint()
+            && self.verified_root_blake3
+                == root.digest(scope.keyspace()).unwrap_or_default()
+            && self.verified_root_etag == etag
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_trust_anchor_test(
+        scope: &S3RemoteAnchorScope,
+        root: &S3PackedHeadV2,
+        etag: &str,
+    ) -> Self {
+        Self {
+            generation: root.generation(),
+            verified_revisions: 1,
+            verified_packs: 1,
+            verified_pack_bytes: 1,
+            document_head_count: 1,
+            requires_explicit_file_gate_review: true,
+            verified_root_blake3: root.digest(scope.keyspace()).unwrap(),
+            verified_root_etag: etag.to_owned(),
+            verified_scope_fingerprint: scope.binding_fingerprint().to_owned(),
+        }
+    }
 }
 
 /// A complete immutable manifest ref index. Neither S3 LIST nor an ETag is
@@ -342,6 +385,9 @@ impl AwsS3ProbeClient {
             verified_pack_bytes: pack_bytes,
             document_head_count: head_count,
             requires_explicit_file_gate_review: true,
+            verified_root_blake3: root.digest(ns)?,
+            verified_root_etag: last.object.etag,
+            verified_scope_fingerprint: scope.binding_fingerprint().to_owned(),
         })
     }
 }
