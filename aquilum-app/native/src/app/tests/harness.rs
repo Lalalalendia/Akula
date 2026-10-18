@@ -7,8 +7,30 @@ impl Harness {
 
     pub(super) fn with(real_vault: Option<&std::path::Path>, scale: f64) -> Self {
         let theme = theme::test_lock();
-        let vault = crate::test_dir::tempdir();
-        let data = crate::test_dir::tempdir();
+        // Frame-to-frame, cross-build A/B visual comparisons must not render
+        // two unrelated random tempfile basenames in the sidebar footer.
+        // This is strictly test-only and off unless explicitly requested by
+        // the single-process (and serially executed) Vello A/B workflow.
+        let stable_ab = std::env::var_os("AQ_CROSSOVER_AB_STABLE_VAULT").is_some();
+        let (vault, data) = if stable_ab {
+            let root = crate::workspace::normalize(&std::env::temp_dir());
+            // rand_bytes(0) is safe *only* for this CI-only, sequential,
+            // disposable fixture: create_new refuses to reuse stale dirs.
+            let vault = tempfile::Builder::new()
+                .prefix("akula-vello-ab-vault")
+                .rand_bytes(0)
+                .tempdir_in(&root)
+                .expect("create deterministic, isolated A/B vault");
+            let data = tempfile::Builder::new()
+                .prefix("akula-vello-ab-data")
+                .rand_bytes(0)
+                .tempdir_in(&root)
+                .expect("create deterministic, isolated A/B config");
+            eprintln!("VELLO_AB_FIXED_VAULT {}", vault.path().display());
+            (vault, data)
+        } else {
+            (crate::test_dir::tempdir(), crate::test_dir::tempdir())
+        };
         std::fs::write(vault.path().join("a.md"), "текст").unwrap();
         let mut config = AppConfig::default();
         config.ui.theme = if std::env::var_os("AQUILUM_BENCH_LIGHT").is_some() { "light".into() } else { "dark".into() };
