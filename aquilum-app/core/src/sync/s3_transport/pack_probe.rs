@@ -1,8 +1,9 @@
 //! SYNC-COORD-02b: bounded immutable pack verification, read-only only.
 //!
-//! The pure parser is used by a V1-pinned advisory S3 sidecar verifier;
-//! the pack sender/builder is kept test-only. This is NOT a new remote
-//! manifest, authenticated writer, File Gate operation or cloud publisher.
+//! The pure parser is used by a V1-pinned advisory S3 sidecar verifier.
+//! The bounded pack byte builder is also production-compiled as an inert
+//! serializer for a future authorized sender. It has NO S3 I/O or ability
+//! to publish a root, authenticate a writer or write through File Gate.
 //! Each member and the envelope must match the caller's independently
 //! verified immutable S3 manifest references. The in-memory test descriptor
 //! is not a durable trust root and may NOT grant deletion, publication,
