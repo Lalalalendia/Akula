@@ -44,3 +44,23 @@ If V1 still must upload every full immutable new blob, patching only the V2 side
 ## Gate for further development
 
 The public repository test corpus is NOT representative user editing behavior. Do not claim average production speedups from these fixtures. If a clear net byte reduction remains with real opt-in histories, implement a separately gated Rust codec with robust negative tests and explicit capability negotiation. The next mandatory Akula milestone remains the host-custody / end-to-end safe File Gate sync path, not this optimization.
+
+
+## Measured first A/B — run 39133595383 (2026-10-18)
+
+The first real Actions run on PR #270 passed its format/negative tests and all **42** public-repository Markdown scenarios. [Workflow and machine-readable JSONL artifact](https://github.com/Lalalalendia/Akula/actions/runs/39133595383), artifact ID **12138976912**.
+
+| Hypothetical transfer over 42 independent generated edits | Bytes |
+| --- | ---: |
+| Full text compressed with Zstd-3 | 311,819 |
+| One-region splice + Zstd-3, forced for all edits | 122,849 |
+| Zstd patch-from, forced for all edits | 86,519 |
+| Example 128-byte / 15% adaptive selection | **86,222** |
+
+The example policy chose Zstd patch-from **21** times, splice **15** times and full Zstd **6** times. It reduced message-envelope bytes **72.35%** on *this specific manufactured workload*. In six complete rewrites it selected full Zstd (no claimed saving). The largest improvements were one-character changes (38,943 -> 611 B) and scattered 10 edits (39,140 -> 1,099 B), aggregated across six files.
+
+Across these short CLI-driven scenarios the medians were **1.33 ms** full Zstd encode, **2.65 ms** splice+Zstd encode and **1.35 ms** patch-from encode; corresponding decode medians **1.29 ms**, **1.26 ms** and **1.48 ms**. These include external process startup and are NOT equivalent to an in-process Rust codec benchmark or end-to-end S3 latency.
+
+**Very important denominator:** current V1 still stores an independent full blob for every new content revision. Across the same 42 hypothetical changes that adds about **655,438 raw bytes**, untouched by this experiment. In an artificially simplified scenario with *exactly one* V2 sidecar transfer alongside *exactly one* full V1 upload per change, total moves from 967,257 B to 741,660 B — at most **23.32%** before S3 requests, manifests, old-base retrieval and metadata. Even this is NOT an observed S3 result and would be wrong for many real workflows. Do not report 72.35% as upload saving, sync speed, user storage reduction or energy reduction.
+
+The benchmark data are public product documentation and a test Markdown fixture, not real note edit histories. Before choosing a production algorithm, test actual version pairs (including multi-hour offline edit sequences and documents over 32 KiB), cold/missing base, independent V1 availability, realistic RTT and cloud billable request counts. Keep P0 host-admission priorities ahead of this optimization.
