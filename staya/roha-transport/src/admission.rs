@@ -191,8 +191,8 @@ impl StageLease {
     /// Only exact full-size BLAKE3 bytes count as verified. This is NOT a
     /// File Gate publication permit; caller must retain lease until cleanup.
     pub fn verify(&mut self, full_bytes: &[u8]) -> Result<(), AdmissionError> {
-        let len = u64::try_from(full_bytes.len())
-            .map_err(|_| AdmissionError::VerificationFailed)?;
+        let len =
+            u64::try_from(full_bytes.len()).map_err(|_| AdmissionError::VerificationFailed)?;
         if len != self.expected_bytes || *blake3::hash(full_bytes).as_bytes() != self.hash {
             return Err(AdmissionError::VerificationFailed);
         }
@@ -255,16 +255,40 @@ mod tests {
     fn invalid_and_zero_limits_are_rejected() {
         let x = example_limits();
         for bad in [
-            AdmissionLimits { max_object_bytes: 0, ..x },
-            AdmissionLimits { max_tracked_bytes: 0, ..x },
-            AdmissionLimits { max_peer_bytes: 0, ..x },
+            AdmissionLimits {
+                max_object_bytes: 0,
+                ..x
+            },
+            AdmissionLimits {
+                max_tracked_bytes: 0,
+                ..x
+            },
+            AdmissionLimits {
+                max_peer_bytes: 0,
+                ..x
+            },
             AdmissionLimits { max_active: 0, ..x },
-            AdmissionLimits { max_peer_active: 0, ..x },
-            AdmissionLimits { max_object_bytes: 3000, ..x },
-            AdmissionLimits { max_peer_bytes: 3000, ..x },
-            AdmissionLimits { max_peer_active: 4, ..x },
+            AdmissionLimits {
+                max_peer_active: 0,
+                ..x
+            },
+            AdmissionLimits {
+                max_object_bytes: 3000,
+                ..x
+            },
+            AdmissionLimits {
+                max_peer_bytes: 3000,
+                ..x
+            },
+            AdmissionLimits {
+                max_peer_active: 4,
+                ..x
+            },
         ] {
-            assert!(matches!(StageBudget::new(bad), Err(AdmissionError::InvalidLimits)));
+            assert!(matches!(
+                StageBudget::new(bad),
+                Err(AdmissionError::InvalidLimits)
+            ));
         }
     }
 
@@ -350,7 +374,10 @@ mod tests {
         let body = b"verified exact content";
         let expected = *blake3::hash(body).as_bytes();
         let mut lease = budget.reserve(user, expected, body.len() as u64).unwrap();
-        assert_eq!(lease.verify(b"changed exact content"), Err(AdmissionError::VerificationFailed));
+        assert_eq!(
+            lease.verify(b"changed exact content"),
+            Err(AdmissionError::VerificationFailed)
+        );
         assert_eq!(budget.snapshot().unwrap().verified_objects, 0);
         assert_eq!(lease.verify(body), Ok(()));
         assert_eq!(budget.snapshot().unwrap().verified_objects, 1);
@@ -383,7 +410,8 @@ mod tests {
             max_peer_bytes: 3072,
             max_active: 3,
             max_peer_active: 3,
-        }).unwrap();
+        })
+        .unwrap();
         let user = peer();
         let start = Arc::new(Barrier::new(WORKERS));
         let finish = Arc::new(Barrier::new(WORKERS));
