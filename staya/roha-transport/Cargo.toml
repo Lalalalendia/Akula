@@ -17,6 +17,7 @@ blake3 = "1.8.5"
 [dev-dependencies]
 # Lab-only, disabled in native Akula. 0.103.1 contains the mandatory push EventMask fix.
 iroh-blobs = { version = "=0.103.1", default-features = false }
+futures-util = "0.3"
 
 [patch.crates-io]
 # Critical: iroh-blobs depends on crates.io iroh; unify it with our pinned Roha.
