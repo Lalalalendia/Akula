@@ -411,10 +411,62 @@ fn insert_and_render_outline(
 
     let subpixel_offset = subpixel_offset(cache_key.subpixel_x);
 
+    // Debug-only source fingerprint for the real outline glyph that later
+    // supplies a traced atlas texel. The no_std production crate uses no
+    // logging unless the explicit test environment variable is present.
+    #[cfg(feature = "std")]
+    let traced_outline = {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *ENABLED.get_or_init(|| std::env::var_os("AQ_TRACE_ATLAS_PIXEL").is_some()) {
+            use std::hash::{Hash, Hasher};
+            fn hash_point<H: Hasher>(h: &mut H, point: &kurbo::Point) {
+                point.x.to_bits().hash(h);
+                point.y.to_bits().hash(h);
+            }
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            glyph.scale.to_bits().hash(&mut hasher);
+            subpixel_offset.to_bits().hash(&mut hasher);
+            for element in glyph.path.elements() {
+                match element {
+                    kurbo::PathEl::MoveTo(p) => { 0_u8.hash(&mut hasher); hash_point(&mut hasher, p); }
+                    kurbo::PathEl::LineTo(p) => { 1_u8.hash(&mut hasher); hash_point(&mut hasher, p); }
+                    kurbo::PathEl::QuadTo(p0, p1) => {
+                        2_u8.hash(&mut hasher);
+                        hash_point(&mut hasher, p0);
+                        hash_point(&mut hasher, p1);
+                    }
+                    kurbo::PathEl::CurveTo(p0, p1, p2) => {
+                        3_u8.hash(&mut hasher);
+                        hash_point(&mut hasher, p0);
+                        hash_point(&mut hasher, p1);
+                        hash_point(&mut hasher, p2);
+                    }
+                    kurbo::PathEl::ClosePath => { 4_u8.hash(&mut hasher); }
+                }
+            }
+            Some((cache_key.clone(), hasher.finish(), glyph.path.elements().len()))
+        } else {
+            None
+        }
+    };
+
     let Some((atlas_slot, recorder)) = glyph_atlas.insert(image_cache, cache_key, raster_metrics)
     else {
         return CacheResult::AtlasFull;
     };
+
+    #[cfg(feature = "std")]
+    if let Some((key, path_hash, elements)) = traced_outline {
+        std::eprintln!(
+            "GLIFO_ATLAS_SLOT page={} slot=({},{},{},{}) \
+             path_hash={path_hash:016x} elements={elements} \\
+             scale_bits={:016x} subpixel_bits={:08x} \\
+             bearing=({},{}) key={key:?}",
+            atlas_slot.page_index, atlas_slot.x, atlas_slot.y,
+            atlas_slot.width, atlas_slot.height, glyph.scale.to_bits(),
+            subpixel_offset.to_bits(), raster_metrics.bearing_x, raster_metrics.bearing_y,
+        );
+    }
 
     render_outline_to_atlas(
         &glyph.path,
