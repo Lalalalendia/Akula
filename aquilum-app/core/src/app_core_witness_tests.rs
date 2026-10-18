@@ -89,8 +89,8 @@ fn compiler_pinned_witness_survives_cold_restart_and_refuses_foreign_empty_ledge
 
     // Only the already-provisioned shared host can enroll a protected root.
     fs::write(custody.join(LOCK_NAME), b"").unwrap();
-    let held = PinnedProbeRoot::open(&custody).unwrap()
-        .try_lock().unwrap().expect("exclusive custody fixture");
+    let custody_root = PinnedProbeRoot::open(&custody).unwrap();
+    let held = custody_root.try_lock().unwrap().expect("exclusive custody fixture");
     let physical = PinnedProbeRoot::open(&protected).unwrap().identity();
     host = SharedHostCustodyRegistry::open_existing(&db).unwrap();
     host.enroll(&HostCustodyRecord {
