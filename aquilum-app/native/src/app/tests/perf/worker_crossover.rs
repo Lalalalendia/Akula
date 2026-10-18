@@ -107,9 +107,9 @@ fn run_worker_case(case: &str, width: u32, height: u32, scale: f64, cover: bool,
     let _ = h.root.redraw();
     let (w, hh) = (width as u16, height as u16);
     let mut renderers = [
-        Renderer::new(WORKERS[0]),
-        Renderer::new(WORKERS[1]),
-        Renderer::new(WORKERS[2]),
+        Renderer::new_fixed_for_test(WORKERS[0]),
+        Renderer::new_fixed_for_test(WORKERS[1]),
+        Renderer::new_fixed_for_test(WORKERS[2]),
     ];
     let mut samples: [Vec<WorkerSample>; 3] =
         std::array::from_fn(|_| Vec::with_capacity((STEPS - 1) as usize));
