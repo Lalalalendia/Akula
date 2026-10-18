@@ -333,6 +333,14 @@ mod tests {
 
         let mut attacker_rehashed = descriptor.clone();
         attacker_rehashed.digest = blake3::hash(&damaged).to_hex().to_string();
+        // A changed digest with the *old* immutable object key is a distinct
+        // protocol violation, rejected before member-level content checks.
+        assert_eq!(ingest_verified_pack(&damaged, &attacker_rehashed, &mut dag, &mut seen),
+            Err(PackProbeError::Invalid));
+        // Even when the attacker also moves the payload under a key matching
+        // the recomputed outer digest, the original per-member BLAKE3 still
+        // rejects the tampered Markdown blob.
+        attacker_rehashed.key = ns.immutable_blob_key(&attacker_rehashed.digest).unwrap();
         assert_eq!(ingest_verified_pack(&damaged, &attacker_rehashed, &mut dag, &mut seen),
             Err(PackProbeError::IntegrityMismatch));
 
@@ -346,12 +354,14 @@ mod tests {
         extra.push(b'!');
         let mut checked = descriptor.clone();
         checked.digest = blake3::hash(&extra).to_hex().to_string();
+        checked.key = ns.immutable_blob_key(&checked.digest).unwrap();
         assert_eq!(ingest_verified_pack(&extra, &checked, &mut dag, &mut seen),
             Err(PackProbeError::Invalid));
 
         let mut truncated = bytes.clone();
         truncated.truncate(truncated.len() - 5);
         checked.digest = blake3::hash(&truncated).to_hex().to_string();
+        checked.key = ns.immutable_blob_key(&checked.digest).unwrap();
         assert_eq!(ingest_verified_pack(&truncated, &checked, &mut dag, &mut seen),
             Err(PackProbeError::Invalid));
         assert_eq!(dag.active_len(), 0);
