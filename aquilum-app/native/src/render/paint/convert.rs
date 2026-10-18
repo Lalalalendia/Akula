@@ -99,15 +99,30 @@ pub fn brush_to_paint_trial(
     effective_geometry: Affine,
     brush_transform: Affine,
 ) -> (PaintType, Affine) {
+    let enabled = !cfg!(feature = "installed")
+        && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1");
+    brush_to_paint_candidate(
+        brush, composite, images, effective_geometry, brush_transform, enabled,
+    )
+}
+
+// Testable decision path without changing process environment or allowing the
+// experimental setting to leak between concurrently running Rust tests.
+fn brush_to_paint_candidate(
+    brush: BrushRef<'_>,
+    composite: Composite,
+    images: &mut Images,
+    effective_geometry: Affine,
+    brush_transform: Affine,
+    enabled: bool,
+) -> (PaintType, Affine) {
     let original_id = if let BrushRef::Image(image) = &brush {
         Some(image.image.data.id())
     } else {
         None
     };
     let mut paint = brush_to_paint(brush, composite, images);
-    if cfg!(feature = "installed")
-        || std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() != Some("1")
-    {
+    if !enabled {
         return (paint, brush_transform);
     }
     let Some(id) = original_id else { return (paint, brush_transform) };
@@ -197,4 +212,74 @@ pub fn line_bounds(y: f32, font_size: f32, glyph_transform: Option<Affine>, tran
     let local = Rect::new(-1e7, f64::from(y) - size * 1.25, 1e7, f64::from(y) + size * 0.5);
     let local = glyph_transform.map_or(local, |g| g.transform_rect_bbox(local).union(local));
     transform.transform_rect_bbox(local)
+}
+
+
+#[cfg(test)]
+mod mipmap_integration_tests {
+    use super::*;
+    use masonry::peniko::{ImageAlphaType, ImageBrush};
+    use vello_cpu::PixelMetadata;
+
+    fn test_brush(width: u16, height: u16) -> ImageBrush {
+        let raw = vec![120, 60, 30, 255].repeat(usize::from(width) * usize::from(height));
+        crate::render::pixels::brush(Pixmap::from_parts(
+            raw, width, height,
+            PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, false),
+        )).with_quality(ImageQuality::High)
+    }
+
+    #[test]
+    fn paint_selection_is_opt_in_and_keeps_image_geometry() {
+        let brush = test_brush(128, 128);
+        let mut images = Images::default();
+        let geometry = Affine::scale(1.0 / 8.0);
+        let (baseline, untouched) = brush_to_paint_candidate(
+            BrushRef::Image(&brush), Composite::default(), &mut images,
+            geometry, Affine::IDENTITY, false,
+        );
+        assert_eq!(untouched, Affine::IDENTITY);
+        let Brush::Image(original) = baseline else { panic!("expected original image") };
+        let ImageSource::Pixmap(original) = original.image else { panic!("expected pixmap") };
+        assert_eq!((original.width(), original.height()), (128, 128));
+        assert!(images.mips.is_empty());
+
+        let (enabled, image_transform) = brush_to_paint_candidate(
+            BrushRef::Image(&brush), Composite::default(), &mut images,
+            geometry, Affine::IDENTITY, true,
+        );
+        assert_eq!(image_transform, Affine::scale(4.0));
+        let Brush::Image(candidate) = enabled else { panic!("expected candidate image") };
+        let ImageSource::Pixmap(candidate) = candidate.image else { panic!("expected pixmap") };
+        assert_eq!((candidate.width(), candidate.height()), (32, 32));
+        assert!(!candidate.may_have_transparency());
+        assert_eq!(images.mips.len(), 2);
+
+        let (again, _) = brush_to_paint_candidate(
+            BrushRef::Image(&brush), Composite::default(), &mut images,
+            geometry, Affine::IDENTITY, true,
+        );
+        let Brush::Image(again) = again else { panic!("expected cached image") };
+        let ImageSource::Pixmap(again) = again.image else { panic!("expected pixmap") };
+        assert!(Arc::ptr_eq(&candidate, &again), "same id/level reuses the mip");
+        images.next_frame();
+        assert_eq!(images.mips.len(), 2);
+        images.next_frame();
+        assert!(images.mips.is_empty(), "mips expire after two unused frames");
+    }
+
+    #[test]
+    fn non_divisible_dimensions_fall_back_without_repositioning() {
+        let brush = test_brush(127, 128);
+        let mut images = Images::default();
+        let (paint, transform) = brush_to_paint_candidate(
+            BrushRef::Image(&brush), Composite::default(), &mut images,
+            Affine::scale(1.0 / 8.0), Affine::IDENTITY, true,
+        );
+        assert_eq!(transform, Affine::IDENTITY);
+        let Brush::Image(image) = paint else { panic!("expected image") };
+        let ImageSource::Pixmap(image) = image.image else { panic!("expected pixmap") };
+        assert_eq!((image.width(), image.height()), (127, 128));
+        assert!(images.mips.is_empty());
+    }
 }

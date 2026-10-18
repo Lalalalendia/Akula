@@ -21,6 +21,9 @@ pub fn half(source: &Pixmap) -> Option<Pixmap> {
     let src = source.data_as_u8_slice();
     let stride = usize::from(width) * 4;
     let mut out = Vec::with_capacity(usize::from(dst_w) * usize::from(dst_h) * 4);
+    // Derive the opacity hint from the reduced pixels, not from stale source
+    // metadata. Vello's opaque-image fast path depends on this exact flag.
+    let mut may_have_transparency = false;
     for y in 0..usize::from(dst_h) {
         for x in 0..usize::from(dst_w) {
             let top = (y * 2) * stride + x * 8;
@@ -29,7 +32,11 @@ pub fn half(source: &Pixmap) -> Option<Pixmap> {
                     + u16::from(src[top + 4 + channel])
                     + u16::from(src[top + stride + channel])
                     + u16::from(src[top + stride + 4 + channel]);
-                out.push(((sum + 2) / 4) as u8);
+                let averaged = ((sum + 2) / 4) as u8;
+                if channel == 3 && averaged != 255 {
+                    may_have_transparency = true;
+                }
+                out.push(averaged);
             }
         }
     }
@@ -37,7 +44,7 @@ pub fn half(source: &Pixmap) -> Option<Pixmap> {
         out,
         dst_w,
         dst_h,
-        PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, true),
+        PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, may_have_transparency),
     ))
 }
 
@@ -177,4 +184,29 @@ mod tests {
         assert_eq!(level_for_transform(Affine::rotate(0.1)), 0);
         assert_eq!(level_for_transform(Affine::scale(-0.25)), 0);
     }
+
+    #[test]
+    fn opacity_hint_matches_reduced_pixels() {
+        // Source metadata is conservatively translucent even though the data
+        // is opaque. Mipmaps should recover Vello's opaque-image fast path.
+        let opaque = Pixmap::from_parts(
+            vec![200, 100, 50, 255].repeat(4),
+            2, 2,
+            PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, true),
+        );
+        assert!(opaque.may_have_transparency());
+        let reduced = half(&opaque).expect("valid 2x2");
+        assert!(!reduced.may_have_transparency());
+        assert_eq!(reduced.data_as_u8_slice(), &[200, 100, 50, 255]);
+
+        let translucent = Pixmap::from_parts(
+            vec![64, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            2, 2,
+            PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, true),
+        );
+        let reduced_alpha = half(&translucent).expect("valid 2x2");
+        assert!(reduced_alpha.may_have_transparency());
+        assert_eq!(reduced_alpha.data_as_u8_slice(), &[16, 0, 0, 16]);
+    }
+
 }
