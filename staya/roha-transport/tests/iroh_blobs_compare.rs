@@ -14,7 +14,7 @@ use iroh::{endpoint::presets, protocol::Router, Endpoint, EndpointId, RelayMode,
 use iroh_blobs::{
     api::blobs::BlobStatus,
     get::request::get_blob,
-    protocol::{ChunkRangesSeq, GetManyRequest, PushRequest},
+    protocol::{ChunkRangesSeq, GetManyRequest, ObserveRequest, PushRequest},
     provider::events::{
         AbortReason, ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage,
         RequestMode, ThrottleMode,
@@ -155,7 +155,7 @@ async fn a_get_can_be_allowed_without_enabling_push_or_other_reads() {
         ).complete()).await.expect("get-many must settle");
         assert!(get_many.is_err(), "get-many bypassed single-hash authorization");
 
-        let observe = local.remote().observe(connection.clone(), allowed_tag.hash).stream();
+        let observe = local.remote().observe(connection.clone(), ObserveRequest::new(allowed_tag.hash));
         futures_util::pin_mut!(observe);
         let observation = tokio::time::timeout(
             NET_STEP_DEADLINE, observe.next(),
