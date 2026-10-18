@@ -2,7 +2,7 @@
 //! while one existing external OS lock stays held. Fixture-only cooperative
 //! experiment: it does NOT make normal Akula writers interprocess-safe.
 
-use super::filegate_custody_identity::{CustodyBindingError, SqliteCustodyIdentityStore};
+use super::filegate_custody_identity::SqliteCustodyIdentityStore;
 use super::filegate_lock_custody::scoped_leaf;
 use super::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
 use super::{RegisteredReadAdmission, VaultId};
@@ -143,6 +143,26 @@ fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_k
     ).unwrap();
     receipt.bind_observed(&admitted, vault_id, &scope).unwrap();
 
+    // A custody receipt must never make writes outside the registered root,
+    // to a mismatched VaultId, or via another Core's registration possible.
+    let outside = temp.path().join("outside.md");
+    fs::write(&outside, b"leave outside untouched").unwrap();
+    assert!(gate::write_with_registered_custody(
+        &parent_core, &admitted, &receipt, vault_id, &scope, &outside,
+        "forbidden", None, Source::Me, None,
+    ).is_err());
+    assert_eq!(fs::read(&outside).unwrap(), b"leave outside untouched");
+    assert!(gate::write_with_registered_custody(
+        &parent_core, &admitted, &receipt, VaultId::new(), &scope, &note,
+        "forbidden", None, Source::Me, None,
+    ).is_err());
+    let impostor = core_at(&temp.path().join("impostor-appdata"), &root);
+    assert!(gate::write_with_registered_custody(
+        &impostor, &admitted, &receipt, vault_id, &scope, &note,
+        "wrong Core", None, Source::Me, None,
+    ).is_err());
+    assert_eq!(fs::read(&note).unwrap(), b"original-untouched");
+
     let report = temp.path().join("cooperative-report.txt");
     let child = Command::new(std::env::current_exe().unwrap())
         .arg("--exact").arg(CHILD_ENTRYPOINT).arg("--nocapture")
@@ -156,15 +176,13 @@ fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_k
     let mut child = KillOnDrop(child);
     until_child_reports(&mut child.0, &report.with_extension("held"), b"held");
 
-    let attempted = std::cell::Cell::new(false);
-    let contested = receipt.with_cooperative_writer_lifetime(
-        &admitted, vault_id, &scope, || {
-            attempted.set(true);
-            gate::write(&parent_core, &note, "must-never-be-written", None, Source::Me, None).unwrap();
-        },
+    // Exercise the NEW opt-in production writer, not just a test wrapper.
+    // A real second process already owns the same physical OS lock.
+    let contested = gate::write_with_registered_custody(
+        &parent_core, &admitted, &receipt, vault_id, &scope, &note,
+        "must-never-be-written", None, Source::Me, None,
     );
-    assert!(matches!(contested, Err(CustodyBindingError::Admission(_))));
-    assert!(!attempted.get(), "the losing Core executed a File Gate write");
+    assert!(matches!(contested, Err(crate::files::error::FileCommandError::Task { .. })));
     assert_eq!(fs::read(&note).unwrap(), b"original-untouched");
 
     fs::write(report.with_extension("go"), b"go").unwrap();
@@ -176,24 +194,23 @@ fn oslock_cooperative_two_process_filegate_and_history_stay_serialized_through_k
 
     // Even AFTER durable history and primary bytes, the child OS lock stays
     // held; a second writer must still refuse without modifying either.
-    let again = receipt.with_cooperative_writer_lifetime(
-        &admitted, vault_id, &scope, || {
-            panic!("File Gate must never execute while child holds OS lock");
-        },
+    let again = gate::write_with_registered_custody(
+        &parent_core, &admitted, &receipt, vault_id, &scope, &note,
+        "still-denied", None, Source::Me, None,
     );
-    assert!(matches!(again, Err(CustodyBindingError::Admission(_))));
+    assert!(again.is_err());
+    assert_eq!(fs::read_to_string(&note).unwrap(), "child edit ".repeat(90));
     child.terminate();
 
     // A hard kill releases the OS lock. A second independently registered
     // Core can now perform BOTH primary save and history work under the
     // SAME existing physical lock object.
-    receipt.with_cooperative_writer_lifetime(&admitted, vault_id, &scope, || {
-        gate::write(
-            &parent_core, &note, &"parent edit ".repeat(90),
-            None, Source::Me, Some("cooperative-parent"),
-        ).unwrap();
-        assert!(parent_core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0);
-    }).unwrap();
+    let result = gate::write_with_registered_custody(
+        &parent_core, &admitted, &receipt, vault_id, &scope, &note,
+        &"parent edit ".repeat(90), None, Source::Me, Some("cooperative-parent"),
+    ).unwrap();
+    assert_eq!(result.hash, blake3::hash("parent edit ".repeat(90).as_bytes()).to_hex().to_string());
+    assert!(parent_core.history.page(&|| vec![root.clone()], &note, 0, 8).total > 0);
     assert_eq!(fs::read_to_string(&note).unwrap(), "parent edit ".repeat(90));
     assert_eq!(
         fs::read(scope.join(LOCK_NAME)).unwrap(),
