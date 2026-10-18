@@ -53,6 +53,18 @@ pub fn quote(line: &str) -> Option<Block> {
         let kind = match c.name.as_str() {
             "quote" => Callout::Quote,
             "book" => Callout::Book,
+            // The indexes are Akula's existing LIST_CALLOUTS brush tones:
+            // important=0, question=1, highlight=2, idea=3,
+            // info=4, success=5, muted=6. No new Markdown grammar.
+            "note" | "info" | "todo" | "abstract" | "summary" | "tldr" =>
+                Callout::Typed(4),
+            "tip" | "hint" | "example" => Callout::Typed(3),
+            "success" | "check" | "done" => Callout::Typed(5),
+            "question" | "help" | "faq" => Callout::Typed(1),
+            "warning" | "caution" | "attention" => Callout::Typed(2),
+            "important" | "danger" | "error" | "failure" | "fail" | "missing" | "bug" =>
+                Callout::Typed(0),
+            "cite" => Callout::Typed(6),
             _ => Callout::Other,
         };
         (c.range, kind)
