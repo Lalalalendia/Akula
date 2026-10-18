@@ -1,0 +1,94 @@
+name: Native scroll input-to-CPU-frame A/B (diagnostic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/app/tests/perf/scroll_pipeline.rs'
+      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - '.github/scripts/summarize-native-scroll-pipeline.py'
+      - '.github/workflows/native-scroll-pipeline-ab.yml'
+      - 'docs/perf/native-scroll-pipeline-ab.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-scroll-pipeline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Real pointer event through CPU framebuffer (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-single-region-rss-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install Linux native GUI build libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record source and CPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          { git rev-parse HEAD; rustc --version; cargo --version; grep -m1 'model name' /proc/cpuinfo || true; } | tee scroll-pipeline-env.txt
+      - name: Compile native release test once
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native --no-run
+      - name: Three independent fixed/adaptive process pairs with alternating order
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          for trial in 1 2 3; do
+            case "$trial" in
+              1|3) order="fixed2 adaptive2" ;;
+              2) order="adaptive2 fixed2" ;;
+            esac
+            for mode in $order; do
+              if [ "$mode" = adaptive2 ]; then
+                route=1
+              else
+                route=0
+              fi
+              log="$GITHUB_WORKSPACE/scroll-pipeline-$mode-trial-$trial.log"
+              echo "SCROLL_PIPELINE_BEGIN trial=$trial mode=$mode route=$route"
+              env -u AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT AKULA_VELLO_SINGLE_RECT="$route" \
+                cargo test --release --locked -p aquilum-native --bin aquilum-native \
+                benchmark_native_scroll_pipeline_ab -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
+              grep 'AKULA_SCROLL_PIPELINE case=' "$log"
+              echo "SCROLL_PIPELINE_PASS trial=$trial mode=$mode"
+            done
+          done
+      - name: Validate comparable pixels, real scroll workload and report stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/summarize-native-scroll-pipeline.py
+          python3 .github/scripts/summarize-native-scroll-pipeline.py . --output scroll-pipeline-summary.md
+          cat scroll-pipeline-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive the independent process measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-scroll-pipeline-${{ github.sha }}
+          path: |
+            scroll-pipeline-env.txt
+            scroll-pipeline-*-trial-*.log
+            scroll-pipeline-summary.md
+          if-no-files-found: warn
+          retention-days: 14

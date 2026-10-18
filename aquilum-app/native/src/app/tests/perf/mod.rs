@@ -20,6 +20,8 @@ mod search;
 mod timing;
 mod vello_release;
 mod vello_natural_stages;
+#[cfg(target_os = "linux")]
+mod scroll_pipeline;
 mod worker_crossover;
 mod worker_router;
 
