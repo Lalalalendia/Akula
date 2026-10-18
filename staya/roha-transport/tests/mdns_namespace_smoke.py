@@ -83,9 +83,10 @@ def probe_multicast_link():
     receiver = r"""
 import socket, sys
 group, local = "224.0.0.251", sys.argv[1]
+port = int(sys.argv[2])
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind(("", 53921))
+sock.bind(("", port))
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
                 socket.inet_aton(group) + socket.inet_aton(local))
 sock.settimeout(6)
@@ -99,25 +100,27 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
                 socket.inet_aton(sys.argv[1]))
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
-sock.sendto(b"staya-multicast-probe-v0", ("224.0.0.251", 53921))
+sock.sendto(b"staya-multicast-probe-v0", ("224.0.0.251", int(sys.argv[2])))
 """
-    waiting = subprocess.Popen(
-        ["sudo", "-n", "ip", "netns", "exec", NS_A, sys.executable, "-c",
-         receiver, IP_A],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        time.sleep(0.6)
-        sent = inside(NS_B, sys.executable, "-c", sender, IP_B, timeout=8)
-        if sent.returncode != 0:
-            raise AssertionError("test multicast sender failed: " + sent.stderr[-500:])
-        _, err = waiting.communicate(timeout=9)
-        if waiting.returncode != 0:
-            raise AssertionError("no IPv4 multicast UDP delivery over veth: " + err[-500:])
-        print("STAYA_MULTICAST_LINK_PASS: independent UDP probe over offline veth", flush=True)
-    finally:
-        if waiting.poll() is None:
-            waiting.kill()
-            waiting.communicate(timeout=5)
+    for port in (53921, 5353):
+        waiting = subprocess.Popen(
+            ["sudo", "-n", "ip", "netns", "exec", NS_A, sys.executable, "-c",
+             receiver, IP_A, str(port)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            time.sleep(0.6)
+            sent = inside(NS_B, sys.executable, "-c", sender, IP_B, str(port), timeout=8)
+            if sent.returncode != 0:
+                raise AssertionError("test multicast sender failed: " + sent.stderr[-500:])
+            _, err = waiting.communicate(timeout=9)
+            if waiting.returncode != 0:
+                raise AssertionError(
+                    f"no IPv4 multicast UDP on port {port} over veth: " + err[-500:])
+            print(f"STAYA_MULTICAST_LINK_PASS port={port}", flush=True)
+        finally:
+            if waiting.poll() is None:
+                waiting.kill()
+                waiting.communicate(timeout=5)
 
 
 def kill_server(server):
