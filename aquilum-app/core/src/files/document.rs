@@ -146,8 +146,8 @@ pub fn write_file_atomic_impl(
 /// the temporary content is complete, just as write_file_atomic_impl does.
 ///
 /// The entire source is never allocated here; only a 256 KiB scratch buffer.
-#[allow(dead_code)] // The protected File Gate integration is a separate step.
-pub(crate) fn write_file_atomic_buffered_impl(
+#[allow(dead_code)] // Private until a separately reviewed File Gate integration.
+fn write_file_atomic_buffered_impl(
     path: &Path,
     mut source: impl Read,
     proposed_len: usize,
