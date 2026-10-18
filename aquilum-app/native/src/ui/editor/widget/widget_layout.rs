@@ -54,6 +54,7 @@ impl TextEditor {
             ctx.request_scroll_by(shift);
         }
         self.reveal_caret();
+        self.reveal_code_caret();
         if self.suggest.is_some() {
             self.publish_suggest(ctx.widget_id());
         }

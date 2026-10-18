@@ -6,6 +6,7 @@ impl TextEditor {
             ctx.request_layout();
         }
         self.reveal_caret();
+        self.reveal_code_caret();
         if self.laid_out() {
             let caret = self.caret();
             ctx.set_ime_area(caret);

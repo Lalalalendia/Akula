@@ -1,7 +1,7 @@
 use std::ops::{Range, RangeInclusive};
 use masonry::core::{PaintCtx, PropertiesRef, render_text};
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, RoundedRect};
+use masonry::kurbo::{Affine, RoundedRect, Vec2};
 use masonry::parley::{Affinity, BoundingBox, Cursor};
 use masonry::properties::{ContentColor, SelectionColor};
 use super::Fold;
@@ -68,7 +68,8 @@ impl TextEditor {
                 if markdown {
                     self.paint_marks(painter, i, &palette);
                 }
-                render_text(painter, Affine::translate(self.shift() + self.doc.origin(i)), self.doc.paragraph(i).layout(), &palette, true);
+                let offset = self.code_offset_at(i);
+                render_text(painter, Affine::translate(self.shift() + self.doc.origin(i) - Vec2::new(offset, 0.0)), self.doc.paragraph(i).layout(), &palette, true);
             };
             if let Some(viewport) = self.code_viewport(i) {
                 // Balanced clip in the retained scene; no glyphs may escape
@@ -112,7 +113,7 @@ impl TextEditor {
             if !(matches!(p.fold, Fold::None | Fold::Above) && p.laid().is_some() && p.start <= range.end && p.end() >= range.start) {
                 continue;
             }
-            let origin = self.doc.origin(i);
+            let origin = self.doc.origin(i) - Vec2::new(self.code_offset_at(i), 0.0);
             let layout = p.layout();
             let a = range.start.max(p.start) - p.start;
             let b = range.end.min(p.end()) - p.start;

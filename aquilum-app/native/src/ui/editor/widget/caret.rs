@@ -66,7 +66,8 @@ impl TextEditor {
         let origin = self.doc.origin(i);
         let center = (top + bottom) / 2.0 + origin.y;
         let line = line + Vec2::new(origin.x, 0.0);
-        Rect::new(line.x0, center - half, line.x0 + size::CARET_WIDTH, center + half) + self.shift()
+        Rect::new(line.x0, center - half, line.x0 + size::CARET_WIDTH, center + half)
+            + self.shift() - Vec2::new(self.code_offset_at(i), 0.0)
     }
 
     pub(super) fn reveal_caret(&mut self) {
@@ -97,7 +98,7 @@ impl TextEditor {
         if matches!(p.fold, Fold::Head | Fold::Member) {
             return (p.start, Affinity::Downstream);
         }
-        let local = point - self.doc.origin(i);
+        let local = point - self.doc.origin(i) + Vec2::new(self.code_offset_at(i), 0.0);
         let Some(layout) = p.laid() else { return (p.start, Affinity::Downstream) };
         let cursor = Cursor::from_point(layout, local.x as f32, local.y as f32);
         let text = self.doc.slice(p.range());

@@ -16,3 +16,59 @@ fn code_line_has_an_explicit_narrow_viewport_even_when_layout_overflows() {
     assert!(editor.code_viewport(0).is_none(), "prose must not be clipped");
     assert!(editor.code_viewport(4).is_none(), "following prose must not be clipped");
 }
+
+
+#[test]
+fn horizontal_wheel_moves_two_fenced_blocks_independently_without_changing_source() {
+    use super::support::{wheel, text};
+
+    let first_line = "alpha🐱".repeat(90);
+    let second_line = "beta👁".repeat(90);
+    let source = format!("before\n~~~rust\n{first_line}\n~~~\nbetween\n~~~python\n{second_line}\n~~~\nafter");
+    let first = source.find("~~~rust").unwrap();
+    let second = source.find("~~~python").unwrap();
+    let mut root = unfocused(TextEditor::new(&source).markdown(), 250, 440);
+    let first_y = root.get_widget_with_tag(TAG).unwrap().inner().top_of(first + "~~~rust\n".len()).unwrap() + 7.0;
+    let second_y = root.get_widget_with_tag(TAG).unwrap().inner().top_of(second + "~~~python\n".len()).unwrap() + 7.0;
+
+    wheel(&mut root, (95.0, first_y), (-180.0, 0.0));
+    let first_after = root.get_widget_with_tag(TAG).unwrap().inner().code_scroll_for_test(first);
+    assert!(first_after > 0.0, "horizontal wheel must move the first code block");
+    assert_eq!(root.get_widget_with_tag(TAG).unwrap().inner().code_scroll_for_test(second), 0.0);
+    wheel(&mut root, (95.0, second_y), (-55.0, 0.0));
+    let editor = root.get_widget_with_tag(TAG).unwrap();
+    assert_eq!(editor.inner().code_scroll_for_test(first), first_after);
+    assert!(editor.inner().code_scroll_for_test(second) > 0.0);
+    assert_eq!(text(&root), source, "view motion must not create document edits");
+}
+
+#[test]
+fn hit_testing_tracks_horizontal_scroll_instead_of_using_unshifted_bytes() {
+    use super::support::wheel;
+    use masonry::kurbo::{Affine, Point};
+
+    let line = "rusty".repeat(160);
+    let source = format!("~~~rust\n{line}\n~~~");
+    let mut root = unfocused(TextEditor::new(&source).markdown(), 200, 260);
+    let y = root.get_widget_with_tag(TAG).unwrap().inner().top_of("~~~rust\n".len()).unwrap() + 7.0;
+    let click = Point::new(82.0, y);
+    let before = root.get_widget_with_tag(TAG).unwrap().inner().offset_at(Affine::IDENTITY, click);
+    wheel(&mut root, (click.x, click.y), (-180.0, 0.0));
+    let after = root.get_widget_with_tag(TAG).unwrap().inner().offset_at(Affine::IDENTITY, click);
+    assert!(after > before, "same screen x must hit later source bytes when code is scrolled");
+}
+
+#[test]
+fn keyboard_caret_follow_reveals_the_end_of_a_long_fence() {
+    use super::support::editor_id;
+    let line = "longline".repeat(160);
+    let source = format!("~~~rust\n{line}\n~~~");
+    let opener = 0;
+    let end = "~~~rust\n".len() + line.len();
+    let mut root = unfocused(TextEditor::new(&source).markdown(), 240, 220);
+    let id = editor_id(&root);
+    root.edit_widget(id, |mut editor| TextEditor::select_byte_range(&mut editor.downcast(), end, end));
+    let _ = root.redraw();
+    assert!(root.get_widget_with_tag(TAG).unwrap().inner().code_scroll_for_test(opener) > 0.0,
+        "placing caret at the end of a long unwrapped code line must reveal it");
+}

@@ -123,7 +123,9 @@ impl TextEditor {
                     _ => (0.0, 0.0),
                 };
                 let (dx, dy) = if scroll.state.modifiers.shift() && dx == 0.0 { (dy, 0.0) } else { (dx, dy) };
-                if dx.abs() > dy.abs() && self.table_scroll(ctx, point, -dx) {
+                if dx.abs() > dy.abs()
+                    && (self.table_scroll(ctx, point, -dx) || self.code_scroll_wheel(ctx, point, -dx))
+                {
                     ctx.set_handled();
                 }
             }
