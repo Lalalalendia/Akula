@@ -133,13 +133,12 @@ impl AwsS3ProbeClient {
             || prepared.packs.len() != letter.packs().len()
             || prepared.references != letter.revisions()
             || prepared.packs.iter().zip(letter.packs()).any(|(pack, index)| {
+                let start = pack.index.first_revision_index as usize;
+                let end = start.checked_add(pack.index.revision_count as usize);
                 &pack.index != index
                     || pack.index.pack_blake3 != pack.descriptor.digest
-                    || pack.descriptor.references != prepared.references[
-                        pack.index.first_revision_index as usize
-                        ..pack.index.first_revision_index as usize
-                            + pack.index.revision_count as usize
-                    ]
+                    || end.and_then(|end| prepared.references.get(start..end))
+                        != Some(pack.descriptor.references.as_slice())
                     || blake3::hash(&pack.payload).to_hex().as_str()
                         != pack.index.pack_blake3
             })
