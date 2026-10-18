@@ -1141,8 +1141,8 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                         let screen_local = target_x
                             .checked_sub(screen_origin.0)
                             .zip(target_y.checked_sub(screen_origin.1));
-                        if let Some((local_x, local_y)) = screen_local {
-                        if tint.is_some_and(|t| {
+                        if let Some((local_x, local_y)) = screen_local
+                            && tint.is_some_and(|t| {
                             matches!(t.mode, vello_common::paint::TintMode::AlphaMask)
                         }) && local_x >= u32::from(sample_x)
                             && local_x < u32::from(sample_x) + width as u32
@@ -1193,7 +1193,6 @@ impl<S: Simd, T: FineKernel<S>> Fine<S, T> {
                                     tint.map(|t| t.color), image.transform,
                                 );
                             }
-                        }
                         }
                     }
                 }
