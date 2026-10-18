@@ -152,6 +152,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::pack_probe::tests
+      - name: Reject forged AWS identity, cross-account scope and custom endpoints
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 s3_transport::principal::tests
       - name: Validate bounded read-only RemoteStore snapshot projection
         shell: bash
         working-directory: aquilum-app
