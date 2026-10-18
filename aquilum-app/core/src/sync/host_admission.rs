@@ -825,13 +825,6 @@ impl<'a> RegisteredReadAdmission<'a> {
         &self, operation: OperationId, journal: &SqliteSyncJournal,
         expected_vault: super::VaultId,
     ) -> Result<LocalRecoveryArchivedCopy, LocalRecoveryError> {
-        // This copy writes bytes into the vault using only Core's process-wide
-        // mutex, without the shared host SQLite epoch. No installed-host Core
-        // may publish it until it has a dedicated admitted mutation route.
-        #[cfg(feature = "host-custody")]
-        if self.core.requires_installed_host_epoch() {
-            return Err(LocalRecoveryError::Admission(VaultPortError::PermissionDenied));
-        }
         // An attacker-controlled sync folder must never become the location
         // of an archive / WAL / SHM sidecar. The journal's host app-data path
         // is checked before archive bytes are written.
