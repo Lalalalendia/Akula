@@ -644,6 +644,27 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     let after_scope_failure = b.test_io_snapshot();
     assert_eq!(before_scope_failure, after_scope_failure,
         "wrong connected vault must fail before making ANY network request");
+    // A profile rebinding to an entirely different bucket must be refused
+    // before any AWS call, even when the VaultId and root pin are unchanged.
+    let switched_profile = S3ConnectionProfile {
+        bucket: "akula-unrelated-bucket".into(), ..profile.clone()
+    };
+    let switched_scope = S3RemoteAnchorScope::new(
+        "desktop-v2", "isolated-test-account", &switched_profile, &ns,
+    ).unwrap();
+    let before_profile_failure = b.test_io_snapshot();
+    assert!(matches!(
+        b.inspect_explicitly_pinned_v2_read_only(
+            &switched_scope, &winning.head, &_ack_lost.etag, Some(&first.head),
+        ).await, Err(S3PinnedV2ReadError::ScopeMismatch)
+    ));
+    assert_eq!(before_profile_failure, b.test_io_snapshot(),
+        "switched S3 profile must fail without a network request");
+    assert!(matches!(
+        b.inspect_explicitly_pinned_v2_read_only(
+            &scope, &winning.head, &_ack_lost.etag, Some(&winning.head),
+        ).await, Err(S3PinnedV2ReadError::InvalidAncestry)
+    ));
     assert!(matches!(
         S3HeadPointerV1::decode(&winning.head_bytes, &ns),
         Err(S3ContractError::InvalidRoot | S3ContractError::UnsupportedRootSchema),
