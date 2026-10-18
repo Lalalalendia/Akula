@@ -22,7 +22,6 @@ jobs:
       - name: Resolve dependencies and validate fork chain
         working-directory: experiments/akula-library-iroh
         run: |
-          cargo generate-lockfile
           cargo metadata --locked --format-version 1 > metadata.json
           python3 check_dependency_chain.py metadata.json Cargo.lock
           cargo tree --locked -i noq
