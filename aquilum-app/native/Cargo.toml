@@ -32,6 +32,8 @@ memory-probe = []
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.
 sync-installed-host-witness = ["sync-installed-host", "aquilum-core/sync-installed-host-witness"]
+# Installer trust experiment only, not enabled by signed local release.
+sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum-core/sync-installed-host-unix-root-witness"]
 
 [dependencies]
 aquilum-core = { path = "../core", features = ["host-custody"] }
