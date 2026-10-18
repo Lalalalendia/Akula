@@ -1,0 +1,113 @@
+name: Vello glyph nearest-neighbor dispatch falsifier
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-glyph-nearest-dispatch.yml'
+      - 'aquilum-app/native/vendor/vello_cpu/src/fine/mod.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-glyph-nearest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  glyph-nearest:
+    name: Cached outline alpha-mask fast vs generic nearest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-guard96-repro
+          cache-workspace-crates: true
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Capture exact environment
+        shell: bash
+        run: |
+          {
+            git rev-parse HEAD
+            grep -m1 'model name' /proc/cpuinfo || true
+            rustc --version
+          } | tee vello-nn-runner.txt
+      - name: ABBA strict 20-process comparison (no quality change)
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -uo pipefail
+          baseline_n=0
+          generic_n=0
+          baseline_failed=0
+          generic_failed=0
+          unexpected=0
+          for cycle in $(seq 1 10); do
+            for mode in baseline generic generic baseline; do
+              if [ "$mode" = baseline ]; then
+                baseline_n=$((baseline_n + 1))
+                n="$baseline_n"
+              else
+                generic_n=$((generic_n + 1))
+                n="$generic_n"
+              fi
+              log="$GITHUB_WORKSPACE/vello-nn-$mode-$n.log"
+              if [ "$mode" = generic ]; then
+                if env AQ_TEST_GLYPH_GENERIC_NN=1 cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  rc=0
+                else
+                  rc=$?
+                fi
+              else
+                if cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  rc=0
+                else
+                  rc=$?
+                fi
+              fi
+              if [ "$rc" -eq 0 ]; then
+                :
+              elif grep -q 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
+                if [ "$mode" = baseline ]; then
+                  baseline_failed=$((baseline_failed + 1))
+                else
+                  generic_failed=$((generic_failed + 1))
+                fi
+              else
+                unexpected=$((unexpected + 1))
+                echo "VELLO_NN_UNEXPECTED mode=$mode trial=$n rc=$rc"
+                tail -n 25 "$log"
+              fi
+            done
+          done
+          echo "VELLO_NN mode=baseline red=$baseline_failed/20" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "VELLO_NN mode=generic red=$generic_failed/20" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "The full-frame >1/255 gate is unchanged; neither sampling mode is a release approval." >> "$GITHUB_STEP_SUMMARY"
+          test "$baseline_n" -eq 20
+          test "$generic_n" -eq 20
+          test "$unexpected" -eq 0
+          test "$generic_failed" -eq 0
+      - name: Archive per-process pixel diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-glyph-nearest-${{ github.sha }}
+          path: |
+            vello-nn-runner.txt
+            vello-nn-*.log
+          retention-days: 14
+          if-no-files-found: warn
