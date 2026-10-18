@@ -131,7 +131,7 @@ impl ReaderView {
         // presenting the app's first window does not satisfy this condition.
         #[cfg(feature = "memory-probe")]
         if self.intro.value() >= 0.25
-            && self.session.on_screen().iter().any(|&item| self.session.layout(item).is_some())
+            && self.session.visible().iter().any(|(_, _, col)| col.pieces.iter().any(|piece| self.session.layout(piece.item).is_some()))
         {
             crate::memory_probe::mark_text_painted();
         }
