@@ -350,7 +350,13 @@ impl Core {
                 message: "host S3 enrollment requires the mandatory installed-host policy".into(),
             });
         }
-        let mut host = self.open_installed_host_registry()?;
+        // Keep the stable outward S3 enrollment diagnostic even when the
+        // shared opener refuses an unavailable or replaced install witness.
+        // The user must still see HOLD rather than a retryable empty roster.
+        let mut host = self.open_installed_host_registry()
+            .map_err(|error| FileCommandError::Task {
+                message: format!("host custody enrollment HOLD: {error:?}"),
+            })?;
         host.enroll(record).map_err(|error| FileCommandError::Task {
             message: format!("host custody enrollment HOLD: {error:?}"),
         })?;
