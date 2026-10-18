@@ -139,6 +139,12 @@ impl Renderer {
         #[cfg(test)]
         let mut encoding = Duration::ZERO;
         #[cfg(test)]
+        let mut reset_time = Duration::ZERO;
+        #[cfg(test)]
+        let mut replay_time = Duration::ZERO;
+        #[cfg(test)]
+        let mut flush_time = Duration::ZERO;
+        #[cfg(test)]
         let mut rasterizing = Duration::ZERO;
         canvas.with_target(&mut |Target { pixels, width, height }| {
             for shift in &damage.moves {
@@ -152,11 +158,29 @@ impl Renderer {
                     let _zone = aq_trace::zone("кодирование");
                     #[cfg(test)]
                     painter.route_for_test(w, h);
+                    #[cfg(test)]
+                    let reset_started = Instant::now();
                     painter.begin(x, y, w, h);
+                    #[cfg(test)]
+                    {
+                        reset_time += reset_started.elapsed();
+                    }
+                    #[cfg(test)]
+                    let replay_started = Instant::now();
                     frame.paint_into(painter);
+                    #[cfg(test)]
+                    {
+                        replay_time += replay_started.elapsed();
+                    }
+                    #[cfg(test)]
+                    let flush_started = Instant::now();
                     if let Err(err) = painter.finish() {
                         result = Err(err);
                         return;
+                    }
+                    #[cfg(test)]
+                    {
+                        flush_time += flush_started.elapsed();
                     }
                 }
                 #[cfg(test)]
@@ -178,6 +202,9 @@ impl Renderer {
         #[cfg(test)]
         {
             stages.encode = encoding;
+            stages.reset = reset_time;
+            stages.replay = replay_time;
+            stages.flush = flush_time;
             stages.raster = rasterizing;
             self.last_stages = stages;
         }
