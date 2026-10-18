@@ -353,6 +353,62 @@ mod buffered_write_tests {
     }
 
     #[test]
+    fn buffered_primary_remains_old_while_reader_is_paused_before_commit() {
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        struct PausedReader {
+            stage: u8,
+            ready: mpsc::Sender<()>,
+            resume: mpsc::Receiver<()>,
+        }
+
+        impl Read for PausedReader {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                let part = match self.stage {
+                    0 => b"first".as_slice(),
+                    1 => {
+                        self.ready.send(()).unwrap();
+                        self.resume.recv_timeout(Duration::from_secs(10))
+                            .expect("stalled source was not resumed");
+                        b"second".as_slice()
+                    }
+                    _ => return Ok(0),
+                };
+                self.stage += 1;
+                buffer[..part.len()].copy_from_slice(part);
+                Ok(part.len())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ongoing.md");
+        fs::write(&path, b"old revision").unwrap();
+        let old_hash = hash_bytes(b"old revision");
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let worker_path = path.clone();
+        let worker = thread::spawn(move || {
+            write_file_atomic_buffered_impl(
+                &worker_path,
+                PausedReader { stage: 0, ready: ready_tx, resume: resume_rx },
+                b"firstsecond".len(),
+                &hash_bytes(b"firstsecond"),
+                Some(&old_hash),
+            )
+        });
+
+        ready_rx.recv_timeout(Duration::from_secs(10))
+            .expect("writer never staged its first part");
+        assert_eq!(fs::read(&path).unwrap(), b"old revision",
+            "a partial temporary write must never be visible at the original path");
+        resume_tx.send(()).unwrap();
+        assert_eq!(worker.join().unwrap().unwrap().hash, hash_bytes(b"firstsecond"));
+        assert_eq!(fs::read(&path).unwrap(), b"firstsecond");
+    }
+
+    #[test]
     fn buffered_interrupted_reader_is_retried_and_publishes_identical_bytes() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("interrupt.md");
