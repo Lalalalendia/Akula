@@ -607,6 +607,23 @@ mod history_unhashed_atomic_tests {
     }
 
     #[test]
+    fn primary_note_cas_still_checks_raw_crlf_disk_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("CAS.md");
+        let raw = b"old\r\nraw bytes";
+        fs::write(&path, raw).unwrap();
+        // This is the editor-normalized hash, NOT the actual disk hash.
+        let wrong_expected = hash_bytes(b"old\nraw bytes");
+        let error = write_file_atomic_impl(&path, "new version", Some(&wrong_expected))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::files::error::FileCommandError::Conflict { .. }
+        ));
+        assert_eq!(fs::read(&path).unwrap(), raw);
+    }
+
+    #[test]
     fn history_writer_rejects_missing_parent_without_publishing_any_version() {
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("no-such-history").join("version.md");
