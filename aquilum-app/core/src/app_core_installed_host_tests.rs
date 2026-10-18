@@ -188,7 +188,7 @@ fn mandatory_installed_host_core_open_uses_real_compiled_shared_ledger() {
     gate::create(&a, &clean_note, "initial", Source::Me, None).unwrap();
     gate::write(&a, &clean_note, "updated", None, Source::Me, None).unwrap();
     assert_eq!(fs::read_to_string(&clean_note).unwrap(), "updated");
-    assert!(a.history.page(&|| vec![clean_root], &clean_note, 0, 10).total > 0,
+    assert!(a.history.page(&|| vec![clean_root.clone()], &clean_note, 0, 10).total > 0,
         "legitimate installed-host note publication must persist HistoryService");
 
     let report = temp.path().join("second-process-report");
