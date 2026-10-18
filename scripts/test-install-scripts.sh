@@ -323,6 +323,25 @@ rm -rf "$stage1" "$stage2"
 old_intact
 no_staging_left
 
+# Recovery may restore the old app, but must not recursively discard an
+# unexpected file placed in its abandoned stage.
+stage3="$temporary_home/Applications/.akula-install.33333333"
+mkdir -p "$stage3"
+/bin/mv "$existing" "$stage3/Aquilum.previous.app"
+printf 'do not delete\n' > "$stage3/unexpected-user.txt"
+if run_installer; then
+  echo 'Recovery deleted unknown contents of abandoned stage' >&2
+  exit 1
+fi
+grep -Fq 'unverified entries' "$error_log"
+[[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'old installed version' ]]
+[[ -f "$stage3/unexpected-user.txt" ]]
+[[ "$(cat "$stage3/unexpected-user.txt")" == 'do not delete' ]]
+# Test fixture only: manual inspection is complete.
+rm -rf "$stage3"
+old_intact
+no_staging_left
+
 run_installer
 [[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'new installed version' ]]
 [[ ! -e "$existing/Keep.txt" ]]
