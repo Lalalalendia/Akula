@@ -19,6 +19,8 @@ const MAX_MANIFEST_BYTES: usize = 4 + 8 + 4 + 4 + 32 + MAX_CHUNKS * 32;
 const REQUEST_LIMIT: usize = 1 + 32 + 4;
 pub const MAX_ACTIVE_CONNECTIONS: usize = 32; // bounded lab admission, even during overload
 pub const MAX_CONNECTIONS_PER_PEER: usize = 2;
+/// All endpoint keys assigned to one owner-controlled principal share this cap.
+pub const MAX_CONNECTIONS_PER_PRINCIPAL: usize = 8;
 const MAX_STREAMS_PER_CONNECTION: usize = 128;
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -152,18 +154,30 @@ impl QuotaState {
     }
 }
 
-/// Per-identity admission lease; releases on normal close, network failure,
-/// task cancellation, or panic. Prevents a single identity from hoarding slots.
+/// Trusted principal is a stable, owner-assigned identity. A remote peer never
+/// gets to choose or assert a principal in its network request.
+#[derive(Default)]
+struct AdmissionCounts {
+    per_identity: HashMap<EndpointId, usize>,
+    per_principal: HashMap<EndpointId, usize>,
+}
+/// RAII lease: the identity and principal counters change atomically under one
+/// lock, even when a QUIC task is cancelled or fails before it sends any data.
 struct ActivePeerLease {
-    counts: Arc<Mutex<HashMap<EndpointId, usize>>>,
+    counts: Arc<Mutex<AdmissionCounts>>,
     id: EndpointId,
+    principal: EndpointId,
 }
 impl Drop for ActivePeerLease {
     fn drop(&mut self) {
         let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(n) = counts.get_mut(&self.id) {
+        if let Some(n) = counts.per_identity.get_mut(&self.id) {
             *n -= 1;
-            if *n == 0 { counts.remove(&self.id); }
+            if *n == 0 { counts.per_identity.remove(&self.id); }
+        }
+        if let Some(n) = counts.per_principal.get_mut(&self.principal) {
+            *n -= 1;
+            if *n == 0 { counts.per_principal.remove(&self.principal); }
         }
     }
 }
@@ -175,16 +189,21 @@ pub struct Server {
     quota: Arc<Mutex<QuotaState>>,
     disk_quota: Option<Arc<Mutex<persistent_quota::PersistentQuota>>>,
     rate: Option<Arc<rate_limit::RateGate>>,
-    active_per_peer: Arc<Mutex<HashMap<EndpointId, usize>>>,
+    active: Arc<Mutex<AdmissionCounts>>,
+    /// Every allowed endpoint key has a stable trusted principal. By default
+    /// each key is its own principal; group assignment is opt-in by the owner.
+    principal_for: Arc<HashMap<EndpointId, EndpointId>>,
     idle_timeout: Duration,
     request_timeout: Duration,
 }
 impl Server {
     pub fn new(book: Book, allowed: HashSet<EndpointId>, limits: QuotaState) -> Self {
+        let principal_for = allowed.iter().map(|id| (*id, *id)).collect();
         Self {
             book, allowed: Arc::new(allowed),
             quota: Arc::new(Mutex::new(limits)), disk_quota: None, rate: None,
-            active_per_peer: Arc::new(Mutex::new(HashMap::new())),
+            active: Arc::new(Mutex::new(AdmissionCounts::default())),
+            principal_for: Arc::new(principal_for),
             idle_timeout: DEFAULT_IDLE_TIMEOUT, request_timeout: DEFAULT_REQUEST_TIMEOUT,
         }
     }
@@ -197,6 +216,22 @@ impl Server {
         self.rate = Some(Arc::new(gate));
         self
     }
+    /// Group rotated/multiple EndpointIds under a locally trusted *stable*
+    /// principal key. Mapping is configured by the owner, NEVER by the peer.
+    /// Every allowed ID must be mapped; every canonical principal maps to itself.
+    /// Incomplete or inconsistent assignments fail closed.
+    pub fn with_trusted_principals(mut self,
+        mapping: HashMap<EndpointId, EndpointId>) -> Result<Self> {
+        ensure!(mapping.len() == self.allowed.len(), "principal mapping must be complete");
+        for id in self.allowed.iter() {
+            let principal = mapping.get(id).context("missing principal for allowed identity")?;
+            ensure!(self.allowed.contains(principal), "principal must be an allowed identity");
+            ensure!(mapping.get(principal) == Some(principal),
+                "principal key must map to itself");
+        }
+        self.principal_for = Arc::new(mapping);
+        Ok(self)
+    }
     /// Shorter timeouts are used only by negative laboratory tests.
     pub fn with_request_timeouts(mut self, idle: Duration, request: Duration) -> Self {
         assert!(!idle.is_zero() && !request.is_zero());
@@ -205,11 +240,15 @@ impl Server {
         self
     }
     fn admit_peer(&self, peer: EndpointId) -> Option<ActivePeerLease> {
-        let mut active = self.active_per_peer.lock().unwrap_or_else(|p| p.into_inner());
-        let count = active.entry(peer).or_default();
-        if *count >= MAX_CONNECTIONS_PER_PEER { return None; }
-        *count += 1;
-        Some(ActivePeerLease { counts: self.active_per_peer.clone(), id: peer })
+        let principal = *self.principal_for.get(&peer)?;
+        let mut state = self.active.lock().unwrap_or_else(|p| p.into_inner());
+        if state.per_identity.get(&peer).copied().unwrap_or(0) >= MAX_CONNECTIONS_PER_PEER
+            || state.per_principal.get(&principal).copied().unwrap_or(0) >= MAX_CONNECTIONS_PER_PRINCIPAL {
+            return None;
+        }
+        *state.per_identity.entry(peer).or_default() += 1;
+        *state.per_principal.entry(principal).or_default() += 1;
+        Some(ActivePeerLease { counts: self.active.clone(), id: peer, principal })
     }
     /// Run until the endpoint is closed; bounded to 32 concurrent accepted connections.
     pub async fn run(self, endpoint: Endpoint) {
@@ -229,13 +268,14 @@ impl Server {
     }
     async fn handle_connection(&self, conn: Connection) -> Result<()> {
         let peer = conn.remote_id();
-        let result = if !self.allowed.contains(&peer) {
+        let principal = self.principal_for.get(&peer).copied();
+        let result = if !self.allowed.contains(&peer) || principal.is_none() {
             conn.close(403u32.into(), b"denied");
             Ok(())
         } else if let Some(_lease) = self.admit_peer(peer) {
-            self.handle_connection_inner(&conn, peer).await
+            self.handle_connection_inner(&conn, principal.expect("validated principal")).await
         } else {
-            conn.close(429u32.into(), b"per-peer connection cap");
+            conn.close(429u32.into(), b"peer/principal connection cap");
             Ok(())
         };
         let usage = WireUsage::sample(&conn);
@@ -245,7 +285,7 @@ impl Server {
         let _ = std::io::stdout().flush();
         result
     }
-    async fn handle_connection_inner(&self, conn: &Connection, peer: EndpointId) -> Result<()> {
+    async fn handle_connection_inner(&self, conn: &Connection, principal: EndpointId) -> Result<()> {
         for _ in 0..MAX_STREAMS_PER_CONNECTION {
             // An authenticated peer must not occupy a global connection slot forever.
             let (mut send, mut recv) = match timeout(self.idle_timeout, conn.accept_bi()).await {
@@ -260,7 +300,7 @@ impl Server {
             // promptly even when book downloads themselves are rate-limited.
             let incoming = timeout(self.request_timeout, recv.read_to_end(REQUEST_LIMIT)).await;
             let response: Vec<u8> = match incoming {
-                Ok(Ok(raw)) => self.reply(peer, &raw),
+                Ok(Ok(raw)) => self.reply(principal, &raw),
                 Ok(Err(_)) => vec![BAD_REQUEST],
                 Err(_) => {
                     conn.close(408u32.into(), b"incomplete request");
@@ -271,7 +311,7 @@ impl Server {
                 // Pacing applies to all application response bytes including manifest/status.
                 // The persistent ledger separately accounts only accepted file payload.
                 for piece in response.chunks(rate_limit::PACE_SLICE) {
-                    gate.wait(peer, piece.len()).await?;
+                    gate.wait(principal, piece.len()).await?;
                     timeout(RESPONSE_TIMEOUT, send.write_all(piece)).await??;
                 }
             } else {
@@ -746,19 +786,19 @@ mod tests {
         let allowed = HashSet::from([attacker_ep.id(), healthy_ep.id()]);
         let service = Server::new(book.clone(), allowed, QuotaState::new(100_000, 100_000))
             .with_request_timeouts(Duration::from_millis(250), Duration::from_millis(250));
-        let active = service.active_per_peer.clone();
+        let active = service.active.clone();
         let worker = tokio::spawn(service.clone().run(server_ep.clone()));
         let first = attacker_ep.connect(addr.clone(), ALPN).await?;
         let second = attacker_ep.connect(addr.clone(), ALPN).await?;
         // The first two authorized connections hold slots but send no streams.
         tokio::time::sleep(Duration::from_millis(40)).await;
-        assert_eq!(active.lock().unwrap().get(&attacker_ep.id()).copied(), Some(2));
+        assert_eq!(active.lock().unwrap().per_identity.get(&attacker_ep.id()).copied(), Some(2));
         let third = attacker_ep.connect(addr.clone(), ALPN).await?;
         let _ = timeout(Duration::from_secs(2), third.closed()).await?;
         let result = download(&healthy_ep, addr.clone()).await?;
         ensure!(result == *book.bytes, "healthy client blocked by idle peer");
         tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(active.lock().unwrap().get(&attacker_ep.id()).is_none(),
+        assert!(active.lock().unwrap().per_identity.get(&attacker_ep.id()).is_none(),
             "idle leases must expire and release slots");
         first.close(0u32.into(), b"done");
         second.close(0u32.into(), b"done");
@@ -778,13 +818,13 @@ mod tests {
         let service = Server::new(Book::new(bytes(2048))?,
             HashSet::from([peer_ep.id()]), QuotaState::new(100_000,100_000))
             .with_request_timeouts(Duration::from_millis(500), Duration::from_millis(150));
-        let active = service.active_per_peer.clone();
+        let active = service.active.clone();
         let worker = tokio::spawn(service.clone().run(server_ep.clone()));
         let conn = peer_ep.connect(addr, ALPN).await?;
         let (mut send, _recv) = conn.open_bi().await?;
         send.write_all(&[OP_CHUNK]).await?; // Never sends the rest of request.
         tokio::time::sleep(Duration::from_millis(350)).await;
-        assert!(active.lock().unwrap().get(&peer_ep.id()).is_none(),
+        assert!(active.lock().unwrap().per_identity.get(&peer_ep.id()).is_none(),
             "incomplete request must expire without reserving quota");
         assert_eq!(service.quota.lock().unwrap().used(),0);
         conn.close(0u32.into(), b"done");
