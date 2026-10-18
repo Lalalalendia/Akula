@@ -1095,8 +1095,8 @@ async fn quota_requires_preflight_before_quic_get() {
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "current_thread")]
 async fn durable_admission_stays_charged_after_verified_quic_and_process_reopen() {
-    use std::{fs, os::unix::fs::PermissionsExt};
     use akula_roha_transport::durable_admission::{DurableError, DurableLedger};
+    use std::{fs, os::unix::fs::PermissionsExt};
 
     tokio::time::timeout(TEST_DEADLINE, async {
         // Completely isolated Linux fixture. Directory containing the ledger
