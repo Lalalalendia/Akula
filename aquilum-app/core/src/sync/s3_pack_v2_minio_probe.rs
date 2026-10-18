@@ -10,6 +10,7 @@ use super::*;
 use crate::sync::{
     DocumentId, RevisionDag, RevisionOperation, RevisionRecord, S3ContractError,
     S3HeadPointerV1, S3ManifestShardV1, SyncRelativePath,
+    S3RemoteAnchorScope, S3PinnedV2ReadError,
     MAX_MANIFEST_BYTES, MAX_SHARD_BYTES,
 };
 use crate::sync::s3_transport::{
@@ -487,8 +488,11 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
         endpoint: Some(endpoint),
         force_path_style: true,
     };
+    let scope = S3RemoteAnchorScope::new(
+        "desktop-v2", "isolated-test-account", &profile, &ns,
+    ).unwrap();
     let a = AwsS3ProbeClient::connect(profile.clone(), ns.clone()).await.unwrap();
-    let b = AwsS3ProbeClient::connect(profile, ns.clone()).await.unwrap();
+    let b = AwsS3ProbeClient::connect(profile.clone(), ns.clone()).await.unwrap();
     // Direct bucket creation is confined to this disposable local server.
     let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new("us-east-1")).load().await;
@@ -529,6 +533,15 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     assert_eq!(initial_observed.head, first.head);
     assert_eq!(initial_observed.etag, written.etag);
     assert_eq!(initial_observed.dag.heads(doc), BTreeSet::from([id0]));
+    // Exercise production-compiled, scope-bound V2 *observer*, not only
+    // the historic test-local readback routine.
+    let first_preview = b.inspect_explicitly_pinned_v2_read_only(
+        &scope, &first.head, &written.etag, None,
+    ).await.unwrap();
+    assert_eq!(first_preview.generation, 1);
+    assert_eq!(first_preview.verified_revisions, 1);
+    assert_eq!(first_preview.verified_packs, 1);
+    assert!(first_preview.requires_explicit_file_gate_review);
     journal.recover_verified(op1, &ns, &b).await.unwrap();
     assert!(journal.is_observed(op1).unwrap());
 
@@ -569,6 +582,28 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
     let observed = read_verified_v2(&b, &ns).await.unwrap();
     assert_eq!(observed.head, winning.head);
     assert_eq!(observed.dag.heads(doc), BTreeSet::from([left, deletion]));
+    let v2_preview = b.inspect_explicitly_pinned_v2_read_only(
+        &scope, &winning.head, &_ack_lost.etag, Some(&first.head),
+    ).await.unwrap();
+    assert_eq!(v2_preview.generation, 2);
+    assert_eq!(v2_preview.verified_revisions, 3);
+    assert_eq!(v2_preview.verified_packs, 1);
+    assert_eq!(v2_preview.document_head_count, 2);
+    assert!(matches!(
+        b.inspect_explicitly_pinned_v2_read_only(
+            &scope, &winning.head, &_ack_lost.etag, None,
+        ).await, Err(S3PinnedV2ReadError::MissingTrustedRoot)
+    ));
+    assert!(matches!(
+        b.inspect_explicitly_pinned_v2_read_only(
+            &scope, &winning.head, "wrong-validator", Some(&first.head),
+        ).await, Err(S3PinnedV2ReadError::RootChanged)
+    ));
+    assert!(matches!(
+        b.inspect_explicitly_pinned_v2_read_only(
+            &scope, &first.head, &written.etag, None,
+        ).await, Err(S3PinnedV2ReadError::RootChanged)
+    ));
 
     // A stale second writer must fail at the S3 server; it cannot overwrite
     // the first writer's root or treat a losing branch as a deletion.
@@ -597,6 +632,18 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
         S3PackedHeadV2::decode(&foreign, &winning.head_bytes),
         Err(S3PackIndexV2Error::ForeignVault),
     );
+    let foreign_scope = S3RemoteAnchorScope::new(
+        "desktop-v2", "isolated-test-account", &profile, &foreign,
+    ).unwrap();
+    let before_scope_failure = b.test_io_snapshot();
+    assert!(matches!(
+        b.inspect_explicitly_pinned_v2_read_only(
+            &foreign_scope, &winning.head, &_ack_lost.etag, Some(&first.head),
+        ).await, Err(S3PinnedV2ReadError::ScopeMismatch)
+    ));
+    let after_scope_failure = b.test_io_snapshot();
+    assert_eq!(before_scope_failure, after_scope_failure,
+        "wrong connected vault must fail before making ANY network request");
     assert!(matches!(
         S3HeadPointerV1::decode(&winning.head_bytes, &ns),
         Err(S3ContractError::InvalidRoot | S3ContractError::UnsupportedRootSchema),
@@ -612,6 +659,9 @@ async fn minio_v2_pack_root_cas_two_clients_and_lost_ack() {
         S3PutCondition::IfMatch(current_packet.object.etag),
     ).await.unwrap();
     assert!(read_verified_v2(&b, &ns).await.is_err());
+    assert!(b.inspect_explicitly_pinned_v2_read_only(
+        &scope, &winning.head, &_ack_lost.etag, Some(&first.head),
+    ).await.is_err());
     // Previously recorded intent is never a user's confirmed sync baseline.
     assert!(after_restart.recover_verified(intent_winner, &ns, &b).await.is_err());
     eprintln!(
