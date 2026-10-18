@@ -90,6 +90,8 @@ impl std::fmt::Display for TaskFailed {
 
 /// Every service of the app, wired together, with no knowledge of the UI that hosts it.
 pub struct Core {
+    #[cfg(feature = "sync-s3")]
+    installed_host_custody_db: Option<PathBuf>,
     pub settings: SettingsManager,
     pub ui_state: UiStateService,
     pub search: SearchService,
@@ -118,6 +120,26 @@ pub struct Core {
 impl Core {
     /// Opens all stores under `app_data_dir`, which the host picks.
     pub fn open(app_data_dir: &Path, events: Arc<dyn EventSink>) -> Arc<Self> {
+        Self::open_inner(app_data_dir, events, #[cfg(feature = "sync-s3")] None)
+    }
+
+    /// P0-B2a *explicit* host-bound Core for a cooperating installer-owned
+    /// source. Unlike Core::open, ordinary legacy mutations will fail closed
+    /// unless individually routed through the shared enrollment epoch.
+    /// The caller MUST obtain this path from the trusted host, not appdata.
+    /// Full production native startup still needs to make it mandatory.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn open_with_installed_host(
+        app_data_dir: &Path, host_custody_db: &Path, events: Arc<dyn EventSink>,
+    ) -> Arc<Self> {
+        Self::open_inner(app_data_dir, events, Some(host_custody_db.to_path_buf()))
+    }
+
+    fn open_inner(
+        app_data_dir: &Path,
+        events: Arc<dyn EventSink>,
+        #[cfg(feature = "sync-s3")] installed_host_custody_db: Option<PathBuf>,
+    ) -> Arc<Self> {
         let core = Arc::new_cyclic(|this: &Weak<Core>| {
             let changed = Arc::clone(&events);
             let notifier: ChangeNotifier = Arc::new(move |paths| {
@@ -134,6 +156,8 @@ impl Core {
                 }
             });
             Core {
+                #[cfg(feature = "sync-s3")]
+                installed_host_custody_db,
                 settings: SettingsManager::new(app_data_dir),
                 ui_state: UiStateService::open(&app_data_dir.join("ui-state.sqlite3")),
                 search: SearchService::new(app_data_dir.join("search-v2"), notifier, index_notifier),
@@ -154,6 +178,12 @@ impl Core {
         // Bind HistoryService to the SAME live/cold-start participant HOLD
         // before publishing the Core to hosts, watchers or editor workers.
         core.history.bind_guarded_participant_policy(core.documents.guarded_history_policy());
+        #[cfg(feature = "sync-s3")]
+        if core.installed_host_custody_db.is_some() {
+            // Every direct HistoryService mutator must refuse until routed
+            // through the host epoch; do so before exposing workers/hosts.
+            core.history.require_installed_host_epoch();
+        }
         core.documents.start(Arc::downgrade(&core));
         core
     }
@@ -200,7 +230,7 @@ impl Core {
     /// This is a pathname/SQLite HOLD check under an in-process mutex, NOT
     /// an OS interprocess lock or permission for a sync overwrite/delete.
     pub(crate) fn file_mutation_guard_for_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
-        self.file_mutation_guard_for_write_mode(false)
+        self.file_mutation_guard_for_write_mode(false, false)
     }
 
     /// INTERNAL ONLY: the caller must already hold a verified, pinned
@@ -208,13 +238,37 @@ impl Core {
     /// No other File Gate operation may use this exception. This is not a
     /// remote sync overwrite/delete capability or a generic write permit.
     pub(crate) fn file_mutation_guard_for_custody_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
-        self.file_mutation_guard_for_write_mode(true)
+        self.file_mutation_guard_for_write_mode(true, false)
+    }
+
+    /// Only the still-held host SQLite enrollment epoch can invoke this
+    /// exception, never a normal File Gate entrypoint or a network reader.
+    #[cfg(feature = "sync-s3")]
+    pub(crate) fn file_mutation_guard_for_host_write(
+        &self, permit: &HostUnenrolledEpochPermit<'_>,
+    ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+        if !std::ptr::eq(self, permit.core)
+            || self.documents.requires_guarded_participant_hold()
+        {
+            return Err(FileCommandError::Task {
+                message: "host ordinary mutation is HOLD: wrong Core or locally enrolled participant".into(),
+            });
+        }
+        self.file_mutation_guard_for_write_mode(false, true)
     }
 
     fn file_mutation_guard_for_write_mode(
-        &self, proven_custody: bool,
+        &self, proven_custody: bool, host_epoch_held: bool,
     ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
         let guard = self.file_mutation_guard()?;
+        #[cfg(feature = "sync-s3")]
+        if !proven_custody && !host_epoch_held && self.installed_host_custody_db.is_some() {
+            return Err(FileCommandError::Task {
+                message: "host custody is HOLD: mutation has no held shared enrollment epoch".into(),
+            });
+        }
+        #[cfg(not(feature = "sync-s3"))]
+        let _ = host_epoch_held;
         if !proven_custody && self.documents.requires_guarded_participant_hold() {
             return Err(FileCommandError::Task {
                 message: "File Gate is HOLD: an S3 workspace was enrolled or its appdata registry is unavailable; ordinary mutations require explicit custody admission".into(),
