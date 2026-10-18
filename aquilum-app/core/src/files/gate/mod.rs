@@ -11,6 +11,7 @@ pub use moves::{move_across, rename};
 pub use trash::{cleanup_retention, ensure_trash, restore, restore_deletion, trash};
 pub use write::{copy, create, create_binary, create_folder, ensure_folder_tree, name_version, write};
 /// Explicit internal guarded writer; not yet the default editor-save path.
+#[allow(unused_imports)]
 pub(crate) use write::write_with_registered_custody;
 
 use super::attachments::forget_attachments_if_touched;
