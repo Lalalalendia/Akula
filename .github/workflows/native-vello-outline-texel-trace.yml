@@ -42,6 +42,12 @@ jobs:
             grep -m1 'model name' /proc/cpuinfo || true
             rustc --version
           } | tee vello-atlas-pixel-runner.txt
+      - name: Compile test harness exactly once before repeating trials
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked --no-run -p aquilum-native --bin aquilum-native
       - name: Twelve independent guarded UI frames with atlas neighborhood logs
         shell: bash
         working-directory: aquilum-app
