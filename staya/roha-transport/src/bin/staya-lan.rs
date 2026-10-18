@@ -1,5 +1,5 @@
 //! Standalone, manually addressed LAN proof-of-concept. No files or Sync Core.
-use akula_roha_transport::{lan_discovery, AllowedPeers, StayaTransport};
+use akula_roha_transport::{AllowedPeers, StayaTransport, lan_discovery};
 use iroh::{EndpointAddr, EndpointId, SecretKey};
 use std::{
     collections::BTreeSet,
@@ -115,14 +115,16 @@ async fn serve(
     };
     println!("endpoint_id={}", transport.id());
     println!("local_udp_sockets={:?}", transport.bound_sockets());
-    println!("relay=disabled discovery={} allowed_peer={allowed}", _mdns.is_some());
+    println!(
+        "relay=disabled discovery={} allowed_peer={allowed}",
+        _mdns.is_some()
+    );
     loop {
         let conn = transport.accept_one().await?;
-        let (mut send, mut recv) =
-            tokio::time::timeout(Duration::from_secs(15), conn.accept_bi())
-                .await
-                .map_err(|_| "stream accept timeout")?
-                .map_err(|e| e.to_string())?;
+        let (mut send, mut recv) = tokio::time::timeout(Duration::from_secs(15), conn.accept_bi())
+            .await
+            .map_err(|_| "stream accept timeout")?
+            .map_err(|e| e.to_string())?;
         let msg = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(64))
             .await
             .map_err(|_| "receive timeout")?
