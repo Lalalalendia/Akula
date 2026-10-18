@@ -38,7 +38,8 @@ def main():
         book.write_bytes(book_bytes)
         serve = subprocess.Popen([str(binary), "serve", "--key", str(server_key),
             "--book", str(book), "--allow", client_id, "--bind", "127.0.0.1:0",
-            "--global-quota", "1000000", "--peer-quota", "1000000"],
+            "--global-quota", "1000000", "--peer-quota", "1000000",
+            "--quota-state", str(base / "quota-state")],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
         try:
             assert serve.stdout
