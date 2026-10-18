@@ -12,6 +12,11 @@ on:
 permissions:
   contents: read
 
+# Replace obsolete PR experiment runs after new commits; keep manual runs.
+concurrency:
+  group: akula-fed-inventory-01-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   candidate-inventory:
     name: Read-only three-peer inventory and independent full-list baseline
