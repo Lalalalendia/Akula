@@ -32,7 +32,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          old_sha="$(gh api repos/Lalalalendia/Akula/contents/staya/roha-transport/Cargo.lock --jq .sha)"
+          old_sha="$(gh api "repos/Lalalalendia/Akula/contents/staya/roha-transport/Cargo.lock?ref=experiment/staya-iroh-blobs-compare-20261018" --jq .sha)"
           test "$old_sha" = "5bff8451c3be8b2c479fd759e6c3c3ecea213ed1"
           cargo metadata --format-version 1 > dep-metadata.json
           python3 - <<'PY'
