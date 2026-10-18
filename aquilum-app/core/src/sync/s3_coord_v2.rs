@@ -9,6 +9,8 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use super::s3_manifest::is_blake3;
+#[cfg(feature = "sync-s3")]
+use super::S3PinnedRevisionSnapshot;
 use super::{
     OperationId, RevisionId, S3HeadPointerV1, S3Keyspace,
     S3ManifestV1, S3RevisionRefV1, VaultId, MAX_REVISIONS,
@@ -29,6 +31,7 @@ pub enum S3DeltaEnvelopeV2Error {
     Oversized,
     InvalidEncoding,
     InvalidAnchor,
+    UntrustedSnapshot,
     MissingAncestry,
     InvalidRevision,
     DuplicateRevision,
@@ -144,10 +147,40 @@ impl S3DeltaEnvelopeV2 {
     pub fn revisions(&self) -> &[S3RevisionRefV1] { &self.revisions }
     pub fn packs(&self) -> &[S3DeltaPackRefV2] { &self.packs }
 
-    /// Validate exact membership against two independently verified V1
-    /// snapshots. Even if this succeeds, the result is advisory only.
-    /// No intermediate generations may be skipped by this single-letter API.
-    pub fn verify_v1_coverage(
+    /// Public read-only path is restricted to full V1 snapshots produced by
+    /// the canonical pinned-S3 verification pipeline. Caller-defined slices
+    /// of revision IDs are NOT a remote assurance boundary. Neither digest
+    /// nor snapshot label is a writer-authenticated MAC.
+    #[cfg(feature = "sync-s3")]
+    pub fn verify_pinned_v1_coverage(
+        &self,
+        ns: &S3Keyspace,
+        previous_head: &S3HeadPointerV1,
+        previous_manifest: &S3ManifestV1,
+        previous: &S3PinnedRevisionSnapshot,
+        current_head: &S3HeadPointerV1,
+        current_manifest: &S3ManifestV1,
+        current: &S3PinnedRevisionSnapshot,
+    ) -> Result<S3DeltaEnvelopeCoverageV2, S3DeltaEnvelopeV2Error> {
+        if previous.snapshot_id != format!(
+            "{}:{}", previous_head.manifest_id(), previous_head.manifest_blake3(),
+        ) || current.snapshot_id != format!(
+            "{}:{}", current_head.manifest_id(), current_head.manifest_blake3(),
+        ) {
+            return Err(S3DeltaEnvelopeV2Error::UntrustedSnapshot);
+        }
+        self.verify_v1_coverage(
+            ns, previous_head, previous_manifest,
+            previous.references_for_coord_v2(),
+            current_head, current_manifest,
+            current.references_for_coord_v2(),
+        )
+    }
+
+    /// Private inventory comparison. Only the pinned entrypoint above may
+    /// provide read-only remote assurance to other Core subsystems; direct
+    /// fabricated slices in tests prove fail-closed arithmetic only.
+    fn verify_v1_coverage(
         &self,
         ns: &S3Keyspace,
         previous_head: &S3HeadPointerV1,
@@ -496,6 +529,32 @@ mod tests {
         let mut bogus = f.envelope.clone();
         bogus.previous_pointer_blake3 = blake3::hash(b"tamper").to_hex().to_string();
         assert_eq!(verify(&f, &bogus), Err(S3DeltaEnvelopeV2Error::InvalidAnchor));
+    }
+
+    #[cfg(feature = "sync-s3")]
+    #[test]
+    fn pinned_v1_snapshots_are_required_and_stale_snapshot_ids_fail_closed() {
+        let f = fixture();
+        let previous = S3PinnedRevisionSnapshot::for_coord_v2_test(
+            format!("{}:{}", f.old_head.manifest_id(), f.old_head.manifest_blake3()),
+            f.old.clone(),
+        );
+        let current = S3PinnedRevisionSnapshot::for_coord_v2_test(
+            format!("{}:{}", f.new_head.manifest_id(), f.new_head.manifest_blake3()),
+            f.current.clone(),
+        );
+        let receipt = f.envelope.verify_pinned_v1_coverage(
+            &f.ns, &f.old_head, &f.old_root, &previous,
+            &f.new_head, &f.new_root, &current,
+        ).unwrap();
+        assert_eq!(receipt.added_revision_ids.len(), 3);
+        let forged = S3PinnedRevisionSnapshot::for_coord_v2_test(
+            "foreign-snapshot:sha".into(), f.current.clone(),
+        );
+        assert_eq!(f.envelope.verify_pinned_v1_coverage(
+            &f.ns, &f.old_head, &f.old_root, &previous,
+            &f.new_head, &f.new_root, &forged,
+        ), Err(S3DeltaEnvelopeV2Error::UntrustedSnapshot));
     }
 
     #[test]
