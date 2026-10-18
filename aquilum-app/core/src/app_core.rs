@@ -14,7 +14,7 @@ use crate::wikixiv::WikixivService;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "host-custody")]
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Conservatively serialize all Core-managed mutations and protected original
@@ -24,7 +24,7 @@ static PROCESS_FILE_MUTATIONS: Mutex<()> = Mutex::new(());
 /// An ordinary note's primary bytes and HistoryService may be separate
 /// mutex stages. Hold a read lease across BOTH, while activation obtains
 /// an exclusive write fence before publishing participant HOLD.
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "host-custody")]
 static PROCESS_NOTE_PUBLICATIONS: RwLock<()> = RwLock::new(());
 
 /// What the core tells its host.
@@ -90,7 +90,7 @@ impl std::fmt::Display for TaskFailed {
 
 /// Every service of the app, wired together, with no knowledge of the UI that hosts it.
 pub struct Core {
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     installed_host_custody_db: Option<PathBuf>,
     pub settings: SettingsManager,
     pub ui_state: UiStateService,
@@ -121,12 +121,12 @@ pub struct Core {
 /// SQLite enrollment epoch is held by Core::with_unenrolled_host_epoch.
 /// It is NOT remote S3 write authority, a protected-custody token or evidence
 /// against uncooperative same-user writers.
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "host-custody")]
 pub(crate) struct HostUnenrolledEpochPermit<'a> {
     core: &'a Core,
 }
 
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "host-custody")]
 impl HostUnenrolledEpochPermit<'_> {
     pub(crate) fn binds_history(&self, history: &HistoryService) -> bool {
         std::ptr::eq(&self.core.history, history)
@@ -144,8 +144,8 @@ impl Core {
     /// unless individually routed through the shared enrollment epoch.
     /// The caller MUST obtain this path from the trusted host, not appdata.
     /// Full production native startup still needs to make it mandatory.
-    #[cfg(feature = "sync-s3")]
-    pub(crate) fn open_with_installed_host(
+    #[cfg(feature = "host-custody")]
+    pub fn open_with_installed_host(
         app_data_dir: &Path, host_custody_db: &Path, events: Arc<dyn EventSink>,
     ) -> Arc<Self> {
         Self::open_inner(app_data_dir, events, Some(host_custody_db.to_path_buf()))
@@ -156,7 +156,7 @@ impl Core {
         events: Arc<dyn EventSink>,
         installed_host_custody_db: Option<PathBuf>,
     ) -> Arc<Self> {
-        #[cfg(not(feature = "sync-s3"))]
+        #[cfg(not(feature = "host-custody"))]
         let _ = &installed_host_custody_db;
         let core = Arc::new_cyclic(|this: &Weak<Core>| {
             let changed = Arc::clone(&events);
@@ -174,7 +174,7 @@ impl Core {
                 }
             });
             Core {
-                #[cfg(feature = "sync-s3")]
+                #[cfg(feature = "host-custody")]
                 installed_host_custody_db,
                 settings: SettingsManager::new(app_data_dir),
                 ui_state: UiStateService::open(&app_data_dir.join("ui-state.sqlite3")),
@@ -196,7 +196,7 @@ impl Core {
         // Bind HistoryService to the SAME live/cold-start participant HOLD
         // before publishing the Core to hosts, watchers or editor workers.
         core.history.bind_guarded_participant_policy(core.documents.guarded_history_policy());
-        #[cfg(feature = "sync-s3")]
+        #[cfg(feature = "host-custody")]
         if core.installed_host_custody_db.is_some() {
             // Every direct HistoryService mutator must refuse until routed
             // through the host epoch; do so before exposing workers/hosts.
@@ -217,7 +217,7 @@ impl Core {
     /// Keep a legacy note publication (primary bytes + history snapshot)
     /// within a single cooperative admission epoch. Callers MUST drop this
     /// guard before UI callbacks, document reconciliation or notifications.
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     pub(crate) fn ordinary_note_publication_lease(
         &self,
     ) -> Result<RwLockReadGuard<'static, ()>, FileCommandError> {
@@ -230,7 +230,7 @@ impl Core {
     /// AFTER DocumentHub prewrite arming and BEFORE File Gate/HistoryFiles.
     /// Waits for any already-admitted ordinary note primary+history attempt
     /// to finish. This is process-local, not an interprocess custody lock.
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     pub(crate) fn ordinary_note_enrollment_fence(
         &self,
     ) -> Result<RwLockWriteGuard<'static, ()>, FileCommandError> {
@@ -259,14 +259,14 @@ impl Core {
         self.file_mutation_guard_for_write_mode(true, false)
     }
 
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     pub(crate) fn requires_installed_host_epoch(&self) -> bool {
         self.installed_host_custody_db.is_some()
     }
 
     /// Only the still-held host SQLite enrollment epoch can invoke this
     /// exception, never a normal File Gate entrypoint or a network reader.
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     pub(crate) fn file_mutation_guard_for_host_write(
         &self, permit: &HostUnenrolledEpochPermit<'_>,
     ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
@@ -284,13 +284,13 @@ impl Core {
         &self, proven_custody: bool, host_epoch_held: bool,
     ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
         let guard = self.file_mutation_guard()?;
-        #[cfg(feature = "sync-s3")]
+        #[cfg(feature = "host-custody")]
         if !proven_custody && !host_epoch_held && self.installed_host_custody_db.is_some() {
             return Err(FileCommandError::Task {
                 message: "host custody is HOLD: mutation has no held shared enrollment epoch".into(),
             });
         }
-        #[cfg(not(feature = "sync-s3"))]
+        #[cfg(not(feature = "host-custody"))]
         let _ = host_epoch_held;
         if !proven_custody && self.documents.requires_guarded_participant_hold() {
             return Err(FileCommandError::Task {
@@ -334,7 +334,7 @@ impl Core {
     /// This path is supplied by the installer contract, never from appdata;
     /// Core::open (legacy) still bypasses this policy and MUST be migrated
     /// before #251's real alternate-appdata release blocker can close.
-    #[cfg(feature = "sync-s3")]
+    #[cfg(feature = "host-custody")]
     pub(crate) fn with_unenrolled_host_epoch<T>(
         &self,
         target: &Path,
