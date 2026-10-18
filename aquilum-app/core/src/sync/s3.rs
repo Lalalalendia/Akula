@@ -86,6 +86,13 @@ impl S3Keyspace {
         {
             return manifest.parse::<OperationId>().is_ok();
         }
+        // Immutable, deterministic advisory locator for one exact V1
+        // generation. Never treat a missing locator as an empty delta.
+        if let Some(manifest) = rest.strip_prefix("coord/letters/")
+            .and_then(|s| s.strip_suffix(".json"))
+        {
+            return manifest.parse::<OperationId>().is_ok();
+        }
         if let Some(revision) = rest.strip_prefix("revisions/")
             .and_then(|s| s.strip_suffix(".json"))
         {
@@ -106,6 +113,13 @@ impl S3Keyspace {
 
     pub fn immutable_revision_key(&self, revision: RevisionId) -> String {
         format!("{}/revisions/{revision}.json", self.vault_root())
+    }
+
+    /// Discover a compact read-only delta letter from a *verified* V1
+    /// manifest identity without S3 LIST or caller-supplied digest guessing.
+    /// This is a separate write-once hint key, not the canonical V1 root.
+    pub fn immutable_coord_letter_locator_key(&self, manifest: OperationId) -> String {
+        format!("{}/coord/letters/{manifest}.json", self.vault_root())
     }
 
     pub fn immutable_blob_key(&self, blake3_hex: &str) -> Result<String, S3ContractError> {
