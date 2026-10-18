@@ -1,0 +1,93 @@
+name: Vello single-region release A/B and process RSS
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/render/paint/mod.rs'
+      - 'aquilum-app/native/src/render/renderer/**'
+      - 'aquilum-app/native/src/app/tests/perf/worker_router.rs'
+      - '.github/scripts/summarize-vello-single-region-rss.py'
+      - '.github/workflows/native-vello-single-region-rss.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-single-region-rss-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rss:
+    name: Single-renderer mixed real frames, RSS and p95 (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-single-region-rss-v1
+          cache-workspace-crates: true
+      - name: Install native build libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record CPU and source
+        shell: bash
+        run: |
+          { git rev-parse HEAD; rustc --version; cargo --version; grep -m1 'model name' /proc/cpuinfo || true; } | tee vello-single-region-env.txt
+      - name: Compile release diagnostic once
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native --no-run
+      - name: Compare three independent processes per mode, varying launch order
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          for trial in 1 2 3; do
+            case "$trial" in
+              1) order="serial parallel2 routed" ;;
+              2) order="parallel2 routed serial" ;;
+              3) order="routed serial parallel2" ;;
+            esac
+            for mode in $order; do
+              log="$GITHUB_WORKSPACE/vello-single-region-$mode-trial-$trial.log"
+              echo "Single-region process A/B trial=$trial mode=$mode"
+              if [ "$mode" = routed ]; then
+                AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT=1 AQ_SINGLE_REGION_RSS_MODE="$mode" \
+                  cargo test --release --locked -p aquilum-native --bin aquilum-native \
+                  benchmark_vello_single_region_process_rss -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
+              else
+                env -u AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT AQ_SINGLE_REGION_RSS_MODE="$mode" \
+                  cargo test --release --locked -p aquilum-native --bin aquilum-native \
+                  benchmark_vello_single_region_process_rss -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
+              fi
+              grep 'VELLO_SINGLE_REGION_PROCESS_RSS' "$log"
+            done
+          done
+      - name: Verify all nine separate-process samples and record memory/latency
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/summarize-vello-single-region-rss.py
+          python3 .github/scripts/summarize-vello-single-region-rss.py . --output vello-single-region-rss-summary.md
+          cat vello-single-region-rss-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive raw process logs and environmental details
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-single-region-rss-${{ github.sha }}
+          path: |
+            vello-single-region-env.txt
+            vello-single-region-*-trial-*.log
+            vello-single-region-rss-summary.md
+          if-no-files-found: warn
+          retention-days: 14
