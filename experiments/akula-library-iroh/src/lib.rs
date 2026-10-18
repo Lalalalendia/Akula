@@ -5,6 +5,7 @@
 use anyhow::{bail, ensure, Context, Result};
 pub mod durable;
 pub mod persistent_quota;
+pub mod rate_limit;
 use iroh::{endpoint::{presets, Connection}, Endpoint, EndpointAddr, EndpointId, SecretKey};
 use std::{collections::{HashMap, HashSet}, net::SocketAddr, sync::{Arc, Mutex}};
 use tokio::{sync::Semaphore, time::{timeout, Duration}};
@@ -17,7 +18,7 @@ const MANIFEST_MAGIC: &[u8; 4] = b"AKM1";
 const MAX_MANIFEST_BYTES: usize = 4 + 8 + 4 + 4 + 32 + MAX_CHUNKS * 32;
 const REQUEST_LIMIT: usize = 1 + 32 + 4;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const OP_MANIFEST: u8 = 1;
 const OP_CHUNK: u8 = 2;
 const OK: u8 = 0;
@@ -124,14 +125,19 @@ pub struct Server {
     allowed: Arc<HashSet<EndpointId>>,
     quota: Arc<Mutex<QuotaState>>,
     disk_quota: Option<Arc<Mutex<persistent_quota::PersistentQuota>>>,
+    rate: Option<Arc<rate_limit::RateGate>>,
 }
 impl Server {
     pub fn new(book: Book, allowed: HashSet<EndpointId>, limits: QuotaState) -> Self {
-        Self { book, allowed: Arc::new(allowed), quota: Arc::new(Mutex::new(limits)), disk_quota: None }
+        Self { book, allowed: Arc::new(allowed), quota: Arc::new(Mutex::new(limits)), disk_quota: None, rate: None }
     }
     pub fn quota(&self) -> Arc<Mutex<QuotaState>> { self.quota.clone() }
     pub fn with_persistent_quota(mut self, quota: persistent_quota::PersistentQuota) -> Self {
         self.disk_quota = Some(Arc::new(Mutex::new(quota)));
+        self
+    }
+    pub fn with_rate_limit(mut self, gate: rate_limit::RateGate) -> Self {
+        self.rate = Some(Arc::new(gate));
         self
     }
     /// Run until the endpoint is closed; bounded to eight concurrent accepted connections.
@@ -163,7 +169,16 @@ impl Server {
                 Ok(Ok(raw)) => self.reply(peer, &raw),
                 _ => vec![BAD_REQUEST],
             };
-            timeout(RESPONSE_TIMEOUT, send.write_all(&response)).await??;
+            if let Some(gate) = &self.rate {
+                // Pacing applies to all application response bytes including manifest/status.
+                // The persistent ledger separately accounts only accepted file payload.
+                for piece in response.chunks(rate_limit::PACE_SLICE) {
+                    gate.wait(peer, piece.len()).await;
+                    timeout(RESPONSE_TIMEOUT, send.write_all(piece)).await??;
+                }
+            } else {
+                timeout(RESPONSE_TIMEOUT, send.write_all(&response)).await??;
+            }
             send.finish()?;
         }
         Ok(())
