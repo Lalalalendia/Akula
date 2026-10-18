@@ -57,3 +57,17 @@ jobs:
         run: |
           bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
           bash scripts/test-install-scripts.sh
+
+  macos-installer:
+    name: macOS installer BSD-lock and crash recovery
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise real macOS lockf, cross-process restore and HOLD
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/lockf
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash scripts/test-install-scripts.sh
