@@ -95,6 +95,12 @@ jobs:
           node --test .github/scripts/release-source-contract.test.cjs
           node .github/scripts/release-source-contract.cjs
 
+      - name: macOS updater TAR and signed-DMG content parity (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
+
       - uses: dtolnay/rust-toolchain@stable
         if: needs.classify.outputs.mode != 'none'
 

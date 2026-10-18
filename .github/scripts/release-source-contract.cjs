@@ -64,7 +64,9 @@ function validateRelease(yaml) {
       for (const required of [
         'dmgs=(dist/Aquilum_*_${{ matrix.arch }}.dmg)',
         'if [[ "${#dmgs[@]}" -ne 1 ]]',
-        'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}"',
+        'archives=(dist/Aquilum_${{ matrix.arch }}.app.tar.gz)',
+        'if [[ "${#archives[@]}" -ne 1',
+        'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}" "${archives[0]}"',
       ]) {
         if (!body.includes(required)) {
           errors.push('macos release verifier must use exact pinned source and DMG: ' + required);

@@ -85,7 +85,7 @@ test('macOS release artifact cannot skip publisher and notarization verification
 
 test('macOS release verifier cannot consume an arbitrary source policy', () => {
   const bad = original.replace(
-    'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}"',
+    'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}" "${archives[0]}"',
     'bash scripts/verify-macos-release.sh /tmp/injected-install.sh "${dmgs[0]}"',
   );
   mustReject(bad, 'macos release verifier must use exact pinned source and DMG');
@@ -116,4 +116,12 @@ test('macOS release verifier must not run after artifact upload', () => {
   assert.ok(next > uploaded);
   const unsafe = after.slice(0, next) + verifyBlock + after.slice(next);
   mustReject(unsafe, 'macos must verify genuine signed DMG');
+});
+
+test('macOS updater archive parity cannot be omitted from notarized DMG release', () => {
+  const bad = original.replace(
+    'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}" "${archives[0]}"',
+    'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}"',
+  );
+  mustReject(bad, 'macos release verifier must use exact pinned source and DMG');
 });

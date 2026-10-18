@@ -9,6 +9,19 @@ trap 'rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/tools"
 dmg="$test_root/Aquilum_release_aarch64.dmg"
 printf 'synthetic, NOT a signed DMG\n' > "$dmg"
+# Synthetic archive must match the fake mounted DMG exactly, including modes.
+fixture="$test_root/updater-fixture/Aquilum.app"
+archive="$test_root/Aquilum_aarch64.app.tar.gz"
+mkdir -p "$fixture/Contents/MacOS"
+printf 'simulated executable\n' > "$fixture/Contents/MacOS/aquilum-app"
+printf 'plist\n' > "$fixture/Contents/Info.plist"
+chmod 755 "$fixture/Contents/MacOS/aquilum-app"
+python3 - "$fixture" "$archive" <<'PY'
+import sys
+import tarfile
+with tarfile.open(sys.argv[2], 'w:gz') as output:
+    output.add(sys.argv[1], arcname='Aquilum.app')
+PY
 calls="$test_root/tools.log"
 errors="$test_root/errors.log"
 export AKULA_RELEASE_TEST_CALLS="$calls"
@@ -39,6 +52,8 @@ if [[ "$1" == attach ]]; then
   [[ -n "$mount" ]] || exit 91
   mkdir -p "$mount/Aquilum.app/Contents/MacOS"
   printf 'simulated executable\n' > "$mount/Aquilum.app/Contents/MacOS/aquilum-app"
+  printf 'plist\n' > "$mount/Aquilum.app/Contents/Info.plist"
+  chmod 755 "$mount/Aquilum.app/Contents/MacOS/aquilum-app"
 elif [[ "$1" == detach ]]; then
   [[ -d "$2" ]] || exit 92
   rm -rf "$2/Aquilum.app"
@@ -71,7 +86,7 @@ printf 'spctl %s\n' "$*" >> "$AKULA_RELEASE_TEST_CALLS"
 EOF
 chmod +x "$test_root/tools/"*
 
-verify() { PATH="$test_root/tools:$PATH" bash "$verifier" "$1" "$2" > "$test_root/stdout.log" 2> "$errors"; }
+verify() { PATH="$test_root/tools:$PATH" bash "$verifier" "$1" "$2" "$archive" > "$test_root/stdout.log" 2> "$errors"; }
 expect_hold() {
   if verify "$1" "$2"; then
     printf 'Untrusted release unexpectedly passed: %s\n' "$3" >&2
@@ -93,11 +108,22 @@ sed -e 's/^AKULA_DEVELOPER_TEAM_ID=""$/AKULA_DEVELOPER_TEAM_ID="AB12CD34EF"/' \
     -e 's/^AKULA_BUNDLE_ID=""$/AKULA_BUNDLE_ID="com.lalalalendia.akula"/' \
     "$production" > "$mock_installer"
 verify "$mock_installer" "$dmg"
-grep -Fq 'pinned publisher and stapled DMG verified' "$test_root/stdout.log"
+grep -Fq 'pinned publisher, notarized DMG and updater TAR parity verified' "$test_root/stdout.log"
 grep -Fq 'stapler validate' "$calls"
 grep -Fq 'hdiutil attach' "$calls"
 grep -Fq 'codesign --verify --deep --strict -R' "$calls"
 grep -Fq 'spctl --assess --type execute' "$calls"
+grep -Fq 'hdiutil detach' "$calls"
+: > "$calls"
+
+# Valid notarization and publisher mocks must not admit a tampered updater
+# TAR even though the DMG itself remains identical and code-signed.
+printf 'not a gzip stream\n' > "$test_root/tampered.app.tar.gz"
+if PATH="$test_root/tools:$PATH" bash "$verifier" "$mock_installer" "$dmg" "$test_root/tampered.app.tar.gz" > /dev/null 2> "$errors"; then
+  echo 'Tampered updater archive passed after notarized DMG verification' >&2
+  exit 1
+fi
+grep -Fq 'Updater TAR and notarized DMG bundles differ' "$errors"
 grep -Fq 'hdiutil detach' "$calls"
 : > "$calls"
 
