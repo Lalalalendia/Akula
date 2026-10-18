@@ -56,6 +56,22 @@ def sanitized(output, secrets):
     return output[-1200:]
 
 
+def verified_pin(folder, identity_key, identity_id, label):
+    """Create a local trust record only after exact identity confirmation."""
+    contact = pathlib.Path(folder) / (label + ".contact")
+    trusted = pathlib.Path(folder) / (label + ".trusted")
+    exported = subprocess.run(
+        [str(BIN), "show-contact", identity_key],
+        capture_output=True, text=True, check=True, timeout=15
+    )
+    contact.write_bytes(exported.stdout.encode("utf-8"))
+    subprocess.run(
+        [str(BIN), "confirm-contact", str(contact), identity_id, str(trusted)],
+        capture_output=True, text=True, check=True, timeout=15
+    )
+    return str(trusted)
+
+
 def setup_network():
     ip("netns", "add", NS_A)
     ip("netns", "add", NS_B)
@@ -210,6 +226,9 @@ def run_with_keys(folder):
     a_id, a_key = identity(folder, 'a')
     b_id, b_key = identity(folder, 'b')
     unknown_id, unknown_key = identity(folder, 'unknown')
+    a_pin = verified_pin(folder, a_key, a_id, "a-verified")
+    b_pin = verified_pin(folder, b_key, b_id, "b-verified")
+    unknown_pin = verified_pin(folder, unknown_key, unknown_id, "unknown-verified")
     peer_address = f"{IP_B}:{PORT}"
     server = None
     captures = []
@@ -219,7 +238,7 @@ def run_with_keys(folder):
         captures = start_mdns_captures(folder)
         server = subprocess.Popen(
             ["sudo", "-n", "ip", "netns", "exec", NS_B, str(BIN),
-             "serve-mdns", b_key, a_id, peer_address, IP_B],
+             "serve-mdns-trusted", b_key, a_pin, peer_address, IP_B],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
         )
         time.sleep(2)
@@ -229,7 +248,7 @@ def run_with_keys(folder):
                                  sanitized(err, [a_key, b_key, unknown_key]))
 
         # The client knows only B's enrolled public key, not B's IP.
-        good = inside(NS_A, BIN, "ping-discovered", a_key, b_id, "12", timeout=50)
+        good = inside(NS_A, BIN, "ping-discovered-trusted", a_key, b_pin, "12", timeout=50)
         if good.returncode != 0 or "via=mdns relay=disabled" not in good.stdout:
             # Publisher-side monitor reports whether DNS-SD was actually
             # announced and whether its daemon encountered any errors.
@@ -251,7 +270,7 @@ def run_with_keys(folder):
 
         # A foreign secret key can discover B's public record but must never
         # complete the authenticated QUIC exchange.
-        denied = inside(NS_A, BIN, "ping-discovered", unknown_key, b_id, "8",
+        denied = inside(NS_A, BIN, "ping-discovered-trusted", unknown_key, b_pin, "8",
                         timeout=55)
         if denied.returncode == 0:
             raise AssertionError("unknown peer was accepted after mDNS")
@@ -262,11 +281,18 @@ def run_with_keys(folder):
             )
 
         # An unapproved/other EndpointId must not resolve to B at all.
-        other = inside(NS_A, BIN, "ping-discovered", a_key, unknown_id, "3",
+        other = inside(NS_A, BIN, "ping-discovered-trusted", a_key, unknown_pin, "3",
                        timeout=15)
         if other.returncode == 0 or "no permitted peers were discovered" not in other.stderr:
             raise AssertionError("mDNS allowed an unrelated endpoint identity")
-        print("STAYA_MDNS_PASS: offline mDNS discovery and QUIC; foreign keys and IDs rejected")
+        # A missing trusted record must not fall back to unconfirmed mDNS.
+        missing = inside(
+            NS_A, BIN, "ping-discovered-trusted", a_key,
+            str(pathlib.Path(folder) / "missing.trusted"), "3", timeout=12
+        )
+        if missing.returncode == 0:
+            raise AssertionError("missing trusted record bypassed enrollment")
+        print("STAYA_MDNS_TRUSTED_PASS: offline trusted contact mDNS and authenticated QUIC; foreign keys rejected")
     finally:
         report_mdns_captures(captures)
         kill_server(server)
