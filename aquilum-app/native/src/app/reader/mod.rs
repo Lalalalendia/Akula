@@ -116,11 +116,21 @@ impl App {
         let workspace_id = self.workspace.core.ui_state.resolve_workspace(&workspace.to_string_lossy(), crate::dates::now_ms()).ok();
         let cached = workspace_id.and_then(|id| self.workspace.core.ui_state.load_reader_state(id, &key).ok().flatten());
         let active = initial.filter(|c| !c.trim().is_empty());
-        let target = match (active.clone(), cached) {
-            (Some(cfi), _) => Target::Cfi(cfi),
-            _ if current == 0 => Target::Start,
-            (None, Some(state)) if state.current == i64::from(current) && state.cfi.is_some() => Target::Cfi(state.cfi.unwrap_or_default()),
-            _ => Target::Fraction(f64::from(current) / f64::from(total)),
+        // No linked note means there is no authoritative "pages" counter;
+        // synthetic_pages starts at 0 on every open. The durable CFI in
+        // SQLite is therefore the only precise resume point for loose EPUBs.
+        // With a linked note, require the saved current page counter to
+        // match that note before trusting a cached position.
+        let saved_cfi = cached.and_then(|state| {
+            (page.is_none() || state.current == i64::from(current))
+                .then_some(state.cfi)
+                .flatten()
+                .filter(|cfi| !cfi.trim().is_empty())
+        });
+        let target = match (active.clone(), saved_cfi) {
+            (Some(cfi), _) | (None, Some(cfi)) => Target::Cfi(cfi),
+            (None, None) if current == 0 => Target::Start,
+            (None, None) => Target::Fraction(f64::from(current) / f64::from(total)),
         };
         let Some(session) = Session::open(file, target) else {
             report!("книга не открылась: {}", file.display());
