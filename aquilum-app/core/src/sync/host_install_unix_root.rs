@@ -84,6 +84,32 @@ mod tests {
     }
 
     #[test]
+    fn valid_sqlite_and_user_issued_receipt_are_still_hold() {
+        use crate::sync::host_custody_registry::SharedHostCustodyRegistry;
+        use crate::sync::host_install_witness::{
+            create_test_witness_once, read_installer_witness,
+        };
+
+        let temp = tempfile::tempdir().unwrap();
+        let host = temp.path().join("host-ledger");
+        let anchor = temp.path().join("separate-anchor");
+        fs::create_dir(&host).unwrap();
+        fs::create_dir(&anchor).unwrap();
+        let db = host.join("legitimate.sqlite3");
+        let receipt = anchor.join("well-formed.json");
+        drop(SharedHostCustodyRegistry::provision_new(&db, &[]).unwrap());
+        create_test_witness_once(&db, &receipt).unwrap();
+        assert!(SharedHostCustodyRegistry::open_existing(&db).is_ok(),
+            "test must use a valid, existing SQLite ledger");
+        assert!(receipt.is_file());
+        assert!(read_installer_witness(&db, &receipt).is_err(),
+            "the correct schema, path and physical IDs cannot replace OS-owned authority");
+        // No bootstrap, deletion, repair or alteration of either input.
+        assert!(SharedHostCustodyRegistry::open_existing(&db).is_ok());
+        assert!(receipt.is_file());
+    }
+
+    #[test]
     fn root_owned_receipt_second_process() {
         if std::env::var_os("AKULA_B6B2_CHILD").is_none() { return; }
         let path = PathBuf::from(
