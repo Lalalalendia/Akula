@@ -858,6 +858,79 @@ mod tests {
         assert_eq!(reader.inspect(&vault, record.root_identity).unwrap(), Some(record));
     }
 
+    /// A pinned live Core must not mistake a completely new real directory
+    /// containing a VALID empty SQLite registry for its earlier host ledger.
+    /// There is no symlink in this fixture; the earlier parent-only check
+    /// would have accepted the replacement.
+    #[cfg(unix)]
+    #[test]
+    fn live_registry_denies_real_parent_rename_and_empty_replacement() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let mut enrolled_host = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        enrolled_host.enroll(&record).unwrap();
+
+        let old_parent = db.parent().unwrap();
+        let saved_parent = temp.path().join("saved-host-directory");
+        fs::rename(old_parent, &saved_parent).unwrap();
+        fs::create_dir(old_parent).unwrap();
+        // A second, perfectly well-formed but EMPTY ledger at the same
+        // configured string pathname is NOT trusted by the live first Core.
+        let replacement = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        assert_eq!(
+            replacement.inspect(&vault, record.root_identity).unwrap(),
+            None,
+        );
+        drop(replacement);
+
+        let mut entered_mutation = false;
+        assert!(matches!(
+            enrolled_host.with_unenrolled_epoch(&vault, record.root_identity, || {
+                entered_mutation = true;
+            }),
+            Err(HostCustodyError::InvalidHostLocation)
+        ));
+        assert!(!entered_mutation, "swapped host parent gave write authority");
+        assert!(matches!(
+            enrolled_host.inspect(&vault, record.root_identity),
+            Err(HostCustodyError::InvalidHostLocation)
+        ));
+        assert!(matches!(
+            enrolled_host.enroll(&record),
+            Err(HostCustodyError::InvalidHostLocation)
+        ));
+        assert!(saved_parent.join(db.file_name().unwrap()).exists(),
+            "preserved host ledger must not be deleted by HOLD");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_registry_denies_leaf_sqlite_inode_substitution() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let mut host = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        host.enroll(&record).unwrap();
+        let retained = temp.path().join("previous-ledger.sqlite");
+        fs::rename(&db, &retained).unwrap();
+        // Even a regular (non-symlink) file with the exact original name is
+        // not the object opened when the host epoch was established.
+        fs::write(&db, b"replacement bytes").unwrap();
+        let mut called = false;
+        assert!(matches!(
+            host.with_unenrolled_epoch(&vault, record.root_identity, || {
+                called = true;
+            }),
+            Err(HostCustodyError::InvalidHostLocation)
+        ));
+        assert!(!called);
+        assert_eq!(fs::read(&db).unwrap(), b"replacement bytes");
+        assert!(retained.exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn substituted_host_parent_symlink_cannot_select_a_private_empty_ledger() {
