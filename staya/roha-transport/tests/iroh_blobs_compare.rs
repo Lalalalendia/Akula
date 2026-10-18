@@ -1327,11 +1327,12 @@ fn bounded_ext4_inventory_audit_seed() {
         max_active: 1,
         max_peer_active: 1,
     };
-    let mut journal = DurableLedger::open(&journal_dir, policy)
-        .expect("private durable metadata");
-    journal.reserve(SecretKey::generate().public(), expected, size)
+    let mut journal = DurableLedger::open(&journal_dir, policy).expect("private durable metadata");
+    journal
+        .reserve(SecretKey::generate().public(), expected, size)
         .expect("synthetic exact known hash and size");
-    journal.verify_full(expected, &payload)
+    journal
+        .verify_full(expected, &payload)
         .expect("persist verified ledger record");
     let original_journal = fs::read(journal_dir.join("reservations.v1"))
         .expect("immutable snapshot for observational tests");
@@ -1351,7 +1352,8 @@ fn bounded_ext4_inventory_audit_seed() {
 
     // An orphan file with the right suffix and another digest must HOLD.
     let orphan = stage.join("data").join(format!(
-        "{}.data", blake3::hash(b"foreign-unreserved-blob").to_hex()
+        "{}.data",
+        blake3::hash(b"foreign-unreserved-blob").to_hex()
     ));
     fs::write(&orphan, b"foreign").expect("test-only orphan injection");
     assert!(matches!(
@@ -1401,8 +1403,14 @@ fn bounded_ext4_inventory_audit_seed() {
         original_journal,
         "audit must not mutate durable journal metadata"
     );
-    fs::File::open(stage.join("data")).unwrap().sync_all().unwrap();
-    fs::File::open(stage.join("temp")).unwrap().sync_all().unwrap();
+    fs::File::open(stage.join("data"))
+        .unwrap()
+        .sync_all()
+        .unwrap();
+    fs::File::open(stage.join("temp"))
+        .unwrap()
+        .sync_all()
+        .unwrap();
     fs::File::open(&stage).unwrap().sync_all().unwrap();
     fs::File::open(&root).unwrap().sync_all().unwrap();
     drop(journal);
@@ -1419,10 +1427,8 @@ fn bounded_ext4_inventory_audit_seed() {
 #[ignore = "requires remounted disposable ext4 image after prior inventory fixture"]
 fn bounded_ext4_inventory_audit_after_remount() {
     use akula_roha_transport::{
-        admission::AdmissionLimits,
-        bounded_staging::StagingVolumeGuard,
-        durable_admission::DurableLedger,
-        reconcile_inventory::audit_external_inventory,
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, reconcile_inventory::audit_external_inventory,
     };
     let root = std::path::PathBuf::from(
         std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 root"),
