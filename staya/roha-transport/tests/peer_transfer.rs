@@ -16,6 +16,7 @@ async fn permitted_peers_exchange_verified_bytes() {
     let expected = vec![0xA5; 128 * 1024];
     let expected_reply = b"verified-receipt".to_vec();
 
+    let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel::<()>();
     let run = async {
         let receiver = async {
             let conn = b.accept_one().await.expect("accept authenticated peer");
@@ -24,6 +25,7 @@ async fn permitted_peers_exchange_verified_bytes() {
             assert_eq!(received, expected);
             send.write_all(&expected_reply).await.expect("send reply");
             send.finish().expect("finish reply");
+            receipt_rx.await.expect("sender received receipt");
         };
         let sender = async {
             let conn = a.connect(address).await.expect("connect to permitted peer");
@@ -34,6 +36,7 @@ async fn permitted_peers_exchange_verified_bytes() {
             send.finish().expect("finish stream");
             let answer = recv.read_to_end(1024).await.expect("read reply");
             assert_eq!(answer, b"verified-receipt");
+            receipt_tx.send(()).expect("receiver remains alive");
         };
         tokio::join!(receiver, sender);
     };
