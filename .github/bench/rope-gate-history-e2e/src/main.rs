@@ -28,7 +28,8 @@ fn status_kib(label: &str) -> u64 {
 }
 
 fn make_rope(target_bytes: usize) -> Rope {
-    let line = "Новая заметка 😀 漢字 / large saved text, CRLF:\r\n";
+    // Native read normalizes the editor Rope to LF; keep CRLF in the disk baseline only.
+    let line = "Новая заметка 😀 漢字 / large saved text, LF:\n";
     let part = line.repeat(2048);
     let mut rope = Rope::new();
     while rope.byte_len() + part.len() <= target_bytes {
