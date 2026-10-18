@@ -30,6 +30,9 @@ jobs:
       - name: Compile and test real QUIC loopback endpoints
         working-directory: experiments/akula-library-iroh
         run: cargo test --locked --all-targets
+      - name: Build two-process laboratory binary
+        working-directory: experiments/akula-library-iroh
+        run: cargo build --locked --bin akula-library-iroh-lab
       - name: Separate-process durable download smoke test
         working-directory: experiments/akula-library-iroh
         run: python3 tests/two_process_smoke.py --binary target/debug/akula-library-iroh-lab
