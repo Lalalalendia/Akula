@@ -370,3 +370,46 @@ mod partition_tests {
         assert!(weighted_peak < fixed_peak);
     }
 }
+
+
+#[cfg(test)]
+mod candidate_tests {
+    use super::{initial_candidates, REUSE_LOOKAHEAD_BLOCKS, REUSE_SOURCE_BUDGET, REUSE_BLOCK_LIMIT};
+    use crate::reader::flow::{Block, Role};
+
+    fn block(size: usize) -> Block {
+        Block::Text {
+            text: "X".repeat(size),
+            spans: Vec::new(),
+            origins: Vec::new(),
+            role: Role::Paragraph,
+            depth: 0,
+            indent: false,
+            align: None,
+        }
+    }
+
+    #[test]
+    fn no_capture_for_ordinary_books_or_late_giant_blocks() {
+        let mut small: Vec<Block> = (0..25).map(|_| block(100)).collect();
+        assert!(initial_candidates(&small).iter().all(|&b| !b));
+        small[REUSE_LOOKAHEAD_BLOCKS] = block(40 * 1024);
+        assert!(initial_candidates(&small).iter().all(|&b| !b));
+    }
+
+    #[test]
+    fn speculative_retention_is_limited_by_source_bytes_and_indices() {
+        let mut blocks: Vec<Block> = (0..32).map(|_| block(4096)).collect();
+        blocks[1] = block(118 * 1024);
+        blocks[2] = block(118 * 1024);
+        blocks[3] = block(REUSE_BLOCK_LIMIT + 1);
+        let flags = initial_candidates(&blocks);
+        assert!(flags[0] && flags[1] && flags[2]);
+        assert!(!flags[3]);
+        assert!(flags[REUSE_LOOKAHEAD_BLOCKS..].iter().all(|&flag| !flag));
+        let budget: usize = blocks.iter().zip(flags).filter_map(
+            |(block, keep)| keep.then_some(super::block_weight(block))
+        ).sum();
+        assert!(budget <= REUSE_SOURCE_BUDGET);
+    }
+}
