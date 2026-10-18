@@ -7,6 +7,10 @@ on:
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
       - 'aquilum-app/native/src/render/paint/mod.rs'
       - 'aquilum-app/native/vendor/vello_cpu/src/text.rs'
+      - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
+      - 'aquilum-app/native/vendor/glifo/src/renderer.rs'
+      - 'aquilum-app/native/vendor/glifo/src/atlas/key.rs'
+      - 'aquilum-app/native/vendor/glifo/src/util.rs'
   workflow_dispatch:
 
 permissions:
@@ -44,6 +48,14 @@ jobs:
             rustc --version
             cargo --version
           } | tee vello-guard96-environment.log
+      - name: Verify glifo decision-boundary and existing hinted-baseline invariants
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p glifo --lib glyph_atlas_origin_split_ -- --nocapture
+          cargo test --release --locked -p glifo --lib test_quantize_subpixel -- --nocapture
+          cargo test --release --locked -p glifo --lib hinted_vertical_snap -- --nocapture
       - name: Build benchmark once, then repeat 20 independent strict parity runs
         shell: bash
         working-directory: aquilum-app
