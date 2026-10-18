@@ -1,0 +1,20 @@
+[package]
+name = "staya-upstream-authorheads-repro"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+
+# Exact upstream AuthorHeads behavior, isolated from Akula product builds.
+[workspace]
+resolver = "2"
+
+[dependencies]
+iroh-docs = { version = "=0.101.0", default-features = false }
+
+[patch.crates-io]
+# Preserve our own forks even while testing an external library.
+iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49" }
+noq = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
+noq-proto = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
+noq-udp = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
