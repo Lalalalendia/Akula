@@ -71,12 +71,73 @@ fn save_key_file(path: &Path, key: &SecretKey) -> Result<(), String> {
         .map_err(|e| format!("cannot save secret key: {e}"))
 }
 
+/// Bounded read of an untrusted public contact. It never grants access.
+fn read_contact_file(path: &str) -> Result<EndpointId, String> {
+    let file = File::open(path).map_err(|e| format!("cannot open contact file: {e}"))?;
+    let meta = file.metadata().map_err(|e| format!("cannot inspect contact file: {e}"))?;
+    if !meta.is_file() || meta.len() > pairing::MAX_RECORD_BYTES as u64 {
+        return Err("invalid contact file type or size".into());
+    }
+    let mut text = String::new();
+    file.take(pairing::MAX_RECORD_BYTES as u64 + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| format!("cannot read contact file: {e}"))?;
+    pairing::parse_contact(&text)
+}
+
+/// Explicitly confirmed public key pin. Local OS users with write access to
+/// this file can change it, so this is a lab allowlist, not signed membership.
+fn read_trusted_peer_file(path: &str) -> Result<EndpointId, String> {
+    let symlink_meta = std::fs::symlink_metadata(path)
+        .map_err(|e| format!("cannot inspect trusted peer path: {e}"))?;
+    if !symlink_meta.file_type().is_file() {
+        return Err("trusted peer record must be a regular file, not a symlink".into());
+    }
+    #[cfg(unix)]
+    if symlink_meta.permissions().mode() & 0o077 != 0 {
+        return Err("trusted peer record requires owner-only permissions".into());
+    }
+    let file = File::open(path).map_err(|e| format!("cannot open trusted peer record: {e}"))?;
+    let meta = file.metadata().map_err(|e| format!("cannot inspect trusted peer record: {e}"))?;
+    if !meta.is_file() || meta.len() > pairing::MAX_RECORD_BYTES as u64 {
+        return Err("invalid trusted peer record type or size".into());
+    }
+    let mut text = String::new();
+    file.take(pairing::MAX_RECORD_BYTES as u64 + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| format!("cannot read trusted peer record: {e}"))?;
+    pairing::parse_trusted_peer(&text)
+}
+
+/// Only a confirmed contact can be saved as trusted. Create a new local file
+/// atomically with respect to path existence; never silently replace a pin.
+fn write_trusted_peer_file(path: &Path, id: EndpointId) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(path)
+        .map_err(|e| format!("cannot create trusted peer record: {e}"))?;
+    file.write_all(pairing::export_trusted_peer(id).as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(|e| format!("cannot save trusted peer record: {e}"))
+}
+
+fn peer_from_arg(kind: &str, value: &str) -> Result<EndpointId, String> {
+    if kind.ends_with("-trusted") {
+        read_trusted_peer_file(value)
+    } else {
+        parse_id(value)
+    }
+}
+
 fn parse_id(s: &str) -> Result<EndpointId, String> {
     EndpointId::from_str(s).map_err(|e| format!("invalid peer id: {e}"))
 }
 
 fn usage() -> &'static str {
-    "usage:\n  staya-lan show-contact @KEY_PATH > contact.txt\n  staya-lan inspect-contact CONTACT_PATH\n  staya-lan confirm-contact CONTACT_PATH VERIFIED_FULL_ENDPOINT_ID > trusted-peer.txt\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\n  staya-lan serve-mdns @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT ANNOUNCE_IPV4\n  staya-lan ping-discovered @KEY_PATH ALLOWED_PEER_ID SECONDS_1_TO_20\nDiscovery only runs on explicit request; mDNS broadcasts your public endpoint ID on the LAN.\nDo not publish or commit the private key files.\n"
+    "usage:\n  staya-lan show-contact @KEY_PATH > contact.txt\n  staya-lan inspect-contact CONTACT_PATH\n  staya-lan confirm-contact CONTACT_PATH VERIFIED_FULL_ENDPOINT_ID TRUST_OUTPUT_PATH\n  staya-lan gen-key-file KEY_PATH\n  staya-lan serve-trusted @KEY_PATH TRUSTED_PEER_FILE BIND_IP:UDP_PORT\n  staya-lan ping-trusted @KEY_PATH TRUSTED_PEER_FILE SERVER_IP:UDP_PORT\n  staya-lan serve-mdns-trusted @KEY_PATH TRUSTED_PEER_FILE BIND_IP:UDP_PORT ANNOUNCE_IPV4\n  staya-lan ping-discovered-trusted @KEY_PATH TRUSTED_PEER_FILE SECONDS_1_TO_20\n  staya-lan serve @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT\n  staya-lan ping @KEY_PATH SERVER_PEER_ID SERVER_IP:UDP_PORT\n  staya-lan serve-mdns @KEY_PATH ALLOWED_PEER_ID BIND_IP:UDP_PORT ANNOUNCE_IPV4\n  staya-lan ping-discovered @KEY_PATH ALLOWED_PEER_ID SECONDS_1_TO_20\nDiscovery only runs on explicit request; mDNS broadcasts your public endpoint ID on the LAN.\nDo not publish or commit the private key files.\n"
 }
 
 /// The received mDNS address is never trusted as authentication. QUIC
@@ -151,27 +212,18 @@ async fn main() -> Result<(), String> {
             print!("{}", pairing::export_contact(key.public()));
         }
         Some("inspect-contact") if args.len() == 3 => {
-            let file = std::fs::read_to_string(&args[2])
-                .map_err(|e| format!("cannot read public contact: {e}"))?;
-            if file.len() > pairing::MAX_RECORD_BYTES {
-                return Err("contact too large".into());
-            }
-            let id = pairing::parse_contact(&file)?;
+            let id = read_contact_file(&args[2])?;
             println!("untrusted_contact_endpoint_id={id}");
             println!("not_enrolled=true; verify independently before trusting");
         }
-        Some("confirm-contact") if args.len() == 4 => {
-            let file = std::fs::read_to_string(&args[2])
-                .map_err(|e| format!("cannot read public contact: {e}"))?;
-            if file.len() > pairing::MAX_RECORD_BYTES {
-                return Err("contact too large".into());
-            }
-            let id = pairing::parse_contact(&file)?;
+        Some("confirm-contact") if args.len() == 5 => {
+            let id = read_contact_file(&args[2])?;
             let expected = parse_id(&args[3])?;
             if id != expected {
                 return Err("contact ID mismatch: no trust record created".into());
             }
-            print!("{}", pairing::export_trusted_peer(id));
+            write_trusted_peer_file(Path::new(&args[4]), id)?;
+            println!("peer_pin_saved=true file_access=false");
         }
         Some("gen-key-file") if args.len() == 3 => {
             let key = SecretKey::generate();
@@ -179,22 +231,22 @@ async fn main() -> Result<(), String> {
             println!("endpoint_id={}", key.public());
             eprintln!("Private key saved. Protect its location; never upload it.");
         }
-        Some("serve") if args.len() == 5 => {
+        Some("serve" | "serve-trusted") if args.len() == 5 => {
             let key = secret_from_arg(&args[2])?;
-            let allowed = parse_id(&args[3])?;
+            let allowed = peer_from_arg(&args[1], &args[3])?;
             let socket: SocketAddr = args[4].parse().map_err(|_| "invalid bind socket")?;
             serve(key, allowed, socket, None).await?;
         }
-        Some("serve-mdns") if args.len() == 6 => {
+        Some("serve-mdns" | "serve-mdns-trusted") if args.len() == 6 => {
             let key = secret_from_arg(&args[2])?;
-            let allowed = parse_id(&args[3])?;
+            let allowed = peer_from_arg(&args[1], &args[3])?;
             let socket: SocketAddr = args[4].parse().map_err(|_| "invalid bind socket")?;
             let ip: IpAddr = args[5].parse().map_err(|_| "invalid LAN advertise IP")?;
             serve(key, allowed, socket, Some(ip)).await?;
         }
-        Some("ping") if args.len() == 5 => {
+        Some("ping" | "ping-trusted") if args.len() == 5 => {
             let key = secret_from_arg(&args[2])?;
-            let server = parse_id(&args[3])?;
+            let server = peer_from_arg(&args[1], &args[3])?;
             let socket: SocketAddr = args[4].parse().map_err(|_| "invalid peer socket")?;
             let local = StayaTransport::bind(key, AllowedPeers::new([server])).await?;
             let addr = EndpointAddr::new(server).with_ip_addr(socket);
@@ -205,9 +257,9 @@ async fn main() -> Result<(), String> {
             local.close().await;
             outcome?;
         }
-        Some("ping-discovered") if args.len() == 5 => {
+        Some("ping-discovered" | "ping-discovered-trusted") if args.len() == 5 => {
             let key = secret_from_arg(&args[2])?;
-            let server = parse_id(&args[3])?;
+            let server = peer_from_arg(&args[1], &args[3])?;
             let seconds: u64 = args[4].parse().map_err(|_| "invalid discovery duration")?;
             if !(1..=20).contains(&seconds) {
                 return Err("discovery window must be 1..20 seconds".into());
