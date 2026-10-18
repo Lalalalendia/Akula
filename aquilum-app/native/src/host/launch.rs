@@ -57,6 +57,8 @@ pub fn run(args: Args) -> Result<(), String> {
         replay,
         #[cfg(feature = "memory-probe")]
         probe: None,
+        #[cfg(feature = "memory-probe")]
+        reader_frame: None,
         cursor: CursorIcon::Default,
         resize_edge: None,
         background: None,
