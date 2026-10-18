@@ -329,6 +329,18 @@ pub(crate) fn decode(
 mod tests {
     use super::*;
 
+    fn real_like_base() -> String {
+        // Deterministic incompressible *text*: the delta threshold must
+        // be tested against a nontrivial full-Zstd competitor, not a tiny
+        // Zstd frame for a repeated single phrase.
+        let mut text = String::from("shared words\n");
+        for i in 0u64..300 {
+            text.push_str(&blake3::hash(&i.to_le_bytes()).to_hex().to_string());
+            text.push('\n');
+        }
+        text
+    }
+
     #[test]
     fn byte_exact_utf8_edits_and_full_fallback() {
         let parent_id = RevisionId::new();
@@ -358,7 +370,7 @@ mod tests {
         let parent_id = RevisionId::new();
         let left_id = RevisionId::new();
         let right_id = RevisionId::new();
-        let parent = "one shared note ".repeat(1000);
+        let parent = real_like_base();
         let left = parent.replacen("shared", "left", 1);
         let right = parent.replacen("shared", "right", 1);
         for (revision, target, wrong) in [
@@ -382,7 +394,7 @@ mod tests {
     fn reject_downgrade_spoofed_uuid_unknown_version_and_corrupt_payload() {
         let parent_id = RevisionId::new();
         let target_id = RevisionId::new();
-        let base = "A normal UTF-8 base with words and lines ".repeat(800);
+        let base = real_like_base();
         let target = base.replace("words", "slightly different words");
         let envelope = encode(target_id, target.as_bytes(),
                               Some((parent_id, base.as_bytes()))).unwrap();
