@@ -190,6 +190,26 @@ fn mandatory_installed_host_core_open_uses_real_compiled_shared_ledger() {
     assert_eq!(fs::read_to_string(&clean_note).unwrap(), "updated");
     assert!(a.history.page(&|| vec![clean_root.clone()], &clean_note, 0, 10).total > 0,
         "legitimate installed-host note publication must persist HistoryService");
+    // An existing shared ledger permits CAS write/create in an UNENROLLED
+    // workspace; it does NOT grant blanket filesystem or history authority.
+    // Exercise the public File Gate routes in the same positive CI matrix.
+    assert!(gate::create_binary(&a, &clean_root.join("Blocked.bin"), b"bad").is_err());
+    assert!(gate::copy(&a, &clean_note, &clean_root.join("Copied.md")).is_err());
+    assert!(gate::create_folder(&a, &clean_root.join("Folder")).is_err());
+    assert!(gate::ensure_folder_tree(&a, &clean_root.join("Nested").join("Child")).is_err());
+    assert!(gate::rename(&a, &clean_note, &clean_root.join("Renamed.md")).is_err());
+    assert!(gate::move_across(&a, &clean_note, &clean_root.join("Moved.md")).is_err());
+    assert!(gate::ensure_trash(&a, &clean_root).is_err());
+    assert!(gate::trash(&a, &clean_root, &clean_note).is_err());
+    assert!(a.empty_trash_guarded(&clean_root).is_err());
+    assert!(gate::name_version(&a, &clean_note, None, "must-not-rename").is_none());
+    assert_eq!(fs::read_to_string(&clean_note).unwrap(), "updated");
+    for forbidden in ["Blocked.bin", "Copied.md", "Folder", "Nested",
+                      "Renamed.md", "Moved.md", ".trash"] {
+        assert!(!clean_root.join(forbidden).exists(),
+            "installed-host unexpectedly changed a disallowed route: {forbidden}");
+    }
+
 
     let report = temp.path().join("second-process-report");
     let output = Command::new(std::env::current_exe().unwrap())
@@ -245,4 +265,87 @@ fn explicit_constructor_cannot_select_a_private_empty_host_database() {
     assert!(gate::create(&b, &note, "forbidden", Source::Me, None).is_err(),
         "installed build accepted a caller-chosen empty registry");
     assert!(!note.exists());
+}
+
+
+#[test]
+fn missing_installer_ledger_blocks_all_structural_file_gate_mutations() {
+    use crate::files::error::FileCommandError;
+    use std::time::{Duration, SystemTime};
+
+    // The other CI lane compiles a disposable real host DB and proves
+    // ordinary writes can still succeed. This lane has NO compiler-issued
+    // registry, so every structural/file-history mutation must remain HOLD.
+    if !lacks_compiled_installer_path() {
+        return;
+    }
+
+    fn expect_host_hold<T>(operation: &str, result: Result<T, FileCommandError>) {
+        match result {
+            Err(FileCommandError::Task { message })
+                if message.contains("host custody is HOLD") => {}
+            Err(error) => panic!("{operation} failed for a reason OTHER than host custody: {error:?}"),
+            Ok(_) => panic!("{operation} escaped mandatory host custody without a ledger"),
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let appdata = temp.path().join("appdata");
+    let root = temp.path().join("vault");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&appdata).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let original = root.join("Keep.md");
+    fs::write(&original, "unchanged primary").unwrap();
+
+    let core = Core::open(&appdata, events());
+    assert!(core.requires_installed_host_epoch());
+    core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+
+    // Public File Gate routes should refuse at custody admission, not only
+    // due to missing source/destination or history preflight errors.
+    expect_host_hold("create_binary",
+        gate::create_binary(&core, &root.join("Image.bin"), b"forbidden"));
+    expect_host_hold("copy",
+        gate::copy(&core, &original, &root.join("Copy.md")));
+    expect_host_hold("create_folder",
+        gate::create_folder(&core, &root.join("NewFolder")));
+    expect_host_hold("ensure_folder_tree",
+        gate::ensure_folder_tree(&core, &root.join("Generated").join("Nested")));
+    expect_host_hold("rename",
+        gate::rename(&core, &original, &root.join("Renamed.md")));
+    expect_host_hold("move_across",
+        gate::move_across(&core, &original, &root.join("Moved.md")));
+    expect_host_hold("ensure_trash",
+        gate::ensure_trash(&core, &root));
+    expect_host_hold("trash",
+        gate::trash(&core, &root, &original));
+
+    // Stage a real trash item using *test-only* direct fs operations. The
+    // restore and retention calls below go through the public File Gate.
+    let stale = root.join(".trash").join("Old").join("stale.md");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "preserve this trash record").unwrap();
+    fs::File::options().write(true).open(&stale).unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(40 * 24 * 3600))
+        .unwrap();
+    let deletions = crate::files::deletions::deletion_page_impl(&root, 0, 10).unwrap();
+    assert!(deletions.total > 0, "fixture must contain a genuine deleted note");
+
+    expect_host_hold("restore",
+        gate::restore(&core, &root, &stale));
+    expect_host_hold("restore_deletion",
+        gate::restore_deletion(&core, &root, &deletions.deletions[0].id));
+    expect_host_hold("cleanup_retention",
+        gate::cleanup_retention(&core, &root, 30));
+    expect_host_hold("empty_trash_guarded",
+        core.empty_trash_guarded(&root));
+
+    assert_eq!(fs::read_to_string(&original).unwrap(), "unchanged primary");
+    assert_eq!(fs::read_to_string(&stale).unwrap(), "preserve this trash record");
+    for forbidden in ["Image.bin", "Copy.md", "NewFolder", "Generated",
+                      "Renamed.md", "Moved.md"] {
+        assert!(!root.join(forbidden).exists(),
+            "forbidden File Gate route changed bytes: {forbidden}");
+    }
 }
