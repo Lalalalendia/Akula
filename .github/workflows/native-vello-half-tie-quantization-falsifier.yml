@@ -1,0 +1,149 @@
+name: Vello Common 8-bit half-tie conversion (diagnostic only)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/vendor/vello_cpu/src/render.rs'
+      - '.github/workflows/native-vello-half-tie-quantization-falsifier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-half-tie-quantizer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  half-tie:
+    name: Original vs ephemeral constant-bias Vello, exact glyph and guard96
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-half-tie-quantizer-v1
+          cache-workspace-crates: true
+      - name: Linux native GUI libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Record source, CPU and toolchain
+        shell: bash
+        run: |
+          { git rev-parse HEAD; rustc --version; cargo --version; grep -m1 'model name' /proc/cpuinfo || true; } > vello-half-tie-env.txt
+          cat vello-half-tie-env.txt
+      - name: Verify original real-glyph test reproduces D4 versus D5
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cargo test --release --locked -p vello_cpu --lib guard96_real_glyph_495_slot_and_crop_coverage -- --nocapture > "$GITHUB_WORKSPACE/vello-half-tie-original-unit.log" 2>&1; then
+            echo 'ERROR: original Vello no longer reproduces the real glyph problem'
+            exit 1
+          fi
+          grep -Fq 'GUARD96_EXACT_495 slot=(381, 24) crop=true different_alpha_pixels=1' "$GITHUB_WORKSPACE/vello-half-tie-original-unit.log"
+          grep -Fq 'test render::tests::guard96_real_glyph_495_slot_and_crop_coverage ... FAILED' "$GITHUB_WORKSPACE/vello-half-tie-original-unit.log"
+          grep -F 'GUARD96_EXACT_495' "$GITHUB_WORKSPACE/vello-half-tie-original-unit.log"
+      - name: Patch only the NonZero coverage-to-u8 rounding constant in ephemeral dependency
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import os
+          import pathlib
+          import shutil
+
+          candidates = glob.glob(os.path.expanduser("~/.cargo/registry/src/*/vello_common-0.3.0"))
+          if len(candidates) != 1:
+              raise SystemExit(f"Expected one registry vello_common-0.3.0 source, found: {candidates!r}")
+          source = pathlib.Path(candidates[0])
+          dest = pathlib.Path(os.environ["RUNNER_TEMP"]) / "vello_common_0_3_0_half_tie"
+          shutil.copytree(source, dest)
+          path = dest / "src/strip.rs"
+          original = path.read_text(encoding="utf-8")
+          anchor = "Fill::NonZero => {\n                    let p1 = f32x4::splat(s, 0.5);"
+          if original.count(anchor) != 1:
+              raise SystemExit("Could not locate exact upstream NonZero coverage rounding site")
+          patched = original.replace(anchor, anchor.replace("0.5", "0.5001"), 1)
+          path.write_text(patched, encoding="utf-8")
+          manifest = pathlib.Path("Cargo.toml")
+          text = manifest.read_text(encoding="utf-8")
+          if text.count("[patch.crates-io]") != 1 or "vello_common = { path =" in text:
+              raise SystemExit("Workspace patch section unexpected")
+          manifest.write_text(
+              text + f'\nvello_common = {{ path = "{dest}" }}\n',
+              encoding="utf-8",
+          )
+          pathlib.Path(os.environ["GITHUB_WORKSPACE"], "vello-half-tie-patch-summary.txt").write_text(
+              f"source={source}\npatched={dest}\nonly_change=NonZero alpha rounding: 0.5 -> 0.5001\n",
+              encoding="utf-8",
+          )
+          print(f"Patched exactly one coverage conversion at {path}")
+          PY
+          # This is a local uncommitted Cargo patch. --locked is intentionally
+          # excluded after source replacement, because Cargo.lock must update.
+          cargo metadata --no-deps --format-version=1 >/dev/null
+      - name: Same exact glyph with patched NonZero rounding (must match all slots)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release -p vello_cpu --lib guard96_real_glyph_495_slot_and_crop_coverage -- --nocapture > "$GITHUB_WORKSPACE/vello-half-tie-patched-unit.log" 2>&1 || {
+            tail -n 90 "$GITHUB_WORKSPACE/vello-half-tie-patched-unit.log"
+            exit 1
+          }
+          grep -F 'GUARD96_EXACT_495' "$GITHUB_WORKSPACE/vello-half-tie-patched-unit.log"
+          if grep -Eq 'different_alpha_pixels=[1-9]' "$GITHUB_WORKSPACE/vello-half-tie-patched-unit.log"; then
+            echo "ERROR: patched quantizer still changes a glyph alpha with atlas slot/crop"
+            exit 1
+          fi
+      - name: Repeat real strict cover@1x guard96 in 20 separate processes
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQ_CROSSOVER_ONLY_CASE: cover_1x
+          AQ_CROSSOVER_WORKLOAD: guard96
+          AQ_CROSSOVER_EVERY_FRAME: '1'
+          AQ_TEST_SCROLL_EDGE_GUARD: '96'
+        run: |
+          set -euo pipefail
+          cargo test --release -p aquilum-native --bin aquilum-native --no-run
+          failures=0
+          unexpected=0
+          for attempt in $(seq 1 20); do
+            log="$GITHUB_WORKSPACE/vello-half-tie-ui-$attempt.log"
+            if cargo test --release -p aquilum-native --bin aquilum-native benchmark_vello_worker_crossover -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+              echo "HALF_TIE_UI_PASS trial=$attempt"
+            elif grep -Fq 'VELLO_GUARD_PARITY_FAILURE case=cover_1x' "$log"; then
+              echo "HALF_TIE_UI_PIXEL_FAIL trial=$attempt"
+              failures=$((failures + 1))
+            else
+              echo "HALF_TIE_UI_UNEXPECTED trial=$attempt"
+              unexpected=$((unexpected + 1))
+              tail -n 35 "$log"
+            fi
+          done
+          echo "HALF_TIE_UI patched strict_failures=$failures/20 unexpected=$unexpected" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$unexpected" -eq 0
+          test "$failures" -eq 0
+      - name: Archive all controls and evidence even on failing result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-half-tie-quantizer-${{ github.sha }}
+          path: |
+            vello-half-tie-env.txt
+            vello-half-tie-patch-summary.txt
+            vello-half-tie-original-unit.log
+            vello-half-tie-patched-unit.log
+            vello-half-tie-ui-*.log
+          retention-days: 14
+          if-no-files-found: warn
