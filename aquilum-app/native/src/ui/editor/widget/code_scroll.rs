@@ -212,9 +212,7 @@ impl TextEditor {
     /// Text-only viewport: the code panel background/border are not clipped.
     /// It remains in editor-local coordinates, even as document bytes shift.
     pub(in crate::ui::editor) fn code_viewport(&self, line: usize) -> Option<Rect> {
-        if self.doc.markdown.is_none()
-            || !matches!(self.doc.block(line), Block::Code { lang, .. } if *lang != Some(Lang::Math))
-        {
+        if self.doc.markdown.is_none() || !self.doc.fenced_code(line) {
             return None;
         }
         const PAD: f64 = 12.0; // Same as markdown::metrics::CODE_PADDING.
