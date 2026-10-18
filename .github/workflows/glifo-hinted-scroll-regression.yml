@@ -35,6 +35,13 @@ jobs:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: glifo-hinted-scroll-regression
           cache-workspace-crates: true
+      - name: Install Linux desktop test build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: Check stable hinted glyph baselines at integer viewport origins
         working-directory: aquilum-app
         shell: bash
@@ -53,3 +60,9 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --release --locked -p glifo --lib test_quantize_subpixel -- --nocapture
+      - name: Compare real fractional-scroll pixels to a fresh full-frame reference
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native hinted_fractional_scroll_remains_pixel_stable -- --nocapture --test-threads=1
