@@ -61,12 +61,48 @@ jobs:
             --repo . --max-per-file 4 --max-pairs 20 \
             --minio-endpoint http://127.0.0.1:9000 \
             --output text-delta-real-git-minio.jsonl | tee text-delta-real-git-minio.log
+      - name: Assert each independently verified S3 cache path and real commit pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path("text-delta-real-git-minio.jsonl").read_text().splitlines()]
+          assert 9 <= len(rows) <= 20, len(rows)
+          assert len({x["public_file"] for x in rows}) >= 3
+          assert all(x["kind"] == "actual_adjacent_git_commits" for x in rows)
+          assert all(x["old_sha256"] != x["new_sha256"] for x in rows)
+          assert all(x["selected_wire_bytes"] <= x["full_wire_bytes"] for x in rows)
+          assert any(x["selected"] != "full_zstd" for x in rows)
+          for x in rows:
+              s = x["real_two_client_minio"]
+              assert s["full_baseline"]["get"] == s["warm_cached_old"]["get"] == 1
+              assert s["cold_fetch_old"]["get"] == (1 if x["selected"] == "full_zstd" else 2)
+              assert s["warm_cached_old"]["payload_bytes"] == x["selected_wire_bytes"]
+              assert s["full_baseline"]["payload_bytes"] == x["full_wire_bytes"]
+              assert s["missing_base_full_fallback"]["payload_bytes"] == x["full_wire_bytes"]
+              assert s["sidecar_plus_required_v1_full_bytes"] == x["new_bytes"] + x["selected_wire_bytes"]
+              assert s["full_sidecar_plus_required_v1_full_bytes"] == x["new_bytes"] + x["full_wire_bytes"]
+          lines = [x.split("DELTA_REAL_SUMMARY ", 1)[1] for x in
+                   Path("text-delta-real-git-minio.log").read_text().splitlines()
+                   if x.startswith("DELTA_REAL_SUMMARY ")]
+          assert len(lines) == 1
+          summary = json.loads(lines[0])
+          assert summary["pairs"] == len(rows)
+          assert summary["uses_real_two_client_minio"]
+          assert summary["actual_minio_get_requests"]["warm_cached_old"] == len(rows)
+          assert summary["actual_minio_read_payload_bytes"]["missing_base_full_fallback"] == summary["sidecar_full_bytes"]
+          print("DELTA_REAL_GIT_S3_ACCEPTED: verified real Git pairs, warm/cold/missing bases, tampered S3 objects refused")
+          PY
       - name: Upload numeric comparisons
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: akula-text-delta-02-real-history
-          path: text-delta-real-git-minio.jsonl
+          path: |
+            text-delta-real-git-minio.jsonl
+            text-delta-real-git-minio.log
           retention-days: 14
           if-no-files-found: ignore
       - name: Stop disposable MinIO
