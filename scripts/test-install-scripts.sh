@@ -5,9 +5,23 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 temporary_home="$(mktemp -d)"
 trap 'rm -rf "$temporary_home"' EXIT
 
+# macOS tests exercise the real BSD lockf utility. Ubuntu CI adapts
+# its fd-lock interface to util-linux flock without changing install code.
+mkdir -p "$temporary_home/tools"
+if [[ "$(uname -s)" != Darwin ]]; then
+  cat > "$temporary_home/tools/lockf" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" -eq 4 && "$1" == -s && "$2" == -t && "$3" == 0 ]] || exit 60
+[[ "$4" =~ ^[0-9]+$ ]] || exit 60
+exec /usr/bin/flock -n "$4"
+EOF
+  chmod +x "$temporary_home/tools/lockf"
+fi
+
 mkdir -p "$temporary_home/Applications/Aquilum.app" "$temporary_home/Notes"
 printf 'keep\n' > "$temporary_home/Notes/Keep.md"
-HOME="$temporary_home" bash "$script_dir/uninstall.sh" >/dev/null
+HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" bash "$script_dir/uninstall.sh" >/dev/null
 
 [[ ! -e "$temporary_home/Applications/Aquilum.app" ]]
 [[ "$(cat "$temporary_home/Notes/Keep.md")" == keep ]]
@@ -54,6 +68,10 @@ cat > "$temporary_home/tools/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$AKULA_INSTALL_CURL_CALLS"
+if [[ "${AKULA_TEST_CURL_PAUSE:-0}" == 1 && "$*" == *"/releases/latest"* ]]; then
+  touch "$AKULA_TEST_CURL_READY"
+  until [[ -e "$AKULA_TEST_CURL_CONTINUE" ]]; do sleep 0.05; done
+fi
 dest="${@: -1}"
 if [[ "$*" == *"/releases/latest"* ]]; then
   cat > "$dest" <<JSON
@@ -110,6 +128,20 @@ EOF
 cat > "$temporary_home/tools/mv" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${AKULA_TEST_KILL_AFTER_BACKUP:-0}" == 1
+   && "$1" == "$HOME/Applications/Aquilum.app"
+   && "$2" == "$HOME/Applications"/.akula-install.*/Aquilum.previous.app ]]; then
+  /bin/mv "$@"
+  kill -KILL "$PPID"
+  exit 137
+fi
+if [[ "${AKULA_TEST_KILL_AFTER_PROMOTION:-0}" == 1
+   && "$1" == "$HOME/Applications"/.akula-install.*/Aquilum.app
+   && "$2" == "$HOME/Applications/Aquilum.app" ]]; then
+  /bin/mv "$@"
+  kill -KILL "$PPID"
+  exit 137
+fi
 if [[ "${AKULA_TEST_PROMOTION_FAIL:-0}" == 1
    && "$1" == *"/.akula-install."*"/Aquilum.app"
    && "$2" == "$HOME/Applications/Aquilum.app" ]]; then
@@ -166,6 +198,149 @@ export AKULA_TEST_PROMOTION_FAIL=1
 must_fail_without_changing_old
 grep -Fq 'restoring previous installation' "$error_log"
 unset AKULA_TEST_PROMOTION_FAIL
+
+
+# Both installer and uninstaller use the same kernel lock. A held descriptor
+# must cause immediate refusal without touching the active application.
+exec 8>>"$temporary_home/Applications/.akula-install.lock"
+PATH="$temporary_home/tools:$PATH" lockf -s -t 0 8
+if run_installer; then
+  echo 'Installer bypassed another process holding the lock' >&2
+  exit 1
+fi
+grep -Fq 'holds the Applications lock' "$error_log"
+if HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" \
+    bash "$script_dir/uninstall.sh" 2> "$error_log"; then
+  echo 'Uninstaller bypassed the held shared lock' >&2
+  exit 1
+fi
+grep -Fq 'holds the Applications lock' "$error_log"
+old_intact
+exec 8>&-
+
+# Test genuine parallel installers: first one is paused inside its API fetch,
+# second one must refuse before even fetching a release.
+export AKULA_TEST_CURL_PAUSE=1
+export AKULA_TEST_CURL_READY="$temporary_home/first-paused"
+export AKULA_TEST_CURL_CONTINUE="$temporary_home/first-continue"
+run_installer &
+first_pid=$!
+for attempt in {1..100}; do
+  [[ -e "$AKULA_TEST_CURL_READY" ]] && break
+  sleep 0.05
+done
+if [[ ! -e "$AKULA_TEST_CURL_READY" ]]; then
+  echo 'First installer failed to reach paused download state' >&2
+  touch "$AKULA_TEST_CURL_CONTINUE"
+  wait "$first_pid" || true
+  exit 1
+fi
+if run_installer; then
+  echo 'Second independent installer bypassed the first' >&2
+  touch "$AKULA_TEST_CURL_CONTINUE"
+  wait "$first_pid" || true
+  exit 1
+fi
+grep -Fq 'holds the Applications lock' "$error_log"
+touch "$AKULA_TEST_CURL_CONTINUE"
+wait "$first_pid"
+unset AKULA_TEST_CURL_PAUSE AKULA_TEST_CURL_READY AKULA_TEST_CURL_CONTINUE
+no_staging_left
+[[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'new installed version' ]]
+
+# Kill installer AFTER moving old.app to backup but BEFORE promoting staged
+# app. Kernel lock is automatically released; next launch restores backup
+# before any network request, then stops rather than blindly retrying.
+printf 'old installed version\n' > "$existing/Contents/MacOS/aquilum-app"
+printf 'installed app remains\n' > "$existing/Keep.txt"
+export AKULA_TEST_KILL_AFTER_BACKUP=1
+if run_installer; then
+  echo 'Fatal interruption after backup unexpectedly succeeded' >&2
+  exit 1
+fi
+unset AKULA_TEST_KILL_AFTER_BACKUP
+[[ ! -e "$existing" ]]
+backup="$(find "$temporary_home/Applications" -maxdepth 2 -type d -name 'Aquilum.previous.app' -print -quit)"
+[[ -n "$backup" && -f "$backup/Contents/MacOS/aquilum-app" ]]
+[[ "$(cat "$backup/Contents/MacOS/aquilum-app")" == 'old installed version' ]]
+if HOME="$temporary_home" PATH="$temporary_home/tools:$PATH" \
+    bash "$script_dir/uninstall.sh" 2> "$error_log"; then
+  echo 'Uninstall ignored an interrupted backup' >&2
+  exit 1
+fi
+grep -Fq 'needs review before uninstall' "$error_log"
+if run_installer; then
+  echo 'Recovery must not automatically start a new installation' >&2
+  exit 1
+fi
+grep -Fq 'Recovered interrupted install' "$error_log"
+old_intact
+no_staging_left
+
+# Kill AFTER new.app was promoted but BEFORE deleting prior app. Both
+# generations exist. It is unsafe to auto-delete the backup; fail closed.
+export AKULA_TEST_KILL_AFTER_PROMOTION=1
+if run_installer; then
+  echo 'Fatal interruption after promotion unexpectedly succeeded' >&2
+  exit 1
+fi
+unset AKULA_TEST_KILL_AFTER_PROMOTION
+[[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'new installed version' ]]
+old_backup="$(find "$temporary_home/Applications" -maxdepth 2 -type d -name 'Aquilum.previous.app' -print -quit)"
+[[ -n "$old_backup" ]]
+[[ "$(cat "$old_backup/Contents/MacOS/aquilum-app")" == 'old installed version' ]]
+if run_installer; then
+  echo 'Ambiguous generation was silently accepted' >&2
+  exit 1
+fi
+grep -Fq 'needs review' "$error_log"
+[[ "$(cat "$old_backup/Contents/MacOS/aquilum-app")" == 'old installed version' ]]
+[[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'new installed version' ]]
+[[ "$(cat "$temporary_home/Notes/Keep.md")" == keep ]]
+# Test-only cleanup: production requires a human to resolve both generations.
+rm -rf "$(dirname "$old_backup")"
+printf 'old installed version\n' > "$existing/Contents/MacOS/aquilum-app"
+printf 'installed app remains\n' > "$existing/Keep.txt"
+
+# Two different abandoned stages with a missing destination are not a proof
+# of which old app should be restored. Both remain untouched on HOLD.
+stage1="$temporary_home/Applications/.akula-install.11111111"
+stage2="$temporary_home/Applications/.akula-install.22222222"
+mkdir -p "$stage1" "$stage2"
+/bin/mv "$existing" "$stage1/Aquilum.previous.app"
+cp -R "$stage1/Aquilum.previous.app" "$stage2/Aquilum.previous.app"
+if run_installer; then
+  echo 'Ambiguous concurrent interrupted generations were accepted' >&2
+  exit 1
+fi
+grep -Fq 'Multiple interrupted install generations' "$error_log"
+[[ ! -e "$existing" ]]
+[[ -f "$stage1/Aquilum.previous.app/Contents/MacOS/aquilum-app" ]]
+[[ -f "$stage2/Aquilum.previous.app/Contents/MacOS/aquilum-app" ]]
+# Test fixture only: select first backup manually, then remove staging.
+/bin/mv "$stage1/Aquilum.previous.app" "$existing"
+rm -rf "$stage1" "$stage2"
+old_intact
+no_staging_left
+
+# Recovery may restore the old app, but must not recursively discard an
+# unexpected file placed in its abandoned stage.
+stage3="$temporary_home/Applications/.akula-install.33333333"
+mkdir -p "$stage3"
+/bin/mv "$existing" "$stage3/Aquilum.previous.app"
+printf 'do not delete\n' > "$stage3/unexpected-user.txt"
+if run_installer; then
+  echo 'Recovery deleted unknown contents of abandoned stage' >&2
+  exit 1
+fi
+grep -Fq 'unverified entries' "$error_log"
+[[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'old installed version' ]]
+[[ -f "$stage3/unexpected-user.txt" ]]
+[[ "$(cat "$stage3/unexpected-user.txt")" == 'do not delete' ]]
+# Test fixture only: manual inspection is complete.
+rm -rf "$stage3"
+old_intact
+no_staging_left
 
 run_installer
 [[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'new installed version' ]]

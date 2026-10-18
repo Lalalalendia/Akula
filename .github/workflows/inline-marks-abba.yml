@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
 
+# New commits on one PR supersede its older experimental/diagnostic checks.
+# Explicit workflow_dispatch runs are never preempted automatically.
+concurrency:
+  group: akula-inline-marks-abba-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   same-runner-abba:
     runs-on: ubuntu-24.04
