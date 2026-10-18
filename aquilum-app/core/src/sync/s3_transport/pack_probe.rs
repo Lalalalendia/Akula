@@ -150,6 +150,11 @@ pub(super) fn ingest_verified_pack(
     if blake3::hash(payload).to_hex().as_str() != descriptor.digest {
         return Err(PackProbeError::IntegrityMismatch);
     }
+    // A content-addressed object key must name the exact same digest.
+    // The S3 client separately enforces the vault-scoped key namespace.
+    if !descriptor.key.ends_with(&format!("/blobs/{}", descriptor.digest)) {
+        return Err(PackProbeError::Invalid);
+    }
     if payload.get(..MAGIC.len()) != Some(MAGIC.as_slice()) {
         return Err(PackProbeError::Invalid);
     }
