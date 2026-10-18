@@ -70,10 +70,7 @@ impl StayaTransport {
                 .map_err(|err| format!("bind address: {err}"))?;
         }
 
-        let endpoint = builder
-            .bind()
-            .await
-            .map_err(|err| format!("bind: {err}"))?;
+        let endpoint = builder.bind().await.map_err(|err| format!("bind: {err}"))?;
         Ok(Self { endpoint, peers })
     }
 
