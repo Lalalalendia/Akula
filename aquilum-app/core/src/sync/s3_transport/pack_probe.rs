@@ -1,8 +1,8 @@
-//! SYNC-05d2f experiment: bounded immutable packed objects (TEST-ONLY).
+//! SYNC-COORD-02b: bounded immutable pack verification, read-only only.
 //!
-//! This is NOT an Akula S3 pack protocol, manifest type, file writer, or
-//! RemoteStore. It only benchmarks whether fetching 128 revision+blob pairs
-//! as one content-addressed S3 object reduces the 20k-object cold read cost.
+//! The pure parser is used by a V1-pinned advisory S3 sidecar verifier;
+//! the pack sender/builder is kept test-only. This is NOT a new remote
+//! manifest, authenticated writer, File Gate operation or cloud publisher.
 //! Each member and the envelope must match the caller's independently
 //! verified immutable S3 manifest references. The in-memory test descriptor
 //! is not a durable trust root and may NOT grant deletion, publication,
@@ -10,9 +10,11 @@
 
 use crate::sync::{
     DagError, RevisionDag, RevisionId, RevisionOperation, RevisionRecord,
-    S3Keyspace, S3RevisionRefV1,
+    S3RevisionRefV1,
 };
 use std::collections::BTreeSet;
+#[cfg(test)]
+use crate::sync::S3Keyspace;
 
 const MAGIC: &[u8; 8] = b"AKPKEXP1";
 pub(super) const MAX_PACK_BYTES: usize = 512 * 1024;
@@ -47,11 +49,13 @@ impl From<DagError> for PackProbeError {
 ///   }
 /// The pack does not include user filenames or any power to create/delete
 /// an Akula file. The canonical RevisionRecord JSON is checked when read.
+#[cfg(test)]
 pub(super) struct PackBuilder {
     bytes: Vec<u8>,
     references: Vec<S3RevisionRefV1>,
 }
 
+#[cfg(test)]
 impl PackBuilder {
     pub fn new() -> Self {
         let mut bytes = Vec::with_capacity(HEADER_BYTES);
@@ -145,6 +149,11 @@ pub(super) fn ingest_verified_pack(
     }
     if blake3::hash(payload).to_hex().as_str() != descriptor.digest {
         return Err(PackProbeError::IntegrityMismatch);
+    }
+    // A content-addressed object key must name the exact same digest.
+    // The S3 client separately enforces the vault-scoped key namespace.
+    if !descriptor.key.ends_with(&format!("/blobs/{}", descriptor.digest)) {
+        return Err(PackProbeError::Invalid);
     }
     if payload.get(..MAGIC.len()) != Some(MAGIC.as_slice()) {
         return Err(PackProbeError::Invalid);
@@ -324,6 +333,14 @@ mod tests {
 
         let mut attacker_rehashed = descriptor.clone();
         attacker_rehashed.digest = blake3::hash(&damaged).to_hex().to_string();
+        // A changed digest with the *old* immutable object key is a distinct
+        // protocol violation, rejected before member-level content checks.
+        assert_eq!(ingest_verified_pack(&damaged, &attacker_rehashed, &mut dag, &mut seen),
+            Err(PackProbeError::Invalid));
+        // Even when the attacker also moves the payload under a key matching
+        // the recomputed outer digest, the original per-member BLAKE3 still
+        // rejects the tampered Markdown blob.
+        attacker_rehashed.key = ns.immutable_blob_key(&attacker_rehashed.digest).unwrap();
         assert_eq!(ingest_verified_pack(&damaged, &attacker_rehashed, &mut dag, &mut seen),
             Err(PackProbeError::IntegrityMismatch));
 
@@ -337,12 +354,14 @@ mod tests {
         extra.push(b'!');
         let mut checked = descriptor.clone();
         checked.digest = blake3::hash(&extra).to_hex().to_string();
+        checked.key = ns.immutable_blob_key(&checked.digest).unwrap();
         assert_eq!(ingest_verified_pack(&extra, &checked, &mut dag, &mut seen),
             Err(PackProbeError::Invalid));
 
         let mut truncated = bytes.clone();
         truncated.truncate(truncated.len() - 5);
         checked.digest = blake3::hash(&truncated).to_hex().to_string();
+        checked.key = ns.immutable_blob_key(&checked.digest).unwrap();
         assert_eq!(ingest_verified_pack(&truncated, &checked, &mut dag, &mut seen),
             Err(PackProbeError::Invalid));
         assert_eq!(dag.active_len(), 0);

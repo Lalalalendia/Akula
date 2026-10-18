@@ -12,8 +12,8 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod manifest;
-// Strict pack framing is experimental and available to tests only.
-#[cfg(test)]
+// Bounded, opt-in read-only pack verifier. The sender/builder stays
+// test-only; no new remote writer or local file apply is enabled.
 mod pack_probe;
 // SYNC-COORD-01 stays test-only: no production S3 format or file writes.
 #[cfg(test)]
@@ -27,6 +27,8 @@ pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanE
 mod snapshot_store;
 mod verified_cache_disk;
 pub use verified_cache_disk::{S3VerifiedHintsError, S3VerifiedHintsJournal};
+mod coord_sidecar;
+pub use coord_sidecar::{S3CoordSidecarReadError, S3CoordSidecarPreview};
 mod selective_snapshot;
 mod offline_retention;
 pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
