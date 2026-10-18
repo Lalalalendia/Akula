@@ -27,9 +27,40 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq zstd
           python -m pip install 'boto3>=1.35,<2'
-      - name: Compare actual consecutive Git Markdown versions
+      - name: Start disposable loopback-only MinIO
+        shell: bash
         run: |
-          python scripts/benchmarks/sync-text-delta-history-s3.py --repo . --output text-delta-real-git-minio.jsonl
+          set -euo pipefail
+          CI_KEY=$(openssl rand -hex 24)
+          echo "AQ_MINIO_TEST_PASSWORD=$CI_KEY" >> "$GITHUB_ENV"
+          docker run -d --rm --name akula-text-delta-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
+            -e MINIO_ROOT_USER=akula_test_local \
+            -e MINIO_ROOT_PASSWORD="$CI_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs akula-text-delta-minio
+          exit 1
+      - name: Compare actual consecutive Git Markdown versions
+        env:
+          AWS_ACCESS_KEY_ID: akula_test_local
+          AWS_SECRET_ACCESS_KEY: ${{ env.AQ_MINIO_TEST_PASSWORD }}
+          AWS_REGION: us-east-1
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_EC2_METADATA_DISABLED: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/benchmarks/sync-text-delta-history-s3.py \
+            --repo . --max-per-file 4 --max-pairs 20 \
+            --minio-endpoint http://127.0.0.1:9000 \
+            --output text-delta-real-git-minio.jsonl | tee text-delta-real-git-minio.log
       - name: Upload numeric comparisons
         if: always()
         uses: actions/upload-artifact@v4
@@ -38,3 +69,7 @@ jobs:
           path: text-delta-real-git-minio.jsonl
           retention-days: 14
           if-no-files-found: ignore
+      - name: Stop disposable MinIO
+        if: always()
+        shell: bash
+        run: docker rm -f akula-text-delta-minio 2>/dev/null || true
