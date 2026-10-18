@@ -302,6 +302,27 @@ rm -rf "$(dirname "$old_backup")"
 printf 'old installed version\n' > "$existing/Contents/MacOS/aquilum-app"
 printf 'installed app remains\n' > "$existing/Keep.txt"
 
+# Two different abandoned stages with a missing destination are not a proof
+# of which old app should be restored. Both remain untouched on HOLD.
+stage1="$temporary_home/Applications/.akula-install.11111111"
+stage2="$temporary_home/Applications/.akula-install.22222222"
+mkdir -p "$stage1" "$stage2"
+/bin/mv "$existing" "$stage1/Aquilum.previous.app"
+cp -R "$stage1/Aquilum.previous.app" "$stage2/Aquilum.previous.app"
+if run_installer; then
+  echo 'Ambiguous concurrent interrupted generations were accepted' >&2
+  exit 1
+fi
+grep -Fq 'Multiple interrupted install generations' "$error_log"
+[[ ! -e "$existing" ]]
+[[ -f "$stage1/Aquilum.previous.app/Contents/MacOS/aquilum-app" ]]
+[[ -f "$stage2/Aquilum.previous.app/Contents/MacOS/aquilum-app" ]]
+# Test fixture only: select first backup manually, then remove staging.
+/bin/mv "$stage1/Aquilum.previous.app" "$existing"
+rm -rf "$stage1" "$stage2"
+old_intact
+no_staging_left
+
 run_installer
 [[ "$(cat "$existing/Contents/MacOS/aquilum-app")" == 'new installed version' ]]
 [[ ! -e "$existing/Keep.txt" ]]
