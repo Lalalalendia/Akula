@@ -94,7 +94,7 @@ fn compare_masks(
                     first = Some((dx, dy, a, b));
                 }
                 for (aa, bb) in a.to_le_bytes().iter().zip(b.to_le_bytes()) {
-                    maximum = maximum.max(aa.abs_diff(*bb));
+                    maximum = maximum.max(aa.abs_diff(bb));
                 }
             }
         }
