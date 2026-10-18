@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DocumentId, OperationId, RevisionId, S3Keyspace, S3ManifestV1,
+    OperationId, RevisionId, S3Keyspace, S3ManifestV1,
     S3RevisionRefV1, VaultId,
 };
 use super::s3_manifest::is_blake3;
@@ -529,4 +529,360 @@ fn bounded_json<T: Serialize>(
 
 fn blake3_hex(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::{
+        DocumentId, RevisionOperation, RevisionRecord, S3ContractError,
+        S3HeadPointerV1, S3ManifestShardV1, S3ManifestV1, SyncRelativePath,
+    };
+
+    struct Fixture {
+        ns: S3Keyspace,
+        manifest: S3ManifestV1,
+        references: Vec<S3RevisionRefV1>,
+        index: S3PackIndexRootV2,
+        head: S3PackedHeadV2,
+        shards: Vec<(OperationId, Vec<u8>)>,
+        pack_bytes: Vec<u8>,
+    }
+
+    fn fixture() -> Fixture {
+        let ns = S3Keyspace::new("akula-sync/pack-v2-contract", VaultId::new()).unwrap();
+        let document = DocumentId::new();
+        let original = RevisionId::new();
+        let left = RevisionId::new();
+        let right = RevisionId::new();
+        let deletion = RevisionId::new();
+        let mut members = Vec::new();
+        let mut raw_pack = b"AKPKEXP1".to_vec();
+        raw_pack.extend_from_slice(&4_u16.to_le_bytes());
+        for (revision, parents, payload) in [
+            (original, vec![], Some(&b"original"[..])),
+            (left, vec![original], Some(&b"offline left"[..])),
+            (right, vec![original], Some(&b"offline right"[..])),
+            (deletion, vec![original], None),
+        ] {
+            let record = RevisionRecord {
+                id: revision,
+                document_id: document,
+                parents,
+                operation: match payload {
+                    Some(bytes) => RevisionOperation::Content {
+                        path: SyncRelativePath::parse("notes/test.md").unwrap(),
+                        blob_hash: blake3_hex(bytes),
+                    },
+                    None => RevisionOperation::Tombstone {
+                        path: SyncRelativePath::parse("notes/test.md").unwrap(),
+                    },
+                },
+            };
+            let json = serde_json::to_vec(&record).unwrap();
+            let blob = payload.unwrap_or_default();
+            raw_pack.extend_from_slice(&(json.len() as u32).to_le_bytes());
+            raw_pack.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+            raw_pack.extend_from_slice(&json);
+            raw_pack.extend_from_slice(blob);
+            members.push((
+                S3RevisionRefV1 {
+                    revision_id: revision,
+                    document_id: document,
+                    revision_blake3: blake3_hex(&json),
+                    blob_bytes: payload.map(|b| b.len() as u64),
+                },
+                json.len() as u32,
+            ));
+        }
+        let pack = S3PackDescriptorV2::from_lengths(
+            blake3_hex(&raw_pack), members.clone(),
+        ).unwrap();
+        assert_eq!(pack.pack_bytes as usize, raw_pack.len());
+        let shard = S3PackIndexShardV2::new(
+            &ns, OperationId::new(), vec![pack],
+        ).unwrap();
+        let refs = {
+            let mut refs: Vec<_> = members.into_iter().map(|(r, _)| r).collect();
+            refs.sort_by_key(|reference| reference.revision_id);
+            refs
+        };
+        let manifest_shard = S3ManifestShardV1::new(
+            &ns, OperationId::new(), refs.clone(),
+        ).unwrap();
+        let manifest = S3ManifestV1::new(
+            &ns, OperationId::new(), 1, None,
+            vec![manifest_shard.reference(&ns).unwrap()],
+        ).unwrap();
+        let digest = manifest.digest(&ns).unwrap();
+        let index = S3PackIndexRootV2::new(
+            &ns, OperationId::new(), 1, manifest.manifest_id,
+            digest.clone(), vec![shard.reference(&ns).unwrap()],
+        ).unwrap();
+        let head = S3PackedHeadV2::new(
+            &ns, 1, manifest.manifest_id, &digest,
+            index.index_id, &index.digest(&ns).unwrap(), None,
+        ).unwrap();
+        Fixture {
+            ns, manifest, references: refs, index, head,
+            shards: vec![(shard.shard_id, shard.encode(&ns).unwrap())],
+            pack_bytes: raw_pack,
+        }
+    }
+
+    #[test]
+    fn v2_root_index_shard_and_full_sibling_coverage_are_canonical() {
+        let sample = fixture();
+        let ns = &sample.ns;
+        let root_bytes = sample.head.encode(ns).unwrap();
+        let index_bytes = sample.index.encode(ns).unwrap();
+        assert_eq!(S3PackedHeadV2::decode(ns, &root_bytes), Ok(sample.head.clone()));
+        assert_eq!(S3PackIndexRootV2::decode(ns, sample.index.index_id, &index_bytes),
+            Ok(sample.index.clone()));
+        assert!(sample.index.verify_complete(ns, &sample.head, &sample.manifest,
+            &sample.references, &sample.shards).is_ok());
+        assert_eq!(sample.index.total_revisions, 4);
+        assert_eq!(sample.index.total_packs, 1);
+        assert!(sample.pack_bytes.len() < MAX_PACK_V2_BYTES as usize);
+        let content_index = S3PackIndexShardV2::decode(
+            ns, sample.shards[0].0, &sample.shards[0].1,
+        ).unwrap();
+        assert_eq!(content_index.packs[0].members.len(), 4);
+        let tombstone = content_index.packs[0].members.iter()
+            .find(|m| m.reference.blob_bytes.is_none()).unwrap();
+        assert_eq!(tombstone.blob_offset, None);
+        assert!(!content_index.packs[0].members.iter().any(|m|
+            m.reference.revision_blake3.is_empty()));
+
+        // Legacy readers cannot silently reinterpret an unknown V2 pointer
+        // as an ordinary V1 root or turn its contents into a deletion signal.
+        assert_eq!(
+            S3HeadPointerV1::decode(&root_bytes, ns),
+            Err(S3ContractError::InvalidRoot),
+        );
+    }
+
+    #[test]
+    fn foreign_vault_unknown_schema_or_fields_and_oversize_fail_closed() {
+        let f = fixture();
+        let other = S3Keyspace::new("akula-sync/pack-v2-contract", VaultId::new()).unwrap();
+        assert_eq!(
+            S3PackedHeadV2::decode(&other, &f.head.encode(&f.ns).unwrap()),
+            Err(S3PackIndexV2Error::ForeignVault),
+        );
+        assert_eq!(
+            S3PackIndexRootV2::decode(
+                &other, f.index.index_id, &f.index.encode(&f.ns).unwrap()
+            ), Err(S3PackIndexV2Error::ForeignVault),
+        );
+        assert_eq!(
+            S3PackIndexShardV2::decode(
+                &other, f.shards[0].0, &f.shards[0].1
+            ), Err(S3PackIndexV2Error::ForeignVault),
+        );
+        for mut value in [
+            serde_json::from_slice::<serde_json::Value>(&f.head.encode(&f.ns).unwrap()).unwrap(),
+            serde_json::from_slice::<serde_json::Value>(&f.index.encode(&f.ns).unwrap()).unwrap(),
+            serde_json::from_slice::<serde_json::Value>(&f.shards[0].1).unwrap(),
+        ] {
+            value["schema"] = 3.into();
+            let edited = serde_json::to_vec(&value).unwrap();
+            assert!(
+                S3PackedHeadV2::decode(&f.ns, &edited).is_err()
+                    && S3PackIndexRootV2::decode(
+                        &f.ns, f.index.index_id, &edited
+                    ).is_err()
+                    && S3PackIndexShardV2::decode(
+                        &f.ns, f.shards[0].0, &edited
+                    ).is_err()
+            );
+        }
+        let mut unknown: serde_json::Value =
+            serde_json::from_slice(&f.head.encode(&f.ns).unwrap()).unwrap();
+        unknown["allow_delete"] = true.into();
+        assert_eq!(
+            S3PackedHeadV2::decode(&f.ns, &serde_json::to_vec(&unknown).unwrap()),
+            Err(S3PackIndexV2Error::InvalidRoot),
+        );
+        assert_eq!(
+            S3PackedHeadV2::decode(&f.ns, &vec![0; MAX_PACK_V2_ROOT_BYTES + 1]),
+            Err(S3PackIndexV2Error::Oversized),
+        );
+        assert_eq!(
+            S3PackIndexRootV2::decode(&f.ns, f.index.index_id,
+                &vec![0; MAX_PACK_V2_INDEX_BYTES + 1]),
+            Err(S3PackIndexV2Error::Oversized),
+        );
+        assert_eq!(
+            S3PackIndexShardV2::decode(&f.ns, f.shards[0].0,
+                &vec![0; MAX_PACK_V2_SHARD_BYTES + 1]),
+            Err(S3PackIndexV2Error::Oversized),
+        );
+    }
+
+    #[test]
+    fn one_bit_tamper_wrong_digest_missing_shard_and_fake_manifest_are_held() {
+        let f = fixture();
+        let mut tampered = f.shards.clone();
+        *tampered[0].1.last_mut().unwrap() ^= 1;
+        assert_eq!(
+            f.index.verify_complete(&f.ns, &f.head, &f.manifest, &f.references, &tampered),
+            Err(S3PackIndexV2Error::IntegrityMismatch),
+        );
+        assert_eq!(
+            f.index.verify_complete(&f.ns, &f.head, &f.manifest, &f.references, &[]),
+            Err(S3PackIndexV2Error::IncompleteCoverage),
+        );
+        let mut fake_pointer = f.head.clone();
+        fake_pointer.index_blake3 = blake3_hex(b"substituted index");
+        assert_eq!(
+            f.index.verify_complete(&f.ns, &fake_pointer, &f.manifest,
+                &f.references, &f.shards),
+            Err(S3PackIndexV2Error::IntegrityMismatch),
+        );
+        let mut fake_manifest = f.manifest.clone();
+        fake_manifest.generation += 1;
+        assert_eq!(
+            f.index.verify_complete(&f.ns, &f.head, &fake_manifest,
+                &f.references, &f.shards),
+            Err(S3PackIndexV2Error::IntegrityMismatch),
+        );
+    }
+
+    #[test]
+    fn pack_member_rewrite_missing_or_duplicate_reference_is_not_a_snapshot() {
+        let f = fixture();
+        let mut corrupted_shard = S3PackIndexShardV2::decode(
+            &f.ns, f.shards[0].0, &f.shards[0].1,
+        ).unwrap();
+        // A changed member reference cannot borrow the identity/digest
+        // of another verified revision even if attacker re-hashes its shard.
+        corrupted_shard.packs[0].members[0].reference.document_id = DocumentId::new();
+        let corrupted_bytes = corrupted_shard.encode(&f.ns).unwrap();
+        let mut altered_index = f.index.clone();
+        altered_index.shards[0].shard_blake3 = blake3_hex(&corrupted_bytes);
+        let altered_head = S3PackedHeadV2::new(
+            &f.ns, 1, f.manifest.manifest_id,
+            &f.manifest.digest(&f.ns).unwrap(),
+            altered_index.index_id, &altered_index.digest(&f.ns).unwrap(), None,
+        ).unwrap();
+        assert_eq!(
+            altered_index.verify_complete(
+                &f.ns, &altered_head, &f.manifest, &f.references,
+                &[(corrupted_shard.shard_id, corrupted_bytes)],
+            ), Err(S3PackIndexV2Error::IncompleteCoverage),
+        );
+
+        let shortened = &f.references[..f.references.len() - 1];
+        assert_eq!(
+            f.index.verify_complete(&f.ns, &f.head, &f.manifest, shortened, &f.shards),
+            Err(S3PackIndexV2Error::IncompleteCoverage),
+        );
+        let mut repeated = f.references.clone();
+        repeated.push(f.references[0].clone());
+        assert_eq!(
+            f.index.verify_complete(&f.ns, &f.head, &f.manifest, &repeated, &f.shards),
+            Err(S3PackIndexV2Error::IncompleteCoverage),
+        );
+    }
+
+    #[test]
+    fn forged_offsets_oversize_duplicate_pack_or_shard_are_rejected() {
+        let f = fixture();
+        let shard = S3PackIndexShardV2::decode(
+            &f.ns, f.shards[0].0, &f.shards[0].1,
+        ).unwrap();
+        let mut broken = shard.clone();
+        broken.packs[0].members[0].revision_offset += 1;
+        assert_eq!(broken.encode(&f.ns), Err(S3PackIndexV2Error::InvalidMember));
+        let mut broken = shard.clone();
+        broken.packs[0].members[0].blob_offset = Some(1);
+        assert_eq!(broken.encode(&f.ns), Err(S3PackIndexV2Error::InvalidMember));
+        let mut broken = shard.clone();
+        broken.packs[0].pack_bytes += 1;
+        assert_eq!(broken.encode(&f.ns), Err(S3PackIndexV2Error::InvalidPack));
+        let mut broken = shard.clone();
+        broken.packs.push(shard.packs[0].clone());
+        assert_eq!(broken.encode(&f.ns), Err(S3PackIndexV2Error::InvalidPack));
+        let mut bad_root = f.index.clone();
+        bad_root.shards.push(bad_root.shards[0].clone());
+        bad_root.total_revisions *= 2;
+        bad_root.total_packs *= 2;
+        assert_eq!(bad_root.encode(&f.ns), Err(S3PackIndexV2Error::InvalidShard));
+        let mut pack = shard.packs[0].clone();
+        pack.pack_blake3 = "X".repeat(64);
+        assert_eq!(pack.check(), Err(S3PackIndexV2Error::InvalidPack));
+        let mut pack = shard.packs[0].clone();
+        pack.pack_bytes = MAX_PACK_V2_BYTES + 1;
+        assert_eq!(pack.check(), Err(S3PackIndexV2Error::InvalidPack));
+    }
+
+    #[test]
+    fn v2_root_chain_requires_authenticated_direct_parent_not_blind_cas_retry() {
+        let f = fixture();
+        assert!(!f.head.is_direct_successor_of(&f.ns, &f.head));
+        let mut child = S3PackedHeadV2::new(
+            &f.ns, 2, OperationId::new(), &blake3_hex(b"next manifest"),
+            OperationId::new(), &blake3_hex(b"next index"),
+            Some(f.head.digest(&f.ns).unwrap()),
+        ).unwrap();
+        assert!(child.is_direct_successor_of(&f.ns, &f.head));
+        child.previous_root_blake3 = Some(blake3_hex(b"unrelated head"));
+        assert!(!child.is_direct_successor_of(&f.ns, &f.head));
+        assert_eq!(
+            S3PackedHeadV2::new(
+                &f.ns, 2, OperationId::new(), &blake3_hex(b"m"),
+                OperationId::new(), &blake3_hex(b"i"), None,
+            ), Err(S3PackIndexV2Error::InvalidRoot),
+        );
+        let other = S3Keyspace::new("akula-sync/pack-v2-contract", VaultId::new()).unwrap();
+        assert!(!child.is_direct_successor_of(&other, &f.head));
+    }
+
+    #[test]
+    fn pack_index_10k_small_revisions_fit_in_20_bounded_shards() {
+        let ns = S3Keyspace::new("akula-sync/pack-v2-large", VaultId::new()).unwrap();
+        let mut refs = Vec::new();
+        let mut shards = Vec::new();
+        for batch in 0..20 {
+            let mut packs = Vec::new();
+            for _ in 0..4 {
+                let mut members = Vec::new();
+                for _ in 0..125 {
+                    if refs.len() == 10_000 { break; }
+                    let r = S3RevisionRefV1 {
+                        revision_id: RevisionId::new(),
+                        document_id: DocumentId::new(),
+                        revision_blake3: blake3_hex(format!("ref-{}", refs.len()).as_bytes()),
+                        blob_bytes: Some(1024),
+                    };
+                    members.push((r.clone(), 200));
+                    refs.push(r);
+                }
+                if !members.is_empty() {
+                    packs.push(S3PackDescriptorV2::from_lengths(
+                        blake3_hex(format!("pack-{batch}-{}", packs.len()).as_bytes()),
+                        members,
+                    ).unwrap());
+                }
+            }
+            if !packs.is_empty() {
+                let shard = S3PackIndexShardV2::new(
+                    &ns, OperationId::new(), packs,
+                ).unwrap();
+                assert!(shard.encode(&ns).unwrap().len() < MAX_PACK_V2_SHARD_BYTES);
+                shards.push(shard.reference(&ns).unwrap());
+            }
+        }
+        assert_eq!(refs.len(), 10_000);
+        assert_eq!(shards.len(), 20);
+        let index = S3PackIndexRootV2::new(
+            &ns, OperationId::new(), 1, OperationId::new(),
+            blake3_hex(b"manifest fixture"), shards,
+        ).unwrap();
+        assert!(index.encode(&ns).unwrap().len() < MAX_PACK_V2_INDEX_BYTES);
+        assert_eq!(index.total_revisions, 10_000);
+        assert_eq!(index.total_packs, 80);
+    }
 }
