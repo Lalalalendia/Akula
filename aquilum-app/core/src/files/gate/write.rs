@@ -1,6 +1,6 @@
 use super::{announce_history, paths_changed, record, NoteHistorySaveFailed};
 use crate::app_core::{Core, CoreEvent};
-use crate::sync::filegate_custody_identity::SqliteCustodyIdentityStore;
+use crate::sync::SqliteCustodyIdentityStore;
 use crate::sync::{RegisteredReadAdmission, VaultId};
 use crate::files::document::write_file_atomic_impl;
 use crate::files::entries::{copy_file_impl, create_binary_file_impl, create_file_impl};
