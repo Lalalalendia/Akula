@@ -781,10 +781,15 @@ async fn child_receives_unflushed_ranges_until_sigkill() {
         remote = remote.with_ip_addr(hint.parse().expect("valid local UDP address"));
         count += 1;
     }
-    assert!(count > 0, "direct address required: never use public discovery");
+    assert!(
+        count > 0,
+        "direct address required: never use public discovery"
+    );
     const CRASH_SIZE: usize = 8 * 1024 * 1024 + 13;
     let expected_hash = Hash::new(&bytes(CRASH_SIZE));
-    let store = FsStore::load(&root).await.expect("child private disk store");
+    let store = FsStore::load(&root)
+        .await
+        .expect("child private disk store");
     let peer = local_endpoint(key).await;
     let conn = peer
         .connect(remote, iroh_blobs::ALPN)
@@ -801,7 +806,11 @@ async fn child_receives_unflushed_ranges_until_sigkill() {
     .expect("initial range timeout")
     .expect("initial verified range");
 
-    let local = store.remote().local(expected_hash).await.expect("verified range status");
+    let local = store
+        .remote()
+        .local(expected_hash)
+        .await
+        .expect("verified range status");
     assert_eq!(local.local_bytes(), 64 * 1024);
     assert!(!local.is_complete());
     // Parent sees this marker only after Bao verification. No Store::shutdown
