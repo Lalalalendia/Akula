@@ -17,6 +17,7 @@ on:
       - 'aquilum-app/core/src/app_core_witness_tests.rs'
       - 'aquilum-app/core/src/sync/host_core_epoch_tests.rs'
       - 'aquilum-app/native/src/workspace.rs'
+      - 'aquilum-app/native/src/workspace_installed_witness_tests.rs'
       - '.github/workflows/sync-host-custody.yml'
   workflow_dispatch:
 
@@ -173,3 +174,16 @@ jobs:
       - name: Real cold Core.open witness, 2 processes, forged valid empty DB and missing receipt
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --no-default-features --features sync-installed-host-witness compiler_pinned_witness_survives_cold_restart_and_refuses_foreign_empty_ledger -- --nocapture
+      - name: Install native Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Real native Workspace.open with external witness and second process
+        working-directory: aquilum-app
+        env:
+          AKULA_B6B_NATIVE_SMOKE: '1'
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --no-default-features --features installed,sync-installed-host-witness workspace::installed_host_witness_tests -- --nocapture
