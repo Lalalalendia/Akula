@@ -18,9 +18,14 @@ concurrency:
 
 jobs:
   sampler-abba:
-    name: Release p95 and direct-render visual difference
+    name: Release p95 and direct-render visual difference (non-acceptance)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # A distinct diagnostic code path: strict visual parity remains enforced
+    # by native-vello-outline-sampler.yml and ordinary release tests.
+    # This mode records all >1/255 breaches instead of aborting the timings.
+    env:
+      AQ_SAMPLER_TIMING_ONLY: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
