@@ -18,7 +18,7 @@ Do not duplicate existing Vello/glyph cache or damaged-region optimizations.
   threshold or coalescing for ordinary scrolling. #187 captured a >1-LSB
   cross-partition pixel mismatch. #179 independently tracks an intermittent
   guard96 >1-LSB mismatch.
-  
+
 ## Deliberately narrow implementation
 
 - Set `AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT=1` **before starting Akula** to
