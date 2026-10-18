@@ -254,6 +254,13 @@ impl DurableLedger {
         }
         check_metadata_directory(root)?;
         let lock_path = root.join(OWNER_FILE);
+        // A prior owner marker with no snapshot is an interrupted or deleted
+        // reservation ledger, NOT a fresh empty ledger. Refuse to reset it.
+        let owner_preexisting = match fs::symlink_metadata(&lock_path) {
+            Ok(_) => true,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => false,
+            Err(err) => return Err(err.into()),
+        };
         let owner = OpenOptions::new()
             .read(true)
             .write(true)
@@ -279,6 +286,9 @@ impl DurableLedger {
                 decode_snapshot(&fs::read(root.join(SNAPSHOT_FILE))?, limits)?
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                if owner_preexisting {
+                    return Err(DurableError::CorruptOrUnknownSnapshot);
+                }
                 let empty = BTreeMap::new();
                 let bytes = encode_snapshot(limits, 0, &empty)?;
                 let mut file = OpenOptions::new()
@@ -575,6 +585,20 @@ mod tests {
         assert!(matches!(
             DurableLedger::open(dir.path(), limits()),
             Err(DurableError::UnsafeDirectory)
+        ));
+    }
+
+    #[test]
+    fn missing_snapshot_with_existing_owner_marker_never_resets_quota() {
+        let dir = temp_root();
+        {
+            let mut ledger = DurableLedger::open(dir.path(), limits()).unwrap();
+            ledger.reserve(peer(), digest(b"cannot silently erase capacity"), 900).unwrap();
+        }
+        fs::remove_file(dir.path().join(SNAPSHOT_FILE)).unwrap();
+        assert!(matches!(
+            DurableLedger::open(dir.path(), limits()),
+            Err(DurableError::CorruptOrUnknownSnapshot)
         ));
     }
 
