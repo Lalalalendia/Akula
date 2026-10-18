@@ -1,0 +1,92 @@
+name: Native window scroll replay A/B (diagnostic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/host/frame.rs'
+      - 'aquilum-app/native/src/replay.rs'
+      - 'aquilum-app/native/src/metrics.rs'
+      - 'scripts/benchmarks/native_scroll_window_ab.py'
+      - '.github/workflows/native-window-scroll-replay-ab.yml'
+      - 'docs/perf/native-window-scroll-replay-ab.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-window-scroll-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-xvfb:
+    name: Actual Akula window and softbuffer present path (Xvfb Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native GUI packages and virtual display
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            xvfb openbox
+      - name: Compile uninstalled production-path native window
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p aquilum-native
+          test -x ../.artifacts/cargo-native/release/aquilum-native
+      - name: Record exact executable, runner and test script
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/benchmarks/native_scroll_window_ab.py
+          {
+            git rev-parse HEAD
+            sha256sum .artifacts/cargo-native/release/aquilum-native
+            rustc --version
+            cargo --version
+            grep -m1 'model name' /proc/cpuinfo || true
+          } | tee window-scroll-env.txt
+      - name: Alternate existing real-window fixed/adaptive replay (3 pairs per scene)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export AKULA_BINARY="$PWD/.artifacts/cargo-native/release/aquilum-native"
+          export AKULA_OUT="$PWD/window-scroll-results"
+          xvfb-run -a -s "-screen 0 1920x1200x24" bash -c '
+            set -euo pipefail
+            openbox >/dev/null 2>&1 &
+            sleep 1
+            python3 scripts/benchmarks/native_scroll_window_ab.py \
+              --binary "$AKULA_BINARY" --out "$AKULA_OUT" --timeout 35
+          '
+          cat window-scroll-results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive replay JSON and logs (no generated vault databases)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-window-scroll-${{ github.sha }}
+          path: |
+            window-scroll-env.txt
+            window-scroll-results/summary.md
+            window-scroll-results/matrix.json
+            window-scroll-results/**/sample.json
+            window-scroll-results/**/replay.json
+            window-scroll-results/**/metrics.json
+            window-scroll-results/**/process.log
+          if-no-files-found: warn
+          retention-days: 14
