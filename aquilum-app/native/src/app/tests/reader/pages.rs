@@ -120,3 +120,68 @@ fn reader_settings_inputs_keep_popover_open() {
     assert!(!open(&h), "щелчок по книге не закрыл настройки");
     assert!(h.reader());
 }
+
+
+fn epub_widget_position(h: &Harness) -> (usize, String) {
+    let Some(Popup::Reader(state)) = &h.app.popup else {
+        panic!("expected visible EPUB Reader");
+    };
+    h.root
+        .get_widget(state.layer)
+        .and_then(|widget| widget.downcast::<crate::ui::reader::ReaderView>())
+        .and_then(|widget| widget.inner().test_reader_position())
+        .expect("Reader must expose a resolvable CFI after layout")
+}
+
+#[test]
+fn standalone_epub_resumes_sqlite_cfi_without_note() {
+    let mut h = Harness::new();
+    let (_fixture, source) = crate::reader::session::epub_acceptance::synthetic_epub();
+    let folder = h.vault.path().join("Files");
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("standalone.epub");
+    std::fs::copy(source, &file).unwrap();
+
+    // This is how standalone Files/*.epub books are opened: no linked Markdown
+    // note to provide a pages frontmatter counter.
+    open_book(&mut h, &file, None, "Standalone EPUB");
+    assert_eq!(epub_widget_position(&h).0, 0);
+
+    let mut turns = 0;
+    while epub_widget_position(&h).0 == 0 {
+        turn_pages(&mut h, 1);
+        turns += 1;
+        assert!(turns < 100, "could not reach the middle EPUB spine section");
+    }
+    assert_eq!(epub_widget_position(&h).0, 1);
+    for _ in 0..3 {
+        turn_pages(&mut h, 1);
+        assert_eq!(epub_widget_position(&h).0, 1);
+    }
+    let (saved_section, saved_cfi) = epub_widget_position(&h);
+    assert_eq!(saved_section, 1);
+
+    // Confirm the source of truth is durable SQLite, not an in-memory
+    // Reader widget or a side effect of a Markdown frontmatter field.
+    let workspace = h.app.workspace.core.ui_state
+        .resolve_workspace(&h.vault.path().to_string_lossy(), crate::dates::now_ms())
+        .unwrap();
+    let row = h.app.workspace.core.ui_state
+        .load_reader_state(workspace, "Files/standalone.epub")
+        .unwrap()
+        .expect("Reader did not persist standalone book CFI");
+    assert_eq!(row.cfi.as_deref(), Some(saved_cfi.as_str()));
+
+    h.escape();
+    assert!(!h.reader());
+    open_book(&mut h, &file, None, "Standalone EPUB");
+    let (resumed_section, resumed_cfi) = epub_widget_position(&h);
+    assert_eq!(
+        resumed_section, saved_section,
+        "reopened standalone EPUB ignored durable CFI and jumped to first chapter"
+    );
+    let book = crate::reader::Book::open(&file).unwrap();
+    assert_eq!(book.resolve(&resumed_cfi).expect("resumed CFI valid").0, 1);
+    assert_eq!(book.resolve(&saved_cfi).expect("saved CFI valid").0, 1);
+    h.escape();
+}

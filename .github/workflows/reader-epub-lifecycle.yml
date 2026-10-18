@@ -1,0 +1,77 @@
+name: Reader EPUB CFI lifecycle — Windows
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/reader/session/epub_acceptance.rs"
+      - "aquilum-app/native/src/reader/session/mod.rs"
+      - "aquilum-app/native/src/reader/session/navigate.rs"
+      - "aquilum-app/native/src/reader/session/layout.rs"
+      - "aquilum-app/native/src/reader/cfi/**"
+      - "aquilum-app/native/src/reader/epub.rs"
+      - "aquilum-app/native/src/app/reader/mod.rs"
+      - "aquilum-app/native/src/app/tests/reader/pages.rs"
+      - "aquilum-app/native/src/ui/reader/view.rs"
+      - ".github/workflows/reader-epub-lifecycle.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reader-epub-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-epub:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: reader-epub-windows
+          cache-on-failure: true
+      - name: Record Windows runner and compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git rev-parse HEAD
+          rustc --version
+          cargo --version
+          Write-Output "RUNNER_OS=$env:RUNNER_OS"
+          Write-Output "RUNNER_ARCH=$env:RUNNER_ARCH"
+
+      - name: Exercise real EPUB ZIP and CFI across chapters on Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked -p aquilum-native --bin aquilum-native reader::session::epub_acceptance -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Keep existing reader UI persistence and font tests green
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked -p aquilum-native --bin aquilum-native app::tests::reader::pages:: -- --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Acceptance scope
+        shell: pwsh
+        run: |
+          @"
+          ## Windows Reader EPUB lifecycle
+          Cross-platform native Rust tests executed against a generated **real EPUB 2 ZIP**,
+          not FB2 masquerading as EPUB: OPF spine, 3 XHTML sections, Unicode, direct-body
+          chapter titles, forward/backward navigation, CFI reopening, font size changes,
+          paged/scrolled modes, and invalid CFI fallback.
+
+          Also runs the existing Reader UI-harness tests for position persistence.
+          This does **not** exercise a physical Windows desktop window or GPU rasterizer;
+          Linux Main PR gate covers full workspace and required frame fidelity.
+          No copyrighted book bytes are part of this workflow.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
