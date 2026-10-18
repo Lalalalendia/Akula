@@ -243,6 +243,17 @@ fn profile_case(case: &str, scale: f64, width: u32, height: u32, with_cover: boo
             case, step, w, serial.frame_pixels(), parallel.frame_pixels(),
         );
         assert_eq!(mismatch, 0, "{case}: serial/parallel pixels disagree on frame {step}");
+        // Optional test-only visual artifact capture for sampler comparisons.
+        // This is a separate diagnostic invocation, never part of the timing
+        // A/B runs; ordinary benchmarking keeps all image I/O disabled.
+        if matches!(step, 0 | 20)
+            && let Some(path) = std::env::var_os("AQ_SAMPLER_SCREENSHOTS")
+        {
+            let path = std::path::PathBuf::from(path);
+            std::fs::create_dir_all(&path).expect("create sampler image directory");
+            std::fs::write(path.join(format!("{case}-step{step}.png")), serial.png())
+                .expect("write sampler screenshot");
+        }
 
         // In diagnostic-only mode compare every frame, rather than only
         // the benchmark's four snapshots, to isolate the *first* bad shift.
