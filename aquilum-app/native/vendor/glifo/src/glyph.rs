@@ -23,7 +23,7 @@ use crate::kurbo::Vec2;
 use crate::kurbo::{self, Affine, BezPath, Diagonal2, Join, Line, ParamCurve as _, PathSeg, Shape};
 use crate::peniko::FontData;
 use crate::renderer::{fill_glyph, render_cached_glyph, stroke_glyph};
-use crate::util::AffineExt;
+use crate::util::{AffineExt, biased_fract};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -502,7 +502,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             // Therefore, we can calculate the relative paint transform for
             // the glyph by pre-concatenating it with the inverted outline transform.
             let outline_cache_key = outline_cache_enabled.then(|| {
-                let fractional_x = outline_transform.translation().x.fract() as f32;
+                let fractional_x = biased_fract(outline_transform.translation().x) as f32;
                 GlyphCacheKey::new(
                     font_info.id,
                     font_info.index,
