@@ -34,7 +34,7 @@ jobs:
           key: iroh-blobs-01031
       - name: Verify a single pinned Roha and noq source graph
         run: |
-          cargo metadata --format-version 1 > dependency-metadata.json
+          cargo metadata --locked --format-version 1 > dependency-metadata.json
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -55,12 +55,12 @@ jobs:
           assert len(blobs) == 1 and blobs[0]["version"] == "0.103.1", blobs
           print("PIN_OK iroh-blobs 0.103.1")
           PY
-          cargo tree -i iroh
-          cargo tree -i noq
+          cargo tree --locked -i iroh
+          cargo tree --locked -i noq
       - name: Execute actual QUIC bytes and denied-request tests
         run: |
           set -o pipefail
-          cargo test --all-targets -- --nocapture 2>&1 | tee iroh-blobs-ab.log
+          cargo test --locked --all-targets -- --nocapture 2>&1 | tee iroh-blobs-ab.log
       - name: Generate rustfmt difference for exact review
         if: always()
         run: |
