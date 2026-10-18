@@ -233,6 +233,7 @@ async fn live_minio_v2_two_offline_generations_retains_tombstone_and_rejects_gap
     // available BEFORE staging V2 packs, letter and deterministic locator.
     // No mutable S3 root is written by the new production-compiled helper.
     let verified_gen2 = writer.read_verified_head().await.unwrap().unwrap();
+    assert_eq!(verified_gen2.etag, second_put.etag);
     let pinned_gen2 = writer.pin_revision_snapshot().await.unwrap().unwrap();
     let prepared = super::super::coord_pack_encode::prepare_delta_packs_v2(
         &ns, &[tombstone.clone()],
