@@ -80,6 +80,10 @@ impl Offsets {
             .collect();
     }
 
+    pub(super) fn retain_openers(&mut self, mut still_a_fence: impl FnMut(usize) -> bool) {
+        self.positions.retain(|&opener, _| still_a_fence(opener));
+    }
+
     pub(super) fn clear(&mut self) {
         self.positions.clear();
     }
