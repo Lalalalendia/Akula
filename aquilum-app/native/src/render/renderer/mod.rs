@@ -92,9 +92,13 @@ pub struct Renderer {
     pub causes: Vec<masonry::kurbo::Rect>,
 }
 
+/// Provisional bound from test-only Akula #166. No automatic routing in
+/// production until CPU/RSS/fidelity gates justify it.
+const EXPERIMENTAL_SERIAL_MAX_PIXELS: u64 = 350_000;
+
 impl Renderer {
     pub fn new(threads: u16) -> Self {
-        Renderer {
+        let mut renderer = Renderer {
             painter: Painter::new(1, 1, super::paint::settings(threads)),
             scratch: Vec::new(),
             tracker: Tracker::new(),
@@ -122,7 +126,13 @@ impl Renderer {
             moved: Vec::new(),
             #[cfg(test)]
             causes: Vec::new(),
+        };
+        // OFF by default. Enable only for controlled platform acceptance:
+        // AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT=1
+        if std::env::var("AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT").as_deref() == Ok("1") {
+            renderer.painter.enable_serial_for_single_damage(EXPERIMENTAL_SERIAL_MAX_PIXELS);
         }
+        renderer
     }
 
     /// Construct a renderer with an explicitly detected SIMD level for parity/perf
