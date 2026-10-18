@@ -4,7 +4,7 @@
 use masonry::kurbo::Size;
 use masonry::parley::{FontContext, LayoutContext};
 
-use super::{Session, Target};
+use super::{Session, Spot, Target};
 use crate::reader::{Book, flow};
 use crate::reader::tests::settings;
 
@@ -248,7 +248,9 @@ fn epub_saved_cfi_survives_reopen_and_font_or_scroll_changes() {
         ensure_ready(&mut session, 18.0, false, &mut fcx, &mut lcx);
         assert_eq!(session.section(), 1, "did not test a middle-of-chapter bookmark");
     }
-    let saved_block = session.start().expect("visible first line").0;
+    let (saved_block, saved_byte) = session.start().expect("visible first line");
+    assert!(saved_byte > 0, "bookmark must capture an interior point in a giant br block");
+    let bookmarked = Spot { block: saved_block, byte: saved_byte };
     let (bookmark, fraction) = session.location().expect("Reader saved position");
     assert!(fraction > 0.0 && fraction < 1.0);
     assert!(bookmark.starts_with("epubcfi("), "{bookmark}");
@@ -262,10 +264,12 @@ fn epub_saved_cfi_survives_reopen_and_font_or_scroll_changes() {
             .expect("reopen persisted EPUB position");
         ensure_ready(&mut restored, size, scrolled, &mut fcx, &mut lcx);
         assert_eq!(restored.section(), 1, "bookmark jumped between chapters");
-        let (first, last) = (restored.start().unwrap().0, restored.end().unwrap().0);
+        let first = restored.start().expect("visible start");
+        let last = restored.end().expect("visible end");
         assert!(
-            first <= saved_block && saved_block <= last,
-            "saved block {saved_block} not visible at {size}pt, scrolled={scrolled}: {first}..{last}"
+            Spot { block: first.0, byte: first.1 } <= bookmarked
+                && bookmarked <= Spot { block: last.0, byte: last.1 },
+            "bookmarked UTF-8 byte offset {bookmarked:?} not visible at {size}pt,              scrolled={scrolled}: {first:?}..{last:?}"
         );
         let (current, ratio) = restored.location().expect("CFI after reflow");
         assert_eq!(restored.book.resolve(&current).expect("reflow CFI resolves").0, 1);
