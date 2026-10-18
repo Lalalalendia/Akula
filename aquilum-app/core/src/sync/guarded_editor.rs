@@ -148,32 +148,65 @@ pub(crate) fn activate_registered_s3_editor(
     let _file_gate_fence = core.file_mutation_guard()?;
     let mut registry = core.guarded_editors.lock()
         .map_err(|_| refused("cooperative editor registry poisoned"))?;
+    let mut already_active = false;
     for previous in registry.iter() {
         if previous.root.starts_with(&config.root) || config.root.starts_with(&previous.root) {
             // Never switch an armed root to a different custody config in
-            // memory. Host must restart and undergo explicit new admission.
-            return if previous == &config {
-                Ok(())
-            } else {
-                Err(refused("ambiguous or conflicting cooperative editor root"))
-            };
+            // memory. Even an identical reactivation must re-prove the
+            // shared host enrollment, not return early on a cached flag.
+            if previous != &config {
+                return Err(refused("ambiguous or conflicting cooperative editor root"));
+            }
+            already_active = true;
         }
     }
     // This must succeed BEFORE any guarded File Gate route becomes reachable.
     // In particular, it refuses activation with open CRDT editor sessions
     // or an unreadable v2 SQLite write-intent journal.
     core.history.with_participant_enrollment_fence(|| {
-        // Holding both the process File Gate and HistoryFiles barriers means
-        // no in-flight ordinary primary mutation or direct history mutation
-        // is actively touching those files when HOLD becomes visible.
-        // DocumentHub prewrite admission was armed BEFORE taking File Gate.
-        // Commit the appdata participant marker before publishing the writer
-        // route. A failed insert keeps the Core on HOLD with no silent retry.
+        // Enrollment and an ordinary host-bound primary+history publication
+        // use the SAME SQLite BEGIN IMMEDIATE epoch. Register globally FIRST
+        // so another appdata cannot continue to view this root as unenrolled.
+        // A subsequent failed local marker leaves global HOLD intact.
+        if core.requires_installed_host_epoch() {
+            use super::host_custody_registry::{HostCustodyRecord, PhysicalObjectId};
+            let record = HostCustodyRecord {
+                root_path: fs::canonicalize(&config.root)?
+                    .to_str().ok_or_else(|| refused("non-UTF8 shared host root"))?
+                    .to_owned(),
+                root_identity: PhysicalObjectId {
+                    device: verified.registered_root_volume,
+                    file: verified.registered_root_file,
+                },
+                vault_id: config.binding.vault_id,
+                profile_id: config.binding.profile_id.clone(),
+                custody_scope_path: fs::canonicalize(&config.scope)?
+                    .to_str().ok_or_else(|| refused("non-UTF8 shared custody scope"))?
+                    .to_owned(),
+                lock_identity: PhysicalObjectId {
+                    device: verified.lock_volume,
+                    file: verified.lock_file,
+                },
+            };
+            // The verified appdata binding already checked the OS lock and
+            // registered root; the durable host record must agree with it.
+            if record.root_identity.device != config.binding.local_root_device
+                || record.root_identity.file != config.binding.local_root_file
+                || record.vault_id != verified.vault_id
+            {
+                return Err(refused("host and S3 physical identity mismatch"));
+            }
+            core.enroll_installed_host_s3_participant(&record)?;
+        }
+        // Holding both local barriers prevents in-flight primary/history
+        // writes from crossing the local participant transition.
         core.documents.enroll_guarded_participant(
             &config.root, &config.binding.vault_id.to_string(),
             &config.profile_db, &config.custody_db, &config.scope,
         )?;
-        registry.push(config);
+        if !already_active {
+            registry.push(config);
+        }
         Ok(())
     })
 }
