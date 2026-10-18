@@ -1,0 +1,109 @@
+name: Vello canonical outline first-frame and scroll ABBA
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-vello-canonical-outline-perf.yml'
+      - '.github/scripts/summarize-vello-canonical-abba.py'
+      - 'aquilum-app/native/src/app/tests/perf/vello_release.rs'
+      - 'aquilum-app/native/vendor/vello_cpu/src/text.rs'
+      - 'aquilum-app/native/vendor/vello_cpu/src/text/canonical_miss.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vello-canonical-outline-perf-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-abba:
+    name: First-frame cold glyph prep + warm scroll p95 (diagnostic)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # Timing-only: record any >1-LSB delta but never classify as a
+      # fidelity success. Normal strict guard96 continues to assert.
+      AQ_CANONICAL_TIMING_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-vello-canonical-perf-v1
+          cache-workspace-crates: true
+      - name: Install native Linux libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Capture source and runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vello-canonical-perf
+          {
+            git rev-parse HEAD
+            rustc --version
+            grep -m1 'model name' /proc/cpuinfo || true
+          } | tee vello-canonical-perf/runner.txt
+      - name: Compile release harness exactly once
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --release --locked --no-run -p aquilum-native --bin aquilum-native
+      - name: Eight baseline and eight candidate fresh-process runs in ABBA order
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/vello-canonical-perf"
+          baseline_n=0
+          canonical_n=0
+          for cycle in 1 2 3 4; do
+            for mode in baseline canonical canonical baseline; do
+              if [ "$mode" = baseline ]; then
+                baseline_n=$((baseline_n + 1))
+                trial="$baseline_n"
+              else
+                canonical_n=$((canonical_n + 1))
+                trial="$canonical_n"
+              fi
+              log="$root/$mode-$trial.log"
+              echo "CANONICAL_PERF cycle=$cycle mode=$mode trial=$trial"
+              if [ "$mode" = canonical ]; then
+                if ! env AQ_TEST_CANONICAL_OUTLINE_REPLAY=1 cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  tail -n 60 "$log"
+                  exit 1
+                fi
+              else
+                if ! cargo test --release --locked -p aquilum-native --bin aquilum-native benchmark_vello_release_trace -- --ignored --nocapture --test-threads=1 > "$log" 2>&1; then
+                  tail -n 60 "$log"
+                  exit 1
+                fi
+              fi
+              test "$(grep -c 'VELLO_RELEASE case=' "$log")" -eq 8
+              test "$(grep -c 'VELLO_CANONICAL_COLD case=' "$log")" -eq 4
+              test "$(grep -c 'VELLO_RELEASE_PARITY case=' "$log")" -eq 4
+            done
+          done
+          test "$baseline_n" -eq 8
+          test "$canonical_n" -eq 8
+      - name: Summarize independent cold and warm timings with fidelity labels
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/summarize-vello-canonical-abba.py vello-canonical-perf | tee vello-canonical-perf/report.log
+          cat vello-canonical-perf/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive raw per-trial logs and summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vello-canonical-perf-${{ github.sha }}
+          path: vello-canonical-perf/
+          retention-days: 14
+          if-no-files-found: warn
