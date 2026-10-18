@@ -31,6 +31,8 @@ mod verified_cache_disk;
 pub use verified_cache_disk::{S3VerifiedHintsError, S3VerifiedHintsJournal};
 mod coord_sidecar;
 pub use coord_sidecar::{S3CoordSidecarReadError, S3CoordSidecarPreview};
+mod coord_chain;
+pub use coord_chain::{S3CoordOfflineChainError, S3CoordOfflineChainPreview};
 mod selective_snapshot;
 mod offline_retention;
 pub use selective_snapshot::{S3SelectiveReadError, S3SelectiveRevisionPreview};
