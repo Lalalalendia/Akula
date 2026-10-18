@@ -81,7 +81,24 @@ impl Host {
                 self.window().set_minimized(minimized);
                 return;
             }
+            let opening_reader = matches!(&step, crate::memory_probe::Step::Reader(_));
+            if opening_reader {
+                self.reader_frame = Some(crate::memory_probe::ReaderFrame::begin());
+            }
             self.app.probe(root, &step);
+            if opening_reader {
+                if self.app.probe_reader_active() {
+                    if let Some(frame) = &mut self.reader_frame {
+                        frame.opened();
+                    }
+                } else {
+                    self.reader_frame = None;
+                    eprintln!("READER_GUI_ERROR: Reader did not open; no first-frame metric");
+                }
+            }
+            if matches!(&step, crate::memory_probe::Step::CloseReader) {
+                self.reader_frame = None;
+            }
             if let crate::memory_probe::Step::Mark(name) | crate::memory_probe::Step::Evict(name) = &step {
                 probe.record(name, &self.app.probe_stats(root));
             }
