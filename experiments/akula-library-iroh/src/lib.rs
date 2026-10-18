@@ -897,6 +897,109 @@ mod tests {
         assert!(mk().with_trusted_principals(HashMap::from([(a,unknown),(b,b)])).is_err());
         Ok(())
     }
+    /// Linux-only process-level observations. This is CPU time in clock ticks and
+    /// resident memory in KiB, not CPU percentage nor interface-level traffic.
+    #[cfg(target_os = "linux")]
+    fn process_load_snapshot() -> Option<(u64, u64, u64)> {
+        let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+        let suffix = stat.rsplit_once(')')?.1;
+        let columns: Vec<_> = suffix.split_whitespace().collect();
+        // First suffix item is state (field 3), so utime/stime (14/15) are 11/12.
+        let cpu = columns.get(11)?.parse::<u64>().ok()?
+            .saturating_add(columns.get(12)?.parse::<u64>().ok()?);
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let kib = |field: &str| -> Option<u64> {
+            status.lines().find(|line| line.starts_with(field))?
+                .split_whitespace().nth(1)?.parse().ok()
+        };
+        Some((cpu, kib("VmRSS:")?, kib("VmHWM:")?))
+    }
+
+    #[tokio::test(flavor="multi_thread",worker_threads=8)]
+    async fn unknown_48_quic_peers_cannot_read_book_and_known_peer_recovers() -> Result<()> {
+        const STRANGERS: usize = 48; // exceeds 32 handshake slots; localhost only
+        let server_ep = private_endpoint(None).await?;
+        let reader_ep = private_endpoint(None).await?;
+        let addr = loopback_addr(&server_ep)?;
+        let book = Book::new(bytes(CHUNK_SIZE))?;
+        let quota_bytes = CHUNK_SIZE as u64;
+        let service = Server::new(book.clone(), HashSet::from([reader_ep.id()]),
+            QuotaState::new(quota_bytes, quota_bytes))
+            .with_rate_limit(rate_limit::RateGate::new(4*1024*1024, 2*1024*1024)?);
+        let quota = service.quota();
+        let server_task = tokio::spawn(service.run(server_ep.clone()));
+        #[cfg(target_os = "linux")]
+        let before = process_load_snapshot();
+        let start = tokio::time::Instant::now();
+
+        let mut strangers = Vec::with_capacity(STRANGERS);
+        for _ in 0..STRANGERS {
+            strangers.push(private_endpoint(None).await?);
+        }
+        let barrier = Arc::new(tokio::sync::Barrier::new(STRANGERS+1));
+        let mut jobs = Vec::with_capacity(STRANGERS);
+        for ep in &strangers {
+            let ep = ep.clone();
+            let remote = addr.clone();
+            let begin = barrier.clone();
+            jobs.push(tokio::spawn(async move {
+                begin.wait().await;
+                let started = tokio::time::Instant::now();
+                let result = timeout(Duration::from_secs(14), manifest_from(&ep, remote)).await;
+                // Unauthorized book publication is a security failure. A timeout is
+                // a rejection for this bounded lab test, not proof of a permanent ban.
+                (matches!(result, Ok(Ok(_))), result.is_err(), started.elapsed())
+            }));
+        }
+        barrier.wait().await;
+        // Try the authorized client while unknown endpoints are connecting.
+        tokio::time::sleep(Duration::from_millis(35)).await;
+        let mut known_file = None;
+        let mut known_attempts = 0usize;
+        for attempt in 0..5 {
+            known_attempts = attempt + 1;
+            match timeout(Duration::from_secs(6), download(&reader_ep, addr.clone())).await {
+                Ok(Ok(bytes)) => { known_file = Some(bytes); break; }
+                _ => tokio::time::sleep(Duration::from_millis(180)).await,
+            }
+        }
+
+        let mut denied = 0usize;
+        let mut timed_out = 0usize;
+        let mut times = Vec::with_capacity(STRANGERS);
+        for job in jobs {
+            let (leaked, expired, elapsed) = timeout(Duration::from_secs(18), job).await???;
+            ensure!(!leaked, "unknown QUIC key obtained a private book manifest");
+            denied += 1;
+            timed_out += usize::from(expired);
+            times.push(elapsed);
+        }
+        ensure!(denied == STRANGERS, "unaccounted unknown peers");
+        let known_file = known_file.context("authorized reader was starved by unknown peers")?;
+        ensure!(sha(&known_file) == book.manifest.digest, "authorized download corrupted");
+        ensure!(quota.lock().unwrap().used() == quota_bytes,
+            "unknown attempts consumed protected book upload budget");
+        times.sort();
+        let p95_ms = times[45].as_millis(); // 46th of 48 = nearest-rank p95
+        #[cfg(target_os = "linux")]
+        {
+            if let (Some((old_ticks, old_rss, _)), Some((now_ticks, now_rss, hwm))) =
+                (before, process_load_snapshot()) {
+                println!("UNKNOWN_48 denied={denied} timeouts={timed_out} known_attempts={known_attempts} elapsed_ms={} p95_denial_ms={p95_ms} cpu_ticks={} rss_delta_kib={} rss_now_kib={now_rss} rss_hwm_kib={hwm}",
+                    start.elapsed().as_millis(), now_ticks.saturating_sub(old_ticks),
+                    now_rss.saturating_sub(old_rss));
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        println!("UNKNOWN_48 denied={denied} timeouts={timed_out} known_attempts={known_attempts} elapsed_ms={} p95_denial_ms={p95_ms}",
+            start.elapsed().as_millis());
+        for ep in strangers { ep.close().await; }
+        reader_ep.close().await;
+        server_ep.close().await;
+        server_task.abort();
+        Ok(())
+    }
+
     #[tokio::test(flavor="multi_thread",worker_threads=2)]
     async fn real_iroh_direct_loopback_and_resume() -> Result<()> {
         let server_ep = private_endpoint(None).await?;
