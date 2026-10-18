@@ -68,13 +68,18 @@ pub fn scan(
     let events = daemon.browse(SERVICE).map_err(|e| e.to_string())?;
     let deadline = Instant::now() + duration;
     let mut result = BTreeSet::new();
+    let mut resolved = 0u64;
+    let mut wrong_version = 0u64;
+    let mut rejected = 0u64;
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         if remaining.is_zero() {
             break;
         }
         match events.recv_timeout(remaining) {
             Ok(ServiceEvent::ServiceResolved(info)) => {
+                resolved += 1;
                 if info.get_property_val_str("version") != Some("0") {
+                    wrong_version += 1;
                     continue;
                 }
                 let Some((text_id, _)) = info.get_fullname().split_once('.') else {
@@ -83,6 +88,8 @@ pub fn scan(
                 for ip in info.get_addresses_v4() {
                     if let Some(c) = candidate(text_id, info.get_port(), IpAddr::V4(ip), allowed) {
                         result.insert((c.id, c.address));
+                    } else {
+                        rejected += 1;
                     }
                 }
             }
@@ -92,6 +99,12 @@ pub fn scan(
         }
     }
     let _ = daemon.shutdown();
+    // The command prints no secret key or untrusted peer-provided data.
+    // Counts help distinguish multicast delivery from peer filtering.
+    eprintln!(
+        "mdns_diagnostics resolved={resolved} wrong_version={wrong_version} rejected_address_or_id={rejected} permitted={}",
+        result.len()
+    );
     Ok(result
         .into_iter()
         .map(|(id, address)| LanCandidate { id, address })
