@@ -116,3 +116,52 @@ fn sync_reservation_blocks_windows_junction_alias() {
     assert!(matches!(core.documents.open(&core, &alias, 0), Err(HubError::SyncReserved)));
     drop(reservation);
 }
+
+
+#[test]
+fn armed_document_write_crash_intent_blocks_reopen_before_automatic_reconcile() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::documents::session::{SessionIo, SessionError};
+    use std::sync::Arc;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("vault");
+    let data = temp.path().join("appdata");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    let root = std::fs::canonicalize(&root).unwrap();
+    let note = root.join("Protected.md");
+    std::fs::write(&note, b"original").unwrap();
+    let original = blake3::hash(b"original").to_hex().to_string();
+    let proposed = blake3::hash(b"published-but-unconfirmed").to_hex().to_string();
+    let key = identity(&note);
+    {
+        let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+        let io = core.documents.io(&core, &note, &key);
+        // Ordinary editor roots incur no prewrite WAL checkpoint.
+        assert!(!io.begin_guarded_write("ordinary change", &original).unwrap());
+        assert!(io.unresolved_native_write().unwrap().is_none());
+
+        core.documents.arm_durable_intents_for_root(&root).unwrap();
+        assert!(io.begin_guarded_write("published-but-unconfirmed", &original).unwrap());
+        assert!(io.unresolved_native_write().unwrap().is_some());
+        // Native File Gate could publish bytes just before the process
+        // terminates, leaving no in-memory NeedsReview to recover.
+        std::fs::write(&note, b"published-but-unconfirmed").unwrap();
+        // SQLite still has the exact pre-commit intent, not an ACK.
+    }
+    let core = Core::open(&data, Arc::new(|_: CoreEvent| {}));
+    let result = core.documents.open(&core, &note, 0);
+    assert!(matches!(result, Err(HubError::Session(SessionError::Disk {
+        code: "needs_review", ..
+    }))), "reopen bypassed durable write HOLD: {result:?}");
+    assert_eq!(std::fs::read(&note).unwrap(), b"published-but-unconfirmed");
+    let store = DocumentStore::open(&data.join("documents.sqlite3")).unwrap();
+    assert_eq!(store.write_intent(&key).unwrap().unwrap().proposed_hash, proposed);
+    // An unchanged or matching physical hash is not clearance; the next
+    // open is STILL held. No automatic confirmation or retry occurred.
+    assert!(matches!(
+        core.documents.open(&core, &note, 0),
+        Err(HubError::Session(SessionError::Disk { code: "needs_review", .. }))
+    ));
+    assert_eq!(store.sync_point(&key), SyncPointLookup::Absent);
+}
