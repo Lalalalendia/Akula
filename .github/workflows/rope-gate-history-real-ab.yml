@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 55
     env:
       CARGO_INCREMENTAL: "0"
-      CARGO_TARGET_DIR: ${{ runner.temp }}/akula-real-save-target
+      CARGO_TARGET_DIR: ./target/akula-real-save-target
     steps:
       - name: Candidate checkout (includes unchanged diagnostic)
         uses: actions/checkout@v4
