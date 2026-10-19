@@ -298,12 +298,9 @@ impl DurableLedger {
         // Do not mislabel every underlying OS lock error as a competing
         // owner. EWOULDBLOCK means contention; I/O errors and unsupported
         // filesystem locking remain distinct fail-closed diagnostics.
-        owner.try_lock().map_err(|error| {
-            if error.kind() == io::ErrorKind::WouldBlock {
-                DurableError::CompetingOwner
-            } else {
-                DurableError::Io(error)
-            }
+        owner.try_lock().map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => DurableError::CompetingOwner,
+            std::fs::TryLockError::Error(error) => DurableError::Io(error),
         })?;
         check_metadata_directory(root)?;
         if root.join(NEXT_FILE).exists() {
