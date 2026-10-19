@@ -9,6 +9,7 @@ export AKAI_MCP_STOP_FILE="$OUT/stop"
 AKAI_MCP_TEST_BEARER=$(python3 -c 'import secrets; print(secrets.token_hex(24))')
 export AKAI_MCP_TEST_BEARER
 rm -f "$AKAI_MCP_PORT_FILE" "$AKAI_MCP_STOP_FILE" "$OUT/proxy-port"
+rm -rf "$OUT/results"
 fixture_pid=""
 proxy_pid=""
 cleanup() {
@@ -53,29 +54,46 @@ done
 test -s "$OUT/proxy-port" || { echo "::error::MCP test adapter timeout"; exit 1; }
 
 proxy_url="http://127.0.0.1:$(cat "$OUT/proxy-port")/mcp"
-# Pin the upstream CLI. Record failure, do not fabricate a passing verdict.
+# Pin upstream CLI to an immutable release. Full active suite is bounded and
+# diagnostic; failures remain visible in raw official checks.json.
 set +e
 npx --yes @modelcontextprotocol/conformance@0.1.16 server \
   --url "$proxy_url" \
   --scenario server-initialize \
   --spec-version 2025-06-18 \
-  --output-dir "$OUT/results" \
+  --output-dir "$OUT/results/initialize" \
   --verbose > "$OUT/conformance.log" 2>&1
-suite_code=$?
-set -e
-printf 'AKAI_MCP_CONFORMANCE_RUNNER_EXIT=%s\n' "$suite_code"
-tail -n 65 "$OUT/conformance.log"
+smoke_code=$?
 
-if ! find "$OUT/results" -name checks.json -type f 2>/dev/null | grep -q .; then
-  echo "::error::Official conformance runner produced no checks.json"
-  exit 1
-fi
+timeout --signal=TERM --kill-after=5s 240s \
+  npx --yes @modelcontextprotocol/conformance@0.1.16 server \
+    --url "$proxy_url" \
+    --suite active \
+    --spec-version 2025-06-18 \
+    --output-dir "$OUT/results/matrix" \
+    --verbose > "$OUT/conformance-matrix.log" 2>&1
+matrix_code=$?
+set -e
+
+printf 'AKAI_MCP_SMOKE_EXIT=%s\n' "$smoke_code"
+printf 'AKAI_MCP_MATRIX_EXIT=%s\n' "$matrix_code"
+tail -n 30 "$OUT/conformance.log"
+tail -n 90 "$OUT/conformance-matrix.log"
+
+python3 "$ROOT/scripts/mcp_conformance_report.py" \
+  --results-root "$OUT/results" \
+  --output "$OUT/conformance-summary.json" | tee "$OUT/matrix-summary.log"
+
 if test -n "$(printenv GITHUB_STEP_SUMMARY || true)"; then
   {
-    echo '### AKAI-PROT-01 official MCP conformance smoke'
-    echo 'Version: 2025-06-18 / server-initialize / CLI 0.1.16'
-    echo "Conformance CLI exit code: $suite_code"
-    echo 'Bearer adapter: loopback test-only, not full transport or authorization conformance.'
-    echo 'Raw checks.json and logs are in the CI artifact.'
+    echo '### AKAI-PROT-01 official MCP conformance, revision 2025-06-18'
+    echo "Initialize scenario CLI exit: $smoke_code"
+    echo "Active scenario matrix CLI exit: $matrix_code (nonzero may mean real nonconformance)"
+    echo 'The matrix contains actual FAILED and SUCCESS checks, not an all-pass badge.'
+    echo 'Authenticated localhost proxy masks direct auth/SSE/chunked/DNS-rebinding behavior.'
+    echo 'Raw checks.json, JSON summary and logs are archived.'
+    echo '~~~text'
+    cat "$OUT/matrix-summary.log"
+    echo '~~~'
   } >> "$GITHUB_STEP_SUMMARY"
 fi
