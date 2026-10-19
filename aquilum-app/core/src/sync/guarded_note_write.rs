@@ -4,7 +4,8 @@
 
 use super::filegate_custody_identity::SqliteCustodyIdentityStore;
 use super::{filegate_lock_custody, resolve_no_symlinks, RegisteredReadAdmission, SyncRelativePath, VaultId};
-use crate::app_core::{CoreEvent};
+use crate::app_core::{Core, CoreEvent};
+use crate::history::service::HistoryService;
 use crate::files::error::FileCommandError;
 use crate::files::gate::{self, CheckedHistoryError, NoteHistoryChanged, NoteHistorySaveFailed};
 use crate::files::models::FileWriteResult;
@@ -15,10 +16,30 @@ use std::path::{Path, PathBuf};
 
 const MAX_NOTE_BYTES: usize = 32 * 1024 * 1024;
 
-/// The constructor is deliberately private to this module. This proof is
-/// borrowed only by the real File Gate checked history write, from within a
-/// previously verified pinned OS custody lock callback. It is NOT clonable.
-pub(crate) struct HeldCustodyHistoryPermit(());
+/// P0g-3c: a non-Clone lexical capability minted ONLY inside the held
+/// external OS-custody callback, for the exact registered Core and checked
+/// note pathname. It is not an OS lock handle or remote baseline authority.
+/// Borrowed Core/path references keep the capability scoped to that writer.
+pub(crate) struct HeldCustodyHistoryPermit<'a> {
+    core: &'a Core,
+    note: &'a Path,
+}
+
+impl HeldCustodyHistoryPermit<'_> {
+    /// Check before the File Gate primary mutation, not only after the write.
+    pub(crate) fn binds_core_and_note(&self, core: &Core, note: &Path) -> bool {
+        std::ptr::eq(self.core, core) && self.note == note
+    }
+
+    /// Check again inside HistoryService before any history-store mutation.
+    pub(crate) fn binds_history_and_note(
+        &self,
+        history: &HistoryService,
+        note: &Path,
+    ) -> bool {
+        std::ptr::eq(&self.core.history, history) && self.note == note
+    }
+}
 
 /// Denied means neither preparation nor the primary writer was entered.
 /// NeedsReview means durable preparation, bytes or history might have changed,
@@ -184,7 +205,10 @@ pub(crate) fn save_existing_note_with_prewrite_under_custody<T>(
             ).map_err(CheckedHistoryError::Primary)?;
             entered = true;
             let prepared = prepare().map_err(CheckedHistoryError::Primary)?;
-            let permit = HeldCustodyHistoryPermit(());
+            let permit = HeldCustodyHistoryPermit {
+                core,
+                note: &checked,
+            };
             let (result, changed) = gate::write_checked_history_with_prewrite(
                 &permit, core, &checked, content, expected_hash, source, version_name,
                 || prewrite(&prepared),
@@ -418,6 +442,114 @@ mod tests {
             assert!(checked.is_err(), "{name}");
         }
         assert_eq!(fs::read(&outside).unwrap(), b"original");
+    }
+
+    #[test]
+    fn p0g3c_rejects_foreign_core_and_note_before_primary_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let data_a = temp.path().join("appdata-a");
+        let data_b = temp.path().join("appdata-b");
+        for path in [&root, &data_a, &data_b] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let core_a = Core::open(&data_a, Arc::new(|_: CoreEvent| {}));
+        let core_b = Core::open(&data_b, Arc::new(|_: CoreEvent| {}));
+        let note = root.join("Bound.md");
+        let foreign_note = root.join("Foreign.md");
+        fs::write(&note, b"protected original").unwrap();
+        fs::write(&foreign_note, b"protected original").unwrap();
+        let hash = blake3::hash(b"protected original").to_hex().to_string();
+        let permit = HeldCustodyHistoryPermit {
+            core: &core_a,
+            note: &note,
+        };
+        assert!(permit.binds_core_and_note(&core_a, &note));
+        assert!(permit.binds_history_and_note(&core_a.history, &note));
+
+        // White-box test for a future accidental cross-Core call: a forged
+        // misplaced permit must never enter the primary writer or prewrite.
+        let mut called = false;
+        let wrong_core = gate::write_checked_history_with_prewrite(
+            &permit, &core_b, &note, "forbidden", &hash,
+            Source::External, None,
+            || { called = true; Ok(()) },
+        );
+        assert!(matches!(
+            wrong_core,
+            Err(CheckedHistoryError::Primary(FileCommandError::Task { message }))
+                if message == "held custody permit belongs to a different Core or note"
+        ));
+        assert!(!called, "wrong Core invoked primary prewrite");
+        assert_eq!(fs::read(&note).unwrap(), b"protected original");
+
+        let mut called = false;
+        let wrong_note = gate::write_checked_history_with_prewrite(
+            &permit, &core_a, &foreign_note, "forbidden", &hash,
+            Source::External, None,
+            || { called = true; Ok(()) },
+        );
+        assert!(matches!(
+            wrong_note,
+            Err(CheckedHistoryError::Primary(FileCommandError::Task { message }))
+                if message == "held custody permit belongs to a different Core or note"
+        ));
+        assert!(!called, "wrong note invoked primary prewrite");
+        assert_eq!(fs::read(&foreign_note).unwrap(), b"protected original");
+    }
+
+    #[test]
+    fn p0g3c_history_rejects_foreign_instance_and_path_before_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let data_a = temp.path().join("appdata-a");
+        let data_b = temp.path().join("appdata-b");
+        for path in [&root, &data_a, &data_b] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let core_a = Core::open(&data_a, Arc::new(|_: CoreEvent| {}));
+        let core_b = Core::open(&data_b, Arc::new(|_: CoreEvent| {}));
+        let note = root.join("Bound.md");
+        let other_note = root.join("Other.md");
+        fs::write(&note, b"protected original").unwrap();
+        fs::write(&other_note, b"protected original").unwrap();
+        let hash = blake3::hash(b"forbidden history snapshot").to_hex().to_string();
+        let permit = HeldCustodyHistoryPermit {
+            core: &core_a,
+            note: &note,
+        };
+        fn note_write(hash: &str) -> crate::history::NoteWrite<'_> {
+            crate::history::NoteWrite {
+                disk_before: None,
+                text: "forbidden history snapshot",
+                hash,
+                source: Source::External,
+                name: None,
+            }
+        }
+        let roots = || vec![root.clone()];
+        let wrong_core = core_b.history.try_saved_with_custody(
+            &permit, &roots, &note, note_write(&hash),
+        );
+        assert_eq!(wrong_core.unwrap_err().action, "custody history owner",
+            "legacy custody must fail because of mismatched owner");
+        let wrong_strict = core_b.history.try_saved_with_custody_verified_version(
+            &permit, &roots, &note, note_write(&hash),
+        );
+        assert_eq!(wrong_strict.unwrap_err().action, "custody history owner",
+            "strict proof must fail because of mismatched owner");
+        let wrong_note = core_a.history.try_saved_with_custody(
+            &permit, &roots, &other_note, note_write(&hash),
+        );
+        assert_eq!(wrong_note.unwrap_err().action, "custody history owner",
+            "legacy custody must fail because of mismatched note");
+        let strict_wrong_note = core_a.history.try_saved_with_custody_verified_version(
+            &permit, &roots, &other_note, note_write(&hash),
+        );
+        assert_eq!(strict_wrong_note.unwrap_err().action, "custody history owner",
+            "strict proof must fail because of mismatched note");
+        assert_eq!(fs::read(&note).unwrap(), b"protected original");
+        assert_eq!(fs::read(&other_note).unwrap(), b"protected original");
     }
 
     #[path = "guarded_note_transaction_tests.rs"]

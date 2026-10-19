@@ -120,7 +120,7 @@ pub(crate) enum CheckedHistoryError {
 /// check is opt-in. Normal local history publication still has one writer.
 #[allow(dead_code)]
 pub(crate) fn write_checked_history(
-    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
     core: &Core,
     path: &Path,
     content: &str,
@@ -144,7 +144,7 @@ pub(crate) fn write_checked_history(
 /// retry a previously committed V7 one-shot claim.
 #[allow(dead_code)]
 pub(crate) fn write_checked_history_with_prewrite(
-    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
     core: &Core,
     path: &Path,
     content: &str,
@@ -153,6 +153,14 @@ pub(crate) fn write_checked_history_with_prewrite(
     version_name: Option<&str>,
     prewrite: impl FnOnce() -> Result<(), FileCommandError>,
 ) -> Result<(FileWriteResult, bool), CheckedHistoryError> {
+    // A mismatched Core or target must be rejected BEFORE ANY primary write
+    // and before the prewrite callback, not after a successful publication.
+    // This capability is only constructed within one held OS custody lifetime.
+    if !permit.binds_core_and_note(core, path) {
+        return Err(CheckedHistoryError::Primary(FileCommandError::Task {
+            message: "held custody permit belongs to a different Core or note".into(),
+        }));
+    }
     // Only Core's own File Gate mutex is held here, after the external OS
     // lock. Release it BEFORE taking HistoryService's files/state mutexes.
     let (before, result) = {
