@@ -59,6 +59,13 @@ impl TextEditor {
     }
 
     pub fn reset_rope(this: &mut WidgetMut<'_, Self>, text: crop::Rope) {
+        // Reset replaces the entire source identity. Even when the next note
+        // has a fence at the same byte offset, it must receive a NEW WidgetId.
+        // Remove existing child widgets from Masonry's arena rather than only
+        // clearing the Rust vector and leaving ghost accessibility nodes.
+        for button in std::mem::take(&mut this.widget.access_code_buttons) {
+            this.ctx.remove_child(button.widget);
+        }
         let widget = &mut *this.widget;
         widget.videos.stop();
         widget.doc.set_rope(text);

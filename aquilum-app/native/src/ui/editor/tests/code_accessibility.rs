@@ -88,3 +88,62 @@ fn removed_code_fence_removes_old_widget_id_without_rebinding_it() {
     assert_ne!(renewed[0].1, old_id, "a removed WidgetId must not point at a different fence");
     assert_eq!(text(&root), "~~~python\nnew\n~~~");
 }
+
+
+#[test]
+fn replacing_a_note_at_the_same_fence_byte_creates_a_fresh_accessibility_identity() {
+    let mut root = unfocused(TextEditor::new("~~~rust\nold\n~~~").markdown(), 560, 290);
+    root.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+    let _ = root.redraw();
+    let old = buttons(&root);
+    assert_eq!(old.len(), 1);
+
+    let id = editor_id(&root);
+    root.edit_widget(id, |mut editor| {
+        TextEditor::reset_text(&mut editor.downcast(), "~~~python\nreplacement\n~~~");
+    });
+    for _ in 0..3 {
+        let _ = root.redraw();
+    }
+    let current = buttons(&root);
+    assert_eq!(current.len(), 1, "the new document still has one header");
+    assert_eq!(current[0].0, old[0].0, "the test intentionally reuses opener byte 0");
+    assert_ne!(current[0].1, old[0].1, "old UIA/AccessKit identity must never copy from a different document");
+    assert_eq!(text(&root), "~~~python\nreplacement\n~~~");
+}
+
+#[test]
+fn scrolling_between_distant_headers_removes_offscreen_accessibility_buttons() {
+    use super::support::{scrolled, PAGE};
+    use crate::ui::scroll::ScrollArea;
+
+    let source = format!(
+        "~~~rust\nold\n~~~\n{}~~~python\nnew\n~~~\n",
+        "ordinary paragraph\n".repeat(350)
+    );
+    let second = source.find("~~~python").unwrap();
+    let mut root = scrolled(TextEditor::new(&source).markdown(), 570, 280);
+    root.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+    for _ in 0..3 {
+        let _ = root.redraw();
+    }
+    let initial = buttons(&root);
+    assert_eq!(initial.len(), 1, "only the first header begins inside the viewport");
+    assert_eq!(initial[0].0, 0);
+
+    let y = root.get_widget_with_tag(TAG).unwrap().inner()
+        .top_of(second).expect("second header position");
+    let page = root.get_widget_with_tag(PAGE).unwrap().id();
+    root.edit_widget(page, |mut w| {
+        ScrollArea::set_offset(&mut w.downcast::<ScrollArea<TextEditor>>(), (y - 40.0).max(0.0));
+    });
+    for _ in 0..6 {
+        let _ = root.redraw();
+    }
+
+    let final_buttons = buttons(&root);
+    assert_eq!(final_buttons.len(), 1, "the first header must no longer exist in the access tree");
+    assert_eq!(final_buttons[0].0, second);
+    assert_ne!(final_buttons[0].1, initial[0].1, "a second visible fence needs a distinct WidgetId");
+    assert_eq!(text(&root), source);
+}

@@ -196,6 +196,15 @@ impl TextEditor {
             .find(|entry| entry.widget.id() == source)
             .map(|entry| (entry.opener, entry.rect)) else { return };
         if self.doc.markdown.is_none() || !self.laid_out() { return; }
+        // A platform may deliver an accessibility Click after a scroll but
+        // before the deferred child-removal pass runs. Never allow an
+        // offscreen, previously exposed node to copy stale content.
+        let (top, bottom) = super::visible(ctx.window_transform(), ctx.window_size());
+        if !top.is_finite() || !bottom.is_finite()
+            || original.y1 <= top || original.y0 >= bottom
+        {
+            return;
+        }
         let line = self.doc.at_offset(opener);
         if self.doc.paragraph(line).start != opener || self.code_header_button(line) != Some(original) {
             return;
