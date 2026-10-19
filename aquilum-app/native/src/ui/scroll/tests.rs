@@ -104,3 +104,28 @@ fn continuous_wheel_moves_every_frame_without_jolts() {
     assert!(steps.iter().all(|&s| s > 0.0), "кадр без движения при непрерывном вращении: {steps:?}");
     assert!(steps.windows(2).all(|w| w[1] / w[0] < 2.0 && w[0] / w[1] < 2.0), "скачок скорости между кадрами: {steps:?}");
 }
+
+#[test]
+fn nested_horizontal_wheel_normalizes_all_delta_units() {
+    use masonry::core::ScrollDelta;
+    use masonry::dpi::PhysicalPosition;
+    let pixel = super::pixels(&ScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 80.0)), 2.0, 600.0);
+    assert_eq!(pixel.y, 40.0);
+    assert_eq!(super::sideways(pixel, true), 40.0);
+    assert_eq!(super::sideways(pixel, false), 0.0);
+    let lines = super::pixels(&ScrollDelta::LineDelta(2.0, 1.0), 2.0, 600.0);
+    assert_eq!(lines.x, 2.0 * super::LINE);
+    assert_eq!(super::sideways(lines, false), lines.x);
+    let page = super::pixels(&ScrollDelta::PageDelta(0.0, 1.0), 1.0, 600.0);
+    assert_eq!(super::sideways(page, true), 600.0);
+    assert_eq!(super::sideways(page, false), 0.0);
+}
+
+#[test]
+fn invalid_geometry_does_not_create_nonfinite_horizontal_motion() {
+    use masonry::core::ScrollDelta;
+    use masonry::dpi::PhysicalPosition;
+    assert_eq!(super::pixels(&ScrollDelta::PixelDelta(PhysicalPosition::new(50.0, 100.0)), 0.0, 600.0).x, 0.0);
+    assert_eq!(super::pixels(&ScrollDelta::PageDelta(1.0, 1.0), 1.0, f64::NAN).x, 0.0);
+    assert_eq!(super::sideways(super::pixels(&ScrollDelta::LineDelta(0.0, 1.0), 1.0, 500.0), true), super::LINE);
+}
