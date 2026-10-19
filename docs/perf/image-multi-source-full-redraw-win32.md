@@ -9,7 +9,7 @@ Status: **uninstalled developer-only**, not a production change. Builds on [IMG-
 - Mode Eager: existing opt-in mipmap, Medium filtering, 512-frame cache lifetime, builds L1 and L2 using scalar 2×2 reduction.
 - Mode Selective: **identical image content, viewport, Medium sampler, image source identifiers and 32-MiB budget**, but opt-in developer-only direct packed L2, without initial L1 allocation; lazy L1 remains possible.
 - Developer-only \`AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW=1\` forces a complete raster during an active replay, defeating optimization of copying existing BGRA rows. Positive \`AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED\` witness is mandatory. Normal and installed rendering paths remain unchanged.
-- Opt-in \`AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF=1\` instruments actual **distinct source image IDs used by mipmap**; samples are logged at least every 32 frames. A note with 100 image links but only 3 actually sampled sources **must fail**.
+- Opt-in `AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF=1` records both **distinct runtime image IDs** and **distinct sampled decoded-pixel fingerprints**, reported at least every 32 frames. For each newly seen ID, BLAKE3 hashes dimensions and three complete decoded RGBA scanlines (first/center/last). That samples about 15 KiB per image rather than hashing 4.3 MiB during the measured frame; it is **not a complete file hash**. The generator's 100 seeded fixtures differ in these scanlines, and separate fixture SHA-256 still proves their original files differ. Require **both** counts to reach the threshold so repeated instances of one PNG cannot masquerade as different images.
 
 ## Acceptance
 
@@ -21,7 +21,7 @@ One native Windows release binary, visible uncloaked PID-owned Win32 HWND and mo
 - peak process RSS, median fully damaged raster pixel area, Win32 window dimensions and exact binary SHA;
 - paired difference in p95. Never interpret CPU work as physical display presentation or user-visible FPS.
 
-Minimum valid source coverage: scene 1 → **1** used, scene 10 → **8** used, scene 100 → **24** used. Why 24? For 1280×884 L1+L2, 24×1,414,400 bytes exceeds the old 32 MiB cache, so this scene actually challenges retention. The 100-file scenario must not pass by displaying only the first picture. A 24-image unique access count is not proof that 24 are simultaneously resident; compare evictions, timing and memory honestly.
+Minimum valid source coverage **for both runtime IDs and pixel fingerprints**: scene 1 → **1** used, scene 10 → **8** used, scene 100 → **24** used. Why 24? For 1280×884 L1+L2, 24×1,414,400 bytes exceeds the old 32 MiB cache, so this scene actually challenges retention. The 100-file scenario must not pass by displaying only the first picture. A 24-image unique access count is not proof that 24 are simultaneously resident; compare evictions, timing and memory honestly.
 
 All sample files are pure-SHA deterministic and require no external Python packages. GUI startup and loading are not excluded from the whole-process stage array but **are excluded** from replay p95/p99. More trials are necessary if two pairs disagree.
 
