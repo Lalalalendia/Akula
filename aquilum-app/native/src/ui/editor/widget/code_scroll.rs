@@ -221,8 +221,8 @@ mod tests {
 
     #[test]
     fn scrolling_position_survives_far_window_moves_inside_one_large_fence() {
-        let body: String = (0..30_000).map(|n| format!("code_{n}_with_data\\n")).collect();
-        let source = format!("before\\n~~~rust\\n{body}~~~\\nafter");
+        let body: String = (0..30_000).map(|n| format!("code_{n}_with_data\n")).collect();
+        let source = format!("before\n~~~rust\n{body}~~~\nafter");
         let opener = source.find("~~~rust").unwrap();
         let mut editor = TextEditor::windowed(crop::Rope::from(source.as_str())).markdown();
         assert!(editor.code_scrolls.advance(opener, 75.0, 400.0, 150.0));
