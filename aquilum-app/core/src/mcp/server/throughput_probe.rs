@@ -11,7 +11,8 @@ fn baseline_serialized_tool_latency_at_1_4_8_16_clients() {
     const TOTAL_REQUESTS: usize = 128;
     const SYNTHETIC_TOOL_MILLIS: u64 = 12;
 
-    for clients in [1usize, 4, 8, 16] {
+    for (route, tool_name) in [("exclusive", "synthetic-read"), ("read-only", "read_note")] {
+        for clients in [1usize, 4, 8, 16] {
         assert_eq!(TOTAL_REQUESTS % clients, 0);
         let tool = slow_tool(Duration::from_millis(SYNTHETIC_TOOL_MILLIS));
         let (server, url) = start(tool);
@@ -23,7 +24,7 @@ fn baseline_serialized_tool_latency_at_1_4_8_16_clients() {
                 thread::spawn(move || {
                     let agent = ureq::agent();
                     let authorization = bearer();
-                    let request = tool_call("synthetic-read");
+                    let request = tool_call(tool_name);
                     gate.wait();
 
                     let mut durations = Vec::with_capacity(TOTAL_REQUESTS / clients);
@@ -61,12 +62,13 @@ fn baseline_serialized_tool_latency_at_1_4_8_16_clients() {
         let p99 = samples[(TOTAL_REQUESTS * 99).div_ceil(100) - 1];
         let rate = TOTAL_REQUESTS as f64 / elapsed.as_secs_f64();
         eprintln!(
-            "MCP_SYNTHETIC_SERIAL_BASELINE clients={clients} requests={TOTAL_REQUESTS} \
+            "MCP_SYNTHETIC_SERIAL_BASELINE route={route} clients={clients} requests={TOTAL_REQUESTS} \
              transport=keepalive tool_delay_ms={SYNTHETIC_TOOL_MILLIS} \
              elapsed_ms={:.1} req_per_sec={rate:.1} \
              p50_us={p50} p95_us={p95} p99_us={p99} errors=0",
             elapsed.as_secs_f64() * 1000.0
         );
         server.stop();
+        }
     }
 }
