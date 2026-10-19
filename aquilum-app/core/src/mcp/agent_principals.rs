@@ -52,7 +52,19 @@ pub(crate) struct AuthenticatedAgent {
     pub(crate) epoch: u64,
 }
 
-/// The complete bearer exists only in this one-time host return value.
+/// One-time secret handoff: deliberately no Debug, Clone, Serialize or Display.
+/// Unlike Zeroizing<String>, this wrapper does not expose those trait impls.
+/// Only the trusted host may intentionally read it; Drop zeroizes the bytes.
+#[must_use]
+pub(crate) struct OneTimeAgentBearer(Zeroizing<String>);
+
+impl OneTimeAgentBearer {
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// The complete bearer exists only in this host-issued one-time return value.
 /// Intentionally no Debug, Clone, Serialize or Display implementation.
 pub(crate) struct IssuedAgentCredential {
     pub(crate) principal: AgentPrincipalId,
@@ -64,11 +76,11 @@ pub(crate) struct IssuedAgentCredential {
 impl IssuedAgentCredential {
     /// Move the credential to a zeroizing holder for one-time host display.
     /// A second extraction returns None, even before this struct is dropped.
-    pub(crate) fn take_bearer_once(&mut self) -> Option<Zeroizing<String>> {
+    pub(crate) fn take_bearer_once(&mut self) -> Option<OneTimeAgentBearer> {
         if self.bearer.is_empty() {
             return None;
         }
-        Some(Zeroizing::new(std::mem::take(&mut self.bearer)))
+        Some(OneTimeAgentBearer(Zeroizing::new(std::mem::take(&mut self.bearer))))
     }
 }
 
@@ -583,10 +595,10 @@ mod tests {
         let forged = format!(
             "{TOKEN_PREFIX}.{}.{}",
             bob.credential.0,
-            alice_token.split('.').next_back().unwrap()
+            alice_token.as_str().split('.').next_back().unwrap()
         );
         assert_eq!(store.authenticate(&forged), Err(AgentCredentialError::Denied));
-        let secret = alice_token.as_bytes().to_vec();
+        let secret = alice_token.as_str().as_bytes().to_vec();
         drop(store);
         let disk = std::fs::read(&path).unwrap();
         assert!(!disk.windows(secret.len()).any(|window| window == secret));
@@ -599,15 +611,15 @@ mod tests {
         let mut store = AgentCredentialStore::open(&path).unwrap();
         let mut issued = store.issue_principal("Reader", None).unwrap();
         let token = issued.take_bearer_once().unwrap();
-        let old_epoch = store.authenticate(&token).unwrap().epoch;
+        let old_epoch = store.authenticate(token.as_str()).unwrap().epoch;
         let new_epoch = store.revoke(issued.credential).unwrap();
         assert!(new_epoch > old_epoch);
-        assert_eq!(store.authenticate(&token), Err(AgentCredentialError::Denied));
+        assert_eq!(store.authenticate(token.as_str()), Err(AgentCredentialError::Denied));
         assert_eq!(store.authenticate("akmcp1.broken"), Err(AgentCredentialError::Denied));
         assert_eq!(store.revoke(issued.credential), Err(AgentCredentialError::Denied));
         drop(store);
         let reopened = AgentCredentialStore::open(&path).unwrap();
-        assert_eq!(reopened.authenticate(&token), Err(AgentCredentialError::Denied));
+        assert_eq!(reopened.authenticate(token.as_str()), Err(AgentCredentialError::Denied));
     }
 
     #[test]
@@ -648,7 +660,7 @@ mod tests {
         );
 
         let reopened = AgentCredentialStore::open(&path).unwrap();
-        assert_eq!(reopened.authenticate(&old_token), Err(AgentCredentialError::Denied));
+        assert_eq!(reopened.authenticate(old_token.as_str()), Err(AgentCredentialError::Denied));
         if let Ok(mut new_key) = rotated {
             let new_token = new_key.take_bearer_once().unwrap();
             assert_eq!(
@@ -669,11 +681,11 @@ mod tests {
         let next_token = next.take_bearer_once().unwrap();
         assert_eq!(first.principal, next.principal);
         assert_eq!(next.epoch, first.epoch + 1);
-        assert_eq!(store.authenticate(&original), Err(AgentCredentialError::Denied));
+        assert_eq!(store.authenticate(original.as_str()), Err(AgentCredentialError::Denied));
         assert_eq!(store.authenticate(next_token.as_str()).unwrap().epoch, next.epoch);
         drop(store);
         let reopened = AgentCredentialStore::open(&path).unwrap();
-        assert_eq!(reopened.authenticate(&original), Err(AgentCredentialError::Denied));
+        assert_eq!(reopened.authenticate(original.as_str()), Err(AgentCredentialError::Denied));
         assert!(reopened.authenticate(next_token.as_str()).is_ok());
     }
 
