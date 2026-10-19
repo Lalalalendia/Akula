@@ -133,17 +133,17 @@ pub fn resolve_sync_revisions(
 /// Kept distinct from the low-level external-provider selection API.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OwnedRevision {
-    pub id: String,
-    pub kind: RevisionKind,
-    pub source_hash: Option<String>,
+    id: String,
+    kind: RevisionKind,
+    source_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OwnedSelection {
-    pub document_id: String,
-    pub historical: bool,
-    pub conflict: bool,
-    pub revisions: Vec<OwnedRevision>,
+    document_id: String,
+    historical: bool,
+    conflict: bool,
+    revisions: Vec<OwnedRevision>,
 }
 
 /// Search the resolved Sync revisions, enforcing their original blob hashes.
