@@ -292,7 +292,7 @@ where
         broker
             .revalidate_lease(&lease, live_context())
             .map_err(|_| ProbeError::AccessDenied)?;
-        let mut observed = observe_owner()?;
+        let observed = observe_owner()?;
         // A grant to the CURRENT note does not imply read access to prior
         // snapshots or either branch of a sync conflict. Those require a
         // separate, explicit historical/conflict authorization route.
@@ -304,9 +304,9 @@ where
         {
             return Err(ProbeError::AccessDenied);
         }
-        // The PermissionBroker lease is the authority for grant generation.
-        // Do not trust the callback to invent a grant_epoch.
-        observed.grant_epoch = lease.revision_token();
+        // The lease is independently revalidated by PermissionBroker.
+        // The owner callback's epoch is only an additional snapshot fence,
+        // never a replacement for the permission grant.
         broker
             .revalidate_lease(&lease, live_context())
             .map_err(|_| ProbeError::AccessDenied)?;
