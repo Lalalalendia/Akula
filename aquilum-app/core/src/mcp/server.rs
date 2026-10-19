@@ -814,11 +814,16 @@ mod tests {
         }
         assert_eq!(invoked.load(Ordering::SeqCst), 3);
 
+        let wrong_port = if server.port() == u16::MAX {
+            server.port() - 1
+        } else {
+            server.port() + 1
+        };
         for forbidden in [
             "Host: attacker.example\r\n".to_owned(),
             format!("Host: attacker.example:{}\r\n", server.port()),
             format!("Host: localhost.evil.example:{}\r\n", server.port()),
-            format!("Host: localhost:{}\r\n", server.port() + 1),
+            format!("Host: localhost:{wrong_port}\r\n"),
             "Host: 127.0.0.1@attacker.example\r\n".to_owned(),
         ] {
             assert_eq!(send_with_host(&forbidden).status, 403, "{forbidden}");
