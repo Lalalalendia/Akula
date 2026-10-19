@@ -126,6 +126,66 @@ def windows_peak_rss_kib(pid: int) -> int:
         _close_handle(handle)
 
 
+# Real Win32 top-level HWND witness. A successful replay JSON alone is NOT
+# sufficient evidence that a native desktop window was ever presented.
+if os.name == "nt":
+    from ctypes import wintypes
+
+    class _WinRect(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG), ("top", wintypes.LONG),
+            ("right", wintypes.LONG), ("bottom", wintypes.LONG),
+        ]
+
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _window_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    _enum_windows = _user32.EnumWindows
+    _enum_windows.argtypes = [_window_proc, wintypes.LPARAM]
+    _enum_windows.restype = wintypes.BOOL
+    _window_pid = _user32.GetWindowThreadProcessId
+    _window_pid.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    _window_pid.restype = wintypes.DWORD
+    _is_visible = _user32.IsWindowVisible
+    _is_visible.argtypes = [wintypes.HWND]
+    _is_visible.restype = wintypes.BOOL
+    _window_rect = _user32.GetWindowRect
+    _window_rect.argtypes = [wintypes.HWND, ctypes.POINTER(_WinRect)]
+    _window_rect.restype = wintypes.BOOL
+    _window_title = _user32.GetWindowTextW
+    _window_title.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _window_title.restype = ctypes.c_int
+
+
+def windows_gui_witness(pid: int) -> dict | None:
+    if os.name != "nt":
+        return None
+    matches = []
+
+    @_window_proc
+    def scan(hwnd, _):
+        owner = wintypes.DWORD()
+        _window_pid(hwnd, ctypes.byref(owner))
+        if owner.value != pid or not _is_visible(hwnd):
+            return True
+        bounds = _WinRect()
+        if not _window_rect(hwnd, ctypes.byref(bounds)):
+            return True
+        width, height = bounds.right - bounds.left, bounds.bottom - bounds.top
+        if width < 400 or height < 300:
+            return True
+        buf = ctypes.create_unicode_buffer(256)
+        _window_title(hwnd, buf, len(buf))
+        # The installed GUI test already requires the Akula title. Verify
+        # the very same process owns a visible normal application window.
+        if "Akula" not in buf.value:
+            return True
+        matches.append({"width": width, "height": height, "title_akula": True})
+        return False
+
+    _enum_windows(scan, 0)
+    return matches[0] if matches else None
+
+
 def rss_kib(pid: int) -> int:
     if os.name == "nt":
         return windows_peak_rss_kib(pid)
@@ -181,12 +241,15 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER", None)
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER", None)
     rss = 0
+    window_witness = None
     with log_file.open("wb") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
         started = time.monotonic()
         try:
             while process.poll() is None:
                 rss = max(rss, rss_kib(process.pid))
+                if os.name == "nt" and window_witness is None:
+                    window_witness = windows_gui_witness(process.pid)
                 if time.monotonic() - started > timeout:
                     raise TimeoutError(f"{scene}/{trial}/{mode}: timed out")
                 time.sleep(0.05)
@@ -198,6 +261,8 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
             raise
     if rss <= 0:
         raise ValueError(f"{scene}/{trial}/{mode}: missing process RSS")
+    if os.name == "nt" and window_witness is None:
+        raise ValueError(f"{scene}/{trial}/{mode}: no visible, PID-matched Win32 Akula window")
     log = log_file.read_text(errors="replace")
     applied = "AKULA_MIP_APPLIED level=" in log
     if applied != (mode != "baseline"):
@@ -237,7 +302,8 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
     result = dict(
         trial=trial, mode=mode, scene=scene, size=size,
         note_sha256=note_hash, image_sha256=image_hash,
-        peak_rss_kib=rss, applied=applied, replay=replay, metrics=metrics,
+        peak_rss_kib=rss, window_witness=window_witness,
+        applied=applied, replay=replay, metrics=metrics,
         frame_distribution=distribution, cache=diagnostics,
     )
     (root / "sample.json").write_text(json.dumps(result, indent=2) + "\n")
