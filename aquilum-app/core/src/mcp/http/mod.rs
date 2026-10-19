@@ -54,12 +54,18 @@ impl<'a> Connection<'a> {
         !self.received.is_empty()
     }
 
-    pub fn read_head(&mut self) -> Result<Head, Failure> {
+    pub fn read_head(&mut self, mut on_received: impl FnMut() -> bool) -> Result<Head, Failure> {
         loop {
             if let Some(head) = self.parse_head()? {
                 return Ok(head);
             }
             self.receive_framing()?;
+            // Mark the connection active immediately after receiving its first
+            // request bytes. Otherwise a partially framed new HTTP request on
+            // a previously idle keep-alive could be reclaimed mid-header.
+            if !on_received() {
+                return Err(Failure::Gone);
+            }
         }
     }
 
