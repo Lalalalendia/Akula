@@ -11,7 +11,7 @@ Linux only. Not compiled by installed Akula.
 
 ## Stable ID, not client-chosen path
 
-A trusted local operator constructs ReadCatalog::open(vault_root, allowed_names).
+A trusted local operator constructs ReadCatalog::open(vault_root, registered_vault_id, allowed_names). The argument is the existing strongly typed Core sync::VaultId; the runtime MUST independently validate that it identifies the exact protected vault. A local workspace ID/path is not an acceptable substitute.
 
 - Root is opened **once** as a Linux O_DIRECTORY | O_NOFOLLOW dirfd;
   later reads use openat(dirfd, stored_filename, O_NOFOLLOW), not the root
@@ -21,8 +21,8 @@ A trusted local operator constructs ReadCatalog::open(vault_root, allowed_names)
   exist, be regular and be at most 64 KiB at admission. The entire catalog
   fails on a missing, duplicate, oversized or otherwise invalid entry.
 - Every admitted file has a stable 64-hex ID based on domain-separated
-  BLAKE3 of its operator-admitted filename. The ID is independent of admission
-  order and stable across restarts. It is **not** a secret credential,
+  BLAKE3 of the typed VaultId and operator-admitted filename. The ID is independent of admission
+  order and stable across restarts for the same registered vault. Identical filenames in two different vaults receive different IDs. It is **not** a secret credential,
   authorization, object capability or immutable inode identity.
 - A later request can resolve **only** an ID in the immutable catalog, never
   an arbitrary filesystem path. Device/inode identity is checked at read.
@@ -37,7 +37,8 @@ A trusted local operator constructs ReadCatalog::open(vault_root, allowed_names)
 
 Test file: aquilum-app/core/tests/node_catalog_lab.rs.
 
-1. Three Markdown files retain stable IDs regardless of allowlist order.
+1. Three Markdown files retain stable IDs regardless of allowlist order,
+   and the same filename receives a distinct ID with a distinct typed VaultId.
    An unlisted fourth file and unknown ID cannot be accessed.
 2. Raw BLAKE3 over the exact source bytes, including CRLF. A stale revision
    refuses to return the changed document.
