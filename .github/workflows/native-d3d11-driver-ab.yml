@@ -1,0 +1,72 @@
+name: Windows D3D11 hardware versus WARP (experimental)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/output/device.rs'
+      - 'scripts/benchmarks/native_d3d11_driver_ab.py'
+      - '.github/workflows/native-d3d11-driver-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-d3d11-driver-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-driver-ab:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-image-mip-ab-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check benchmark syntax and Windows desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git rev-parse HEAD
+          python -m py_compile scripts/benchmarks/native_d3d11_driver_ab.py
+          python -c "import sys; sys.path.insert(0, 'scripts/benchmarks'); from native_mipmap_windows_ab import windows_scenes; windows_scenes()"
+      - name: Compile uninstalled developer-only release and exact driver selector test
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-native --bin aquilum-native diagnostic_driver_mode_is_explicit
+          if ($LASTEXITCODE -ne 0) { throw 'Driver selector test failed' }
+          cargo build --release --locked -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Release binary build failed' }
+      - name: Run strict WARP / hardware Win32 GUI experiments
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          python scripts/benchmarks/native_d3d11_driver_ab.py --binary $binary --out windows-driver-results
+          if ($LASTEXITCODE -ne 0) { throw 'D3D11 A/B invalid; check missing hardware adapter or witness' }
+          Get-Content windows-driver-results/summary.md | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-d3d11-driver-ab
+          path: |
+            windows-driver-results/summary.md
+            windows-driver-results/matrix.json
+            windows-driver-results/**/driver-proof.txt
+            windows-driver-results/**/sample.json
+            windows-driver-results/**/replay.json
+            windows-driver-results/**/metrics.json
+            windows-driver-results/**/process.log
+          retention-days: 14
+          if-no-files-found: warn
