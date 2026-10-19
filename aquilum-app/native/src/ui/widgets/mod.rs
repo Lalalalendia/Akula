@@ -15,7 +15,7 @@ mod visible;
 
 pub use buttons::*;
 pub use appear::*;
-pub use caption::Caption;
+pub use caption::{Caption, CaptionAction};
 pub use collapse::*;
 pub use document_item::*;
 pub use items::*;
