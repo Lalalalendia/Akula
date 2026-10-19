@@ -79,12 +79,14 @@ impl From<io::Error> for RedbHold {
 // A &[u8] Value (not a custom type) is used for the inline tables.
 macro_rules! raw_value {
     ($name:ident, $type_name:literal, $width:expr) => {
+        #[derive(Debug)]
         struct $name;
         impl Value for $name {
             type SelfType<'a> = &'a [u8];
             type AsBytes<'a> = &'a [u8];
             fn fixed_width() -> Option<usize> { $width }
-            fn from_bytes<'a>(value: &'a [u8]) -> Self::SelfType<'a> { value }
+            fn from_bytes<'a>(value: &'a [u8]) -> Self::SelfType<'a>
+            where Self: 'a { value }
             fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
             where Self: 'a, Self: 'b { *value }
             fn type_name() -> redb::TypeName { redb::TypeName::new($type_name) }
