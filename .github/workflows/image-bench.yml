@@ -1,5 +1,4 @@
 name: Image decoder comparison
-
 on:
   pull_request:
     paths:
@@ -7,10 +6,8 @@ on:
       - 'aquilum-app/native/src/images/decode.rs'
       - '.github/workflows/image-bench.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   jpeg-smoke:
     runs-on: ubuntu-24.04
@@ -18,24 +15,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install JPEG and libvips development packages
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libjpeg-dev libjpeg-turbo-progs libvips-dev pkg-config time
-      - name: Three modes on the same deterministic JPEGs
+      - name: Controlled synthetic JPEG
         run: bash scripts/image-bench/run.sh
-        env:
-          REPEATS: '3'
-          LARGE: '0'
-      - name: Archive whole-process memory, timing and quality evidence
+      - name: Archive synthetic measurements
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: image-bench-${{ github.run_id }}
+          path: scripts/image-bench/results/*.txt
+          if-no-files-found: warn
+  real-corpus:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-dev libjpeg-turbo-progs pkg-config time
+      - name: Check allowlist and hash-validation rules
+        run: python3 -m unittest discover -s scripts/image-bench -p test_corpus.py -v
+      - name: Real JPEG/PNG smoke
+        run: bash scripts/image-bench/run-corpus.sh
+      - name: Archive metadata, not copyrighted image bytes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-corpus-${{ github.run_id }}
           path: |
-            scripts/image-bench/results/environment.txt
-            scripts/image-bench/results/metrics.csv
-            scripts/image-bench/results/decode-info.txt
-            scripts/image-bench/results/quality.txt
-            scripts/image-bench/results/fixtures.sha256
+            scripts/image-bench/results/corpus/metrics.csv
+            scripts/image-bench/results/corpus/skipped.csv
+            scripts/image-bench/results/corpus/decode.log
+            scripts/image-bench/results/corpus/inputs/cases.tsv
+            scripts/image-bench/results/corpus/inputs/manifest-provenance.txt
           if-no-files-found: warn
