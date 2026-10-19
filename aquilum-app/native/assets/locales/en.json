@@ -234,6 +234,7 @@
       "probeMissingKeys": "No keys for this bucket were found in Windows.",
       "probeInvalidStoredKeys": "Stored credentials are malformed or damaged.",
       "probeKeyStoreUnavailable": "Windows Credential Manager is unavailable.",
+      "probeKeysChanged": "Windows credentials changed during the check. Run it again.",
       "probeRejected": "Server rejected these credentials. Check the key pair.",
       "probeDenied": "Permission to list objects in this bucket is denied.",
       "probeMissingBucket": "Bucket not found (or server withheld its existence).",
