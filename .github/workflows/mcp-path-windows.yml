@@ -1,0 +1,45 @@
+name: MCP Windows path containment
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/mcp/vault.rs'
+      - '.github/workflows/mcp-path-windows.yml'
+
+permissions:
+  contents: read
+
+# Only this narrow security path check consumes a Windows runner.
+concurrency:
+  group: mcp-path-windows-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  windows-junction:
+    name: MCP Windows junction and symlink rejection
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: mcp-path-windows-v1
+          save-if: false
+      - name: Run MCP vault path regression tests, including real Windows junction
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::vault::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-path-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Keep platform acceptance transcript
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mcp-path-windows-${{ github.event.pull_request.head.sha }}
+          path: mcp-path-windows.log
+          retention-days: 30

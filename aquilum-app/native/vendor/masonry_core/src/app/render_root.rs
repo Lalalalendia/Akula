@@ -624,7 +624,16 @@ impl RenderRoot {
             data: event.data,
         };
 
-        run_on_access_event_pass(self, &event, WidgetId(id));
+        let target = WidgetId(id);
+        // Platform accessibility requests are queued: scrolling, editing or
+        // replacing a note can remove the advertised node before it arrives.
+        // Reject removed targets before dispatch reaches the debug assertion
+        // in run_event_pass. Existing targets keep the normal action path.
+        if !self.has_widget(target) {
+            warn!("Ignoring AccessKit action for a removed widget {target}");
+            return;
+        }
+        run_on_access_event_pass(self, &event, target);
         self.run_rewrite_passes();
     }
 

@@ -137,6 +137,27 @@ impl TextEditor {
     }
 
     pub(super) fn do_text_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &TextEvent) {
+        // Tab normally indents in the editor. On a *visible fence header* it
+        // instead reaches the Copy button; once a Copy child has focus, Tab
+        // must also bubble unhandled so Masonry can traverse to the next one.
+        // Keep indentation unchanged in prose and fenced code bodies.
+        if let TextEvent::Keyboard(key) = event
+            && matches!(&key.key, masonry::core::keyboard::Key::Named(masonry::core::keyboard::NamedKey::Tab))
+            && !key.modifiers.ctrl() && !key.modifiers.alt() && !key.modifiers.meta()
+        {
+            let from_copy_button = self.access_code_buttons.iter()
+                .any(|button| button.widget.id() == ctx.target());
+            let header_start = self.doc.paragraph(self.doc.at_offset(self.focus)).start;
+            let on_visible_header = !key.modifiers.shift()
+                && self.selection().is_empty()
+                && ctx.is_focus_target()
+                && self.access_code_buttons.iter().any(|button| button.opener == header_start);
+            if from_copy_button || on_visible_header {
+                // Masonry handles Tab/Shift+Tab after an unhandled text event.
+                // Do not let the editable parent's Indent/Outdent binding run.
+                return;
+            }
+        }
         self.restart_blink(ctx);
         if !matches!(event, TextEvent::WindowFocusChange(_)) {
             self.include_caret();

@@ -94,3 +94,7 @@ together before any baseline promotion.
 These tests cannot prove hostile same-user namespace races or machine
 power-loss durability. Windows remains HOLD without an approved native
 publication/durability strategy.
+
+## Platform acceptance after MAC-HOLD-01
+
+This history-only P0g-3b proof is accepted on **Windows and Linux**. macOS is frozen/P2 by [MAC-HOLD-01](../../docs/platforms/MAC-HOLD-01.md); its runner is not scheduled by this PR and skipped/deferred Mac checks are not called a success. The production S3 apply/ConfirmedBaseline HOLD remains global across platforms. The sealed unit history permit is not yet tied to the exact Core/HistoryService instance; that identity binding is mandatory in the future File Gate receipt integration before this strict API can authorize any write or baseline.

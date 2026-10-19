@@ -152,14 +152,18 @@ impl Renderer {
                 let _zone = aq_trace::zone("сдвиг прокрутки");
                 crate::render::scroll::shift_rows(pixels, usize::from(width), *shift);
             }
-            for &(x, y, w, h) in &damage.areas {
+            for (region_index, &(x, y, w, h)) in damage.areas.iter().enumerate() {
                 #[cfg(test)]
                 let encoding_started = Instant::now();
                 {
                     let _zone = aq_trace::zone("кодирование");
                     #[cfg(test)]
                     let reset_started = Instant::now();
-                    painter.begin(x, y, w, h);
+                    if region_index == 0 {
+                        painter.begin(x, y, w, h);
+                    } else {
+                        painter.begin_region(x, y, w, h);
+                    }
                     #[cfg(test)]
                     {
                         reset_time += reset_started.elapsed();

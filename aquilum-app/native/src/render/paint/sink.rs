@@ -126,10 +126,16 @@ impl PaintSink for Painter {
             Some((true, id)) => BrushRef::Solid(crate::render::sprite::color(id).unwrap_or(masonry::peniko::Color::TRANSPARENT)),
             None => draw.brush,
         };
-        let paint = convert::brush_to_paint(brush, draw.composite, &mut self.images);
+        let (paint, paint_transform) = convert::brush_to_paint_trial(
+            brush,
+            draw.composite,
+            &mut self.images,
+            self.shift * draw.transform,
+            draw.brush_transform.unwrap_or(Affine::IDENTITY),
+        );
         self.set_transform(draw.transform);
         self.ctx.set_fill_rule(draw.fill_rule);
-        self.ctx.set_paint_transform(draw.brush_transform.unwrap_or(Affine::IDENTITY));
+        self.ctx.set_paint_transform(paint_transform);
         self.ctx.set_blend_mode(draw.composite.blend);
         self.ctx.set_paint(paint);
         match draw.shape {
