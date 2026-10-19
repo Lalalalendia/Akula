@@ -79,6 +79,114 @@ pub enum RevisionSelection<'a> {
     Historical(RevisionRef<'a>),
 }
 
+/// Read-only resolver for a Sync document. It does not change DAG heads,
+/// publish files or infer ordering from timestamps. The caller must separately
+/// establish a trusted DAG snapshot and read grants for this document.
+/// Pending ancestry for this document prevents an incomplete "current" view.
+pub fn resolve_sync_revisions(
+    dag: &crate::sync::RevisionDag,
+    document: crate::sync::DocumentId,
+    requested_history: Option<crate::sync::RevisionId>,
+) -> Result<OwnedSelection, ProbeError> {
+    use crate::sync::RevisionOperation;
+    let refs = if let Some(revision) = requested_history {
+        let record = dag.get(revision).ok_or(ProbeError::StaleSource)?;
+        if record.document_id != document {
+            return Err(ProbeError::Invalid("Revision belongs to another document"));
+        }
+        vec![record]
+    } else {
+        if dag.has_pending_for_document(document) {
+            return Err(ProbeError::StaleSource);
+        }
+        let heads = dag.heads(document);
+        if heads.is_empty() {
+            return Err(ProbeError::StaleSource);
+        }
+        heads.into_iter().map(|id| dag.get(id).expect("verified head exists")).collect()
+    };
+    let mut revisions = Vec::with_capacity(refs.len());
+    for record in refs {
+        revisions.push(OwnedRevision {
+            id: record.id.to_string(),
+            kind: if matches!(record.operation, RevisionOperation::Tombstone { .. }) {
+                RevisionKind::Tombstone
+            } else {
+                RevisionKind::Content
+            },
+            source_hash: match &record.operation {
+                RevisionOperation::Content { blob_hash, .. }
+                | RevisionOperation::Rename { blob_hash, .. } => Some(blob_hash.clone()),
+                RevisionOperation::Tombstone { .. } => None,
+            },
+        });
+    }
+    Ok(OwnedSelection {
+        document_id: document.to_string(),
+        historical: requested_history.is_some(),
+        conflict: revisions.len() > 1,
+        revisions,
+    })
+}
+
+/// Owned, verified revision IDs and expected immutable content hashes.
+/// Kept distinct from the low-level external-provider selection API.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnedRevision {
+    pub id: String,
+    pub kind: RevisionKind,
+    pub source_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnedSelection {
+    pub document_id: String,
+    pub historical: bool,
+    pub conflict: bool,
+    pub revisions: Vec<OwnedRevision>,
+}
+
+/// Search the resolved Sync revisions, enforcing their original blob hashes.
+/// The outer host must check live permissions both before and after this call.
+/// This is NOT a public RPC; only trusted callers should be given a DAG.
+pub fn search_sync_verified(
+    connection: &Connection,
+    scope_id: &str,
+    expected_generation: u64,
+    selection: &OwnedSelection,
+    model_id: &str,
+    query: &[f32],
+    limit: usize,
+) -> Result<SearchResult, ProbeError> {
+    if selection.revisions.is_empty() {
+        return Err(ProbeError::StaleSource);
+    }
+    let refs: Vec<RevisionRef<'_>> = selection.revisions.iter().map(|r| RevisionRef {
+        id: &r.id,
+        kind: r.kind,
+    }).collect();
+    let selected = if selection.historical {
+        RevisionSelection::Historical(refs[0])
+    } else if selection.conflict {
+        RevisionSelection::Conflicted(&refs)
+    } else {
+        RevisionSelection::Committed(refs[0])
+    };
+    let result = search(connection, scope_id, &[SearchTarget {
+        source_id: &selection.document_id,
+        expected_generation,
+        selection: selected,
+    }], model_id, query, limit)?;
+    for hit in &result.hits {
+        let expected = selection.revisions.iter().find(|r| r.id == hit.revision_id)
+            .and_then(|r| r.source_hash.as_deref());
+        if expected != Some(hit.source_hash.as_str()) {
+            return Err(ProbeError::RevisionCollision);
+        }
+    }
+    Ok(result)
+}
+
 /// Only authorized sources/revisions may be supplied by the trusted host.
 /// The generation is a LOCAL stale-worker/revocation fence, not revision order.
 pub struct SearchTarget<'a> {
@@ -648,6 +756,53 @@ mod tests {
         selection: RevisionSelection<'_>,
     ) -> Result<SearchResult, ProbeError> {
         search(db, scope, &[target(source, generation, selection)], MODEL, &[1.0, 0.0], 10)
+    }
+
+    #[test]
+    fn resolver_rejects_cross_document_and_pending_head() {
+        let mut dag = RevisionDag::new();
+        let doc = DocumentId::new();
+        let other = DocumentId::new();
+        let current = add_dag_revision(&mut dag, doc, vec![], "valid");
+        let unrelated = add_dag_revision(&mut dag, other, vec![], "other");
+        assert!(resolve_sync_revisions(&dag, doc, Some(unrelated)).is_err());
+        let s = resolve_sync_revisions(&dag, doc, None).unwrap();
+        assert_eq!(s.revisions[0].id, current.to_string());
+        let delayed = RevisionId::new();
+        let not_here = RevisionId::new();
+        dag.ingest(RevisionRecord {
+            id: delayed,
+            document_id: doc,
+            parents: vec![not_here],
+            operation: RevisionOperation::Content {
+                path: SyncRelativePath::parse("notes/claim.md").unwrap(),
+                blob_hash: hash("child"),
+            },
+        }).unwrap();
+        assert!(matches!(
+            resolve_sync_revisions(&dag, doc, None),
+            Err(ProbeError::StaleSource)
+        ));
+        assert!(resolve_sync_revisions(&dag, other, None).is_ok());
+    }
+
+    #[test]
+    fn verified_search_rejects_cached_hash_mismatch_and_keeps_history() {
+        let mut dag = RevisionDag::new();
+        let doc = DocumentId::new();
+        let rev = add_dag_revision(&mut dag, doc, vec![], "correct");
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let id = doc.to_string();
+        register_source(&db, "vault", &id).unwrap();
+        put(&mut db, "vault", &id, 1, &rev.to_string(), "wrong", &[1.0, 0.0]);
+        let selected = resolve_sync_revisions(&dag, doc, None).unwrap();
+        assert!(matches!(
+            search_sync_verified(&db, "vault", 1, &selected, MODEL, &[1.0, 0.0], 5),
+            Err(ProbeError::RevisionCollision)
+        ));
+        let historical = resolve_sync_revisions(&dag, doc, Some(rev)).unwrap();
+        assert!(historical.historical);
     }
 
     #[test]
