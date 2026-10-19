@@ -35,3 +35,14 @@ Microsoft API references:
 - https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-creduipromptforcredentialsw
 - https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credwritew
 - https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credreadw
+
+## YC-S3-T01b-READ — Windows-only in-memory credential checkout
+
+An internal `with_stored_keys(bucket, callback)` helper can now retrieve a **single bucket-bound** generic credential through native `CredReadW`. The callback receives borrowed key strings, **not** a serialized config object. This is an enabling primitive for a later background read-only probe; no network call, SDK configuration, GUI action or Sync is enabled here.
+
+- Input reuses the strict bucket validation and versioned `Akula/YandexObjectStorage/v1/<bucket>` key; **empty drafts are invalid**.
+- The API distinguishes absent keys from unreadable/unavailable OS store and malformed stored credentials. The latter are never handed to a callback.
+- Decoding checks length, ASCII formatting, NUL termination and limits of the persisted UTF-8 secret. Temporary `Zeroizing` allocations are wiped on ordinary return and unwinding. The credential's Windows-allocated copy is always released with a RAII `CredFree` guard, and is released **before** the callback runs.
+- This does not protect from process-local malware, OS swap/crash snapshots or unspecified copies in AWS SDK memory. Windows Credential Manager deletion does not revoke the Yandex static key server-side.
+- The native Windows test now proves **store → read exact synthetic test value → replace → read replaced value → reject malformed stored bytes → delete → missing**, plus isolation from a different bucket. CI still does **not** click through the interactive CredUI modal.
+- Security boundary: the caller is responsible for scheduling the callback only on a background worker after explicit user action, preventing copied secrets in its return value, and logging only sanitized error categories. The callback is deliberately **not wired** to any production action until Core #408 is independently accepted.
