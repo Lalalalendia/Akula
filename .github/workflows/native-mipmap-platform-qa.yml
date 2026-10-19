@@ -60,3 +60,5 @@ jobs:
             render::paint::convert::fractional_odd_quality_tests -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             render::paint::convert::mipmap_crop_alpha_edge_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_rounded_coverage_tests -- --nocapture --test-threads=1

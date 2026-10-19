@@ -1253,3 +1253,174 @@ mod mipmap_crop_alpha_edge_tests {
         assert_eq!(checked, 16);
     }
 }
+
+
+// Independent coverage check for the exact 8px rounded image-frame radius used
+// by the editor. The expected mask is a supersampled *analytic shape*, not a
+// Vello output or a second invocation of the same clip renderer.
+#[cfg(test)]
+mod mipmap_rounded_coverage_tests {
+    use super::*;
+    use masonry::peniko::{ImageAlphaType, ImageQuality};
+    use vello_cpu::color::palette::css::WHITE;
+    use vello_cpu::kurbo::{RoundedRect, Shape as _};
+    use vello_cpu::{RasterizerSettings, RenderContext, RenderSettings, Resources, TargetInit};
+
+    const WIDTH: u16 = 127;
+    const HEIGHT: u16 = 129;
+    const FRAME_W: u16 = 64;
+    const FRAME_H: u16 = 56;
+
+    fn draw(scale: f64, workers: u16, enabled: bool) -> Pixmap {
+        // Opaque black on all source pixels isolates *geometric coverage*
+        // from image colour/alpha interpolation. Includes fractional source
+        // translation and odd source dimensions.
+        let raw = vec![0u8, 0, 0, 255].repeat(usize::from(WIDTH) * usize::from(HEIGHT));
+        let brush = crate::render::pixels::from_rgba(
+            raw, u32::from(WIDTH), u32::from(HEIGHT), ImageAlphaType::Alpha,
+        )
+        .expect("valid uniform RGBA image")
+        .with_quality(ImageQuality::High);
+        let geometry = Affine::translate((14.75, 8.35)) * Affine::scale(scale);
+        let mut images = Images::default();
+        let (paint, paint_transform) = brush_to_paint_candidate_tuned(
+            BrushRef::Image(brush.as_ref()), Composite::default(),
+            &mut images, geometry, Affine::IDENTITY, enabled, true,
+        );
+        assert_eq!(images.mips.is_empty(), !enabled);
+        let clip = RoundedRect::from_rect(
+            Rect::new(24.0, 18.0, 44.0, 36.0),
+            8.0, // ui/editor/embed/media/paint.rs: RADIUS
+        );
+        let mut ctx = RenderContext::new_with(
+            FRAME_W, FRAME_H,
+            RenderSettings { num_threads: workers, ..RenderSettings::default() },
+        );
+        ctx.set_transform(Affine::IDENTITY);
+        ctx.push_clip_path(&clip.to_path(0.1));
+        ctx.set_transform(geometry);
+        ctx.set_paint_transform(paint_transform);
+        ctx.set_paint(paint);
+        ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(WIDTH), f64::from(HEIGHT)));
+        ctx.pop_clip();
+        ctx.flush();
+
+        let mut output = Pixmap::new(FRAME_W, FRAME_H);
+        ctx.render_with(
+            &mut output, &mut Resources::default(),
+            RasterizerSettings {
+                target_init: TargetInit::Clear(WHITE),
+                ..RasterizerSettings::default()
+            },
+        );
+        output
+    }
+
+    fn inside_rounded(x: f64, y: f64) -> bool {
+        // Signed-distance geometry for rounded rectangle [24,44] x [18,36]
+        // with radius 8: clamp to its [32,36] x [26,28] core, then compare
+        // distance to 8. This is independent of kurbo's path tessellation.
+        let dx = x - x.clamp(32.0, 36.0);
+        let dy = y - y.clamp(26.0, 28.0);
+        dx * dx + dy * dy <= 64.0
+    }
+
+    fn coverage(x: usize, y: usize) -> f64 {
+        const SAMPLES: usize = 16;
+        let mut hit = 0usize;
+        for sy in 0..SAMPLES {
+            for sx in 0..SAMPLES {
+                let px = x as f64 + (sx as f64 + 0.5) / SAMPLES as f64;
+                let py = y as f64 + (sy as f64 + 0.5) / SAMPLES as f64;
+                if inside_rounded(px, py) {
+                    hit += 1;
+                }
+            }
+        }
+        hit as f64 / (SAMPLES * SAMPLES) as f64
+    }
+
+    fn encode_srgb(linear: f64) -> f64 {
+        if linear <= 0.003_130_8 {
+            12.92 * linear
+        } else {
+            1.055 * linear.powf(1.0 / 2.4) - 0.055
+        }
+    }
+
+    #[test]
+    fn rounded_image_clip_matches_independent_coverage_on_both_sampler_paths() {
+        let mut checked = 0;
+        for scale in [0.241, 0.313] {
+            for workers in [0, 2] {
+                let before = draw(scale, workers, false);
+                let after = draw(scale, workers, true);
+                let mut transition_pixels = 0;
+                let mut largest_deviation = 0.0f64;
+                let mut largest_mip_delta = 0u8;
+
+                for y in 0..usize::from(FRAME_H) {
+                    for x in 0..usize::from(FRAME_W) {
+                        let index = y * usize::from(FRAME_W) + x;
+                        let cov = coverage(x, y);
+                        let baseline = before.data()[index];
+                        let candidate = after.data()[index];
+                        for p in [baseline, candidate] {
+                            assert_eq!(p.r, p.g, "colored channel from black/white clip");
+                            assert_eq!(p.g, p.b, "colored channel from black/white clip");
+                            assert_eq!(p.a, 255, "transparent output frame");
+                            let intensity = f64::from(p.r);
+                            if cov == 0.0 {
+                                assert!(intensity >= 252.0, "leak at ({x},{y})");
+                            } else if cov == 1.0 {
+                                assert!(intensity <= 3.0, "missing fill at ({x},{y})");
+                            } else {
+                                // Vello may composite in linear or encoded sRGB;
+                                // both accepted colour-space paths must respect
+                                // the analytic coverage interval with AA slack.
+                                let linear = 255.0 * (1.0 - cov);
+                                let gamma = 255.0 * encode_srgb(1.0 - cov);
+                                let deviation = if intensity < linear.min(gamma) {
+                                    linear.min(gamma) - intensity
+                                } else if intensity > linear.max(gamma) {
+                                    intensity - linear.max(gamma)
+                                } else {
+                                    0.0
+                                };
+                                largest_deviation = largest_deviation.max(deviation);
+                                assert!(
+                                    deviation <= 24.0,
+                                    "incorrect rounded AA at ({x},{y}): coverage={cov:.3}, \
+                                     intensity={intensity:.1}, deviation={deviation:.1}, \
+                                     scale={scale}, workers={workers}"
+                                );
+                                if cov > 0.1 && cov < 0.9 {
+                                    transition_pixels += 1;
+                                }
+                            }
+                        }
+                        let mip_delta = baseline.r.abs_diff(candidate.r);
+                        largest_mip_delta = largest_mip_delta.max(mip_delta);
+                        assert!(
+                            mip_delta <= 5,
+                            "mipmap changed opaque rounded-clip geometry at ({x},{y}): \
+                             delta={mip_delta}, scale={scale}, workers={workers}"
+                        );
+                    }
+                }
+                assert!(
+                    transition_pixels >= 12,
+                    "test failed to exercise enough antialiased rounded-corner pixels"
+                );
+                println!(
+                    "AKULA_MIP_ROUND_ANALYTIC scale={scale} workers={workers} \
+                     transition_pixels={transition_pixels} \
+                     worst_reference_deviation={largest_deviation:.2} \
+                     worst_mip_delta={largest_mip_delta}"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 4);
+    }
+}
