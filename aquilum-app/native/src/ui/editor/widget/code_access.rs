@@ -9,7 +9,6 @@
 use super::*;
 use masonry::accesskit::{Action, Role};
 use masonry::core::{ActionCtx, AccessEvent, NewWidget, WidgetId, WidgetPod};
-use std::collections::HashMap;
 
 const MAX_VISIBLE_HEADERS: usize = 128;
 
@@ -59,6 +58,19 @@ impl Widget for CodeCopyButton {
     }
 
     fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+
+    fn children_ids(&self) -> ChildrenIds { ChildrenIds::new() }
+
+    fn measure(
+        &mut self,
+        _ctx: &mut MeasureCtx<'_>,
+        _props: &PropertiesRef<'_>,
+        _axis: Axis,
+        _request: LenReq,
+        _cross: Option<Length>,
+    ) -> Length {
+        Length::px(24.0)
+    }
 
     fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, _size: Size) {}
 
