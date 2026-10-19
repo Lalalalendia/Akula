@@ -109,7 +109,7 @@ pub fn resolve_sync_revisions(
     for record in refs {
         revisions.push(OwnedRevision {
             id: record.id.to_string(),
-            kind: if matches!(record.operation, RevisionOperation::Tombstone { .. }) {
+            kind: if matches!(&record.operation, RevisionOperation::Tombstone { .. }) {
                 RevisionKind::Tombstone
             } else {
                 RevisionKind::Content
