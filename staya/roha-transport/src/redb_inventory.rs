@@ -22,8 +22,7 @@ use std::{
 };
 
 use redb::{
-    Key, ReadOnlyDatabase, ReadableDatabase, ReadableTable, TableDefinition,
-    TableHandle, Value,
+    Key, ReadOnlyDatabase, ReadableDatabase, ReadableTable, TableDefinition, TableHandle, Value,
 };
 
 use crate::{
@@ -62,13 +61,19 @@ pub enum RedbHold {
 }
 
 impl From<VolumeError> for RedbHold {
-    fn from(value: VolumeError) -> Self { Self::Volume(value) }
+    fn from(value: VolumeError) -> Self {
+        Self::Volume(value)
+    }
 }
 impl From<DurableError> for RedbHold {
-    fn from(value: DurableError) -> Self { Self::Ledger(value) }
+    fn from(value: DurableError) -> Self {
+        Self::Ledger(value)
+    }
 }
 impl From<io::Error> for RedbHold {
-    fn from(value: io::Error) -> Self { Self::Io(value) }
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
 }
 
 // Pinned source: iroh-blobs tag v0.103.1:
@@ -84,12 +89,25 @@ macro_rules! raw_value {
         impl Value for $name {
             type SelfType<'a> = &'a [u8];
             type AsBytes<'a> = &'a [u8];
-            fn fixed_width() -> Option<usize> { $width }
+            fn fixed_width() -> Option<usize> {
+                $width
+            }
             fn from_bytes<'a>(value: &'a [u8]) -> Self::SelfType<'a>
-            where Self: 'a { value }
+            where
+                Self: 'a,
+            {
+                value
+            }
             fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
-            where Self: 'a, Self: 'b { *value }
-            fn type_name() -> redb::TypeName { redb::TypeName::new($type_name) }
+            where
+                Self: 'a,
+                Self: 'b,
+            {
+                *value
+            }
+            fn type_name() -> redb::TypeName {
+                redb::TypeName::new($type_name)
+            }
         }
     };
 }
@@ -98,10 +116,14 @@ raw_value!(DbState, "EntryState", None);
 raw_value!(DbTag, "Tag", None);
 raw_value!(DbHashFormat, "iroh_blobs::HashAndFormat", Some(33));
 impl Key for DbHash {
-    fn compare(left: &[u8], right: &[u8]) -> std::cmp::Ordering { left.cmp(right) }
+    fn compare(left: &[u8], right: &[u8]) -> std::cmp::Ordering {
+        left.cmp(right)
+    }
 }
 impl Key for DbTag {
-    fn compare(left: &[u8], right: &[u8]) -> std::cmp::Ordering { left.cmp(right) }
+    fn compare(left: &[u8], right: &[u8]) -> std::cmp::Ordering {
+        left.cmp(right)
+    }
 }
 
 const BLOBS: TableDefinition<DbHash, DbState> = TableDefinition::new("blobs-0");
@@ -188,7 +210,9 @@ fn sha_of_file(path: &std::path::Path) -> Result<[u8; 32], RedbHold> {
     let mut buffer = [0u8; 64 * 1024];
     loop {
         let size = file.read(&mut buffer)?;
-        if size == 0 { break; }
+        if size == 0 {
+            break;
+        }
         hasher.update(&buffer[..size]);
     }
     Ok(*hasher.finalize().as_bytes())
@@ -218,8 +242,11 @@ pub fn audit_pinned_redb(
     ledger: &DurableLedger,
     store_child: &str,
 ) -> Result<RedbEvidenceOnly, RedbHold> {
-    if store_child.is_empty() || store_child == "." || store_child == ".."
-        || store_child.contains('/') || store_child.contains('\\')
+    if store_child.is_empty()
+        || store_child == "."
+        || store_child == ".."
+        || store_child.contains('/')
+        || store_child.contains('\\')
     {
         return Err(RedbHold::InvalidStoreRoot);
     }
@@ -232,9 +259,11 @@ pub fn audit_pinned_redb(
     }
     let path = root.join("blobs.db");
     let metadata = fs::symlink_metadata(&path)?;
-    if !metadata.file_type().is_file() || metadata.nlink() != 1
+    if !metadata.file_type().is_file()
+        || metadata.nlink() != 1
         || metadata.dev() != mount_dev
-        || metadata.len() == 0 || metadata.len() > MAX_DB_BYTES
+        || metadata.len() == 0
+        || metadata.len() > MAX_DB_BYTES
     {
         return Err(RedbHold::DatabaseUnsafe);
     }
@@ -252,23 +281,31 @@ pub fn audit_pinned_redb(
 
     let db = ReadOnlyDatabase::open(&path).map_err(|_| RedbHold::DatabaseUnsafe)?;
     let tx = db.begin_read().map_err(|_| RedbHold::DatabaseUnsafe)?;
-    let names: BTreeSet<String> = tx.list_tables()
+    let names: BTreeSet<String> = tx
+        .list_tables()
         .map_err(|_| RedbHold::UnsupportedSchema)?
         .map(|t| t.name().to_owned())
         .collect();
-    let pinned: BTreeSet<String> = [
-        "blobs-0", "tags-0", "inline-data-0", "inline-outboard-0"
-    ].into_iter().map(str::to_owned).collect();
-    if names != pinned { return Err(RedbHold::UnsupportedSchema); }
+    let pinned: BTreeSet<String> = ["blobs-0", "tags-0", "inline-data-0", "inline-outboard-0"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    if names != pinned {
+        return Err(RedbHold::UnsupportedSchema);
+    }
 
-    let blobs = tx.open_table(BLOBS).map_err(|_| RedbHold::UnsupportedSchema)?;
+    let blobs = tx
+        .open_table(BLOBS)
+        .map_err(|_| RedbHold::UnsupportedSchema)?;
     let mut expected_inline = BTreeSet::new();
     let mut expected_outboard = BTreeSet::new();
     let mut seen = BTreeSet::new();
     for result in blobs.iter().map_err(|_| RedbHold::UnknownOrDamagedRecord)? {
         let (key, raw) = result.map_err(|_| RedbHold::UnknownOrDamagedRecord)?;
         let hash = hash_key(key.value())?;
-        let reservation = reservations.get(&hash).ok_or(RedbHold::OrphanDatabaseBlob)?;
+        let reservation = reservations
+            .get(&hash)
+            .ok_or(RedbHold::OrphanDatabaseBlob)?;
         if !seen.insert(hash) || seen.len() > MAX_BLOBS {
             return Err(RedbHold::TooManyRecords);
         }
@@ -279,7 +316,9 @@ pub fn audit_pinned_redb(
         }
         let state = parse_complete(raw.value())?;
         match state.data {
-            DataLocation::Inline => { expected_inline.insert(hash); }
+            DataLocation::Inline => {
+                expected_inline.insert(hash);
+            }
             DataLocation::Owned(len) if len == reservation.expected_bytes => {}
             DataLocation::Owned(_) => return Err(RedbHold::WrongDeclaredLength),
         }
@@ -294,7 +333,9 @@ pub fn audit_pinned_redb(
     }
     drop(blobs);
 
-    let inline = tx.open_table(INLINE).map_err(|_| RedbHold::UnsupportedSchema)?;
+    let inline = tx
+        .open_table(INLINE)
+        .map_err(|_| RedbHold::UnsupportedSchema)?;
     let mut counted_inline = 0usize;
     let mut inline_bytes = 0usize;
     for row in inline.iter().map_err(|_| RedbHold::InvalidInlineData)? {
@@ -305,7 +346,8 @@ pub fn audit_pinned_redb(
         }
         let body = value.value();
         let expected = &reservations[&hash];
-        inline_bytes = inline_bytes.checked_add(body.len())
+        inline_bytes = inline_bytes
+            .checked_add(body.len())
             .ok_or(RedbHold::TooManyRecords)?;
         if body.len() as u64 != expected.expected_bytes
             || inline_bytes > MAX_INLINE_BYTES
@@ -320,16 +362,22 @@ pub fn audit_pinned_redb(
     }
     drop(inline);
 
-    let outboard = tx.open_table(OUTBOARD).map_err(|_| RedbHold::UnsupportedSchema)?;
+    let outboard = tx
+        .open_table(OUTBOARD)
+        .map_err(|_| RedbHold::UnsupportedSchema)?;
     let mut outboard_bytes = 0usize;
     let mut outboard_count = 0usize;
-    for row in outboard.iter().map_err(|_| RedbHold::InvalidInlineOutboard)? {
+    for row in outboard
+        .iter()
+        .map_err(|_| RedbHold::InvalidInlineOutboard)?
+    {
         let (key, value) = row.map_err(|_| RedbHold::InvalidInlineOutboard)?;
         let hash = hash_key(key.value())?;
         if !expected_outboard.remove(&hash) {
             return Err(RedbHold::OrphanInlineOutboard);
         }
-        outboard_bytes = outboard_bytes.checked_add(value.value().len())
+        outboard_bytes = outboard_bytes
+            .checked_add(value.value().len())
             .ok_or(RedbHold::TooManyRecords)?;
         if outboard_bytes > MAX_INLINE_BYTES {
             return Err(RedbHold::InvalidInlineOutboard);
@@ -341,7 +389,9 @@ pub fn audit_pinned_redb(
     }
     drop(outboard);
 
-    let tags = tx.open_table(TAGS).map_err(|_| RedbHold::UnsupportedSchema)?;
+    let tags = tx
+        .open_table(TAGS)
+        .map_err(|_| RedbHold::UnsupportedSchema)?;
     let mut tags_count = 0usize;
     for row in tags.iter().map_err(|_| RedbHold::ForeignOrUnsupportedTag)? {
         let (key, value) = row.map_err(|_| RedbHold::ForeignOrUnsupportedTag)?;
@@ -399,12 +449,19 @@ mod tests {
     #[test]
     fn reject_partial_external_and_noncanonical_entry_wires() {
         for wire in [
-            vec![], vec![1, 0], vec![0, 2], vec![0, 1, 8],
-            vec![0, 0, 0, 0], vec![0, 0, 3],
+            vec![],
+            vec![1, 0],
+            vec![0, 2],
+            vec![0, 1, 8],
+            vec![0, 0, 0, 0],
+            vec![0, 0, 3],
             vec![0, 1, 0x81, 0, 1],
             vec![0, 1, 4, 1, 44],
         ] {
-            assert!(parse_complete(&wire).is_err(), "accepted malformed wire {wire:?}");
+            assert!(
+                parse_complete(&wire).is_err(),
+                "accepted malformed wire {wire:?}"
+            );
         }
     }
 
@@ -413,7 +470,10 @@ mod tests {
         assert_eq!(DbHash::type_name().name(), "iroh_blobs::Hash");
         assert_eq!(DbState::type_name().name(), "EntryState");
         assert_eq!(DbTag::type_name().name(), "Tag");
-        assert_eq!(DbHashFormat::type_name().name(), "iroh_blobs::HashAndFormat");
+        assert_eq!(
+            DbHashFormat::type_name().name(),
+            "iroh_blobs::HashAndFormat"
+        );
         assert_eq!(DbHash::fixed_width(), Some(32));
         assert_eq!(DbState::fixed_width(), None);
         assert_eq!(DbHashFormat::fixed_width(), Some(33));
