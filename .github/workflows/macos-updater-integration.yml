@@ -9,6 +9,8 @@ on:
       - 'aquilum-app/native/src/updater/apply.rs'
       - 'aquilum-app/native/src/updater/macos_transaction.rs'
       - 'aquilum-app/native/src/updater/mod.rs'
+      - 'aquilum-app/native/src/updater/startup_ack.rs'
+      - 'aquilum-app/native/src/host/frame.rs'
       - '.github/workflows/macos-updater-integration.yml'
 
 permissions:
@@ -32,3 +34,9 @@ jobs:
         run: |
           set -euo pipefail
           cargo check -p aquilum-native --features installed --locked
+      - name: Exercise first-render updater generation receipt on native macOS
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-native --features installed --locked updater::startup_ack -- --nocapture
