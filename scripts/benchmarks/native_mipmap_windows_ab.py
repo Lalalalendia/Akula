@@ -10,6 +10,7 @@ import os
 import sys
 from pathlib import Path
 from statistics import median
+from math import floor, isfinite
 
 from native_mipmap_window_ab import SOURCE, run_one
 
@@ -49,6 +50,25 @@ def metric(row: dict, name: str) -> float:
     return float(value)
 
 
+def replay_work(row: dict) -> list[float]:
+    """CPU work for presented scroll-replay frames; no startup pre-roll."""
+    replay = row["replay"]
+    samples = replay.get("workSamplesMs")
+    if not isinstance(samples, list) or len(samples) != replay["frames"] or len(samples) < 80:
+        raise ValueError("Missing/misaligned replay-only per-frame CPU samples")
+    if any(isinstance(value, bool) or not isinstance(value, (float, int))
+           or not isfinite(value) or value < 0 for value in samples):
+        raise ValueError("Non-finite/negative replay-only CPU sample")
+    return [float(value) for value in samples]
+
+
+def percentile(values: list[float], fraction: float) -> float:
+    if not values or not 0 <= fraction <= 1:
+        raise ValueError("Bad percentile request")
+    ordered = sorted(values)
+    return ordered[floor((len(ordered) - 1) * fraction + 0.5)]
+
+
 def report(rows: list[dict], exe_hash: str,
            scenes: tuple[tuple[str, str], ...]) -> str:
     if len(rows) != len(TRIALS) * len(MODES) * len(scenes):
@@ -60,12 +80,15 @@ def report(rows: list[dict], exe_hash: str,
         "Actual Win32/Winit window, pinned photo and Markdown note, 2 workers.",
         "Three trials per mode/scene, randomized AB/BA process order.",
         "RSS = actual process peak working set; not free system memory.",
-        "Frame p95 is submitted CPU work, NOT monitor scanout or visual judder.",
+        "Replay CPU work percentiles cover presented scroll frames ONLY; startup is excluded.",
+        "Whole-process frame/raster numbers include startup; raster means full renderer.draw(), including encoding and mip generation.",
+        "Replay 'missed' uses a fixed 120Hz target; it is NOT a 60Hz Windows jank count.",
+        "No CPU metric measures physical monitor scanout or subjective smoothness.",
         "No hard latency threshold on shared Windows CI.",
         "Shipping installed builds are tested separately and keep mip OFF.",
         "",
-        "| Scene | Viewport | Mode | Frame p95 ms | Raster p95 ms | RSS MiB |",
-        "|---|---|---|---:|---:|---:|",
+        "| Scene | Viewport | Mode | Replay CPU p95 ms | Replay CPU p99 ms | Whole-process p95 ms | Renderer p95 ms | RSS MiB |",
+        "|---|---|---|---:|---:|---:|---:|---:|",
     ]
     for scene, viewport in scenes:
         selected = [row for row in rows if row["scene"] == scene]
@@ -90,6 +113,8 @@ def report(rows: list[dict], exe_hash: str,
             frame = median(metric(row, "frameP95Ms") for row in group)
             raster = median(metric(row, "rasterP95Ms") for row in group)
             rss = median(row["peak_rss_kib"] for row in group) / 1024
+            replay_p95 = median(percentile(replay_work(row), 0.95) for row in group)
+            replay_p99 = median(percentile(replay_work(row), 0.99) for row in group)
             frames = [
                 float(value)
                 for row in group
@@ -102,8 +127,8 @@ def report(rows: list[dict], exe_hash: str,
             worst = max(frames)
             over_60hz = sum(value > 1000 / 60 for value in frames)
             lines.append(
-                f"| {scene} | {viewport} | {mode} | {frame:.3f} | "
-                f"{raster:.3f} | {rss:.1f} |"
+                f"| {scene} | {viewport} | {mode} | {replay_p95:.3f} | "
+                f"{replay_p99:.3f} | {frame:.3f} | {raster:.3f} | {rss:.1f} |"
             )
             lines.append(
                 f"{scene}/{mode}: worst CPU frame {worst:.3f} ms; "
@@ -116,9 +141,9 @@ def report(rows: list[dict], exe_hash: str,
             base = next(row for row in by_mode["baseline"] if row["trial"] == trial)
             mip = next(row for row in by_mode["mip_medium_linger"]
                        if row["trial"] == trial)
-            differences.append(metric(mip, "frameP95Ms") - metric(base, "frameP95Ms"))
+            differences.append(percentile(replay_work(mip), 0.95) - percentile(replay_work(base), 0.95))
         lines.append(
-            f"{scene}: paired p95 delta (mip - original) ms "
+            f"{scene}: paired replay-only CPU p95 delta (mip - original) ms "
             f"{[round(v, 3) for v in differences]}, "
             f"wins={sum(v < 0 for v in differences)}/{len(differences)}."
         )
