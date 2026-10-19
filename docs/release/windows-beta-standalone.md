@@ -30,9 +30,10 @@ otherwise calls `set_current_dir` on the JSON file itself while inferring a pack
 name, triggering Windows `os error 267` before NSIS. The explicit `name` bypasses
 that version-specific bug, and matches the `-p aquilum-native` selection.
 The standalone config lives under `native/packaging`, so icon paths are
-explicitly relative (`../icons/...`). Its `--binaries-dir` is explicitly set
-to the compiled Cargo release directory; `--out-dir` is only the NSIS output.
-Without these, cargo-packager 0.11.8 would look for assets/binaries in the wrong directories.
+explicitly relative (`../icons/...`). `binariesDir` is explicitly set **in JSON** to the compiled Cargo release directory,
+while `--out-dir` is only the NSIS output. In cargo-packager 0.11.8 the parsed
+`--binaries-dir` CLI flag is not applied to file-based configs. The JSON field
+avoids the broken default which would point at the distribution folder.
 It creates temporary **upstream sentinel** directories and registry values
 on a **GitHub-hosted ephemeral runner**, then installs, opens, restarts and
 uninstalls Akula and ensures those sentinels and the local vault survive.

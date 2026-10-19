@@ -57,7 +57,7 @@ jobs:
           $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item (Join-Path $release 'aquilum-native.exe') (Join-Path $release 'akula-app.exe') -Force
-          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --binaries-dir $release --out-dir $dist
+          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --out-dir $dist
           if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
           $setup = @(Get-ChildItem $dist -Filter '*-setup.exe')
           if ($setup.Count -ne 1) { throw "Expected one Akula NSIS package; found $($setup.Count)" }

@@ -24,6 +24,9 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
   assert.equal(config.identifier, 'io.github.lalalendia.akula');
   assert.notEqual(config.identifier, 'com.dmitriy.aquilum-app');
   assert.deepEqual(config.binaries, [{ path: 'akula-app', main: true }]);
+  assert.equal(path.resolve(root, 'aquilum-app/native/packaging', config.binariesDir),
+    path.resolve(root, '.artifacts/cargo-native/release'),
+    'cargo-packager 0.11.8 takes binariesDir from JSON; CLI flag is ignored');
   assert.equal(config.homepage, 'https://github.com/Lalalalendia/Akula');
   assert.equal(config.nsis.installerIcon, '../icons/icon.ico');
   assert.deepEqual(config.icons, [
@@ -45,7 +48,6 @@ test('candidate builds local-only, uses explicit Windows config and never replac
     'runs-on: windows-latest',
     'cargo build --release --locked -p aquilum-native --features installed',
     '--config native/packaging/akula-windows.json',
-    '--binaries-dir $release',
     "Join-Path $release 'akula-app.exe'",
     './scripts/test-windows-beta.ps1',
     'Upload candidate (not a release)',
@@ -54,7 +56,7 @@ test('candidate builds local-only, uses explicit Windows config and never replac
   }
   // YAML comments are descriptive: enforce the *active* release commands.
   const activeLines = workflow.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
-  assert.doesNotMatch(activeLines, /Freaction\/Aquilum|--all-features|gh release create|--features installed,sync-installed-host/);
+  assert.doesNotMatch(activeLines, /Freaction\/Aquilum|--all-features|gh release create|--features installed,sync-installed-host|--binaries-dir/);
 });
 
 test('installer smoke checks distinct directories and preserves existing Aquilum', () => {

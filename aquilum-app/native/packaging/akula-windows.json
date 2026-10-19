@@ -20,5 +20,6 @@
   "nsis": {
     "installerIcon": "../icons/icon.ico"
   },
-  "name": "aquilum-native"
+  "name": "aquilum-native",
+  "binariesDir": "../../../.artifacts/cargo-native/release"
 }
