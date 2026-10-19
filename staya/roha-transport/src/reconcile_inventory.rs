@@ -194,9 +194,6 @@ pub fn audit_external_inventory(
     let mut count = 0usize;
     for item in fs::read_dir(&root)? {
         count += 1;
-        if count > 3 {
-            return Err(AuditHold::TooManyFiles);
-        }
         let item = item?;
         let name = item
             .file_name()
@@ -220,6 +217,12 @@ pub fn audit_external_inventory(
                 seen_temp = true;
             }
             _ => return Err(AuditHold::UnexpectedStoreEntry(name)),
+        }
+        // Check the exact layout first. read_dir enumeration order is NOT
+        // stable: an unknown fourth filename must be UnexpectedStoreEntry
+        // whether encountered first or last, never a misleading size error.
+        if count > 3 {
+            return Err(AuditHold::TooManyFiles);
         }
     }
     if !seen_db {
