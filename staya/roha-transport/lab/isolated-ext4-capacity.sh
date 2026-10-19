@@ -224,6 +224,20 @@ cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
   --test iroh_blobs_compare bounded_ext4_owned_bao_after_remount \
   -- --exact --ignored --nocapture
 
+# P2P-BLOB-10c: external FsStore data with inline Bao held in read-only
+# redb. Corrupt proof parents / size / omit required row only in disposable DB
+# copies and verify the original byte-identical database and journal.
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_inline_bao_crypto_proof \
+  -- --exact --ignored --nocapture
+
+sync
+sudo umount "$volume"
+mount_image
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_inline_bao_after_remount \
+  -- --exact --ignored --nocapture
+
 # A missing mount must NOT cause staging to continue on its host parent.
 sudo umount "$volume"
 cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
