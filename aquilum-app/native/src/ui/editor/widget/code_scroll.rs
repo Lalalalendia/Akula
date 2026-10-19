@@ -217,11 +217,23 @@ mod tests {
         assert_eq!(editor.code_offset_at(0), 0.0);
         assert_eq!(editor.code_offset_at(800), 80.0);
         let second_line = editor.doc.at_offset(second);
-        assert_eq!(editor.code_offset_at(second_line), 30.0);
+        assert_eq!(editor.code_offset_at(second_line), 0.0, "language header stays fixed");
+        assert_eq!(editor.code_offset_at(second_line + 1), 30.0, "only the body scrolls");
         assert_eq!(editor.code_offset_at(second_line - 1), 0.0);
         editor.paint_code_offsets.clear();
     }
 
+
+    #[test]
+    fn fenced_language_header_and_closer_do_not_scroll_with_the_code_body() {
+        let editor_source = "~~~rust\nvery_long_expression_and_🐱\n~~~";
+        let mut editor = TextEditor::new(editor_source).markdown();
+        assert!(editor.code_scrolls.advance(0, 70.0, 400.0, 160.0));
+        editor.prepare_code_paint_offsets(0, 2);
+        assert_eq!(editor.code_offset_at(0), 0.0, "header must remain fixed");
+        assert_eq!(editor.code_offset_at(1), 70.0, "body must scroll");
+        assert_eq!(editor.code_offset_at(2), 0.0, "closing fence must remain fixed");
+    }
 
     #[test]
     fn editing_code_body_invalidates_window_cache_without_losing_scroll_identity() {
@@ -344,6 +356,11 @@ impl TextEditor {
     }
 
     pub(super) fn code_offset_at(&self, line: usize) -> f64 {
+        // The opening language label and closing fence are fixed chrome,
+        // not horizontally scrollable code-body glyphs.
+        if matches!(self.doc.block(line), Block::Code { fence: true, .. }) {
+            return 0.0;
+        }
         if let Some(index) = line.checked_sub(self.paint_code_first)
             && let Some(value) = self.paint_code_offsets.get(index)
         {
@@ -391,7 +408,9 @@ impl TextEditor {
                 return Some(maximum);
             }
             let laid = self.doc.paragraph(line).laid()?;
-            maximum = maximum.max(f64::from(laid.width()));
+            if !matches!(self.doc.block(line), Block::Code { fence: true, .. }) {
+                maximum = maximum.max(f64::from(laid.width()));
+            }
             if matches!(self.doc.block(line), Block::Code { first: false, last: true, fence: true, .. }) {
                 return Some(maximum);
             }
@@ -428,7 +447,9 @@ impl TextEditor {
             {
                 break;
             }
-            if let Some(layout) = self.doc.paragraph(at).laid() {
+            if !matches!(self.doc.block(at), Block::Code { fence: true, .. })
+                && let Some(layout) = self.doc.paragraph(at).laid()
+            {
                 max = max.max(f64::from(layout.width()));
             }
             at += 1;
@@ -460,6 +481,10 @@ impl TextEditor {
             return;
         }
         let index = self.doc.at_offset(self.focus);
+        // A caret inside the fixed language label must not scroll the body.
+        if matches!(self.doc.block(index), Block::Code { fence: true, .. }) {
+            return;
+        }
         let Some(viewport) = self.code_viewport(index) else { return };
         let Some(opener) = self.code_opener_at(index) else { return };
         let paragraph = self.doc.paragraph(index);
