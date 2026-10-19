@@ -38,6 +38,8 @@ mod fault_matrix;
 mod identity;
 mod journal;
 mod local_create;
+#[cfg(test)]
+mod native_existing_replace_probe;
 mod local_recovery;
 mod recovery_review;
 /// Crypto envelope contract only: no production key custody or archive writer yet.
