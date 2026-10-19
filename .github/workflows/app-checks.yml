@@ -159,6 +159,46 @@ jobs:
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
 
+      # AGENT-PERF: reuse the already compiled Core tests and the current
+      # required-tests runner rather than introducing another queued job.
+      # The output is observational only: no machine-dependent timing gate.
+      - name: MCP synthetic concurrency baseline (opt-in)
+        if: needs.classify.outputs.mode == 'workspace' && startsWith(github.event.pull_request.title, 'AGENT-PERF-')
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "PR_HEAD_SHA=$PR_HEAD_SHA"
+            echo "RUN_SHA=$GITHUB_SHA"
+            echo "RUNNER_OS=$RUNNER_OS"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            echo "VCPUS=$(nproc)"
+            rustc --version
+            cargo --version
+            for attempt in 1 2 3; do
+              echo "MCP_PROBE_ATTEMPT=$attempt"
+              cargo test -p aquilum-core --locked mcp::server::tests::throughput_probe -- --ignored --nocapture --test-threads=1
+            done
+          } 2>&1 | tee ../mcp-agent-perf.log
+          {
+            echo '### MCP synthetic concurrency baseline'
+            echo 'Observational only, not a real agent throughput measurement.'
+            echo '```text'
+            grep 'MCP_SYNTHETIC_SERIAL_BASELINE' ../mcp-agent-perf.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive MCP probe and machine metadata
+        if: always() && needs.classify.outputs.mode == 'workspace' && startsWith(github.event.pull_request.title, 'AGENT-PERF-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-agent-perf-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: mcp-agent-perf.log
+          if-no-files-found: warn
+          retention-days: 30
 
   native-frames:
     name: Native frame fidelity
