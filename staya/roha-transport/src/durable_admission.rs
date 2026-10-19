@@ -295,7 +295,16 @@ impl DurableLedger {
         {
             return Err(DurableError::UnsafeDirectory);
         }
-        owner.try_lock().map_err(|_| DurableError::CompetingOwner)?;
+        // Do not mislabel every underlying OS lock error as a competing
+        // owner. EWOULDBLOCK means contention; I/O errors and unsupported
+        // filesystem locking remain distinct fail-closed diagnostics.
+        owner.try_lock().map_err(|error| {
+            if error.kind() == io::ErrorKind::WouldBlock {
+                DurableError::CompetingOwner
+            } else {
+                DurableError::Io(error)
+            }
+        })?;
         check_metadata_directory(root)?;
         if root.join(NEXT_FILE).exists() {
             return Err(DurableError::InterruptedTransaction);
@@ -732,6 +741,22 @@ mod tests {
             Err(DurableError::SlotsExhausted)
         ));
         assert_eq!(recovered.snapshot().unwrap().reserved_bytes, 1100);
+    }
+
+    #[test]
+    fn repeated_uncontested_owner_handoffs_preserve_reservation() {
+        let dir = temp_root();
+        let known = digest(b"retained after all handoffs");
+        let a = peer();
+        for attempt in 0..96 {
+            let mut ledger = DurableLedger::open(dir.path(), limits())
+                .unwrap_or_else(|error| panic!("handoff {attempt} did not release OS lock: {error:?}"));
+            if attempt == 0 {
+                ledger.reserve(a, known, 777).unwrap();
+            }
+            assert_eq!(ledger.snapshot().unwrap().reserved_bytes, 777);
+            drop(ledger);
+        }
     }
 
     /// Separate operating-system process must be refused while another
