@@ -74,6 +74,53 @@ impl fmt::Display for HistorySaveFailure {
     }
 }
 
+/// P0g-3b: exact version of a HistoryService file verified while holding
+/// PROCESS_HISTORY_FILES. This is NOT a native File Gate OS receipt, and it
+/// cannot by itself advance a remote baseline or authorize any write.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedHistoryVersion {
+    pub version_id: String,
+    pub content_hash: String,
+    pub content_length: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HistorySaveEffect {
+    NoChange,
+    LabelOnly,
+    Reverted,
+    Updated(String),
+    Created(String),
+}
+
+impl HistorySaveEffect {
+    fn changed(&self) -> bool {
+        !matches!(self, Self::NoChange)
+    }
+
+    fn candidate_version(&self) -> Option<&str> {
+        match self {
+            Self::Updated(id) | Self::Created(id) => Some(id),
+            _ => None,
+        }
+    }
+}
+
+struct HistorySaveOutcome {
+    effect: HistorySaveEffect,
+    verified_version: Option<VerifiedHistoryVersion>,
+}
+
+impl HistorySaveOutcome {
+    fn unchanged() -> Self {
+        Self { effect: HistorySaveEffect::NoChange, verified_version: None }
+    }
+
+    fn changed(&self) -> bool {
+        self.effect.changed()
+    }
+}
+
 /// A primary note relocation already succeeded, but moving its history
 /// did not. A partially moved history must not be announced as complete.
 #[derive(Debug)]
