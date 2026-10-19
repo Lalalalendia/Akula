@@ -236,6 +236,7 @@
       "probeMissingKeys": "Ключи для этого бакета не найдены в Windows.",
       "probeInvalidStoredKeys": "Сохранённые ключи повреждены или имеют неверный формат.",
       "probeKeyStoreUnavailable": "Windows Credential Manager недоступен.",
+      "probeKeysChanged": "Ключи Windows были изменены во время проверки. Запустите её повторно.",
       "probeRejected": "Ключи отклонены сервером. Проверьте Access Key ID и Secret Access Key.",
       "probeDenied": "Недостаточно прав для просмотра списка объектов бакета.",
       "probeMissingBucket": "Бакет не найден (либо сервер ограничил сведения о нём).",
