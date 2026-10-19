@@ -19,6 +19,12 @@ use std::{
     fs::{self, File},
     io::{self, Read},
     os::unix::fs::MetadataExt,
+    path::Path,
+};
+
+use bao_tree::{
+    BaoTree, BlockSize, ChunkRanges,
+    io::{outboard::PreOrderOutboard, sync::encode_ranges_validated},
 };
 
 use redb::{
@@ -28,6 +34,7 @@ use redb::{
 use crate::{
     bounded_staging::{StagingVolumeGuard, VolumeError},
     durable_admission::{DurableError, DurableLedger, ReservedBlobAudit},
+    joint_staging_audit::{JointHold, audit_quiescent_staging},
 };
 
 const MAX_DB_BYTES: u64 = 64 * 1024 * 1024;
@@ -35,6 +42,9 @@ const MAX_BLOBS: usize = 256;
 const MAX_TAGS: usize = 256;
 const MAX_INLINE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ENTRY_WIRE_BYTES: usize = 256;
+const MAX_BAO_OWNED_DATA_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_INLINE_BAO_PROOF_BYTES: u64 = 16 * 1024;
+const IROH_BLOCK_SIZE: BlockSize = BlockSize::from_chunk_log(4);
 
 #[derive(Debug)]
 pub enum RedbHold {
@@ -58,6 +68,11 @@ pub enum RedbHold {
     ForeignOrUnsupportedTag,
     TooManyRecords,
     DatabaseChangedDuringRead,
+    InvalidInlineBaoLength,
+    InvalidInlineBaoProof,
+    UnsafeBaoDataFile,
+    ChangedBaoDataFile,
+    UnsupportedInlineBaoPairing,
 }
 
 impl From<VolumeError> for RedbHold {
@@ -246,10 +261,11 @@ pub(crate) struct AuditedRedbManifest {
 /// durable journal reservation. The read-only redb handle takes a shared lock
 /// and never invokes write transactions or auto-repair. A writer must NOT be
 /// permitted to create/modify entries concurrently on the staging volume.
-pub(crate) fn audit_pinned_redb_manifest(
+fn audit_pinned_redb_manifest_inner(
     volume: &StagingVolumeGuard,
     ledger: &DurableLedger,
     store_child: &str,
+    verify_inline_bao: bool,
 ) -> Result<AuditedRedbManifest, RedbHold> {
     if store_child.is_empty()
         || store_child == "."
@@ -308,6 +324,9 @@ pub(crate) fn audit_pinned_redb_manifest(
         .map_err(|_| RedbHold::UnsupportedSchema)?;
     let mut expected_inline = BTreeSet::new();
     let mut expected_outboard = BTreeSet::new();
+    // A 10c scan uses the SAME pinned redb transaction for blob states and
+    // raw inline Bao rows. The standalone 09b scanner leaves these unchecked.
+    let mut inline_bao_data = BTreeMap::<[u8; 32], DataLocation>::new();
     let mut seen = BTreeSet::new();
     for result in blobs.iter().map_err(|_| RedbHold::UnknownOrDamagedRecord)? {
         let (key, raw) = result.map_err(|_| RedbHold::UnknownOrDamagedRecord)?;
@@ -330,6 +349,28 @@ pub(crate) fn audit_pinned_redb_manifest(
             }
             DataLocation::Owned(len) if len == reservation.expected_bytes => {}
             DataLocation::Owned(_) => return Err(RedbHold::WrongDeclaredLength),
+        }
+        if verify_inline_bao {
+            let proof_size = BaoTree::new(reservation.expected_bytes, IROH_BLOCK_SIZE)
+                .outboard_size();
+            match state.outboard {
+                OutboardLocation::NotNeeded if proof_size != 0 => {
+                    return Err(RedbHold::InvalidInlineBaoLength);
+                }
+                OutboardLocation::Inline if proof_size == 0 => {
+                    return Err(RedbHold::InvalidInlineBaoLength);
+                }
+                OutboardLocation::Owned if proof_size == 0 => {
+                    return Err(RedbHold::InvalidInlineBaoLength);
+                }
+                OutboardLocation::Inline => {
+                    if proof_size > MAX_INLINE_BAO_PROOF_BYTES {
+                        return Err(RedbHold::InvalidInlineBaoLength);
+                    }
+                    inline_bao_data.insert(hash, state.data);
+                }
+                _ => {}
+            }
         }
         if state.outboard == OutboardLocation::Inline {
             expected_outboard.insert(hash);
@@ -393,9 +434,26 @@ pub(crate) fn audit_pinned_redb_manifest(
         if outboard_bytes > MAX_INLINE_BYTES {
             return Err(RedbHold::InvalidInlineOutboard);
         }
+        if verify_inline_bao {
+            let owned = inline_bao_data
+                .remove(&hash)
+                .ok_or(RedbHold::UnsupportedInlineBaoPairing)?;
+            let known = reservations[&hash].expected_bytes;
+            match owned {
+                DataLocation::Owned(length) if length == known => {
+                    verify_inline_bao_for_owned_data(&root, mount_dev, hash, known, value.value())?;
+                }
+                // Not a default pinned FsStore pairing: fail closed until
+                // inline DATA + inline Bao are verified in one redb transaction.
+                _ => return Err(RedbHold::UnsupportedInlineBaoPairing),
+            }
+        }
         outboard_count += 1;
     }
     if !expected_outboard.is_empty() {
+        return Err(RedbHold::MissingInlineOutboard);
+    }
+    if verify_inline_bao && !inline_bao_data.is_empty() {
         return Err(RedbHold::MissingInlineOutboard);
     }
     drop(outboard);
@@ -443,6 +501,126 @@ pub(crate) fn audit_pinned_redb_manifest(
         inline_hashes: observed_inline_hashes,
         database_digest: starting_digest,
     })
+}
+
+/// Validate a complete external data object against a Bao preorder outboard
+/// borrowed from the SAME redb transaction as its EntryState. This verifier
+/// never opens FsStore for writing and never reads network-provided proofs.
+fn verify_inline_bao_for_owned_data(
+    store_root: &Path,
+    mount_dev: u64,
+    hash: [u8; 32],
+    known_bytes: u64,
+    raw_outboard: &[u8],
+) -> Result<(), RedbHold> {
+    if known_bytes == 0 || known_bytes > MAX_BAO_OWNED_DATA_BYTES {
+        return Err(RedbHold::InvalidInlineBaoLength);
+    }
+    let tree = BaoTree::new(known_bytes, IROH_BLOCK_SIZE);
+    if tree.outboard_size() == 0
+        || tree.outboard_size() > MAX_INLINE_BAO_PROOF_BYTES
+        || raw_outboard.len() as u64 != tree.outboard_size()
+    {
+        return Err(RedbHold::InvalidInlineBaoLength);
+    }
+    let path = store_root
+        .join("data")
+        .join(format!("{}.data", blake3::Hash::from_bytes(hash).to_hex()));
+    let prior = fs::symlink_metadata(&path).map_err(|_| RedbHold::UnsafeBaoDataFile)?;
+    if !prior.file_type().is_file()
+        || prior.nlink() != 1
+        || prior.dev() != mount_dev
+        || prior.len() != known_bytes
+    {
+        return Err(RedbHold::UnsafeBaoDataFile);
+    }
+    let file = File::open(&path).map_err(|_| RedbHold::UnsafeBaoDataFile)?;
+    let opened = file.metadata()?;
+    if opened.ino() != prior.ino()
+        || opened.dev() != prior.dev()
+        || opened.nlink() != 1
+        || opened.len() != prior.len()
+    {
+        return Err(RedbHold::ChangedBaoDataFile);
+    }
+    let proof = PreOrderOutboard {
+        root: blake3::Hash::from_bytes(hash),
+        tree,
+        data: raw_outboard,
+    };
+    encode_ranges_validated(&file, proof, &ChunkRanges::all(), io::sink())
+        .map_err(|_| RedbHold::InvalidInlineBaoProof)?;
+    let after = file.metadata()?;
+    if after.ino() != opened.ino()
+        || after.dev() != opened.dev()
+        || after.len() != opened.len()
+        || after.nlink() != 1
+    {
+        return Err(RedbHold::ChangedBaoDataFile);
+    }
+    Ok(())
+}
+
+/// P2P-BLOB-10c: strong evidence only for the pinned redb-inline Bao format.
+/// The joined pass and Bao pass are sequential, not one atomic OS snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InlineBaoEvidenceOnly {
+    pub journal_generation: u64,
+    pub verified_inline_bao_outboards: usize,
+    pub verified_inline_data_blobs: usize,
+    pub all_outboard_rows_checked: bool,
+    pub partial_bitfields_unchecked: bool,
+    pub atomic_filesystem_snapshot: bool,
+    pub file_gate_ready: bool,
+}
+
+#[derive(Debug)]
+pub enum InlineBaoHold {
+    Joint(JointHold),
+    Redb(RedbHold),
+    CrossComponentMismatch,
+}
+
+pub fn audit_pinned_inline_bao(
+    volume: &StagingVolumeGuard,
+    ledger: &DurableLedger,
+    store_child: &str,
+) -> Result<InlineBaoEvidenceOnly, InlineBaoHold> {
+    // 10a first refuses stray physical data and validates full BLAKE3.
+    // 10c then validates exact state/proof rows within one redb read txn.
+    let joint = audit_quiescent_staging(volume, ledger, store_child)
+        .map_err(InlineBaoHold::Joint)?;
+    let manifest = audit_pinned_redb_manifest_inner(volume, ledger, store_child, true)
+        .map_err(InlineBaoHold::Redb)?;
+    if joint.file_gate_ready
+        || joint.atomic_filesystem_snapshot
+        || !joint.bao_verification_pending
+        || manifest.summary.file_gate_ready
+        || manifest.summary.journal_generation != joint.ledger_generation
+        || manifest.summary.blob_records != joint.durable_blob_count
+        || manifest.summary.inline_data_entries != joint.verified_inline_blobs
+    {
+        return Err(InlineBaoHold::CrossComponentMismatch);
+    }
+    Ok(InlineBaoEvidenceOnly {
+        journal_generation: joint.ledger_generation,
+        verified_inline_bao_outboards: manifest.summary.inline_outboards,
+        verified_inline_data_blobs: manifest.summary.inline_data_entries,
+        all_outboard_rows_checked: true,
+        partial_bitfields_unchecked: true,
+        atomic_filesystem_snapshot: false,
+        file_gate_ready: false,
+    })
+}
+
+/// 09b and 10a must retain their exact existing read-only behavior. No
+/// implicit 10c crypto validation is required by older audit entrypoints.
+pub(crate) fn audit_pinned_redb_manifest(
+    volume: &StagingVolumeGuard,
+    ledger: &DurableLedger,
+    store_child: &str,
+) -> Result<AuditedRedbManifest, RedbHold> {
+    audit_pinned_redb_manifest_inner(volume, ledger, store_child, false)
 }
 
 /// The public standalone audit retains the strict 09b evidence contract.
