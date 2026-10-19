@@ -342,6 +342,42 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn denies_windows_junction_reparse_point_without_skipping() {
+        use std::process::Command;
+
+        let (_guard, vault) = vault();
+        let outside = tempfile::tempdir().unwrap();
+        let junction = vault.root.join("Junction");
+        let escape_ps = |value: &std::path::Path| {
+            value.to_string_lossy().replace('\'', "''")
+        };
+        let script = format!(
+            "New-Item -ItemType Junction -Path '{}' -Target '{}' -ErrorAction Stop | Out-Null",
+            escape_ps(&junction),
+            escape_ps(outside.path())
+        );
+        let created = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .expect("PowerShell is required to test Windows junctions");
+        assert!(
+            created.status.success(),
+            "junction creation failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&created.stdout),
+            String::from_utf8_lossy(&created.stderr)
+        );
+        let metadata = fs::symlink_metadata(&junction).unwrap();
+        assert!(
+            super::windows_reparse_point(&metadata),
+            "test did not produce a real Windows reparse point"
+        );
+        assert!(vault.folder("Junction").is_err());
+        assert!(vault.note_path("Junction/new.md").is_err());
+        fs::remove_dir(&junction).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn denies_windows_symbolic_directory_when_test_host_allows_creation() {
         let (_guard, vault) = vault();
         let outside = tempfile::tempdir().unwrap();
