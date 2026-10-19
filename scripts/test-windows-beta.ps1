@@ -100,7 +100,7 @@ $savedText = [System.IO.File]::ReadAllText($note)
 if (!$savedText.Contains($syntheticEdit) -or !$savedText.Contains('# Akula Beta') -or !$savedText.Contains('Existing local document')) {
   throw 'Installed GUI edit was not preserved after graceful shutdown'
 }
-if ($savedText.Split([string[]]@($syntheticEdit), [StringSplitOptions]::None).Length -ne 2) {
+if ($savedText.IndexOf($syntheticEdit) -ne $savedText.LastIndexOf($syntheticEdit)) {
   throw 'Expected exactly one GUI-injected edit marker'
 }
 $savedHash = (Get-FileHash -LiteralPath $note).Hash
