@@ -55,6 +55,10 @@ struct MipDiagnostics {
     evicted: u64,
     build_nanos: u128,
     distinct_requested_ids: std::collections::HashSet<u64>,
+    // Only hashed on the first request for each runtime ID; three
+    // complete scanlines are sufficient to distinguish the deterministic
+    // benchmark's seeded PNGs. This is NOT a full-content file hash.
+    distinct_sampled_pixel_fingerprints: std::collections::HashSet<blake3::Hash>,
 }
 
 #[derive(Default)]
@@ -135,8 +139,28 @@ impl Images {
             // not just filenames enumerated in a benchmark note. Enabled
             // only for multisource diagnostic runs.
             static DISTINCT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-            if *DISTINCT.get_or_init(|| std::env::var("AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF").ok().as_deref() == Some("1")) {
-                self.diag.distinct_requested_ids.insert(id);
+            if *DISTINCT.get_or_init(|| std::env::var("AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF").ok().as_deref() == Some("1"))
+                && self.diag.distinct_requested_ids.insert(id)
+            {
+                // Do not equate fresh runtime IDs with distinct image bytes.
+                // Fingerprint the first/middle/last *decoded* RGBA scanline
+                // once per ID. The seeded fixture has unique first-row RGBA
+                // values for every PNG, so this is an independent contents
+                // witness. Hashing the whole 4.3MiB source during a measured
+                // frame would substantially perturb CPU p95.
+                let row_bytes = usize::from(base.width()) * 4;
+                let height = usize::from(base.height());
+                let raw = base.data_as_u8_slice();
+                if row_bytes > 0 && height > 0 && raw.len() >= row_bytes * height {
+                    let mut fingerprint = blake3::Hasher::new();
+                    fingerprint.update(&base.width().to_le_bytes());
+                    fingerprint.update(&base.height().to_le_bytes());
+                    for row in [0, height / 2, height - 1] {
+                        let offset = row * row_bytes;
+                        fingerprint.update(&raw[offset..offset + row_bytes]);
+                    }
+                    self.diag.distinct_sampled_pixel_fingerprints.insert(fingerprint.finalize());
+                }
             }
         }
         // A warmed final level is the common scrolling case. Avoid scanning
@@ -284,11 +308,12 @@ impl Images {
                 && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF").ok().as_deref() == Some("1")
             {
                 eprintln!(
-                    "AKULA_MIP_CACHE frames={frame} requests={} final_hits={} generated={} generated_pixels={} evicted={} generated_ms={:.3} resident_levels={} distinct_requested_ids={}",
+                    "AKULA_MIP_CACHE frames={frame} requests={} final_hits={} generated={} generated_pixels={} evicted={} generated_ms={:.3} resident_levels={} distinct_requested_ids={} distinct_sampled_pixel_fingerprints={}",
                     self.diag.requests, self.diag.final_hits, self.diag.generated,
                     self.diag.generated_pixels, self.diag.evicted,
                     self.diag.build_nanos as f64 / 1_000_000.0, self.mips.len(),
                     self.diag.distinct_requested_ids.len(),
+                    self.diag.distinct_sampled_pixel_fingerprints.len(),
                 );
             }
         }
