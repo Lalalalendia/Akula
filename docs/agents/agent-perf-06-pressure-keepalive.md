@@ -21,3 +21,13 @@ Real temporary Markdown burst, merged PR #371: at 100 clients, 600 successful lo
 ## Limits
 
 100 HTTP client threads are not 100 simultaneously running LLM agents. Current server still admits only 16 active TCP connections and at most four parallel MCP reads. This change does not solve authenticated fairness, writes to many documents or S3 scaling.
+
+## Why cross-run improvement is not yet causal
+
+Initial PR #372 observation (separate workflow run): at 100 ordinary readers 3571.3 logical reads/s and p95 71.64 ms, versus baseline 2729.1/s and 96.684 ms. Resets fell to about 80 but HTTP 503 rose to approximately 604 (from 493). The number of unsuccessful attempts per 600 successes barely changed. More importantly, **10-client throughput rose from 3597.7 to 5069.2/s even though pressure handling is never activated at 10 clients**. This exposes runner noise/cache as a major confounder, so cross-run throughput is not causal evidence.
+
+## Controlled same-run A/B
+
+Core tests compile a test-only `disable_pressure_close` switch out of production binaries. The identical temporary Markdown workload now executes pressure close disabled (control) and enabled (candidate) on each Linux runner. Repetition 2 reverses mode order to reduce simple warm-cache ordering bias. Log `pressure_close=true|false` on every 10/32/100-client × BLAKE3 on/off line, with 3 paired repetitions and the same bounded retry policy.
+
+**Decision gate:** compare same-run differences in `503 + transport_resets` per 600 logical requests, 503 separately, throughput and p95/p99. Merge only if benefits materially outweigh extra refusals and correctness regressions are absent. Do not misrepresent a shift from resets into 503 as fewer retries.
