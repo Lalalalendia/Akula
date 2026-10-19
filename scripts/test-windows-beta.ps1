@@ -62,7 +62,15 @@ function Start-And-Close {
   param([switch]$EditNote)
   $arguments = "--vault `"$vault`" --data-dir `"$akulaData`" --open `"$note`""
   if ($EditNote) { $arguments += ' --focus' }
-  $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+  if ($EditNote) { $arguments += ' --trace' }
+  # Diagnostics remain on the disposable runner only. Never upload raw GUI
+  # event traces, which can contain typed text.
+  $traceFile = if ($EditNote) { Join-Path $env:RUNNER_TEMP 'akula-beta-gui-events.log' } else { $null }
+  if ($EditNote) {
+    $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -RedirectStandardError $traceFile
+  } else {
+    $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+  }
   $visible = $false
   for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
@@ -72,8 +80,9 @@ function Start-And-Close {
   }
   if (!$visible) { throw 'Akula window did not appear' }
   if ($EditNote) {
-    # This must be a genuine key sequence into the focused installed editor.
-    # The script never writes to $note directly after initial fixture creation.
+    # This must be genuine OS input into the installed foreground editor.
+    # After initial fixture creation this script never writes to $note.
+    $noteWindowTitle = $app.MainWindowTitle -like '*First note*'
     Send-AkulaBetaText -Process $app -Text $syntheticEdit
     $published = $false
     for ($i = 0; $i -lt 30; $i++) {
@@ -83,15 +92,30 @@ function Start-And-Close {
       $onDisk = [System.IO.File]::ReadAllText($note)
       if ($onDisk.Contains($syntheticEdit)) { $published = $true; break }
     }
+  }
+  # Even after a failed autosave, close normally to distinguish no-typing,
+  # delayed-on-close saves, and rejected writes. Failure still remains red.
+  if (!$app.CloseMainWindow()) { throw 'Akula window refused close request' }
+  if (!$app.WaitForExit(20000)) { throw 'Akula did not exit within 20s' }
+  if ($EditNote) {
+    $afterClose = [System.IO.File]::ReadAllText($note)
+    $postClosePublished = $afterClose.Contains($syntheticEdit)
+    $traceText = if (Test-Path -LiteralPath $traceFile) {
+      [System.IO.File]::ReadAllText($traceFile)
+    } else { '' }
+    $keyboardEvents = [regex]::Matches($traceText, 'KeyboardInput').Count
+    $imeCommits = [regex]::Matches($traceText, 'Ime\\(Commit').Count
+    $focusedEvents = [regex]::Matches($traceText, 'Focused\\(true\\)').Count
+    $saveErrors = [regex]::Matches($traceText, 'не сохранён|NeedsReview|SaveError|write refused|HOLD').Count
+    # Exact note/title/error contents and raw winit event traces stay private.
+    Write-Host "AKULA_WINDOWS_GUI_DIAGNOSTIC note_title=$noteWindowTitle keyboard_events=$keyboardEvents ime_commits=$imeCommits focus_events=$focusedEvents save_error_hints=$saveErrors trace_bytes=$($traceText.Length) saved_before_close=$published saved_after_close=$postClosePublished"
     if (!$published) {
-      throw 'OS-injected GUI text was not saved to the Markdown file within 30 seconds'
+      throw 'OS GUI input did not autosave within 30 seconds; see bounded diagnostic counts (no release approval)'
     }
-    if (!$onDisk.Contains('# Akula Beta') -or !$onDisk.Contains('Existing local document')) {
+    if (!$afterClose.Contains('# Akula Beta') -or !$afterClose.Contains('Existing local document')) {
       throw 'GUI edit removed original note content'
     }
   }
-  if (!$app.CloseMainWindow()) { throw 'Akula window refused close request' }
-  if (!$app.WaitForExit(20000)) { throw 'Akula did not exit within 20s' }
 }
 Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
