@@ -426,6 +426,6 @@ mod tests {
         let v:i64=migrated.connection.query_row(
             "PRAGMA user_version",[],|row|row.get(0),
         ).unwrap();
-        assert_eq!(v,7);
+        assert_eq!(v,8);
     }
 }
