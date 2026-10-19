@@ -121,6 +121,26 @@ fn tab_in_fenced_code_body_keeps_editing_focus_instead_of_jumping_to_copy() {
 
 
 #[test]
+fn shift_tab_and_multiline_indent_on_fence_header_keep_editor_focus() {
+    let source = "~~~rust\nlet x = 1;\n~~~";
+    let mut root = focused(TextEditor::new(source).markdown(), 590, 300);
+    let eid = editor_id(&root);
+    assert_eq!(buttons(&root).len(), 1);
+    // Shift+Tab on the opening-fence text remains the editor's Outdent.
+    press(&mut root, Key::Named(NamedKey::Tab), Modifiers::SHIFT);
+    assert_eq!(root.focused_widget(), Some(eid));
+
+    // An actual multi-line selection beginning at the fence must retain
+    // the editor's Indent action rather than jumping into the Copy child.
+    let end = source.find("let x").unwrap() + "let x = 1;".len();
+    root.edit_widget(eid, |mut widget| {
+        TextEditor::select_byte_range(&mut widget.downcast(), 0, end);
+    });
+    press(&mut root, Key::Named(NamedKey::Tab), Modifiers::empty());
+    assert_eq!(root.focused_widget(), Some(eid));
+}
+
+#[test]
 fn removed_code_fence_removes_old_widget_id_without_rebinding_it() {
     let source = "~~~rust\nold\n~~~\nnormal";
     let mut root = unfocused(TextEditor::new(source).markdown(), 560, 300);

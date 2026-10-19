@@ -148,8 +148,10 @@ impl TextEditor {
             let from_copy_button = self.access_code_buttons.iter()
                 .any(|button| button.widget.id() == ctx.target());
             let header_start = self.doc.paragraph(self.doc.at_offset(self.focus)).start;
-            let on_visible_header = ctx.is_focus_target() && self.access_code_buttons.iter()
-                .any(|button| button.opener == header_start);
+            let on_visible_header = !key.modifiers.shift()
+                && self.selection().is_empty()
+                && ctx.is_focus_target()
+                && self.access_code_buttons.iter().any(|button| button.opener == header_start);
             if from_copy_button || on_visible_header {
                 // Masonry handles Tab/Shift+Tab after an unhandled text event.
                 // Do not let the editable parent's Indent/Outdent binding run.
