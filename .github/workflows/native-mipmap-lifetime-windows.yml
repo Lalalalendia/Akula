@@ -1,0 +1,78 @@
+name: Native Win32 mipmap lifetime 2 vs 512 (developer only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/benchmarks/native_mipmap_lifetime_windows.py'
+      - '.github/workflows/native-mipmap-lifetime-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-mipmap-lifetime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  win32-paired:
+    name: Real Win32 2 vs 512 frame cache policy (12-process)
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-image-mip-ab-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate native Windows runtime and Python scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Only a native Win32 runner is acceptable' }
+          git rev-parse HEAD
+          rustc --version
+          python -m py_compile scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_mipmap_windows_ab.py scripts/benchmarks/native_mipmap_lifetime_windows.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax error' }
+          python -c "import os,sys;sys.path.insert(0,'scripts/benchmarks');from native_mipmap_window_ab import windows_peak_rss_kib;from native_mipmap_windows_ab import windows_scenes;assert windows_peak_rss_kib(os.getpid())>0;windows_scenes()"
+          if ($LASTEXITCODE -ne 0) { throw 'Native Win32/RSS probe unavailable' }
+      - name: Build one uninstalled release binary (locked)
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Rust developer release build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Missing Win32 executable' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Prove frame retention and paired p95 p99 on 12 real Win32 processes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $result = Join-Path $env:GITHUB_WORKSPACE 'mip-lifetime-win32-results'
+          python scripts/benchmarks/native_mipmap_lifetime_windows.py --binary $binary --out $result --timeout 55
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid 2 vs 512 frame retention A/B' }
+          Get-Content -LiteralPath (Join-Path $result 'summary.md') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive frame stages, witnesses and raw CPU traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-mipmap-lifetime-native-win32
+          path: |
+            mip-lifetime-win32-results/summary.md
+            mip-lifetime-win32-results/matrix.json
+            mip-lifetime-win32-results/**/sample.json
+            mip-lifetime-win32-results/**/process.log
+            mip-lifetime-win32-results/**/metrics.json
+            mip-lifetime-win32-results/**/replay.json
+          retention-days: 14
+          if-no-files-found: warn
