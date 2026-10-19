@@ -103,7 +103,8 @@ impl App {
                     || before.updates.auto != after.updates.auto
                     || before.templates.folder != after.templates.folder
                     || mcp_changed
-                    || retention;
+                    || retention
+                    || before.s3_onboarding != after.s3_onboarding;
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;
