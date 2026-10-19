@@ -30,8 +30,10 @@ HistoryService mutex lifetime.
   `Reverted`, `Updated` or `Created`.
 - Add a private **sealed-custody-only** method
   `try_saved_with_custody_verified_version` for a future File Gate receipt
-  writer. It can return `VerifiedHistoryVersion` only for a truly
-  **newly-created** snapshot.
+  writer. It can return `VerifiedHistoryVersion` only for a bounded
+  **newly-created `Source::External`** snapshot, verified at the time of
+  saving. Local `Source::Me` versions may be coalesced in-place later and
+  are ineligible for this observation.
 - While holding the existing process HistoryService files lock, read the
   exact newly generated version ID, require a regular non-symlink file and
   a single hardlink on Unix, enforce a 32 MiB cap, and verify exact raw
@@ -50,12 +52,23 @@ S3 automatic overwrite, no OS-native receipt table and no journal schema.
 No caller yet uses this new strict method. It is specifically not an
 authority by itself.
 
+**Important distinction: observed != permanently immutable.** After the
+process history lock is released, an ordinary revert, history retention, or
+an uncooperative same-user filesystem writer can delete or alter even an
+externally sourced, newly created history file. The returned ID and digest
+are a point-in-time observation, not an immutable archive or a guarantee of
+future availability. A production receipt must independently retain protected
+bytes/identity and revalidate evidence after restart before any remote ACK.
+
 ## CI proof
 
 Run on Ubuntu, macOS and Windows with `sync-s3` enabled:
 
-- Exactly identified newly-created history version, independently re-read
-  with exact bytes, length and BLAKE3.
+- Exactly identified newly-created external history version, independently
+  re-read with exact bytes, length and BLAKE3.
+- Strict local-user source refused before version publication, preserving
+  ordinary editor saves; later tampering of a previously verified external
+  history version is detected and never treated as permanent evidence.
 - Normal `Skip` continues returning false, while strict mode refuses it.
 - Label-only history writes cannot impersonate a newly-created snapshot.
 - Coalesced latest version cannot be presented as an immutable ID.
