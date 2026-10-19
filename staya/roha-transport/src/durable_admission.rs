@@ -517,11 +517,25 @@ impl DurableLedger {
 mod tests {
     use super::*;
     use iroh::SecretKey;
+    use std::sync::Mutex;
     use std::{
         process::{Command, Stdio},
         thread,
         time::Duration,
     };
+
+    // Tests spawn children while other cases hold flock leases. A fork can
+    // transiently inherit a live lock descriptor until exec/close. Serialize
+    // laboratory parent opens/spawns so the "uncontested" handoff test does
+    // not race sibling child creation. Production keeps strict nonblocking
+    // OS locking; no retry or bypass is introduced.
+    static PARENT_LOCK_TESTS: Mutex<()> = Mutex::new(());
+
+    fn isolate_file_lock_test() -> std::sync::MutexGuard<'static, ()> {
+        PARENT_LOCK_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     fn limits() -> AdmissionLimits {
         AdmissionLimits {
@@ -551,6 +565,7 @@ mod tests {
 
     #[test]
     fn durable_reservation_survives_reopen_and_verification() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let who = peer();
         let data = b"exact verified object";
@@ -583,6 +598,7 @@ mod tests {
 
     #[test]
     fn remaining_reservation_blocks_oversubscription_on_restart() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let a = peer();
         let b = peer();
@@ -607,6 +623,7 @@ mod tests {
 
     #[test]
     fn another_owner_cannot_open_while_first_holds_os_lock() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let ledger = DurableLedger::open(dir.path(), limits()).unwrap();
         assert!(matches!(
@@ -619,6 +636,7 @@ mod tests {
 
     #[test]
     fn corrupted_snapshots_and_orphan_write_are_fail_closed() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         {
             let mut ledger = DurableLedger::open(dir.path(), limits()).unwrap();
@@ -645,6 +663,7 @@ mod tests {
 
     #[test]
     fn changed_limits_or_unknown_dir_entry_cannot_reset_accounting() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         DurableLedger::open(dir.path(), limits()).unwrap();
         let stricter = AdmissionLimits {
@@ -674,6 +693,7 @@ mod tests {
 
     #[test]
     fn missing_snapshot_with_existing_owner_marker_never_resets_quota() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         {
             let mut ledger = DurableLedger::open(dir.path(), limits()).unwrap();
@@ -690,6 +710,7 @@ mod tests {
 
     #[test]
     fn size_and_duplicate_denials_leave_snapshot_unchanged() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let mut ledger = DurableLedger::open(dir.path(), limits()).unwrap();
         let who = peer();
@@ -712,6 +733,7 @@ mod tests {
 
     #[test]
     fn per_peer_byte_and_slot_limits_survive_restart() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let policy = AdmissionLimits {
             max_object_bytes: 500,
@@ -742,6 +764,7 @@ mod tests {
 
     #[test]
     fn repeated_uncontested_owner_handoffs_preserve_reservation() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let known = digest(b"retained after all handoffs");
         let a = peer();
@@ -771,6 +794,7 @@ mod tests {
 
     #[test]
     fn simultaneously_opened_second_os_process_is_refused() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let ledger = DurableLedger::open(dir.path(), limits()).unwrap();
         let child = Command::new(std::env::current_exe().unwrap())
@@ -807,6 +831,7 @@ mod tests {
 
     #[test]
     fn killed_owner_ledger_survives_and_blocks_new_bytes() {
+        let _isolation = isolate_file_lock_test();
         let dir = temp_root();
         let executable = std::env::current_exe().unwrap();
         let mut child = Command::new(executable)
