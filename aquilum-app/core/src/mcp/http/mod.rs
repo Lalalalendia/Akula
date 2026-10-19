@@ -48,6 +48,12 @@ impl<'a> Connection<'a> {
         })
     }
 
+    /// A pooled socket is reclaimable only after a complete response and
+    /// only if no pipelined request bytes are waiting in the local buffer.
+    pub fn has_buffered_data(&self) -> bool {
+        !self.received.is_empty()
+    }
+
     pub fn read_head(&mut self) -> Result<Head, Failure> {
         loop {
             if let Some(head) = self.parse_head()? {
