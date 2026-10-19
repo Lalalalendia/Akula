@@ -70,7 +70,7 @@ impl Widget for CodeCopyButton {
     fn accessibility_role(&self) -> Role { Role::Button }
 
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_name(crate::i18n::t("settings.shortcuts.copyCodeBlock"));
+        node.set_label(crate::i18n::t("settings.shortcuts.copyCodeBlock"));
         node.add_action(Action::Click);
     }
 
