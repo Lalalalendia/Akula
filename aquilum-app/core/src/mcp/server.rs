@@ -409,7 +409,7 @@ fn is_loopback_host(value: &str, listen_port: u16) -> bool {
     let suffix = ["127.0.0.1", "localhost", "[::1]"]
         .iter()
         .find_map(|host| {
-            value.strip_prefix(host).filter(|suffix| suffix.is_empty() || suffix.starts_with(':'))
+            value.strip_prefix(*host).filter(|suffix| suffix.is_empty() || suffix.starts_with(':'))
         });
     let Some(suffix) = suffix else { return false };
     if suffix.is_empty() {
