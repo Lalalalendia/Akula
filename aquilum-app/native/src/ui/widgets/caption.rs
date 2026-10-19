@@ -18,6 +18,12 @@ use crate::ui::{text, theme};
 const NAME_DRAG_THRESHOLD: f64 = 4.0;
 const NAME_FEEDBACK_SECONDS: f64 = 1.5;
 
+/// Source filenames can exceed the rendered ellipsis layout.
+fn visible_len(layout: &masonry::parley::Layout<masonry::core::BrushIndex>, source_len: usize) -> usize {
+    layout.lines().flat_map(|line| line.runs()).flat_map(|run| run.clusters())
+        .map(|cluster| cluster.text_range().end).max().unwrap_or(0).min(source_len)
+}
+
 /// Emitted only by the filename caption. The App checks the active file
 /// identity and reports clipboard success before showing confirmation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,7 +150,7 @@ impl Widget for Caption {
                         2 => Selection::word_from_point(layout, x, y),
                         _ => Selection::new(
                             Cursor::from_byte_index(layout, 0, Affinity::Downstream),
-                            Cursor::from_byte_index(layout, self.text.len(), Affinity::Upstream),
+                            Cursor::from_byte_index(layout, visible_len(layout, self.text.len()), Affinity::Upstream),
                         ),
                     }
                 };
@@ -160,7 +166,7 @@ impl Widget for Caption {
             PointerEvent::Move(update) if self.pressed.is_some() && ctx.is_active() => {
                 let at = ctx.local_position(update.current.position);
                 if let Some((start, _, dragged)) = self.pressed.as_mut() {
-                    *dragged |= (at - *start).hypot() >= NAME_DRAG_THRESHOLD;
+                    *dragged |= (at.x - start.x).abs().max((at.y - start.y).abs()) >= NAME_DRAG_THRESHOLD;
                 }
                 if let Some((layout, _, origin)) = self.displayed(bounds) {
                     self.selection = self.selection.extend_to_point(
@@ -174,7 +180,7 @@ impl Widget for Caption {
                 let down = self.pressed.take();
                 let at = ctx.local_position(e.state.position);
                 if let Some((start, count, dragged)) = down {
-                    let is_click = count == 1 && !dragged && (at - start).hypot() < NAME_DRAG_THRESHOLD
+                    let is_click = count == 1 && !dragged && (at.x - start.x).abs().max((at.y - start.y).abs()) < NAME_DRAG_THRESHOLD
                         && self.selection.is_collapsed() && self.hit_name(bounds, at);
                     if is_click {
                         ctx.submit_action::<CaptionAction>(CaptionAction::CopyFileName);
@@ -204,7 +210,7 @@ impl Widget for Caption {
                 if let Some((layout, _, _)) = self.displayed(ctx.content_box()) {
                     self.selection = Selection::new(
                         Cursor::from_byte_index(layout, 0, Affinity::Downstream),
-                        Cursor::from_byte_index(layout, self.text.len(), Affinity::Upstream),
+                        Cursor::from_byte_index(layout, visible_len(layout, self.text.len()), Affinity::Upstream),
                     );
                     self.select_all = true;
                     ctx.request_paint_only();
