@@ -175,7 +175,7 @@ fn concurrent_mcp_reads_survive_real_file_gate_revisions_and_preserve_history() 
     let disk = fs::read_to_string(&live).unwrap();
     assert_eq!(final_read["content"], disk);
     assert!(disk.contains(&final_revision));
-    assert!(disk.ends_with("MCP-final\n"));
+    assert!(disk.ends_with("MCP-final"));
     assert_eq!(
         fs::read_to_string(other).unwrap(),
         "# Independent\n\nunchanged\n"
