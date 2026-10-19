@@ -21,8 +21,8 @@ from native_scroll_window_ab import number
 REPO = Path(__file__).resolve().parents[2]
 SOURCE = REPO / "aquilum-app/native/assets/city-cover.png"
 SCENES = (("image_compact", "1000x600"), ("image_large", "1750x1051"))
-TRIALS = (1, 2, 3)
-MODES = ("baseline", "mip_high", "mip_medium")
+TRIALS = (1, 2, 3, 4)
+MODES = ("baseline", "mip_high", "mip_medium", "mip_medium_linger")
 
 
 def fixture() -> str:
@@ -79,14 +79,19 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
     if mode != "baseline":
         env["AKULA_EXPERIMENTAL_IMAGE_MIP"] = "1"
         env["AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF"] = "1"
-        if mode == "mip_medium":
+        if mode in ("mip_medium", "mip_medium_linger"):
             env["AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER"] = "medium"
         else:
             env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER", None)
+        if mode == "mip_medium_linger":
+            env["AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER"] = "1"
+        else:
+            env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER", None)
     else:
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP", None)
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF", None)
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER", None)
+        env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER", None)
     rss = 0
     with log_file.open("wb") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
@@ -153,16 +158,16 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
 
 def report(rows: list[dict], binary_hash: str) -> str:
     if len(rows) != len(TRIALS) * len(SCENES) * len(MODES):
-        raise ValueError("Incomplete 18-run native window A/B")
+        raise ValueError("Incomplete 32-run native window A/B")
     lines = [
         "# Akula real Markdown image scroll A/B",
         "",
         f"Same release executable SHA-256: {binary_hash}.",
         "Real city-cover PNG 1280x884 rendered at 200px, also cropped.",
         "Winit/Masonry/softbuffer on Linux Xvfb/Openbox, 2 workers.",
-        "Same input bytes; three fresh runs per mode in rotating order.",
-        "Compare original High/bicubic, mip+High/bicubic and mip+Medium/bilinear.",
-        "Both mip modes require affirmative native witness; baseline must not.",
+        "Same input bytes; four fresh runs per mode in rotating order.",
+        "Modes: original High, mip+High, mip+Medium, mip+Medium+512-frame LRU.",
+        "All mip modes require affirmative native witness; baseline must not.",
         "Timings and RSS are diagnostic, not a user-visible physical FPS measurement.",
         "",
         "| Scene | Mode | Work avg (ms) | Raster p95 (ms) | Frame p95 (ms) | Peak RSS (MiB) |",
@@ -188,7 +193,7 @@ def report(rows: list[dict], binary_hash: str) -> str:
                 f"{frame:.3f} | {memory:.1f} |"
             )
         old = values["baseline"]
-        for mode in ("mip_high", "mip_medium"):
+        for mode in MODES[1:]:
             new = values[mode]
             lines.append(
                 f"\n{scene}/{mode}: CPU work {(new[0] / old[0] - 1)*100:+.2f}%, "
@@ -201,7 +206,7 @@ def report(rows: list[dict], binary_hash: str) -> str:
             f"{(medium[2] / high[2] - 1)*100:+.2f}%; "
             f"raster p95 {(medium[1] / high[1] - 1)*100:+.2f}%."
         )
-        for mode in ("mip_high", "mip_medium"):
+        for mode in MODES[1:]:
             cache = [r["cache"] for r in selected if r["mode"] == mode]
             lines.append(
                 f"{scene}/{mode}: median cache final_hits="
@@ -209,6 +214,13 @@ def report(rows: list[dict], binary_hash: str) -> str:
                 f"generated_levels={median(int(x['generated']) for x in cache):.0f}, "
                 f"generated_ms={median(float(x['generated_ms']) for x in cache):.2f}."
             )
+        linger = values["mip_medium_linger"]
+        lines.append(
+            f"{scene}: 512-frame retention vs two-frame retention "
+            f"frame p95 {(linger[2] / medium[2] - 1)*100:+.2f}%, "
+            f"raster p95 {(linger[1] / medium[1] - 1)*100:+.2f}%, "
+            f"sampled RSS {(linger[3] / medium[3] - 1)*100:+.2f}%."
+        )
         lines.append("")
     lines.append(
         "No timing threshold: this Xvfb experiment cannot verify physical "

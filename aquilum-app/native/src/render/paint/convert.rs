@@ -12,6 +12,18 @@ use vello_cpu::{Image, ImageSource, PaintType, Pixmap};
 use super::mipmap;
 
 const IMAGE_FRAMES: u64 = 2;
+const EXPERIMENTAL_MIP_LINGER_FRAMES: u64 = 512;
+
+// Experimental, per-process fixed cache policy. The installed binary cannot
+// activate it. Explicit opt-in keeps the old 2-frame policy intact otherwise.
+fn mip_linger_enabled() -> bool {
+    static LINGER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LINGER.get_or_init(|| {
+        !cfg!(feature = "installed")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER").ok().as_deref() == Some("1")
+    })
+}
 
 // Counters are local to an opt-in developer renderer, with no logging in the
 // per-image hot path. Installed builds do not compile these fields.
@@ -62,6 +74,13 @@ impl Images {
     /// Reserve every missing mip level BEFORE allocating anything. A request
     /// denied by the budget must not populate partial, unusable cache levels.
     fn mip_source_budget(&mut self, id: u64, original: &ImageSource, level: u8, budget: usize) -> Option<ImageSource> {
+        self.mip_source_with_policy(id, original, level, budget, mip_linger_enabled())
+    }
+
+    fn mip_source_with_policy(
+        &mut self, id: u64, original: &ImageSource, level: u8,
+        budget: usize, reclaim_old: bool,
+    ) -> Option<ImageSource> {
         let ImageSource::Pixmap(base) = original else { return None };
         if level == 0 || level > mipmap::MAX_LEVELS
             || base.width() == 0 || base.height() == 0
@@ -96,7 +115,40 @@ impl Images {
                 new_bytes = new_bytes.saturating_add(width * height * 4);
             }
         }
-        if used_bytes.saturating_add(new_bytes) > budget { return None; }
+        // In long-lived mode, evict only LRU levels belonging to OTHER
+        // sources. Never remove an intermediate level that was counted as
+        // present when reserving this request's memory. Decide all removals
+        // before mutating the cache: failed reservations stay atomic.
+        let mut eviction = Vec::new();
+        if used_bytes.saturating_add(new_bytes) > budget {
+            if !reclaim_old || new_bytes > budget { return None; }
+            let mut lru: Vec<_> = self.mips.iter()
+                .filter(|((image_id, _), _)| *image_id != id)
+                .map(|(&key, (pixmap, last))| {
+                    (key, *last, usize::from(pixmap.width()) * usize::from(pixmap.height()) * 4)
+                })
+                .collect();
+            lru.sort_unstable_by_key(|&(_, last, _)| last);
+            let mut freed_bytes = 0usize;
+            for (key, _, bytes) in lru {
+                if used_bytes.saturating_sub(freed_bytes).saturating_add(new_bytes) <= budget {
+                    break;
+                }
+                freed_bytes = freed_bytes.saturating_add(bytes);
+                eviction.push(key);
+            }
+            if used_bytes.saturating_sub(freed_bytes).saturating_add(new_bytes) > budget {
+                return None;
+            }
+        }
+        for key in eviction {
+            if self.mips.remove(&key).is_some() {
+                #[cfg(not(feature = "installed"))]
+                {
+                    self.diag.evicted += 1;
+                }
+            }
+        }
 
         let mut previous = Arc::clone(base);
         let frame = self.frame;
@@ -122,12 +174,21 @@ impl Images {
     }
 
     pub fn next_frame(&mut self) {
+        let mip_frames = if mip_linger_enabled() {
+            EXPERIMENTAL_MIP_LINGER_FRAMES
+        } else {
+            IMAGE_FRAMES
+        };
+        self.next_frame_with_mip_lifetime(mip_frames);
+    }
+
+    fn next_frame_with_mip_lifetime(&mut self, mip_frames: u64) {
         self.frame += 1;
         let frame = self.frame;
         self.sources.retain(|_, (_, used, owner)| frame - *used < IMAGE_FRAMES && owner.as_ref().is_none_or(|o| o.strong_count() > 0));
         #[cfg(not(feature = "installed"))]
         let previous_count = self.mips.len();
-        self.mips.retain(|_, (_, last)| frame - *last < IMAGE_FRAMES);
+        self.mips.retain(|_, (_, last)| frame - *last < mip_frames);
         #[cfg(not(feature = "installed"))]
         {
             self.diag.evicted += (previous_count - self.mips.len()) as u64;
@@ -455,6 +516,65 @@ mod mipmap_integration_tests {
         assert!(images.mips.is_empty(), "no partial allocation on failed reservation");
         assert!(images.mip_source_budget(id, &source, 2, needed).is_some());
         assert_eq!(images.mips.len(), 2);
+    }
+
+    #[test]
+    fn long_lived_mip_reuse_survives_scroll_gap_but_expires_within_cap() {
+        let brush = test_brush(128, 128);
+        let mut images = Images::default();
+        let source = images.source(&brush.image);
+        let id = brush.image.data.id();
+        let first = images.mip_source_with_policy(
+            id, &source, 2, mipmap::MAX_EXTRA_BYTES, true,
+        ).expect("initial mipmap");
+        let ImageSource::Pixmap(first) = first else { panic!("need pixmap") };
+        for _ in 0..384 {
+            images.next_frame_with_mip_lifetime(EXPERIMENTAL_MIP_LINGER_FRAMES);
+        }
+        let second = images.mip_source_with_policy(
+            id, &source, 2, mipmap::MAX_EXTRA_BYTES, true,
+        ).expect("reuse mipmap after scroll gap");
+        let ImageSource::Pixmap(second) = second else { panic!("need pixmap") };
+        assert!(Arc::ptr_eq(&first, &second), "must not recompute on image revisit");
+        #[cfg(not(feature = "installed"))]
+        {
+            assert_eq!(images.diag.generated, 2, "no build after 384-frame absence");
+        }
+        for _ in 0..EXPERIMENTAL_MIP_LINGER_FRAMES {
+            images.next_frame_with_mip_lifetime(EXPERIMENTAL_MIP_LINGER_FRAMES);
+        }
+        assert!(images.mips.is_empty(), "unused mips age out after 512 frames");
+    }
+
+    #[test]
+    fn long_lived_cache_eviction_frees_lru_atomically_under_fixed_budget() {
+        let first = test_brush(128, 128);
+        let second = test_brush(128, 128);
+        let mut images = Images::default();
+        let a = images.source(&first.image);
+        let b = images.source(&second.image);
+        let aid = first.image.data.id();
+        let bid = second.image.data.id();
+        assert_ne!(aid, bid);
+        let budget = 64 * 64 * 4 + 32 * 32 * 4;
+        assert!(images.mip_source_with_policy(aid, &a, 2, budget, true).is_some());
+        assert_eq!(images.mips.len(), 2);
+
+        // A request that can NEVER fit must leave the previous cache intact.
+        assert!(images.mip_source_with_policy(bid, &b, 2, budget - 1, true).is_none());
+        assert!(images.mips.contains_key(&(aid, 2)));
+        assert!(!images.mips.contains_key(&(bid, 1)));
+
+        // At full size, evict A to give B its fair bounded share.
+        assert!(images.mip_source_with_policy(bid, &b, 2, budget, true).is_some());
+        assert_eq!(images.mips.len(), 2);
+        assert!(!images.mips.contains_key(&(aid, 1)));
+        assert!(!images.mips.contains_key(&(aid, 2)));
+        assert!(images.mips.contains_key(&(bid, 2)));
+        let bytes: usize = images.mips.values()
+            .map(|(p, _)| usize::from(p.width()) * usize::from(p.height()) * 4)
+            .sum();
+        assert!(bytes <= budget);
     }
 
     #[test]
