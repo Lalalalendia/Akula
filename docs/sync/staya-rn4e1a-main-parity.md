@@ -1,6 +1,6 @@
 # RN-4E1a — validate disabled P2P grant and File Gate research on current main
 
-**Main source:** `da7cbfeaa14313a23afb02dc31c78476285cb176`. **Prior passing lab:** [Akula #411](https://github.com/Lalalalendia/Akula/pull/411) at exact `5f4d1b61b8570ca7bca76ede3e9d81720c6c322c`; [CI Linux + Windows #39325530650](https://github.com/Lalalalendia/Akula/actions/runs/39325530650).
+**Original main source:** `da7cbfeaa14313a23afb02dc31c78476285cb176`; **updated with current File Gate/History changes** at `6865adddad2cf1d8aa048c080edba3bfaa186dbb` through a verified two-parent merge, preserving the eight scoped lab files.  **Prior passing lab:** [Akula #411](https://github.com/Lalalalendia/Akula/pull/411) at exact `5f4d1b61b8570ca7bca76ede3e9d81720c6c322c`; [CI Linux + Windows #39325530650](https://github.com/Lalalalendia/Akula/actions/runs/39325530650).
 
 ## Reason for a fresh branch from main
 
@@ -23,3 +23,7 @@ This integration makes the **minimum compatible replay**: transplant the RN-4C l
 Before enabling actual P2P file writes, design a non-cloneable, Core-owned admission interface without arbitrary callbacks; bind the *authenticated* QUIC endpoint to a local enrolled DeviceId and canonical shared VaultId (never `VaultId::from_uuid(workspace_id)`). Use independently verified pinned Bao stage outside user vault, a durable intent, the **existing** handle-relative `local_create::create_with_hook`/File Gate custody route, no-replace and post-publish readback. Agree global lock-order across OS custody, DocumentHub reservation, Core File Gate, grant SQLite and journal; **never hold a SQLite write transaction during network retrieval**. Define crash cuts and NeedsReview/Partial on ambiguity before signed/replay-safe receipt or ACK.
 
 **STY-G2-06 remains the upstream hard gate for production Staya storage.** Do not merge this research slice or deploy an auto-sync worker based on an isolated success.
+
+## Main compatibility merge
+
+On October 20 the upstream main introduced two additional commits touching `files/gate/write.rs`, `files/gate/mod.rs`, `sync/guarded_note_write.rs`, strict HistoryService tests, and headless smoke. Our research files have zero path overlap with these modifications. The explicit merge preserves these newer product changes, and CI compares the 8 research paths against `git merge-base HEAD origin/main` rather than pretending the older main SHA is current. The merge proves provenance and zero overlap by path only; it does **not** prove semantic compatibility until exact merged HEAD Linux/Windows success.

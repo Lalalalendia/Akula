@@ -251,6 +251,107 @@ pub(crate) fn save_existing_note_with_prewrite_under_custody<T>(
     }
 }
 
+
+/// Point-in-time observation from the one File Gate primary writer and an
+/// immutable external HistoryService CreateNew. Does not attest primary inode,
+/// fsync of all history ancestors, process restart, native receipt or S3 apply.
+#[must_use = "strict history witness cannot be promoted into an S3 acknowledgement"]
+#[derive(Debug)]
+pub(crate) struct TransientStrictHistoryObservation {
+    pub(crate) primary: FileWriteResult,
+    pub(crate) history: crate::history::service::VerifiedHistoryVersion,
+}
+
+/// P0g-3d-03: opt-in bridge which preserves the existing lock lifetime,
+/// editor reservation, one primary publisher and postflight semantics, while
+/// demanding the typed strict HistoryService witness instead of a bool.
+///
+/// A genuine point-in-time immutable snapshot must be observed under the
+/// locked Core/HistoryService. Any failure after entering preparation is
+/// NeedsReview and never authorizes replay of a one-shot V7 attempt.
+/// This method is deliberately not connected to any production S3 executor.
+#[allow(dead_code)]
+pub(crate) fn save_existing_note_with_prewrite_strict_history_under_custody<T>(
+    admission: &RegisteredReadAdmission<'_>,
+    custody: &SqliteCustodyIdentityStore,
+    vault_id: VaultId,
+    custody_scope: &Path,
+    relative: &SyncRelativePath,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prepare: impl FnOnce() -> Result<T, FileCommandError>,
+    prewrite: impl FnOnce(&T) -> Result<(), FileCommandError>,
+    postflight: impl FnOnce(
+        &T, &FileWriteResult, &crate::history::service::VerifiedHistoryVersion,
+    ) -> Result<(), FileCommandError>,
+) -> Result<TransientStrictHistoryObservation, GuardedNoteWriteError> {
+    // Refuse an impossible strict history receipt before admission/claim
+    // preparation and before entering any mutating File Gate operation.
+    if source != Source::External || content.len() > MAX_NOTE_BYTES {
+        return Err(GuardedNoteWriteError::Denied(
+            "strict history witness requires bounded Source::External".into(),
+        ));
+    }
+    let core = admission.registered_core();
+    let target = admission.registered_root_path().join(relative.as_str());
+    let mut entered = false;
+    let mut history_changed = false;
+    let outcome = custody.with_cooperative_writer_lifetime(
+        admission, vault_id, custody_scope, || {
+            let checked = existing_note(
+                admission.registered_root_path(), relative, expected_hash, content,
+            ).map_err(CheckedHistoryError::Primary)?;
+            entered = true;
+            let prepared = prepare().map_err(CheckedHistoryError::Primary)?;
+            let permit = HeldCustodyHistoryPermit {
+                core,
+                note: &checked,
+            };
+            let (primary, history) = gate::write_checked_history_with_prewrite_verified(
+                &permit, core, &checked, content, expected_hash, source, version_name,
+                || prewrite(&prepared),
+            )?;
+            history_changed = true;
+            // Strict version metadata must be visible to postflight under the
+            // original pinned OS custody. Not a durability or remote apply gate.
+            postflight(&prepared, &primary, &history)
+                .map_err(CheckedHistoryError::Primary)?;
+            Ok(TransientStrictHistoryObservation { primary, history })
+        },
+    );
+    // Never notify UI or search while holding external OS custody.
+    if entered {
+        core.search.notify_content_path(target.clone());
+    }
+    if history_changed {
+        core.emit(CoreEvent::NoteHistoryChanged(NoteHistoryChanged {
+            path: target.to_string_lossy().into_owned(),
+        }));
+    }
+    match outcome {
+        Ok(Ok(observation)) => Ok(observation),
+        Ok(Err(error)) => {
+            if let CheckedHistoryError::History(failure) = &error {
+                core.emit(CoreEvent::NoteHistorySaveFailed(NoteHistorySaveFailed {
+                    path: target.to_string_lossy().into_owned(),
+                    action: failure.action.to_owned(),
+                    message: failure.message.clone(),
+                }));
+            }
+            let message = format!("{error:?}");
+            if entered {
+                Err(GuardedNoteWriteError::NeedsReview(message))
+            } else {
+                Err(GuardedNoteWriteError::Denied(message))
+            }
+        }
+        Err(error) if entered => Err(GuardedNoteWriteError::NeedsReview(format!("{error:?}"))),
+        Err(error) => Err(GuardedNoteWriteError::Denied(format!("{error:?}"))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,6 +652,9 @@ mod tests {
         assert_eq!(fs::read(&note).unwrap(), b"protected original");
         assert_eq!(fs::read(&other_note).unwrap(), b"protected original");
     }
+
+    #[path = "guarded_strict_history_tests.rs"]
+    mod strict_history;
 
     #[path = "guarded_note_transaction_tests.rs"]
     mod transaction;
