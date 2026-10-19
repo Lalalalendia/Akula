@@ -504,8 +504,19 @@ mod tests {
         use std::time::Duration;
         let fixture = Fixture::new();
         let marker = fixture.home.join("crash-marker");
-        let helper = format!("{}::child_crash_at_transaction_boundary", module_path!());
-        let mut child = Command::new(std::env::current_exe().unwrap())
+        // In standalone rustc --test and cargo test, the test harness may
+        // qualify module names differently. Discover the actual --exact name
+        // instead of assuming module_path! matches the harness name.
+        let executable = std::env::current_exe().unwrap();
+        let listing = Command::new(&executable).arg("--list").output().unwrap();
+        assert!(listing.status.success(), "cannot list subprocess test names");
+        let listed = String::from_utf8_lossy(&listing.stdout);
+        let helper = listed
+            .lines()
+            .filter_map(|line| line.strip_suffix(": test"))
+            .find(|name| name.ends_with("::child_crash_at_transaction_boundary"))
+            .expect("test harness did not register crash subprocess helper");
+        let mut child = Command::new(&executable)
             .arg("--exact")
             .arg(helper)
             .arg("--nocapture")
