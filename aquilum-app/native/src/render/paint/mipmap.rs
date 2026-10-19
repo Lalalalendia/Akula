@@ -228,4 +228,157 @@ mod tests {
         assert!(!image.may_have_transparency());
     }
 
+
+    // B1: test-only, byte-identical RGBA reducer. No runtime dispatch,
+    // production path, feature flag or unsafe implementation changes.
+    fn half_packed_trial(source: &Pixmap) -> Option<Pixmap> {
+        let (width, height) = (source.width(), source.height());
+        if width == 0 || height == 0 || (width == 1 && height == 1) {
+            return None;
+        }
+        let (dst_w, dst_h) = (width.div_ceil(2), height.div_ceil(2));
+        let src = source.data_as_u8_slice();
+        let stride = usize::from(width) * 4;
+        let (max_x, max_y) = (usize::from(width) - 1, usize::from(height) - 1);
+        let mut out = Vec::with_capacity(usize::from(dst_w) * usize::from(dst_h) * 4);
+        let mut may_have_transparency = false;
+        const LANES: u32 = 0x00ff_00ff;
+        const ROUND: u32 = 0x0002_0002;
+        for y in 0..usize::from(dst_h) {
+            let row0 = (2 * y) * stride;
+            let row1 = (2 * y + 1).min(max_y) * stride;
+            for x in 0..usize::from(dst_w) {
+                let x0 = 2 * x;
+                let x1 = (x0 + 1).min(max_x);
+                let rgba_word = |row: usize, column: usize| {
+                    let at = row + column * 4;
+                    u32::from_le_bytes(src[at..at + 4].try_into().expect("complete RGBA texel"))
+                };
+                let a = rgba_word(row0, x0);
+                let b = rgba_word(row0, x1);
+                let c = rgba_word(row1, x0);
+                let d = rgba_word(row1, x1);
+                // A 16-bit lane never overflows: four 8-bit values sum to
+                // <=1020, and ROUND adds at most 2. Sum R/B and G/A in
+                // separate 16-bit lanes to avoid cross-channel carries.
+                let even = (a & LANES) + (b & LANES) + (c & LANES) + (d & LANES);
+                let odd = ((a >> 8) & LANES) + ((b >> 8) & LANES)
+                    + ((c >> 8) & LANES) + ((d >> 8) & LANES);
+                let reduced = (((even + ROUND) >> 2) & LANES)
+                    | ((((odd + ROUND) >> 2) & LANES) << 8);
+                if reduced >> 24 != 255 {
+                    may_have_transparency = true;
+                }
+                out.extend_from_slice(&reduced.to_le_bytes());
+            }
+        }
+        Some(Pixmap::from_parts(
+            out, dst_w, dst_h,
+            PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, may_have_transparency),
+        ))
+    }
+
+    fn packed_test_source(w: u16, h: u16, seed: u32, opaque: bool) -> Pixmap {
+        let mut pixels = Vec::with_capacity(usize::from(w) * usize::from(h) * 4);
+        let mut state = seed;
+        for y in 0..h {
+            for x in 0..w {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let alpha = if opaque {
+                    255
+                } else if x % 7 == 0 && y % 5 == 0 {
+                    0
+                } else {
+                    (state >> 24) as u8
+                };
+                // Valid premultiplied texels even for mixed alpha.
+                pixels.extend_from_slice(&[
+                    (state as u8).min(alpha),
+                    ((state >> 8) as u8).min(alpha),
+                    ((state >> 16) as u8).min(alpha),
+                    alpha,
+                ]);
+            }
+        }
+        Pixmap::from_parts(
+            pixels, w, h,
+            PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, !opaque),
+        )
+    }
+
+    #[test]
+    fn packed_reduction_is_byte_exact_for_odd_alpha_and_thin_images() {
+        let sizes = [
+            (1, 1), (1, 2), (2, 1), (1, 33), (33, 1), (2, 2),
+            (3, 3), (3, 5), (5, 3), (17, 19), (128, 127),
+            (511, 257), (1280, 884), (1281, 885),
+        ];
+        for (w, h) in sizes {
+            for seed in [0u32, 1, 0x1234_5678, 0xffff_ffff] {
+                for opaque in [true, false] {
+                    let source = packed_test_source(w, h, seed, opaque);
+                    let expected = half(&source);
+                    let candidate = half_packed_trial(&source);
+                    assert_eq!(expected.is_some(), candidate.is_some(),
+                        "different None behavior: {w}x{h}, seed={seed}, opaque={opaque}");
+                    if let (Some(expected), Some(candidate)) = (expected, candidate) {
+                        assert_eq!((expected.width(), expected.height()),
+                            (candidate.width(), candidate.height()));
+                        assert_eq!(expected.data_as_u8_slice(), candidate.data_as_u8_slice(),
+                            "byte mismatch: {w}x{h}, seed={seed}, opaque={opaque}");
+                        assert_eq!(expected.may_have_transparency(),
+                            candidate.may_have_transparency(),
+                            "opacity hint mismatch: {w}x{h}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "opt-in Windows microbenchmark, non-gating performance figures"]
+    fn packed_reduction_microbench_diagnostic() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        fn median(mut values: Vec<f64>) -> f64 {
+            values.sort_by(|a, b| a.total_cmp(b));
+            values[values.len() / 2]
+        }
+
+        for (w, h) in [(1280, 884), (1281, 885), (4096, 2160)] {
+            let source = packed_test_source(w, h, 0xa51a_cafe, false);
+            let mut scalar_ms = Vec::new();
+            let mut packed_ms = Vec::new();
+            // AB/BA alternating process-local order. Discard two warmup pairs.
+            // No speed threshold or performance-based CI failure.
+            for turn in 0..12 {
+                let order = if turn % 2 == 0 { [0, 1] } else { [1, 0] };
+                for which in order {
+                    let started = Instant::now();
+                    let pixmap = if which == 0 {
+                        half(black_box(&source)).expect("nonempty scalar result")
+                    } else {
+                        half_packed_trial(black_box(&source)).expect("nonempty packed result")
+                    };
+                    black_box(pixmap.data_as_u8_slice());
+                    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                    if turn >= 2 {
+                        if which == 0 {
+                            scalar_ms.push(elapsed_ms);
+                        } else {
+                            packed_ms.push(elapsed_ms);
+                        }
+                    }
+                }
+            }
+            let scalar = median(scalar_ms);
+            let packed = median(packed_ms);
+            println!(
+                "AKULA_MIP_B1_MICROBENCH source={}x{} scalar_ms={scalar:.4} packed_ms={packed:.4} ratio={:.3} device=ci-hosted-windows release=1",
+                w, h, scalar / packed,
+            );
+        }
+    }
+
 }
