@@ -2195,6 +2195,39 @@ mod tests {
     }
 
     #[test]
+    fn p0g3b_strict_history_proof_never_deletes_reverted_version() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Revert.md");
+        let earlier = "first history text";
+        let later = "second history text";
+        fs::write(&note, earlier).unwrap();
+        let first_hash = blake3::hash(earlier.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(earlier, Source::External, &first_hash, None),
+        ).unwrap());
+        fs::write(&note, later).unwrap();
+        let second_hash = blake3::hash(later.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(later, Source::Me, &second_hash, None),
+        ).unwrap());
+        let dir = fixture.history_of("Revert.md");
+        let saved = versions(&dir);
+        assert_eq!(saved.len(), 2);
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(earlier, Source::Me, &first_hash, None), true, true,
+        );
+        assert!(result.is_err(), "reversion is not an immutable new snapshot");
+        let after = versions(&dir);
+        assert_eq!(after.len(), 2, "strict rejection must not delete a version");
+        assert_eq!(after[1].id, saved[1].id);
+        assert_eq!(fs::read_to_string(dir.join(&saved[1].id)).unwrap(), later);
+    }
+
+    #[test]
     fn p0g3b_strict_history_proof_refuses_forged_expected_hash_after_write() {
         let fixture = Fixture::new();
         let history = fixture.service();
