@@ -514,28 +514,30 @@ mod tests {
             core: &core_a,
             note: &note,
         };
-        let write = || crate::history::NoteWrite {
-            disk_before: None,
-            text: "forbidden history snapshot",
-            hash: &hash,
-            source: Source::External,
-            name: None,
-        };
+        fn note_write(hash: &str) -> crate::history::NoteWrite<'_> {
+            crate::history::NoteWrite {
+                disk_before: None,
+                text: "forbidden history snapshot",
+                hash,
+                source: Source::External,
+                name: None,
+            }
+        }
         let roots = || vec![root.clone()];
         let wrong_core = core_b.history.try_saved_with_custody(
-            &permit, &roots, &note, write(),
+            &permit, &roots, &note, note_write(&hash),
         );
         assert!(wrong_core.is_err(), "legacy custody accepted foreign HistoryService");
         let wrong_strict = core_b.history.try_saved_with_custody_verified_version(
-            &permit, &roots, &note, write(),
+            &permit, &roots, &note, note_write(&hash),
         );
         assert!(wrong_strict.is_err(), "strict evidence accepted foreign HistoryService");
         let wrong_note = core_a.history.try_saved_with_custody(
-            &permit, &roots, &other_note, write(),
+            &permit, &roots, &other_note, note_write(&hash),
         );
         assert!(wrong_note.is_err(), "legacy custody accepted a different note");
         let strict_wrong_note = core_a.history.try_saved_with_custody_verified_version(
-            &permit, &roots, &other_note, write(),
+            &permit, &roots, &other_note, note_write(&hash),
         );
         assert!(strict_wrong_note.is_err(), "strict custody accepted a different note");
         assert_eq!(fs::read(&note).unwrap(), b"protected original");
