@@ -99,8 +99,8 @@ fn m1dd_native_recovery_settings_are_read_only_for_every_state() {
     ] {
         context.sync_recovery = state.clone();
         let all = blocks(Section::Sync, &config, &context);
-        assert_eq!(all.len(), 1);
-        let rows = &all[0].rows;
+        assert_eq!(all.len(), 2);
+        let rows = &all[1].rows;
         assert!(rows.len() >= 3);
         assert!(rows.iter().all(|row| row.setter.is_none()));
         assert!(rows.iter().all(|row| match &row.control {
@@ -142,7 +142,7 @@ fn m1de_native_review_only_offers_explicit_nondestructive_intents() {
         review_count: 0,
         latest_event_digest: "genesis".into(),
     });
-    let rows = &blocks(Section::Sync, &AppConfig::default(), &ctx)[0].rows;
+    let rows = &blocks(Section::Sync, &AppConfig::default(), &ctx)[1].rows;
     assert!(rows.iter().all(|r| r.setter.is_none()));
     let mut inspect = 0;
     let mut hold = 0;
@@ -164,7 +164,7 @@ fn m1de_native_review_only_offers_explicit_nondestructive_intents() {
     }
     assert_eq!((inspect, hold, escalate), (1, 1, 1));
     ctx.sync_selected.as_mut().unwrap().operation_id = "different".into();
-    let rows = &blocks(Section::Sync, &AppConfig::default(), &ctx)[0].rows;
+    let rows = &blocks(Section::Sync, &AppConfig::default(), &ctx)[1].rows;
     assert!(rows.iter().all(|r| match &r.control {
         Control::Status { .. } => true,
         Control::Buttons(buttons) => buttons.iter().all(|b| matches!(&b.action, Action::InspectRecovery(_))),
