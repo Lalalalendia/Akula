@@ -74,9 +74,10 @@ impl fmt::Display for HistorySaveFailure {
     }
 }
 
-/// P0g-3b: exact version of a HistoryService file verified while holding
-/// PROCESS_HISTORY_FILES. This is NOT a native File Gate OS receipt, and it
-/// cannot by itself advance a remote baseline or authorize any write.
+/// P0g-3b: point-in-time version observation verified while holding
+/// PROCESS_HISTORY_FILES. Normal retention, reversion and direct same-user
+/// edits can later remove/alter these bytes. This is NOT a persistent immutable
+/// archive, an OS publication receipt or remote baseline authority.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedHistoryVersion {
     pub version_id: String,
@@ -503,12 +504,17 @@ impl HistoryService {
         // Existing non-strict editor/host APIs retain their legacy semantics.
         if require_verified_version {
             const MAX_RECEIPT_HISTORY_BYTES: usize = 32 * 1024 * 1024;
+            // A Source::Me snapshot could later be coalesced in-place by
+            // the ordinary editor, invalidating a claimed immutable ID.
+            // The S3 path is external by definition and must never mint
+            // history evidence through a mutable local-typing milestone.
             if write.text.len() > MAX_RECEIPT_HISTORY_BYTES
+                || write.source != Source::External
                 || !matches!(&plan, MilestonePlan::CreateNew { .. })
             {
                 return Err(HistorySaveFailure::new(
                     "history version proof",
-                    "not a bounded immutable CreateNew snapshot",
+                    "strict evidence requires bounded external CreateNew snapshot",
                 ));
             }
         }
