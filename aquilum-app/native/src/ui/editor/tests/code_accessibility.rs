@@ -112,6 +112,56 @@ fn replacing_a_note_at_the_same_fence_byte_creates_a_fresh_accessibility_identit
     assert_eq!(text(&root), "~~~python\nreplacement\n~~~");
 }
 
+
+#[test]
+fn delayed_accesskit_click_after_scroll_cannot_copy_an_offscreen_fence() {
+    use super::support::{scrolled, PAGE};
+    use crate::ui::scroll::ScrollArea;
+
+    let source = format!(
+        "~~~rust\nFIRST_SECRET\n~~~\n{}~~~python\nSECOND_PUBLIC\n~~~\n",
+        "ordinary paragraph\n".repeat(350)
+    );
+    let second = source.find("~~~python").unwrap();
+    let mut root = scrolled(TextEditor::new(&source).markdown(), 570, 280);
+    root.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+    let _ = root.redraw();
+    let before = buttons(&root);
+    assert_eq!(before.len(), 1);
+    let stale_id = before[0].1;
+    assert_eq!(before[0].0, 0);
+
+    let y = root.get_widget_with_tag(TAG).unwrap().inner()
+        .top_of(second).expect("second header layout");
+    let page = root.get_widget_with_tag(PAGE).unwrap().id();
+    root.edit_widget(page, |mut widget| {
+        ScrollArea::set_offset(
+            &mut widget.downcast::<ScrollArea<TextEditor>>(),
+            (y - 40.0).max(0.0),
+        );
+    });
+
+    // Simulates a queued UI Automation action targeted to the formerly
+    // visible node before the next explicit rendering pass.
+    root.handle_access_event(ActionRequest {
+        target_tree: TreeId::ROOT,
+        target_node: stale_id.into(),
+        action: Action::Click,
+        data: None,
+    });
+    for _ in 0..3 { let _ = root.redraw(); }
+    let now = buttons(&root);
+    assert_eq!(now.len(), 1);
+    assert_eq!(now[0].0, second);
+    assert_ne!(now[0].1, stale_id);
+    assert_eq!(
+        root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
+        None,
+        "an offscreen queued Click must never copy an obsolete code body"
+    );
+    assert_eq!(text(&root), source);
+}
+
 #[test]
 fn scrolling_between_distant_headers_removes_offscreen_accessibility_buttons() {
     use super::support::{scrolled, PAGE};
