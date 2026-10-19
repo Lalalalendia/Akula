@@ -12,9 +12,9 @@ Canonical roadmap: [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec
 
 ## Truthful scope of evidence
 
-The first run measures only **`server-initialize` under MCP 2025-06-18**. Even when successful, it does NOT prove full 2025 conformance. Because the proxy terminates HTTP and adds a bearer, it cannot validate direct authorization failures, SSE streaming, chunked bodies, HTTP keep-alive behavior, DNS rebinding, or malformed transport framing. Test those directly in a separate native transport suite. No claim is made for modern `2026-07-28`.
+The initial upstream result was **one passing `server-initialize` check (1/1)** on CI run `39294691440`, artifact `12207792559`. The next diagnostic runs **both** that stable smoke check and the upstream `active` suite filtered to `2025-06-18`, and summarizes every available official `checks.json` into `conformance-summary.json` with passing and failing counts. The larger suite is bounded to 240 seconds; a timeout means incomplete coverage. Even a passing initialization check does NOT prove full 2025 conformance. Because the proxy terminates HTTP and adds a bearer, it cannot validate direct authorization failures, SSE streaming, chunked bodies, HTTP keep-alive behavior, DNS rebinding, or malformed transport framing. Test those directly in a separate native transport suite. No claim is made for modern `2026-07-28`.
 
-An upstream **conformance failure** is reported with a nonzero CLI exit but does not silently fail unrelated product CI at this exploratory stage. An invocation failure that produces **no actual `checks.json`** fails the CI diagnostic step. Never equate `test script exited 0` with `specification passed`; inspect individual check results.
+An upstream **conformance failure** is preserved in the raw `checks.json` and explicit machine summary; it does not silently fail unrelated product CI at this exploratory stage. A missing `checks.json` for either the smoke or the active suite fails the diagnostic job. See CI summary for which checks actually fail. The 240-second suite deadline may yield incomplete evidence and must not be reported as a complete specification audit. Never equate `test script exited 0` with `specification passed`; inspect individual check results.
 
 ## Exit gate for M0
 
