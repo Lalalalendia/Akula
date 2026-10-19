@@ -194,6 +194,21 @@ cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
   --test iroh_blobs_compare bounded_ext4_redb_read_only_after_remount \
   -- --exact --ignored --nocapture
 
+# P2P-BLOB-10a: join durable journal, exact pinned read-only redb
+# and external BLAKE3 under one *quiescent* lab owner. Inline blobs must
+# not demand an external .data, but must have complete trusted DB contents.
+# Still NOT fd-relative, not an atomic OS snapshot, not a File Gate grant.
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_joint_staging_checkpoint \
+  -- --exact --ignored --nocapture
+
+sync
+sudo umount "$volume"
+mount_image
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_joint_staging_checkpoint_after_remount \
+  -- --exact --ignored --nocapture
+
 # A missing mount must NOT cause staging to continue on its host parent.
 sudo umount "$volume"
 cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
