@@ -191,8 +191,13 @@ pub fn audit_complete_owned_preorder(
     let ob_path: PathBuf = root.join(format!("{hex}.obao4"));
     let (data, data_meta) = checked_file(&data_path, device, MAX_COMPLETE_OBJECT_BYTES, false)?;
     let (outboard, ob_meta) = checked_file(&ob_path, device, MAX_OUTBOARD_BYTES, true)?;
-    if data_meta.len() != known_bytes || ob_meta.len() == 0 {
+    if data_meta.len() != known_bytes {
         return Err(BaoHold::InvalidLength);
+    }
+    // The verified encoder visits expected nodes but does not reject trailing
+    // bytes by itself. Require the EXACT pinned pre-order physical footprint.
+    if ob_meta.len() != BaoTree::new(known_bytes, IROH_BLOCK_SIZE).outboard_size() {
+        return Err(BaoHold::MissingBaoNodes);
     }
 
     fully_verify_preorder(&data, &outboard, known_bytes, trusted_hash)?;
