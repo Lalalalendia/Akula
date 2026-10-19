@@ -143,7 +143,7 @@ pub fn audit_complete_owned_preorder(
     {
         return Err(BaoHold::BadStoreName);
     }
-    if known_bytes <= IROH_BLOCK_SIZE.bytes() || known_bytes > MAX_COMPLETE_OBJECT_BYTES {
+    if known_bytes <= IROH_BLOCK_SIZE.bytes() as u64 || known_bytes > MAX_COMPLETE_OBJECT_BYTES {
         return Err(BaoHold::SizePolicyViolation);
     }
     mount.check()?;
