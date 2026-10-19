@@ -110,6 +110,43 @@ impl<'a> HostPluginVaultReader<'a> {
         self.read_with_hook(instance, note, max_bytes, live_context, || {})
     }
 
+    /// Host-only bridge from a physically pinned local note to a verified
+    /// CURRENT Sync revision. The caller supplies a trusted, already-loaded
+    /// RevisionDag; the note path always comes from a host-created handle,
+    /// never from plugin JSON or user-controlled search parameters.
+    ///
+    /// This deliberately requests NotesRead (not just NotesSearch) because
+    /// binding needs to inspect protected primary bytes. Existing read
+    /// admission refuses substituted inodes, unsafe roots and open editors.
+    /// We re-read and revalidate permission after resolving the DAG binding.
+    ///
+    /// A matching snapshot proves neither the future state of the file nor
+    /// authority to release search results over RPC. The real search/response
+    /// boundary must revalidate source and grants again. No historical access
+    /// or multi-head auto-resolution is provided by this bridge.
+    pub(crate) fn bind_current_sync_note(
+        &self,
+        instance: PluginInstanceHandle,
+        note: &ScopedNoteHandle,
+        dag: &crate::sync::RevisionDag,
+        max_bytes: u64,
+        live_context: impl Fn() -> HostContext,
+    ) -> Result<crate::search::semantic_probe::OwnedSelection, PluginReadError> {
+        let first = self.read_note_bounded(
+            instance, note, max_bytes, &live_context,
+        )?;
+        let selected = crate::search::semantic_probe::bind_current_note_to_sync(
+            dag, note.relative.as_str(), &first.content_hash,
+        ).map_err(|_| PluginReadError::Unavailable)?;
+        let second = self.read_note_bounded(
+            instance, note, max_bytes, &live_context,
+        )?;
+        if second.content_hash != first.content_hash || second.bytes.len() != first.bytes.len() {
+            return Err(PluginReadError::Unavailable);
+        }
+        Ok(selected)
+    }
+
     pub(super) fn read_with_hook(
         &self,
         instance: PluginInstanceHandle,
