@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-15]
+        os: [windows-latest] # MAC-HOLD-01: macOS frozen
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
