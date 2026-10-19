@@ -2,6 +2,7 @@ use super::http::{refused, Connection, Failure, Head, Response};
 use super::protocol;
 use serde_json::Value;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -9,6 +10,8 @@ use std::thread::{self, JoinHandle};
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
 const MAX_PARALLEL_READS: usize = 4;
+// Bound how long the accept loop waits for a reclaimed *idle* connection.
+const RECLAIM_WAIT: Duration = Duration::from_millis(500);
 
 pub type SharedToolCaller = Arc<dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync>;
 
@@ -23,11 +26,32 @@ struct Endpoint {
     call: SharedToolCaller,
     stopping: AtomicBool,
     turn: DispatchGate,
-    open: Mutex<usize>,
+    open: Mutex<ConnectionSlots>,
     freed: Condvar,
 }
 
-struct Slot(Arc<Endpoint>);
+#[derive(Default)]
+struct ConnectionSlots {
+    count: usize,
+    next_id: u64,
+    idle: Vec<IdleConnection>,
+}
+
+struct IdleConnection {
+    id: u64,
+    evicted: Arc<AtomicBool>,
+}
+
+struct Slot {
+    endpoint: Arc<Endpoint>,
+    id: u64,
+    evicted: Arc<AtomicBool>,
+}
+
+enum Capacity {
+    Stopping,
+    Saturated,
+}
 
 // Admission is bounded independently of TCP keep-alive connections.
 // Pending writers block *new* readers to prevent read-heavy agent traffic
@@ -132,23 +156,77 @@ impl Drop for DispatchPermit<'_> {
 }
 
 impl Slot {
-    fn wait(endpoint: &Arc<Endpoint>) -> Option<Self> {
-        let mut open = lock(&endpoint.open);
-        while *open >= MAX_CONNECTIONS && !endpoint.stopping.load(Ordering::SeqCst) {
-            open = endpoint.freed.wait(open).unwrap_or_else(PoisonError::into_inner);
+    fn acquire(endpoint: &Arc<Endpoint>) -> Result<Self, Capacity> {
+        let mut slots = lock(&endpoint.open);
+        if endpoint.stopping.load(Ordering::SeqCst) {
+            return Err(Capacity::Stopping);
+        }
+        if slots.count >= MAX_CONNECTIONS {
+            // A completed HTTP reply is idle and has no tool mutation in
+            // progress. Reclaim only that socket; never interrupt active
+            // headers, request bodies, tool calls or response writes.
+            // Prefer the oldest completed keep-alive. Evicting the newest
+            // risks closing the socket before its previous response has
+            // even been observed by the client.
+            if !slots.idle.is_empty() {
+                let idle = slots.idle.remove(0);
+                // Portable cooperative wakeup. On Windows, shutdown on a
+                // cloned socket does not reliably wake another recv thread.
+                // The idle header reader polls the eviction bit every 50 ms.
+                idle.evicted.store(true, Ordering::SeqCst);
+                let (next, _) = endpoint
+                    .freed
+                    .wait_timeout_while(slots, RECLAIM_WAIT, |slots| {
+                        slots.count >= MAX_CONNECTIONS
+                            && !endpoint.stopping.load(Ordering::SeqCst)
+                    })
+                    .unwrap_or_else(PoisonError::into_inner);
+                slots = next;
+            }
         }
         if endpoint.stopping.load(Ordering::SeqCst) {
-            return None;
+            return Err(Capacity::Stopping);
         }
-        *open += 1;
-        Some(Self(Arc::clone(endpoint)))
+        if slots.count >= MAX_CONNECTIONS {
+            return Err(Capacity::Saturated);
+        }
+        let id = slots.next_id;
+        slots.next_id = slots.next_id.wrapping_add(1);
+        slots.count += 1;
+        Ok(Self {
+            endpoint: Arc::clone(endpoint),
+            id,
+            evicted: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    fn idle(&self) {
+        // Register only between complete replies and the next request head.
+        // No duplicated kernel socket or forced TCP reset is necessary.
+        let mut slots = lock(&self.endpoint.open);
+        if !self.endpoint.stopping.load(Ordering::SeqCst)
+            && !self.evicted.load(Ordering::SeqCst)
+        {
+            slots.idle.push(IdleConnection {
+                id: self.id,
+                evicted: Arc::clone(&self.evicted),
+            });
+        }
+    }
+
+    fn activate(&self) -> bool {
+        let mut slots = lock(&self.endpoint.open);
+        slots.idle.retain(|connection| connection.id != self.id);
+        !self.evicted.load(Ordering::SeqCst)
     }
 }
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        *lock(&self.0.open) -= 1;
-        self.0.freed.notify_one();
+        let mut slots = lock(&self.endpoint.open);
+        slots.idle.retain(|connection| connection.id != self.id);
+        slots.count -= 1;
+        self.endpoint.freed.notify_all();
     }
 }
 
@@ -162,7 +240,7 @@ impl RunningServer {
             call,
             stopping: AtomicBool::new(false),
             turn: DispatchGate::new(),
-            open: Mutex::new(0),
+            open: Mutex::new(ConnectionSlots::default()),
             freed: Condvar::new(),
         });
         let accepted = Arc::clone(&endpoint);
@@ -222,22 +300,39 @@ fn accept(listener: &TcpListener, endpoint: &Arc<Endpoint>) {
             return;
         }
         let Ok(stream) = stream else { continue };
-        let Some(slot) = Slot::wait(endpoint) else {
-            return;
+        let slot = match Slot::acquire(endpoint) {
+            Ok(slot) => slot,
+            Err(Capacity::Stopping) => return,
+            Err(Capacity::Saturated) => {
+                // Explicit bounded backpressure instead of holding the accept
+                // loop behind 16 occupied sockets for up to 60 seconds.
+                if let Ok(mut connection) = Connection::new(&stream) {
+                    let _ = stream.set_write_timeout(Some(RECLAIM_WAIT));
+                    let _ = connection.send(
+                        &Response::text(503, "MCP: все соединения заняты, повторите запрос"),
+                        false,
+                    );
+                }
+                continue;
+            }
         };
         let _ = thread::Builder::new()
             .name("aquilum-mcp-connection".to_owned())
-            .spawn(move || serve(&stream, &slot.0));
+            .spawn(move || serve(&stream, &slot));
     }
 }
 
-fn serve(stream: &TcpStream, endpoint: &Endpoint) {
+fn serve(stream: &TcpStream, slot: &Slot) {
     let Ok(mut connection) = Connection::new(stream) else {
         return;
     };
     let closing = loop {
-        match exchange(&mut connection, endpoint) {
-            Ok(true) => {}
+        match exchange(&mut connection, &slot.endpoint, slot) {
+            Ok(true) => {
+                if !connection.has_buffered_data() {
+                    slot.idle();
+                }
+            }
             Ok(false) => break Ok(()),
             Err(Failure::Refused(response)) => break connection.send(&response, false),
             Err(Failure::Gone) => return,
@@ -248,8 +343,17 @@ fn serve(stream: &TcpStream, endpoint: &Endpoint) {
     }
 }
 
-fn exchange(connection: &mut Connection, endpoint: &Endpoint) -> Result<bool, Failure> {
-    let head = connection.read_head()?;
+fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Result<bool, Failure> {
+    let head = connection.read_head(|received| {
+        if received {
+            slot.activate()
+        } else {
+            !slot.evicted.load(Ordering::SeqCst)
+        }
+    })?;
+    if !slot.activate() {
+        return Err(Failure::Gone);
+    }
     admit(&head, &endpoint.token)?;
     let body = connection.read_body(&head, MAX_BODY_BYTES)?;
     let body = String::from_utf8(body).map_err(|_| refused(400, "Тело запроса не в UTF-8"))?;
@@ -574,7 +678,8 @@ mod tests {
     }
 
     #[test]
-    fn holds_connections_over_the_limit_until_a_slot_frees() {
+    fn reclaims_idle_keep_alive_before_refusing_new_work() {
+        use std::time::Instant;
         let (server, _) = server();
         let mut held = (0..MAX_CONNECTIONS)
             .map(|_| {
@@ -585,19 +690,133 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
+        // Wait until each completed response is registered as idle. Selecting
+        // its ID proves the exact client reclaimed, not merely that a fresh
+        // response happened after a timeout.
+        let mut reclaimed_id = None;
+        for _ in 0..2500 {
+            let slots = lock(&server.endpoint.open);
+            if slots.count == MAX_CONNECTIONS && slots.idle.len() == MAX_CONNECTIONS {
+                reclaimed_id = slots.idle.first().map(|idle| idle.id as usize);
+                break;
+            }
+            drop(slots);
+            thread::sleep(Duration::from_millis(2));
+        }
+        let reclaimed_id = reclaimed_id.expect("16 keep-alive connections became idle");
+        assert!(reclaimed_id < MAX_CONNECTIONS);
+
+        let start = Instant::now();
         let mut waiting = Client::connect(&server);
         waiting.send(&sized(&tool_call("waiting"), ""));
-        waiting.stream.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
-        let mut chunk = [0; 1];
-        let early = waiting.stream.read(&mut chunk).unwrap_err().kind();
-        assert!(matches!(early, io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut));
-
-        drop(held.pop());
-        waiting.stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let answer = waiting.answer();
         assert_eq!(answer.status, 200);
         assert!(answer.body.contains("waiting"));
+        assert!(start.elapsed() < Duration::from_secs(3), "idle reclamation was too slow");
+        assert!(held[reclaimed_id].hung_up(), "idle victim wasn't disconnected");
+        assert_eq!(lock(&server.endpoint.open).count, MAX_CONNECTIONS);
+        drop(waiting);
         drop(held);
+        server.stop();
+    }
+
+    #[test]
+    fn partial_header_after_keep_alive_stops_idle_reclamation() {
+        let (server, _) = server();
+        let mut held = (0..MAX_CONNECTIONS)
+            .map(|_| {
+                let mut client = Client::connect(&server);
+                client.send(&sized(&initialize(), ""));
+                assert_eq!(client.answer().status, 200);
+                client
+            })
+            .collect::<Vec<_>>();
+
+        let mut all_idle = false;
+        for _ in 0..2500 {
+            if lock(&server.endpoint.open).idle.len() == MAX_CONNECTIONS {
+                all_idle = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(all_idle, "pooled connections never became idle");
+
+        let partial = sized(&tool_call("partially-framed"), "");
+        assert!(partial.starts_with("POST"));
+        held[0].send(&partial[..1]);
+
+        let mut became_active = false;
+        for _ in 0..2500 {
+            let slots = lock(&server.endpoint.open);
+            if slots.idle.len() == MAX_CONNECTIONS - 1
+                && slots.idle.iter().all(|idle| idle.id != 0)
+            {
+                became_active = true;
+                break;
+            }
+            drop(slots);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(became_active, "first header byte must clear idle registration");
+
+        let mut incoming = Client::connect(&server);
+        incoming.send(&sized(&tool_call("fresh"), ""));
+        assert_eq!(incoming.answer().status, 200);
+
+        // The in-progress header is not a reclamation victim: finish and
+        // process it while a *different* already-idle socket was evicted.
+        held[0].send(&partial[1..]);
+        let original = held[0].answer();
+        assert_eq!(original.status, 200);
+        assert!(original.body.contains("partially-framed"));
+
+        drop(incoming);
+        drop(held);
+        server.stop();
+    }
+
+    #[test]
+    fn returns_bounded_503_when_all_sockets_are_mid_request() {
+        use std::time::Instant;
+        let (server, _) = server();
+        let mut active = (0..MAX_CONNECTIONS)
+            .map(|_| {
+                let mut client = Client::connect(&server);
+                // Authorized, but intentionally incomplete body: this socket
+                // is NOT idle and must not be evicted under pressure.
+                client.send(&head("Content-Length: 1024\r\n"));
+                client
+            })
+            .collect::<Vec<_>>();
+        let mut occupied = false;
+        for _ in 0..2500 {
+            let slots = lock(&server.endpoint.open);
+            if slots.count == MAX_CONNECTIONS && slots.idle.is_empty() {
+                occupied = true;
+                break;
+            }
+            drop(slots);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(occupied, "all 16 request slots were occupied");
+        let mut overflow = Client::connect(&server);
+        let start = Instant::now();
+        overflow.send(&sized(&initialize(), ""));
+        let refused = overflow.answer();
+        assert_eq!((refused.status, refused.connection.as_str()), (503, "close"));
+        assert!(start.elapsed() < Duration::from_secs(3), "overload waited for a busy socket");
+        assert!(refused.body.contains("соединения заняты"));
+        assert!(overflow.hung_up());
+
+        // A busy socket must survive the overload. Completing its body
+        // returns the JSON-RPC parse error, not a forced TCP disconnect.
+        active[0].send(&" ".repeat(1024));
+        let response = active[0].answer();
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("-32700"));
+        drop(overflow);
+        drop(active);
         server.stop();
     }
 
