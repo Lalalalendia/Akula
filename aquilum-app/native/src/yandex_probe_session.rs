@@ -16,6 +16,7 @@ pub enum ProbeFailure {
     MissingKeys,
     InvalidStoredKeys,
     CredentialStoreUnavailable,
+    KeysChangedDuringCheck,
     CredentialsRejected,
     AccessDenied,
     BucketNotFound,
