@@ -169,8 +169,15 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         for item in lines[-1].split()[1:] if "=" in item
     }
     unique = int(counters.get("distinct_requested_ids", 0))
-    if unique < min(images, 3):
-        raise ValueError(f"{sample}: workload never exercised enough unique images ({unique}/{images})")
+    # At 1280x884, 24 eager L1+L2 pyramids exceed the real 32-MiB
+    # budget. A 100-file note with only a handful of visible images
+    # would not constitute cache-pressure evidence.
+    minimum = {1: 1, 10: 8, 100: 24}[images]
+    if unique < minimum:
+        raise ValueError(
+            f"{sample}: only {unique}/{images} unique mip images exercised; "
+            f"required at least {minimum} for a meaningful workload"
+        )
     parsed_replay = json.loads(replay.read_text(encoding="utf-8"))
     parsed_metrics = json.loads(metrics.read_text(encoding="utf-8"))
     work = parsed_replay.get("workSamplesMs")
