@@ -252,3 +252,241 @@ impl AppGate {
         fs::remove_dir(stage).map_err(|e| e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct Fixture {
+        home: PathBuf,
+        parent: PathBuf,
+        app: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let home = std::env::temp_dir()
+                .join(format!("akula-updater-txn-{}-{id}", std::process::id()));
+            let parent = home.join("Applications");
+            let app = parent.join(APP_NAME);
+            fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+            fs::write(app.join("Contents/Info.plist"), b"old-info").unwrap();
+            fs::write(app.join("Contents/MacOS/aquilum-app"), b"old-binary").unwrap();
+            Self { home, parent, app }
+        }
+
+        fn lock(&self) -> AppGate {
+            AppGate::acquire(&self.app, &self.home).unwrap()
+        }
+
+        fn stage_with_new(&self, gate: &AppGate) -> PathBuf {
+            let stage = gate.new_stage("aabbccddeeff00112233445566778899").unwrap();
+            let fresh = stage.join(APP_NAME);
+            fs::create_dir_all(fresh.join("Contents/MacOS")).unwrap();
+            fs::write(fresh.join("Contents/Info.plist"), b"new-info").unwrap();
+            fs::write(fresh.join("Contents/MacOS/aquilum-app"), b"new-binary").unwrap();
+            stage
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.home);
+        }
+    }
+
+    #[test]
+    fn fresh_user_install_has_one_shared_lock() {
+        let fixture = Fixture::new();
+        let first = fixture.lock();
+        assert_eq!(first.recover().unwrap(), Recovery::Clean);
+        let blocked = AppGate::acquire(&fixture.app, &fixture.home);
+        assert!(blocked.is_err(), "a second independent fd bypassed BSD flock");
+        drop(first);
+        assert!(AppGate::acquire(&fixture.app, &fixture.home).is_ok());
+    }
+
+    #[test]
+    fn staging_is_unique_and_never_deletes_a_prior_run() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = gate.new_stage("aabbccddeeff00112233445566778899").unwrap();
+        fs::write(stage.join("unrelated"), b"preserve").unwrap();
+        assert!(gate.new_stage("aabbccddeeff00112233445566778899").is_err());
+        assert_eq!(fs::read(stage.join("unrelated")).unwrap(), b"preserve");
+        assert!(gate.recover().unwrap_err().contains("requires review"));
+    }
+
+    #[test]
+    fn interrupted_old_to_backup_restores_before_any_update() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        fs::rename(&fixture.app, stage.join(OLD_NAME)).unwrap();
+        assert!(!fixture.app.exists());
+        assert_eq!(gate.recover().unwrap(), Recovery::PreviousRestored);
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"old-info");
+        assert!(!stage.exists());
+    }
+
+    #[test]
+    fn missing_app_is_allowed_into_recovery_under_same_lock() {
+        let fixture = Fixture::new();
+        let stage;
+        {
+            let gate = fixture.lock();
+            stage = fixture.stage_with_new(&gate);
+            fs::rename(&fixture.app, stage.join(OLD_NAME)).unwrap();
+        }
+        let next = fixture.lock();
+        assert_eq!(next.recover().unwrap(), Recovery::PreviousRestored);
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"old-info");
+    }
+
+    #[test]
+    fn interrupted_after_new_publication_preserves_both_generations() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        gate.promote(&stage).unwrap();
+        assert!(gate.recover().unwrap_err().contains("requires review"));
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"new-info");
+        assert_eq!(fs::read(stage.join(OLD_NAME).join("Contents/Info.plist")).unwrap(), b"old-info");
+    }
+
+    #[test]
+    fn successful_launch_dispatch_does_not_destroy_old_backup() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        gate.promote(&stage).unwrap();
+        gate.preserve_until_startup_ack(&stage).unwrap();
+        assert!(stage.join(OLD_NAME).exists());
+        assert!(gate.recover().is_err(), "new process has not acknowledged its own startup");
+    }
+
+    #[test]
+    fn launch_failure_restores_old_without_deleting_new_generation() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        gate.promote(&stage).unwrap();
+        gate.rollback_launch(&stage).unwrap();
+        assert_eq!(fs::read(fixture.app.join("Contents/MacOS/aquilum-app")).unwrap(), b"old-binary");
+        assert_eq!(
+            fs::read(stage.join("Aquilum.failed.app/Contents/MacOS/aquilum-app")).unwrap(),
+            b"new-binary"
+        );
+        assert!(gate.recover().is_err());
+    }
+
+    #[test]
+    fn multiple_abandoned_stages_refuse_arbitrary_rollback_choice() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let _first = fixture.stage_with_new(&gate);
+        fs::create_dir(fixture.parent.join(".akula-install.ffffffffffffffff")).unwrap();
+        assert!(gate.recover().unwrap_err().contains("multiple"));
+    }
+
+    #[test]
+    fn recovery_restores_old_but_preserves_unknown_staging_payload() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        fs::rename(&fixture.app, stage.join(OLD_NAME)).unwrap();
+        fs::write(stage.join("unknown.txt"), b"preserve").unwrap();
+        assert!(gate.recover().unwrap_err().contains("unknown stage"));
+        assert_eq!(fs::read(stage.join("unknown.txt")).unwrap(), b"preserve");
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"old-info");
+    }
+
+    #[test]
+    fn failed_unpack_only_discards_known_unpublished_candidate() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        gate.discard_unpublished(&stage).unwrap();
+        assert!(!stage.exists());
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"old-info");
+    }
+
+    #[test]
+    fn unknown_prepared_files_are_not_recursively_destroyed() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        fs::write(stage.join("unrecognized.txt"), b"important").unwrap();
+        assert!(gate.discard_unpublished(&stage).is_err());
+        assert_eq!(fs::read(stage.join("unrecognized.txt")).unwrap(), b"important");
+    }
+
+    #[test]
+    fn cannot_discard_any_previous_app_backup() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = fixture.stage_with_new(&gate);
+        fs::rename(&fixture.app, stage.join(OLD_NAME)).unwrap();
+        assert!(gate.discard_unpublished(&stage).unwrap_err().contains("prior installed"));
+        assert!(stage.join(OLD_NAME).exists());
+    }
+
+    #[test]
+    fn refuses_alternate_installation_authority() {
+        let fixture = Fixture::new();
+        let other = fixture.home.join("Different");
+        fs::create_dir(&other).unwrap();
+        let other_app = other.join(APP_NAME);
+        fs::create_dir(&other_app).unwrap();
+        assert!(AppGate::acquire(&other_app, &fixture.home)
+            .unwrap_err()
+            .contains("outside the shared"));
+    }
+
+    #[test]
+    fn refuses_a_symlinked_lock_file() {
+        let fixture = Fixture::new();
+        let lock = fixture.parent.join(LOCK_NAME);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(fixture.app.join("Contents/Info.plist"), lock).unwrap();
+        assert!(AppGate::acquire(&fixture.app, &fixture.home).is_err());
+    }
+
+    #[test]
+    fn rejects_symlinked_replacement_bundle() {
+        let fixture = Fixture::new();
+        fs::rename(&fixture.app, fixture.parent.join("Real.app")).unwrap();
+        std::os::unix::fs::symlink(fixture.parent.join("Real.app"), &fixture.app).unwrap();
+        assert!(AppGate::acquire(&fixture.app, &fixture.home).is_err());
+    }
+
+    #[test]
+    fn parser_output_must_contain_both_regular_essential_files() {
+        let fixture = Fixture::new();
+        let gate = fixture.lock();
+        let stage = gate.new_stage("0123456789abcdef0123456789abcdef").unwrap();
+        fs::create_dir(stage.join(APP_NAME)).unwrap();
+        assert!(gate.promote(&stage).unwrap_err().contains("lacks regular file"));
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"old-info");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_bsd_lockf_refuses_same_lock_held_from_rust() {
+        use std::process::Command;
+        let fixture = Fixture::new();
+        let _held = fixture.lock();
+        let status = Command::new("/usr/bin/lockf")
+            .arg("-k")
+            .arg("-t")
+            .arg("0")
+            .arg(fixture.parent.join(LOCK_NAME))
+            .arg("/usr/bin/true")
+            .status()
+            .unwrap();
+        assert!(!status.success(), "macOS lockf must see the Rust-held BSD flock");
+    }
+}
