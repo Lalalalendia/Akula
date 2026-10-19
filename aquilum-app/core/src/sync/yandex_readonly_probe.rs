@@ -110,7 +110,8 @@ fn validate_input(
     access_key_id: &str,
     secret_access_key: &str,
 ) -> Result<(), YandexS3ProbeError> {
-    if !YandexS3Onboarding::valid_bucket(bucket) {
+    // The onboarding *draft* allows an empty bucket; network admission must not.
+    if bucket.is_empty() || !YandexS3Onboarding::valid_bucket(bucket) {
         return Err(YandexS3ProbeError::InvalidBucket);
     }
     if access_key_id.is_empty() || secret_access_key.is_empty() {
@@ -153,6 +154,8 @@ mod tests {
 
     #[test]
     fn no_bucket_or_secrets_are_accepted_by_admission() {
+        assert_eq!(validate_input("", "valid_key", "test-secret-123"),
+            Err(YandexS3ProbeError::InvalidBucket));
         assert_eq!(validate_input("bad.name", "valid_key", "test-secret-123"),
             Err(YandexS3ProbeError::InvalidBucket));
         assert_eq!(validate_input("akula-private-bucket", "", "test-secret-123"),
