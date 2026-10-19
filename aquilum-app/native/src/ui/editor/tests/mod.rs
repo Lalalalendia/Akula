@@ -3,6 +3,7 @@ mod emoji;
 mod clipboard;
 mod code_copy;
 mod code_scroll;
+mod code_scroll_acceptance;
 mod images;
 mod input;
 mod keys;
