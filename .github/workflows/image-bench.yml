@@ -1,0 +1,41 @@
+name: Image decoder comparison
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/image-bench/**'
+      - 'aquilum-app/native/src/images/decode.rs'
+      - '.github/workflows/image-bench.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  jpeg-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install JPEG and libvips development packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-dev libjpeg-turbo-progs libvips-dev pkg-config time
+      - name: Three modes on the same deterministic JPEGs
+        run: bash scripts/image-bench/run.sh
+        env:
+          REPEATS: '3'
+          LARGE: '0'
+      - name: Archive whole-process memory, timing and quality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-bench-${{ github.run_id }}
+          path: |
+            scripts/image-bench/results/environment.txt
+            scripts/image-bench/results/metrics.csv
+            scripts/image-bench/results/decode-info.txt
+            scripts/image-bench/results/quality.txt
+            scripts/image-bench/results/fixtures.sha256
+          if-no-files-found: warn
