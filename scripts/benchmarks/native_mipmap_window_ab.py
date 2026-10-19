@@ -75,7 +75,60 @@ def fixture() -> str:
     return header + body
 
 
+# Measure the peak working set on Windows, equivalent in meaning to the
+# Linux process VmHWM counter. No fallback-to-zero is allowed by the A/B.
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _ProcessMemoryCounters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    _open_process = _kernel32.OpenProcess
+    _open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _open_process.restype = wintypes.HANDLE
+    _close_handle = _kernel32.CloseHandle
+    _close_handle.argtypes = [wintypes.HANDLE]
+    _close_handle.restype = wintypes.BOOL
+    _get_memory = _psapi.GetProcessMemoryInfo
+    _get_memory.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(_ProcessMemoryCounters), wintypes.DWORD,
+    ]
+    _get_memory.restype = wintypes.BOOL
+
+
+def windows_peak_rss_kib(pid: int) -> int:
+    if os.name != "nt":
+        raise RuntimeError("Windows process memory query requires Windows")
+    handle = _open_process(0x0400 | 0x0010, False, pid)
+    if not handle:
+        return 0  # Process may exit between poll() and OpenProcess.
+    try:
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not _get_memory(handle, ctypes.byref(counters), counters.cb):
+            return 0
+        return int(counters.PeakWorkingSetSize // 1024)
+    finally:
+        _close_handle(handle)
+
+
 def rss_kib(pid: int) -> int:
+    if os.name == "nt":
+        return windows_peak_rss_kib(pid)
     try:
         content = Path(f"/proc/{pid}/status").read_text()
     except OSError:
