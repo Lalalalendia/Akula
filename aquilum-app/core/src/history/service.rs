@@ -615,6 +615,23 @@ impl HistoryService {
         use std::io::Read;
         const MAX_RECEIPT_HISTORY_BYTES: u64 = 32 * 1024 * 1024;
         let path = dir.join(id);
+        let named = fs::symlink_metadata(&path).map_err(|e|
+            HistorySaveFailure::new("history metadata", e)
+        )?;
+        if !named.is_file() || named.file_type().is_symlink() {
+            return Err(HistorySaveFailure::new(
+                "history version proof", "history version is an alias or non-file",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if named.nlink() != 1 {
+                return Err(HistorySaveFailure::new(
+                    "history version proof", "hardlinked history version",
+                ));
+            }
+        }
         let mut file = fs::File::open(&path).map_err(|e|
             HistorySaveFailure::new("history readback", e)
         )?;
@@ -2080,7 +2097,7 @@ mod tests {
             HistorySaveEffect::Created(id) => id.clone(),
             unexpected => panic!("expected new snapshot: {unexpected:?}"),
         };
-        let proof = outcome.verified_version.unwrap();
+        let proof = outcome.verified_version.as_ref().unwrap();
         assert_eq!(proof.version_id, id);
         assert_eq!(proof.content_hash, new_hash);
         assert_eq!(proof.content_length, updated.len());
