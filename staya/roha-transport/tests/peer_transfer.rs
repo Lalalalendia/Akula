@@ -56,3 +56,62 @@ async fn outbound_connection_rejects_unknown_peer_before_network_io() {
     assert_eq!(a.connect(remote).await.unwrap_err(), "peer not admitted");
     a.close().await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn inbound_unknown_peer_is_closed_without_blocking_admitted_peer() {
+    let server_key = SecretKey::generate();
+    let admitted_key = SecretKey::generate();
+    let stranger_key = SecretKey::generate();
+
+    // These are network admission lists, not permissions to read or write files.
+    let server = StayaTransport::bind(
+        server_key.clone(),
+        AllowedPeers::new([admitted_key.public()]),
+    )
+    .await
+    .expect("bind server");
+    let admitted = StayaTransport::bind(
+        admitted_key.clone(),
+        AllowedPeers::new([server_key.public()]),
+    )
+    .await
+    .expect("bind admitted client");
+    let stranger = StayaTransport::bind(
+        stranger_key,
+        AllowedPeers::new([server_key.public()]),
+    )
+    .await
+    .expect("bind unknown client");
+    let server_addr = server.address();
+
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let incoming = server.accept_one();
+        let clients = async {
+            // The stranger knows the server identity and can attempt a valid
+            // QUIC handshake, but the server has not admitted the stranger.
+            // Once the server notices that identity, the connection must close.
+            if let Ok(unadmitted) = stranger.connect(server_addr.clone()).await {
+                tokio::time::timeout(Duration::from_secs(5), unadmitted.closed())
+                    .await
+                    .expect("unadmitted QUIC session must be closed");
+            }
+
+            // An unauthorized attempt must not consume the admission slot:
+            // the next authorized client must still be accepted normally.
+            admitted
+                .connect(server_addr)
+                .await
+                .expect("admitted client can still connect")
+        };
+
+        let (server_connection, _client_connection) = tokio::join!(incoming, clients);
+        let server_connection = server_connection.expect("admitted incoming connection");
+        assert_eq!(server_connection.remote_id(), admitted_key.public());
+    })
+    .await
+    .expect("reject unknown then accept known within bounded time");
+
+    stranger.close().await;
+    admitted.close().await;
+    server.close().await;
+}
