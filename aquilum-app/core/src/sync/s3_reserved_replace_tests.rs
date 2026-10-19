@@ -331,6 +331,21 @@ fn postflight_tamper_requires_review_and_releases_only_editor_reservation() {
 }
 
 
+/// Consume one V7 attempt while the required cooperative OS custody lock
+/// is held; deliberately do not enter a primary File Gate publisher.
+fn claim_cold_attempt_without_publication(
+    f: &Fixture,
+    admission: &RegisteredReadAdmission<'_>,
+) {
+    f.custody.with_cooperative_writer_lifetime(
+        admission, f.keyspace.vault_id(), &f.scope, || {
+            let prepared = prepare(f, admission).unwrap();
+            assert_editor_reserved(f);
+            drop(prepared);
+        },
+    ).unwrap();
+}
+
 // P0g-3d-02 tests exercise a fresh, strictly read-only SQLite recovery-open.
 // They intentionally do NOT assert crash durability or issue S3 apply authority.
 fn inert_cold_review(f: &Fixture) -> Result<InertColdS3Review, FileCommandError> {
@@ -354,10 +369,7 @@ fn inert_cold_review(f: &Fixture) -> Result<InertColdS3Review, FileCommandError>
 fn p0g3d02_cold_review_original_still_visible_remains_hold() {
     let f = fixture();
     let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
-    {
-        let _prepared = prepare(&f, &admission).unwrap();
-        assert_editor_reserved(&f);
-    }
+    claim_cold_attempt_without_publication(&f, &admission);
     drop(admission);
     let review = inert_cold_review(&f).unwrap();
     assert_eq!(review.operation_id, f.intent.operation_id);
@@ -392,8 +404,7 @@ fn p0g3d02_cold_review_after_real_filegate_publication_remains_hold() {
 fn p0g3d02_cold_review_inplace_modification_is_needs_review_not_receipt() {
     let f = fixture();
     let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
-    let prepared = prepare(&f, &admission).unwrap();
-    drop(prepared);
+    claim_cold_attempt_without_publication(&f, &admission);
     drop(admission);
     let path = f.root.join(f.intent.path.as_str());
     // Same inode / file ID, but neither protected original nor staged target:
@@ -410,8 +421,7 @@ fn p0g3d02_cold_review_missing_claim_and_corrupted_original_fail_closed() {
     // A protected BLOB without a V7 claim is NOT a clean restart permit.
     assert!(inert_cold_review(&f).is_err());
     let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
-    let prepared = prepare(&f, &admission).unwrap();
-    drop(prepared);
+    claim_cold_attempt_without_publication(&f, &admission);
     drop(admission);
     let corrupted = rusqlite::Connection::open(
         f.appdata.join("originals.sqlite"),
@@ -430,8 +440,7 @@ fn p0g3d02_cold_review_missing_claim_and_corrupted_original_fail_closed() {
 fn p0g3d02_cold_review_same_bytes_foreign_inode_is_needs_review() {
     let f = fixture();
     let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
-    let held = prepare(&f, &admission).unwrap();
-    drop(held);
+    claim_cold_attempt_without_publication(&f, &admission);
     drop(admission);
     let target = f.root.join(f.intent.path.as_str());
     let parked = f.root.join("physically-retained-original.md");
@@ -448,8 +457,7 @@ fn p0g3d02_cold_review_same_bytes_foreign_inode_is_needs_review() {
 fn p0g3d02_cold_review_changed_baseline_refuses_without_mutating_file() {
     let f = fixture();
     let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
-    let held = prepare(&f, &admission).unwrap();
-    drop(held);
+    claim_cold_attempt_without_publication(&f, &admission);
     drop(admission);
     // A changed durable baseline is disqualifying even if the primary bytes
     // and the independent protected-original BLOB are still identical.
