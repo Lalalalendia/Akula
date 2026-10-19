@@ -48,6 +48,11 @@ pub struct Painter {
 }
 
 impl Painter {
+    #[cfg(not(feature = "installed"))]
+    pub(crate) fn mip_diagnostic_counters(&self) -> (u128, u64, u64) {
+        self.images.diagnostic_counters()
+    }
+
     pub fn new(width: u16, height: u16, settings: RenderSettings) -> Self {
         Painter {
             ctx: RenderContext::new_with(width, height, settings),

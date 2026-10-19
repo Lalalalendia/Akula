@@ -62,6 +62,34 @@ pub(crate) struct FrameStages {
     pub damage: super::damage::DamageStats,
 }
 
+
+#[cfg(not(feature = "installed"))]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StageSample {
+    // Encoder includes mip build. Durations measure submitted CPU work only.
+    pub scene_ms: f64,
+    pub renderer_draw_ms: f64,
+    pub output_present_ms: f64,
+    pub encode_ms: f64,
+    pub vello_ms: f64,
+    pub scroll_shift_ms: f64,
+    pub mip_build_ms: f64,
+    pub raster_pixels: u64,
+    pub shifted_pixels: u64,
+    pub raster_rects: usize,
+    pub mip_hits: u64,
+    pub mip_generated: u64,
+}
+
+#[cfg(not(feature = "installed"))]
+pub(super) fn stages_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("AKULA_EXPERIMENTAL_FRAME_STAGES").ok().as_deref() == Some("1")
+    })
+}
+
 pub struct Renderer {
     pub(super) painter: Painter,
     pub(super) scratch: Vec<u32>,
@@ -78,6 +106,8 @@ pub struct Renderer {
     sprite_changes: Option<Area>,
     stamped: Option<Vec<Sprite>>,
     shifted: Vec<Area>,
+    #[cfg(not(feature = "installed"))]
+    pub(super) last_diagnostic_stages: StageSample,
     #[cfg(test)]
     pub(super) frame: (u16, u16, Vec<u32>),
     #[cfg(test)]
@@ -129,6 +159,8 @@ impl Renderer {
             sprite_changes: None,
             stamped: None,
             shifted: Vec::new(),
+            #[cfg(not(feature = "installed"))]
+            last_diagnostic_stages: StageSample::default(),
             #[cfg(test)]
             frame: (0, 0, Vec::new()),
             #[cfg(test)]
@@ -198,6 +230,16 @@ impl Renderer {
             }
         }
         Some(Frame { width, height, scale, background, base, overlays, fading })
+    }
+
+    #[cfg(not(feature = "installed"))]
+    pub fn diagnostic_stages(&self) -> StageSample {
+        self.last_diagnostic_stages
+    }
+
+    #[cfg(not(feature = "installed"))]
+    pub fn diagnostic_stages_enabled() -> bool {
+        stages_enabled()
     }
 
     pub fn trim(&mut self) {

@@ -69,6 +69,34 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[floor((len(ordered) - 1) * fraction + 0.5)]
 
 
+def stage_samples(row: dict) -> tuple[list[dict], list[dict]]:
+    """Require whole-process samples (incl. first frame) and replay-only samples."""
+    metrics, replay = row["metrics"], row["replay"]
+    whole = metrics.get("frameStages")
+    live = replay.get("stageSamples")
+    if not isinstance(whole, list) or len(whole) != int(metrics["frames"]):
+        raise ValueError("Missing first-frame/whole-process stage samples")
+    if not isinstance(live, list) or len(live) != int(replay["frames"]):
+        raise ValueError("Missing or misaligned replay-only stage samples")
+    required = ("sceneMs", "rendererDrawMs", "outputPresentMs", "encodeMs",
+                "velloMs", "scrollShiftMs", "mipBuildMs", "rasterPixels",
+                "shiftedPixels", "rasterRects", "mipHits", "mipGenerated")
+    for entry in whole + live:
+        if not isinstance(entry, dict):
+            raise ValueError("Invalid stage row")
+        for key in required:
+            value = entry.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value < 0:
+                raise ValueError(f"Missing, negative or non-finite stage: {key}")
+    total_built = sum(item["mipGenerated"] for item in whole)
+    total_build_ms = sum(item["mipBuildMs"] for item in whole)
+    if row["mode"] == "baseline" and (total_built or total_build_ms):
+        raise ValueError("Baseline unexpectedly builds mipmap")
+    if row["mode"] != "baseline" and total_built < 2:
+        raise ValueError("Mipmap mode never built both levels in measured frames")
+    return whole, live
+
+
 def report(rows: list[dict], exe_hash: str,
            scenes: tuple[tuple[str, str], ...]) -> str:
     if len(rows) != len(TRIALS) * len(MODES) * len(scenes):
@@ -81,6 +109,7 @@ def report(rows: list[dict], exe_hash: str,
         "Three trials per mode/scene, randomized AB/BA process order.",
         "RSS = actual process peak working set; not free system memory.",
         "Replay CPU work percentiles cover presented scroll frames ONLY; startup is excluded.",
+        "Per-frame diagnostic stages cover ALL frames including first, plus separately replay-only frames.",
         "Whole-process frame/raster numbers include startup; raster means full renderer.draw(), including encoding and mip generation.",
         "Replay 'missed' uses a fixed 120Hz target; it is NOT a 60Hz Windows jank count.",
         "No CPU metric measures physical monitor scanout or subjective smoothness.",
@@ -115,6 +144,7 @@ def report(rows: list[dict], exe_hash: str,
             rss = median(row["peak_rss_kib"] for row in group) / 1024
             replay_p95 = median(percentile(replay_work(row), 0.95) for row in group)
             replay_p99 = median(percentile(replay_work(row), 0.99) for row in group)
+            stage_data = [stage_samples(row) for row in group]
             frames = [
                 float(value)
                 for row in group
@@ -129,6 +159,19 @@ def report(rows: list[dict], exe_hash: str,
             lines.append(
                 f"| {scene} | {viewport} | {mode} | {replay_p95:.3f} | "
                 f"{replay_p99:.3f} | {frame:.3f} | {raster:.3f} | {rss:.1f} |"
+            )
+            lines.append(
+                f"{scene}/{mode}: stage costs: "
+                f"first-frame mip build median={median(float(full[0]['mipBuildMs']) for full, _ in stage_data):.3f}ms; "
+                f"total-process mip build median={median(sum(float(e['mipBuildMs']) for e in full) for full, _ in stage_data):.3f}ms; "
+                f"replay mip build median={median(sum(float(e['mipBuildMs']) for e in replay) for _, replay in stage_data):.3f}ms."
+            )
+            lines.append(
+                f"{scene}/{mode}: replay mean stage time medians "
+                f"encode={median(sum(e['encodeMs'] for e in live) / len(live) for _, live in stage_data):.3f}ms "
+                f"vello={median(sum(e['velloMs'] for e in live) / len(live) for _, live in stage_data):.3f}ms "
+                f"row_shift={median(sum(e['scrollShiftMs'] for e in live) / len(live) for _, live in stage_data):.3f}ms "
+                f"raster_pixels={median(sum(e['rasterPixels'] for e in live) / len(live) for _, live in stage_data):.0f}."
             )
             lines.append(
                 f"{scene}/{mode}: worst CPU frame {worst:.3f} ms; "
@@ -187,6 +230,9 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     scenes = windows_scenes()
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    # Both modes must record identical diagnostic clocks. No installed build
+    # supports these flags; this runner uses an uninstalled release binary.
+    os.environ["AKULA_EXPERIMENTAL_FRAME_STAGES"] = "1"
     print(f"AKULA_WIN_MIP_BINARY sha256={digest}", flush=True)
     rows = []
     for trial in TRIALS:

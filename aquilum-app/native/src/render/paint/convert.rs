@@ -58,6 +58,11 @@ pub struct Images {
 }
 
 impl Images {
+    #[cfg(not(feature = "installed"))]
+    pub(super) fn diagnostic_counters(&self) -> (u128, u64, u64) {
+        (self.diag.build_nanos, self.diag.final_hits, self.diag.generated)
+    }
+
     fn source(&mut self, data: &ImageData) -> ImageSource {
         let frame = self.frame;
         let (source, used, _) = self.sources.entry(data.data.id()).or_insert_with(|| {
