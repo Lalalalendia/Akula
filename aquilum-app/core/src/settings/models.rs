@@ -211,6 +211,37 @@ impl Default for McpSettings {
     }
 }
 
+/// Public, non-secret setup draft only. This never grants an S3 capability,
+/// stores credentials, binds a remote vault or enables a sync worker.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct YandexS3Onboarding {
+    pub bucket: String,
+    /// The name of an external named AWS credentials profile, never its keys.
+    pub aws_profile_name: String,
+}
+
+impl YandexS3Onboarding {
+    /// Reject accidentally pasted access keys, URLs and other arbitrary data.
+    /// This is a *draft validation*, not proof that an account owns the bucket.
+    pub fn valid_bucket(value: &str) -> bool {
+        if value.is_empty() {
+            return true;
+        }
+        let b = value.as_bytes();
+        (3..=63).contains(&b.len())
+            && b.first().is_some_and(u8::is_ascii_lowercase)
+            && b.last().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+            && !value.contains("--")
+    }
+
+    pub fn valid_profile_name(value: &str) -> bool {
+        (value.is_empty() || value.len() <= 64)
+            && value.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
@@ -225,6 +256,7 @@ pub struct AppConfig {
     pub templates: TemplateSettings,
     pub files: FilesSettings,
     pub updates: UpdateSettings,
+    pub s3_onboarding: YandexS3Onboarding,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
