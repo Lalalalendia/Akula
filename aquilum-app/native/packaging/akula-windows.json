@@ -19,5 +19,6 @@
   ],
   "nsis": {
     "installerIcon": "../icons/icon.ico"
-  }
+  },
+  "name": "aquilum-native"
 }

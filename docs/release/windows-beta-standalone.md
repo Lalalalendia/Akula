@@ -25,6 +25,10 @@ provisional Windows installer icon still uses the inherited icon assets.
 The `windows-beta.yml` workflow builds only `--features installed`,
 never enables `sync-installed-host`, S3 mutation or a release publication.
 It uses a separate cargo-packager configuration with immutable product ID.
+The JSON **must** include `"name": "aquilum-native"`: cargo-packager 0.11.8
+otherwise calls `set_current_dir` on the JSON file itself while inferring a package
+name, triggering Windows `os error 267` before NSIS. The explicit `name` bypasses
+that version-specific bug, and matches the `-p aquilum-native` selection.
 The standalone config lives under `native/packaging`, so icon paths are
 explicitly relative (`../icons/...`). Its `--binaries-dir` is explicitly set
 to the compiled Cargo release directory; `--out-dir` is only the NSIS output.

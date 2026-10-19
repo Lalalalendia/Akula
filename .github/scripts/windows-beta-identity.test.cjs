@@ -20,6 +20,7 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
   assert.ok(cargoVersion);
   assert.equal(config.version, cargoVersion);
   assert.equal(config.productName, 'Akula');
+  assert.equal(config.name, 'aquilum-native', 'must avoid cargo-packager 0.11.8 trying to chdir into JSON file');
   assert.equal(config.identifier, 'io.github.lalalendia.akula');
   assert.notEqual(config.identifier, 'com.dmitriy.aquilum-app');
   assert.deepEqual(config.binaries, [{ path: 'akula-app', main: true }]);
