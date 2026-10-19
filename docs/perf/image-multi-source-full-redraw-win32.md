@@ -5,7 +5,7 @@ Status: **uninstalled developer-only**, not a production change. Builds on [IMG-
 ## Invariants
 
 - Each source file is a genuinely distinct 1280×884 RGBA8 PNG, created deterministically by a pure-Python PNG writer using a compressed sequence of color/alpha bands and per-file seeds. Individual SHA-256 values must be unique; filenames by themselves are insufficient.
-- Test fixtures contain **1, 10 and 100 distinct image embeds**, displayed 200px wide so the normal mip level selector uses L2.
+- Test fixtures contain **1, 10 and 100 distinct PNG source files** with all filenames embedded across a **240-section scrollable note**, plus repeated images to force actual repaint. A single image followed by one heading was insufficient to drive a valid replay in the first CI attempt (0 mip requests). Images display at 200px width so the normal mip level selector targets L2.
 - Mode Eager: existing opt-in mipmap, Medium filtering, 512-frame cache lifetime, builds L1 and L2 using scalar 2×2 reduction.
 - Mode Selective: **identical image content, viewport, Medium sampler, image source identifiers and 32-MiB budget**, but opt-in developer-only direct packed L2, without initial L1 allocation; lazy L1 remains possible.
 - Developer-only \`AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW=1\` forces a complete raster during an active replay, defeating optimization of copying existing BGRA rows. Positive \`AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED\` witness is mandatory. Normal and installed rendering paths remain unchanged.
