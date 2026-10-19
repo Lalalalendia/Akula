@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
   throw 'Windows beta installer smoke is restricted to GitHub-hosted Windows runners'
 }
+. (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
 
 $legacyInstall = Join-Path $env:LOCALAPPDATA 'Aquilum'
 $legacyData = Join-Path $env:APPDATA 'com.dmitriy.aquilum-app'
@@ -55,9 +56,12 @@ New-Item -ItemType Directory -Force -Path $vault | Out-Null
 $note = Join-Path $vault 'First note.md'
 Set-Content -LiteralPath $note -Value "# Akula Beta`n`nExisting local document"
 $original = (Get-FileHash -LiteralPath $note).Hash
+$syntheticEdit = 'AKULA_GUI_EDIT_' + [Guid]::NewGuid().ToString('N')
 
 function Start-And-Close {
+  param([switch]$EditNote)
   $arguments = "--vault `"$vault`" --data-dir `"$akulaData`" --open `"$note`""
+  if ($EditNote) { $arguments += ' --focus' }
   $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
   $visible = $false
   for ($i = 0; $i -lt 30; $i++) {
@@ -67,14 +71,43 @@ function Start-And-Close {
     if ($app.MainWindowHandle -ne 0) { $visible = $true; break }
   }
   if (!$visible) { throw 'Akula window did not appear' }
+  if ($EditNote) {
+    # This must be a genuine key sequence into the focused installed editor.
+    # The script never writes to $note directly after initial fixture creation.
+    Send-AkulaBetaText -Process $app -Text $syntheticEdit
+    $published = $false
+    for ($i = 0; $i -lt 30; $i++) {
+      Start-Sleep -Seconds 1
+      $app.Refresh()
+      if ($app.HasExited) { throw 'Akula exited during the GUI edit' }
+      $onDisk = [System.IO.File]::ReadAllText($note)
+      if ($onDisk.Contains($syntheticEdit)) { $published = $true; break }
+    }
+    if (!$published) {
+      throw 'OS-injected GUI text was not saved to the Markdown file within 30 seconds'
+    }
+    if (!$onDisk.Contains('# Akula Beta') -or !$onDisk.Contains('Existing local document')) {
+      throw 'GUI edit removed original note content'
+    }
+  }
   if (!$app.CloseMainWindow()) { throw 'Akula window refused close request' }
   if (!$app.WaitForExit(20000)) { throw 'Akula did not exit within 20s' }
 }
-Start-And-Close
+Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
-if ((Get-FileHash -LiteralPath $note).Hash -ne $original) { throw 'Unedited source document was changed' }
+$savedText = [System.IO.File]::ReadAllText($note)
+if (!$savedText.Contains($syntheticEdit) -or !$savedText.Contains('# Akula Beta') -or !$savedText.Contains('Existing local document')) {
+  throw 'Installed GUI edit was not preserved after graceful shutdown'
+}
+if ($savedText.Split([string[]]@($syntheticEdit), [StringSplitOptions]::None).Length -ne 2) {
+  throw 'Expected exactly one GUI-injected edit marker'
+}
+$savedHash = (Get-FileHash -LiteralPath $note).Hash
+if ($savedHash -eq $original) { throw 'GUI input had no observable file effect' }
+# The second launch must not change bytes, even after reopening that same note.
 Start-And-Close
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
@@ -87,6 +120,6 @@ for ($i = 0; $i -lt 30 -and ((Test-Path $exe) -or (Test-Path $akulaRegistry)); $
 if (Test-Path $exe) { throw 'Akula executable remains after uninstall' }
 if (Test-Path $akulaRegistry) { throw 'Akula uninstall registry key remains' }
 if (!(Test-Path $state)) { throw 'Uninstall removed Akula user state' }
-if ((Get-FileHash -LiteralPath $note).Hash -ne $original) { throw 'Uninstall changed the local document' }
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Uninstall changed the edited local document' }
 Assert-LegacyUntouched
-Write-Host 'AKULA_WINDOWS_BETA_SMOKE_PASS: clean install, two launches, persistent state, uninstall, upstream markers unchanged'
+Write-Host 'AKULA_WINDOWS_BETA_GUI_EDIT_PASS: NSIS install, real OS keyboard edit, on-disk save, restart, uninstall and upstream sentinels'
