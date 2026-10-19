@@ -12,6 +12,10 @@ default = []
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
+# Experimental MCP concurrency: strictly allowlisted read-only calls may
+# overlap; unknown/mutating calls and mixed batches remain exclusive.
+# Off in default and published installed artifacts.
+mcp-parallel-reads = []
 # Only protocol contracts compile in PR 00; no runtime/network/UI is started.
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.

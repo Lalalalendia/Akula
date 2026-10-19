@@ -28,6 +28,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 [features]
 installed = []
 memory-probe = []
+# Non-release agent read-lane experiment: see Core's MCP gates.
+mcp-parallel-reads = ["aquilum-core/mcp-parallel-reads"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.

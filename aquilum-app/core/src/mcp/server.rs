@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+#[cfg(feature = "mcp-parallel-reads")]
+use std::sync::RwLock;
 use std::thread::{self, JoinHandle};
 
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
@@ -21,7 +23,10 @@ struct Endpoint {
     token: String,
     call: SharedToolCaller,
     stopping: AtomicBool,
+    #[cfg(not(feature = "mcp-parallel-reads"))]
     turn: Mutex<()>,
+    #[cfg(feature = "mcp-parallel-reads")]
+    turn: RwLock<()>,
     open: Mutex<usize>,
     freed: Condvar,
 }
@@ -58,7 +63,10 @@ impl RunningServer {
             token,
             call,
             stopping: AtomicBool::new(false),
+            #[cfg(not(feature = "mcp-parallel-reads"))]
             turn: Mutex::new(()),
+            #[cfg(feature = "mcp-parallel-reads")]
+            turn: RwLock::new(()),
             open: Mutex::new(0),
             freed: Condvar::new(),
         });
@@ -84,7 +92,10 @@ impl RunningServer {
         self.endpoint.freed.notify_all();
         let _ = TcpStream::connect(self.address);
         let _ = self.accepting.join();
+        #[cfg(not(feature = "mcp-parallel-reads"))]
         drop(lock(&self.endpoint.turn));
+        #[cfg(feature = "mcp-parallel-reads")]
+        drop(self.endpoint.turn.write().unwrap_or_else(PoisonError::into_inner));
     }
 }
 
@@ -95,7 +106,16 @@ impl Endpoint {
         connection: &mut Connection,
         keep_alive: bool,
     ) -> Result<bool, Failure> {
+        #[cfg(not(feature = "mcp-parallel-reads"))]
         let _turn = lock(&self.turn);
+        #[cfg(feature = "mcp-parallel-reads")]
+        let _read_turn = independent_read_request(body).then(|| {
+            self.turn.read().unwrap_or_else(PoisonError::into_inner)
+        });
+        #[cfg(feature = "mcp-parallel-reads")]
+        let _write_turn = _read_turn.is_none().then(|| {
+            self.turn.write().unwrap_or_else(PoisonError::into_inner)
+        });
         if self.stopping.load(Ordering::SeqCst) {
             return Err(refused(503, "MCP-сервер остановлен"));
         }
@@ -105,6 +125,42 @@ impl Endpoint {
         };
         connection.send(&response, keep_alive)?;
         Ok(keep_alive)
+    }
+}
+
+
+/// Narrow, deliberately hard-coded allowlist. Never infer read authority
+/// from a tool name prefix, caller-supplied arguments, or MCP descriptions.
+/// A batch with ANY mutation, unknown method or malformed entry is exclusive.
+/// The whitelist is restricted to tested local read/search actions. Other
+/// tools (including navigation, remote lookups and future tools) stay serial.
+#[cfg(feature = "mcp-parallel-reads")]
+fn independent_read_request(body: &str) -> bool {
+    fn read_only(value: &Value) -> bool {
+        let Some(method) = value.get("method").and_then(Value::as_str) else {
+            return false;
+        };
+        match method {
+            "initialize" | "ping" | "tools/list" => true,
+            "tools/call" => value
+                .get("params")
+                .and_then(|params| params.get("name"))
+                .and_then(Value::as_str)
+                .is_some_and(|name| {
+                    matches!(
+                        name,
+                        "read_note" | "note_outline" | "search_notes"
+                            | "get_index_status" | "dataview_syntax"
+                    )
+                }),
+            _ => false,
+        }
+    }
+
+    match serde_json::from_str::<Value>(body) {
+        Ok(Value::Array(items)) => !items.is_empty() && items.iter().all(read_only),
+        Ok(value) => read_only(&value),
+        Err(_) => false,
     }
 }
 
@@ -588,6 +644,156 @@ mod tests {
             .send_string(&"x".repeat(MAX_BODY_BYTES as usize + 1))
             .unwrap_err();
         assert!(matches!(error, ureq::Error::Status(413, _)), "{error}");
+        server.stop();
+    }
+
+    #[cfg(feature = "mcp-parallel-reads")]
+    #[test]
+    fn read_lane_requires_an_exact_known_non_mutating_tool() {
+        assert!(independent_read_request(&tool_call("read_note")));
+        assert!(independent_read_request(&tool_call("search_notes")));
+        assert!(independent_read_request(&initialize()));
+        assert!(independent_read_request(&json!([
+            { "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {"name": "read_note", "arguments": {}} },
+            { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "get_index_status", "arguments": {}} },
+        ]).to_string()));
+
+        // Unknown, mutated, UI navigation and mixed batches are EXCLUSIVE,
+        // not reclassified by caller-supplied adjectives or prefixes.
+        for name in [
+            "create_note", "update_note", "set_frontmatter", "restore_version",
+            "delete_note", "rename_note", "move_note", "empty_trash",
+            "switch_workspace", "open_note", "read_note_and_update",
+            "future_read_tool",
+        ] {
+            assert!(!independent_read_request(&tool_call(name)), "{name}");
+        }
+        assert!(!independent_read_request(&json!([
+            { "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {"name": "read_note"} },
+            { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "update_note"} }
+        ]).to_string()));
+        assert!(!independent_read_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}"#
+        ));
+        assert!(!independent_read_request("not json"));
+        assert!(!independent_read_request("[]"));
+    }
+
+    #[cfg(feature = "mcp-parallel-reads")]
+    #[test]
+    fn independent_mcp_reads_can_overlap_over_real_http() {
+        let current = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new(AtomicBool::new(false));
+        let (entered, arrivals) = mpsc::channel();
+        let (inside, max, free) = (
+            Arc::clone(&current), Arc::clone(&peak), Arc::clone(&release)
+        );
+        let (server, url) = start(Arc::new(move |name, _| {
+            assert_eq!(name, "read_note");
+            let running = inside.fetch_add(1, Ordering::SeqCst) + 1;
+            max.fetch_max(running, Ordering::SeqCst);
+            entered.send(()).unwrap();
+            while !free.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(2));
+            }
+            inside.fetch_sub(1, Ordering::SeqCst);
+            Ok(json!({"read": true}))
+        }));
+        let clients = (0..3).map(|_| {
+            let url = url.clone();
+            thread::spawn(move || status(
+                ureq::post(&url)
+                    .set("Authorization", &bearer())
+                    .send_string(&tool_call("read_note"))
+            ))
+        }).collect::<Vec<_>>();
+
+        // A serial implementation could enter only one of these calls.
+        let first = arrivals.recv_timeout(Duration::from_secs(6));
+        let second = arrivals.recv_timeout(Duration::from_secs(6));
+        release.store(true, Ordering::SeqCst);
+        assert!(first.is_ok() && second.is_ok(), "independent reads serialized");
+        assert!(clients.into_iter().all(|client| client.join().unwrap() == Some(200)));
+        assert!(peak.load(Ordering::SeqCst) >= 2);
+        server.stop();
+    }
+
+    #[cfg(feature = "mcp-parallel-reads")]
+    #[test]
+    fn writer_does_not_enter_while_a_read_has_the_turn() {
+        let (started, rx) = mpsc::channel::<String>();
+        let release = Arc::new(AtomicBool::new(false));
+        let free = Arc::clone(&release);
+        let (server, url) = start(Arc::new(move |name, _| {
+            started.send(name.to_string()).unwrap();
+            if name == "read_note" {
+                while !free.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(2));
+                }
+            }
+            Ok(Value::Null)
+        }));
+        let first_url = url.clone();
+        let reader = thread::spawn(move || status(
+            ureq::post(&first_url)
+                .set("Authorization", &bearer())
+                .send_string(&tool_call("read_note"))
+        ));
+        assert_eq!(rx.recv_timeout(Duration::from_secs(6)).unwrap(), "read_note");
+        let writer = thread::spawn(move || status(
+            ureq::post(&url)
+                .set("Authorization", &bearer())
+                .send_string(&tool_call("update_note"))
+        ));
+        // Time bounded negative assertion. The reader is deliberately held.
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ), "writer entered while read was active");
+        release.store(true, Ordering::SeqCst);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(6)).unwrap(), "update_note");
+        assert_eq!(reader.join().unwrap(), Some(200));
+        assert_eq!(writer.join().unwrap(), Some(200));
+        server.stop();
+    }
+
+    #[cfg(feature = "mcp-parallel-reads")]
+    #[test]
+    #[ignore = "synthetic transport-only measurement; run manually, not an Akula vault throughput claim"]
+    fn measure_synthetic_http_mcp_read_lane() {
+        use std::time::Instant;
+        let (server, url) = start(Arc::new(|name, _| {
+            assert_eq!(name, "read_note");
+            thread::sleep(Duration::from_millis(30));
+            Ok(Value::Null)
+        }));
+        for workers in [1, 4, 8, 16] {
+            let started = Instant::now();
+            let threads = (0..workers).map(|_| {
+                let url = url.clone();
+                thread::spawn(move || {
+                    for _ in 0..4 {
+                        let response = ureq::post(&url)
+                            .set("Authorization", &bearer())
+                            .send_string(&tool_call("read_note")).unwrap();
+                        assert_eq!(response.status(), 200);
+                    }
+                })
+            }).collect::<Vec<_>>();
+            for worker in threads {
+                worker.join().unwrap();
+            }
+            let elapsed = started.elapsed().as_secs_f64();
+            eprintln!(
+                "AKULA_MCP_SYNTHETIC workers={workers} requests={} seconds={elapsed:.3} rps={:.1}",
+                workers * 4, workers as f64 * 4.0 / elapsed
+            );
+        }
         server.stop();
     }
 
