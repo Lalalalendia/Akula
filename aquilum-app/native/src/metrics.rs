@@ -18,6 +18,8 @@ pub struct Metrics {
     total: Vec<f64>,
     #[cfg(not(feature = "installed"))]
     live: Option<Live>,
+    #[cfg(not(feature = "installed"))]
+    stage_samples: Vec<crate::render::StageSample>,
 }
 
 #[cfg(not(feature = "installed"))]
@@ -89,6 +91,11 @@ impl Metrics {
     }
 
     #[cfg(not(feature = "installed"))]
+    pub fn record_stage(&mut self, stage: crate::render::StageSample) {
+        self.stage_samples.push(stage);
+    }
+
+    #[cfg(not(feature = "installed"))]
     pub fn toggle_live(&mut self) {
         self.live = if self.live.is_some() { None } else { Some(Live::default()) };
     }
@@ -136,6 +143,18 @@ impl Metrics {
                     ",\"rasterSamplesMs\":{raster},\"frameSamplesMs\":{frame}}}"
                 ));
             }
+        }
+        #[cfg(not(feature = "installed"))]
+        if !self.stage_samples.is_empty() {
+            assert_eq!(self.stage_samples.len(), self.frames as usize,
+                "diagnostic stage collection must include every frame, even the first");
+            let stages = serde_json::to_string(&self.stage_samples)
+                .expect("finite whole-process renderer stages");
+            debug_assert!(json.ends_with('}'));
+            json.pop();
+            json.push_str(",\"frameStages\":");
+            json.push_str(&stages);
+            json.push('}');
         }
         if let Err(e) = std::fs::write(path, &json) {
             eprintln!("не удалось записать замеры в {}: {e}", path.display());

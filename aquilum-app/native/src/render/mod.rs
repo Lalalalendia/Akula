@@ -24,4 +24,6 @@ mod colr_bounds_tests;
 pub use offscreen::offscreen;
 pub use pixels::{brush, from_rgba};
 pub use renderer::Renderer;
+#[cfg(not(feature = "installed"))]
+pub use renderer::StageSample;
 pub use surface::Surfaces;
