@@ -759,12 +759,21 @@ mod tests {
     fn stop_drains_admitted_reads_and_rejects_queued_mutation() {
         let finished_reads = Arc::new(AtomicUsize::new(0));
         let started_writes = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
         let (started, entered) = mpsc::channel();
-        let (finished, writes) = (Arc::clone(&finished_reads), Arc::clone(&started_writes));
+        let (finished, writes, release_in_tool) = (
+            Arc::clone(&finished_reads),
+            Arc::clone(&started_writes),
+            Arc::clone(&release),
+        );
         let (server, url) = start(Arc::new(move |name, _| {
             if name == "read_note" {
                 let _ = started.send(());
-                thread::sleep(Duration::from_millis(300));
+                let (state, changed) = &*release_in_tool;
+                let mut released = lock(state);
+                while !*released {
+                    released = changed.wait(released).unwrap_or_else(PoisonError::into_inner);
+                }
                 finished.fetch_add(1, Ordering::SeqCst);
             } else {
                 writes.fetch_add(1, Ordering::SeqCst);
@@ -805,7 +814,20 @@ mod tests {
         }
         assert!(waiting, "writer was not queued behind readers");
 
-        server.stop();
+        let stopping = Arc::clone(&server.endpoint);
+        let stopping_thread = thread::spawn(move || server.stop());
+        for _ in 0..1000 {
+            if stopping.stopping.load(Ordering::SeqCst) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(stopping.stopping.load(Ordering::SeqCst));
+        let (state, changed) = &*release;
+        *lock(state) = true;
+        changed.notify_all();
+
+        stopping_thread.join().unwrap();
         for read in readers {
             assert_eq!(read.join().unwrap(), Some(200));
         }
