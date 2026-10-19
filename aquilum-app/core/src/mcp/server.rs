@@ -605,10 +605,22 @@ mod tests {
         let vault = dir.path().join("vault");
         fs::create_dir_all(&appdata).unwrap();
         fs::create_dir_all(&vault).unwrap();
-        fs::write(vault.join("Conformance.md"), "# Conformance\n\nTemporary note.\n").unwrap();
         let root = fs::canonicalize(&vault).unwrap();
         let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
         core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        // SDK smoke uses the same File Gate and revisions as installed Akula.
+        // All data and credentials are disposable.
+        crate::files::gate::create(
+            &core,
+            &root.join("Conformance.md"),
+            "# Conformance\n\nTemporary note.\n",
+            crate::history::Source::Agent,
+            None,
+        )
+        .unwrap();
+        if let Some(path) = std::env::var_os("AKAI_MCP_WORKSPACE_FILE") {
+            fs::write(path, root.to_string_lossy().as_bytes()).unwrap();
+        }
         let tool_core = Arc::clone(&core);
         let server = RunningServer::start(
             0,
