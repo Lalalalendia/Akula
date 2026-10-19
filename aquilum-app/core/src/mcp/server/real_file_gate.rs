@@ -190,6 +190,26 @@ fn concurrent_mcp_reads_survive_real_file_gate_revisions_and_preserve_history() 
         history["total"].as_u64().unwrap_or(0) > 0,
         "real File Gate modifications must retain note history: {history}"
     );
+    // A clean Core restart must retain both the complete file bytes and
+    // the HistoryService records created by real File Gate operations.
+    let persisted_bytes = fs::read(&live).unwrap();
+    let persisted_hash = blake3::hash(&persisted_bytes);
+    let history_count = history["total"].as_u64().unwrap();
     server.stop();
     core.shutdown();
+    drop(core);
+
+    let restarted = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    assert_eq!(blake3::hash(&fs::read(&live).unwrap()), persisted_hash);
+    let restored_history = crate::mcp::tools::call(
+        &restarted,
+        "note_history",
+        &json!({ "note": "Live.md", "workspace": workspace, "limit": 100 }),
+    )
+    .expect("history survives reopening Core");
+    assert!(
+        restored_history["total"].as_u64().unwrap_or(0) >= history_count,
+        "history count was lost after Core restart: {restored_history}"
+    );
+    restarted.shutdown();
 }
