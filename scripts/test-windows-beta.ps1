@@ -138,7 +138,7 @@ function Start-And-Close {
     }
     $actual = & $normalizeText $copied
     $expected = & $normalizeText ([System.IO.File]::ReadAllText($note))
-    if ($actual -ne $expected) {
+    if (![string]::Equals($actual, $expected, [StringComparison]::Ordinal)) {
       throw 'Reopened editor copy differs from the exact saved Markdown note'
     }
     if (!$actual.Contains($syntheticEdit) -or !$actual.Contains('# Akula Beta') -or
