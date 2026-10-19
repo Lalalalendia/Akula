@@ -87,6 +87,13 @@ impl RevisionDag {
         self.pending.len()
     }
 
+    /// A pending child is not yet a verified revision/head. Consumers which
+    /// need a complete local snapshot can fail closed for this one document
+    /// without blocking unrelated documents that have missing ancestors.
+    pub fn has_pending_for_document(&self, document_id: DocumentId) -> bool {
+        self.pending.values().any(|record| record.document_id == document_id)
+    }
+
     pub fn get(&self, id: RevisionId) -> Option<&RevisionRecord> {
         // Do not expose children whose ancestry is not yet verified.
         self.active.get(&id)
@@ -252,6 +259,28 @@ mod tests {
                 blob_hash: hash(text),
             },
         }
+    }
+
+    #[test]
+    fn pending_is_scoped_by_document_for_read_only_consumers() {
+        let mut dag = RevisionDag::new();
+        let known = DocumentId::new();
+        let delayed = DocumentId::new();
+        let k = RevisionId::new();
+        let missing = RevisionId::new();
+        let child = RevisionId::new();
+        dag.ingest(record(k, known, vec![], b"known")).unwrap();
+        assert_eq!(
+            dag.ingest(record(child, delayed, vec![missing], b"pending")),
+            Ok(IngestOutcome::Pending),
+        );
+        assert!(!dag.has_pending_for_document(known));
+        assert!(dag.has_pending_for_document(delayed));
+        assert_eq!(dag.heads(known), BTreeSet::from([k]));
+        assert!(dag.heads(delayed).is_empty());
+        dag.ingest(record(missing, delayed, vec![], b"root")).unwrap();
+        assert!(!dag.has_pending_for_document(delayed));
+        assert_eq!(dag.heads(delayed), BTreeSet::from([child]));
     }
 
     #[test]
