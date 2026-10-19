@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-const TOKEN: &str = "f1a4d32807ae3901b2dcbca07244a9086eef2f9550e7d1c600fd5b19e3cd407";
+const TOKEN: &str = "f1a4d32807ae3901b2dcbca07244a9086eef2f9550e7d1c600fd5b19e3cd4070";
 const BAD_TOKEN: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 fn program() -> Command {
