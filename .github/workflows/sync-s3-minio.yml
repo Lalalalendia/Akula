@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/src/sync/yandex_readonly_probe.rs'
       - 'aquilum-app/core/src/sync/profile_binding.rs'
       - 'aquilum-app/core/src/sync/host_admission.rs'
       - 'aquilum-app/core/src/sync/s3_preimage_capture.rs'
@@ -89,6 +90,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::tests -- --skip live_minio_
+      - name: Validate Yandex read-only probe admission and error taxonomy
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 yandex_readonly_probe::tests
       - name: Prove real MinIO server-side conditions and bounded streaming
         shell: bash
         working-directory: aquilum-app
