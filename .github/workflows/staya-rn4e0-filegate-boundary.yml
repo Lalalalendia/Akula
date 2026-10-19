@@ -1,0 +1,86 @@
+name: Staya RN4E0 — interprocess grant/File Gate boundary lab
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e0-filegate-boundary-*"
+    paths:
+      - "aquilum-app/core/tests/rn4e_filegate_boundary.rs"
+      - "docs/sync/staya-core-filegate-boundary-01.md"
+      - ".github/workflows/staya-rn4e0-filegate-boundary.yml"
+  pull_request:
+    paths:
+      - "aquilum-app/core/tests/rn4e_filegate_boundary.rs"
+      - "docs/sync/staya-core-filegate-boundary-01.md"
+      - ".github/workflows/staya-rn4e0-filegate-boundary.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  filegate-boundary:
+    name: Interprocess grant + File Gate — ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTFLAGS: "-Zcrate-attr=feature(if_let_guard)"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Verify only isolated RN4E0 files changed
+        run: |
+          set -euo pipefail
+          grep -q 'staya-core-grant-lab = \[\]' aquilum-app/core/Cargo.toml
+          grep -q '#\[cfg(feature = "staya-core-grant-lab")\]' aquilum-app/core/src/sync/mod.rs
+          if grep -q 'staya-core-grant-lab' aquilum-app/native/Cargo.toml; then
+            echo "unexpected native/product activation" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import subprocess
+          changed = set(subprocess.check_output([
+              "git", "diff", "--name-only",
+              "f9710cc22885c878290b883c908a93624d00cdce..HEAD"
+          ], text=True).splitlines())
+          allowed = {
+              "aquilum-app/core/tests/rn4e_filegate_boundary.rs",
+              "docs/sync/staya-core-filegate-boundary-01.md",
+              ".github/workflows/staya-rn4e0-filegate-boundary.yml",
+          }
+          assert changed <= allowed, f"unexpected edit: {changed - allowed}"
+          assert "aquilum-app/core/tests/rn4e_filegate_boundary.rs" in changed
+          assert "aquilum-app/core/src/sync/peer_grant_lab.rs" not in changed
+          print("PASS: RN-4E0 is a test-only application-authorization fixture")
+          PY
+      - name: Check Rust formatting
+        run: |
+          rustfmt --edition 2021 --check aquilum-app/core/tests/rn4e_filegate_boundary.rs
+      - name: Run ledger, race fence and real File Gate process tests
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features staya-core-grant-lab \
+            --test rn4c_peer_grant_lab \
+            --test rn4d_revocation_fence \
+            --test rn4e_filegate_boundary \
+            -- --nocapture --test-threads=1
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Record narrow acceptance boundary
+        run: |
+          echo "RN4E0 ${{ matrix.platform }}: real Core File Gate fixture and cross-process SQLite revocation ordering only." >> "$GITHUB_STEP_SUMMARY"
+          echo "Unproven: real remote QUIC identity, Bao staging, OS-pinned custody, durable intent, signed receipt, Android, power loss and product synchronization." >> "$GITHUB_STEP_SUMMARY"
