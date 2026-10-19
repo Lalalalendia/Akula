@@ -15,6 +15,8 @@ pub mod admission;
 #[cfg(target_os = "linux")]
 pub mod bounded_staging;
 #[cfg(target_os = "linux")]
+pub mod bao_outboard_audit;
+#[cfg(target_os = "linux")]
 pub mod durable_admission;
 #[cfg(target_os = "linux")]
 pub mod joint_staging_audit;
