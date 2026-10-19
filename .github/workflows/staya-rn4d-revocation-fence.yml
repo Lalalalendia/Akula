@@ -1,0 +1,86 @@
+name: Staya RN4D — revocation race fence lab
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4d-revocation-fence-*"
+    paths:
+      - "aquilum-app/core/src/sync/peer_grant_lab.rs"
+      - "aquilum-app/core/tests/rn4d_revocation_fence.rs"
+      - "docs/sync/staya-revocation-fence-01.md"
+      - ".github/workflows/staya-rn4d-revocation-fence.yml"
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/sync/peer_grant_lab.rs"
+      - "aquilum-app/core/tests/rn4d_revocation_fence.rs"
+      - ".github/workflows/staya-rn4d-revocation-fence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  revocation-boundary:
+    name: Revocation race & scope fence — ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTFLAGS: "-Zcrate-attr=feature(if_let_guard)"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Check default-off product isolation
+        run: |
+          set -euo pipefail
+          grep -q 'staya-core-grant-lab = \[\]' aquilum-app/core/Cargo.toml
+          grep -q '#\[cfg(feature = "staya-core-grant-lab")\]' aquilum-app/core/src/sync/mod.rs
+          if grep -q 'staya-core-grant-lab' aquilum-app/native/Cargo.toml; then
+            echo "Unexpected production/native activation" >&2
+            exit 1
+          fi
+          git diff --name-only 1ff92aa7c0fe6c349cdeabc1ec874cad4494625d..HEAD > /tmp/rn4d-files
+          python3 - <<'PY'
+          from pathlib import Path
+          found = set(Path("/tmp/rn4d-files").read_text().splitlines())
+          allowed = {
+              "aquilum-app/core/src/sync/peer_grant_lab.rs",
+              "aquilum-app/core/tests/rn4d_revocation_fence.rs",
+              "docs/sync/staya-revocation-fence-01.md",
+              ".github/workflows/staya-rn4d-revocation-fence.yml",
+          }
+          assert found <= allowed, f"unexpected source edit: {found - allowed}"
+          assert "aquilum-app/core/src/sync/peer_grant_lab.rs" in found
+          assert "aquilum-app/core/tests/rn4d_revocation_fence.rs" in found
+          print("PASS: isolated experimental source only")
+          PY
+      - name: Check new Rust code formatting
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/sync/peer_grant_lab.rs
+          rustfmt --edition 2021 --check aquilum-app/core/tests/rn4d_revocation_fence.rs
+      - name: Run existing Core grant journal + new race-fence tests with pinned Cargo.lock
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features staya-core-grant-lab \
+            --test rn4c_peer_grant_lab --test rn4d_revocation_fence \
+            -- --nocapture --test-threads=1
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Record precise evidence limit
+        run: |
+          echo "RN-4D on ${{ matrix.platform }}: SQLite BEGIN IMMEDIATE serializes application grant preflight and cooperative revocation; no production write path." >> "$GITHUB_STEP_SUMMARY"
+          echo "Still unproven: installer-owned trusted identity, real QUIC EndpointId, Bao/staging, File Gate atomic custody, Android phone and actual P2P synchronization." >> "$GITHUB_STEP_SUMMARY"
