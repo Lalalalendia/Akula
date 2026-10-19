@@ -274,11 +274,21 @@ pub(crate) enum InertColdS3FileState {
     NeedsReview,
 }
 
+/// V8 metadata may correlate with the protected source and pinned primary,
+/// but the independent HistoryService version is not verified by this stage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InertColdV8State {
+    Missing,
+    LocalCorrelationOnly,
+}
+
 #[must_use = "recovery observation is forensic only and never authorizes S3 apply"]
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct InertColdS3Review {
     pub(crate) operation_id: super::OperationId,
     pub(crate) file_state: InertColdS3FileState,
+    /// V8 is forensic metadata, never an apply, ACK or receipt capability.
+    pub(crate) v8_state: InertColdV8State,
 }
 
 /// P0g-3d-02: read-only post-restart inspection of an *existing* V7 claim,
@@ -381,6 +391,25 @@ pub(crate) fn inspect_cold_s3_replace_hold(
         InertColdS3FileState::NeedsReview
     };
 
+    // A V8 candidate is optional: an old V7 claim must remain reviewable
+    // without manufacturing a new receipt. If V8 exists, require its exact
+    // persisted evidence to match the live OS-pinned read and protected BLOB.
+    // This does not prove the independent HistoryService bytes or power-loss
+    // durability, so even a positive result remains HOLD.
+    let v8 = journal.read_existing_replace_receipt_candidate(operation)
+        .map_err(refused)?;
+    let v8_state = match &v8 {
+        None => InertColdV8State::Missing,
+        Some(candidate) => {
+            if file_state != InertColdS3FileState::CandidateVisibleWithoutReceipt {
+                return Err(refused("V8 exists but primary is not the published candidate"));
+            }
+            candidate.validate_cold_local_evidence(&claim, &original, &first)
+                .map_err(refused)?;
+            InertColdV8State::LocalCorrelationOnly
+        }
+    };
+
     admission.recheck_registered_root().map_err(refused)?;
     if root_identity(&pinned)? != claim.root
         || bindings.load_for_registered(admission).map_err(refused)?.as_ref()
@@ -392,8 +421,10 @@ pub(crate) fn inspect_cold_s3_replace_hold(
             .as_ref() != Some(&claim)
         || protected.read_bound_preimage(operation).map_err(refused)?
             .as_ref() != Some(&original)
+        || journal.read_existing_replace_receipt_candidate(operation)
+            .map_err(refused)?.as_ref() != v8.as_ref()
     {
         return Err(refused("cold review evidence changed during inspection"));
     }
-    Ok(InertColdS3Review { operation_id: operation, file_state })
+    Ok(InertColdS3Review { operation_id: operation, file_state, v8_state })
 }

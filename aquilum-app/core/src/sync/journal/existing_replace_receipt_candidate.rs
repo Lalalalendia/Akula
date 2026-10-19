@@ -96,6 +96,53 @@ impl InertExistingReplaceReceiptCandidate {
         Ok(candidate)
     }
 
+    /// P0g-3d-06: compare previously persisted V8 metadata against a
+    /// *newly* reopened, separately protected original and OS-pinned primary
+    /// read. This deliberately DOES NOT re-read the HistoryService version,
+    /// whose ID/hash/length remain an unverified stored assertion here.
+    /// No S3 apply/ACK, original cleanup or baseline transition is possible.
+    #[allow(dead_code)]
+    pub(crate) fn validate_cold_local_evidence(
+        &self,
+        claim: &ReadOnlyExistingReplaceAttempt,
+        protected: &BoundProtectedOriginal,
+        observed: &IdentifiedRead,
+    ) -> JournalResult<()> {
+        self.check_fields().map_err(|_| JournalError::CorruptedRecord)?;
+        let observed_file = observed.identity.ok_or(JournalError::CorruptedRecord)?;
+        if self.operation_id != claim.operation_id
+            || self.vault_id != claim.vault_id
+            || self.document_id != claim.document_id
+            || self.path != claim.path
+            || self.baseline_revision != claim.baseline_revision
+            || self.baseline_operation != claim.baseline_operation
+            || self.intent_digest != claim.intent_digest
+            || self.preimage_hash != claim.preimage_hash
+            || self.target_hash != claim.target_hash
+            || self.original_root != claim.root
+            || self.original_file != claim.original_file
+            || self.original_length != claim.original_length
+            || protected.original.operation_id != self.operation_id
+            || protected.original.path != self.path
+            || protected.original.content_hash != self.preimage_hash
+            || protected.original.bytes.len() as u64 != self.original_length
+            || blake3::hash(&protected.original.bytes).to_hex().as_str()
+                != self.preimage_hash
+            || protected.root != self.original_root
+            || protected.file != self.original_file
+            || observed_file != self.published_file
+            || observed_file == self.original_file
+            || observed_file.device != self.original_root.device
+            || observed.snapshot.bytes.len() as u64 != self.target_length
+            || observed.snapshot.content_hash != self.target_hash
+            || blake3::hash(&observed.snapshot.bytes).to_hex().as_str()
+                != self.target_hash
+        {
+            return Err(JournalError::CorruptedRecord);
+        }
+        Ok(())
+    }
+
     pub(crate) fn operation_id(&self) -> OperationId {
         self.operation_id
     }
@@ -443,6 +490,64 @@ mod tests {
         ));
         assert_eq!(cold.get(intent.operation_id).unwrap().unwrap().phase,
             JournalPhase::Staged);
+    }
+
+    #[test]
+    fn v8_cold_local_correlation_rejects_foreign_file_and_changed_original() {
+        use crate::sync::LocalFileSnapshot;
+
+        let (_dir,mut journal,intent,original,candidate)=fixture();
+        let claim=journal.record_existing_replace_attempt_once(
+            &intent,&original,
+        ).unwrap();
+        // The unit fixture supplies IdentifiedRead directly. It proves the
+        // field constraints, NOT actual OS handle pinning; real pinned reads
+        // are supplied by the guarded Core inspector.
+        let mut observed=IdentifiedRead {
+            identity:Some(candidate.published_file),
+            snapshot:LocalFileSnapshot {
+                bytes:b"external immutable bytes".to_vec(),
+                content_hash:intent.expected_content_hash.clone(),
+            },
+        };
+        assert!(candidate.validate_cold_local_evidence(
+            &claim,&original,&observed,
+        ).is_ok());
+
+        observed.identity=Some(original.file);
+        assert!(candidate.validate_cold_local_evidence(
+            &claim,&original,&observed,
+        ).is_err(),"same target bytes at original inode must not verify V8");
+
+        observed.identity=Some(PinnedFileIdentity {
+            device:original.root.device,file:999,
+        });
+        assert!(candidate.validate_cold_local_evidence(
+            &claim,&original,&observed,
+        ).is_err(),"foreign inode with identical bytes must fail");
+        observed.identity=Some(candidate.published_file);
+        observed.snapshot.bytes[0]=b'X';
+        assert!(candidate.validate_cold_local_evidence(
+            &claim,&original,&observed,
+        ).is_err(),"changed bytes with stale reported hash must fail");
+        observed.snapshot.bytes[0]=b'e';
+        observed.identity=None;
+        assert!(candidate.validate_cold_local_evidence(
+            &claim,&original,&observed,
+        ).is_err(),"missing physical ID must fail");
+        observed.identity=Some(candidate.published_file);
+
+        let mut tampered=original.clone();
+        tampered.original.bytes[0]=b'X';
+        assert!(candidate.validate_cold_local_evidence(
+            &claim,&tampered,&observed,
+        ).is_err(),"changed protected bytes must not pass cold join");
+
+        let mut foreign=claim.clone();
+        foreign.operation_id=OperationId::new();
+        assert!(candidate.validate_cold_local_evidence(
+            &foreign,&original,&observed,
+        ).is_err(),"a different one-shot claim cannot reuse candidate");
     }
 
     #[test]
