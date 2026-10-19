@@ -22,6 +22,9 @@ sync-installed-host = ["host-custody"]
 # A separate opt-in hardening flavor: compiler-pinned independent install
 # witness, not a released OS-owned installer or hostile-writer isolation.
 sync-installed-host-witness = ["sync-installed-host"]
+# Inert RN-4C research: registered Core workspace + durable P2P grant epochs.
+# No P2P network worker, File Gate permission, or production synchronization.
+staya-core-grant-lab = []
 # Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
 sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
 
