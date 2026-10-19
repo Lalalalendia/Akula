@@ -50,13 +50,17 @@ impl Host {
             Err(err) => report(&format!("вывод кадра: {err}")),
         }
         self.touchpad = crate::touchpad::Touchpad::attach(&*window);
-        self.window = Some(window);
         if let Some(note) = self.args.open.clone() {
-            self.app.open(&mut root, note);
+            // The session title was set before processing --open. Refresh it
+            // only after the requested document has actually become active.
+            if self.app.open(&mut root, note) {
+                window.set_title(&self.app.title());
+            }
         }
         if self.args.focus {
             root.focus_on(self.app.editor_id());
         }
+        self.window = Some(window);
         self.root = Some(root);
         self.on_wake(event_loop);
         self.redraw();
