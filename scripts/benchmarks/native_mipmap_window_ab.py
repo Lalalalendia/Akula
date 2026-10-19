@@ -75,7 +75,148 @@ def fixture() -> str:
     return header + body
 
 
+# Measure the peak working set on Windows, equivalent in meaning to the
+# Linux process VmHWM counter. No fallback-to-zero is allowed by the A/B.
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _ProcessMemoryCounters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    _open_process = _kernel32.OpenProcess
+    _open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _open_process.restype = wintypes.HANDLE
+    _close_handle = _kernel32.CloseHandle
+    _close_handle.argtypes = [wintypes.HANDLE]
+    _close_handle.restype = wintypes.BOOL
+    _get_memory = _psapi.GetProcessMemoryInfo
+    _get_memory.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(_ProcessMemoryCounters), wintypes.DWORD,
+    ]
+    _get_memory.restype = wintypes.BOOL
+
+
+def windows_peak_rss_kib(pid: int) -> int:
+    if os.name != "nt":
+        raise RuntimeError("Windows process memory query requires Windows")
+    handle = _open_process(0x0400 | 0x0010, False, pid)
+    if not handle:
+        return 0  # Process may exit between poll() and OpenProcess.
+    try:
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not _get_memory(handle, ctypes.byref(counters), counters.cb):
+            return 0
+        return int(counters.PeakWorkingSetSize // 1024)
+    finally:
+        _close_handle(handle)
+
+
+# Real Win32 top-level HWND witness. A successful replay JSON alone is NOT
+# sufficient evidence that a native desktop window was ever presented.
+if os.name == "nt":
+    from ctypes import wintypes
+
+    class _WinRect(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG), ("top", wintypes.LONG),
+            ("right", wintypes.LONG), ("bottom", wintypes.LONG),
+        ]
+
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _window_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    _enum_windows = _user32.EnumWindows
+    _enum_windows.argtypes = [_window_proc, wintypes.LPARAM]
+    _enum_windows.restype = wintypes.BOOL
+    _window_pid = _user32.GetWindowThreadProcessId
+    _window_pid.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    _window_pid.restype = wintypes.DWORD
+    _is_visible = _user32.IsWindowVisible
+    _is_visible.argtypes = [wintypes.HWND]
+    _is_visible.restype = wintypes.BOOL
+    _window_rect = _user32.GetWindowRect
+    _window_rect.argtypes = [wintypes.HWND, ctypes.POINTER(_WinRect)]
+    _window_rect.restype = wintypes.BOOL
+    _window_title = _user32.GetWindowTextW
+    _window_title.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _window_title.restype = ctypes.c_int
+    _is_minimized = _user32.IsIconic
+    _is_minimized.argtypes = [wintypes.HWND]
+    _is_minimized.restype = wintypes.BOOL
+    _get_system_metrics = _user32.GetSystemMetrics
+    _get_system_metrics.argtypes = [ctypes.c_int]
+    _get_system_metrics.restype = ctypes.c_int
+    _dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
+    _dwm_get_attribute = _dwm.DwmGetWindowAttribute
+    _dwm_get_attribute.argtypes = [
+        wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    _dwm_get_attribute.restype = ctypes.c_long
+
+
+def windows_gui_witness(pid: int) -> dict | None:
+    if os.name != "nt":
+        return None
+    matches = []
+    desktop_w = _get_system_metrics(0)
+    desktop_h = _get_system_metrics(1)
+    if desktop_w < 800 or desktop_h < 600:
+        return None
+
+    @_window_proc
+    def scan(hwnd, _):
+        owner = wintypes.DWORD()
+        _window_pid(hwnd, ctypes.byref(owner))
+        if owner.value != pid or not _is_visible(hwnd) or _is_minimized(hwnd):
+            return True
+        # Akula uses DWM cloaking while its initial scene is being prepared.
+        # IsWindowVisible alone can return TRUE for a cloaked window.
+        cloaked = wintypes.DWORD(0)
+        if (_dwm_get_attribute(hwnd, 14, ctypes.byref(cloaked),
+                               ctypes.sizeof(cloaked)) != 0 or cloaked.value != 0):
+            return True
+        bounds = _WinRect()
+        if not _window_rect(hwnd, ctypes.byref(bounds)):
+            return True
+        if (bounds.right <= 0 or bounds.bottom <= 0
+                or bounds.left >= desktop_w or bounds.top >= desktop_h):
+            return True
+        width, height = bounds.right - bounds.left, bounds.bottom - bounds.top
+        if width < 400 or height < 300:
+            return True
+        buf = ctypes.create_unicode_buffer(256)
+        _window_title(hwnd, buf, len(buf))
+        # The installed GUI test already requires the Akula title. Verify
+        # the very same process owns a visible normal application window.
+        if "Akula" not in buf.value:
+            return True
+        matches.append({
+            "width": width, "height": height, "title_akula": True,
+            "uncloaked": True, "on_primary_desktop": True,
+        })
+        return False
+
+    _enum_windows(scan, 0)
+    return matches[0] if matches else None
+
+
 def rss_kib(pid: int) -> int:
+    if os.name == "nt":
+        return windows_peak_rss_kib(pid)
     try:
         content = Path(f"/proc/{pid}/status").read_text()
     except OSError:
@@ -128,12 +269,15 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER", None)
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER", None)
     rss = 0
+    window_witness = None
     with log_file.open("wb") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
         started = time.monotonic()
         try:
             while process.poll() is None:
                 rss = max(rss, rss_kib(process.pid))
+                if os.name == "nt" and window_witness is None:
+                    window_witness = windows_gui_witness(process.pid)
                 if time.monotonic() - started > timeout:
                     raise TimeoutError(f"{scene}/{trial}/{mode}: timed out")
                 time.sleep(0.05)
@@ -145,6 +289,8 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
             raise
     if rss <= 0:
         raise ValueError(f"{scene}/{trial}/{mode}: missing process RSS")
+    if os.name == "nt" and window_witness is None:
+        raise ValueError(f"{scene}/{trial}/{mode}: no visible, PID-matched Win32 Akula window")
     log = log_file.read_text(errors="replace")
     applied = "AKULA_MIP_APPLIED level=" in log
     if applied != (mode != "baseline"):
@@ -184,7 +330,8 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
     result = dict(
         trial=trial, mode=mode, scene=scene, size=size,
         note_sha256=note_hash, image_sha256=image_hash,
-        peak_rss_kib=rss, applied=applied, replay=replay, metrics=metrics,
+        peak_rss_kib=rss, window_witness=window_witness,
+        applied=applied, replay=replay, metrics=metrics,
         frame_distribution=distribution, cache=diagnostics,
     )
     (root / "sample.json").write_text(json.dumps(result, indent=2) + "\n")
