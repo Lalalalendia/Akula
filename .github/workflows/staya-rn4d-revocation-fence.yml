@@ -52,10 +52,14 @@ jobs:
             echo "Unexpected production/native activation" >&2
             exit 1
           fi
-          git diff --name-only 1ff92aa7c0fe6c349cdeabc1ec874cad4494625d..HEAD > /tmp/rn4d-files
           python3 - <<'PY'
-          from pathlib import Path
-          found = set(Path("/tmp/rn4d-files").read_text().splitlines())
+          import subprocess
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only",
+               "1ff92aa7c0fe6c349cdeabc1ec874cad4494625d..HEAD"],
+              text=True,
+          )
+          found = set(changed.splitlines())
           allowed = {
               "aquilum-app/core/src/sync/peer_grant_lab.rs",
               "aquilum-app/core/tests/rn4d_revocation_fence.rs",
