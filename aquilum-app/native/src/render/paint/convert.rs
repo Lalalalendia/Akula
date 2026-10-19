@@ -13,12 +13,27 @@ use super::mipmap;
 
 const IMAGE_FRAMES: u64 = 2;
 
+// Counters are local to an opt-in developer renderer, with no logging in the
+// per-image hot path. Installed builds do not compile these fields.
+#[cfg(not(feature = "installed"))]
+#[derive(Default)]
+struct MipDiagnostics {
+    requests: u64,
+    final_hits: u64,
+    generated: u64,
+    generated_pixels: u64,
+    evicted: u64,
+    build_nanos: u128,
+}
+
 #[derive(Default)]
 pub struct Images {
     sources: HashMap<u64, (ImageSource, u64, Option<Weak<()>>)>,
     /// Image ID + reduction level, restricted to a 32 MiB two-frame budget.
     mips: HashMap<(u64, u8), (Arc<Pixmap>, u64)>,
     frame: u64,
+    #[cfg(not(feature = "installed"))]
+    diag: MipDiagnostics,
 }
 
 impl Images {
@@ -54,6 +69,20 @@ impl Images {
         {
             return None;
         }
+        #[cfg(not(feature = "installed"))]
+        {
+            self.diag.requests += 1;
+        }
+        // A warmed final level is the common scrolling case. Avoid scanning
+        // the budget and walking intermediate mip levels just to reuse it.
+        if let Some((cached, last)) = self.mips.get_mut(&(id, level)) {
+            *last = self.frame;
+            #[cfg(not(feature = "installed"))]
+            {
+                self.diag.final_hits += 1;
+            }
+            return Some(ImageSource::Pixmap(Arc::clone(cached)));
+        }
         let used_bytes: usize = self.mips.values()
             .map(|(mip, _)| usize::from(mip.width()) * usize::from(mip.height()) * 4)
             .sum();
@@ -77,7 +106,15 @@ impl Images {
                 previous = Arc::clone(cached);
                 continue;
             }
+            #[cfg(not(feature = "installed"))]
+            let started = std::time::Instant::now();
             let next = Arc::new(mipmap::half(&previous)?);
+            #[cfg(not(feature = "installed"))]
+            {
+                self.diag.generated += 1;
+                self.diag.generated_pixels += u64::from(next.width()) * u64::from(next.height());
+                self.diag.build_nanos += started.elapsed().as_nanos();
+            }
             self.mips.insert((id, current), (Arc::clone(&next), frame));
             previous = next;
         }
@@ -88,7 +125,25 @@ impl Images {
         self.frame += 1;
         let frame = self.frame;
         self.sources.retain(|_, (_, used, owner)| frame - *used < IMAGE_FRAMES && owner.as_ref().is_none_or(|o| o.strong_count() > 0));
+        #[cfg(not(feature = "installed"))]
+        let previous_count = self.mips.len();
         self.mips.retain(|_, (_, last)| frame - *last < IMAGE_FRAMES);
+        #[cfg(not(feature = "installed"))]
+        {
+            self.diag.evicted += (previous_count - self.mips.len()) as u64;
+            // This diagnostic prints once per 128 real frame passes, not per
+            // image paint, so it cannot dominate the measured frame p95.
+            if frame % 128 == 0
+                && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF").ok().as_deref() == Some("1")
+            {
+                eprintln!(
+                    "AKULA_MIP_CACHE frames={frame} requests={} final_hits={} generated={} generated_pixels={} evicted={} generated_ms={:.3} resident_levels={}",
+                    self.diag.requests, self.diag.final_hits, self.diag.generated,
+                    self.diag.generated_pixels, self.diag.evicted,
+                    self.diag.build_nanos as f64 / 1_000_000.0, self.mips.len(),
+                );
+            }
+        }
     }
 }
 
@@ -301,6 +356,35 @@ mod mipmap_integration_tests {
         let ImageSource::Pixmap(image) = image.image else { panic!("expected pixmap") };
         assert_eq!((image.width(), image.height()), (32, 33));
         assert_eq!(images.mips.len(), 2);
+    }
+
+    #[test]
+    fn warm_final_mip_shortcut_does_not_keep_unused_levels_alive() {
+        let brush = test_brush(128, 128);
+        let mut images = Images::default();
+        let src = images.source(&brush.image);
+        let id = brush.image.data.id();
+
+        let first = images.mip_source(id, &src, 2).expect("initial build");
+        assert_eq!(images.mips.len(), 2);
+        images.next_frame();
+        let reused = images.mip_source(id, &src, 2).expect("warm final level");
+        let (ImageSource::Pixmap(first), ImageSource::Pixmap(reused)) = (first, reused)
+        else { panic!("unexpected source kind") };
+        assert!(Arc::ptr_eq(&first, &reused));
+        #[cfg(not(feature = "installed"))]
+        {
+            assert_eq!(images.diag.requests, 2);
+            assert_eq!(images.diag.final_hits, 1);
+            assert_eq!(images.diag.generated, 2);
+        }
+        images.next_frame();
+        assert!(!images.mips.contains_key(&(id, 1)), "unused intermediate may expire");
+        assert!(images.mips.contains_key(&(id, 2)), "requested final stays resident");
+
+        let lower = images.mip_source(id, &src, 1).expect("lower level rebuilt");
+        let ImageSource::Pixmap(lower) = lower else { panic!("unexpected source") };
+        assert_eq!((lower.width(), lower.height()), (64, 64));
     }
 
     #[test]
