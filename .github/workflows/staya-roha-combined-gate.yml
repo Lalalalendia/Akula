@@ -44,10 +44,10 @@ jobs:
         run: |
           set -euo pipefail
           cargo generate-lockfile
-          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/staya-combined-metadata.json"
+          cargo metadata --locked --format-version 1 > .source-graph.json
           python3 - <<'PY'
           import json, os, pathlib
-          m = json.loads(pathlib.Path(os.environ["RUNNER_TEMP"], "staya-combined-metadata.json").read_text())
+          m = json.loads(pathlib.Path(".source-graph.json").read_text())
           expected = {
               "iroh": ("https://github.com/calex794/roha", os.environ["ROHA_PIN"]),
               "noq": ("https://github.com/calex794/noq", os.environ["NOQ_PIN"]),
@@ -64,6 +64,7 @@ jobs:
                   raise SystemExit(f"{name}: wanted {wanted}, got {got}")
               print(f"PIN VERIFIED: {name} = {sha}")
           PY
+          rm -f .source-graph.json
       - name: Run end-to-end two local QUIC endpoints, ALPN, permissions and bounded frame tests
         run: |
           set -euo pipefail
@@ -72,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo fmt --all -- --check
-          git diff --exit-code -- staya/roha-transport/Cargo.toml
+          git diff --exit-code -- Cargo.toml
       - name: Evidence only (generated lock is not yet checked in)
         run: |
           echo "Isolated adapter tested on ${{ matrix.platform }} with Roha $ROHA_PIN and noq $NOQ_PIN." >> "$GITHUB_STEP_SUMMARY"
