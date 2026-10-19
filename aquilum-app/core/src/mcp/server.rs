@@ -277,9 +277,14 @@ impl RunningServer {
 }
 
 impl Endpoint {
-    fn keep_alive_under_pressure(&self, requested: bool) -> bool {
+    fn keep_alive_under_pressure(&self, requested: bool, buffered: bool) -> bool {
         if !requested {
             return false;
+        }
+        // If the parser already accepted bytes of another pipelined HTTP
+        // request, finish handling that request rather than silently drop it.
+        if buffered {
+            return true;
         }
         lock(&self.open)
             .last_saturation
@@ -306,7 +311,7 @@ impl Endpoint {
         };
         // Admission pressure never interrupts a running tool. It affects
         // only the connection header and lifecycle after the response.
-        let keep_alive = self.keep_alive_under_pressure(keep_alive);
+        let keep_alive = self.keep_alive_under_pressure(keep_alive, connection.has_buffered_data());
         connection.send(&response, keep_alive)?;
         Ok(keep_alive)
     }
@@ -698,21 +703,25 @@ mod tests {
     #[test]
     fn keep_alive_is_preserved_without_pressure_and_temporarily_disabled_under_overload() {
         let (server, _) = server();
-        assert!(server.endpoint.keep_alive_under_pressure(true));
-        assert!(!server.endpoint.keep_alive_under_pressure(false));
+        assert!(server.endpoint.keep_alive_under_pressure(true, false));
+        assert!(!server.endpoint.keep_alive_under_pressure(false, false));
 
         {
             let mut slots = lock(&server.endpoint.open);
             slots.last_saturation = Some(Instant::now());
         }
-        assert!(!server.endpoint.keep_alive_under_pressure(true));
+        assert!(!server.endpoint.keep_alive_under_pressure(true, false));
+        assert!(server.endpoint.keep_alive_under_pressure(true, true),
+            "already-buffered pipelined requests must not be discarded");
+        assert!(!server.endpoint.keep_alive_under_pressure(false, true),
+            "explicit Connection: close must never be overridden");
 
         {
             let mut slots = lock(&server.endpoint.open);
             slots.last_saturation =
                 Some(Instant::now() - PRESSURE_CLOSE_WINDOW - Duration::from_millis(1));
         }
-        assert!(server.endpoint.keep_alive_under_pressure(true));
+        assert!(server.endpoint.keep_alive_under_pressure(true, false));
         server.stop();
     }
 
