@@ -140,9 +140,7 @@ fn rn4e_child_worker() {
                  WHERE vault=?1 AND device=?2 AND epoch=1 AND active=1",
                 params![vault.to_string(), device.to_string()],
             ) {
-                Err(rusqlite::Error::SqliteFailure(e, _))
-                    if e.code == ErrorCode::DatabaseBusy =>
-                {
+                Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::DatabaseBusy => {
                     "busy"
                 }
                 Ok(1) => "revoked",
@@ -151,8 +149,7 @@ fn rn4e_child_worker() {
         }
         "core_revoke_first" => {
             let core = registered_core(&app, &root);
-            let mut ledger =
-                RegisteredPullGrantLedger::open_existing(&core, &root, &db).unwrap();
+            let mut ledger = RegisteredPullGrantLedger::open_existing(&core, &root, &db).unwrap();
             assert_eq!(ledger.revoke(vault, device, 1).unwrap(), 2);
             "revoked"
         }
@@ -192,7 +189,10 @@ fn cross_process_writer_cannot_revoke_during_real_filegate_create() {
             assert_eq!(wait_for_child_result(&result), "busy");
             let created = gate::create(&core, &target, CONTENT, Source::Me, None)
                 .expect("the existing Core File Gate must create new local note");
-            assert_eq!(created.hash, blake3::hash(CONTENT.as_bytes()).to_hex().to_string());
+            assert_eq!(
+                created.hash,
+                blake3::hash(CONTENT.as_bytes()).to_hex().to_string()
+            );
             assert_eq!(fs::read(&target).unwrap(), CONTENT.as_bytes());
             Ok(())
         })
@@ -237,15 +237,7 @@ fn revoke_committed_in_another_core_process_denies_filegate_before_write() {
     assert!(competitor.wait().unwrap().success());
 
     assert!(matches!(
-        fixture_publish_inside_fence(
-            &mut ledger,
-            &core,
-            snapshot,
-            [7; 32],
-            NOW,
-            &target,
-            CONTENT,
-        ),
+        fixture_publish_inside_fence(&mut ledger, &core, snapshot, [7; 32], NOW, &target, CONTENT,),
         Err(GrantLedgerError::Revoked)
     ));
     assert!(!target.exists());
@@ -265,7 +257,10 @@ fn exact_object_and_endpoint_must_match_before_disposable_publication() {
     let mut ledger = RegisteredPullGrantLedger::provision_new(&core, &root, &db).unwrap();
     let expected = ledger.issue(proposal(vault, device)).unwrap();
 
-    for invalid in ["tampered payload", "RN-4E0 verified local fixture - not network payloaD\n"] {
+    for invalid in [
+        "tampered payload",
+        "RN-4E0 verified local fixture - not network payloaD\n",
+    ] {
         assert!(matches!(
             fixture_publish_inside_fence(
                 &mut ledger,
