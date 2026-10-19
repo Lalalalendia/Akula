@@ -64,19 +64,21 @@ impl TextEditor {
             self.paint_link_hover(painter, i);
         }
         for i in texts {
-            let paint_line = |painter: &mut Painter<'_>| {
+            let origin = self.shift() + self.doc.origin(i) - Vec2::new(self.code_offset_at(i), 0.0);
+            if let Some(viewport) = self.code_viewport(i) {
+                // The clipped sub-painter has an independent borrow lifetime.
+                // Use an inline closure, not a pretyped Painter<'_> callback.
+                painter.with_fill_clip(viewport, |p| {
+                    if markdown {
+                        self.paint_marks(p, i, &palette);
+                    }
+                    render_text(p, Affine::translate(origin), self.doc.paragraph(i).layout(), &palette, true);
+                });
+            } else {
                 if markdown {
                     self.paint_marks(painter, i, &palette);
                 }
-                let offset = self.code_offset_at(i);
-                render_text(painter, Affine::translate(self.shift() + self.doc.origin(i) - Vec2::new(offset, 0.0)), self.doc.paragraph(i).layout(), &palette, true);
-            };
-            if let Some(viewport) = self.code_viewport(i) {
-                // Balanced clip in the retained scene; no glyphs may escape
-                // the panel or overlap neighboring text.
-                painter.with_fill_clip(viewport, paint_line);
-            } else {
-                paint_line(painter);
+                render_text(painter, Affine::translate(origin), self.doc.paragraph(i).layout(), &palette, true);
             }
         }
     }
@@ -117,19 +119,34 @@ impl TextEditor {
             let layout = p.layout();
             let a = range.start.max(p.start) - p.start;
             let b = range.end.min(p.end()) - p.start;
-            let draw_selection = |painter: &mut Painter<'_>| {
-                for (bounds, _) in markdown::range_rects(layout, a, b) {
-                    painter.fill(super::rect(BoundingBox::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1), 0.0) + origin + self.shift(), color).draw();
-                }
-                if range.end > p.end() && b == p.len as usize {
-                    let end = Cursor::from_byte_index(layout, p.len as usize, Affinity::Upstream).geometry(layout, 1.0);
-                    painter.fill(super::rect(BoundingBox::new(end.x0, end.y0, end.x0 + 8.0, end.y1), 0.0) + origin + self.shift(), color).draw();
-                }
+            let range_rects: Vec<_> = markdown::range_rects(layout, a, b)
+                .into_iter()
+                .map(|(bounds, _)| {
+                    super::rect(BoundingBox::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1), 0.0) + origin + self.shift()
+                })
+                .collect();
+            let continuation = if range.end > p.end() && b == p.len as usize {
+                let end = Cursor::from_byte_index(layout, p.len as usize, Affinity::Upstream).geometry(layout, 1.0);
+                Some(super::rect(BoundingBox::new(end.x0, end.y0, end.x0 + 8.0, end.y1), 0.0) + origin + self.shift())
+            } else {
+                None
             };
             if let Some(viewport) = self.code_viewport(i) {
-                painter.with_fill_clip(viewport, draw_selection);
+                painter.with_fill_clip(viewport, |clipped| {
+                    for rect in &range_rects {
+                        clipped.fill(*rect, color).draw();
+                    }
+                    if let Some(rect) = continuation {
+                        clipped.fill(rect, color).draw();
+                    }
+                });
             } else {
-                draw_selection(painter);
+                for rect in range_rects {
+                    painter.fill(rect, color).draw();
+                }
+                if let Some(rect) = continuation {
+                    painter.fill(rect, color).draw();
+                }
             }
         }
     }
