@@ -4,6 +4,17 @@
 **Dependencies:** #358 (File Gate identity), #363 (strict HistoryService witness), #385 (Core/path-bound custody permit), SQLite V7 one-shot journal.  
 **Platforms:** Windows and Linux. macOS Frozen/P2 per MAC-HOLD-01.
 
+
+## Source audit checkpoint — P0g-3d-01
+
+**Source-level audit completed** in [P0g-3d byte-level audit](./p0g3d-byte-level-audit.md). It is not a native power-loss acceptance test.
+
+- `atomic-write-file 0.3.0` is pinned. `commit()` synchronizes the temporary file. On Linux its rename path also synchronizes the containing directory; on Windows its generic rename path does **not** establish equivalent directory durability.
+- The current checked File Gate path invokes the legacy `HistoryService::try_saved_with_custody` bool API. Its strict immutable-version witness is not yet connected to any receipt.
+- The independently held protected original is a bounded SQLite WAL/FULL BLOB. SQLite V7 is an irreversible one-shot attempt fence, **not** the receipt. Distinct DB files plus the workspace/history filesystem cannot be regarded as one ACID transaction.
+- Native Linux/Windows replacement probes are test-only; no production S3 apply authority exists.
+- **Next implementation boundary:** P0g-3d-02 starts with read-only cross-store cold-start verification (protected original + V7 claim + rooted identity), with no writer capability or baseline change. Persistence guarantees beyond process restart require separate platform fault tests.
+
 ## Goal
 
 Associate exactly one authorized local replacement with a verifiable persisted receipt that ties together the **protected original**, **single File Gate primary publisher**, **post-publication file identity**, **exact HistoryService version**, and **SQLite V7 attempt**. Point-in-time observation is not proof of power-loss durability.
