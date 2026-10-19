@@ -409,9 +409,13 @@ fn is_loopback_host(value: &str, listen_port: u16) -> bool {
     let suffix = ["127.0.0.1", "localhost", "[::1]"]
         .iter()
         .find_map(|host| {
-            value.strip_prefix(*host).filter(|suffix| suffix.is_empty() || suffix.starts_with(':'))
+            value
+                .strip_prefix(*host)
+                .filter(|suffix| suffix.is_empty() || suffix.starts_with(':'))
         });
-    let Some(suffix) = suffix else { return false };
+    let Some(suffix) = suffix else {
+        return false;
+    };
     if suffix.is_empty() {
         return true;
     }
@@ -761,7 +765,10 @@ mod tests {
             "LOCALHOST:8787",
             "[::1]:8787",
         ] {
-            assert!(is_loopback_host(allowed, port), "valid local host: {allowed}");
+            assert!(
+                is_loopback_host(allowed, port),
+                "valid local host: {allowed}"
+            );
         }
         for forbidden in [
             "",
@@ -781,7 +788,10 @@ mod tests {
             "2130706433:8787",
             "0x7f000001:8787",
         ] {
-            assert!(!is_loopback_host(forbidden, port), "unexpectedly allowed Host: {forbidden}");
+            assert!(
+                !is_loopback_host(forbidden, port),
+                "unexpectedly allowed Host: {forbidden}"
+            );
         }
     }
 
