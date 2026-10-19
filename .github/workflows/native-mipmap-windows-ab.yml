@@ -1,0 +1,80 @@
+name: Windows native image mipmap real-GUI A/B (developer only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/benchmarks/native_mipmap_window_ab.py'
+      - 'scripts/benchmarks/native_mipmap_windows_ab.py'
+      - 'aquilum-app/native/src/render/paint/convert.rs'
+      - 'aquilum-app/native/src/render/paint/mipmap.rs'
+      - '.github/workflows/native-mipmap-windows-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-windows-image-mip-ab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-windows:
+    name: Real Win32/Winit paired image scroll / 12 processes
+    runs-on: windows-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-image-mip-ab-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify exact Windows source and benchmark syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Not Windows' }
+          git rev-parse HEAD
+          rustc --version
+          cargo --version
+          python --version
+          python -m py_compile scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_mipmap_windows_ab.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python benchmark syntax failed' }
+      - name: Build developer-only native Windows release executable
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Native developer release build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Missing developer .exe' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Run real Win32 GUI baseline versus opt-in mipmap
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $result = Join-Path $env:GITHUB_WORKSPACE 'windows-mipmap-results'
+          python scripts/benchmarks/native_mipmap_windows_ab.py --binary $binary --out $result --timeout 50
+          if ($LASTEXITCODE -ne 0) { throw 'Real Win32 GUI mipmap benchmark failed' }
+          Get-Content -LiteralPath (Join-Path $result 'summary.md') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive synthetic-only performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-native-windows-mipmap-ab
+          path: |
+            windows-mipmap-results/summary.md
+            windows-mipmap-results/matrix.json
+            windows-mipmap-results/**/sample.json
+            windows-mipmap-results/**/metrics.json
+            windows-mipmap-results/**/replay.json
+          retention-days: 14
+          if-no-files-found: warn
