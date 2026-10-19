@@ -114,3 +114,33 @@ test('installed Windows beta GUI edit must use OS-level input into its own foreg
   assert.doesNotMatch(script, /AKULA_WINDOWS_BETA_SMOKE_PASS/,
     'a launch-only smoke must not be mistaken for true GUI editing');
 });
+
+test('reopened note GUI readback uses foreground OS shortcuts and clipboard oracle', () => {
+  for (const token of [
+    'Start-And-Close -VerifyRestoredContent',
+    "Set-Clipboard -Value $clipboardSentinel",
+    'Send-AkulaBetaShortcut -Process $app -Action SelectAll',
+    'Send-AkulaBetaShortcut -Process $app -Action Copy',
+    'Get-Clipboard -Raw',
+    'Reopened editor copy differs from the exact saved Markdown note',
+    'AKULA_WINDOWS_BETA_REOPEN_GUI_READBACK_PASS',
+    'Restart changed the previously edited note',
+  ]) {
+    assert.ok(script.includes(token), 'missing real restored-document GUI assertion: ' + token);
+  }
+  for (const token of [
+    'PressCtrlShortcut(',
+    "ValidateSet('SelectAll', 'Copy')",
+    'GetWindowThreadProcessId',
+    'GetForegroundWindow',
+    'Refusing shortcut on nonforeground window',
+    'Only selection/copy shortcuts are authorized',
+    'VK_CONTROL',
+    'KEYEVENTF_KEYUP',
+  ]) {
+    assert.ok(guiInput.includes(token), 'missing bounded OS keyboard shortcut guard: ' + token);
+  }
+  const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
+  assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
+    'UI readback must never simulate success by writing to the note');
+});
