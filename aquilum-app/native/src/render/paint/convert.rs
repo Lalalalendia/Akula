@@ -698,3 +698,123 @@ mod image_scene_tests {
         assert_eq!(checked, 24);
     }
 }
+
+
+#[cfg(test)]
+mod mipmap_stage_benchmarks {
+    use super::*;
+    use std::time::Instant;
+    use masonry::peniko::{ImageAlphaType, ImageQuality};
+    use vello_cpu::color::palette::css::WHITE;
+    use vello_cpu::{RasterizerSettings, RenderContext, RenderSettings, Resources, TargetInit};
+
+    fn stats_us(samples: &[f64]) -> (f64, f64) {
+        assert!(!samples.is_empty());
+        let mut sorted = samples.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let median = sorted[sorted.len() / 2];
+        let p95 = sorted[(sorted.len() * 95 / 100).min(sorted.len() - 1)];
+        (median, p95)
+    }
+
+    /// Diagnostic: separate Paint/Source/Mip conversion from actual CPU
+    /// rasterization, with the same PNG and 200px canvas in every mode.
+    /// Kept ignored to avoid noisy performance thresholds in normal CI.
+    #[test]
+    #[ignore]
+    fn real_photo_mip_paint_vs_raster_stages() {
+        const WARMUP: usize = 20;
+        const SAMPLES: usize = 180;
+        let rgba = image::load_from_memory(
+            include_bytes!("../../../assets/city-cover.png"),
+        )
+        .expect("pinned photo PNG")
+        .to_rgba8();
+        let (width, height) = rgba.dimensions();
+        assert_eq!((width, height), (1280, 884));
+        let pixels = rgba.into_raw();
+        let scale = Affine::scale(200.0 / f64::from(width));
+        let shape = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+
+        for workers in [0u16, 2u16] {
+            for (mode, enable_mip, bilinear) in [
+                ("baseline", false, false),
+                ("mip_high", true, false),
+                ("mip_medium", true, true),
+            ] {
+                let brush = crate::render::pixels::from_rgba(
+                    pixels.clone(), width, height, ImageAlphaType::Alpha,
+                )
+                .expect("valid real PNG")
+                .with_quality(ImageQuality::High);
+
+                let mut images = Images::default();
+                let mut render = RenderContext::new_with(
+                    200, 139,
+                    RenderSettings { num_threads: workers, ..RenderSettings::default() },
+                );
+                let mut resources = Resources::default();
+                let mut canvas = Pixmap::new(200, 139);
+                let mut convert_samples = Vec::with_capacity(SAMPLES);
+                let mut encode_samples = Vec::with_capacity(SAMPLES);
+                let mut raster_samples = Vec::with_capacity(SAMPLES);
+                let mut first_frame_ms = None;
+
+                for iteration in 0..(WARMUP + SAMPLES) {
+                    images.next_frame();
+                    let started = Instant::now();
+                    let (paint, brush_transform) = brush_to_paint_candidate_tuned(
+                        BrushRef::Image(brush.as_ref()), Composite::default(),
+                        &mut images, scale, Affine::IDENTITY, enable_mip, bilinear,
+                    );
+                    let convert_us = started.elapsed().as_secs_f64() * 1e6;
+
+                    let encode_start = Instant::now();
+                    render.reset();
+                    render.set_transform(scale);
+                    render.set_paint_transform(brush_transform);
+                    render.set_paint(paint);
+                    render.fill_rect(&shape);
+                    render.flush();
+                    let encode_us = encode_start.elapsed().as_secs_f64() * 1e6;
+
+                    let raster_start = Instant::now();
+                    render.render_with(
+                        &mut canvas, &mut resources,
+                        RasterizerSettings {
+                            target_init: TargetInit::Clear(WHITE),
+                            ..RasterizerSettings::default()
+                        },
+                    );
+                    let raster_us = raster_start.elapsed().as_secs_f64() * 1e6;
+                    if iteration == 0 {
+                        first_frame_ms = Some((convert_us + encode_us + raster_us) / 1000.0);
+                    }
+                    if iteration >= WARMUP {
+                        convert_samples.push(convert_us);
+                        encode_samples.push(encode_us);
+                        raster_samples.push(raster_us);
+                    }
+                }
+
+                let (convert_p50, convert_p95) = stats_us(&convert_samples);
+                let (encode_p50, encode_p95) = stats_us(&encode_samples);
+                let (raster_p50, raster_p95) = stats_us(&raster_samples);
+                let expected_levels = if enable_mip { 2 } else { 0 };
+                assert_eq!(
+                    images.mips.len(), expected_levels,
+                    "warm image must not repeatedly rebuild or evaporate",
+                );
+                println!(
+                    "AKULA_MIP_STAGES workers={workers} mode={mode} \
+                     first_frame_ms={:.3} convert_p50_us={convert_p50:.2} \
+                     convert_p95_us={convert_p95:.2} encode_p50_us={encode_p50:.2} \
+                     encode_p95_us={encode_p95:.2} raster_p50_us={raster_p50:.2} \
+                     raster_p95_us={raster_p95:.2} cached_levels={}",
+                    first_frame_ms.unwrap_or_default(),
+                    images.mips.len(),
+                );
+            }
+        }
+    }
+}
