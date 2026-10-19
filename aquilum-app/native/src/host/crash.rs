@@ -22,15 +22,16 @@ pub(super) fn install_crash_log(file: std::path::PathBuf) {
         }
 
         let copied = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(entry.clone())).is_ok();
+        let product = if cfg!(target_os = "windows") { "Akula" } else { "Aquilum" };
         let prompt = if copied {
-            "В приложении произошла непредвиденная ошибка.\nОтчёт об ошибке скопирован в буфер обмена.\n\nПерезапустить Aquilum?"
+            format!("В приложении произошла непредвиденная ошибка.\nОтчёт об ошибке скопирован в буфер обмена.\n\nПерезапустить {product}?")
         } else {
-            "В приложении произошла непредвиденная ошибка.\n\nПерезапустить Aquilum?"
+            format!("В приложении произошла непредвиденная ошибка.\n\nПерезапустить {product}?")
         };
 
         let restart = rfd::MessageDialog::new()
             .set_title("Упс, приложение упало!")
-            .set_description(prompt)
+            .set_description(prompt.as_str())
             .set_buttons(rfd::MessageButtons::YesNo)
             .show();
 

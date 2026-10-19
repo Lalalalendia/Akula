@@ -11,12 +11,26 @@ on:
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
+      - "scripts/verify-macos-release.sh"
+      - "scripts/test-macos-release-verifier.sh"
+      - "scripts/verify_mac_tar_parity.py"
+      - "scripts/test_mac_tar_parity.py"
+      - "aquilum-app/native/src/updater/tar.rs"
+      - "aquilum-app/native/src/updater/apply.rs"
+      - "aquilum-app/native/src/updater/macos_transaction.rs"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "scripts/install.sh"
       - "scripts/uninstall.sh"
       - "scripts/test-install-scripts.sh"
+      - "scripts/verify-macos-release.sh"
+      - "scripts/test-macos-release-verifier.sh"
+      - "scripts/verify_mac_tar_parity.py"
+      - "scripts/test_mac_tar_parity.py"
+      - "aquilum-app/native/src/updater/tar.rs"
+      - "aquilum-app/native/src/updater/apply.rs"
+      - "aquilum-app/native/src/updater/macos_transaction.rs"
       - ".github/workflows/docs.yml"
 
 permissions:
@@ -32,6 +46,7 @@ concurrency:
 jobs:
   docs:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,8 +76,10 @@ jobs:
 
       - name: Check macOS installer scripts
         run: |
-          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh scripts/verify-macos-release.sh scripts/test-macos-release-verifier.sh
           bash scripts/test-install-scripts.sh
+          bash scripts/test-macos-release-verifier.sh
+          python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
   macos-installer:
     name: macOS installer BSD-lock and crash recovery
@@ -75,5 +92,22 @@ jobs:
         run: |
           set -euo pipefail
           test -x /usr/bin/lockf
-          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh scripts/verify-macos-release.sh scripts/test-macos-release-verifier.sh
           bash scripts/test-install-scripts.sh
+          bash scripts/test-macos-release-verifier.sh
+          python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Native macOS TAR extractor security regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#[path = "%s"] mod tar;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/tar.rs" > "$RUNNER_TEMP/akula_tar_test_harness.rs"
+          rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_tar_test_harness.rs" -o "$RUNNER_TEMP/akula_tar_security_tests"
+          "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
+      - name: Native macOS shared BSD-lock and updater crash recovery tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#[path = "%s"] mod txn;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/macos_transaction.rs" > "$RUNNER_TEMP/akula_updater_txn_harness.rs"
+          rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_updater_txn_harness.rs" -o "$RUNNER_TEMP/akula_updater_txn_tests"
+          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture

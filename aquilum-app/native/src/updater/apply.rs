@@ -3,9 +3,9 @@ pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
     use windows::core::{HSTRING, w};
-    let dir = std::env::temp_dir().join(format!("aquilum-update-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("akula-update-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let installer = dir.join("Aquilum-setup.exe");
+    let installer = dir.join("Akula-setup.exe");
     std::fs::write(&installer, payload).map_err(|e| e.to_string())?;
     before_exit();
     let started = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(installer.as_os_str()), &HSTRING::from("/S /R /UPDATE /ARGS"), None, SW_SHOW) };
@@ -17,28 +17,66 @@ pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
+    use super::macos_transaction::{AppGate, Recovery};
+
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let text = exe.to_string_lossy().into_owned();
-    let (bundle, _) = text.split_once(".app/Contents/MacOS/").ok_or("приложение запущено не из пакета .app")?;
-    let bundle = std::path::PathBuf::from(format!("{bundle}.app"));
-    let parent = bundle.parent().ok_or("нет каталога пакета")?;
-    let staging = parent.join(format!(".aquilum-update-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let gz = flate2::read::GzDecoder::new(payload);
-    super::tar::unpack(gz, &staging)?;
-    let fresh = std::fs::read_dir(&staging).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "app")).ok_or("в обновлении нет пакета .app")?;
-    before_exit();
-    let backup = parent.join(format!(".aquilum-old-{}", std::process::id()));
-    std::fs::rename(&bundle, &backup).map_err(|e| e.to_string())?;
-    if let Err(error) = std::fs::rename(&fresh, &bundle) {
-        let _ = std::fs::rename(&backup, &bundle);
-        return Err(error.to_string());
+    let text = exe.to_string_lossy();
+    let (prefix, _) = text
+        .split_once(".app/Contents/MacOS/")
+        .ok_or("app updater requires a native .app bundle")?;
+    let bundle = std::path::PathBuf::from(format!("{prefix}.app"));
+    let home = std::env::var_os("HOME").ok_or("macOS HOME unavailable")?;
+    // The gate uses the same persistent BSD flock as both shell scripts.
+    // No fallback to a PID lock or a second authority for /Applications.
+    let gate = AppGate::acquire(&bundle, std::path::Path::new(&home))?;
+    match gate.recover()? {
+        Recovery::Clean => {}
+        Recovery::PreviousRestored => {
+            return Err("previous app restored after interrupted update; retry only after review".into());
+        }
     }
-    let _ = std::fs::remove_dir_all(&backup);
-    let _ = std::fs::remove_dir_all(&staging);
-    let _ = std::process::Command::new("open").arg("-n").arg(&bundle).spawn();
-    std::process::exit(0);
+
+    // No PID-derived overwrite or recursive removal of a previous run's
+    // stage. A fresh random name is atomically created under the held lock.
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let stage = gate.new_stage(&nonce)?;
+    let decoded = flate2::read::GzDecoder::new(payload);
+    if let Err(error) = super::tar::unpack(decoded, &stage) {
+        if let Err(cleanup) = gate.discard_unpublished(&stage) {
+            return Err(format!("{error}; stage preserved for review: {cleanup}"));
+        }
+        return Err(error);
+    }
+
+    // If the caller terminates during shutdown, the old installed app is
+    // still in place and the new staged candidate is preserved for HOLD.
+    before_exit();
+    gate.promote(&stage)?;
+
+    // The program may still have mapped pages from its old bundle while it
+    // runs; macOS must accept a new app launch before we exit this process.
+    let dispatch = std::process::Command::new("open")
+        .arg("-n")
+        .arg(&bundle)
+        .status();
+    match dispatch {
+        Ok(status) if status.success() => {
+            // "open" success does not prove the new binary is healthy.
+            // Keep the original backup until a separately tested startup
+            // acknowledgement is implemented. Further installs fail closed.
+            gate.preserve_until_startup_ack(&stage)?;
+            std::process::exit(0);
+        }
+        other => {
+            let reason = match other {
+                Ok(status) => format!("macOS app relaunch rejected: {status}"),
+                Err(e) => format!("cannot dispatch macOS app relaunch: {e}"),
+            };
+            gate.rollback_launch(&stage)
+                .map_err(|rollback| format!("{reason}; rollback failed: {rollback}"))?;
+            Err(format!("{reason}; old app restored, failed new generation retained for review"))
+        }
+    }
 }
 
 fn appimage() -> Option<std::path::PathBuf> {

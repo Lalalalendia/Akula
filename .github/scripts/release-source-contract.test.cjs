@@ -73,3 +73,55 @@ test('missing Akula verification key must fail closed', () => {
   const bad = original.replace('test -n "$key" || {', 'true # key not checked');
   mustReject(bad, 'Release must stop when');
 });
+
+
+test('macOS release artifact cannot skip publisher and notarization verification', () => {
+  const bad = original.replace(
+    '- name: Verify pinned Akula publisher and notarized DMG',
+    '- name: Bypass publisher verification',
+  );
+  mustReject(bad, 'macos must verify genuine signed DMG');
+});
+
+test('macOS release verifier cannot consume an arbitrary source policy', () => {
+  const bad = original.replace(
+    'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}" "${archives[0]}"',
+    'bash scripts/verify-macos-release.sh /tmp/injected-install.sh "${dmgs[0]}"',
+  );
+  mustReject(bad, 'macos release verifier must use exact pinned source and DMG');
+});
+
+test('macOS release verifier must check exactly one packaged DMG', () => {
+  const bad = original.replace(
+    'if [[ "${#dmgs[@]}" -ne 1 ]]',
+    'if [[ "${#dmgs[@]}" -lt 1 ]]',
+  );
+  mustReject(bad, 'macos release verifier must use exact pinned source and DMG');
+});
+
+test('macOS release verifier must not run after artifact upload', () => {
+  const before = '      - name: Verify pinned Akula publisher and notarized DMG';
+  const upload = '      - uses: actions/upload-artifact@v7';
+  const start = original.indexOf(before, original.indexOf('  macos:'));
+  const finish = original.indexOf('      - name: Install from DMG', start);
+  const verifyBlock = original.slice(start, finish);
+  const without = original.slice(0, start) + original.slice(finish);
+  const uploadAt = without.indexOf(upload, without.indexOf('  macos:'));
+  assert.ok(start >= 0 && finish > start && uploadAt > start);
+  const bad = without.slice(0, uploadAt) + verifyBlock + without.slice(uploadAt);
+  // Verify block before upload is acceptable; move it after upload instead.
+  const after = bad.replace(verifyBlock, '');
+  const uploaded = after.indexOf(upload, after.indexOf('  macos:'));
+  const next = after.indexOf('      - uses: actions/upload-artifact@v7', uploaded + upload.length);
+  assert.ok(next > uploaded);
+  const unsafe = after.slice(0, next) + verifyBlock + after.slice(next);
+  mustReject(unsafe, 'macos must verify genuine signed DMG');
+});
+
+test('macOS updater archive parity cannot be omitted from notarized DMG release', () => {
+  const bad = original.replace(
+    'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}" "${archives[0]}"',
+    'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}"',
+  );
+  mustReject(bad, 'macos release verifier must use exact pinned source and DMG');
+});

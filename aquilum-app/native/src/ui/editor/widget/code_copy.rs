@@ -4,7 +4,7 @@ use aquilum_core::markdown::fence::Fence;
 impl TextEditor {
     // The popup carries only the opener offset; avoid cloning large code bodies
     // when the user merely right-clicks or opens an unrelated menu action.
-    fn fenced_code_start(&self, index: usize) -> Option<usize> {
+    pub(super) fn fenced_code_start(&self, index: usize) -> Option<usize> {
         if !self.doc.block(index).is_code() {
             return None;
         }

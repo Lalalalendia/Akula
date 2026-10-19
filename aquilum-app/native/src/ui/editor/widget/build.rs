@@ -36,6 +36,8 @@ impl TextEditor {
             focused: false,
             table: None,
             hovered_table: None,
+            hovered_code_copy: None,
+            copied_code: None,
             table_scrolls: std::collections::HashMap::new(),
             code_scrolls: code_scroll::Offsets::default(),
             code_window_base: None,

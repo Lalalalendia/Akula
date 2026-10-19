@@ -8,8 +8,11 @@ on:
       - "aquilum-app/core/src/plugins/permission_broker.rs"
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/local_create.rs"
+      - "aquilum-app/core/src/sync/native_existing_replace_probe.rs"
       - "aquilum-app/core/src/sync/local_recovery.rs"
       - "aquilum-app/core/src/sync/recovery_dashboard.rs"
+      - "aquilum-app/core/src/sync/recovery_existing_replace_tests.rs"
+      - "aquilum-app/core/src/sync/journal/existing_replace_attempt.rs"
       - "aquilum-app/core/src/sync/recovery_review.rs"
       - "aquilum-app/core/src/sync/sealed_archive.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
@@ -91,6 +94,9 @@ jobs:
       - name: M1d-d read-only recovery status and non-mutating SQLite gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1dd_ -- --nocapture
+      - name: Existing replacement claims cannot hide behind additive-only recovery UI
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine recovery_dashboard::tests -- --nocapture
       - name: M1d-e explicit native review and no-mutation gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1de_ -- --nocapture
@@ -131,6 +137,9 @@ jobs:
           cargo test --locked -p aquilum-core --features sync-engine cannot_arm_durable_editor_with_active_document_buffers -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine guarded_write_completes_only_after -- --nocapture
           cargo test --locked -p aquilum-core --features sync-engine guarded_metadata_failure_preserves_crash_intent -- --nocapture
+      - name: Native existing-file name exchange experiment (test only)
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine native_existing_replace_probe::tests -- --nocapture
       - name: OS two-process File Gate advisory lock probe (test-only)
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine oslock_ -- --nocapture

@@ -1,0 +1,92 @@
+# Run ONLY on a clean, GitHub-hosted ephemeral Windows runner.
+# In particular, never execute this script on a developer workstation.
+$ErrorActionPreference = 'Stop'
+if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
+  throw 'Windows beta installer smoke is restricted to GitHub-hosted Windows runners'
+}
+
+$legacyInstall = Join-Path $env:LOCALAPPDATA 'Aquilum'
+$legacyData = Join-Path $env:APPDATA 'com.dmitriy.aquilum-app'
+$uninstallBase = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+$legacyRegistry = Join-Path $uninstallBase 'Aquilum'
+$akulaRegistry = Join-Path $uninstallBase 'Akula'
+$runRegistry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$akulaInstall = Join-Path $env:LOCALAPPDATA 'Akula'
+$akulaData = Join-Path $env:APPDATA 'io.github.lalalendia.akula'
+
+foreach ($path in @($legacyInstall, $legacyData, $legacyRegistry, $akulaRegistry, $akulaInstall, $akulaData)) {
+  if (Test-Path $path) { throw "Not a clean runner: $path already exists" }
+}
+# Model an existing Aquilum installation without downloading or executing it.
+# A genuine Akula installer must not overwrite its directories, Run key or uninstall key.
+New-Item -ItemType Directory -Force -Path $legacyInstall, $legacyData | Out-Null
+$legacyExeMarker = Join-Path $legacyInstall 'legacy-do-not-touch.txt'
+$legacyDataMarker = Join-Path $legacyData 'user-data-do-not-touch.txt'
+Set-Content -LiteralPath $legacyExeMarker -Value 'AQUILUM-INSTALL'
+Set-Content -LiteralPath $legacyDataMarker -Value 'AQUILUM-DATA'
+New-Item -Path $legacyRegistry -Force | Out-Null
+Set-ItemProperty -Path $legacyRegistry -Name DisplayName -Value 'Aquilum'
+Set-ItemProperty -Path $legacyRegistry -Name DisplayVersion -Value '0.2.6'
+New-Item -Path $runRegistry -Force | Out-Null
+Set-ItemProperty -Path $runRegistry -Name Aquilum -Value 'Aquilum-startup-sentinel'
+
+function Assert-LegacyUntouched {
+  if ((Get-Content -LiteralPath $legacyExeMarker -Raw).Trim() -ne 'AQUILUM-INSTALL') { throw 'Upstream install was modified' }
+  if ((Get-Content -LiteralPath $legacyDataMarker -Raw).Trim() -ne 'AQUILUM-DATA') { throw 'Upstream app data was modified' }
+  if ((Get-ItemProperty -Path $legacyRegistry -Name DisplayName).DisplayName -ne 'Aquilum') { throw 'Upstream uninstall entry was modified' }
+  if ((Get-ItemProperty -Path $runRegistry -Name Aquilum).Aquilum -ne 'Aquilum-startup-sentinel') { throw 'Upstream startup key was modified' }
+}
+
+$setups = @(Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE 'dist') -Filter 'Akula_*-setup.exe')
+if ($setups.Count -ne 1) { throw "Expected a single Akula setup, found $($setups.Count)" }
+$installed = Start-Process $setups[0].FullName -ArgumentList '/S' -Wait -PassThru
+if ($installed.ExitCode -ne 0) { throw "Akula NSIS exit: $($installed.ExitCode)" }
+
+$exe = Join-Path $akulaInstall 'akula-app.exe'
+if (!(Test-Path $exe)) { throw "Akula binary not installed at $exe" }
+if (!(Test-Path $akulaRegistry)) { throw 'Akula uninstall registration missing' }
+if ((Get-ItemProperty $akulaRegistry -Name DisplayName).DisplayName -ne 'Akula') { throw 'Installer has wrong product name' }
+$built = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\akula-app.exe'
+if ((Get-FileHash $exe).Hash -ne (Get-FileHash $built).Hash) { throw 'Installed binary does not match built Akula' }
+Assert-LegacyUntouched
+
+$vault = Join-Path $env:RUNNER_TEMP 'akula-beta-vault'
+New-Item -ItemType Directory -Force -Path $vault | Out-Null
+$note = Join-Path $vault 'First note.md'
+Set-Content -LiteralPath $note -Value "# Akula Beta`n`nExisting local document"
+$original = (Get-FileHash -LiteralPath $note).Hash
+
+function Start-And-Close {
+  $arguments = "--vault `"$vault`" --data-dir `"$akulaData`" --open `"$note`""
+  $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+  $visible = $false
+  for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 1
+    $app.Refresh()
+    if ($app.HasExited) { throw "Akula exited unexpectedly: $($app.ExitCode)" }
+    if ($app.MainWindowHandle -ne 0) { $visible = $true; break }
+  }
+  if (!$visible) { throw 'Akula window did not appear' }
+  if (!$app.CloseMainWindow()) { throw 'Akula window refused close request' }
+  if (!$app.WaitForExit(20000)) { throw 'Akula did not exit within 20s' }
+}
+Start-And-Close
+$state = Join-Path $akulaData 'window-state.json'
+if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
+if ((Get-FileHash -LiteralPath $note).Hash -ne $original) { throw 'Unedited source document was changed' }
+Start-And-Close
+Assert-LegacyUntouched
+
+$uninstall = Join-Path $akulaInstall 'uninstall.exe'
+if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
+$removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
+if ($removed.ExitCode -ne 0) { throw "Akula uninstall exit: $($removed.ExitCode)" }
+for ($i = 0; $i -lt 30 -and ((Test-Path $exe) -or (Test-Path $akulaRegistry)); $i++) {
+  Start-Sleep -Seconds 1
+}
+if (Test-Path $exe) { throw 'Akula executable remains after uninstall' }
+if (Test-Path $akulaRegistry) { throw 'Akula uninstall registry key remains' }
+if (!(Test-Path $state)) { throw 'Uninstall removed Akula user state' }
+if ((Get-FileHash -LiteralPath $note).Hash -ne $original) { throw 'Uninstall changed the local document' }
+Assert-LegacyUntouched
+Write-Host 'AKULA_WINDOWS_BETA_SMOKE_PASS: clean install, two launches, persistent state, uninstall, upstream markers unchanged'

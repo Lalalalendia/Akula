@@ -2,6 +2,8 @@ mod apply;
 mod release;
 #[cfg(target_os = "macos")]
 mod tar;
+#[cfg(target_os = "macos")]
+mod macos_transaction;
 #[cfg(test)]
 mod tests;
 
