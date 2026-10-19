@@ -1743,6 +1743,7 @@ mod tests {
                  DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
                  DROP TABLE sync_local_publication_attempts;
+                 DROP TABLE IF EXISTS sync_existing_replace_receipt_candidates;
                  DROP TABLE IF EXISTS sync_existing_replace_attempts;
                   PRAGMA user_version = 1;",
             ).unwrap();
@@ -1954,6 +1955,7 @@ mod tests {
                  DROP TABLE sync_local_recovery_reviews;
                  DROP TABLE sync_local_recovery_copies;
                  DROP TABLE sync_local_recovery_evidence;
+                 DROP TABLE IF EXISTS sync_existing_replace_receipt_candidates;
                  DROP TABLE IF EXISTS sync_existing_replace_attempts;
                   PRAGMA user_version = 2;",
             ).unwrap();
@@ -2068,6 +2070,7 @@ mod tests {
                 "DROP TABLE sync_local_native_publication_observations;
                  DROP TABLE sync_local_recovery_reviews;
                  DROP TABLE sync_local_recovery_copies;
+                 DROP TABLE IF EXISTS sync_existing_replace_receipt_candidates;
                  DROP TABLE IF EXISTS sync_existing_replace_attempts;
                   PRAGMA user_version = 3;",
             ).unwrap();
@@ -2114,7 +2117,8 @@ mod tests {
         journal.connection.execute_batch(
             "DROP TABLE sync_local_native_publication_observations;
                  DROP TABLE sync_local_recovery_reviews;
-             DROP TABLE IF EXISTS sync_existing_replace_attempts;
+             DROP TABLE IF EXISTS sync_existing_replace_receipt_candidates;
+                 DROP TABLE IF EXISTS sync_existing_replace_attempts;
                   PRAGMA user_version = 4;",
         ).unwrap();
         drop(journal);
@@ -2284,7 +2288,8 @@ mod tests {
             .unwrap().is_none());
         journal.connection.execute_batch(
             "DROP TABLE sync_local_native_publication_observations;
-             DROP TABLE IF EXISTS sync_existing_replace_attempts;
+             DROP TABLE IF EXISTS sync_existing_replace_receipt_candidates;
+                 DROP TABLE IF EXISTS sync_existing_replace_attempts;
                   PRAGMA user_version = 5;",
         ).unwrap();
         drop(journal);
