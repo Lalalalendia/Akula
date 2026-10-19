@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Independent opt-in Linux read-only Node catalog contract. No server socket.
+node-catalog-lab = []
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
