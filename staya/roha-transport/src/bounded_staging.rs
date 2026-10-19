@@ -70,6 +70,13 @@ impl StagingVolumeGuard {
         &self.root
     }
 
+    /// Borrow the immutable open mount directory FD. New Linux custody gates
+    /// resolve children beneath this FD with openat2 and NO_XDEV/NO_SYMLINKS.
+    /// This does not make other pathname-based audits atomic.
+    pub(crate) fn pinned_directory(&self) -> &File {
+        &self._pinned_dir
+    }
+
     /// Fail closed when the mount disappears, gets replaced or the directory
     /// becomes accessible to unrelated local users between operations.
     pub fn check(&self) -> Result<(), VolumeError> {
