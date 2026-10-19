@@ -134,7 +134,7 @@ impl Replay {
             .map(|(index, interval)| (index, interval.round()))
             .collect::<Vec<_>>();
         let long_json = serde_json::to_string(&long).expect("finite replay interval JSON");
-        let mut json = format(
+        let mut json = format!(
             "{{\"quarters\":{:?},\"frames\":{},\"fps\":{:.1},\"intervalAvgMs\":{:.2},\"intervalP95Ms\":{:.2},\"missed\":{},\"workAvgMs\":{:.2},\"long\":{}}}",
             self.work.chunks(self.work.len().div_ceil(4).max(1)).map(|c| (c.iter().sum::<f64>() / c.len() as f64 * 100.0).round() / 100.0).collect::<Vec<_>>(),
             self.presents.len(),
