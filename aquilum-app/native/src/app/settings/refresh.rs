@@ -59,6 +59,9 @@ impl App {
         if dialog.section == section {
             return;
         }
+        if dialog.section == Section::Sync {
+            self.yandex_probe.settings_closed();
+        }
         for &(nav, item) in &dialog.nav {
             root.edit_widget(nav, |mut w| ItemButton::set_active(&mut w.downcast(), item == section));
         }
