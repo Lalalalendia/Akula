@@ -68,7 +68,7 @@ pub(super) fn yandex_setup(config: &AppConfig) -> Block {
                 // Explicitly unavailable until keychain + read-only probe +
                 // Yandex-specific trust bootstrap are implemented and tested.
                 Button::new(t("settings.yandex.checkConnection"), Action::OpenUrl(YANDEX_KEY_DOCS)).enabled(false),
-            ]),
+            ])),
     ];
     Block { title: t("settings.yandex.title"), rows }
 }
