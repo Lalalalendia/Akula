@@ -17,9 +17,12 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 mod existing_replace_attempt;
+mod existing_replace_receipt_candidate;
 pub(crate) use existing_replace_attempt::ReadOnlyExistingReplaceAttempt;
+#[allow(unused_imports)]
+pub(crate) use existing_replace_receipt_candidate::InertExistingReplaceReceiptCandidate;
 
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -242,6 +245,8 @@ pub enum JournalError {
     PublicationAttemptAlreadyRecorded,
     NativePublicationObservationAlreadyRecorded,
     ExistingReplaceAttemptAlreadyRecorded,
+    /// A forensic, non-authoritative V8 receipt candidate is immutable.
+    ExistingReplaceReceiptCandidateAlreadyRecorded,
 }
 
 impl From<rusqlite::Error> for JournalError {
@@ -522,12 +527,12 @@ impl SqliteSyncJournal {
                  PRAGMA user_version = 6;
                  COMMIT;",
             )?,
-            6 | SCHEMA_VERSION => {},
+            6 | 7 | SCHEMA_VERSION => {},
             other => return Err(JournalError::UnsupportedSchema(other)),
         }
         // Older migrations still reach v6. Upgrade atomically on the next
         // writer-open; read-only Settings never creates or migrates tables.
-        if version < SCHEMA_VERSION {
+        if version < 7 {
             connection.execute_batch(
                 "BEGIN IMMEDIATE;
                  CREATE TABLE sync_existing_replace_attempts (
@@ -542,6 +547,22 @@ impl SqliteSyncJournal {
                      UNIQUE(vault_id,path_collision_key,baseline_revision)
                  );
                  PRAGMA user_version = 7;
+                 COMMIT;",
+            )?;
+        }
+        // V8 is an additive, write-once *forensic candidate*, not an S3
+        // permission or cross-filesystem atomic transaction. A read-only
+        // connection never creates or migrates this table.
+        if version < 8 {
+            connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE sync_existing_replace_receipt_candidates (
+                     operation_id TEXT PRIMARY KEY NOT NULL
+                         REFERENCES sync_existing_replace_attempts(operation_id),
+                     candidate_json BLOB NOT NULL,
+                     candidate_digest TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 8;
                  COMMIT;",
             )?;
         }
