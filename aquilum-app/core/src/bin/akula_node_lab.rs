@@ -230,11 +230,14 @@ mod linux {
     }
 
     impl ScopedCatalog {
-        fn admit(cfg: &Config) -> Result<Option<Self>, String> {
+        fn admit(cfg: &Config, pinned_root: &File) -> Result<Option<Self>, String> {
             let Some(vault_id) = cfg.vault_id else { return Ok(None); };
             let trusted_names = cfg.catalog_files.iter().map(String::as_str).collect::<Vec<_>>();
-            let catalog = ReadCatalog::open(&cfg.root, vault_id, &trusted_names)
-                .map_err(|error| format!("refused catalog admission: {error:?}"))?;
+            let catalog = ReadCatalog::from_pinned_root(
+                pinned_root.try_clone().map_err(|error| format!("clone pinned root: {error}"))?,
+                vault_id,
+                &trusted_names,
+            ).map_err(|error| format!("refused catalog admission: {error:?}"))?;
             let entries = catalog.list();
             let mut reader_ids = BTreeSet::new();
             for name in &cfg.reader_files {
@@ -360,7 +363,7 @@ mod linux {
             return Err("vault root changed while pinning".into());
         }
         // Reject invalid reader scope before Core::open may write appdata.
-        let scoped_catalog = ScopedCatalog::admit(&cfg)?;
+        let scoped_catalog = ScopedCatalog::admit(&cfg, &root)?;
         let events: Arc<dyn EventSink> = Arc::new(|_event: CoreEvent| {});
         let core = Core::open(&cfg.appdata, events);
         if core.mcp.status().running {
