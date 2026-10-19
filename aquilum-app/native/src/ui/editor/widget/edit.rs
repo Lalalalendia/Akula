@@ -57,6 +57,13 @@ impl TextEditor {
         });
         // A shorter body can eliminate overflow without changing viewport.
         self.code_last_viewport = None;
+        // Mounted-window byte offsets and paint-time line indexes can become
+        // stale after an edit even if the window base does not move.
+        // Re-resolve the opener from checkpoints at the next layout, rather
+        // than associating this code offset with a different fence.
+        self.code_window_base = None;
+        self.code_window_opener = None;
+        self.paint_code_offsets.clear();
         let map = |at: usize| change.map(at);
         for (anchor, focus) in &mut self.extra_cursors {
             (*anchor, *focus) = (map(*anchor), map(*focus));
