@@ -43,6 +43,15 @@ impl TextEditor {
         self.fenced_code_body(index)
     }
 
+    /// Resolve the whole fenced code body under the keyboard caret, even
+    /// when the opening fence is outside the mounted paragraph window.
+    /// This uses the same full-Rope extraction as menu and header actions.
+    pub(super) fn focused_fenced_code_body(&self) -> Option<(usize, String)> {
+        let line = self.doc.at_offset(self.focus);
+        let opener = self.code_opener_at(line)?;
+        self.doc.copy_fenced_body(opener).map(|body| (opener, body))
+    }
+
     pub(super) fn fenced_code_start_at(&self, point: Point) -> Option<usize> {
         let index = self.index_at(point)?;
         let paragraph = self.doc.paragraph(index);
