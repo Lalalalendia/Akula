@@ -231,6 +231,18 @@ mod tests {
 
 
 impl TextEditor {
+    pub(super) fn refresh_code_window_opener(&mut self) {
+        let base = self.doc.loaded().0;
+        // A pending checkpoint can become available on a later layout.
+        // Once resolved, the byte identity survives until the window shifts.
+        if self.code_window_base != Some(base)
+            || (self.code_window_opener.is_none() && base > 0 && self.doc.fenced_code(0))
+        {
+            self.code_window_base = Some(base);
+            self.code_window_opener = self.doc.window_fence_opener();
+        }
+    }
+
     /// Text-only viewport: the code panel background/border are not clipped.
     /// It remains in editor-local coordinates, even as document bytes shift.
     pub(in crate::ui::editor) fn code_viewport(&self, line: usize) -> Option<Rect> {
@@ -257,7 +269,10 @@ impl TextEditor {
             if matches!(self.doc.block(at), Block::Code { first: true, fence: true, .. }) {
                 return Some(self.doc.paragraph(at).start);
             }
-            if at == 0 || !self.doc.fenced_code(at - 1) {
+            if at == 0 {
+                return self.code_window_opener;
+            }
+            if !self.doc.fenced_code(at - 1) {
                 return None;
             }
             at -= 1;
