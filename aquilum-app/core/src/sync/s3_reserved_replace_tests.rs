@@ -423,6 +423,7 @@ fn p0g3d02_cold_review_missing_claim_and_corrupted_original_fail_closed() {
     let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
     claim_cold_attempt_without_publication(&f, &admission);
     drop(admission);
+    assert_no_remote_ack(&f);
     let corrupted = rusqlite::Connection::open(
         f.appdata.join("originals.sqlite"),
     ).unwrap();
@@ -432,7 +433,24 @@ fn p0g3d02_cold_review_missing_claim_and_corrupted_original_fail_closed() {
     ).unwrap();
     drop(corrupted);
     assert!(inert_cold_review(&f).is_err());
-    assert_no_remote_ack(&f);
+    assert!(f.protected.read_bound_preimage(f.intent.operation_id).is_err(),
+        "tampered protected identity must not be accepted after restart");
+    // Do NOT call assert_no_remote_ack here: it intentionally assumes that
+    // protected BLOB provenance is still sound. Instead independently inspect
+    // the untouched journal and primary after corrupting that other database.
+    let mut journal = SqliteSyncJournal::open_existing_read_only(
+        &f.appdata.join("journal.sqlite"),
+    ).unwrap();
+    let baseline = journal.baseline(f.intent.vault_id, f.intent.document_id)
+        .unwrap().unwrap();
+    assert_eq!(Some(baseline.revision_id), f.intent.expected_baseline);
+    assert_eq!(baseline.content_hash, f.old_hash);
+    assert_eq!(journal.get(f.intent.operation_id).unwrap().unwrap().phase,
+        JournalPhase::Staged);
+    assert!(journal.mark_applied(f.intent.operation_id).is_err(),
+        "read-only inspection must never turn an invalid preimage into apply");
+    assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
+        b"unchanged private original");
 }
 
 
@@ -482,4 +500,54 @@ fn p0g3d02_cold_review_changed_baseline_refuses_without_mutating_file() {
     ).unwrap();
     assert_eq!(journal.get(f.intent.operation_id).unwrap().unwrap().phase,
         JournalPhase::Staged);
+}
+
+
+#[test]
+fn p0g3d02_separate_core_after_all_connections_close_is_forensic_only() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    claim_cold_attempt_without_publication(&f, &admission);
+    drop(admission);
+
+    // Release the old Core and ALL write-capable SQLite connections, retain
+    // only paths and immutable operation data for the replacement process.
+    let Fixture {
+        _temp: _hold_temp_dir, core, root, appdata,
+        bindings, custody, journal, cache, protected, intent, old_hash, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+
+    let restarted = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    let admission = RegisteredReadAdmission::open(&restarted, &root).unwrap();
+    let profiles = SqliteRegisteredS3Bindings::open_existing_read_only(
+        &admission, &appdata.join("profile.sqlite"),
+    ).unwrap();
+    let journal = SqliteSyncJournal::open_existing_read_only(
+        &appdata.join("journal.sqlite"),
+    ).unwrap();
+    let originals = SqliteProtectionStore::open_existing_read_only(
+        &appdata.join("originals.sqlite"),
+    ).unwrap();
+    let review = inspect_cold_s3_replace_hold(
+        &admission, &profiles, &journal, &originals, intent.operation_id,
+    ).unwrap();
+    assert_eq!(review.file_state, InertColdS3FileState::OriginalStillVisible);
+    assert_eq!(originals.read_bound_preimage(intent.operation_id)
+        .unwrap().unwrap().original.content_hash, old_hash);
+    assert_eq!(journal.get(intent.operation_id).unwrap().unwrap().phase,
+        JournalPhase::Staged);
+    let baseline = journal.baseline(intent.vault_id, intent.document_id)
+        .unwrap().unwrap();
+    assert_eq!(baseline.content_hash, old_hash);
+    assert_eq!(Some(baseline.revision_id), intent.expected_baseline);
+    assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
+        b"unchanged private original");
+    // A new Core, and matching original bytes, grant no remote ACK and no
+    // permission to replay an already consumed V7 existing-replace claim.
 }
