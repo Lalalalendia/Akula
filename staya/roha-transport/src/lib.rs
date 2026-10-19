@@ -20,6 +20,8 @@ pub mod durable_admission;
 pub mod reconcile_inventory;
 #[cfg(target_os = "linux")]
 pub mod redb_inventory;
+#[cfg(target_os = "linux")]
+pub mod joint_staging_audit;
 pub mod transfer;
 
 /// Explicitly authorized endpoint keys. The pairing workflow owns this list.
