@@ -218,6 +218,30 @@ mod tests {
         editor.paint_code_offsets.clear();
     }
 
+
+    #[test]
+    fn scrolling_position_survives_far_window_moves_inside_one_large_fence() {
+        let body: String = (0..30_000).map(|n| format!("code_{n}_with_data\\n")).collect();
+        let source = format!("before\\n~~~rust\\n{body}~~~\\nafter");
+        let opener = source.find("~~~rust").unwrap();
+        let mut editor = TextEditor::windowed(crop::Rope::from(source.as_str())).markdown();
+        assert!(editor.code_scrolls.advance(opener, 75.0, 400.0, 150.0));
+        for byte in [source.len() / 2, source.len() * 3 / 4] {
+            editor.doc.include(byte);
+            assert!(editor.doc.loaded().0 > opener);
+            let mut restored = None;
+            for _ in 0..300 {
+                editor.doc.track((0.0, 0.0));
+                editor.refresh_code_window_opener();
+                restored = editor.code_window_opener;
+                if restored.is_some() { break; }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(restored, Some(opener), "must identify global opener after moving the window");
+            assert_eq!(editor.code_offset_at(0), 75.0, "must preserve existing per-fence X offset");
+        }
+    }
+
     #[test]
     fn direct_edit_map_can_preserve_before_and_delete_crossing_fence() {
         let mut offsets = Offsets::default();
