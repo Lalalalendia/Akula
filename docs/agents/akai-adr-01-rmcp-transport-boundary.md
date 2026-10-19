@@ -1,7 +1,7 @@
 # AKAI-ADR-01 — MCP transport boundary: custom HTTP vs official RMCP
 
-Status: **PROPOSED — experiment authorization only, no migration decision**  
-Owner program: [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de) / milestone M0.  
+Status: **PROPOSED — experiment authorization only, no migration decision**
+Owner program: [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de) / milestone M0.
 Checkpoint: 2026-10-19. This ADR makes **no changes** to current File Gate, Sync, CAS, agent grants or any runtime.
 
 ## Decision under consideration
