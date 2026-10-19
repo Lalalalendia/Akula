@@ -23,7 +23,8 @@ fn registered_core(app: &Path, root: &Path) -> Arc<Core> {
 
 fn proposal(vault_id: VaultId, device_id: DeviceId) -> ApprovedPull {
     ApprovedPull {
-        vault_id, device_id,
+        vault_id,
+        device_id,
         authenticated_endpoint: [7; 32],
         trusted_issuer: [8; 32],
         object_blake3: [9; 32],
@@ -44,7 +45,10 @@ fn missing_or_unregistered_ledger_does_not_bootstrap_from_network() {
         RegisteredPullGrantLedger::open_existing(&core, &root, &db),
         Err(GrantLedgerError::MissingStore)
     ));
-    assert!(!db.exists(), "read-only admission must never bootstrap grants");
+    assert!(
+        !db.exists(),
+        "read-only admission must never bootstrap grants"
+    );
 
     let other_root = t.path().join("unregistered-vault");
     fs::create_dir(&other_root).unwrap();
@@ -72,15 +76,24 @@ fn core_registered_grant_revocation_survives_cold_restart_and_reissue() {
     assert_eq!(issued.vault_id, vault);
     assert_eq!(issued.device_id, device);
     assert_eq!(first.read_active(vault, device, 10).unwrap(), issued);
-    assert!(matches!(first.issue(p), Err(GrantLedgerError::ActiveGrantExists)));
+    assert!(matches!(
+        first.issue(p),
+        Err(GrantLedgerError::ActiveGrantExists)
+    ));
 
     // A second Core/SQLite connection sees exactly the same committed epoch.
     let cold = registered_core(&app, &root);
     let mut second = RegisteredPullGrantLedger::open_existing(&cold, &root, &db).unwrap();
     assert_eq!(second.read_active(vault, device, 10).unwrap(), issued);
     assert_eq!(second.revoke(vault, device, 1).unwrap(), 2);
-    assert!(matches!(first.read_active(vault, device, 10), Err(GrantLedgerError::Revoked)));
-    assert!(matches!(first.revoke(vault, device, 1), Err(GrantLedgerError::StaleEpoch)));
+    assert!(matches!(
+        first.read_active(vault, device, 10),
+        Err(GrantLedgerError::Revoked)
+    ));
+    assert!(matches!(
+        first.revoke(vault, device, 1),
+        Err(GrantLedgerError::StaleEpoch)
+    ));
     drop(first);
     drop(second);
     drop(cold);
@@ -88,12 +101,21 @@ fn core_registered_grant_revocation_survives_cold_restart_and_reissue() {
     // No automatic re-enrollment: tombstone is durable, not an empty roster.
     let recovered = registered_core(&app, &root);
     let mut last = RegisteredPullGrantLedger::open_existing(&recovered, &root, &db).unwrap();
-    assert!(matches!(last.read_active(vault, device, 10), Err(GrantLedgerError::Revoked)));
+    assert!(matches!(
+        last.read_active(vault, device, 10),
+        Err(GrantLedgerError::Revoked)
+    ));
     let renewal = last.issue(p).unwrap();
     assert_eq!(renewal.epoch, 3, "revoked generation must not be reused");
-    assert!(matches!(last.revoke(vault, device, 1), Err(GrantLedgerError::StaleEpoch)));
+    assert!(matches!(
+        last.revoke(vault, device, 1),
+        Err(GrantLedgerError::StaleEpoch)
+    ));
     assert_eq!(last.read_active(vault, device, 10).unwrap(), renewal);
-    assert!(fs::read_dir(&root).unwrap().next().is_none(), "no user-vault mutation");
+    assert!(
+        fs::read_dir(&root).unwrap().next().is_none(),
+        "no user-vault mutation"
+    );
 }
 
 #[test]
@@ -143,11 +165,20 @@ fn oversize_or_expired_grants_deny_before_any_file_operations() {
     let d = DeviceId::new();
     let mut p = proposal(v, d);
     p.object_length = 4 * 1024 * 1024 + 1;
-    assert!(matches!(ledger.issue(p), Err(GrantLedgerError::InvalidProposal)));
-    assert!(matches!(ledger.read_active(v, d, 100), Err(GrantLedgerError::MissingGrant)));
+    assert!(matches!(
+        ledger.issue(p),
+        Err(GrantLedgerError::InvalidProposal)
+    ));
+    assert!(matches!(
+        ledger.read_active(v, d, 100),
+        Err(GrantLedgerError::MissingGrant)
+    ));
     p.object_length = 200;
     let granted = ledger.issue(p).unwrap();
     assert_eq!(granted.epoch, 1);
-    assert!(matches!(ledger.read_active(v, d, 1000), Err(GrantLedgerError::InvalidProposal)));
+    assert!(matches!(
+        ledger.read_active(v, d, 1000),
+        Err(GrantLedgerError::InvalidProposal)
+    ));
     assert!(fs::read_dir(&root).unwrap().next().is_none());
 }
