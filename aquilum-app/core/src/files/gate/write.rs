@@ -120,7 +120,7 @@ pub(crate) enum CheckedHistoryError {
 /// check is opt-in. Normal local history publication still has one writer.
 #[allow(dead_code)]
 pub(crate) fn write_checked_history(
-    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
     core: &Core,
     path: &Path,
     content: &str,
@@ -144,7 +144,7 @@ pub(crate) fn write_checked_history(
 /// retry a previously committed V7 one-shot claim.
 #[allow(dead_code)]
 pub(crate) fn write_checked_history_with_prewrite(
-    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
     core: &Core,
     path: &Path,
     content: &str,
