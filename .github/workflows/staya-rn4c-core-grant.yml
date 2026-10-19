@@ -1,0 +1,76 @@
+name: Staya RN4C — Core registered peer-grant epoch ledger
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4c-core-grant-ledger-*"
+    paths:
+      - "aquilum-app/core/src/sync/peer_grant_lab.rs"
+      - "aquilum-app/core/src/sync/mod.rs"
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/tests/rn4c_peer_grant_lab.rs"
+      - ".github/workflows/staya-rn4c-core-grant.yml"
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/sync/peer_grant_lab.rs"
+      - "aquilum-app/core/src/sync/mod.rs"
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/tests/rn4c_peer_grant_lab.rs"
+      - ".github/workflows/staya-rn4c-core-grant.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-grant-lab:
+    name: Core registered-grant cold restart — ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTFLAGS: "-Zcrate-attr=feature(if_let_guard)"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Verify exact disabled-by-default feature and no shipping integration
+        run: |
+          set -euo pipefail
+          grep -q 'staya-core-grant-lab = \[\]' aquilum-app/core/Cargo.toml
+          grep -q '#\[cfg(feature = "staya-core-grant-lab")\]' aquilum-app/core/src/sync/mod.rs
+          if grep -q 'staya-core-grant-lab' aquilum-app/native/Cargo.toml; then
+            echo "Unexpected activation in Akula native" >&2
+            exit 1
+          fi
+          test -f aquilum-app/Cargo.lock
+      - name: Verify Rust formatting of new files
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check aquilum-app/core/src/sync/peer_grant_lab.rs
+          rustfmt --edition 2021 --check aquilum-app/core/tests/rn4c_peer_grant_lab.rs
+      - name: Test explicit Core registration, SQLite epoch CAS, revocation and cold start
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features staya-core-grant-lab \
+            --test rn4c_peer_grant_lab -- --nocapture --test-threads=1
+      - name: Keep existing application lockfile unchanged
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: State experimental limit
+        run: |
+          echo "PASS: opt-in Core registered-grant epoch lab on ${{ matrix.platform }}; no File Gate or sync writes." >> "$GITHUB_STEP_SUMMARY"
+          echo "Not a production issuer, atomic revocation/write lease, installer trust, or deployed P2P sync." >> "$GITHUB_STEP_SUMMARY"

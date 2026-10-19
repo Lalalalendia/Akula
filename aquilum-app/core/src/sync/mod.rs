@@ -33,6 +33,9 @@ pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::PinnedFileIdentity;
 #[cfg(test)]
 mod fault_matrix;
+// Explicitly non-shipping registered-root policy journal for P2P lab.
+#[cfg(feature = "staya-core-grant-lab")]
+pub mod peer_grant_lab;
 mod identity;
 mod journal;
 mod local_create;
