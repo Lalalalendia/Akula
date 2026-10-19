@@ -214,16 +214,16 @@ try {
     $buttons[0].SetFocus()
     Wait-ButtonFocus -Target $buttons[0] -Phase 'first Copy button'
     [System.Windows.Forms.Clipboard]::SetText('AKULA_WINDOWS_KEYBOARD_ENTER_PENDING')
-    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [ushort]0x0d, $false)
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x0d, $false)
     Wait-KeyboardClipboard -Expected $expectedBodies[0] -Phase 'Enter'
 
-    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [ushort]0x09, $false)
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x09, $false)
     Wait-ButtonFocus -Target $buttons[1] -Phase 'second Copy button after Tab'
     [System.Windows.Forms.Clipboard]::SetText('AKULA_WINDOWS_KEYBOARD_SPACE_PENDING')
-    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [ushort]0x20, $false)
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x20, $false)
     Wait-KeyboardClipboard -Expected $expectedBodies[1] -Phase 'Space'
 
-    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [ushort]0x09, $true)
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x09, $true)
     Wait-ButtonFocus -Target $buttons[0] -Phase 'first Copy button after Shift+Tab'
     if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $initialHash) {
         throw 'Real Windows keyboard navigation/activation edited the Markdown source'
