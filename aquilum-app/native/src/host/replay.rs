@@ -49,7 +49,25 @@ impl Host {
         let state = self.pointer_state();
         match step {
             crate::replay::Step::Wheel(lines) => {
-                self.pointer_event(PointerEvent::Scroll(PointerScrollEvent { pointer: PRIMARY_MOUSE, delta: ScrollDelta::LineDelta(0.0, lines), state }));
+                // Developer-only full-redraw image scan: smooth wheel glides
+                // reached only three distinct PNGs in a 10-file test note.
+                // Bypass easing for this controlled stress workload while
+                // preserving native pointer-scroll dispatch and replay timing.
+                // Same exact 240 logical-pixel step in both cache policies.
+                static SCAN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                let scan = *SCAN.get_or_init(|| {
+                    std::env::var("AKULA_EXPERIMENTAL_IMAGE_SCROLL_SCAN").ok().as_deref() == Some("1")
+                });
+                let delta = if scan {
+                    static FIRST: std::sync::Once = std::sync::Once::new();
+                    FIRST.call_once(|| eprintln!("AKULA_IMAGE_SCROLL_SCAN_APPLIED logical_step=240"));
+                    ScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(
+                        0.0, 240.0 * f64::from(lines.signum()) * scale,
+                    ))
+                } else {
+                    ScrollDelta::LineDelta(0.0, lines)
+                };
+                self.pointer_event(PointerEvent::Scroll(PointerScrollEvent { pointer: PRIMARY_MOUSE, delta, state }));
             }
             crate::replay::Step::Pinch(delta) => self.pinch(f64::from(delta)),
             crate::replay::Step::Focus => {
