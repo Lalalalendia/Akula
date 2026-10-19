@@ -132,6 +132,35 @@ impl SqliteRegisteredS3Bindings {
         Ok(Self { connection, database_path: database_path.to_path_buf() })
     }
 
+    /// Cold recovery must never create a fresh profile DB or silently migrate
+    /// an older schema. No network request, binding mutation, or S3 authority.
+    #[allow(dead_code)]
+    pub(crate) fn open_existing_read_only(
+        admission: &RegisteredReadAdmission<'_>,
+        database_path: &Path,
+    ) -> Result<Self, S3BindingError> {
+        admission.recheck_registered_root()?;
+        validate_appdata_location(admission, database_path)?;
+        let connection = Connection::open_with_flags(
+            database_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 250;",
+        )?;
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        )?;
+        if version != SCHEMA_VERSION {
+            return Err(S3BindingError::UnsupportedSchema(version));
+        }
+        admission.recheck_registered_root()?;
+        Ok(Self { connection, database_path: database_path.to_path_buf() })
+    }
+
     /// A trusted host calls this only after separately checking the existing
     /// S3 head and obtaining user approval to join that exact remote namespace.
     /// Re-binding an established workspace or stealing another local
