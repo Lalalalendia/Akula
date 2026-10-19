@@ -226,7 +226,22 @@
       "keysRemoveCancelled": "Credential removal cancelled.",
       "keysConfirmTitle": "Remove S3 credentials",
       "keysConfirmText": "Remove this bucket's keys from Windows Credential Manager? Akula files are not affected. This does NOT revoke keys in Yandex Cloud; revoke them separately in the console.",
-"checkConnection": "Check connection · not available"
+"checkConnection": "Check connection · not available",
+      "checkConnectionPreview": "Check S3 access · read-only (test)",
+      "probeStatus": "S3 verification result",
+      "probeChecking": "Checking bucket access… Sync remains off.",
+      "probeVerifiedReadOnly": "Object-list permission verified. Sync remains off.",
+      "probeMissingKeys": "No keys for this bucket were found in Windows.",
+      "probeInvalidStoredKeys": "Stored credentials are malformed or damaged.",
+      "probeKeyStoreUnavailable": "Windows Credential Manager is unavailable.",
+      "probeRejected": "Server rejected these credentials. Check the key pair.",
+      "probeDenied": "Permission to list objects in this bucket is denied.",
+      "probeMissingBucket": "Bucket not found (or server withheld its existence).",
+      "probeClock": "Computer clock differs from server time. Check Windows clock.",
+      "probeRegion": "S3 region or endpoint is incorrect.",
+      "probeTimeout": "Connection check timed out. Retry manually.",
+      "probeNetwork": "Network failure or TLS error.",
+      "probeServer": "S3 returned an unverified response. Access is not proven."
     },
     "sync": {
       "title": "Sync recovery · read-only",
