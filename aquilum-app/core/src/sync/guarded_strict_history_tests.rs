@@ -1,5 +1,5 @@
 //! P0g-3d-03: genuine File Gate + immutable HistoryService witness tests.
- //! This does NOT model a cold power cut, S3 apply or durable receipt.
+//! This does NOT model a cold power cut, S3 apply or durable receipt.
 
 use super::*;
 use crate::app_core::{Core, CoreEvent};
