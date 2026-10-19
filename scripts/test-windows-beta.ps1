@@ -132,6 +132,15 @@ function Start-And-Close {
     }
   }
 }
+# Test the real Windows UI Automation adapter in a separate STA client before
+# the regular GUI edit/restart/uninstall checks. Never run on a workstation.
+$uiaScript = Join-Path $PSScriptRoot 'windows-accesskit-uia.ps1'
+$windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $uiaScript -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula Windows UIA acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+
 Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
