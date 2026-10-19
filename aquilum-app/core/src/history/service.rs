@@ -770,11 +770,21 @@ impl HistoryService {
                 "cold history lock", "history mutex poisoned",
             ));
         };
-        let located = locate(&mut state, roots, note).ok_or_else(||
-            HistorySaveFailure::new(
+        // Cold-read authority uses CURRENT host registration, not previously
+        // cached roots retained by an earlier call to locate().
+        let active_roots=roots();
+        if active_roots.iter().filter(|root|
+            relative_inside(root,note).is_some()
+        ).count()!=1 {
+            return Err(HistorySaveFailure::new(
+                "cold history location", "note not in exactly one active root",
+            ));
+        }
+        state.roots=active_roots.clone();
+        let located = locate(&mut state, &||active_roots.clone(), note)
+            .ok_or_else(||HistorySaveFailure::new(
                 "cold history location", "note outside registered roots",
-            )
-        )?;
+            ))?;
         if history_blocked(&state, &located)
             || !allowed_history_directory(&located.vault, &located.dir)
         {
