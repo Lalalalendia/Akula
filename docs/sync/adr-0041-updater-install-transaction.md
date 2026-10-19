@@ -57,6 +57,8 @@ unsupported until explicitly designed and packaged.
 Direct standalone Rust regression tests on Linux and macOS cover
 lock contention, symlinked destinations/lock file, independent stage
 creation, recovery after old->backup, refusal after new promotion,
+**two actual independent child-process SIGKILL tests** at those points with
+OS lock release and preserved/restored generation,
 concurrent ambiguous stages, rollback on refused OS dispatch,
 unexpected staged entries, and preservation of the previous app. On
 macOS one native test uses `/usr/bin/lockf -k -t 0` to independently
