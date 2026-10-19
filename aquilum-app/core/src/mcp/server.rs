@@ -304,8 +304,8 @@ fn accept(listener: &TcpListener, endpoint: &Arc<Endpoint>) {
             Err(Capacity::Saturated) => {
                 // Explicit bounded backpressure instead of holding the accept
                 // loop behind 16 occupied sockets for up to 60 seconds.
-                let _ = stream.set_write_timeout(Some(RECLAIM_WAIT));
                 if let Ok(mut connection) = Connection::new(&stream) {
+                    let _ = stream.set_write_timeout(Some(RECLAIM_WAIT));
                     let _ = connection.send(
                         &Response::text(503, "MCP: все соединения заняты, повторите запрос"),
                         false,
@@ -670,7 +670,8 @@ mod tests {
     }
 
     #[test]
-    fn holds_connections_over_the_limit_until_a_slot_frees() {
+    fn reclaims_idle_keep_alive_before_refusing_new_work() {
+        use std::time::Instant;
         let (server, _) = server();
         let mut held = (0..MAX_CONNECTIONS)
             .map(|_| {
@@ -681,19 +682,77 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
+        // Wait until each completed response is registered as idle. Selecting
+        // its ID proves the exact client reclaimed, not merely that a fresh
+        // response happened after a timeout.
+        let mut reclaimed_id = None;
+        for _ in 0..2500 {
+            let slots = lock(&server.endpoint.open);
+            if slots.count == MAX_CONNECTIONS && slots.idle.len() == MAX_CONNECTIONS {
+                reclaimed_id = slots.idle.last().map(|idle| idle.id as usize);
+                break;
+            }
+            drop(slots);
+            thread::sleep(Duration::from_millis(2));
+        }
+        let reclaimed_id = reclaimed_id.expect("16 keep-alive connections became idle");
+        assert!(reclaimed_id < MAX_CONNECTIONS);
+
+        let start = Instant::now();
         let mut waiting = Client::connect(&server);
         waiting.send(&sized(&tool_call("waiting"), ""));
-        waiting.stream.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
-        let mut chunk = [0; 1];
-        let early = waiting.stream.read(&mut chunk).unwrap_err().kind();
-        assert!(matches!(early, io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut));
-
-        drop(held.pop());
-        waiting.stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let answer = waiting.answer();
         assert_eq!(answer.status, 200);
         assert!(answer.body.contains("waiting"));
+        assert!(start.elapsed() < Duration::from_secs(3), "idle reclamation was too slow");
+        assert!(held[reclaimed_id].hung_up(), "idle victim wasn't disconnected");
+        assert_eq!(lock(&server.endpoint.open).count, MAX_CONNECTIONS);
+        drop(waiting);
         drop(held);
+        server.stop();
+    }
+
+    #[test]
+    fn returns_bounded_503_when_all_sockets_are_mid_request() {
+        use std::time::Instant;
+        let (server, _) = server();
+        let mut active = (0..MAX_CONNECTIONS)
+            .map(|_| {
+                let mut client = Client::connect(&server);
+                // Authorized, but intentionally incomplete body: this socket
+                // is NOT idle and must not be evicted under pressure.
+                client.send(&head("Content-Length: 1024\r\n"));
+                client
+            })
+            .collect::<Vec<_>>();
+        let mut occupied = false;
+        for _ in 0..2500 {
+            let slots = lock(&server.endpoint.open);
+            if slots.count == MAX_CONNECTIONS && slots.idle.is_empty() {
+                occupied = true;
+                break;
+            }
+            drop(slots);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(occupied, "all 16 request slots were occupied");
+        let mut overflow = Client::connect(&server);
+        let start = Instant::now();
+        overflow.send(&sized(&initialize(), ""));
+        let refused = overflow.answer();
+        assert_eq!((refused.status, refused.connection.as_str()), (503, "close"));
+        assert!(start.elapsed() < Duration::from_secs(3), "overload waited for a busy socket");
+        assert!(refused.body.contains("соединения заняты"));
+        assert!(overflow.hung_up());
+
+        // A busy socket must survive the overload. Completing its body
+        // returns the JSON-RPC parse error, not a forced TCP disconnect.
+        active[0].send(&" ".repeat(1024));
+        let response = active[0].answer();
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains("-32700"));
+        drop(overflow);
+        drop(active);
         server.stop();
     }
 
