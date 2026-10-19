@@ -222,6 +222,62 @@ mod tests {
             assert_eq!(target_name(invalid), Err(VaultError::InvalidBucket));
         }
     }
+    // This is an actual Windows Credential Manager round-trip with strictly
+    // disposable, non-Yandex test bytes. No CredUI prompt, network, or real
+    // account key is involved, so it also runs on noninteractive CI runners.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_credential_manager_isolated_roundtrip() {
+        use super::windows_vault::wide;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use windows::core::PWSTR;
+        use windows::Win32::Security::Credentials::{
+            CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+        };
+        use zeroize::Zeroizing;
+
+        // A per-run bucket name cannot collide with a user's ordinary
+        // credentials. Never use the example/production bucket name.
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let bucket = format!("akula-test-{}-{now}", std::process::id());
+        let target = target_name(&bucket).unwrap();
+        struct RemoveOnDrop(String);
+        impl Drop for RemoveOnDrop {
+            fn drop(&mut self) { let _ = super::remove(&self.0); }
+        }
+        let _guard = RemoveOnDrop(bucket.clone());
+
+        assert!(!present(&bucket).unwrap(), "new target unexpectedly already exists");
+
+        let mut target_utf16 = wide(&target);
+        let mut user_utf16 = wide("akula-test-access-id");
+        let mut save_fake = |payload: &[u8]| {
+            let mut secret = Zeroizing::new(payload.to_vec());
+            let credential = CREDENTIALW {
+                Type: CRED_TYPE_GENERIC,
+                TargetName: PWSTR(target_utf16.as_mut_ptr()),
+                UserName: PWSTR(user_utf16.as_mut_ptr()),
+                CredentialBlobSize: secret.len() as u32,
+                CredentialBlob: secret.as_mut_ptr(),
+                Persist: CRED_PERSIST_LOCAL_MACHINE,
+                ..Default::default()
+            };
+            unsafe { CredWriteW(&credential, 0) }.expect("test-only write to Credential Manager");
+        };
+
+        save_fake(b"synthetic-test-secret-v1");
+        assert!(present(&bucket).unwrap());
+        assert!(!present("akula-test-unrelated-bucket").unwrap());
+
+        // Updating the same bucket must retain the same target identity.
+        save_fake(b"synthetic-test-secret-v2");
+        assert!(present(&bucket).unwrap());
+        remove(&bucket).expect("test-only delete from Credential Manager");
+        assert!(!present(&bucket).unwrap(), "delete must revoke local presence");
+        remove(&bucket).expect("repeated delete should be idempotent");
+        assert_eq!(remove("not.valid"), Err(VaultError::InvalidBucket));
+    }
+
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn unsupported_platform_never_prompts_or_writes_credentials() {
