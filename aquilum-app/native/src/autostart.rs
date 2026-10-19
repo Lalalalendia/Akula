@@ -1,3 +1,6 @@
+#[cfg(target_os = "windows")]
+const NAME: &str = "Akula";
+#[cfg(not(target_os = "windows"))]
 const NAME: &str = "Aquilum";
 
 pub fn available() -> bool {
