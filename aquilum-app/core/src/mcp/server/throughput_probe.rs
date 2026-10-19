@@ -1,6 +1,6 @@
-//! Opt-in MCP read-only synthetic throughput diagnostic.
-//! Run: cargo test -p aquilum-core mcp::server::tests::throughput_probe -- --ignored --nocapture
-//! This is NOT an agent workload benchmark or authorization to parallelize writes.
+// Opt-in MCP read-only synthetic throughput diagnostic.
+// Run: cargo test -p aquilum-core mcp::server::tests::throughput_probe -- --ignored --nocapture
+// This is NOT an agent workload benchmark or authorization to parallelize writes.
 use super::*;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
