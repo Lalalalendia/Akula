@@ -92,7 +92,7 @@ mod windows_vault {
         CREDUI_FLAGS_GENERIC_CREDENTIALS,
     };
 
-    fn wide(value: &str) -> Vec<u16> {
+    pub(super) fn wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
