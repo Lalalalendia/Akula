@@ -4,9 +4,14 @@
 #![cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 
 use aquilum_core::node_catalog_lab::{CatalogError, ReadCatalog, MAX_DOCUMENT_BYTES, MAX_DOCUMENTS};
+use aquilum_core::sync::VaultId;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+
+fn vault_id() -> VaultId {
+    VaultId::from_uuid(uuid::Uuid::from_u128(1))
+}
 
 fn setup() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
@@ -21,7 +26,7 @@ fn id_of(catalog: &ReadCatalog, name: &str) -> String {
 }
 
 fn invalid(root: &Path, files: &[&str]) {
-    assert_eq!(ReadCatalog::open(root, files).err(), Some(CatalogError::InvalidConfiguration));
+    assert_eq!(ReadCatalog::open(root, vault_id(), files).err(), Some(CatalogError::InvalidConfiguration));
 }
 
 #[test]
@@ -35,9 +40,19 @@ fn three_allowlisted_documents_have_stable_ids_and_exact_raw_revisions() {
     for (name, bytes) in docs { fs::write(root.join(name), bytes).unwrap(); }
     fs::write(root.join("private.md"), b"DENIED").unwrap();
 
-    let first = ReadCatalog::open(&root, &["alpha.md", "beta.md", "gamma.md"]).unwrap();
-    let second = ReadCatalog::open(&root, &["gamma.md", "alpha.md", "beta.md"]).unwrap();
+    let first = ReadCatalog::open(&root, vault_id(), &["alpha.md", "beta.md", "gamma.md"]).unwrap();
+    let second = ReadCatalog::open(&root, vault_id(), &["gamma.md", "alpha.md", "beta.md"]).unwrap();
     assert_eq!(first.list(), second.list(), "IDs must be stable across catalog order");
+    assert_eq!(first.vault_id(), vault_id());
+    // A local workspace path or identical filename cannot substitute for
+    // the separately registered, typed identity of a different vault.
+    let another_vault = VaultId::from_uuid(uuid::Uuid::from_u128(2));
+    let different = ReadCatalog::open(
+        &root, another_vault, &["alpha.md", "beta.md", "gamma.md"]
+    ).unwrap();
+    assert_ne!(id_of(&first, "alpha.md"), id_of(&different, "alpha.md"));
+    assert_eq!(first.read(&id_of(&different, "alpha.md")).unwrap_err(),
+        CatalogError::UnknownObject);
     assert_eq!(first.list().len(), 3);
     let unknown = "0000000000000000000000000000000000000000000000000000000000000000";
     assert_eq!(first.read(unknown).unwrap_err(), CatalogError::UnknownObject);
@@ -93,7 +108,7 @@ fn invalid_names_duplicates_and_missing_entries_refuse_catalog_creation() {
 fn original_root_fd_survives_path_replacement_but_file_identity_is_sticky() {
     let (scratch, root) = setup();
     fs::write(root.join("a.md"), b"original pinned root").unwrap();
-    let catalog = ReadCatalog::open(&root, &["a.md"]).unwrap();
+    let catalog = ReadCatalog::open(&root, vault_id(), &["a.md"]).unwrap();
     let id = id_of(&catalog, "a.md");
 
     let old_root = scratch.path().join("old");
@@ -112,7 +127,7 @@ fn symlink_swap_and_new_file_revision_cannot_be_silently_accepted() {
     let (_scratch, root) = setup();
     let path = root.join("a.md");
     fs::write(&path, b"initial").unwrap();
-    let catalog = ReadCatalog::open(&root, &["a.md"]).unwrap();
+    let catalog = ReadCatalog::open(&root, vault_id(), &["a.md"]).unwrap();
     let id = id_of(&catalog, "a.md");
     let previous_revision = catalog.read(&id).unwrap().raw_revision;
 
@@ -135,7 +150,7 @@ fn bounded_read_rejects_changed_sizes_and_invalid_utf8() {
     let large = vec![b'X'; MAX_DOCUMENT_BYTES as usize];
     fs::write(root.join("limit.md"), &large).unwrap();
     fs::write(root.join("bad.md"), [0xff, 0xfe, 0xfd]).unwrap();
-    let catalog = ReadCatalog::open(&root, &["limit.md", "bad.md"]).unwrap();
+    let catalog = ReadCatalog::open(&root, vault_id(), &["limit.md", "bad.md"]).unwrap();
 
     let id = id_of(&catalog, "limit.md");
     assert_eq!(catalog.read(&id).unwrap().content.len() as u64, MAX_DOCUMENT_BYTES);
@@ -147,5 +162,5 @@ fn bounded_read_rejects_changed_sizes_and_invalid_utf8() {
 
     let (_scratch2, another) = setup();
     fs::write(another.join("large.md"), vec![b'A'; MAX_DOCUMENT_BYTES as usize + 1]).unwrap();
-    assert_eq!(ReadCatalog::open(&another, &["large.md"]).err(), Some(CatalogError::TooLarge));
+    assert_eq!(ReadCatalog::open(&another, vault_id(), &["large.md"]).err(), Some(CatalogError::TooLarge));
 }
