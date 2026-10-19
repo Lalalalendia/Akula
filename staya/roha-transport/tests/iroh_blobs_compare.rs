@@ -1680,3 +1680,168 @@ fn bounded_ext4_redb_read_only_after_remount() {
         "P2P_BLOB09B_REDB_REMOUNT persistent_ledger_and_redb=true inline_b3=true external_owned_status=true no_db_writes=true file_gate_ready=false"
     );
 }
+
+/// P2P-BLOB-10a: two real immutable FsStore snapshots (external and inline),
+/// two fsynced ledgers and one bounded mounted ext4 volume. No File Gate action.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires both real P2P-09a/09b FsStores plus fsynced journals on ext4"]
+fn bounded_ext4_joint_staging_checkpoint() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits,
+        bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger,
+        joint_staging_audit::{JointHold, audit_quiescent_staging},
+        reconcile_inventory::AuditHold,
+        redb_inventory::RedbHold,
+    };
+    use std::fs;
+
+    let mount = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("disposable mounted ext4 root"),
+    );
+    let volume = StagingVolumeGuard::open(&mount).expect("strict bounded image");
+    let large_size = (1024 * 1024 + 17) as u64;
+    let limit = AdmissionLimits {
+        max_object_bytes: large_size,
+        max_tracked_bytes: large_size,
+        max_peer_bytes: large_size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let large_ledger = DurableLedger::open(&mount.join("reconciliation-ledger"), limit)
+        .expect("existing reserved external blob");
+    let large_bytes_before = fs::read(mount.join("reconciliation-ledger/reservations.v1")).unwrap();
+    let external = audit_quiescent_staging(&volume, &large_ledger, "real-fsstore")
+        .expect("external data + pinned DB agree with locked journal");
+    assert_eq!(external.durable_blob_count, 1);
+    assert_eq!(external.verified_external_blobs, 1);
+    assert_eq!(external.verified_inline_blobs, 0);
+    assert_eq!(external.verified_total_bytes, large_size);
+    assert!(external.redb_tables_scanned);
+    assert!(!external.file_gate_ready);
+    assert!(!external.atomic_filesystem_snapshot);
+    assert!(external.bao_verification_pending);
+
+    let inline_text = b"p2p-blob-09b-readonly-inlined-contents";
+    let inline_size = inline_text.len() as u64;
+    let inline_limits = AdmissionLimits {
+        max_object_bytes: inline_size,
+        max_tracked_bytes: inline_size,
+        max_peer_bytes: inline_size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let inline_ledger = DurableLedger::open(&mount.join("small-inline-ledger"), inline_limits)
+        .expect("existing reserved in-DB blob");
+    let inline_journal_before =
+        fs::read(mount.join("small-inline-ledger/reservations.v1")).unwrap();
+    let inline_db_before = fs::read(mount.join("small-inline-fsstore/blobs.db")).unwrap();
+    let inline = audit_quiescent_staging(&volume, &inline_ledger, "small-inline-fsstore")
+        .expect("exact inline data length and BLAKE3 match locked journal");
+    assert_eq!(inline.durable_blob_count, 1);
+    assert_eq!(inline.verified_external_blobs, 0);
+    assert_eq!(inline.verified_inline_blobs, 1);
+    assert_eq!(inline.verified_total_bytes, inline_size);
+    assert!(!inline.file_gate_ready);
+    assert!(!inline.atomic_filesystem_snapshot);
+    assert!(inline.bao_verification_pending);
+
+    // Using another *valid* ledger for an unrelated real DB must fail.
+    assert!(matches!(
+        audit_quiescent_staging(&volume, &large_ledger, "small-inline-fsstore"),
+        Err(JointHold::Redb(RedbHold::OrphanDatabaseBlob))
+    ));
+
+    // An inline blob is known to be in redb. A duplicate physical file under
+    // the SAME hash must not be counted twice or silently treated as benign.
+    let cloned = mount
+        .join("small-inline-fsstore/data")
+        .join(format!("{}.data", blake3::hash(inline_text).to_hex()));
+    fs::write(&cloned, inline_text).expect("inject only disposable duplicate");
+    assert!(matches!(
+        audit_quiescent_staging(&volume, &inline_ledger, "small-inline-fsstore"),
+        Err(JointHold::External(AuditHold::UnexpectedDataEntry(_)))
+    ));
+    fs::remove_file(&cloned).expect("remove test-injected duplicate");
+
+    // Still reject corrupted in-DB B3 in the separate copy produced by 09b.
+    assert!(matches!(
+        audit_quiescent_staging(&volume, &inline_ledger, "tampered-inline-copy"),
+        Err(JointHold::Redb(RedbHold::InvalidInlineData))
+    ));
+
+    let restored = audit_quiescent_staging(&volume, &inline_ledger, "small-inline-fsstore")
+        .expect("exact restored known state");
+    assert_eq!(restored, inline);
+    assert_eq!(
+        fs::read(mount.join("small-inline-fsstore/blobs.db")).unwrap(),
+        inline_db_before,
+        "read-only audit must not write to the original redb"
+    );
+    assert_eq!(
+        fs::read(mount.join("small-inline-ledger/reservations.v1")).unwrap(),
+        inline_journal_before,
+        "joined audit must not free or mutate the inline journal"
+    );
+    assert_eq!(
+        fs::read(mount.join("reconciliation-ledger/reservations.v1")).unwrap(),
+        large_bytes_before,
+        "joined audit must not free or mutate the external journal"
+    );
+    println!(
+        "P2P_BLOB10A_JOINED external_bytes={} inline_bytes={} separate_valid_ledgers=true cross_ledger_hold=true duplicate_inline_file_hold=true tampered_db_hold=true all_sources_unchanged=true atomic_snapshot=false bao_pending=true file_gate_ready=false",
+        large_size, inline_size
+    );
+}
+
+/// Reconstruct the joint evidence from the same two on-disk ledgers and real
+/// FsStores *after* the ext4 image was physically unmounted and remounted.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires bounded ext4 remount following prior real joint test"]
+fn bounded_ext4_joint_staging_checkpoint_after_remount() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, joint_staging_audit::audit_quiescent_staging,
+    };
+    let mount = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 root"),
+    );
+    let volume = StagingVolumeGuard::open(&mount).expect("separate bounded filesystem");
+    let size = (1024 * 1024 + 17) as u64;
+    let limits = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let big = DurableLedger::open(&mount.join("reconciliation-ledger"), limits).unwrap();
+    let evidence = audit_quiescent_staging(&volume, &big, "real-fsstore").unwrap();
+    assert_eq!(evidence.verified_external_blobs, 1);
+    assert_eq!(evidence.verified_inline_blobs, 0);
+    assert_eq!(evidence.verified_total_bytes, size);
+    drop(big);
+
+    let count = b"p2p-blob-09b-readonly-inlined-contents".len() as u64;
+    let inline_limits = AdmissionLimits {
+        max_object_bytes: count,
+        max_tracked_bytes: count,
+        max_peer_bytes: count,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let ledger = DurableLedger::open(&mount.join("small-inline-ledger"), inline_limits).unwrap();
+    let second = audit_quiescent_staging(&volume, &ledger, "small-inline-fsstore").unwrap();
+    assert_eq!(second.verified_inline_blobs, 1);
+    assert_eq!(second.verified_external_blobs, 0);
+    assert_eq!(second.verified_total_bytes, count);
+    assert!(second.database_unchanged_between_phases);
+    assert!(second.ledger_unchanged_between_phases);
+    assert!(!second.atomic_filesystem_snapshot);
+    assert!(!second.file_gate_ready);
+    println!(
+        "P2P_BLOB10A_JOINED_REMOUNT same_disk_two_db_and_ledgers=true combined_b3_and_lengths=true atomic_snapshot=false file_gate_ready=false bao_pending=true"
+    );
+}

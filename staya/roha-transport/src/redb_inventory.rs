@@ -233,15 +233,24 @@ pub struct RedbEvidenceOnly {
     pub bao_verification_pending: bool,
 }
 
+/// Additional typed inventory for a *single already validated* readonly DB
+/// scan. Never expose individual inline hashes without their verified summary.
+#[derive(Debug, Clone)]
+pub(crate) struct AuditedRedbManifest {
+    pub summary: RedbEvidenceOnly,
+    pub inline_hashes: BTreeSet<[u8; 32]>,
+    pub database_digest: [u8; 32],
+}
+
 /// Every table and blob record in the pinned DB must match an already-held
 /// durable journal reservation. The read-only redb handle takes a shared lock
 /// and never invokes write transactions or auto-repair. A writer must NOT be
 /// permitted to create/modify entries concurrently on the staging volume.
-pub fn audit_pinned_redb(
+pub(crate) fn audit_pinned_redb_manifest(
     volume: &StagingVolumeGuard,
     ledger: &DurableLedger,
     store_child: &str,
-) -> Result<RedbEvidenceOnly, RedbHold> {
+) -> Result<AuditedRedbManifest, RedbHold> {
     if store_child.is_empty()
         || store_child == "."
         || store_child == ".."
@@ -338,6 +347,7 @@ pub fn audit_pinned_redb(
         .map_err(|_| RedbHold::UnsupportedSchema)?;
     let mut counted_inline = 0usize;
     let mut inline_bytes = 0usize;
+    let mut observed_inline_hashes = BTreeSet::new();
     for row in inline.iter().map_err(|_| RedbHold::InvalidInlineData)? {
         let (key, value) = row.map_err(|_| RedbHold::InvalidInlineData)?;
         let hash = hash_key(key.value())?;
@@ -355,6 +365,7 @@ pub fn audit_pinned_redb(
         {
             return Err(RedbHold::InvalidInlineData);
         }
+        observed_inline_hashes.insert(hash);
         counted_inline += 1;
     }
     if !expected_inline.is_empty() {
@@ -417,17 +428,30 @@ pub fn audit_pinned_redb(
     if sha_of_file(&path)? != starting_digest {
         return Err(RedbHold::DatabaseChangedDuringRead);
     }
-    Ok(RedbEvidenceOnly {
-        journal_generation: snapshot.generation,
-        blob_records: seen.len(),
-        inline_data_entries: counted_inline,
-        inline_outboards: outboard_count,
-        tag_references: tags_count,
-        verified_inline_bytes: inline_bytes as u64,
-        database_unchanged: true,
-        file_gate_ready: false,
-        bao_verification_pending: true,
+    Ok(AuditedRedbManifest {
+        summary: RedbEvidenceOnly {
+            journal_generation: snapshot.generation,
+            blob_records: seen.len(),
+            inline_data_entries: counted_inline,
+            inline_outboards: outboard_count,
+            tag_references: tags_count,
+            verified_inline_bytes: inline_bytes as u64,
+            database_unchanged: true,
+            file_gate_ready: false,
+            bao_verification_pending: true,
+        },
+        inline_hashes: observed_inline_hashes,
+        database_digest: starting_digest,
     })
+}
+
+/// The public standalone audit retains the strict 09b evidence contract.
+pub fn audit_pinned_redb(
+    volume: &StagingVolumeGuard,
+    ledger: &DurableLedger,
+    store_child: &str,
+) -> Result<RedbEvidenceOnly, RedbHold> {
+    audit_pinned_redb_manifest(volume, ledger, store_child).map(|result| result.summary)
 }
 
 #[cfg(test)]
