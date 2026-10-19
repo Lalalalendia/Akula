@@ -27,6 +27,36 @@ struct ToolCall {
     arguments: Value,
 }
 
+// Admission is decided from the entire JSON-RPC message. A mixed batch,
+// unknown method or malformed member must stay on the exclusive lane.
+// This is a fixed server-side allowlist, never a claim supplied by the client.
+pub fn allows_parallel_read(body: &str) -> bool {
+    let Ok(message) = serde_json::from_str::<Value>(body) else {
+        return false;
+    };
+    match message {
+        Value::Array(items) => !items.is_empty() && items.iter().all(parallel_read_member),
+        item => parallel_read_member(&item),
+    }
+}
+
+fn parallel_read_member(message: &Value) -> bool {
+    let Some(method) = message.get("method").and_then(Value::as_str) else {
+        return false;
+    };
+    match method {
+        "initialize" | "ping" | "tools/list" => true,
+        "tools/call" => matches!(
+            message
+                .get("params")
+                .and_then(|params| params.get("name"))
+                .and_then(Value::as_str),
+            Some("read_note" | "note_outline")
+        ),
+        _ => false,
+    }
+}
+
 pub fn handle_message(body: &str, call: ToolCaller<'_>) -> Option<String> {
     let message = match serde_json::from_str::<Value>(body) {
         Ok(value) => value,
@@ -123,6 +153,59 @@ mod tests {
 
     fn handle(body: &str) -> Option<Value> {
         handle_message(body, &no_tools).map(|value| serde_json::from_str(&value).unwrap())
+    }
+
+    #[test]
+    fn parallel_read_allowlist_fails_closed_for_unknown_and_mixed_batches() {
+        for name in ["read_note", "note_outline"] {
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": name, "arguments": { "note": "safe.md" } }
+            });
+            assert!(allows_parallel_read(&request.to_string()), "{name}");
+        }
+        for method in ["initialize", "ping", "tools/list"] {
+            assert!(allows_parallel_read(
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": method }).to_string()
+            ));
+        }
+        assert!(!allows_parallel_read("{ broken"));
+        assert!(!allows_parallel_read("[]"));
+        assert!(!allows_parallel_read(
+            &json!({ "method": "tools/call", "params": { "name": "update_note" } }).to_string()
+        ));
+        assert!(!allows_parallel_read(
+            &json!({ "method": "tools/call", "params": { "name": "search_notes" } }).to_string()
+        ));
+        assert!(!allows_parallel_read(
+            &json!({ "method": "tools/call", "params": { "name": "switch_workspace" } }).to_string()
+        ));
+        assert!(!allows_parallel_read(
+            &json!([
+                { "id": 1, "method": "tools/call", "params": { "name": "read_note" } },
+                { "id": 2, "method": "tools/call", "params": { "name": "update_note" } }
+            ]).to_string()
+        ));
+        assert!(!allows_parallel_read(
+            &json!([
+                { "id": 1, "method": "tools/call", "params": { "name": "read_note" } },
+                { "id": 2, "method": "unknown" }
+            ]).to_string()
+        ));
+        assert!(!allows_parallel_read(
+            &json!([
+                { "id": 1, "method": "tools/call", "params": { "name": "read_note" } },
+                4
+            ]).to_string()
+        ));
+        assert!(allows_parallel_read(
+            &json!([
+                { "id": 1, "method": "tools/call", "params": { "name": "read_note" } },
+                { "id": 2, "method": "tools/call", "params": { "name": "note_outline" } }
+            ]).to_string()
+        ));
     }
 
     #[test]
