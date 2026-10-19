@@ -103,7 +103,7 @@ impl Metrics {
 
     pub fn write(&self) {
         let Some(path) = &self.path else { return };
-        let json = format!(
+        let mut json = format!(
             concat!(
                 "{{\"threads\":{},\"scaleFactor\":{},\"windowCreatedMs\":{:.1},\"firstFrameMs\":{:.1},",
                 "\"frames\":{},\"animTicks\":{},\"rasterAvgMs\":{:.2},\"rasterP95Ms\":{:.2},",
@@ -120,6 +120,23 @@ impl Metrics {
             crate::stats::mean(&self.total),
             crate::stats::percentiles(&self.total, [0.95])[0],
         );
+        // Developer-only, explicit diagnostic. Keep the historical summary
+        // JSON byte-for-byte identical for installed builds and ordinary users.
+        // The per-frame vectors are already collected when --metrics is set;
+        // this adds no per-frame work, only a small JSON suffix on final write.
+        #[cfg(not(feature = "installed"))]
+        if std::env::var("AKULA_EXPERIMENTAL_FRAME_SAMPLES").ok().as_deref() == Some("1") {
+            if let (Ok(raster), Ok(frame)) = (
+                serde_json::to_string(&self.raster),
+                serde_json::to_string(&self.total),
+            ) {
+                debug_assert!(json.ends_with('}'));
+                json.pop();
+                json.push_str(&format!(
+                    ",\"rasterSamplesMs\":{raster},\"frameSamplesMs\":{frame}}}"
+                ));
+            }
+        }
         if let Err(e) = std::fs::write(path, &json) {
             eprintln!("не удалось записать замеры в {}: {e}", path.display());
         }
