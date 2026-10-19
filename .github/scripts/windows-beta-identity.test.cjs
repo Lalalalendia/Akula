@@ -88,7 +88,7 @@ test('installed Windows beta GUI edit must use OS-level input into its own foreg
   }
   for (const value of [
     'Start-And-Close -EditNote',
-    "if ($EditNote) { $arguments += ' --focus' }",
+    "if ($EditNote -or $VerifyRestoredContent) { $arguments += ' --focus' }",
     'Send-AkulaBetaText -Process $app -Text $syntheticEdit',
     'AKULA_WINDOWS_BETA_GUI_EDIT_PASS',
     'Restart changed the previously edited note',
