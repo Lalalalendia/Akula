@@ -73,6 +73,9 @@ mod test_dir;
 mod vault_files;
 mod vsync;
 mod ui;
+// Inert read-only S3 background session; no settings control or network enabled.
+#[allow(dead_code)]
+mod yandex_probe_session;
 mod updater;
 mod window_state;
 mod workspace;
