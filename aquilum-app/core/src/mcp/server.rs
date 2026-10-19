@@ -2,7 +2,7 @@ use super::http::{refused, Connection, Failure, Head, Response};
 use super::protocol;
 use serde_json::Value;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -12,6 +12,8 @@ const MAX_CONNECTIONS: usize = 16;
 const MAX_PARALLEL_READS: usize = 4;
 // Bound how long the accept loop waits for a reclaimed *idle* connection.
 const RECLAIM_WAIT: Duration = Duration::from_millis(500);
+// Short overload signal; socket admission stays bounded at 16.
+const PRESSURE_CLOSE_WINDOW: Duration = Duration::from_millis(300);
 
 pub type SharedToolCaller = Arc<dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync>;
 
@@ -35,6 +37,7 @@ struct ConnectionSlots {
     count: usize,
     next_id: u64,
     idle: Vec<IdleConnection>,
+    last_saturation: Option<Instant>,
 }
 
 struct IdleConnection {
@@ -162,6 +165,9 @@ impl Slot {
             return Err(Capacity::Stopping);
         }
         if slots.count >= MAX_CONNECTIONS {
+            // After genuine saturation, future completed responses close
+            // their own keep-alives, reducing reset/retry amplification.
+            slots.last_saturation = Some(Instant::now());
             // A completed HTTP reply is idle and has no tool mutation in
             // progress. Reclaim only that socket; never interrupt active
             // headers, request bodies, tool calls or response writes.
@@ -271,6 +277,15 @@ impl RunningServer {
 }
 
 impl Endpoint {
+    fn keep_alive_under_pressure(&self, requested: bool) -> bool {
+        if !requested {
+            return false;
+        }
+        lock(&self.open)
+            .last_saturation
+            .is_none_or(|since| since.elapsed() >= PRESSURE_CLOSE_WINDOW)
+    }
+
     fn answer(
         &self,
         body: &str,
@@ -289,6 +304,9 @@ impl Endpoint {
             Some(payload) => Response::json(payload),
             None => Response::text(202, ""),
         };
+        // Admission pressure never interrupts a running tool. It affects
+        // only the connection header and lifecycle after the response.
+        let keep_alive = self.keep_alive_under_pressure(keep_alive);
         connection.send(&response, keep_alive)?;
         Ok(keep_alive)
     }
@@ -678,6 +696,27 @@ mod tests {
     }
 
     #[test]
+    fn keep_alive_is_preserved_without_pressure_and_temporarily_disabled_under_overload() {
+        let (server, _) = server();
+        assert!(server.endpoint.keep_alive_under_pressure(true));
+        assert!(!server.endpoint.keep_alive_under_pressure(false));
+
+        {
+            let mut slots = lock(&server.endpoint.open);
+            slots.last_saturation = Some(Instant::now());
+        }
+        assert!(!server.endpoint.keep_alive_under_pressure(true));
+
+        {
+            let mut slots = lock(&server.endpoint.open);
+            slots.last_saturation =
+                Some(Instant::now() - PRESSURE_CLOSE_WINDOW - Duration::from_millis(1));
+        }
+        assert!(server.endpoint.keep_alive_under_pressure(true));
+        server.stop();
+    }
+
+    #[test]
     fn reclaims_idle_keep_alive_before_refusing_new_work() {
         use std::time::Instant;
         let (server, _) = server();
@@ -714,7 +753,8 @@ mod tests {
         assert!(answer.body.contains("waiting"));
         assert!(start.elapsed() < Duration::from_secs(3), "idle reclamation was too slow");
         assert!(held[reclaimed_id].hung_up(), "idle victim wasn't disconnected");
-        assert_eq!(lock(&server.endpoint.open).count, MAX_CONNECTIONS);
+        assert_eq!(answer.connection, "close", "pressure must proactively release sockets");
+        assert!(lock(&server.endpoint.open).count <= MAX_CONNECTIONS);
         drop(waiting);
         drop(held);
         server.stop();
