@@ -166,7 +166,11 @@ impl Slot {
             // A completed HTTP reply is idle and has no tool mutation in
             // progress. Reclaim only that socket; never interrupt active
             // headers, request bodies, tool calls or response writes.
-            if let Some(idle) = slots.idle.pop() {
+            // Prefer the oldest completed keep-alive. Evicting the newest
+            // risks closing the socket before its previous response has
+            // even been observed by the client.
+            if !slots.idle.is_empty() {
+                let idle = slots.idle.remove(0);
                 idle.evicted.store(true, Ordering::SeqCst);
                 let _ = idle.socket.shutdown(Shutdown::Both);
                 let (next, _) = endpoint
@@ -689,7 +693,7 @@ mod tests {
         for _ in 0..2500 {
             let slots = lock(&server.endpoint.open);
             if slots.count == MAX_CONNECTIONS && slots.idle.len() == MAX_CONNECTIONS {
-                reclaimed_id = slots.idle.last().map(|idle| idle.id as usize);
+                reclaimed_id = slots.idle.first().map(|idle| idle.id as usize);
                 break;
             }
             drop(slots);
