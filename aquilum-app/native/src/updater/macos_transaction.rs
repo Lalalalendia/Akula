@@ -35,6 +35,7 @@ fn missing(path: &Path) -> Result<bool, String> {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct AppGate {
     _lock: File,
     parent: PathBuf,
