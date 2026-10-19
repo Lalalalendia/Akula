@@ -147,6 +147,32 @@ pub(crate) fn save_existing_note_with_checks_under_custody<T>(
     prepare: impl FnOnce() -> Result<T, FileCommandError>,
     postflight: impl FnOnce(&T, &FileWriteResult) -> Result<(), FileCommandError>,
 ) -> Result<FileWriteResult, GuardedNoteWriteError> {
+    save_existing_note_with_prewrite_under_custody(
+        admission, custody, vault_id, custody_scope, relative, content,
+        expected_hash, source, version_name, prepare, |_| Ok(()), postflight,
+    )
+}
+
+/// P0g-3a: optional same-inode prepublication check, invoked inside the
+/// existing File Gate mutex while the one external OS custody lifetime and
+/// any retained DocumentHub reservation are still held. A rejection after
+/// entering preparation is irreversibly NeedsReview, never retry/rollback.
+/// This is a cooperative check, NOT an OS-level compare-and-swap or receipt.
+#[allow(dead_code)]
+pub(crate) fn save_existing_note_with_prewrite_under_custody<T>(
+    admission: &RegisteredReadAdmission<'_>,
+    custody: &SqliteCustodyIdentityStore,
+    vault_id: VaultId,
+    custody_scope: &Path,
+    relative: &SyncRelativePath,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prepare: impl FnOnce() -> Result<T, FileCommandError>,
+    prewrite: impl FnOnce(&T) -> Result<(), FileCommandError>,
+    postflight: impl FnOnce(&T, &FileWriteResult) -> Result<(), FileCommandError>,
+) -> Result<FileWriteResult, GuardedNoteWriteError> {
     let core = admission.registered_core();
     let target = admission.registered_root_path().join(relative.as_str());
     let mut entered = false;
@@ -159,8 +185,9 @@ pub(crate) fn save_existing_note_with_checks_under_custody<T>(
             entered = true;
             let prepared = prepare().map_err(CheckedHistoryError::Primary)?;
             let permit = HeldCustodyHistoryPermit(());
-            let (result, changed) = gate::write_checked_history(
+            let (result, changed) = gate::write_checked_history_with_prewrite(
                 &permit, core, &checked, content, expected_hash, source, version_name,
+                || prewrite(&prepared),
             )?;
             history_changed = changed;
             postflight(&prepared, &result).map_err(CheckedHistoryError::Primary)?;

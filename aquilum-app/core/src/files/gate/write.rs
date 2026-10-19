@@ -116,6 +116,8 @@ pub(crate) enum CheckedHistoryError {
     History(crate::history::service::HistorySaveFailure),
 }
 
+/// Backward-compatible checked writer: the extra prepublication identity
+/// check is opt-in. Normal local history publication still has one writer.
 #[allow(dead_code)]
 pub(crate) fn write_checked_history(
     permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
@@ -126,6 +128,31 @@ pub(crate) fn write_checked_history(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<(FileWriteResult, bool), CheckedHistoryError> {
+    write_checked_history_with_prewrite(
+        permit, core, path, content, expected_hash, source, version_name,
+        || Ok(()),
+    )
+}
+
+/// P0g-3a: revalidate the prepared, PHYSICAL original within the Core File
+/// Gate mutex, immediately before the one existing AtomicWriteFile publisher.
+///
+/// The callback is trusted synchronous host code: no UI/plugin/network calls,
+/// no reentry into File Gate or custody, and no acquisition of HistoryService.
+/// It cannot mint a native receipt, attest directory fsync, or solve a hostile
+/// same-UID namespace swap after this check. Failing it is not permission to
+/// retry a previously committed V7 one-shot claim.
+#[allow(dead_code)]
+pub(crate) fn write_checked_history_with_prewrite(
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+    core: &Core,
+    path: &Path,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prewrite: impl FnOnce() -> Result<(), FileCommandError>,
+) -> Result<(FileWriteResult, bool), CheckedHistoryError> {
     // Only Core's own File Gate mutex is held here, after the external OS
     // lock. Release it BEFORE taking HistoryService's files/state mutexes.
     let (before, result) = {
@@ -134,6 +161,10 @@ pub(crate) fn write_checked_history(
         // token, persisted SQLite intent, VaultId, and the held OS lock.
         let _guard = core.file_mutation_guard_for_custody_write()
             .map_err(CheckedHistoryError::Primary)?;
+        // This check runs AFTER acquiring the actual Core mutation guard.
+        // There is exactly ONE primary publisher below, not native swap plus
+        // an additional ordinary File Gate rewrite.
+        prewrite().map_err(CheckedHistoryError::Primary)?;
         let before = core.history.disk_before(path, Some(expected_hash));
         let result = write_file_atomic_impl(path, content, Some(expected_hash))
             .map_err(CheckedHistoryError::Primary)?;
