@@ -756,6 +756,65 @@ mod tests {
     }
 
     #[test]
+    fn stop_drains_admitted_reads_and_rejects_queued_mutation() {
+        let finished_reads = Arc::new(AtomicUsize::new(0));
+        let started_writes = Arc::new(AtomicUsize::new(0));
+        let (started, entered) = mpsc::channel();
+        let (finished, writes) = (Arc::clone(&finished_reads), Arc::clone(&started_writes));
+        let (server, url) = start(Arc::new(move |name, _| {
+            if name == "read_note" {
+                let _ = started.send(());
+                thread::sleep(Duration::from_millis(300));
+                finished.fetch_add(1, Ordering::SeqCst);
+            } else {
+                writes.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(Value::Null)
+        }));
+
+        let readers = (0..MAX_PARALLEL_READS)
+            .map(|_| {
+                let url = url.clone();
+                thread::spawn(move || {
+                    status(
+                        ureq::post(&url)
+                            .set("Authorization", &bearer())
+                            .send_string(&tool_call("read_note")),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        for _ in 0..MAX_PARALLEL_READS {
+            entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+
+        let writer = thread::spawn(move || {
+            status(
+                ureq::post(&url)
+                    .set("Authorization", &bearer())
+                    .send_string(&tool_call("update_note")),
+            )
+        });
+        let mut waiting = false;
+        for _ in 0..1000 {
+            if lock(&server.endpoint.turn.state).waiting_writers == 1 {
+                waiting = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(waiting, "writer was not queued behind readers");
+
+        server.stop();
+        for read in readers {
+            assert_eq!(read.join().unwrap(), Some(200));
+        }
+        assert_eq!(writer.join().unwrap(), Some(503));
+        assert_eq!(finished_reads.load(Ordering::SeqCst), MAX_PARALLEL_READS);
+        assert_eq!(started_writes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
     fn queued_writer_takes_priority_over_later_readers() {
         let gate = Arc::new(DispatchGate::new());
         let stopping = Arc::new(AtomicBool::new(false));
