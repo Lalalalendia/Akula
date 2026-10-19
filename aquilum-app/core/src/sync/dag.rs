@@ -94,6 +94,38 @@ impl RevisionDag {
         self.pending.values().any(|record| record.document_id == document_id)
     }
 
+    /// Host-only diagnostic for linking an on-disk note to a Sync document.
+    /// All *current* claims on this path (including pending changes) count:
+    /// two documents using the same path cannot be mapped by path/hash alone.
+    /// This is not a durable identity registry and does not grant read access.
+    pub(crate) fn current_path_claimants(&self, path: &SyncRelativePath) -> BTreeSet<DocumentId> {
+        let documents: BTreeSet<DocumentId> = self.active.values()
+            .chain(self.pending.values())
+            .map(|record| record.document_id)
+            .collect();
+        let mut claimants = BTreeSet::new();
+        for document in documents {
+            let active_claim = self.heads(document).iter().any(|head| {
+                self.active.get(head).is_some_and(|record| match &record.operation {
+                    RevisionOperation::Content { path: at, .. } => at == path,
+                    RevisionOperation::Rename { to, .. } => to == path,
+                    RevisionOperation::Tombstone { path: at } => at == path,
+                })
+            });
+            let pending_claim = self.pending.values().any(|record| {
+                record.document_id == document && match &record.operation {
+                    RevisionOperation::Content { path: at, .. } => at == path,
+                    RevisionOperation::Rename { to, .. } => to == path,
+                    RevisionOperation::Tombstone { path: at } => at == path,
+                }
+            });
+            if active_claim || pending_claim {
+                claimants.insert(document);
+            }
+        }
+        claimants
+    }
+
     pub fn get(&self, id: RevisionId) -> Option<&RevisionRecord> {
         // Do not expose children whose ancestry is not yet verified.
         self.active.get(&id)
@@ -281,6 +313,25 @@ mod tests {
         dag.ingest(record(missing, delayed, vec![], b"root")).unwrap();
         assert!(!dag.has_pending_for_document(delayed));
         assert_eq!(dag.heads(delayed), BTreeSet::from([child]));
+    }
+
+    #[test]
+    fn current_path_claimants_fail_closed_on_aliases_and_pending() {
+        let mut dag = RevisionDag::new();
+        let one = DocumentId::new();
+        let other = DocumentId::new();
+        let path = SyncRelativePath::parse("notes/example.md").unwrap();
+        let root = RevisionId::new();
+        dag.ingest(record(root, one, vec![], b"a")).unwrap();
+        assert_eq!(dag.current_path_claimants(&path), BTreeSet::from([one]));
+        let also = RevisionId::new();
+        dag.ingest(record(also, other, vec![], b"a")).unwrap();
+        assert_eq!(dag.current_path_claimants(&path), BTreeSet::from([one, other]));
+
+        let pending_doc = DocumentId::new();
+        let child = RevisionId::new();
+        dag.ingest(record(child, pending_doc, vec![RevisionId::new()], b"b")).unwrap();
+        assert_eq!(dag.current_path_claimants(&path), BTreeSet::from([one, other, pending_doc]));
     }
 
     #[test]
