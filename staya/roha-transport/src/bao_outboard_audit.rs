@@ -24,8 +24,8 @@ use std::{
 };
 
 use bao_tree::{
-    io::{outboard::PreOrderOutboard, sync::encode_ranges_validated},
     BaoTree, BlockSize, ChunkRanges,
+    io::{outboard::PreOrderOutboard, sync::encode_ranges_validated},
 };
 
 use crate::{
@@ -57,16 +57,24 @@ pub enum BaoHold {
 }
 
 impl From<VolumeError> for BaoHold {
-    fn from(value: VolumeError) -> Self { Self::Volume(value) }
+    fn from(value: VolumeError) -> Self {
+        Self::Volume(value)
+    }
 }
 impl From<DurableError> for BaoHold {
-    fn from(value: DurableError) -> Self { Self::Ledger(value) }
+    fn from(value: DurableError) -> Self {
+        Self::Ledger(value)
+    }
 }
 impl From<JointHold> for BaoHold {
-    fn from(value: JointHold) -> Self { Self::Joint(value) }
+    fn from(value: JointHold) -> Self {
+        Self::Joint(value)
+    }
 }
 impl From<io::Error> for BaoHold {
-    fn from(value: io::Error) -> Self { Self::Io(value) }
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,10 +97,15 @@ fn checked_file(
     is_outboard: bool,
 ) -> Result<(File, Metadata), BaoHold> {
     let meta = fs::symlink_metadata(path).map_err(|_| {
-        if is_outboard { BaoHold::MissingOrUnsafeOutboardFile }
-        else { BaoHold::MissingOrUnsafeDataFile }
+        if is_outboard {
+            BaoHold::MissingOrUnsafeOutboardFile
+        } else {
+            BaoHold::MissingOrUnsafeDataFile
+        }
     })?;
-    if !meta.file_type().is_file() || meta.nlink() != 1 || meta.dev() != expected_device
+    if !meta.file_type().is_file()
+        || meta.nlink() != 1
+        || meta.dev() != expected_device
         || meta.len() > upper_bound
     {
         return Err(if is_outboard {
@@ -138,8 +151,11 @@ pub fn audit_complete_owned_preorder(
     trusted_hash: [u8; 32],
     known_bytes: u64,
 ) -> Result<OwnedBaoProofEvidenceOnly, BaoHold> {
-    if store_child.is_empty() || store_child == "." || store_child == ".."
-        || store_child.contains('/') || store_child.contains('\\')
+    if store_child.is_empty()
+        || store_child == "."
+        || store_child == ".."
+        || store_child.contains('/')
+        || store_child.contains('\\')
     {
         return Err(BaoHold::BadStoreName);
     }
@@ -147,7 +163,10 @@ pub fn audit_complete_owned_preorder(
         return Err(BaoHold::SizePolicyViolation);
     }
     mount.check()?;
-    let found = ledger.reservation_inventory()?.into_iter().find(|x| x.hash == trusted_hash)
+    let found = ledger
+        .reservation_inventory()?
+        .into_iter()
+        .find(|x| x.hash == trusted_hash)
         .ok_or(BaoHold::MissingAuthorizedReservation)?;
     if !found.verified {
         return Err(BaoHold::UnverifiedReservation);
@@ -181,9 +200,12 @@ pub fn audit_complete_owned_preorder(
     // replacements/remount races still require a future fd-relative adapter.
     let end_data = data.metadata()?;
     let end_ob = outboard.metadata()?;
-    if data_meta.len() != end_data.len() || data_meta.ino() != end_data.ino()
-        || data_meta.dev() != end_data.dev() || ob_meta.len() != end_ob.len()
-        || ob_meta.ino() != end_ob.ino() || ob_meta.dev() != end_ob.dev()
+    if data_meta.len() != end_data.len()
+        || data_meta.ino() != end_data.ino()
+        || data_meta.dev() != end_data.dev()
+        || ob_meta.len() != end_ob.len()
+        || ob_meta.ino() != end_ob.ino()
+        || ob_meta.dev() != end_ob.dev()
     {
         return Err(BaoHold::ChangedFileIdentity);
     }
@@ -209,28 +231,38 @@ mod tests {
     #[test]
     fn preorder_requires_matching_tree_and_rejects_tampered_proof() {
         let dir = tempfile::tempdir().unwrap();
-        let original = (0..65553usize).map(|x| (x % 253) as u8).collect::<Vec<u8>>();
+        let original = (0..65553usize)
+            .map(|x| (x % 253) as u8)
+            .collect::<Vec<u8>>();
         let root_hash = *blake3::hash(&original).as_bytes();
         let data_path = dir.path().join("data");
         let ob_path = dir.path().join("outboard");
         fs::write(&data_path, &original).unwrap();
-        let generated = PreOrderOutboard::<Vec<u8>>::create(
-            File::open(&data_path).unwrap(), IROH_BLOCK_SIZE
-        ).unwrap();
+        let generated =
+            PreOrderOutboard::<Vec<u8>>::create(File::open(&data_path).unwrap(), IROH_BLOCK_SIZE)
+                .unwrap();
         assert_eq!(generated.root.as_bytes(), &root_hash);
         fs::write(&ob_path, generated.data).unwrap();
         fully_verify_preorder(
-            &File::open(&data_path).unwrap(), &File::open(&ob_path).unwrap(),
-            original.len() as u64, root_hash,
-        ).unwrap();
+            &File::open(&data_path).unwrap(),
+            &File::open(&ob_path).unwrap(),
+            original.len() as u64,
+            root_hash,
+        )
+        .unwrap();
         let mut wrong = fs::read(&ob_path).unwrap();
-        assert!(!wrong.is_empty(), "size > one tree group must have proof parents");
+        assert!(
+            !wrong.is_empty(),
+            "size > one tree group must have proof parents"
+        );
         wrong[0] ^= 0x40;
         fs::write(&ob_path, wrong).unwrap();
         assert!(matches!(
             fully_verify_preorder(
-                &File::open(&data_path).unwrap(), &File::open(&ob_path).unwrap(),
-                original.len() as u64, root_hash,
+                &File::open(&data_path).unwrap(),
+                &File::open(&ob_path).unwrap(),
+                original.len() as u64,
+                root_hash,
             ),
             Err(BaoHold::InvalidBaoProof)
         ));
