@@ -1,6 +1,6 @@
-# Windows-only test helper. Inject Unicode keyboard input through the foreground
-# OS window, never into a background window or a developer's actual desktop.
-# Invoked only by test-windows-beta.ps1 on an ephemeral GitHub-hosted runner.
+# Windows-only test helper. Inject actual physical-keyboard-style events
+# into the verified foreground Akula window. No direct note writes.
+# Invoked ONLY on the ephemeral GitHub-hosted Windows x64 runner.
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
   throw 'GUI input acceptance is restricted to GitHub-hosted Windows runners'
 }
@@ -11,9 +11,8 @@ using System;
 using System.Runtime.InteropServices;
 
 public static class AkulaBetaGuiInput {
-    // On Windows x64 INPUT has a DWORD type and a 32-byte union at offset 8.
-    // Explicit size prevents a truncated KEYBDINPUT-only struct from causing
-    // SendInput(ERROR_INVALID_PARAMETER) or writing the wrong window.
+    // Windows x64 INPUT has a DWORD type and 32-byte union at offset 8.
+    // Do not pass a truncated KEYBDINPUT struct to SendInput.
     [StructLayout(LayoutKind.Explicit, Size = 40)]
     public struct Input {
         [FieldOffset(0)] public uint Type;
@@ -36,39 +35,75 @@ public static class AkulaBetaGuiInput {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
+    [DllImport("user32.dll")]
+    static extern IntPtr GetKeyboardLayout(uint threadId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    static extern short VkKeyScanExW(char ch, IntPtr keyboardLayout);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    static extern uint MapVirtualKeyExW(uint code, uint mapType, IntPtr keyboardLayout);
+
+    [DllImport("user32.dll")]
+    static extern short GetKeyState(int virtualKey);
+
     [DllImport("user32.dll", SetLastError = true)]
     static extern uint SendInput(uint count, [In] Input[] inputs, int size);
 
-    public static void TypeUnicode(IntPtr hwnd, int expectedPid, string text) {
-        if (hwnd == IntPtr.Zero || string.IsNullOrEmpty(text))
+    // VK_PACKET / KEYEVENTF_UNICODE generates synthetic unidentified keys
+    // with no IME commit on winit 0.31. Use ordinary virtual keys and the
+    // foreground application's active keyboard layout instead.
+    public static void TypeAsciiKeys(IntPtr hwnd, int expectedPid, string text) {
+        if (hwnd == IntPtr.Zero || String.IsNullOrEmpty(text))
             throw new InvalidOperationException("Missing window or synthetic text");
         if (Marshal.SizeOf(typeof(Input)) != 40)
             throw new InvalidOperationException("Unexpected x64 Windows INPUT size");
         uint owner;
-        if (GetWindowThreadProcessId(hwnd, out owner) == 0 || owner != (uint)expectedPid)
+        uint targetThread = GetWindowThreadProcessId(hwnd, out owner);
+        if (targetThread == 0 || owner != (uint)expectedPid)
             throw new InvalidOperationException("Window PID does not match launched Akula");
         if (GetForegroundWindow() != hwnd)
             throw new InvalidOperationException("Refusing to type into a nonforeground window");
+        if ((GetKeyState(0x14) & 1) != 0)
+            throw new InvalidOperationException("Caps Lock must be off for exact ASCII marker");
+        IntPtr layout = GetKeyboardLayout(targetThread);
+        if (layout == IntPtr.Zero)
+            throw new InvalidOperationException("Foreground keyboard layout unavailable");
 
-        var keys = new Input[text.Length * 2];
         const uint INPUT_KEYBOARD = 1;
         const uint KEYEVENTF_KEYUP = 0x0002;
-        const uint KEYEVENTF_UNICODE = 0x0004;
-        for (int i = 0; i < text.Length; i++) {
-            keys[2 * i] = new Input {
-                Type = INPUT_KEYBOARD,
-                ScanCode = text[i],
-                Flags = KEYEVENTF_UNICODE
-            };
-            keys[2 * i + 1] = new Input {
-                Type = INPUT_KEYBOARD,
-                ScanCode = text[i],
-                Flags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
-            };
+        const ushort VK_SHIFT = 0x10;
+        var events = new System.Collections.Generic.List<Input>(text.Length * 4);
+        foreach (char ch in text) {
+            // No general-purpose system typing interface: the release smoke is
+            // restricted to its own generated ASCII marker and no user content.
+            bool allowed = (ch >= 'A' && ch <= 'Z')
+                || (ch >= 'a' && ch <= 'z')
+                || (ch >= '0' && ch <= '9') || ch == '_';
+            if (!allowed)
+                throw new InvalidOperationException("Non-ASCII synthetic marker refused");
+            short mapping = VkKeyScanExW(ch, layout);
+            if (mapping == -1)
+                throw new InvalidOperationException("Marker char is unavailable on runner layout");
+            int modifiers = (mapping >> 8) & 0xff;
+            if ((modifiers & ~1) != 0)
+                throw new InvalidOperationException("Unexpected Ctrl/Alt modifier for marker");
+            ushort vk = (ushort)(mapping & 0xff);
+            ushort scan = (ushort)MapVirtualKeyExW(vk, 0, layout);
+            if (scan == 0)
+                throw new InvalidOperationException("Missing virtual-key scan code on runner");
+            if ((modifiers & 1) != 0)
+                events.Add(new Input { Type = INPUT_KEYBOARD, VirtualKey = VK_SHIFT });
+            events.Add(new Input { Type = INPUT_KEYBOARD, VirtualKey = vk, ScanCode = scan });
+            events.Add(new Input { Type = INPUT_KEYBOARD, VirtualKey = vk, ScanCode = scan, Flags = KEYEVENTF_KEYUP });
+            if ((modifiers & 1) != 0)
+                events.Add(new Input { Type = INPUT_KEYBOARD, VirtualKey = VK_SHIFT, Flags = KEYEVENTF_KEYUP });
         }
-        uint sent = SendInput((uint)keys.Length, keys, Marshal.SizeOf(typeof(Input)));
-        if (sent != (uint)keys.Length)
-            throw new InvalidOperationException("SendInput wrote " + sent + "/" + keys.Length
+        if (GetForegroundWindow() != hwnd)
+            throw new InvalidOperationException("Foreground window changed before OS key injection");
+        uint sent = SendInput((uint)events.Count, events.ToArray(), Marshal.SizeOf(typeof(Input)));
+        if (sent != (uint)events.Count)
+            throw new InvalidOperationException("Physical-key SendInput injected " + sent + "/" + events.Count
                 + " events; Win32 error " + Marshal.GetLastWin32Error());
     }
 }
@@ -98,6 +133,6 @@ function Send-AkulaBetaText {
     }
   }
   if (!$foreground) { throw 'Windows refused to focus the verified Akula window' }
-  # --focus targets the actual text editor before this OS-level input.
-  [AkulaBetaGuiInput]::TypeUnicode($hwnd, $Process.Id, $Text)
+  # --focus targets the real editor; inject layout-mapped virtual keys.
+  [AkulaBetaGuiInput]::TypeAsciiKeys($hwnd, $Process.Id, $Text)
 }
