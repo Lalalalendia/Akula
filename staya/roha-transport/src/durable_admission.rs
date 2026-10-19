@@ -769,8 +769,9 @@ mod tests {
         let known = digest(b"retained after all handoffs");
         let a = peer();
         for attempt in 0..96 {
-            let mut ledger = DurableLedger::open(dir.path(), limits())
-                .unwrap_or_else(|error| panic!("handoff {attempt} did not release OS lock: {error:?}"));
+            let mut ledger = DurableLedger::open(dir.path(), limits()).unwrap_or_else(|error| {
+                panic!("handoff {attempt} did not release OS lock: {error:?}")
+            });
             if attempt == 0 {
                 ledger.reserve(a, known, 777).unwrap();
             }
