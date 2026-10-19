@@ -1845,3 +1845,138 @@ fn bounded_ext4_joint_staging_checkpoint_after_remount() {
         "P2P_BLOB10A_JOINED_REMOUNT same_disk_two_db_and_ledgers=true combined_b3_and_lengths=true atomic_snapshot=false file_gate_ready=false bao_pending=true"
     );
 }
+
+/// P2P-BLOB-10b: real iroh-blobs FsStore (>8MiB) with a physically owned
+/// *.obao4 file in a 64MiB bounded ext4 image. QUOTAS / FILE GATE not enabled.
+/// Proof is validated against a verified, previously fsynced journal BLAKE3.
+/// Negative cases operate solely on independent disposable test copies.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires explicitly mounted disposable 64MiB ext4 CI image"]
+async fn bounded_ext4_owned_bao_crypto_proof() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits,
+        bao_outboard_audit::{BaoHold, audit_complete_owned_preorder},
+        bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger,
+    };
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("disposable ext4-only mount"),
+    );
+    let mount = StagingVolumeGuard::open(&root).expect("private physical ext4 volume");
+    let payload = bytes(8 * 1024 * 1024 + 17);
+    let expected = Hash::new(&payload);
+    let hash = *expected.as_bytes();
+    let size = payload.len() as u64;
+    let store_root = root.join("bao-owned-fsstore");
+    let store = FsStore::load(&store_root).await.expect("test-only real FsStore");
+    let tag = store.add_slice(&payload).await.expect("add trusted 8MiB+17B blob");
+    assert_eq!(tag.hash, expected);
+    store.shutdown().await.expect("flush real FsStore");
+    drop(store);
+    drop(tag);
+    let ob_name = format!("{}.obao4", expected.to_hex());
+    let ob_path = store_root.join("data").join(&ob_name);
+    let original_outboard = fs::read(&ob_path).expect("real filesystem-owned Bao proof");
+    assert!(!original_outboard.is_empty(), "8MiB+17B should not inline Bao by default");
+    let original_db = fs::read(store_root.join("blobs.db")).expect("real redb source");
+
+    let journal_root = root.join("bao-owned-ledger");
+    fs::create_dir(&journal_root).expect("test metadata location");
+    fs::set_permissions(&journal_root, fs::Permissions::from_mode(0o700)).unwrap();
+    let policy = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let mut ledger = DurableLedger::open(&journal_root, policy).unwrap();
+    ledger.reserve(SecretKey::generate().public(), hash, size)
+        .expect("fsync exact remote-BLAKE3 reservation");
+    ledger.verify_full(hash, &payload).expect("persist correct full hash");
+    let ledger_before = fs::read(journal_root.join("reservations.v1")).unwrap();
+    let proof = audit_complete_owned_preorder(&mount, &ledger, "bao-owned-fsstore", hash, size)
+        .expect("real Bao full pre-order proof checked against journal");
+    assert!(proof.complete_preorder_proof_valid);
+    assert!(proof.outboard_bytes > 0);
+    assert_eq!(proof.object_bytes, size);
+    assert!(!proof.file_gate_ready);
+    assert!(!proof.atomic_filesystem_snapshot);
+    assert!(proof.partial_bitfields_unchecked);
+
+    // Build a completely separate test-only FsStore copy. The immutable source
+    // and journal are never corrupted, replaced, deleted or repaired.
+    let copy = root.join("bao-corrupted-copy");
+    fs::create_dir(&copy).unwrap();
+    fs::create_dir(copy.join("data")).unwrap();
+    fs::create_dir(copy.join("temp")).unwrap();
+    fs::copy(store_root.join("blobs.db"), copy.join("blobs.db")).unwrap();
+    for item in fs::read_dir(store_root.join("data")).unwrap() {
+        let item = item.unwrap();
+        fs::copy(item.path(), copy.join("data").join(item.file_name())).unwrap();
+    }
+    let copied_outboard = copy.join("data").join(ob_name);
+    let mut tampered = fs::read(&copied_outboard).unwrap();
+    tampered[0] ^= 0x40;
+    fs::write(&copied_outboard, tampered).unwrap();
+    assert!(matches!(
+        audit_complete_owned_preorder(&mount, &ledger, "bao-corrupted-copy", hash, size),
+        Err(BaoHold::InvalidBaoProof)
+    ), "tampered Bao parent must cause HOLD even when data and ledger are valid");
+
+    // Remove the proof entirely: the P2P-10a pathname+DB join cannot attest
+    // Bao correctness; this new proof gate MUST notice its absence.
+    fs::remove_file(&copied_outboard).unwrap();
+    assert!(matches!(
+        audit_complete_owned_preorder(&mount, &ledger, "bao-corrupted-copy", hash, size),
+        Err(BaoHold::MissingOrUnsafeOutboardFile)
+    ));
+    assert_eq!(fs::read(&ob_path).unwrap(), original_outboard);
+    assert_eq!(fs::read(store_root.join("blobs.db")).unwrap(), original_db);
+    assert_eq!(fs::read(journal_root.join("reservations.v1")).unwrap(), ledger_before);
+    drop(ledger);
+    println!(
+        "P2P_BLOB10B_OWNED_BAO size={} outboard_bytes={} full_root_proof=true tampered_parent_hold=true missing_proof_hold=true source_unchanged=true fsynced_ledger_unchanged=true partial_bitfields_unchecked=true file_gate_ready=false",
+        size, proof.outboard_bytes
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires real remount of prior disposable 64MiB ext4 image"]
+fn bounded_ext4_owned_bao_after_remount() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits, bao_outboard_audit::audit_complete_owned_preorder,
+        bounded_staging::StagingVolumeGuard, durable_admission::DurableLedger,
+    };
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 root"),
+    );
+    let mount = StagingVolumeGuard::open(&root).unwrap();
+    let content = bytes(8 * 1024 * 1024 + 17);
+    let size = content.len() as u64;
+    let hash = *Hash::new(&content).as_bytes();
+    let policy = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let ledger = DurableLedger::open(&root.join("bao-owned-ledger"), policy)
+        .expect("persisted physical reservation after remount");
+    let proof = audit_complete_owned_preorder(
+        &mount, &ledger, "bao-owned-fsstore", hash, size
+    ).expect("actual on-disk Bao tree remains sound after unmount/remount");
+    assert_eq!(proof.object_bytes, size);
+    assert!(proof.complete_preorder_proof_valid);
+    assert!(!proof.file_gate_ready);
+    println!(
+        "P2P_BLOB10B_OWNED_BAO_REMOUNT size={} checked_parent_hashes=true ext4_remounted=true ledger_recovered=true no_user_file_mutation=true file_gate_ready=false",
+        size
+    );
+}
