@@ -14,7 +14,7 @@ use crate::{
     durable_admission::{DurableError, DurableLedger, ReservedBlobAudit},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, Metadata},
     io::{self, Read},
     os::unix::fs::MetadataExt,
@@ -162,6 +162,18 @@ pub fn audit_external_inventory(
     ledger: &DurableLedger,
     store_child: &str,
 ) -> Result<InventoryEvidenceOnly, AuditHold> {
+    audit_external_inventory_with_inline(volume, ledger, store_child, &BTreeSet::new())
+}
+
+/// Strictly internal joint-audit path: only hashes already verified by the
+/// exact pinned read-only redb scan may have no external .data file.
+/// This is NOT public caller-supplied authority, nor a File Gate clearance.
+pub(crate) fn audit_external_inventory_with_inline(
+    volume: &StagingVolumeGuard,
+    ledger: &DurableLedger,
+    store_child: &str,
+    verified_db_inline: &BTreeSet<[u8; 32]>,
+) -> Result<InventoryEvidenceOnly, AuditHold> {
     if store_child.is_empty()
         || store_child == "."
         || store_child == ".."
@@ -185,6 +197,14 @@ pub fn audit_external_inventory(
         let hex = blake3::Hash::from_bytes(item.hash).to_hex().to_string();
         if expected.insert(hex, item).is_some() {
             return Err(AuditHold::TooManyFiles);
+        }
+    }
+
+    for hash in verified_db_inline {
+        let name = blake3::Hash::from_bytes(*hash).to_hex().to_string();
+        match expected.get(&name) {
+            Some(record) if record.verified => {}
+            _ => return Err(AuditHold::OrphanExternalHash(name)),
         }
     }
 
@@ -282,6 +302,15 @@ pub fn audit_external_inventory(
     let mut verified_bytes = 0u64;
     for (name, entry) in &expected {
         if !entry.verified {
+            continue;
+        }
+        if verified_db_inline.contains(&entry.hash) {
+            // A complete inline blob was already length/BLAKE3 verified in
+            // pinned redb. Reject any stray external file under its hash
+            // instead of treating an extra copy as harmless disk usage.
+            if roles.contains_key(name) {
+                return Err(AuditHold::UnexpectedDataEntry(name.clone()));
+            }
             continue;
         }
         // A verified object may be validly inlined into redb. We cannot
