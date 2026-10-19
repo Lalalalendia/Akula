@@ -237,8 +237,15 @@ impl YandexS3Onboarding {
     }
 
     pub fn valid_profile_name(value: &str) -> bool {
-        (value.is_empty() || value.len() <= 64)
-            && value.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+        if value.is_empty() {
+            return true;
+        }
+        // Restrict this to a short, lowercase *alias*. Access Key IDs and
+        // Secret Access Keys are not valid profile names in this UI.
+        (3..=32).contains(&value.len())
+            && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+            && value.bytes().all(|c| c.is_ascii_lowercase()
+                || c.is_ascii_digit() || c == b'_' || c == b'-')
     }
 }
 
@@ -328,7 +335,8 @@ mod yandex_onboarding_tests {
             assert!(YandexS3Onboarding::valid_profile_name(valid));
         }
         for invalid in ["../../.aws/credentials", "Access Key ID", "aws;rm -rf /",
-                        "profile=secret", "приватный_ключ"] {
+                        "profile=secret", "приватный_ключ", "ABCD0123456789ABCD",
+                        "this-alias-is-way-too-long-to-be-a-profile"] {
             assert!(!YandexS3Onboarding::valid_profile_name(invalid), "{invalid}");
         }
     }
