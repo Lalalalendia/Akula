@@ -148,6 +148,14 @@ pub struct OwnedSelection {
     revisions: Vec<OwnedRevision>,
 }
 
+/// Only the verified DAG resolver can construct this selection. Trusted
+/// host code can retrieve its typed identity, not synthesize another.
+impl OwnedSelection {
+    pub(crate) fn sync_document_id(&self) -> Result<crate::sync::DocumentId, ProbeError> {
+        self.document_id.parse().map_err(|_| ProbeError::StaleSource)
+    }
+}
+
 /// Search the resolved Sync revisions, enforcing their original blob hashes.
 /// The outer host must check live permissions both before and after this call.
 /// This is NOT a public RPC; only trusted callers should be given a DAG.
@@ -284,10 +292,21 @@ where
         broker
             .revalidate_lease(&lease, live_context())
             .map_err(|_| ProbeError::AccessDenied)?;
-        let observed = observe_owner()?;
-        if observed.selection.document_id != expected_document.to_string() {
+        let mut observed = observe_owner()?;
+        // A grant to the CURRENT note does not imply read access to prior
+        // snapshots or either branch of a sync conflict. Those require a
+        // separate, explicit historical/conflict authorization route.
+        if observed.selection.document_id != expected_document.to_string()
+            || observed.selection.historical
+            || observed.selection.conflict
+            || observed.selection.revisions.len() != 1
+            || observed.selection.revisions[0].kind != RevisionKind::Content
+        {
             return Err(ProbeError::AccessDenied);
         }
+        // The PermissionBroker lease is the authority for grant generation.
+        // Do not trust the callback to invent a grant_epoch.
+        observed.grant_epoch = lease.revision_token();
         broker
             .revalidate_lease(&lease, live_context())
             .map_err(|_| ProbeError::AccessDenied)?;
@@ -1134,6 +1153,54 @@ mod tests {
                 })),
             Err(ProbeError::AccessDenied)
         ));
+    }
+
+    #[test]
+    fn plugin_current_note_grant_does_not_authorize_history_or_conflict() {
+        use crate::plugins::{Capability, GrantScope, HostContext};
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let (broker, plugin, vault, note) = plugin_search_fixture();
+        broker.grant_host_approved(
+            plugin, Capability::NotesSearch,
+            GrantScope::selected_notes([note.id]).unwrap(),
+        ).unwrap();
+        let doc = DocumentId::new();
+        let mut dag = RevisionDag::new();
+        let root = add_dag_revision(&mut dag, doc, vec![], "root");
+        let left = add_dag_revision(&mut dag, doc, vec![root], "left");
+        let right = add_dag_revision(&mut dag, doc, vec![root], "right");
+        let scope = vault.as_uuid().to_string();
+        register_source(&db, &scope, &doc.to_string()).unwrap();
+        put(&mut db, &scope, &doc.to_string(), 1, &root.to_string(), "root", &[1.0, 0.0]);
+        put(&mut db, &scope, &doc.to_string(), 1, &left.to_string(), "left", &[1.0, 0.0]);
+        put(&mut db, &scope, &doc.to_string(), 1, &right.to_string(), "right", &[1.0, 0.0]);
+        let context = || HostContext::from_host_state(vault, Some(note.id));
+        let history = resolve_sync_revisions(&dag, doc, Some(root)).unwrap();
+        let conflict = resolve_sync_revisions(&dag, doc, None).unwrap();
+        assert!(conflict.conflict);
+        for selected in [&history, &conflict] {
+            assert!(matches!(
+                search_sync_with_plugin_grant(
+                    &db, &broker, plugin, &note, doc, &scope, MODEL, &[1.0, 0.0], 5,
+                    context, || Ok(ReadObservation {
+                        grant_epoch: 22, owner_epoch: 1, index_generation: 1,
+                        selection: selected.clone(),
+                    })
+                ),
+                Err(ProbeError::AccessDenied)
+            ));
+        }
+        // History is retained; it is just not disclosed through the grant
+        // intended for the present, pinned physical note.
+        let authorized_history = lookup(
+            &db, &scope, &doc.to_string(), 1, history_to_selection(&root.to_string())
+        ).unwrap();
+        assert_eq!(authorized_history.hits.len(), 1);
+    }
+
+    fn history_to_selection(id: &str) -> RevisionSelection<'_> {
+        RevisionSelection::Historical(content(id))
     }
 
     #[test]
