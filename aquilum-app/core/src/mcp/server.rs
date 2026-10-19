@@ -8,6 +8,7 @@ use std::thread::{self, JoinHandle};
 
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
+const MAX_PARALLEL_READS: usize = 4;
 
 pub type SharedToolCaller = Arc<dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync>;
 
@@ -21,12 +22,97 @@ struct Endpoint {
     token: String,
     call: SharedToolCaller,
     stopping: AtomicBool,
-    turn: Mutex<()>,
+    turn: DispatchGate,
     open: Mutex<usize>,
     freed: Condvar,
 }
 
 struct Slot(Arc<Endpoint>);
+
+// Admission is bounded independently of TCP keep-alive connections.
+// Pending writers block *new* readers to prevent read-heavy agent traffic
+// from starving updates. Every request retains its permit through the reply,
+// preserving the existing stop/drain and per-connection response contracts.
+#[derive(Default)]
+struct DispatchState {
+    readers: usize,
+    writer: bool,
+    waiting_writers: usize,
+}
+
+struct DispatchGate {
+    state: Mutex<DispatchState>,
+    ready: Condvar,
+}
+
+struct DispatchPermit<'a> {
+    gate: &'a DispatchGate,
+    read: bool,
+}
+
+impl DispatchGate {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(DispatchState::default()),
+            ready: Condvar::new(),
+        }
+    }
+
+    fn acquire(&self, read: bool, stopping: &AtomicBool) -> Option<DispatchPermit<'_>> {
+        let mut state = lock(&self.state);
+        if !read {
+            state.waiting_writers += 1;
+        }
+        loop {
+            let blocked = if read {
+                state.writer || state.waiting_writers != 0 || state.readers >= MAX_PARALLEL_READS
+            } else {
+                state.writer || state.readers != 0
+            };
+            if !blocked || stopping.load(Ordering::SeqCst) {
+                break;
+            }
+            state = self.ready.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+        if !read {
+            state.waiting_writers -= 1;
+        }
+        if stopping.load(Ordering::SeqCst) {
+            self.ready.notify_all();
+            return None;
+        }
+        if read {
+            state.readers += 1;
+        } else {
+            state.writer = true;
+        }
+        Some(DispatchPermit { gate: self, read })
+    }
+
+    fn wake(&self) {
+        let _state = lock(&self.state);
+        self.ready.notify_all();
+    }
+
+    fn drain(&self) {
+        let mut state = lock(&self.state);
+        while state.writer || state.readers != 0 {
+            state = self.ready.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
+impl Drop for DispatchPermit<'_> {
+    fn drop(&mut self) {
+        let mut state = lock(&self.gate.state);
+        if self.read {
+            state.readers -= 1;
+        } else {
+            state.writer = false;
+        }
+        self.gate.ready.notify_all();
+    }
+}
 
 impl Slot {
     fn wait(endpoint: &Arc<Endpoint>) -> Option<Self> {
@@ -58,7 +144,7 @@ impl RunningServer {
             token,
             call,
             stopping: AtomicBool::new(false),
-            turn: Mutex::new(()),
+            turn: DispatchGate::new(),
             open: Mutex::new(0),
             freed: Condvar::new(),
         });
@@ -80,11 +166,12 @@ impl RunningServer {
 
     pub fn stop(self) {
         self.endpoint.stopping.store(true, Ordering::SeqCst);
+        self.endpoint.turn.wake();
         drop(lock(&self.endpoint.open));
         self.endpoint.freed.notify_all();
         let _ = TcpStream::connect(self.address);
         let _ = self.accepting.join();
-        drop(lock(&self.endpoint.turn));
+        self.endpoint.turn.drain();
     }
 }
 
@@ -95,7 +182,11 @@ impl Endpoint {
         connection: &mut Connection,
         keep_alive: bool,
     ) -> Result<bool, Failure> {
-        let _turn = lock(&self.turn);
+        let read = protocol::allows_parallel_read(body);
+        let _turn = self
+            .turn
+            .acquire(read, &self.stopping)
+            .ok_or_else(|| refused(503, "MCP-сервер остановлен"))?;
         if self.stopping.load(Ordering::SeqCst) {
             return Err(refused(503, "MCP-сервер остановлен"));
         }
@@ -593,6 +684,113 @@ mod tests {
 
     mod throughput_probe {
         include!("server/throughput_probe.rs");
+    }
+
+    #[test]
+    fn parallel_reads_are_bounded_and_never_overlap_exclusive_writes() {
+        use std::sync::Barrier;
+
+        let active_reads = Arc::new(AtomicUsize::new(0));
+        let active_writer = Arc::new(AtomicBool::new(false));
+        let max_reads = Arc::new(AtomicUsize::new(0));
+        let violation = Arc::new(AtomicBool::new(false));
+        let (reads, writer, peak, conflict) = (
+            Arc::clone(&active_reads),
+            Arc::clone(&active_writer),
+            Arc::clone(&max_reads),
+            Arc::clone(&violation),
+        );
+        let (server, url) = start(Arc::new(move |name, _| {
+            if name == "read_note" {
+                let running = reads.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(running, Ordering::SeqCst);
+                if writer.load(Ordering::SeqCst) {
+                    conflict.store(true, Ordering::SeqCst);
+                }
+                thread::sleep(Duration::from_millis(45));
+                if writer.load(Ordering::SeqCst) {
+                    conflict.store(true, Ordering::SeqCst);
+                }
+                reads.fetch_sub(1, Ordering::SeqCst);
+            } else {
+                if writer.swap(true, Ordering::SeqCst) || reads.load(Ordering::SeqCst) != 0 {
+                    conflict.store(true, Ordering::SeqCst);
+                }
+                thread::sleep(Duration::from_millis(20));
+                if reads.load(Ordering::SeqCst) != 0 {
+                    conflict.store(true, Ordering::SeqCst);
+                }
+                writer.store(false, Ordering::SeqCst);
+            }
+            Ok(Value::Null)
+        }));
+
+        let calls = [
+            "read_note", "update_note", "read_note", "read_note", "read_note",
+            "read_note", "update_note", "read_note", "read_note", "read_note",
+        ];
+        let gate = Arc::new(Barrier::new(calls.len() + 1));
+        let workers = calls
+            .into_iter()
+            .map(|name| {
+                let url = url.clone();
+                let gate = Arc::clone(&gate);
+                thread::spawn(move || {
+                    gate.wait();
+                    ureq::post(&url)
+                        .set("Authorization", &bearer())
+                        .send_string(&tool_call(name))
+                        .is_ok_and(|response| response.status() == 200)
+                })
+            })
+            .collect::<Vec<_>>();
+        gate.wait();
+        assert!(workers.into_iter().all(|worker| worker.join().unwrap()));
+        assert!(!violation.load(Ordering::SeqCst), "write overlapped a read or a write");
+        assert!(max_reads.load(Ordering::SeqCst) >= 2, "independent reads did not overlap");
+        assert!(
+            max_reads.load(Ordering::SeqCst) <= MAX_PARALLEL_READS,
+            "reader concurrency exceeded configured limit"
+        );
+        server.stop();
+    }
+
+    #[test]
+    fn queued_writer_takes_priority_over_later_readers() {
+        let gate = Arc::new(DispatchGate::new());
+        let stopping = Arc::new(AtomicBool::new(false));
+        let active = gate.acquire(true, &stopping).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let write_gate = Arc::clone(&gate);
+        let write_stopping = Arc::clone(&stopping);
+        let writer_sender = sender.clone();
+        let writer = thread::spawn(move || {
+            let _permit = write_gate.acquire(false, &write_stopping).unwrap();
+            writer_sender.send("writer").unwrap();
+            thread::sleep(Duration::from_millis(10));
+        });
+
+        let mut seen_waiting = false;
+        for _ in 0..1000 {
+            if lock(&gate.state).waiting_writers == 1 {
+                seen_waiting = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(seen_waiting, "writer never queued");
+
+        let read_gate = Arc::clone(&gate);
+        let read_stopping = Arc::clone(&stopping);
+        let reader = thread::spawn(move || {
+            let _permit = read_gate.acquire(true, &read_stopping).unwrap();
+            sender.send("reader").unwrap();
+        });
+        drop(active);
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), "writer");
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), "reader");
+        writer.join().unwrap();
+        reader.join().unwrap();
     }
 
     #[test]
