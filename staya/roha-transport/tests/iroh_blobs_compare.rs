@@ -1711,8 +1711,7 @@ fn bounded_ext4_joint_staging_checkpoint() {
     };
     let large_ledger = DurableLedger::open(&mount.join("reconciliation-ledger"), limit)
         .expect("existing reserved external blob");
-    let large_bytes_before =
-        fs::read(mount.join("reconciliation-ledger/reservations.v1")).unwrap();
+    let large_bytes_before = fs::read(mount.join("reconciliation-ledger/reservations.v1")).unwrap();
     let external = audit_quiescent_staging(&volume, &large_ledger, "real-fsstore")
         .expect("external data + pinned DB agree with locked journal");
     assert_eq!(external.durable_blob_count, 1);
@@ -1733,14 +1732,11 @@ fn bounded_ext4_joint_staging_checkpoint() {
         max_active: 1,
         max_peer_active: 1,
     };
-    let inline_ledger = DurableLedger::open(
-        &mount.join("small-inline-ledger"),
-        inline_limits,
-    ).expect("existing reserved in-DB blob");
+    let inline_ledger = DurableLedger::open(&mount.join("small-inline-ledger"), inline_limits)
+        .expect("existing reserved in-DB blob");
     let inline_journal_before =
         fs::read(mount.join("small-inline-ledger/reservations.v1")).unwrap();
-    let inline_db_before =
-        fs::read(mount.join("small-inline-fsstore/blobs.db")).unwrap();
+    let inline_db_before = fs::read(mount.join("small-inline-fsstore/blobs.db")).unwrap();
     let inline = audit_quiescent_staging(&volume, &inline_ledger, "small-inline-fsstore")
         .expect("exact inline data length and BLAKE3 match locked journal");
     assert_eq!(inline.durable_blob_count, 1);
@@ -1759,7 +1755,8 @@ fn bounded_ext4_joint_staging_checkpoint() {
 
     // An inline blob is known to be in redb. A duplicate physical file under
     // the SAME hash must not be counted twice or silently treated as benign.
-    let cloned = mount.join("small-inline-fsstore/data")
+    let cloned = mount
+        .join("small-inline-fsstore/data")
         .join(format!("{}.data", blake3::hash(inline_text).to_hex()));
     fs::write(&cloned, inline_text).expect("inject only disposable duplicate");
     assert!(matches!(
@@ -1805,10 +1802,8 @@ fn bounded_ext4_joint_staging_checkpoint() {
 #[ignore = "requires bounded ext4 remount following prior real joint test"]
 fn bounded_ext4_joint_staging_checkpoint_after_remount() {
     use akula_roha_transport::{
-        admission::AdmissionLimits,
-        bounded_staging::StagingVolumeGuard,
-        durable_admission::DurableLedger,
-        joint_staging_audit::audit_quiescent_staging,
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, joint_staging_audit::audit_quiescent_staging,
     };
     let mount = std::path::PathBuf::from(
         std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 root"),
