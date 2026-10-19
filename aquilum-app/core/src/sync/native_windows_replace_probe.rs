@@ -316,4 +316,301 @@ mod tests {
         assert_eq!(fs::read(dir.path().join(backup_name(op))).unwrap(), OLD);
         // This is NOT a second-process SIGKILL, disk failure or durable receipt.
     }
+
+    // Independent OS-process crash falsifier. A panic/catch_unwind is NOT
+    // process termination and cannot establish SQLite restart behavior.
+    mod crash {
+        use super::{backup_name, fixture, read_child, run, stage_name, NEW, OLD};
+        use crate::sync::pinned_windows;
+        use crate::sync::protection_store::{BoundProtectedOriginal, ProtectedOriginal};
+        use crate::sync::{
+            DocumentId, JournalAction, JournalError, JournalPhase, OperationId,
+            OperationIntent, PinnedFileIdentity, RecoveryAction, RemoteGuard,
+            RevisionId, SqliteSyncJournal, SyncRelativePath, VaultId,
+        };
+        use std::fs::{self, File, OpenOptions};
+        use std::io::Write;
+        use std::path::Path;
+        use std::process::{Child, Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        const CHILD: &str =
+            "sync::native_windows_replace_probe::tests::crash::windows_replacefile_crash_child";
+
+        struct ChildGuard(Child);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        fn protected(
+            root: &Path,
+            op: OperationId,
+            file: PinnedFileIdentity,
+        ) -> BoundProtectedOriginal {
+            let pinned = pinned_windows::open_root(root).unwrap();
+            let (volume, index) = pinned_windows::file_identity(&pinned).unwrap();
+            BoundProtectedOriginal {
+                original: ProtectedOriginal {
+                    operation_id: op,
+                    path: SyncRelativePath::parse("file.md").unwrap(),
+                    content_hash: blake3::hash(OLD).to_hex().to_string(),
+                    bytes: OLD.to_vec(),
+                },
+                root: PinnedFileIdentity {
+                    device: u64::from(volume),
+                    file: index,
+                },
+                file,
+            }
+        }
+
+        fn seed_journal(root: &Path) -> OperationIntent {
+            let mut journal =
+                SqliteSyncJournal::open(&root.join("journal.sqlite")).unwrap();
+            let mut prior = OperationIntent {
+                operation_id: OperationId::new(),
+                vault_id: VaultId::new(),
+                document_id: DocumentId::new(),
+                profile_id: "windows-kill-fixture".into(),
+                revision_id: RevisionId::new(),
+                action: JournalAction::UploadImmutable,
+                path: SyncRelativePath::parse("file.md").unwrap(),
+                remote_object_id: "fixture/old".into(),
+                remote_guard: Some(RemoteGuard::Absent),
+                expected_content_hash: blake3::hash(OLD).to_hex().to_string(),
+                expected_baseline: None,
+            };
+            journal.begin(prior.clone()).unwrap();
+            journal.mark_staged(prior.operation_id, OLD).unwrap();
+            journal.mark_applied(prior.operation_id).unwrap();
+            journal
+                .mark_verified(prior.operation_id, OLD, "fixture-provider")
+                .unwrap();
+            journal.commit(prior.operation_id).unwrap();
+
+            prior.expected_baseline = Some(prior.revision_id);
+            prior.operation_id = OperationId::new();
+            prior.revision_id = RevisionId::new();
+            prior.action = JournalAction::StageDownload;
+            prior.remote_object_id = "fixture/new".into();
+            prior.remote_guard = None;
+            prior.expected_content_hash = blake3::hash(NEW).to_hex().to_string();
+            journal.begin(prior.clone()).unwrap();
+            journal.mark_staged(prior.operation_id, NEW).unwrap();
+            prior
+        }
+
+        fn stop_at(root: &Path, mode: &str) -> ! {
+            let mut ready = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(root.join("child-ready"))
+                .unwrap();
+            ready.write_all(mode.as_bytes()).unwrap();
+            ready.sync_all().unwrap();
+            loop {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        #[test]
+        fn windows_replacefile_crash_child() {
+            let Some(mode) = std::env::var("AKULA_WIN_REPLACE_KILL_MODE").ok()
+            else {
+                return;
+            };
+            assert!(matches!(
+                mode.as_str(),
+                "before_replace" | "after_replace" | "after_postflight"
+            ));
+            let root = std::path::PathBuf::from(
+                std::env::var_os("AKULA_WIN_REPLACE_KILL_ROOT").unwrap(),
+            );
+            let op: OperationId = std::env::var("AKULA_WIN_REPLACE_KILL_OP")
+                .unwrap()
+                .parse()
+                .unwrap();
+            let expected_id = PinnedFileIdentity {
+                device: std::env::var("AKULA_WIN_REPLACE_KILL_VOLUME")
+                    .unwrap()
+                    .parse()
+                    .unwrap(),
+                file: std::env::var("AKULA_WIN_REPLACE_KILL_ID")
+                    .unwrap()
+                    .parse()
+                    .unwrap(),
+            };
+            let mut journal =
+                SqliteSyncJournal::open(&root.join("journal.sqlite")).unwrap();
+            let intent = journal.get(op).unwrap().unwrap().intent;
+            journal
+                .record_existing_replace_attempt_once(
+                    &intent,
+                    &protected(&root, op, expected_id),
+                )
+                .unwrap();
+            drop(journal);
+            let result = run(
+                &root,
+                "file.md",
+                op,
+                expected_id,
+                OLD,
+                NEW,
+                || {
+                    if mode == "before_replace" {
+                        stop_at(&root, &mode);
+                    }
+                },
+                || {
+                    if mode == "after_replace" {
+                        stop_at(&root, &mode);
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(result, backup_name(op));
+            assert_eq!(mode, "after_postflight");
+            stop_at(&root, &mode);
+        }
+
+        #[test]
+        fn terminate_process_at_replacefile_boundaries_preserves_v7_hold() {
+            for mode in ["before_replace", "after_replace", "after_postflight"] {
+                let (dir, original_id) = fixture();
+                let intent = seed_journal(dir.path());
+                let bounded_original =
+                    protected(dir.path(), intent.operation_id, original_id);
+                let baseline = {
+                    let journal =
+                        SqliteSyncJournal::open(&dir.path().join("journal.sqlite"))
+                            .unwrap();
+                    journal
+                        .baseline(intent.vault_id, intent.document_id)
+                        .unwrap()
+                };
+
+                let log_path = dir.path().join("child.log");
+                let log = File::create(&log_path).unwrap();
+                let mut child = ChildGuard(
+                    Command::new(std::env::current_exe().unwrap())
+                        .arg("--exact")
+                        .arg(CHILD)
+                        .arg("--nocapture")
+                        .env("AKULA_WIN_REPLACE_KILL_MODE", mode)
+                        .env("AKULA_WIN_REPLACE_KILL_ROOT", dir.path())
+                        .env(
+                            "AKULA_WIN_REPLACE_KILL_OP",
+                            intent.operation_id.to_string(),
+                        )
+                        .env(
+                            "AKULA_WIN_REPLACE_KILL_VOLUME",
+                            original_id.device.to_string(),
+                        )
+                        .env(
+                            "AKULA_WIN_REPLACE_KILL_ID",
+                            original_id.file.to_string(),
+                        )
+                        .stdout(Stdio::from(log.try_clone().unwrap()))
+                        .stderr(Stdio::from(log))
+                        .spawn()
+                        .unwrap(),
+                );
+
+                let deadline = Instant::now() + Duration::from_secs(30);
+                loop {
+                    if fs::read(dir.path().join("child-ready"))
+                        .ok()
+                        .as_deref()
+                        == Some(mode.as_bytes())
+                    {
+                        break;
+                    }
+                    if let Some(status) = child.0.try_wait().unwrap() {
+                        panic!(
+                            "child exited before {mode}: {status}; {}",
+                            fs::read_to_string(&log_path).unwrap_or_default()
+                        );
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "timeout at {mode}: {}",
+                        fs::read_to_string(&log_path).unwrap_or_default()
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+
+                assert!(child.0.try_wait().unwrap().is_none());
+                child.0.kill().unwrap(); // Windows TerminateProcess, not panic.
+                let status = child.0.wait().unwrap();
+                assert!(!status.success(), "must be terminated by parent");
+
+                let target = dir.path().join("file.md");
+                let stage = dir.path().join(stage_name(intent.operation_id));
+                let backup = dir.path().join(backup_name(intent.operation_id));
+                let before = mode == "before_replace";
+                assert_eq!(fs::read(&target).unwrap(), if before { OLD } else { NEW });
+                if before {
+                    assert_eq!(fs::read(&stage).unwrap(), NEW);
+                    assert!(!backup.exists());
+                } else {
+                    assert!(!stage.exists());
+                    assert_eq!(fs::read(&backup).unwrap(), OLD);
+                }
+
+                // Reopen the ORIGINAL by pinned NT parent/child handles, not
+                // by trusting a path string as the physical identity.
+                let root = pinned_windows::open_root(dir.path()).unwrap();
+                let old_name = if before {
+                    "file.md".to_owned()
+                } else {
+                    backup_name(intent.operation_id)
+                };
+                assert_eq!(
+                    read_child(&root, &old_name, OLD.len()).unwrap(),
+                    (original_id, OLD.to_vec())
+                );
+
+                let mut reopened =
+                    SqliteSyncJournal::open(&dir.path().join("journal.sqlite"))
+                        .unwrap();
+                let claim = reopened
+                    .read_existing_replace_attempt(intent.operation_id)
+                    .unwrap()
+                    .expect("durable V7 attempt must survive TerminateProcess");
+                assert_eq!(claim.original_file, original_id);
+                assert_eq!(
+                    reopened
+                        .baseline(intent.vault_id, intent.document_id)
+                        .unwrap(),
+                    baseline
+                );
+                assert_eq!(
+                    reopened.get(intent.operation_id).unwrap().unwrap().phase,
+                    JournalPhase::Staged
+                );
+                assert!(matches!(
+                    reopened.record_existing_replace_attempt_once(
+                        &intent,
+                        &bounded_original
+                    ),
+                    Err(JournalError::ExistingReplaceAttemptAlreadyRecorded)
+                ));
+                assert!(matches!(
+                    reopened.mark_applied(intent.operation_id),
+                    Err(JournalError::LocalDownloadNeedsNativeReceipt)
+                ));
+                assert!(reopened.recovery_queue().unwrap().iter().any(|r| {
+                    r.record.intent.operation_id == intent.operation_id
+                        && r.action == RecoveryAction::InspectBeforeRetry
+                }));
+                eprintln!(
+                    "AKULA_WIN_REPLACE_TERMINATE_PROCESS boundary={mode} journal=staged baseline=unchanged replay=denied"
+                );
+            }
+        }
+    }
 }
