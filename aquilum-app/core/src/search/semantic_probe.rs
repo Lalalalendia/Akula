@@ -19,6 +19,7 @@ pub enum ProbeError {
     Invalid(&'static str),
     CorruptVector,
     ScanBudgetExceeded,
+    StaleSource,
     Database(rusqlite::Error),
 }
 
@@ -28,6 +29,7 @@ impl fmt::Display for ProbeError {
             Self::Invalid(why) => f.write_str(why),
             Self::CorruptVector => f.write_str("Stored vector is corrupt or has the wrong dimension"),
             Self::ScanBudgetExceeded => f.write_str("Semantic probe scan budget exceeded"),
+            Self::StaleSource => f.write_str("Source version changed; stale update refused"),
             Self::Database(error) => error.fmt(f),
         }
     }
@@ -72,6 +74,8 @@ pub fn prepare(connection: &Connection) -> Result<(), ProbeError> {
              scope_id TEXT NOT NULL,
              source_id TEXT NOT NULL,
              active_revision TEXT NOT NULL,
+             generation INTEGER NOT NULL CHECK(generation > 0),
+             revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0, 1)),
              PRIMARY KEY(scope_id, source_id)
          ) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS semantic_probe_chunks (
@@ -93,26 +97,85 @@ pub fn prepare(connection: &Connection) -> Result<(), ProbeError> {
     Ok(())
 }
 
-/// Call as soon as a newer source revision is observed, BEFORE asynchronous
-/// embedding generation. Stale vectors remain reconstructible on disk but
-/// immediately disappear from search via the revision join.
+/// Observe a source revision with optimistic concurrency fencing.
+///
+/// `expected_generation` must be captured by the trusted source adapter
+/// *before* an asynchronous fetch/embedding job starts. Without that fence,
+/// an old event can reactivate an obsolete revision (including A-B-A races).
+/// `None` enrolls a new source only; revocation cannot be undone here.
+///
+/// This is not an authorization check: the trusted adapter must validate
+/// source ownership and grants independently before any call.
 pub fn mark_revision(
     connection: &Connection,
     scope_id: &str,
     source_id: &str,
     revision: &str,
-) -> Result<(), ProbeError> {
+    expected_generation: Option<u64>,
+) -> Result<u64, ProbeError> {
     key(scope_id)?;
     key(source_id)?;
     digest(revision)?;
-    connection.execute(
-        "INSERT INTO semantic_probe_sources(scope_id, source_id, active_revision)
-         VALUES(?1, ?2, ?3)
-         ON CONFLICT(scope_id, source_id)
-         DO UPDATE SET active_revision=excluded.active_revision",
-        params![scope_id, source_id, revision],
+    match expected_generation {
+        None => {
+            let updated = connection.execute(
+                "INSERT OR IGNORE INTO semantic_probe_sources
+                     (scope_id, source_id, active_revision, generation)
+                 VALUES(?1, ?2, ?3, 1)",
+                params![scope_id, source_id, revision],
+            )?;
+            if updated != 1 {
+                return Err(ProbeError::StaleSource);
+            }
+            Ok(1)
+        }
+        Some(generation) => {
+            if generation == 0 || generation >= i64::MAX as u64 {
+                return Err(ProbeError::Invalid("Invalid source generation"));
+            }
+            let updated = connection.execute(
+                "UPDATE semantic_probe_sources
+                 SET active_revision=?3, generation=generation+1
+                 WHERE scope_id=?1 AND source_id=?2 AND generation=?4 AND revoked=0",
+                params![scope_id, source_id, revision, generation as i64],
+            )?;
+            if updated != 1 {
+                return Err(ProbeError::StaleSource);
+            }
+            Ok(generation + 1)
+        }
+    }
+}
+
+/// Tombstone one source and purge its cached vectors in one transaction.
+/// A later stale event cannot silently re-enroll a revoked source.
+pub fn revoke_source(
+    connection: &mut Connection,
+    scope_id: &str,
+    source_id: &str,
+    expected_generation: u64,
+) -> Result<u64, ProbeError> {
+    key(scope_id)?;
+    key(source_id)?;
+    if expected_generation == 0 || expected_generation >= i64::MAX as u64 {
+        return Err(ProbeError::Invalid("Invalid source generation"));
+    }
+    let transaction = connection.transaction()?;
+    let updated = transaction.execute(
+        "UPDATE semantic_probe_sources
+         SET revoked=1, generation=generation+1
+         WHERE scope_id=?1 AND source_id=?2 AND generation=?3 AND revoked=0",
+        params![scope_id, source_id, expected_generation as i64],
     )?;
-    Ok(())
+    if updated != 1 {
+        return Err(ProbeError::StaleSource);
+    }
+    transaction.execute(
+        "DELETE FROM semantic_probe_chunks WHERE scope_id=?1 AND source_id=?2",
+        params![scope_id, source_id],
+    )?;
+    transaction.commit()?;
+    Ok(expected_generation + 1)
 }
 
 /// Replace one model's chunks for a source atomically. Never activates a
@@ -150,7 +213,7 @@ pub fn replace_chunks(
     let current: Option<String> = transaction
         .query_row(
             "SELECT active_revision FROM semantic_probe_sources
-             WHERE scope_id=?1 AND source_id=?2",
+             WHERE scope_id=?1 AND source_id=?2 AND revoked=0",
             params![scope_id, source_id],
             |row| row.get(0),
         )
@@ -233,7 +296,7 @@ pub fn search(
          FROM semantic_probe_chunks c
          JOIN semantic_probe_sources s
            ON s.scope_id=c.scope_id AND s.source_id=c.source_id
-          AND s.active_revision=c.revision
+          AND s.active_revision=c.revision AND s.revoked=0
          WHERE c.scope_id=?1 AND c.source_id=?2 AND c.model_id=?3",
     )?;
     let mut scanned = 0usize;
@@ -338,7 +401,19 @@ mod tests {
         vector: &[f32],
     ) {
         let text_hash = hash("fragment");
-        mark_revision(connection, scope, source, revision).unwrap();
+        let previous: Option<(i64, String)> = connection
+            .query_row(
+                "SELECT generation, active_revision FROM semantic_probe_sources
+                 WHERE scope_id=?1 AND source_id=?2",
+                params![scope, source],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .unwrap();
+        if previous.as_ref().map(|(_, active)| active.as_str()) != Some(revision) {
+            let expected = previous.as_ref().map(|(generation, _)| *generation as u64);
+            mark_revision(connection, scope, source, revision, expected).unwrap();
+        }
         replace_chunks(
             connection,
             scope,
@@ -373,7 +448,7 @@ mod tests {
         let v1 = hash("old");
         let v2 = hash("new");
         insert(&mut db, "one", "note", &v1, &[1.0, 0.0]);
-        mark_revision(&db, "one", "note", &v2).unwrap();
+        mark_revision(&db, "one", "note", &v2, Some(1)).unwrap();
         assert!(search(&db, "one", &["note"], "local-test-model@1", &[1.0, 0.0], 10).unwrap().is_empty());
         let old = replace_chunks(&mut db, "one", "note", &v1, "local-test-model@1", 2, &[]);
         assert!(matches!(old, Err(ProbeError::Invalid(_))));
@@ -424,11 +499,70 @@ mod tests {
     }
 
     #[test]
+    fn stale_revision_fence_rejects_out_of_order_and_aba_events() {
+        let db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let v1 = hash("old");
+        let v2 = hash("new");
+        let first = mark_revision(&db, "one", "note", &v1, None).unwrap();
+        let second = mark_revision(&db, "one", "note", &v2, Some(first)).unwrap();
+        let third = mark_revision(&db, "one", "note", &v1, Some(second)).unwrap();
+        assert_eq!(third, 3);
+        assert!(matches!(
+            mark_revision(&db, "one", "note", &v2, Some(first)),
+            Err(ProbeError::StaleSource)
+        ));
+        assert!(matches!(
+            mark_revision(&db, "one", "note", &v1, None),
+            Err(ProbeError::StaleSource)
+        ));
+        let active: String = db.query_row(
+            "SELECT active_revision FROM semantic_probe_sources
+             WHERE scope_id='one' AND source_id='note'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(active, v1);
+    }
+
+    #[test]
+    fn revocation_purges_vectors_and_prevents_stale_reenrollment() {
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let v1 = hash("allowed");
+        let v2 = hash("formerly-private");
+        insert(&mut db, "one", "note", &v1, &[1.0, 0.0]);
+        let revoked_epoch = revoke_source(&mut db, "one", "note", 1).unwrap();
+        assert_eq!(revoked_epoch, 2);
+        assert!(search(&db, "one", &["note"], "local-test-model@1", &[1.0, 0.0], 10).unwrap().is_empty());
+        let count: i64 = db.query_row(
+            "SELECT count(*) FROM semantic_probe_chunks
+             WHERE scope_id='one' AND source_id='note'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 0);
+        assert!(matches!(
+            mark_revision(&db, "one", "note", &v2, Some(revoked_epoch)),
+            Err(ProbeError::StaleSource)
+        ));
+        assert!(matches!(
+            mark_revision(&db, "one", "note", &v2, None),
+            Err(ProbeError::StaleSource)
+        ));
+        let h = hash("fragment");
+        assert!(replace_chunks(
+            &mut db, "one", "note", &v1, "local-test-model@1", 2,
+            &[Chunk { locator: "heading:1", text_hash: &h, embedding: &[1.0, 0.0] }]
+        ).is_err());
+    }
+
+    #[test]
     fn malformed_and_corrupt_data_fail_closed() {
         let mut db = Connection::open_in_memory().unwrap();
         prepare(&db).unwrap();
         let rev = hash("one");
-        assert!(mark_revision(&db, "one", "note", "bad-revision").is_err());
+        assert!(mark_revision(&db, "one", "note", "bad-revision", None).is_err());
         insert(&mut db, "one", "note", &rev, &[1.0, 0.0]);
         db.execute(
             "UPDATE semantic_probe_chunks SET embedding=x'00000000'
