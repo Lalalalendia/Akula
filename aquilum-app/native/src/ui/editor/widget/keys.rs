@@ -45,9 +45,7 @@ impl TextEditor {
                 // The focused code body may be windowed far away from its
                 // opener. Its stable byte identity comes from the async
                 // Markdown checkpoints, not from the visible line index.
-                if let Some(opener) = self.code_opener_at(self.doc.at_offset(self.focus))
-                    && let Some(body) = self.doc.copy_fenced_body(opener)
-                {
+                if let Some((opener, body)) = self.focused_fenced_code_body() {
                     ctx.set_clipboard(body);
                     self.copied_code = Some((opener, std::time::Instant::now()));
                     ctx.request_anim_frame();
