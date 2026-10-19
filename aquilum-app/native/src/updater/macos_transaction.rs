@@ -117,6 +117,20 @@ impl AppGate {
         Ok(stages)
     }
 
+    /// Read-only generation query under the same held BSD app lock.
+    /// Never auto-clear a staged backup from the new process.
+    // Used by the real startup_ack sibling module, not by this module's
+    // standalone rustc --test harness that compiles with -D warnings.
+    #[allow(dead_code)]
+    pub(super) fn startup_stage(&self) -> Result<Option<PathBuf>, String> {
+        Ok(self.stages()?.into_iter().next())
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn app_path(&self) -> &Path {
+        &self.bundle
+    }
+
     /// Restore only an unambiguous old backup when final app is missing.
     /// Keep other generations for inspection and never retry automatically.
     pub(super) fn recover(&self) -> Result<Recovery, String> {
@@ -307,7 +321,12 @@ mod tests {
         let blocked = AppGate::acquire(&fixture.app, &fixture.home);
         assert!(blocked.is_err(), "a second independent fd bypassed BSD flock");
         drop(first);
-        assert!(AppGate::acquire(&fixture.app, &fixture.home).is_ok());
+        let reacquired = AppGate::acquire(&fixture.app, &fixture.home);
+        assert!(
+            reacquired.is_ok(),
+            "BSD lock must be released on drop, but reacquisition failed: {:?}",
+            reacquired.err()
+        );
     }
 
     #[test]

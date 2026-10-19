@@ -2,8 +2,15 @@ mod apply;
 mod release;
 #[cfg(target_os = "macos")]
 mod tar;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 mod macos_transaction;
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+mod startup_ack;
+
+#[cfg(all(target_os = "macos", feature = "installed"))]
+pub(crate) fn on_first_presented_frame() {
+    startup_ack::on_first_presented_frame();
+}
 #[cfg(test)]
 mod tests;
 
