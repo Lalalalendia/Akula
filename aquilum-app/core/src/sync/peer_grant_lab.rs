@@ -1,9 +1,10 @@
 //! RN-4C: LAB-ONLY, disabled-by-default, Core-registered P2P grant ledger.
 //!
 //! Separate SQLite in appdata. A registered workspace and its pinned physical
-//! root are required for EVERY operation. No network API or File Gate writer
-//! uses this module. It supplies only an explicitly host-provisioned policy
-//! snapshot for read-only experimental admission.
+//! root are required for EVERY operation. A separate immutable, locally
+//! provisioned VaultId binding is required before a grant can be issued.
+//! No network API or File Gate writer uses this module. It supplies only an
+//! explicitly host-provisioned policy snapshot for research admission.
 //!
 //! Security limits: no installer-owned OS custody/ACL, no hostile same-user
 //! writer defense, no atomic revocation/write lease, no issuer private-key
@@ -15,7 +16,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBeha
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 pub const MAX_LAB_GRANT_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug)]
@@ -27,6 +28,9 @@ pub enum GrantLedgerError {
     UnsafeStore,
     InvalidSchema,
     RootMismatch,
+    MissingVaultBinding,
+    VaultAlreadyBound,
+    ForeignVault,
     InvalidProposal,
     ActiveGrantExists,
     MissingGrant,
@@ -108,6 +112,85 @@ fn checked_db_location(admission: &RegisteredReadAdmission<'_>, path: &Path) -> 
 
 fn bytes<const N: usize>(raw: Vec<u8>) -> Result<[u8; N]> {
     raw.try_into().map_err(|_| GrantLedgerError::CorruptRow)
+}
+
+fn registered_root_row(
+    connection: &Connection,
+    admission: &RegisteredReadAdmission<'_>,
+) -> Result<(String, String, String, String)> {
+    let (dev, ino) = admission.registered_root_identity_for_profile()?;
+    let expected = (
+        admission.registered_workspace_id().to_string(),
+        admission
+            .registered_root_path()
+            .to_string_lossy()
+            .into_owned(),
+        dev.to_string(),
+        ino.to_string(),
+    );
+    let rows: i64 =
+        connection.query_row("SELECT COUNT(*) FROM root_binding", [], |row| row.get(0))?;
+    if rows != 1 {
+        return Err(GrantLedgerError::InvalidSchema);
+    }
+    let recorded: (String, String, String, String) = connection
+        .query_row(
+            "SELECT workspace,path,root_dev,root_ino FROM root_binding",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| GrantLedgerError::InvalidSchema)?;
+    if recorded != expected {
+        return Err(GrantLedgerError::RootMismatch);
+    }
+    Ok(expected)
+}
+
+/// The immutable binding is checked against the LIVE registered, OS-pinned
+/// root. Matching grant fields are not sufficient to establish vault
+/// membership. All callers with publication consequences must additionally
+/// hold the appropriate File Gate + host custody permits.
+fn require_bound_vault(
+    connection: &Connection,
+    admission: &RegisteredReadAdmission<'_>,
+    requested_vault: VaultId,
+) -> Result<()> {
+    let (workspace, root_path, root_dev, root_ino) = registered_root_row(connection, admission)?;
+    let stored: Option<(String, String, String, String, String, i64)> = connection
+        .query_row(
+            "SELECT vault,workspace,root_path,root_dev,root_ino,generation
+             FROM vault_binding WHERE singleton=1",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((vault, bound_workspace, bound_path, bound_dev, bound_ino, generation)) = stored
+    else {
+        return Err(GrantLedgerError::MissingVaultBinding);
+    };
+    if bound_workspace != workspace
+        || bound_path != root_path
+        || bound_dev != root_dev
+        || bound_ino != root_ino
+    {
+        return Err(GrantLedgerError::RootMismatch);
+    }
+    if generation != 1 {
+        return Err(GrantLedgerError::CorruptRow);
+    }
+    if vault != requested_vault.to_string() {
+        return Err(GrantLedgerError::ForeignVault);
+    }
+    Ok(())
 }
 
 /// Internal shared decoding: the same schema validation applies to free
@@ -194,6 +277,15 @@ impl<'a> RegisteredPullGrantLedger<'a> {
                 workspace TEXT NOT NULL, path TEXT NOT NULL,
                 root_dev TEXT NOT NULL, root_ino TEXT NOT NULL
              );
+             CREATE TABLE vault_binding(
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                vault TEXT NOT NULL UNIQUE,
+                workspace TEXT NOT NULL,
+                root_path TEXT NOT NULL,
+                root_dev TEXT NOT NULL,
+                root_ino TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation >= 1)
+             );
              CREATE TABLE pull_grants(
                 vault TEXT NOT NULL, device TEXT NOT NULL,
                 endpoint BLOB NOT NULL, issuer BLOB NOT NULL,
@@ -202,7 +294,7 @@ impl<'a> RegisteredPullGrantLedger<'a> {
                 nonce BLOB NOT NULL, active INTEGER NOT NULL,
                 PRIMARY KEY(vault, device)
              );
-             PRAGMA user_version=1;",
+             PRAGMA user_version=2;",
         )?;
         tx.execute(
             "INSERT INTO root_binding(workspace,path,root_dev,root_ino)
@@ -278,6 +370,49 @@ impl<'a> RegisteredPullGrantLedger<'a> {
         &self.db_path
     }
 
+    /// Host-only, explicitly provisioned one-time mapping. The network and
+    /// incoming signed object descriptors must NEVER invoke this operation.
+    /// No rebinding/migration exists in the lab: old grants and their epochs
+    /// cannot silently follow a new physical root or a new VaultId.
+    ///
+    /// A per-workspace SQLite store does NOT enforce uniqueness across other
+    /// independently provisioned appdata stores or establish installer-owned
+    /// custody. RN-4E1b-02 must close that system-wide namespace boundary.
+    pub fn bind_vault_once(&mut self, vault: VaultId) -> Result<()> {
+        self.admission.recheck_registered_root()?;
+        if vault.as_uuid().is_nil() {
+            return Err(GrantLedgerError::InvalidProposal);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (workspace, root_path, dev, ino) = registered_root_row(&tx, &self.admission)?;
+        let existing_grants: i64 =
+            tx.query_row("SELECT COUNT(*) FROM pull_grants", [], |row| row.get(0))?;
+        if existing_grants != 0 {
+            return Err(GrantLedgerError::VaultAlreadyBound);
+        }
+        let already_bound: Option<i64> = tx
+            .query_row(
+                "SELECT generation FROM vault_binding WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if already_bound.is_some() {
+            return Err(GrantLedgerError::VaultAlreadyBound);
+        }
+        tx.execute(
+            "INSERT INTO vault_binding
+             (singleton,vault,workspace,root_path,root_dev,root_ino,generation)
+             VALUES(1,?1,?2,?3,?4,?5,1)",
+            params![vault.to_string(), workspace, root_path, dev, ino],
+        )?;
+        self.admission.recheck_registered_root()?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// A matching active grant cannot be silently replaced. Revocation
     /// records remain as epoch tombstones, so a later grant uses epoch+1.
     pub fn issue(&mut self, req: ApprovedPull) -> Result<StoredPull> {
@@ -293,6 +428,7 @@ impl<'a> RegisteredPullGrantLedger<'a> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_bound_vault(&tx, &self.admission, req.vault_id)?;
         let previous: Option<(i64, i64)> = tx
             .query_row(
                 "SELECT epoch,active FROM pull_grants WHERE vault=?1 AND device=?2",
@@ -340,6 +476,7 @@ impl<'a> RegisteredPullGrantLedger<'a> {
     /// A read-only observation, not a revocation fence or a File Gate permit.
     pub fn read_active(&self, vault: VaultId, device: DeviceId, now: u64) -> Result<StoredPull> {
         self.admission.recheck_registered_root()?;
+        require_bound_vault(&self.db, &self.admission, vault)?;
         let active = load_active_from_connection(&self.db, vault, device, now)?;
         self.admission.recheck_registered_root()?;
         Ok(active)
@@ -374,6 +511,7 @@ impl<'a> RegisteredPullGrantLedger<'a> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_bound_vault(&tx, &self.admission, expected.vault_id)?;
         let current =
             load_active_from_connection(&tx, expected.vault_id, expected.device_id, trusted_now)?;
         if current.epoch != expected.epoch {
@@ -403,6 +541,7 @@ impl<'a> RegisteredPullGrantLedger<'a> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_bound_vault(&tx, &self.admission, vault)?;
         let changed = tx.execute(
             "UPDATE pull_grants SET epoch=?1,active=0
              WHERE vault=?2 AND device=?3 AND epoch=?4 AND active=1",

@@ -170,6 +170,7 @@ fn cross_process_writer_cannot_revoke_during_real_filegate_create() {
     let vault = VaultId::new();
     let device = DeviceId::new();
     let mut ledger = RegisteredPullGrantLedger::provision_new(&core, &root, &db).unwrap();
+    ledger.bind_vault_once(vault).unwrap();
     let expected = ledger.issue(proposal(vault, device)).unwrap();
     let mut competitor = None;
 
@@ -222,6 +223,7 @@ fn revoke_committed_in_another_core_process_denies_filegate_before_write() {
     let vault = VaultId::new();
     let device = DeviceId::new();
     let mut ledger = RegisteredPullGrantLedger::provision_new(&core, &root, &db).unwrap();
+    ledger.bind_vault_once(vault).unwrap();
     let snapshot = ledger.issue(proposal(vault, device)).unwrap();
 
     let mut competitor = spawn_competing_process(
@@ -255,6 +257,7 @@ fn exact_object_and_endpoint_must_match_before_disposable_publication() {
     let vault = VaultId::new();
     let device = DeviceId::new();
     let mut ledger = RegisteredPullGrantLedger::provision_new(&core, &root, &db).unwrap();
+    ledger.bind_vault_once(vault).unwrap();
     let expected = ledger.issue(proposal(vault, device)).unwrap();
 
     for invalid in [

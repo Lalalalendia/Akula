@@ -45,6 +45,7 @@ fn immediate_guard_blocks_second_sqlite_writer_until_probe_completes() {
     let v = VaultId::new();
     let d = DeviceId::new();
     let mut ledger = RegisteredPullGrantLedger::provision_new(&core, &root, &db).unwrap();
+    ledger.bind_vault_once(v).unwrap();
     let original = ledger.issue(proposal(v, d)).unwrap();
 
     let mut probe_was_called = false;
@@ -106,6 +107,7 @@ fn wrong_endpoint_or_signed_scope_mismatch_denies_before_probe() {
     let v = VaultId::new();
     let d = DeviceId::new();
     let mut ledger = RegisteredPullGrantLedger::provision_new(&core, &root, &db).unwrap();
+    ledger.bind_vault_once(v).unwrap();
     let expected = ledger.issue(proposal(v, d)).unwrap();
     let calls = Cell::new(0);
 
@@ -134,7 +136,7 @@ fn wrong_endpoint_or_signed_scope_mismatch_denies_before_probe() {
             calls.set(calls.get() + 1);
             Ok(())
         }),
-        Err(GrantLedgerError::MissingGrant)
+        Err(GrantLedgerError::ForeignVault)
     ));
     assert!(matches!(
         ledger.with_fenced_pull_preflight(expected, [99; 32], 100, |_| {
@@ -164,6 +166,7 @@ fn failed_read_only_probe_rolls_back_and_cannot_fence_later_revocation() {
     let v = VaultId::new();
     let d = DeviceId::new();
     let mut ledger = RegisteredPullGrantLedger::provision_new(&core, &root, &db).unwrap();
+    ledger.bind_vault_once(v).unwrap();
     let expected = ledger.issue(proposal(v, d)).unwrap();
 
     assert!(matches!(
