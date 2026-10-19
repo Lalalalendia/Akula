@@ -129,3 +129,38 @@ fn invalid_geometry_does_not_create_nonfinite_horizontal_motion() {
     assert_eq!(super::pixels(&ScrollDelta::PageDelta(1.0, 1.0), 1.0, f64::NAN).x, 0.0);
     assert_eq!(super::sideways(super::pixels(&ScrollDelta::LineDelta(0.0, 1.0), 1.0, 500.0), true), super::LINE);
 }
+
+fn horizontal_root() -> RenderRoot {
+    let content = NewWidget::new(SizedBox::empty().width(Length::px(5_000.0)));
+    let options = RenderRootOptions {
+        default_properties: Arc::new(default_property_set()),
+        use_system_fonts: false,
+        size_policy: WindowSizePolicy::User,
+        size: PhysicalSize::new(400, 300),
+        scale_factor: 1.0,
+        test_font: None,
+    };
+    let mut root = RenderRoot::new(
+        NewWidget::new(ScrollArea::horizontal(content)).with_tag(TAG).erased(),
+        |_| {},
+        options,
+    );
+    let _ = root.redraw();
+    root
+}
+
+#[test]
+fn horizontal_page_wheel_is_handled_by_scroll_container() {
+    let mut root = horizontal_root();
+    let mut trace = Vec::new();
+    // A horizontal page command scrolls by the viewport, not by LINE pixels.
+    scroll(&mut root, ScrollDelta::PageDelta(-1.0, 0.0));
+    frames(&mut root, 40, &mut trace);
+    assert!((offset(&root) - 400.0).abs() < 0.01,
+        "horizontal page event did not advance by viewport: {trace:?}");
+    // Precision touchpad remains immediate; large deltas must clamp safely.
+    scroll(&mut root, ScrollDelta::PixelDelta(PhysicalPosition::new(-100_000.0, 0.0)));
+    assert!((offset(&root) - (5_000.0 - 400.0)).abs() < 0.01);
+    scroll(&mut root, ScrollDelta::PixelDelta(PhysicalPosition::new(100_000.0, 0.0)));
+    assert_eq!(offset(&root), 0.0);
+}
