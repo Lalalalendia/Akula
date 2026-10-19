@@ -24,6 +24,7 @@ pub enum ProbeError {
     CorruptVector,
     ScanBudgetExceeded,
     StaleSource,
+    AccessDenied,
     RevisionCollision,
     UnknownModel,
     Database(rusqlite::Error),
@@ -36,6 +37,7 @@ impl fmt::Display for ProbeError {
             Self::CorruptVector => f.write_str("Stored vector is corrupt"),
             Self::ScanBudgetExceeded => f.write_str("Semantic probe scan budget exceeded"),
             Self::StaleSource => f.write_str("Local source generation or access changed"),
+            Self::AccessDenied => f.write_str("Semantic search permission denied"),
             Self::RevisionCollision => f.write_str("Immutable revision has different source bytes"),
             Self::UnknownModel => f.write_str("Requested embedding model has no index"),
             Self::Database(error) => error.fmt(f),
@@ -194,6 +196,61 @@ pub fn search_sync_verified(
         }
     }
     Ok(result)
+}
+
+/// Restricted, host-only plugin path. Uses the EXISTING PermissionBroker grant
+/// for NotesSearch rather than inventing a second permission system.
+///
+/// The trusted host MUST independently bind the host-indexed NoteResource to
+/// expected_document and the registered vault scope; neither NoteId nor an
+/// arbitrary path is automatically a Sync DocumentId. This method checks that
+/// scope_id is the registered plugin vault, that the owner's selected document
+/// still matches expected_document, and that a live lease still authorizes the
+/// note before and after the search.
+///
+/// No untrusted plugin arguments, remote agents or MCP routes may call this.
+/// It returns metadata only, not note bytes. The RPC/response boundary must
+/// revalidate its own authorization before any bytes are actually transmitted.
+pub(crate) fn search_sync_with_plugin_grant<Owner, Context>(
+    connection: &Connection,
+    broker: &crate::plugins::PermissionBroker,
+    plugin: crate::plugins::PluginInstanceHandle,
+    note: &crate::plugins::NoteResource,
+    expected_document: crate::sync::DocumentId,
+    scope_id: &str,
+    model_id: &str,
+    query: &[f32],
+    limit: usize,
+    mut live_context: Context,
+    mut observe_owner: Owner,
+) -> Result<SearchResult, ProbeError>
+where
+    Owner: FnMut() -> Result<ReadObservation, ProbeError>,
+    Context: FnMut() -> crate::plugins::HostContext,
+{
+    use crate::plugins::{Capability, Resource};
+    // The isolated index's scope is the registered vault ID (not a
+    // user-chosen project label or arbitrary search namespace).
+    if scope_id != note.vault.as_uuid().to_string() {
+        return Err(ProbeError::AccessDenied);
+    }
+    let resource = Resource::Note(note.clone());
+    let lease = broker
+        .authorize(plugin, live_context(), Capability::NotesSearch, &resource)
+        .map_err(|_| ProbeError::AccessDenied)?;
+    search_sync_revalidated(connection, scope_id, model_id, query, limit, || {
+        broker
+            .revalidate_lease(&lease, live_context())
+            .map_err(|_| ProbeError::AccessDenied)?;
+        let observed = observe_owner()?;
+        if observed.selection.document_id != expected_document.to_string() {
+            return Err(ProbeError::AccessDenied);
+        }
+        broker
+            .revalidate_lease(&lease, live_context())
+            .map_err(|_| ProbeError::AccessDenied)?;
+        Ok(observed)
+    })
 }
 
 /// A snapshot provided by the trusted host. Epochs MUST be monotonic and
@@ -951,6 +1008,175 @@ mod tests {
             }),
             Err(ProbeError::StaleSource)
         ));
+    }
+
+    fn plugin_search_fixture() -> (
+        crate::plugins::PermissionBroker,
+        crate::plugins::PluginInstanceHandle,
+        crate::plugins::VaultId,
+        crate::plugins::NoteResource,
+    ) {
+        use crate::plugins::{
+            PermissionBroker, PluginManifest, NoteId, NoteResource, VaultId,
+        };
+        let baseline = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/plugins/fixtures/valid-v1.json"
+        ));
+        let mut manifest: serde_json::Value = serde_json::from_str(baseline).unwrap();
+        manifest["permissions"]["required"] = serde_json::json!(["notes.search"]);
+        manifest["permissions"]["optional"] = serde_json::json!([]);
+        let manifest = PluginManifest::parse_json(&manifest.to_string()).unwrap();
+        let broker = PermissionBroker::new();
+        let vault = VaultId::new_for_host();
+        let plugin = broker.register_host_package(&manifest, [0x33; 32], vault).unwrap();
+        let note = NoteResource::from_host_index(
+            vault, NoteId::new_for_host(), "docs/test.md"
+        ).unwrap();
+        (broker, plugin, vault, note)
+    }
+
+    #[test]
+    fn plugin_search_denies_without_grant_and_rejects_wrong_scope() {
+        use crate::plugins::{Capability, GrantScope, HostContext};
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let (broker, plugin, vault, note) = plugin_search_fixture();
+        let doc = DocumentId::new();
+        let mut dag = RevisionDag::new();
+        let rev = add_dag_revision(&mut dag, doc, vec![], "private");
+        let scope = vault.as_uuid().to_string();
+        let document_id = doc.to_string();
+        register_source(&db, &scope, &document_id).unwrap();
+        put(&mut db, &scope, &document_id, 1, &rev.to_string(), "private", &[1.0, 0.0]);
+        let context = || HostContext::from_host_state(vault, Some(note.id));
+        let selected = resolve_sync_revisions(&dag, doc, None).unwrap();
+        let observe = || Ok(ReadObservation {
+            grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+            selection: selected.clone(),
+        });
+        assert!(matches!(
+            search_sync_with_plugin_grant(&db, &broker, plugin, &note, doc, &scope,
+                MODEL, &[1.0, 0.0], 5, context, observe),
+            Err(ProbeError::AccessDenied)
+        ));
+        broker.grant_host_approved(
+            plugin, Capability::NotesSearch,
+            GrantScope::selected_notes([note.id]).unwrap(),
+        ).unwrap();
+        let selected = resolve_sync_revisions(&dag, doc, None).unwrap();
+        assert!(matches!(
+            search_sync_with_plugin_grant(&db, &broker, plugin, &note, doc, "another-vault",
+                MODEL, &[1.0, 0.0], 5, context,
+                || Ok(ReadObservation {
+                    grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+                    selection: selected.clone(),
+                })),
+            Err(ProbeError::AccessDenied)
+        ));
+        assert_eq!(
+            search_sync_with_plugin_grant(&db, &broker, plugin, &note, doc, &scope,
+                MODEL, &[1.0, 0.0], 5, context,
+                || Ok(ReadObservation {
+                    grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+                    selection: selected.clone(),
+                })).unwrap().hits.len(), 1
+        );
+        let other_document = DocumentId::new();
+        assert!(matches!(
+            search_sync_with_plugin_grant(&db, &broker, plugin, &note,
+                other_document, &scope, MODEL, &[1.0, 0.0], 5,
+                context, || Ok(ReadObservation {
+                    grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+                    selection: selected.clone(),
+                })),
+            Err(ProbeError::AccessDenied)
+        ));
+    }
+
+    #[test]
+    fn plugin_search_revocation_between_scoring_and_release_is_denied() {
+        use crate::plugins::{Capability, GrantScope, HostContext};
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let (broker, plugin, vault, note) = plugin_search_fixture();
+        broker.grant_host_approved(
+            plugin, Capability::NotesSearch,
+            GrantScope::selected_notes([note.id]).unwrap(),
+        ).unwrap();
+        let doc = DocumentId::new();
+        let mut dag = RevisionDag::new();
+        let rev = add_dag_revision(&mut dag, doc, vec![], "private");
+        let scope = vault.as_uuid().to_string();
+        register_source(&db, &scope, &doc.to_string()).unwrap();
+        put(&mut db, &scope, &doc.to_string(), 1, &rev.to_string(), "private", &[1.0, 0.0]);
+        let selection = resolve_sync_revisions(&dag, doc, None).unwrap();
+        let mut observations = 0usize;
+        let result = search_sync_with_plugin_grant(
+            &db, &broker, plugin, &note, doc, &scope, MODEL, &[1.0, 0.0], 5,
+            || HostContext::from_host_state(vault, Some(note.id)),
+            || {
+                observations += 1;
+                if observations == 2 {
+                    broker.revoke_all_for_host(plugin).unwrap();
+                }
+                Ok(ReadObservation {
+                    grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+                    selection: selection.clone(),
+                })
+            },
+        );
+        assert!(matches!(result, Err(ProbeError::AccessDenied)));
+        assert_eq!(observations, 2);
+    }
+
+    #[test]
+    fn plugin_search_rejects_changed_live_context_and_wrong_note_grant() {
+        use crate::plugins::{Capability, GrantScope, HostContext, NoteId, NoteResource};
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let (broker, plugin, vault, note) = plugin_search_fixture();
+        broker.grant_host_approved(
+            plugin, Capability::NotesSearch,
+            GrantScope::selected_notes([note.id]).unwrap(),
+        ).unwrap();
+        let doc = DocumentId::new();
+        let mut dag = RevisionDag::new();
+        let rev = add_dag_revision(&mut dag, doc, vec![], "private");
+        let scope = vault.as_uuid().to_string();
+        register_source(&db, &scope, &doc.to_string()).unwrap();
+        put(&mut db, &scope, &doc.to_string(), 1, &rev.to_string(), "private", &[1.0, 0.0]);
+        let selected = resolve_sync_revisions(&dag, doc, None).unwrap();
+        let unselected = NoteResource::from_host_index(
+            vault, NoteId::new_for_host(), "docs/other.md"
+        ).unwrap();
+        assert!(matches!(
+            search_sync_with_plugin_grant(&db, &broker, plugin, &unselected, doc, &scope,
+                MODEL, &[1.0, 0.0], 5,
+                || HostContext::from_host_state(vault, Some(note.id)),
+                || Ok(ReadObservation {
+                    grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+                    selection: selected.clone(),
+                })),
+            Err(ProbeError::AccessDenied)
+        ));
+        let mut contexts = 0usize;
+        let response = search_sync_with_plugin_grant(
+            &db, &broker, plugin, &note, doc, &scope, MODEL, &[1.0, 0.0], 5,
+            || {
+                contexts += 1;
+                if contexts >= 4 {
+                    HostContext::from_host_state(vault, Some(unselected.id))
+                } else {
+                    HostContext::from_host_state(vault, Some(note.id))
+                }
+            },
+            || Ok(ReadObservation {
+                grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+                selection: selected.clone(),
+            }),
+        );
+        assert!(matches!(response, Err(ProbeError::AccessDenied)));
     }
 
     #[test]
