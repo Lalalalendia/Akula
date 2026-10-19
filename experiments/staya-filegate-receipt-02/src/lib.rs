@@ -7,6 +7,8 @@
 //! power-loss persistence or host-install custody. The production Writer is
 //! not replaced: the only user-vault mutation goes through gate::create.
 
+pub mod peer_scope;
+
 use aquilum_core::{Core, CoreEvent};
 use aquilum_core::files::gate;
 use aquilum_core::history::Source;
