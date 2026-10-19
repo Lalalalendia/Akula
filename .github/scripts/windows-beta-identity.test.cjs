@@ -24,7 +24,11 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
   assert.notEqual(config.identifier, 'com.dmitriy.aquilum-app');
   assert.deepEqual(config.binaries, [{ path: 'akula-app', main: true }]);
   assert.equal(config.homepage, 'https://github.com/Lalalalendia/Akula');
-  assert.equal(config.nsis.installerIcon, 'icons/icon.ico');
+  assert.equal(config.nsis.installerIcon, '../icons/icon.ico');
+  assert.deepEqual(config.icons, [
+    '../icons/32x32.png', '../icons/128x128.png',
+    '../icons/128x128@2x.png', '../icons/icon.ico',
+  ]);
 });
 
 test('Windows runtime data and global process identities do not alias Aquilum', () => {
@@ -40,6 +44,7 @@ test('candidate builds local-only, uses explicit Windows config and never replac
     'runs-on: windows-latest',
     'cargo build --release --locked -p aquilum-native --features installed',
     '--config native/packaging/akula-windows.json',
+    '--binaries-dir $release',
     "Join-Path $release 'akula-app.exe'",
     './scripts/test-windows-beta.ps1',
     'Upload candidate (not a release)',

@@ -25,6 +25,10 @@ provisional Windows installer icon still uses the inherited icon assets.
 The `windows-beta.yml` workflow builds only `--features installed`,
 never enables `sync-installed-host`, S3 mutation or a release publication.
 It uses a separate cargo-packager configuration with immutable product ID.
+The standalone config lives under `native/packaging`, so icon paths are
+explicitly relative (`../icons/...`). Its `--binaries-dir` is explicitly set
+to the compiled Cargo release directory; `--out-dir` is only the NSIS output.
+Without these, cargo-packager 0.11.8 would look for assets/binaries in the wrong directories.
 It creates temporary **upstream sentinel** directories and registry values
 on a **GitHub-hosted ephemeral runner**, then installs, opens, restarts and
 uninstalls Akula and ensures those sentinels and the local vault survive.
