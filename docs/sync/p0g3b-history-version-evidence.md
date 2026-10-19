@@ -36,9 +36,11 @@ HistoryService mutex lifetime.
   exact newly generated version ID, require a regular non-symlink file and
   a single hardlink on Unix, enforce a 32 MiB cap, and verify exact raw
   bytes + BLAKE3 against the claimed saved content.
-- Reject quiet/no-location, label-only, revert and **coalesced UpdateLatest**
-  even when they previously returned `Ok(true)`: an in-place mutable
-  history version is not an immutable receipt.
+- **Before any history-store mutation**, reject quiet/no-location,
+  label-only, revert and **coalesced UpdateLatest** even when these would
+  ordinarily return `Ok(true)`. Rejected strict attempts may not delete,
+  rename or overwrite historical versions. Normal editor paths still
+  preserve legacy coalescing and revert rules.
 - Reject any failed readback/mismatched hash without undoing history bytes.
   A previous primary publication may already be visible; operator review
   is still needed.
