@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 from statistics import median
-from math import ceil, isfinite
+from math import floor, isfinite
 from native_scroll_window_ab import number
 
 REPO = Path(__file__).resolve().parents[2]
@@ -30,7 +30,7 @@ def p95(samples: list[float]) -> float:
     if not samples or not all(isfinite(s) and s >= 0 for s in samples):
         raise ValueError("invalid frame time samples")
     ordered = sorted(samples)
-    return ordered[max(0, ceil(len(ordered) * 0.95) - 1)]
+    return ordered[floor((len(ordered) - 1) * 0.95 + 0.5)]
 
 
 def frame_distribution(metrics: dict) -> dict:
