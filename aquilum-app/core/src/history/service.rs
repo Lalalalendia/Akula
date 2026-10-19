@@ -2134,6 +2134,53 @@ mod tests {
     }
 
     #[test]
+    fn p0g3b_strict_history_rejects_local_source_before_creating_version() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("LocallyMutable.md");
+        let text = "local typed revision would be coalescible";
+        fs::write(&note, text).unwrap();
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        // This would normally be CreateNew; the strict, non-authorizing S3
+        // proof may only observe an external save. The regular editor still
+        // retains its existing local coalescing path.
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::Me, &hash, None), true, true,
+        );
+        assert!(result.is_err(), "Source::Me would permit later coalescing");
+        assert!(versions(&fixture.history_of("LocallyMutable.md")).is_empty());
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(text, Source::Me, &hash, None),
+        ).unwrap(), "ordinary local save remains supported");
+    }
+
+    #[test]
+    fn p0g3b_history_observation_is_not_permanent_archive() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("ExternalObservation.md");
+        let text = "external revision verified once";
+        fs::write(&note, text).unwrap();
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &hash, None), true, true,
+        ).expect("strictly create history version");
+        let proof = result.verified_version.expect("observed exact version");
+        let dir = fixture.history_of("ExternalObservation.md");
+        assert_eq!(proof.content_hash, hash);
+        // A same-UID writer can mutate even a once-verified version after the
+        // history lock is released. A future native receipt MUST retain its
+        // own protected bytes and independently recheck before remote ACK.
+        fs::write(dir.join(&proof.version_id), b"changed after receipt").unwrap();
+        assert!(super::HistoryService::verify_history_version(
+            &dir, &proof.version_id, text, &hash,
+        ).is_err(), "later history mutation invalidates the old observation");
+    }
+
+    #[test]
     fn p0g3b_strict_history_proof_refuses_skip_and_label_only() {
         let fixture = Fixture::new();
         let history = fixture.service();
