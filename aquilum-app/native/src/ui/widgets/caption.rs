@@ -18,6 +18,11 @@ use crate::ui::{text, theme};
 const NAME_DRAG_THRESHOLD: f64 = 4.0;
 const NAME_FEEDBACK_SECONDS: f64 = 1.5;
 
+fn short_click(start: Point, end: Point, count: u8, dragged: bool, selection_collapsed: bool) -> bool {
+    count == 1 && !dragged && selection_collapsed
+        && (end.x - start.x).abs().max((end.y - start.y).abs()) < NAME_DRAG_THRESHOLD
+}
+
 /// Source filenames can exceed the rendered ellipsis layout.
 fn visible_len(layout: &masonry::parley::Layout<masonry::core::BrushIndex>, source_len: usize) -> usize {
     layout.lines().flat_map(|line| line.runs()).flat_map(|run| run.clusters())
@@ -180,8 +185,8 @@ impl Widget for Caption {
                 let down = self.pressed.take();
                 let at = ctx.local_position(e.state.position);
                 if let Some((start, count, dragged)) = down {
-                    let is_click = count == 1 && !dragged && (at.x - start.x).abs().max((at.y - start.y).abs()) < NAME_DRAG_THRESHOLD
-                        && self.selection.is_collapsed() && self.hit_name(bounds, at);
+                    let is_click = short_click(start, at, count, dragged, self.selection.is_collapsed())
+                        && self.hit_name(bounds, at);
                     if is_click {
                         ctx.submit_action::<CaptionAction>(CaptionAction::CopyFileName);
                     }
@@ -315,5 +320,81 @@ impl Widget for Caption {
 
     fn children_ids(&self) -> ChildrenIds {
         ChildrenIds::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{short_click, Caption};
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
+    use masonry::app::{RenderRoot, RenderRootOptions, RenderRootSignal, WindowSizePolicy};
+    use masonry::core::keyboard::{Code, Key, KeyState, KeyboardEvent, Location};
+    use masonry::core::{NewWidget, PointerButton, PointerButtonEvent, PointerEvent, PointerId,
+        PointerInfo, PointerState, PointerType, PointerUpdate, TextEvent};
+    use masonry::dpi::{PhysicalPosition, PhysicalSize};
+    use masonry::kurbo::Point;
+    use masonry::theme::default_property_set;
+
+    const WIDTH: u32 = 440;
+    const HEIGHT: u32 = 40;
+    const NAME: &str = "chapter-2026-测试.md";
+
+    #[test]
+    fn only_an_unmoved_single_click_copies_full_filename() {
+        let p = Point::new(60.0, 10.0);
+        assert!(short_click(p, p, 1, false, true));
+        assert!(!short_click(p, Point::new(75.0, 10.0), 1, false, true));
+        assert!(!short_click(p, p, 1, true, true));
+        assert!(!short_click(p, p, 2, false, true));
+        assert!(!short_click(p, p, 1, false, false));
+    }
+
+    #[test]
+    fn selecting_a_filename_substring_does_not_require_copying_the_full_path() {
+        let signals = Rc::new(RefCell::new(Vec::<RenderRootSignal>::new()));
+        let sink = Rc::clone(&signals);
+        let opts = RenderRootOptions {
+            default_properties: Arc::new(default_property_set()),
+            use_system_fonts: true,
+            size_policy: WindowSizePolicy::User,
+            size: PhysicalSize::new(WIDTH, HEIGHT),
+            scale_factor: 1.0,
+            test_font: None,
+        };
+        let mut root = RenderRoot::new(NewWidget::new(Caption::new(NAME).copyable_file_name()).erased(),
+            move |signal| sink.borrow_mut().push(signal), opts);
+        let _ = root.redraw();
+
+        let mouse = PointerInfo { pointer_id: Some(PointerId::PRIMARY),
+            persistent_device_id: None, pointer_type: PointerType::Mouse };
+        let mut state = PointerState { position: PhysicalPosition::new(205.0, 10.0),
+            count: 1, scale_factor: 1.0, ..PointerState::default() };
+        state.buttons.insert(PointerButton::Primary);
+        root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+            pointer: mouse, button: Some(PointerButton::Primary), state: state.clone(),
+        }));
+        state.position = PhysicalPosition::new(258.0, 10.0);
+        root.handle_pointer_event(PointerEvent::Move(PointerUpdate {
+            pointer: mouse, current: state.clone(), coalesced: vec![], predicted: vec![],
+        }));
+        state.buttons.remove(PointerButton::Primary);
+        root.handle_pointer_event(PointerEvent::Up(PointerButtonEvent {
+            pointer: mouse, button: Some(PointerButton::Primary), state,
+        }));
+        let key = KeyboardEvent {
+            state: KeyState::Down, key: Key::Character("c".into()), code: Code::Unidentified,
+            location: Location::Standard, modifiers: crate::test_dir::command(), repeat: false,
+            is_composing: false,
+        };
+        root.handle_text_event(TextEvent::Keyboard(key));
+        let _ = root.redraw();
+        let copied: Vec<String> = signals.borrow().iter().filter_map(|signal| match signal {
+            RenderRootSignal::ClipboardStore(value) => Some(value.clone()),
+            _ => None,
+        }).collect();
+        assert_eq!(copied.len(), 1);
+        assert!(!copied[0].is_empty(), "a real drag must select some text");
+        assert!(NAME.contains(&copied[0]), "selected range must come from the displayed filename");
+        assert_ne!(copied[0], NAME, "drag-select cannot silently copy the complete filename");
     }
 }
