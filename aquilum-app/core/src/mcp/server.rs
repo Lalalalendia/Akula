@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+#[cfg(feature = "mcp-parallel-reads")]
+use std::sync::RwLock;
 use std::thread::{self, JoinHandle};
 
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
@@ -21,7 +23,10 @@ struct Endpoint {
     token: String,
     call: SharedToolCaller,
     stopping: AtomicBool,
+    #[cfg(not(feature = "mcp-parallel-reads"))]
     turn: Mutex<()>,
+    #[cfg(feature = "mcp-parallel-reads")]
+    turn: RwLock<()>,
     open: Mutex<usize>,
     freed: Condvar,
 }
@@ -58,7 +63,10 @@ impl RunningServer {
             token,
             call,
             stopping: AtomicBool::new(false),
+            #[cfg(not(feature = "mcp-parallel-reads"))]
             turn: Mutex::new(()),
+            #[cfg(feature = "mcp-parallel-reads")]
+            turn: RwLock::new(()),
             open: Mutex::new(0),
             freed: Condvar::new(),
         });
@@ -84,7 +92,10 @@ impl RunningServer {
         self.endpoint.freed.notify_all();
         let _ = TcpStream::connect(self.address);
         let _ = self.accepting.join();
+        #[cfg(not(feature = "mcp-parallel-reads"))]
         drop(lock(&self.endpoint.turn));
+        #[cfg(feature = "mcp-parallel-reads")]
+        drop(self.endpoint.turn.write().unwrap_or_else(PoisonError::into_inner));
     }
 }
 
@@ -95,7 +106,16 @@ impl Endpoint {
         connection: &mut Connection,
         keep_alive: bool,
     ) -> Result<bool, Failure> {
+        #[cfg(not(feature = "mcp-parallel-reads"))]
         let _turn = lock(&self.turn);
+        #[cfg(feature = "mcp-parallel-reads")]
+        let _read_turn = independent_read_request(body).then(|| {
+            self.turn.read().unwrap_or_else(PoisonError::into_inner)
+        });
+        #[cfg(feature = "mcp-parallel-reads")]
+        let _write_turn = _read_turn.is_none().then(|| {
+            self.turn.write().unwrap_or_else(PoisonError::into_inner)
+        });
         if self.stopping.load(Ordering::SeqCst) {
             return Err(refused(503, "MCP-сервер остановлен"));
         }
@@ -105,6 +125,42 @@ impl Endpoint {
         };
         connection.send(&response, keep_alive)?;
         Ok(keep_alive)
+    }
+}
+
+
+/// Narrow, deliberately hard-coded allowlist. Never infer read authority
+/// from a tool name prefix, caller-supplied arguments, or MCP descriptions.
+/// A batch with ANY mutation, unknown method or malformed entry is exclusive.
+/// The whitelist is restricted to tested local read/search actions. Other
+/// tools (including navigation, remote lookups and future tools) stay serial.
+#[cfg(feature = "mcp-parallel-reads")]
+fn independent_read_request(body: &str) -> bool {
+    fn read_only(value: &Value) -> bool {
+        let Some(method) = value.get("method").and_then(Value::as_str) else {
+            return false;
+        };
+        match method {
+            "initialize" | "ping" | "tools/list" => true,
+            "tools/call" => value
+                .get("params")
+                .and_then(|params| params.get("name"))
+                .and_then(Value::as_str)
+                .is_some_and(|name| {
+                    matches!(
+                        name,
+                        "read_note" | "note_outline" | "search_notes"
+                            | "get_index_status" | "dataview_syntax"
+                    )
+                }),
+            _ => false,
+        }
+    }
+
+    match serde_json::from_str::<Value>(body) {
+        Ok(Value::Array(items)) => !items.is_empty() && items.iter().all(read_only),
+        Ok(value) => read_only(&value),
+        Err(_) => false,
     }
 }
 
@@ -591,6 +647,7 @@ mod tests {
         server.stop();
     }
 
+    #[cfg(not(feature = "mcp-parallel-reads"))]
     #[test]
     fn runs_one_tool_call_at_a_time() {
         let running = Arc::new(AtomicUsize::new(0));
