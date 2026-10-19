@@ -39,7 +39,7 @@ impl Line {
     /// The added ellipsis is decoration, never part of the copyable filename.
     pub fn visible_selection_layout(&self, width: f64, source: &str) -> Option<(&Layout<BrushIndex>, usize)> {
         let (full, cached, _) = self.full.as_ref()?;
-        if cached != source {
+        if cached.as_str() != source {
             return None;
         }
         if f64::from(full.width()) <= width {
