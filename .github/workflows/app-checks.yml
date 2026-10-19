@@ -202,7 +202,7 @@ jobs:
           {
             for attempt in 1 2 3; do
               echo "MCP_BURST_ATTEMPT=$attempt"
-              cargo test -p aquilum-core --locked mcp::server::tests::throughput_probe::burst_reads_against_real_temp_markdown_at_10_32_100_clients -- --ignored --nocapture --test-threads=1
+              MCP_BURST_ATTEMPT="$attempt" cargo test -p aquilum-core --locked mcp::server::tests::throughput_probe::burst_reads_against_real_temp_markdown_at_10_32_100_clients -- --ignored --nocapture --test-threads=1
             done
           } 2>&1 | tee ../mcp-agent-burst.log
           {
