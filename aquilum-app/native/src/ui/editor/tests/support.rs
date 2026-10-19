@@ -152,3 +152,22 @@ pub(super) fn wheel(root: &mut RenderRoot, at: (f64, f64), delta: (f64, f64)) {
     root.handle_pointer_event(PointerEvent::Scroll(event));
     let _ = root.redraw();
 }
+
+
+/// Send a native wheel event with modifier keys (for example Shift+wheel).
+/// Dispatch through the same RenderRoot path as real pointer input.
+pub(super) fn wheel_with_modifiers(
+    root: &mut RenderRoot,
+    at: (f64, f64),
+    delta: (f64, f64),
+    modifiers: Modifiers,
+) {
+    let mut state = pointer_state(at, 1);
+    state.modifiers = modifiers;
+    root.handle_pointer_event(PointerEvent::Scroll(PointerScrollEvent {
+        pointer: mouse(),
+        delta: ScrollDelta::PixelDelta(PhysicalPosition::new(delta.0, delta.1)),
+        state,
+    }));
+    let _ = root.redraw();
+}
