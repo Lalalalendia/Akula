@@ -89,6 +89,11 @@ pub struct State {
 }
 
 impl State {
+    /// True when classification is currently inside a fenced Markdown block.
+    pub(in crate::ui::editor) fn has_open_fence(&self) -> bool {
+        self.open.is_some()
+    }
+
     fn table_line(&mut self, line: &str, next: Option<&str>) -> Option<Block> {
         let row = table::is_row;
         let starts = !self.table && self.open.is_none() && !self.math && row(line) && next.is_some_and(table::is_separator);

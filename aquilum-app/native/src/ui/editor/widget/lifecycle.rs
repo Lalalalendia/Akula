@@ -6,6 +6,7 @@ impl TextEditor {
             ctx.request_layout();
         }
         self.reveal_caret();
+        self.reveal_code_caret();
         if self.laid_out() {
             let caret = self.caret();
             ctx.set_ime_area(caret);
@@ -35,5 +36,7 @@ impl TextEditor {
         }
         self.doc.pins = [self.anchor, self.focus].into_iter().chain(self.extra_cursors.iter().flat_map(|&(a, f)| [a, f])).collect();
         self.doc.layout(fcx, lcx, &self.styles, wrap, compose, self.focused.then_some(self.focus));
+        self.refresh_code_window_opener();
+        self.clamp_code_offsets_after_layout();
     }
 }
