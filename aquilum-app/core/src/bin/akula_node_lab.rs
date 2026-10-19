@@ -20,6 +20,10 @@ fn main() {
 #[cfg(target_os = "linux")]
 mod linux {
     use aquilum_core::{Core, CoreEvent, EventSink};
+    use aquilum_core::node_catalog_lab::{CatalogError, ReadCatalog};
+    use aquilum_core::sync::VaultId;
+    use std::collections::BTreeSet;
+    use std::str::FromStr;
     use rustix::fs::{open, openat, Mode, OFlags};
     use serde_json::json;
     use std::env;
@@ -39,6 +43,9 @@ mod linux {
         root: PathBuf,
         appdata: PathBuf,
         note: String,
+        vault_id: Option<VaultId>,
+        catalog_files: Vec<String>,
+        reader_files: Vec<String>,
         port: u16,
         requests: usize,
         token: String,
@@ -50,15 +57,29 @@ mod linux {
         let mut note = None;
         let mut port = None;
         let mut requests = None;
+        let mut raw_vault_id = None;
+        let mut catalog_files = Vec::new();
+        let mut reader_files = Vec::new();
         let mut args = env::args().skip(1);
         while let Some(flag) = args.next() {
             let value = args.next().ok_or_else(|| format!("missing value for {flag}"))?;
+            // Additional operator-admitted files and a restricted reader scope
+            // are repeatable arguments, never parameters received over HTTP.
+            if flag == "--catalog-note" {
+                catalog_files.push(value);
+                continue;
+            }
+            if flag == "--reader-note" {
+                reader_files.push(value);
+                continue;
+            }
             let slot = match flag.as_str() {
                 "--vault-root" => &mut root,
                 "--appdata" => &mut appdata,
                 "--note" => &mut note,
                 "--port" => &mut port,
                 "--max-requests" => &mut requests,
+                "--vault-id" => &mut raw_vault_id,
                 _ => return Err("unknown command-line option".into()),
             };
             if slot.replace(value).is_some() {
@@ -88,7 +109,24 @@ mod linux {
         if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err("AKULA_NODE_D1_TOKEN must be 64 random hexadecimal characters".into());
         }
-        Ok(Config { root, appdata, note, port, requests, token })
+        // This UUID is asserted by the trusted operator for a lab fixture.
+        // Production must bind a VaultId to independently registered host
+        // authority; a user-supplied UUID is NOT sufficient proof of custody.
+        let vault_id = if catalog_files.is_empty() {
+            if raw_vault_id.is_some() || !reader_files.is_empty() {
+                return Err("catalog options must be provided together".into());
+            }
+            None
+        } else {
+            if catalog_files.len() > 16 || reader_files.is_empty() {
+                return Err("catalog needs 1..=16 entries and at least one reader entry".into());
+            }
+            let id = VaultId::from_str(
+                raw_vault_id.as_deref().ok_or("missing --vault-id")?
+            ).map_err(|_| "invalid --vault-id")?;
+            Some(id)
+        };
+        Ok(Config { root, appdata, note, vault_id, catalog_files, reader_files, port, requests, token })
     }
 
     fn response(status: u16, value: serde_json::Value) -> Vec<u8> {
