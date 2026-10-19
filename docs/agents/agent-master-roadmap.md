@@ -20,7 +20,7 @@ Current `core/src/mcp/protocol.rs` has `PROTOCOL_VERSION = "2025-06-18"` and ref
 
 | Milestone | Work IDs | Required result | Prerequisites |
 | --- | --- | --- | --- |
-| M0 Protocol baseline (P0) | AKAI-PROT-01, OBS-01, ADR-01 | Official MCP conformance for documented versions; reject unsupported versions; measured performance and transport decision ADR | None |
+| M0 Protocol baseline (P0) | AKAI-PROT-01, OBS-01, ADR-01 | Official MCP conformance: 2025 legacy counter-offer, reject unsupported explicit HTTP headers, separately assess 2026 stateless protocol; measured transport ADR | None |
 | M1 Local trust boundary (P0) | AKAI-AUTH-01, PATH-01, UX-01 | Per-agent/per-vault least-privilege grants, revoke-before-send/write, no-follow handle path operations, local connection UI; deny tests on Win/Linux/macOS | M0 + canonical Plugin permission broker |
 | M2 Concurrent authoring (P0/P1) | AKAI-WRITE-01, WRITE-02 | Explicit CAS/identity for all mutating tools, structured conflict, preview/approval/idempotency; no loss under crash/restart | M1 + File Gate/History |
 | M3 Transport and fairness (P1) | AKAI-PERF-01/02/03 | A/B custom HTTP/1.1 vs thin RMCP/Tower, 10/32/100 clients and mixed CAS load, bounded queues, no unbounded retries, measured p95/p99 and writer wait | M0; M2 for mixed writes |
@@ -32,7 +32,7 @@ Current `core/src/mcp/protocol.rs` has `PROTOCOL_VERSION = "2025-06-18"` and ref
 
 ## First PR-sized deliverables
 
-1. **AKAI-PROT-01** — conformance matrix, fail-closed version handling and legacy compatibility; target the exact protocol.rs/code tests.
+1. **AKAI-PROT-01** — conformance matrix and *version-specific* handling: legacy `initialize` must counter-offer a supported version, HTTP explicit unsupported headers must reject, modern MCP needs a separate stateless implementation. [First-slice draft PR #377](https://github.com/Lalalalendia/Akula/pull/377).
 2. **AKAI-OBS-01** — server-side counters plus paired 10/32/100-client transport A/B (keep-alive, close, bounded client); reuse findings from draft #374, do not create duplicate backlogs.
 3. **AKAI-ADR-01** — RMCP/Tokio/Tower thin transport feasibility, features, MSRV/licensing, security/rollback and conformance comparison against the custom HTTP server.
 4. **AKAI-AUTH-01** — per-agent identity and grant mapping to the existing permission broker, then adversarial revocation and foreign-vault tests.
