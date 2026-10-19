@@ -63,11 +63,52 @@ pub(super) fn region(a: Area) -> D3D11_BOX {
     D3D11_BOX { left: a.x, top: a.y, front: 0, right: a.x + a.w, bottom: a.y + a.h, back: 1 }
 }
 
+// This is a developer-only experiment. Installed Akula must ignore both
+// experimental environment variables and keep its existing driver policy.
+#[cfg(not(feature = "installed"))]
+fn diagnostic_driver_mode(value: &str) -> Result<(D3D_DRIVER_TYPE, &'static str), String> {
+    match value {
+        "warp" => Ok((D3D_DRIVER_TYPE_WARP, "warp")),
+        "hardware" => Ok((D3D_DRIVER_TYPE_HARDWARE, "hardware")),
+        _ => Err(format!("AKULA_EXPERIMENTAL_D3D11_DRIVER: expected warp or hardware, got {value:?}")),
+    }
+}
+
+#[cfg(all(test, not(feature = "installed")))]
+mod diagnostic_driver_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_driver_mode_is_explicit_and_rejects_unknown_values() {
+        assert_eq!(diagnostic_driver_mode("warp").unwrap().0, D3D_DRIVER_TYPE_WARP);
+        assert_eq!(diagnostic_driver_mode("hardware").unwrap().0, D3D_DRIVER_TYPE_HARDWARE);
+        for invalid in ["", "default", "HARDWARE", "auto", "software"] {
+            assert!(diagnostic_driver_mode(invalid).is_err(), "{invalid} must fail closed");
+        }
+    }
+}
+
 pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String> {
     #[cfg(feature = "memory-probe")]
     let first = if std::env::var_os("AQ_PROBE_HARDWARE").is_some() { D3D_DRIVER_TYPE_HARDWARE } else { D3D_DRIVER_TYPE_WARP };
     #[cfg(not(feature = "memory-probe"))]
     let first = D3D_DRIVER_TYPE_WARP;
+    #[cfg(not(feature = "installed"))]
+    let forced = match std::env::var("AKULA_EXPERIMENTAL_D3D11_DRIVER") {
+        Ok(value) => Some(diagnostic_driver_mode(&value)?),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => return Err(format!("invalid D3D11 diagnostic driver environment: {error}")),
+    };
+    #[cfg(not(feature = "installed"))]
+    let selected = forced.as_ref().map(|(_, label)| *label);
+    #[cfg(not(feature = "installed"))]
+    let (device, context) = if let Some((driver, label)) = forced {
+        // A forced experiment must not silently fall back to another driver.
+        device(driver).map_err(|error| format!("D3D11 forced {label}: {error}"))?
+    } else {
+        device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE)).map_err(|e| format!("D3D11: {e}"))?
+    };
+    #[cfg(feature = "installed")]
     let (device, context) = device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE)).map_err(|e| format!("D3D11: {e}"))?;
     let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }.map_err(|e| format!("DXGI: {e}"))?;
     let desc = DXGI_SWAP_CHAIN_DESC1 {
@@ -88,5 +129,15 @@ pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String>
         let _ = factory.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
     }
     let canvas = texture(&device, width, height).map_err(|e| format!("холст: {e}"))?;
+    #[cfg(not(feature = "installed"))]
+    if let Some(label) = selected {
+        // Written only after a real device, swap chain and staging canvas exist.
+        // This is a positive witness of the requested D3D11 driver, not of a
+        // physical GPU or monitor scanout. Benchmarks must require this file.
+        if let Some(path) = std::env::var_os("AKULA_EXPERIMENTAL_D3D11_PROOF") {
+            std::fs::write(path, format!("driver={label}\n"))
+                .map_err(|error| format!("D3D11 diagnostic proof: {error}"))?;
+        }
+    }
     Ok(Gpu { device, context, chain, canvas, stale: Default::default(), back: 0 })
 }
