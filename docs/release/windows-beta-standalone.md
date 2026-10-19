@@ -41,9 +41,14 @@ It does **not** read, install or run the actual upstream Aquilum.
 
 ## Not proven / release HOLD
 
-- User edits through the installed GUI (the first smoke verifies launch,
-  persistent window state, local document unchanged and uninstall, not
-  keyboard input or File Gate power-loss recovery).
+- **Physical user acceptance** on Windows 10/11 and accessibility. The
+  hosted runner now additionally attempts `--open --focus`, foreground-bound
+  Windows `SendInput` with layout-mapped virtual key presses, a real GUI edit, timed on-disk
+  persistence, and a second installed launch preserving exact bytes. This is
+  a stronger automated test but is **not** a physical user walkthrough, a
+  power-loss/crash-recovery proof, or evidence of editor content being
+  visually correct after restart. It is only accepted after exact-head CI
+  success; the test never writes the Markdown file after fixture setup.
 - Real Windows 10/11 physical-device testing and accessibility.
 - Signed Akula `latest.json` and its own Minisign key: the updater remains
   fail-closed. No in-app update/rollback is enabled.
@@ -52,6 +57,28 @@ It does **not** read, install or run the actual upstream Aquilum.
 - Installer crash during writing/upgrading and true second-generation
   Akula-to-Akula update with rollback.
 - Distinct icon art and consistent Mac/Linux IDs remain separate work.
+
+## Hosted Windows editor smoke (not a release gate substitute)
+
+`.github/workflows/windows-beta.yml` runs `scripts/test-windows-beta.ps1`
+with the narrowly scoped `scripts/windows-beta-gui-input.ps1` helper.
+The helper refuses to run outside a GitHub-hosted Windows x64 runner,
+identifies the foreground Akula window by native HWND **and process ID**,
+then sends ordinary virtual-key events (not Unicode `VK_PACKET`) to the `--focus` editor.
+The smoke fails rather than appending text directly to the note when OS
+input is unavailable. A unique marker must reach the actual disk file
+within 30 seconds, while the original heading and body survive.
+
+A successful run checks: installed package and executable hash; legacy
+Aquilum directory, uninstall and Run key untouched; GUI edit/save;
+graceful close and reopened note with byte-identical local document;
+uninstall leaving the modified document and Akula user state intact.
+
+This deliberately does **not** prove native first-frame rendering of the
+reopened text, screen-reader usability, Windows 10 hardware behavior,
+immunity to hostile same-user writers, OS power-loss atomicity, trusted
+installer signatures, or a production update/rollback channel. Those
+remain separate release HOLDs; a CI artifact is not a public installer.
 
 Do not merge/release unless exact-commit Windows NSIS and independent legacy
 sentinel acceptance pass. GitHub upload-artifact is a **test artifact**,

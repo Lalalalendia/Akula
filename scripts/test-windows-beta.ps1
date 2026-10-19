@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
   throw 'Windows beta installer smoke is restricted to GitHub-hosted Windows runners'
 }
+. (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
 
 $legacyInstall = Join-Path $env:LOCALAPPDATA 'Aquilum'
 $legacyData = Join-Path $env:APPDATA 'com.dmitriy.aquilum-app'
@@ -55,10 +56,21 @@ New-Item -ItemType Directory -Force -Path $vault | Out-Null
 $note = Join-Path $vault 'First note.md'
 Set-Content -LiteralPath $note -Value "# Akula Beta`n`nExisting local document"
 $original = (Get-FileHash -LiteralPath $note).Hash
+$syntheticEdit = 'AKULA_GUI_EDIT_' + [Guid]::NewGuid().ToString('N')
 
 function Start-And-Close {
+  param([switch]$EditNote)
   $arguments = "--vault `"$vault`" --data-dir `"$akulaData`" --open `"$note`""
-  $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+  if ($EditNote) { $arguments += ' --focus' }
+  if ($EditNote) { $arguments += ' --trace' }
+  # Diagnostics remain on the disposable runner only. Never upload raw GUI
+  # event traces, which can contain typed text.
+  $traceFile = if ($EditNote) { Join-Path $env:RUNNER_TEMP 'akula-beta-gui-events.log' } else { $null }
+  if ($EditNote) {
+    $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -RedirectStandardError $traceFile
+  } else {
+    $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+  }
   $visible = $false
   for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
@@ -67,14 +79,74 @@ function Start-And-Close {
     if ($app.MainWindowHandle -ne 0) { $visible = $true; break }
   }
   if (!$visible) { throw 'Akula window did not appear' }
+  if ($EditNote) {
+    # Guard document identity before typing. A process/HWND-only check cannot
+    # distinguish an editor from an Akula home page or an open-error pane.
+    $noteWindowReady = $false
+    for ($i = 0; $i -lt 15; $i++) {
+      $app.Refresh()
+      if ($app.HasExited) { throw 'Akula exited before opening the requested note' }
+      if ($app.MainWindowTitle -like 'First note*' -and $app.MainWindowTitle -like '*Akula*') {
+        $noteWindowReady = $true
+        break
+      }
+      Start-Sleep -Milliseconds 250
+    }
+    if (!$noteWindowReady) {
+      throw 'Installed Akula did not show the requested note title before OS input'
+    }
+    # This must be genuine OS input into the installed foreground editor.
+    # After initial fixture creation this script never writes to $note.
+    $noteWindowTitle = $app.MainWindowTitle -like '*First note*'
+    Send-AkulaBetaText -Process $app -Text $syntheticEdit
+    $published = $false
+    for ($i = 0; $i -lt 30; $i++) {
+      Start-Sleep -Seconds 1
+      $app.Refresh()
+      if ($app.HasExited) { throw 'Akula exited during the GUI edit' }
+      $onDisk = [System.IO.File]::ReadAllText($note)
+      if ($onDisk.Contains($syntheticEdit)) { $published = $true; break }
+    }
+  }
+  # Even after a failed autosave, close normally to distinguish no-typing,
+  # delayed-on-close saves, and rejected writes. Failure still remains red.
   if (!$app.CloseMainWindow()) { throw 'Akula window refused close request' }
   if (!$app.WaitForExit(20000)) { throw 'Akula did not exit within 20s' }
+  if ($EditNote) {
+    $afterClose = [System.IO.File]::ReadAllText($note)
+    $postClosePublished = $afterClose.Contains($syntheticEdit)
+    $traceText = if (Test-Path -LiteralPath $traceFile) {
+      [System.IO.File]::ReadAllText($traceFile)
+    } else { '' }
+    $keyboardEvents = [regex]::Matches($traceText, 'KeyboardInput').Count
+    $imeCommits = [regex]::Matches($traceText, 'Ime\(Commit').Count
+    $focusedEvents = [regex]::Matches($traceText, 'Focused\(true\)').Count
+    $saveErrors = [regex]::Matches($traceText, 'не сохранён|NeedsReview|SaveError|write refused|HOLD').Count
+    # Exact note/title/error contents and raw winit event traces stay private.
+    Write-Host "AKULA_WINDOWS_GUI_DIAGNOSTIC note_title=$noteWindowTitle keyboard_events=$keyboardEvents ime_commits=$imeCommits focus_events=$focusedEvents save_error_hints=$saveErrors trace_bytes=$($traceText.Length) saved_before_close=$published saved_after_close=$postClosePublished"
+    if (!$published) {
+      throw 'OS GUI input did not autosave within 30 seconds; see bounded diagnostic counts (no release approval)'
+    }
+    if (!$afterClose.Contains('# Akula Beta') -or !$afterClose.Contains('Existing local document')) {
+      throw 'GUI edit removed original note content'
+    }
+  }
 }
-Start-And-Close
+Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
-if ((Get-FileHash -LiteralPath $note).Hash -ne $original) { throw 'Unedited source document was changed' }
+$savedText = [System.IO.File]::ReadAllText($note)
+if (!$savedText.Contains($syntheticEdit) -or !$savedText.Contains('# Akula Beta') -or !$savedText.Contains('Existing local document')) {
+  throw 'Installed GUI edit was not preserved after graceful shutdown'
+}
+if ($savedText.IndexOf($syntheticEdit) -ne $savedText.LastIndexOf($syntheticEdit)) {
+  throw 'Expected exactly one GUI-injected edit marker'
+}
+$savedHash = (Get-FileHash -LiteralPath $note).Hash
+if ($savedHash -eq $original) { throw 'GUI input had no observable file effect' }
+# The second launch must not change bytes, even after reopening that same note.
 Start-And-Close
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
@@ -87,6 +159,6 @@ for ($i = 0; $i -lt 30 -and ((Test-Path $exe) -or (Test-Path $akulaRegistry)); $
 if (Test-Path $exe) { throw 'Akula executable remains after uninstall' }
 if (Test-Path $akulaRegistry) { throw 'Akula uninstall registry key remains' }
 if (!(Test-Path $state)) { throw 'Uninstall removed Akula user state' }
-if ((Get-FileHash -LiteralPath $note).Hash -ne $original) { throw 'Uninstall changed the local document' }
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Uninstall changed the edited local document' }
 Assert-LegacyUntouched
-Write-Host 'AKULA_WINDOWS_BETA_SMOKE_PASS: clean install, two launches, persistent state, uninstall, upstream markers unchanged'
+Write-Host 'AKULA_WINDOWS_BETA_GUI_EDIT_PASS: NSIS install, real OS keyboard edit, on-disk save, restart, uninstall and upstream sentinels'
