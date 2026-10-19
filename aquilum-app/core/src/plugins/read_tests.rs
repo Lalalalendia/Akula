@@ -305,3 +305,54 @@ fn replacing_a_selected_file_with_identical_bytes_cannot_reuse_old_handle() {
     note(&f.root,"Private/selected.md",b"same contents");
     assert_eq!(reader.read_note_bounded(inst,&selected,200,ctx),Err(PluginReadError::Unavailable));
 }
+
+#[test]
+fn pinned_note_binding_requires_read_grant_and_exact_sync_blob() {
+    use crate::sync::{DocumentId, RevisionDag, RevisionId, RevisionOperation, RevisionRecord, SyncRelativePath};
+    let f = fixture();
+    note(&f.root, "notes/a.md", b"known content");
+    let broker = PermissionBroker::new();
+    let reader = HostPluginVaultReader::open_registered(&f.core, &broker, &f.root).unwrap();
+    let handle = reader.bind_host_note("notes/a.md").unwrap();
+    let installed = plugin(&broker, reader.host_vault_id());
+    let live = || HostContext::from_host_state(reader.host_vault_id(), Some(handle.host_note_id()));
+    let document = DocumentId::new();
+    let mut dag = RevisionDag::new();
+    let current = RevisionId::new();
+    dag.ingest(RevisionRecord {
+        id: current, document_id: document, parents: vec![],
+        operation: RevisionOperation::Content {
+            path: SyncRelativePath::parse("notes/a.md").unwrap(),
+            blob_hash: blake3::hash(b"known content").to_hex().to_string(),
+        },
+    }).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+    broker.grant_host_approved(installed, Capability::NotesRead, GrantScope::WholeVault).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_ok());
+    note(&f.root, "notes/a.md", b"changed content");
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+}
+
+#[test]
+fn pinned_note_binding_rejects_other_dag_path_and_stale_instance() {
+    use crate::sync::{DocumentId, RevisionDag, RevisionId, RevisionOperation, RevisionRecord, SyncRelativePath};
+    let f = fixture();
+    note(&f.root, "notes/a.md", b"known content");
+    let broker = PermissionBroker::new();
+    let reader = HostPluginVaultReader::open_registered(&f.core, &broker, &f.root).unwrap();
+    let handle = reader.bind_host_note("notes/a.md").unwrap();
+    let installed = plugin(&broker, reader.host_vault_id());
+    broker.grant_host_approved(installed, Capability::NotesRead, GrantScope::WholeVault).unwrap();
+    let live = || HostContext::from_host_state(reader.host_vault_id(), Some(handle.host_note_id()));
+    let mut dag = RevisionDag::new();
+    dag.ingest(RevisionRecord {
+        id: RevisionId::new(), document_id: DocumentId::new(), parents: vec![],
+        operation: RevisionOperation::Content {
+            path: SyncRelativePath::parse("notes/other.md").unwrap(),
+            blob_hash: blake3::hash(b"known content").to_hex().to_string(),
+        },
+    }).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+    broker.revoke_all_for_host(installed).unwrap();
+    assert!(reader.bind_current_sync_note(installed, &handle, &dag, 2048, live).is_err());
+}
