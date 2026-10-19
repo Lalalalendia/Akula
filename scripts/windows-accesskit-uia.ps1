@@ -54,7 +54,7 @@ $$
 print('SECOND_UIA')
 ~~~
 '@
-[System.IO.File]::WriteAllText($note, $markdown, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText($note, $markdown, ([System.Text.UTF8Encoding]::new($false)))
 $initialHash = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
 
 function Find-CodeCopyButtons {
