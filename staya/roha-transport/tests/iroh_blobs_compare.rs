@@ -1494,7 +1494,10 @@ async fn bounded_ext4_redb_read_only_real_external_and_inline() {
     let evidence = audit_pinned_redb(&volume, &large_ledger, "real-fsstore")
         .expect("pinned complete Owned record matches trusted journal");
     assert_eq!(evidence.blob_records, 1);
-    assert_eq!(evidence.journal_generation, large_ledger.snapshot().unwrap().generation);
+    assert_eq!(
+        evidence.journal_generation,
+        large_ledger.snapshot().unwrap().generation
+    );
     assert!(evidence.database_unchanged);
     assert!(!evidence.file_gate_ready);
     assert!(evidence.bao_verification_pending);
@@ -1507,16 +1510,20 @@ async fn bounded_ext4_redb_read_only_real_external_and_inline() {
     let small = b"p2p-blob-09b-readonly-inlined-contents";
     let small_hash = Hash::new(small);
     let store_dir = root.join("small-inline-fsstore");
-    let store = FsStore::load(&store_dir).await.expect("create temporary pinned FsStore");
-    let tag = store.add_slice(small).await.expect("persist small inline test blob");
+    let store = FsStore::load(&store_dir)
+        .await
+        .expect("create temporary pinned FsStore");
+    let tag = store
+        .add_slice(small)
+        .await
+        .expect("persist small inline test blob");
     assert_eq!(tag.hash, small_hash);
     store.shutdown().await.expect("close DB actor and flush");
     drop(store);
     drop(tag);
     let ledger_dir = root.join("small-inline-ledger");
     fs::create_dir(&ledger_dir).expect("private durable ledger");
-    fs::set_permissions(&ledger_dir, fs::Permissions::from_mode(0o700))
-        .expect("lock down ledger");
+    fs::set_permissions(&ledger_dir, fs::Permissions::from_mode(0o700)).expect("lock down ledger");
     let count = small.len() as u64;
     let policy = AdmissionLimits {
         max_object_bytes: count,
@@ -1527,7 +1534,9 @@ async fn bounded_ext4_redb_read_only_real_external_and_inline() {
     };
     let mut journal = DurableLedger::open(&ledger_dir, policy).unwrap();
     let exact = *small_hash.as_bytes();
-    journal.reserve(SecretKey::generate().public(), exact, count).unwrap();
+    journal
+        .reserve(SecretKey::generate().public(), exact, count)
+        .unwrap();
     journal.verify_full(exact, small).unwrap();
     let db_path = store_dir.join("blobs.db");
     let before = fs::read(&db_path).expect("original source DB");
@@ -1541,7 +1550,10 @@ async fn bounded_ext4_redb_read_only_real_external_and_inline() {
     assert!(!valid.file_gate_ready);
     assert!(valid.bao_verification_pending);
     assert_eq!(fs::read(&db_path).unwrap(), before);
-    assert_eq!(fs::read(ledger_dir.join("reservations.v1")).unwrap(), journal_before);
+    assert_eq!(
+        fs::read(ledger_dir.join("reservations.v1")).unwrap(),
+        journal_before
+    );
 
     // Negative: mutate ONLY AN INDEPENDENT TEST COPY, never original DB.
     // The copy retains an actual real FsStore schema and B3-addressed record.
@@ -1592,7 +1604,10 @@ async fn bounded_ext4_redb_read_only_real_external_and_inline() {
     let orphan_dir = root.join("orphan-in-redb");
     let original_store = FsStore::load(&orphan_dir).await.unwrap();
     let _a = original_store.add_slice(small).await.unwrap();
-    let _foreign = original_store.add_slice(b"unapproved-new-valid-small-blob").await.unwrap();
+    let _foreign = original_store
+        .add_slice(b"unapproved-new-valid-small-blob")
+        .await
+        .unwrap();
     original_store.shutdown().await.unwrap();
     drop(original_store);
     assert!(matches!(
@@ -1603,7 +1618,10 @@ async fn bounded_ext4_redb_read_only_real_external_and_inline() {
     // Neither negative copy nor even a malformed foreign DB may alter the
     // original source database or the independently fsynced ledger snapshot.
     assert_eq!(fs::read(&db_path).unwrap(), before);
-    assert_eq!(fs::read(ledger_dir.join("reservations.v1")).unwrap(), journal_before);
+    assert_eq!(
+        fs::read(ledger_dir.join("reservations.v1")).unwrap(),
+        journal_before
+    );
     drop(journal);
     println!(
         "P2P_BLOB09B_REDB_READONLY external=1 inline=1 inline_b3=true unknown_table_hold=true mutated_copy_hold=true foreign_db_blob_hold=true source_db_unchanged=true journal_unchanged=true bao_pending=true file_gate_ready=false"
@@ -1617,10 +1635,8 @@ async fn bounded_ext4_redb_read_only_real_external_and_inline() {
 #[ignore = "requires remount of disposable ext4 image after prior redb fixture"]
 fn bounded_ext4_redb_read_only_after_remount() {
     use akula_roha_transport::{
-        admission::AdmissionLimits,
-        bounded_staging::StagingVolumeGuard,
-        durable_admission::DurableLedger,
-        redb_inventory::audit_pinned_redb,
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, redb_inventory::audit_pinned_redb,
     };
     let root = std::path::PathBuf::from(
         std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted bounded ext4 image"),
@@ -1629,8 +1645,11 @@ fn bounded_ext4_redb_read_only_after_remount() {
 
     let large = (1024 * 1024 + 17) as u64;
     let limit = AdmissionLimits {
-        max_object_bytes: large, max_tracked_bytes: large,
-        max_peer_bytes: large, max_active: 1, max_peer_active: 1,
+        max_object_bytes: large,
+        max_tracked_bytes: large,
+        max_peer_bytes: large,
+        max_active: 1,
+        max_peer_active: 1,
     };
     let ledger = DurableLedger::open(&root.join("reconciliation-ledger"), limit)
         .expect("reopen persisted physical journal");
@@ -1643,8 +1662,11 @@ fn bounded_ext4_redb_read_only_after_remount() {
     let small = b"p2p-blob-09b-readonly-inlined-contents";
     let count = small.len() as u64;
     let policy = AdmissionLimits {
-        max_object_bytes: count, max_tracked_bytes: count, max_peer_bytes: count,
-        max_active: 1, max_peer_active: 1,
+        max_object_bytes: count,
+        max_tracked_bytes: count,
+        max_peer_bytes: count,
+        max_active: 1,
+        max_peer_active: 1,
     };
     let small_ledger = DurableLedger::open(&root.join("small-inline-ledger"), policy)
         .expect("reopen signed-by-test fsynced inline reservation");
