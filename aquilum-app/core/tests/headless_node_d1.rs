@@ -202,9 +202,8 @@ fn repeated_reads_have_a_bounded_linux_memory_witness() {
     let pid = child.id();
     let mut max_rss_kib = 0u64;
     for _ in 0..16 {
-        let (status, body) = send(&address, "GET", "/v1/note", Some(TOKEN), "");
-        assert_eq!(status, 200);
-        assert_eq!(body["rawBlake3"], blake3::hash(&original).to_hex().to_string());
+        // Capture while the subprocess must still be alive: it intentionally
+        // exits immediately after serving the sixteenth request.
         let status_text = fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
         let rss_kib = status_text.lines()
             .find_map(|line| line.strip_prefix("VmRSS:"))
@@ -212,6 +211,9 @@ fn repeated_reads_have_a_bounded_linux_memory_witness() {
             .and_then(|number| number.parse::<u64>().ok())
             .expect("Linux process VmRSS witness");
         max_rss_kib = max_rss_kib.max(rss_kib);
+        let (status, body) = send(&address, "GET", "/v1/note", Some(TOKEN), "");
+        assert_eq!(status, 200);
+        assert_eq!(body["rawBlake3"], blake3::hash(&original).to_hex().to_string());
     }
     println!("AKULA_NODE_D1_PEAK_OBSERVED_RSS_KIB={max_rss_kib}");
     assert!(max_rss_kib <= 512 * 1024,
