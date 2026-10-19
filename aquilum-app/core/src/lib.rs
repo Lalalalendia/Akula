@@ -19,3 +19,6 @@ pub mod web_agent;
 pub mod wikixiv;
 
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
+
+#[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
+pub mod node_catalog_lab;
