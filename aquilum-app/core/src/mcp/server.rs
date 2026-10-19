@@ -591,6 +591,10 @@ mod tests {
         server.stop();
     }
 
+    mod throughput_probe {
+        include!("server/throughput_probe.rs");
+    }
+
     #[test]
     fn runs_one_tool_call_at_a_time() {
         let running = Arc::new(AtomicUsize::new(0));
