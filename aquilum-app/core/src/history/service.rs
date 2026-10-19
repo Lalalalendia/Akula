@@ -2149,6 +2149,9 @@ mod tests {
         );
         assert!(label_only.is_err(), "A label is not a content-version receipt");
         assert_eq!(versions(&fixture.history_of("SameContent.md")).len(), 1);
+        assert!(crate::history::store::names(
+            &fixture.history_of("SameContent.md")
+        ).is_empty(), "strict refusal must happen before writing a label");
     }
 
     #[test]
@@ -2175,6 +2178,17 @@ mod tests {
         let stored = versions(&fixture.history_of("Coalesced.md"));
         assert_eq!(stored.len(), 1,
             "normal history coalescing is preserved even when strict evidence is refused");
+        assert_eq!(fs::read_to_string(
+            fixture.history_of("Coalesced.md").join(&stored[0].id),
+        ).unwrap(), original,
+            "strict refusal must precede any mutation of the old snapshot");
+        // The normal editor remains allowed to coalesce later, without using
+        // the strict receipt-only path or breaking its old milestone rules.
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(revised, Source::Me, &second_hash, None),
+        ).unwrap());
+        assert_eq!(versions(&fixture.history_of("Coalesced.md")).len(), 1);
         assert_eq!(fs::read_to_string(
             fixture.history_of("Coalesced.md").join(&stored[0].id),
         ).unwrap(), revised);
