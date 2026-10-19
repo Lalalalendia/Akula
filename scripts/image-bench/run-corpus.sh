@@ -12,6 +12,10 @@ mkdir -p "$OUT" "$OUT/inputs" "$OUT/reference"
 printf 'id,format,mode,attempt,status,elapsed_sec,maxrss_kib,user_sec,system_sec\n' > "$OUT/metrics.csv"
 printf 'id,format,mode,attempt,reason\n' > "$OUT/failures.csv"
 python3 "$HERE/corpus.py" --tier "$TIER" --output "$OUT/inputs"
+if [[ "$TIER" == stress ]]; then
+  jpegtran -progressive -copy all -outfile "$OUT/inputs/1407-progressive.jpg" "$OUT/inputs/1407.jpg"
+  python3 "$HERE/jpeg_markers.py" --cases "$OUT/inputs/cases.tsv" --source-id 1407 --derived "$OUT/inputs/1407-progressive.jpg" --record "$OUT/progressive-provenance.json"
+fi
 cargo build --release --manifest-path "$HERE/Cargo.toml"
 BIN="$HERE/target/release/akula-image-bench"
 cc -O2 -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -o "$OUT/turbo" "$HERE/native/turbo.c" $(pkg-config --cflags --libs libjpeg) -lm
@@ -39,7 +43,7 @@ while IFS="$(printf '\t')" read -r id format width height sha file license bytes
         turbo|vips) cmd=("$OUT/$mode" "$file" "$dest") ;;
       esac
       set +e
-      timeout 45s /usr/bin/time -f "$id,$format,$mode,$attempt,ok,%e,%M,%U,%S" -o "$OUT/one_time.txt" "${cmd[@]}" >> "$OUT/decode.log" 2>&1
+      timeout 90s prlimit --as=1610612736 -- /usr/bin/time -f "$id,$format,$mode,$attempt,ok,%e,%M,%U,%S" -o "$OUT/one_time.txt" "${cmd[@]}" >> "$OUT/decode.log" 2>&1
       result=$?
       set -e
       if [[ "$result" == 0 && -s "$dest" ]]; then

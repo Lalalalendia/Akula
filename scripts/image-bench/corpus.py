@@ -31,9 +31,11 @@ CASES = {
     "7007": ("png", "7000-lilith-plots", "PD-own"),
     "9007": ("png", "9000-lilith-ai-clipart", "PD-own"),
     "1407": ("jpg", "1400-lilith-nature", "PD-own"),
+    "2207": ("jpg", "2200-unsplash-renders", "Unsplash-License"),
 }
 SMOKE = ("1019", "1059", "5007", "7007", "9007")
 EXTENDED = SMOKE + ("1407",)
+STRESS = ("1407", "2207")
 REQUIRED = (
     "id", "split", "content_class", "path", "width", "height", "format",
     "bytes_actual", "sha256", "raw_url",
@@ -142,7 +144,7 @@ def prepare(tier: str, output: Path, opener=None):
         if response.status != 200:
             raise ValueError(f"manifest status {response.status}")
         manifest_bytes = read_limited(response, MAX_MANIFEST_BYTES)
-    ids = SMOKE if tier == "smoke" else EXTENDED
+    ids = {"smoke": SMOKE, "extended": EXTENDED, "stress": STRESS}[tier]
     cases = validate_manifest(manifest_bytes.decode("utf-8-sig"), ids)
     # Dataset listing is not needed to run the image decoders themselves.
     with (output / "manifest-provenance.txt").open("w", encoding="utf-8") as f:
@@ -166,7 +168,7 @@ def prepare(tier: str, output: Path, opener=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tier", choices=("smoke", "extended"), default="smoke")
+    parser.add_argument("--tier", choices=("smoke", "extended", "stress"), default="smoke")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     prepare(args.tier, args.output)

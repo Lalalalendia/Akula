@@ -58,3 +58,38 @@ jobs:
             scripts/image-bench/results/corpus/inputs/cases.tsv
             scripts/image-bench/results/corpus/inputs/manifest-provenance.txt
           if-no-files-found: warn
+
+  high-resolution-research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install decoders and jpegtran
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-dev libjpeg-turbo-progs libvips-dev pkg-config time
+      - name: Verify corpus validation tests
+        run: python3 -m unittest discover -s scripts/image-bench -p 'test_*.py' -v
+      - name: 50 and 99 megapixel images; progressive derivative
+        run: bash scripts/image-bench/run-corpus.sh
+        env:
+          CORPUS_TIER: stress
+          REPEATS: '2'
+      - name: Preserve measurements and every failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-high-resolution-${{ github.run_id }}
+          path: |
+            scripts/image-bench/results/corpus/metrics.csv
+            scripts/image-bench/results/corpus/failures.csv
+            scripts/image-bench/results/corpus/summary.csv
+            scripts/image-bench/results/corpus/quality.txt
+            scripts/image-bench/results/corpus/environment.txt
+            scripts/image-bench/results/corpus/decode.log
+            scripts/image-bench/results/corpus/progressive-provenance.json
+            scripts/image-bench/results/corpus/inputs/cases.tsv
+            scripts/image-bench/results/corpus/inputs/manifest-provenance.txt
+          if-no-files-found: warn
