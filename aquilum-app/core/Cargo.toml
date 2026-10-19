@@ -25,6 +25,9 @@ sync-installed-host-witness = ["sync-installed-host"]
 # Extra, non-shipping Unix OS-owner preflight. Refuses all protected host
 # admission on Windows until a real installer/Broker DACL verifier exists.
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness"]
+# Research-only P2P policy journal; never compiled in native/installed builds.
+# No P2P worker, File Gate write capability, or sync executor.
+staya-core-grant-lab = []
 # Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
 sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
 

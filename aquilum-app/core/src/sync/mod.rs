@@ -35,6 +35,9 @@ pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::PinnedFileIdentity;
 #[cfg(test)]
 mod fault_matrix;
+// Isolated main-baseline RN-4C/4D/4E0 research; product builds do not compile it.
+#[cfg(feature = "staya-core-grant-lab")]
+pub mod peer_grant_lab;
 mod identity;
 mod journal;
 mod local_create;
