@@ -76,6 +76,10 @@ mod ui;
 mod updater;
 mod window_state;
 mod yandex_credentials;
+// Inert coordinator in default builds; no network, auth or Sync on startup.
+mod yandex_probe_session;
+#[cfg(all(target_os = "windows", feature = "yandex-s3-connection-preview"))]
+mod yandex_probe_worker;
 mod workspace;
 
 pub use args::Args;
