@@ -343,6 +343,14 @@ mod tests {
             .unwrap().is_none());
         journal.record_existing_replace_attempt_once(&intent,&protected).unwrap();
         journal.record_existing_replace_receipt_candidate_once(&candidate).unwrap();
+        let mut second_writer=SqliteSyncJournal::open(
+            &dir.path().join("sync.sqlite"),
+        ).unwrap();
+        assert!(matches!(
+            second_writer.record_existing_replace_receipt_candidate_once(&candidate),
+            Err(JournalError::ExistingReplaceReceiptCandidateAlreadyRecorded)
+        ), "a second SQLite connection must not duplicate V8 evidence");
+        drop(second_writer);
         assert!(matches!(
             journal.record_existing_replace_receipt_candidate_once(&candidate),
             Err(JournalError::ExistingReplaceReceiptCandidateAlreadyRecorded)
@@ -408,6 +416,33 @@ mod tests {
             cold.read_existing_replace_receipt_candidate(intent.operation_id),
             Err(JournalError::CorruptedRecord)
         ));
+    }
+
+    #[test]
+    fn changed_baseline_invalidates_existing_candidate_on_restart() {
+        let (dir,mut journal,intent,protected,candidate)=fixture();
+        journal.record_existing_replace_attempt_once(&intent,&protected).unwrap();
+        journal.record_existing_replace_receipt_candidate_once(&candidate).unwrap();
+        drop(journal);
+        let c=Connection::open(dir.path().join("sync.sqlite")).unwrap();
+        c.execute(
+            "UPDATE sync_baselines SET revision_id=?1
+              WHERE vault_id=?2 AND document_id=?3",
+            params![
+                RevisionId::new().to_string(),
+                intent.vault_id.to_string(),intent.document_id.to_string(),
+            ],
+        ).unwrap();
+        drop(c);
+        let cold=SqliteSyncJournal::open_existing_read_only(
+            &dir.path().join("sync.sqlite"),
+        ).unwrap();
+        assert!(matches!(
+            cold.read_existing_replace_receipt_candidate(intent.operation_id),
+            Err(JournalError::CorruptedRecord)
+        ));
+        assert_eq!(cold.get(intent.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
     }
 
     #[test]
