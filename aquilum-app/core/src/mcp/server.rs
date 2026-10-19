@@ -583,6 +583,52 @@ mod tests {
         }
     }
 
+    /// Opt-in official conformance fixture: actual MCP tool router, disposable Core.
+    #[test]
+    #[ignore = "started by scripts/mcp-conformance-smoke.sh"]
+    fn isolated_conformance_fixture_serves_temporary_core() {
+        use crate::app_core::{Core, CoreEvent};
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::Instant;
+
+        let port_file = PathBuf::from(
+            std::env::var_os("AKAI_MCP_PORT_FILE").expect("AKAI_MCP_PORT_FILE must be set"),
+        );
+        let stop_file = PathBuf::from(
+            std::env::var_os("AKAI_MCP_STOP_FILE").expect("AKAI_MCP_STOP_FILE must be set"),
+        );
+        let token = std::env::var("AKAI_MCP_TEST_BEARER").expect("fixture bearer required");
+        assert!(token.len() >= 32);
+        let dir = tempfile::tempdir().unwrap();
+        let appdata = dir.path().join("appdata");
+        let vault = dir.path().join("vault");
+        fs::create_dir_all(&appdata).unwrap();
+        fs::create_dir_all(&vault).unwrap();
+        fs::write(vault.join("Conformance.md"), "# Conformance\n\nTemporary note.\n").unwrap();
+        let root = fs::canonicalize(&vault).unwrap();
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let tool_core = Arc::clone(&core);
+        let server = RunningServer::start(
+            0,
+            token,
+            Arc::new(move |name, args| crate::mcp::tools::call(&tool_core, name, args)),
+        )
+        .unwrap();
+        fs::write(&port_file, server.port().to_string()).unwrap();
+        eprintln!("AKAI_MCP_FIXTURE_STARTED port={} temporary=true", server.port());
+
+        let start = Instant::now();
+        while !stop_file.is_file() && start.elapsed() < Duration::from_secs(150) {
+            thread::sleep(Duration::from_millis(100));
+        }
+        let stopped = stop_file.is_file();
+        server.stop();
+        core.shutdown();
+        assert!(stopped, "isolated conformance fixture timed out");
+    }
+
     #[test]
     fn answers_an_authorized_request_with_json() {
         let (server, url) = server();
