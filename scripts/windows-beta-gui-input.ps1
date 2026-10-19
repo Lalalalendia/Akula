@@ -50,7 +50,7 @@ public static class AkulaBetaGuiInput {
     [DllImport("user32.dll", SetLastError = true)]
     static extern uint SendInput(uint count, [In] Input[] inputs, int size);
 
-    // VK_PACKET / KEYEVENTF_UNICODE generates synthetic unidentified keys
+    // Injected Unicode packets generate synthetic unidentified keys
     // with no IME commit on winit 0.31. Use ordinary virtual keys and the
     // foreground application's active keyboard layout instead.
     public static void TypeAsciiKeys(IntPtr hwnd, int expectedPid, string text) {
