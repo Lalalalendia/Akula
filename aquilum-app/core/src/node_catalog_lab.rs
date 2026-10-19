@@ -8,6 +8,7 @@
 //! Fail closed on renamed/replaced file identity. The Linux root dirfd remains
 //! bound to its original directory even after its external pathname changes.
 
+use crate::sync::VaultId;
 use rustix::fs::{open, openat, Mode, OFlags};
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -54,6 +55,7 @@ struct Entry {
 /// The list is static: adding documents or repointing an ID requires a new
 /// explicit admission, not a URL query or a file system rescan.
 pub struct ReadCatalog {
+    vault_id: VaultId,
     root: File,
     entries: BTreeMap<String, Entry>,
 }
@@ -63,7 +65,7 @@ impl ReadCatalog {
     ///
     /// The caller must independently authorize this catalog for a particular
     /// user/device. Constructing one does NOT authenticate a network client.
-    pub fn open(root: &Path, allowed: &[&str]) -> Result<Self, CatalogError> {
+    pub fn open(root: &Path, vault_id: VaultId, allowed: &[&str]) -> Result<Self, CatalogError> {
         if allowed.is_empty() || allowed.len() > MAX_DOCUMENTS {
             return Err(CatalogError::InvalidConfiguration);
         }
@@ -80,7 +82,7 @@ impl ReadCatalog {
         let mut entries = BTreeMap::new();
         for filename in allowed {
             validate_filename(filename)?;
-            let id = object_id(filename);
+            let id = object_id(vault_id, filename);
             if entries.contains_key(&id) {
                 return Err(CatalogError::InvalidConfiguration);
             }
@@ -99,8 +101,12 @@ impl ReadCatalog {
                 inode: metadata.ino(),
             });
         }
-        Ok(Self { root, entries })
+        Ok(Self { vault_id, root, entries })
     }
+
+    /// The caller must independently verify this explicit VaultId against its
+    /// host authority. Never infer a shared VaultId from a local workspace path.
+    pub fn vault_id(&self) -> VaultId { self.vault_id }
 
     /// Lists only the exact operator-admitted set. IDs are NOT credentials.
     pub fn list(&self) -> Vec<ListedDocument> {
@@ -177,10 +183,13 @@ fn validate_filename(filename: &str) -> Result<(), CatalogError> {
     Ok(())
 }
 
-fn object_id(filename: &str) -> String {
+fn object_id(vault_id: VaultId, filename: &str) -> String {
     // Stable across a restart/order change, but never a claim of authority.
     // Deliberately domain-separated from content revisions and peer identities.
     let mut hasher = blake3::Hasher::new_derive_key("Akula Node lab document ID v1");
+    // Same filenames in different vaults MUST NOT alias. The VaultId comes
+    // from an explicit trusted host registration, never from app-local paths.
+    hasher.update(vault_id.as_uuid().as_bytes());
     hasher.update(filename.as_bytes());
     hasher.finalize().to_hex().to_string()
 }
