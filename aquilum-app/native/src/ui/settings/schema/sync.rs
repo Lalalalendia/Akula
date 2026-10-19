@@ -39,6 +39,7 @@ pub(super) fn yandex_setup(config: &AppConfig, ctx: &Context) -> Block {
             ProbeFailure::MissingKeys => "settings.yandex.probeMissingKeys",
             ProbeFailure::InvalidStoredKeys => "settings.yandex.probeInvalidStoredKeys",
             ProbeFailure::CredentialStoreUnavailable => "settings.yandex.probeKeyStoreUnavailable",
+            ProbeFailure::KeysChangedDuringCheck => "settings.yandex.probeKeysChanged",
             ProbeFailure::CredentialsRejected => "settings.yandex.probeRejected",
             ProbeFailure::AccessDenied => "settings.yandex.probeDenied",
             ProbeFailure::BucketNotFound => "settings.yandex.probeMissingBucket",
