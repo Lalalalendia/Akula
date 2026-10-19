@@ -19,8 +19,16 @@ int main(int argc,char **argv){
  double k=fmin(1600.0/w,sqrt(2560000.0/((double)w*h)));
  unsigned tw=k>=1?w:clamp(w*k,w),th=k>=1?h:clamp(h*k,h);
  if(vips_thumbnail(argv[1],&thumb,(int)tw,"height",(int)th,"size",VIPS_SIZE_FORCE,"no_rotate",TRUE,NULL))goto fail;
- if(thumb->Bands!=3||thumb->BandFmt!=VIPS_FORMAT_UCHAR)goto fail;
- if(vips_bandjoin_const1(thumb,&rgba,255.0,NULL))goto fail;
+ if(thumb->BandFmt!=VIPS_FORMAT_UCHAR)goto fail;
+ if(thumb->Bands==4){
+   /* Preserve alpha of real PNG/WebP images. */
+   rgba=thumb;g_object_ref(rgba);
+ } else if(thumb->Bands==3) {
+   if(vips_bandjoin_const1(thumb,&rgba,255.0,NULL))goto fail;
+ } else {
+   fprintf(stderr,"unsupported libvips output bands: %d\n",thumb->Bands);
+   goto fail;
+ }
  bytes=vips_image_write_to_memory(rgba,&len);
  if(!bytes||len!=(size_t)tw*th*4)goto fail;
  double elapsed=ms()-start;

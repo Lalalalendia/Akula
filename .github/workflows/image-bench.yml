@@ -38,9 +38,9 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libjpeg-dev libjpeg-turbo-progs pkg-config time
+          sudo apt-get install -y libjpeg-dev libjpeg-turbo-progs libvips-dev pkg-config time
       - name: Check allowlist and hash-validation rules
-        run: python3 -m unittest discover -s scripts/image-bench -p test_corpus.py -v
+        run: python3 -m unittest discover -s scripts/image-bench -p 'test_*.py' -v
       - name: Real JPEG/PNG smoke
         run: bash scripts/image-bench/run-corpus.sh
       - name: Archive metadata, not copyrighted image bytes
@@ -50,7 +50,10 @@ jobs:
           name: image-corpus-${{ github.run_id }}
           path: |
             scripts/image-bench/results/corpus/metrics.csv
-            scripts/image-bench/results/corpus/skipped.csv
+            scripts/image-bench/results/corpus/failures.csv
+            scripts/image-bench/results/corpus/summary.csv
+            scripts/image-bench/results/corpus/quality.txt
+            scripts/image-bench/results/corpus/environment.txt
             scripts/image-bench/results/corpus/decode.log
             scripts/image-bench/results/corpus/inputs/cases.tsv
             scripts/image-bench/results/corpus/inputs/manifest-provenance.txt

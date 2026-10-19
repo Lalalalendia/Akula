@@ -13,6 +13,13 @@ static double ms(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
 static unsigned clamp(double f,unsigned max) { if(f<1)return 1; if(f>=max)return max; return (unsigned)round(f); }
 static void fit(unsigned w,unsigned h,unsigned *tw,unsigned *th) { double k=fmin(1600.0/w,sqrt(2560000.0/((double)w*h))); if(k>=1){*tw=w;*th=h;}else{*tw=clamp(w*k,w);*th=clamp(h*k,h);} }
 int main(int argc,char **argv) {
+ if(argc==2 && strcmp(argv[1],"--check-portrait-fit")==0){
+   unsigned tw=0,th=0;
+   fit(2841,3788,&tw,&th);
+   if(tw!=1386 || th!=1848 || (uint64_t)tw*th>3000000ULL) return 3;
+   printf("FIT portrait=%ux%u pixels=%llu\n",tw,th,(unsigned long long)(uint64_t)tw*th);
+   return 0;
+ }
  if(argc!=3) {fputs("usage: turbo <jpeg> <rgba>\n",stderr); return 2;}
  FILE *in=fopen(argv[1],"rb"); if(!in){perror("input");return 2;}
  struct jpeg_decompress_struct d={0}; struct jpeg_error err={0};
@@ -22,7 +29,12 @@ int main(int argc,char **argv) {
  double start=ms(); jpeg_stdio_src(&d,in);
  if(jpeg_read_header(&d,TRUE)!=JPEG_HEADER_OK){jpeg_destroy_decompress(&d);fclose(in);return 3;}
  unsigned w=d.image_width,h=d.image_height,tw,th;fit(w,h,&tw,&th);
- if(!tw||!th||(uint64_t)tw*th>2560000ULL){jpeg_destroy_decompress(&d);fclose(in);return 3;}
+ /* Pixel budget applies before rounding; independently rounded preview
+    * dimensions can slightly exceed 1600*1600, including valid portraits. */
+ if(!tw||!th||(uint64_t)tw*th>3000000ULL){
+   fprintf(stderr,"preview allocation guard for %u x %u\n",tw,th);
+   jpeg_destroy_decompress(&d);fclose(in);return 3;
+ }
  for(int denom=8;denom>=1;denom/=2){d.scale_num=1;d.scale_denom=denom;jpeg_calc_output_dimensions(&d);if(d.output_width>=tw&&d.output_height>=th)break;}
  d.out_color_space=JCS_RGB;
  if(!jpeg_start_decompress(&d)||d.output_components!=3){jpeg_destroy_decompress(&d);fclose(in);return 3;}
