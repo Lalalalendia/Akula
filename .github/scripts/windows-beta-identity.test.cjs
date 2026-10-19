@@ -46,7 +46,8 @@ test('candidate builds local-only, uses explicit Windows config and never replac
   ]) {
     assert.ok(workflow.includes(str), 'missing workflow contract: ' + str);
   }
-  assert.doesNotMatch(workflow, /Freaction\\/Aquilum|--all-features|gh release create|--features installed,sync-installed-host/);
+  assert.equal(workflow.includes('Freaction/Aquilum'), false);
+  assert.doesNotMatch(workflow, /--all-features|gh release create|--features installed,sync-installed-host/);
 });
 
 test('installer smoke checks distinct directories and preserves existing Aquilum', () => {
