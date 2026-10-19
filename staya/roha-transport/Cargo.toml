@@ -13,6 +13,8 @@ resolver = "2"
 iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49", default-features = false, features = ["tls-ring"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 blake3 = "1.8.5"
+# Pinned by existing Cargo.lock; read-only redb 4.4.0 inventory in isolated Staya crate.
+redb = "=4.4.0"
 
 [dev-dependencies]
 # Lab-only, disabled in native Akula. 0.103.1 contains the mandatory push EventMask fix.
