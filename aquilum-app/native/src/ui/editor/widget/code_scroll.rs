@@ -336,7 +336,7 @@ impl TextEditor {
 
     /// Find the opening fence in the mounted document window. Never borrow an
     /// offset from a previous code block if the actual opener is not mounted.
-    fn code_opener_at(&self, line: usize) -> Option<usize> {
+    pub(super) fn code_opener_at(&self, line: usize) -> Option<usize> {
         if !self.doc.fenced_code(line) {
             return None;
         }
