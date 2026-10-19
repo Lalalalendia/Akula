@@ -43,7 +43,7 @@ It does **not** read, install or run the actual upstream Aquilum.
 
 - **Physical user acceptance** on Windows 10/11 and accessibility. The
   hosted runner now additionally attempts `--open --focus`, foreground-bound
-  Windows `SendInput(KEYEVENTF_UNICODE)`, one actual GUI edit, timed on-disk
+  Windows `SendInput` with layout-mapped virtual key presses, a real GUI edit, timed on-disk
   persistence, and a second installed launch preserving exact bytes. This is
   a stronger automated test but is **not** a physical user walkthrough, a
   power-loss/crash-recovery proof, or evidence of editor content being
@@ -64,7 +64,7 @@ It does **not** read, install or run the actual upstream Aquilum.
 with the narrowly scoped `scripts/windows-beta-gui-input.ps1` helper.
 The helper refuses to run outside a GitHub-hosted Windows x64 runner,
 identifies the foreground Akula window by native HWND **and process ID**,
-then sends synthetic Unicode keyboard events to the `--focus` editor.
+then sends ordinary virtual-key events (not Unicode `VK_PACKET`) to the `--focus` editor.
 The smoke fails rather than appending text directly to the note when OS
 input is unavailable. A unique marker must reach the actual disk file
 within 30 seconds, while the original heading and body survive.
