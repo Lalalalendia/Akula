@@ -663,15 +663,19 @@ impl HistoryService {
                 "history version proof", "invalid history size or file type",
             ));
         }
+        // Bound the READ itself, not just the initial metadata. Another
+        // process may grow this pathname while it is being consumed.
         let mut bytes = Vec::with_capacity(expected.len());
-        file.read_to_end(&mut bytes).map_err(|e|
-            HistorySaveFailure::new("history readback", e)
-        )?;
+        (&mut file).take(MAX_RECEIPT_HISTORY_BYTES + 1)
+            .read_to_end(&mut bytes).map_err(|e|
+                HistorySaveFailure::new("history readback", e)
+            )?;
         let after = file.metadata().map_err(|e|
             HistorySaveFailure::new("history metadata", e)
         )?;
         let digest = blake3::hash(&bytes).to_hex().to_string();
-        if bytes != expected.as_bytes()
+        if bytes.len() as u64 > MAX_RECEIPT_HISTORY_BYTES
+            || bytes != expected.as_bytes()
             || digest != expected_hash
             || before.len() != after.len()
             || bytes.len() != expected.len()
