@@ -56,6 +56,13 @@ jobs:
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             packed_reduction_microbench_diagnostic -- --ignored --nocapture --test-threads=1
+      - name: Measure byte-exact direct L2 versus two-pass reduction (diagnostic only)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            direct_l2_microbench_diagnostic -- --ignored --nocapture --test-threads=1
       - name: Real PNG, alpha-crop, fractional and odd-size QA
         working-directory: aquilum-app
         shell: bash
