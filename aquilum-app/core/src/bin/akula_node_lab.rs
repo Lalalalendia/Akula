@@ -222,7 +222,86 @@ mod linux {
         Ok((content, hash))
     }
 
-    fn serve(stream: &mut TcpStream, root: &File, config: &Config) -> io::Result<()> {
+    /// Static, single-Bearer lab permission scope. Not device identity, pairing
+    /// or revocation. The catalog may contain more entries than this reader sees.
+    struct ScopedCatalog {
+        catalog: ReadCatalog,
+        reader_ids: BTreeSet<String>,
+    }
+
+    impl ScopedCatalog {
+        fn admit(cfg: &Config) -> Result<Option<Self>, String> {
+            let Some(vault_id) = cfg.vault_id else { return Ok(None); };
+            let trusted_names = cfg.catalog_files.iter().map(String::as_str).collect::<Vec<_>>();
+            let catalog = ReadCatalog::open(&cfg.root, vault_id, &trusted_names)
+                .map_err(|error| format!("refused catalog admission: {error:?}"))?;
+            let entries = catalog.list();
+            let mut reader_ids = BTreeSet::new();
+            for name in &cfg.reader_files {
+                let doc = entries.iter().find(|entry| entry.filename == *name)
+                    .ok_or("reader scope contains document not admitted to catalog")?;
+                if !reader_ids.insert(doc.id.clone()) {
+                    return Err("reader scope contains duplicate document".into());
+                }
+            }
+            Ok(Some(Self { catalog, reader_ids }))
+        }
+    }
+
+    fn catalog_response(path: &str, scope: Option<&ScopedCatalog>) -> Vec<u8> {
+        let Some(scope) = scope else {
+            return response(404, json!({"error": "not found"}));
+        };
+        if path == "/v1/documents" {
+            // Authorization by the caller happens BEFORE invoking this method.
+            // Suppress even filenames/IDs of operator-catalogued but ungranted docs.
+            let documents = scope.catalog.list().into_iter()
+                .filter(|entry| scope.reader_ids.contains(&entry.id))
+                .map(|entry| json!({"id": entry.id, "filename": entry.filename}))
+                .collect::<Vec<_>>();
+            return response(200, json!({
+                "vaultId": scope.catalog.vault_id().to_string(),
+                "documents": documents
+            }));
+        }
+        let Some(raw) = path.strip_prefix("/v1/documents/") else {
+            return response(404, json!({"error": "not found"}));
+        };
+        let (id, expected) = if let Some((id, revision)) = raw.split_once("?rev=") {
+            (id, Some(revision))
+        } else {
+            (raw, None)
+        };
+        if id.len() != 64 || !id.bytes().all(|c| c.is_ascii_hexdigit())
+            || expected.is_some_and(|rev| {
+                rev.len() != 64 || !rev.bytes().all(|c| c.is_ascii_hexdigit())
+            })
+        {
+            return response(404, json!({"error": "not found"}));
+        }
+        // No distinction between a nonexistent ID and an existing but hidden
+        // document. Do not perform filesystem IO before checking reader scope.
+        if !scope.reader_ids.contains(id) {
+            return response(404, json!({"error": "not found"}));
+        }
+        match scope.catalog.read_if_revision(id, expected) {
+            Ok(doc) => response(200, json!({
+                "id": doc.id, "content": doc.content, "rawBlake3": doc.raw_revision
+            })),
+            Err(error) => {
+                let code = match error {
+                    CatalogError::UnknownObject => 404,
+                    CatalogError::RevisionConflict | CatalogError::ReplacedObject => 409,
+                    CatalogError::TooLarge => 413,
+                    CatalogError::InvalidUtf8 => 422,
+                    CatalogError::InvalidConfiguration | CatalogError::Io => 403,
+                };
+                response(code, json!({"error": "read refused"}))
+            }
+        }
+    }
+
+    fn serve(stream: &mut TcpStream, root: &File, config: &Config, scope: Option<&ScopedCatalog>) -> io::Result<()> {
         stream.set_read_timeout(Some(Duration::from_secs(3)))?;
         stream.set_write_timeout(Some(Duration::from_secs(3)))?;
         let result = match request(stream) {
@@ -245,6 +324,8 @@ mod linux {
                         })),
                         Err(status) => response(status, json!({"error": "read refused"})),
                     }
+                } else if req.path == "/v1/documents" || req.path.starts_with("/v1/documents/") {
+                    catalog_response(&req.path, scope)
                 } else {
                     response(404, json!({"error": "not found"}))
                 }
@@ -271,6 +352,8 @@ mod linux {
         if pinned.dev() != expected.dev() || pinned.ino() != expected.ino() {
             return Err("vault root changed while pinning".into());
         }
+        // Reject invalid reader scope before Core::open may write appdata.
+        let scoped_catalog = ScopedCatalog::admit(&cfg)?;
         let events: Arc<dyn EventSink> = Arc::new(|_event: CoreEvent| {});
         let core = Core::open(&cfg.appdata, events);
         if core.mcp.status().running {
@@ -285,7 +368,7 @@ mod linux {
         for _ in 0..cfg.requests {
             let (mut connection, _) = listener.accept().map_err(|e| e.to_string())?;
             // One bounded request per connection. No shared mutable RPC dispatcher.
-            let _ = serve(&mut connection, &root, &cfg);
+            let _ = serve(&mut connection, &root, &cfg, scoped_catalog.as_ref());
         }
         core.shutdown();
         Ok(())
