@@ -103,6 +103,19 @@ impl VerifiedHistoryVersion {
     }
 }
 
+/// Read-only cold-start observation for one registered note/version.
+/// Deliberately not authority to replace any primary file or to acknowledge S3.
+#[must_use = "a cold history observation is forensic only"]
+#[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct InertColdHistoryNote {
+    registered_root: PathBuf,
+    note: PathBuf,
+    version_id: String,
+    content_hash: String,
+    content_length: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum HistorySaveEffect {
     NoChange,
@@ -722,6 +735,145 @@ impl HistoryService {
             version_id: id.to_owned(),
             content_hash: digest,
             content_length: bytes.len(),
+        })
+    }
+
+    /// P0g-3d-05: reconstruct a *non-authoritative* exact external version
+    /// observation from the registered note after HistoryService reopens.
+    ///
+    /// This is a bounded read with the process HistoryService mutex held.
+    /// It cannot grant a File Gate write, S3 apply/ACK, V8 receipt promotion
+    /// or ConfirmedBaseline advancement. Nor does it prove a power-cut-safe
+    /// directory entry or exclude hostile same-UID namespace replacement.
+    #[allow(dead_code)]
+    pub(crate) fn inspect_cold_external_version(
+        &self,
+        roots: Roots<'_>,
+        note: &Path,
+        id: &str,
+        expected_hash: &str,
+        expected_length: u64,
+    ) -> Result<InertColdHistoryNote, HistorySaveFailure> {
+        use std::io::Read;
+        const LIMIT: u64 = 32 * 1024 * 1024;
+        let good_hash = expected_hash.len() == 64
+            && expected_hash.bytes().all(|b|
+                b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !good_hash || expected_length > LIMIT || id.is_empty() {
+            return Err(HistorySaveFailure::new(
+                "cold history proof", "invalid immutable version bounds",
+            ));
+        }
+
+        let Some(mut state) = self.files_lock() else {
+            return Err(HistorySaveFailure::new(
+                "cold history lock", "history mutex poisoned",
+            ));
+        };
+        let located = locate(&mut state, roots, note).ok_or_else(||
+            HistorySaveFailure::new(
+                "cold history location", "note outside registered roots",
+            )
+        )?;
+        if history_blocked(&state, &located)
+            || !allowed_history_directory(&located.vault, &located.dir)
+        {
+            return Err(HistorySaveFailure::new(
+                "cold history location", "unsafe or blocked history directory",
+            ));
+        }
+        // Filename and Source::External must BOTH originate from the parser
+        // for THIS note's history directory, not from untrusted receipt text.
+        let listed = store::versions(&located.dir).into_iter()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| HistorySaveFailure::new(
+                "cold history version", "version ID absent for registered note",
+            ))?;
+        if listed.source != Source::External {
+            return Err(HistorySaveFailure::new(
+                "cold history version", "version was not an external CreateNew",
+            ));
+        }
+        let name = located.dir.join(&listed.id);
+        let named = fs::symlink_metadata(&name).map_err(|e|
+            HistorySaveFailure::new("cold history metadata", e)
+        )?;
+        if !named.is_file() || named.file_type().is_symlink() {
+            return Err(HistorySaveFailure::new(
+                "cold history file", "version is not a plain regular file",
+            ));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if named.file_attributes() & 0x0000_0400 != 0 {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "Windows reparse point refused",
+                ));
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if named.nlink() != 1 {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "hardlinked history version refused",
+                ));
+            }
+        }
+        let mut file = fs::File::open(&name).map_err(|e|
+            HistorySaveFailure::new("cold history file open", e)
+        )?;
+        let before = file.metadata().map_err(|e|
+            HistorySaveFailure::new("cold history file metadata", e)
+        )?;
+        if !before.is_file() || before.len() != expected_length {
+            return Err(HistorySaveFailure::new(
+                "cold history bytes", "wrong file type or length",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (named.dev(), named.ino()) != (before.dev(), before.ino()) {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "name and opened handle differ",
+                ));
+            }
+        }
+        let mut bytes=Vec::with_capacity(expected_length as usize);
+        (&mut file).take(LIMIT+1).read_to_end(&mut bytes).map_err(|e|
+            HistorySaveFailure::new("cold history file read", e)
+        )?;
+        let after = file.metadata().map_err(|e|
+            HistorySaveFailure::new("cold history file metadata", e)
+        )?;
+        if bytes.len() as u64 != expected_length
+            || before.len()!=after.len()
+            || std::str::from_utf8(&bytes).is_err()
+            || blake3::hash(&bytes).to_hex().as_str() != expected_hash
+        {
+            return Err(HistorySaveFailure::new(
+                "cold history bytes", "version bytes or digest changed",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (before.dev(),before.ino())!=(after.dev(),after.ino()) {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "opened handle identity changed",
+                ));
+            }
+        }
+        // Bind the readback to the resolved registered location. This is
+        // deliberately not the non-Clone VerifiedHistoryVersion write token.
+        Ok(InertColdHistoryNote {
+            registered_root: located.vault,
+            note: note.to_path_buf(),
+            version_id: listed.id,
+            content_hash: expected_hash.to_owned(),
+            content_length: expected_length,
         })
     }
 
