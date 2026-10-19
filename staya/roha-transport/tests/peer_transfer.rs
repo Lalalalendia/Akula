@@ -76,12 +76,9 @@ async fn inbound_unknown_peer_is_closed_without_blocking_admitted_peer() {
     )
     .await
     .expect("bind admitted client");
-    let stranger = StayaTransport::bind(
-        stranger_key,
-        AllowedPeers::new([server_key.public()]),
-    )
-    .await
-    .expect("bind unknown client");
+    let stranger = StayaTransport::bind(stranger_key, AllowedPeers::new([server_key.public()]))
+        .await
+        .expect("bind unknown client");
     let server_addr = server.address();
 
     tokio::time::timeout(Duration::from_secs(20), async {
