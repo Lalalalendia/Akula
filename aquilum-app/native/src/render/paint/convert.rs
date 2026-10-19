@@ -217,9 +217,25 @@ pub fn brush_to_paint(brush: BrushRef<'_>, composite: Composite, images: &mut Im
 }
 
 
+/// Installed Akula never even examines the experimental image flags.
+/// This is the original paint path, with no mipmap cache allocation or
+/// developer-only environment lookups in a signed/installed build.
+#[cfg(feature = "installed")]
+pub fn brush_to_paint_trial(
+    brush: BrushRef<'_>,
+    composite: Composite,
+    images: &mut Images,
+    _effective_geometry: Affine,
+    brush_transform: Affine,
+) -> (PaintType, Affine) {
+    (brush_to_paint(brush, composite, images), brush_transform)
+}
+
 /// Experimental Akula-owned image minification. Never intercepts glifo's
-/// glyph atlas or touches non-image brushes. Enabled only on uninstalled
-/// builds with AKULA_EXPERIMENTAL_IMAGE_MIP=1.
+/// glyph atlas or touches non-image brushes. The opt-in flags are sampled
+/// once per process, BEFORE the first paint; benchmark processes get separate
+/// environments and regular draw calls avoid repeated getenv/allocations.
+#[cfg(not(feature = "installed"))]
 pub fn brush_to_paint_trial(
     brush: BrushRef<'_>,
     composite: Composite,
@@ -227,12 +243,19 @@ pub fn brush_to_paint_trial(
     effective_geometry: Affine,
     brush_transform: Affine,
 ) -> (PaintType, Affine) {
-    let enabled = !cfg!(feature = "installed")
-        && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1");
-    let use_bilinear = enabled && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER")
-        .ok().as_deref() == Some("medium");
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let enabled = *ENABLED.get_or_init(|| {
+        std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1")
+    });
+    if !enabled {
+        return (brush_to_paint(brush, composite, images), brush_transform);
+    }
+    static BILINEAR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let use_bilinear = *BILINEAR.get_or_init(|| {
+        std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER").ok().as_deref() == Some("medium")
+    });
     brush_to_paint_candidate_tuned(
-        brush, composite, images, effective_geometry, brush_transform, enabled, use_bilinear,
+        brush, composite, images, effective_geometry, brush_transform, true, use_bilinear,
     )
 }
 
@@ -387,6 +410,22 @@ mod mipmap_integration_tests {
             raw, width, height,
             PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, false),
         )).with_quality(ImageQuality::High)
+    }
+
+    #[cfg(feature = "installed")]
+    #[test]
+    fn installed_build_uses_original_paint_path_without_mipmaps() {
+        let brush = test_brush(128, 128);
+        let mut images = Images::default();
+        let (paint, brush_transform) = brush_to_paint_trial(
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
+            Affine::scale(1.0 / 16.0), Affine::IDENTITY,
+        );
+        let Brush::Image(image) = paint else { panic!("expected image brush") };
+        let ImageSource::Pixmap(original) = image.image else { panic!("expected pixmap") };
+        assert_eq!((original.width(), original.height()), (128, 128));
+        assert_eq!(brush_transform, Affine::IDENTITY);
+        assert!(images.mips.is_empty(), "installed build must not generate mips");
     }
 
     #[test]
