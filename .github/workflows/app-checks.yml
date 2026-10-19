@@ -230,6 +230,27 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      # AKAI-CONF-03: real SDK against the disposable loopback Core, no
+      # credential-injecting proxy and no additional GitHub Actions runner.
+      - name: MCP official SDK direct HTTP and CAS (isolated fixture)
+        if: needs.classify.outputs.mode == 'workspace' && startsWith(github.event.pull_request.title, 'AKAI-CONF-03')
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/mcp-direct-sdk-smoke.sh
+
+      - name: Archive official direct MCP SDK results
+        if: always() && startsWith(github.event.pull_request.title, 'AKAI-CONF-03')
+        uses: actions/upload-artifact@v7
+        with:
+          name: akai-direct-sdk-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            mcp-direct-sdk/direct.log
+            mcp-direct-sdk/fixture.log
+            mcp-direct-sdk/npm-install.log
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Archive MCP probe and machine metadata
         if: always() && needs.classify.outputs.mode == 'workspace' && startsWith(github.event.pull_request.title, 'AGENT-PERF-')
         uses: actions/upload-artifact@v4
