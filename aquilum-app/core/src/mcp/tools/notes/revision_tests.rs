@@ -3,7 +3,8 @@ use super::*;
 use crate::app_core::{Core, CoreEvent};
 use crate::files::gate;
 use std::fs;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 #[test]
 fn stale_expected_revision_does_not_rebase_or_overwrite_newer_note() {
@@ -97,4 +98,73 @@ fn revision_hash_uses_original_crlf_bytes() {
         blake3::hash(read["content"].as_str().unwrap().as_bytes()).to_hex().to_string(),
         "raw-byte CAS must not mistake normalized text for disk identity"
     );
+}
+
+#[test]
+fn two_agents_with_identical_revision_commit_exactly_one_edit() {
+    let temp = tempfile::tempdir().unwrap();
+    let appdata = temp.path().join("appdata");
+    let root = temp.path().join("vault");
+    fs::create_dir_all(&appdata).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let workspace = root.to_string_lossy().into_owned();
+    let note = root.join("Concurrent.md");
+    let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    core.ui_state.resolve_workspace(&workspace, 1).unwrap();
+    gate::create(&core, &note, "# Concurrent\n\nbaseline", Source::Agent, None).unwrap();
+
+    let vault = Vault { root, visible: false };
+    let read = read_one(&vault, "Concurrent.md", &json!({ "includeRevision": true }), 8_000).unwrap();
+    let revision = read["revision"].as_str().unwrap().to_owned();
+    let barrier = Arc::new(Barrier::new(3));
+
+    let writers = (0..2)
+        .map(|number| {
+            let core = Arc::clone(&core);
+            let workspace = workspace.clone();
+            let revision = revision.clone();
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                update_note(
+                    &core,
+                    &json!({
+                        "note": "Concurrent.md",
+                        "workspace": workspace,
+                        "mode": "append",
+                        "content": format!("agent-{number}"),
+                        "expectedRevision": revision,
+                        "open": false,
+                    }),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+
+    let mut successes = 0;
+    let mut conflicts = 0;
+    for writer in writers {
+        match writer.join().unwrap() {
+            Ok(value) => {
+                assert_eq!(value["changed"], true);
+                successes += 1;
+            }
+            Err(error) => {
+                let result: Value = serde_json::from_str(&error).unwrap();
+                assert_eq!(result["code"], "MCP_REVISION_CONFLICT");
+                conflicts += 1;
+            }
+        }
+    }
+    assert_eq!((successes, conflicts), (1, 1));
+
+    let content = fs::read_to_string(&note).unwrap();
+    assert!(content.starts_with("# Concurrent\n\nbaseline"));
+    assert_ne!(content.contains("agent-0"), content.contains("agent-1"));
+    let final_read = read_one(&vault, "Concurrent.md", &json!({ "includeRevision": true }), 8_000).unwrap();
+    assert_ne!(final_read["revision"], revision);
+    assert_eq!(final_read["content"], content);
+    core.shutdown();
 }
