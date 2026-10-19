@@ -1,4 +1,5 @@
 mod apply;
+mod download_guard;
 mod release;
 #[cfg(target_os = "macos")]
 mod tar;
@@ -14,14 +15,11 @@ pub(crate) fn on_first_presented_frame() {
 #[cfg(test)]
 mod tests;
 
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use release::{PUBLIC_KEY, Release, find, verify};
 
 pub use apply::apply;
-
-const CHUNK: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
@@ -103,18 +101,14 @@ impl Updater {
     fn download(&self, release: &Release) -> Result<(), String> {
         let agent = aquilum_core::web_agent::web_agent("updates");
         let response = agent.get(&release.url).call().map_err(|e| e.to_string())?;
-        let total = response.header("Content-Length").and_then(|v| v.parse().ok());
-        let mut reader = response.into_reader();
-        let mut data = Vec::with_capacity(total.unwrap_or(0) as usize);
-        let mut buffer = vec![0u8; CHUNK];
-        loop {
-            let read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
-            if read == 0 {
-                break;
-            }
-            data.extend_from_slice(&buffer[..read]);
-            self.set(Status::Downloading { version: release.version.clone(), done: data.len() as u64, total });
-        }
+        let total = download_guard::content_length(response.header("Content-Length"))?;
+        let data = download_guard::read_payload(response.into_reader(), total, |done, total| {
+            self.set(Status::Downloading {
+                version: release.version.clone(),
+                done,
+                total,
+            });
+        })?;
         verify(&data, &release.signature, PUBLIC_KEY)?;
         *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(data);
         Ok(())
