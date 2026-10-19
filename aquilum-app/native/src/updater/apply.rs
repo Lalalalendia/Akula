@@ -48,8 +48,17 @@ pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
         return Err(error);
     }
 
-    // If the caller terminates during shutdown, the old installed app is
-    // still in place and the new staged candidate is preserved for HOLD.
+    // Record a durable, non-overwriting generation fingerprint BEFORE
+    // old->backup or fresh->destination. No publication without this proof.
+    if let Err(error) = super::startup_ack::record_candidate(&stage) {
+        if let Err(cleanup) = gate.discard_unpublished(&stage) {
+            return Err(format!("{error}; failed candidate retained for review: {cleanup}"));
+        }
+        return Err(error);
+    }
+
+    // A failure during application shutdown leaves the previous app live and
+    // the stage for review; no new bundle is silently accepted.
     before_exit();
     gate.promote(&stage)?;
 
