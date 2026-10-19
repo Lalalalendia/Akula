@@ -1,0 +1,142 @@
+name: Argon highlight tokenizer decision ABBA
+
+on:
+  pull_request:
+    paths:
+      - '.github/bench/highlight-tokens-ab.rs'
+      - '.github/workflows/highlight-tokens-probe.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-highlight-probe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  token-probe:
+    name: Exact-source tokenizer semantic/parity and speed check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Extract pinned production lexer source and candidate in scratch only
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          git show "$BASE_SHA:aquilum-app/native/src/ui/editor/highlight/tokens.rs" > "$RUNNER_TEMP/highlight-base.rs"
+          git show "$BASE_SHA:aquilum-app/native/src/ui/editor/highlight/langs.rs" > "$RUNNER_TEMP/highlight-langs.rs"
+          cp "$RUNNER_TEMP/highlight-base.rs" "$RUNNER_TEMP/highlight-candidate.rs"
+          python3 - "$RUNNER_TEMP/highlight-candidate.rs" <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path(sys.argv[1])
+          s = p.read_text()
+          changes = [
+              (
+                  '        if let Some(open) = lang.comment().iter().find(|m| rest.starts_with(**m)) {',
+                  "        if matches!(c, '/' | '#' | '-' | '<') {\n"
+                  '            if let Some(open) = lang.comment().iter().find(|m| rest.starts_with(**m)) {',
+              ),
+              (
+                  "            continue;\n        }\n        if lang == Lang::Markup && c == '<' {",
+                  "            continue;\n            }\n        }\n        if lang == Lang::Markup && c == '<' {",
+              ),
+              (
+                  '            let token = if (matches!(lang, Lang::Sql | Lang::Dataview) && keywords.contains(&word.to_ascii_lowercase().as_str())) || keywords.contains(&word) {',
+                  '            let keyword = if matches!(lang, Lang::Sql | Lang::Dataview) {\n'
+                  '                keywords.iter().any(|key| word.eq_ignore_ascii_case(key))\n'
+                  '            } else {\n'
+                  '                keywords.contains(&word)\n'
+                  '            };\n'
+                  '            let token = if keyword {',
+              ),
+          ]
+          for old, new in changes:
+              if s.count(old) != 1:
+                  raise SystemExit(f'expected one exact source anchor; found {s.count(old)} for {old!r}')
+              s = s.replace(old, new)
+          p.write_text(s)
+          PY
+          {
+            echo "base=$BASE_SHA"
+            echo "candidate=source-local scratch only; no user code modified"
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } | tee highlight-environment.log
+      - name: Compile exact-source tokenizer with identical wrapper, no dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for side in base candidate; do
+            AKULA_HIGHLIGHT_TOKENS="$RUNNER_TEMP/highlight-$side.rs" \
+            AKULA_HIGHLIGHT_LANGS="$RUNNER_TEMP/highlight-langs.rs" \
+              rustc --edition=2021 -O -Awarnings \
+                .github/bench/highlight-tokens-ab.rs -o "$RUNNER_TEMP/highlight-$side"
+          done
+      - name: Measure representative languages in ABBA order on same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          i=0
+          for side in base candidate candidate base base candidate candidate base; do
+            i=$((i+1))
+            "$RUNNER_TEMP/highlight-$side" | tee "highlight-$i-$side.log"
+          done
+      - name: Reject output differences and summarize paired medians
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import statistics
+          from pathlib import Path
+          names = ('sql','dataview','rust','markup','python')
+          pattern = re.compile(r'HIGHLIGHT_AB case=(\w+) elapsed_ms=([0-9.]+) checksum=(\d+)')
+          results = {'base': [], 'candidate': []}
+          for path in Path('.').glob('highlight-*-*.log'):
+              match = re.fullmatch(r'highlight-\d+-(base|candidate)\.log',path.name)
+              if not match:
+                  continue
+              found = {case:(float(ms), digest) for case,ms,digest in pattern.findall(path.read_text())}
+              assert set(found) == set(names), f'missing cases in {path}'
+              results[match.group(1)].append(found)
+          assert len(results['base']) == len(results['candidate']) == 4
+          output = ['## Tokenizer baseline vs scratch candidate, exact Akula source, ABBA',
+                    '',
+                    '| Language | Base (ms) | Candidate (ms) | Difference |',
+                    '|---|---:|---:|---:|']
+          for name in names:
+              checksums = {r[name][1] for side in results.values() for r in side}
+              assert len(checksums) == 1, f'token boundaries/types changed: {name}, {checksums}'
+              a = statistics.median(r[name][0] for r in results['base'])
+              b = statistics.median(r[name][0] for r in results['candidate'])
+              assert a > 0 and b > 0
+              output.append(f'| {name} | {a:.4f} | {b:.4f} | {100*(b/a-1):+.1f}% |')
+          output += ['', 'Checksum covers every token range and token kind;',
+                     'diagnostic isolates syntax tokenize() only, not full input-to-frame.',
+                     'No shipping changes in this PR and no automatic speed threshold.']
+          report = '\n'.join(output) + '\n'
+          print(report)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(report)
+          Path('highlight-summary.md').write_text(report)
+          PY
+      - name: Preserve logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-highlight-probe-${{ github.event.pull_request.head.sha }}
+          path: |
+            highlight-environment.log
+            highlight-*-*.log
+            highlight-summary.md
+          if-no-files-found: warn
+          retention-days: 14
