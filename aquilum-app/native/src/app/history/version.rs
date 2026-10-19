@@ -32,9 +32,22 @@ impl App {
         true
     }
 
+    /// Remove the hidden diff widget tree, not just the action button handles.
+    /// IndexedStack keeps inactive page children alive until the Slot is replaced.
+    pub(super) fn discard_version_view(&mut self, root: &mut RenderRoot) {
+        if self.version_view.take().is_some() {
+            if let Some(chrome) = &self.chrome {
+                chrome.version_page.edit(root, |mut slot| Slot::set_child(
+                    &mut slot,
+                    masonry::core::NewWidget::new(masonry::widgets::SizedBox::empty()).erased(),
+                ));
+            }
+        }
+    }
+
     pub(super) fn close_version(&mut self, root: &mut RenderRoot) {
         self.opened_versions.remove(&self.tabs.active_id());
-        self.version_view = None;
+        self.discard_version_view(root);
         self.show_page(root, 0);
         self.render_history(root);
     }
