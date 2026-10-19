@@ -22,6 +22,8 @@ pub struct TextEditor {
     pub(super) hovered_table: Option<usize>,
     pub(super) table_scrolls: std::collections::HashMap<usize, f64>,
     pub(super) code_scrolls: code_scroll::Offsets,
+    pub(super) code_window_base: Option<usize>,
+    pub(super) code_window_opener: Option<usize>,
     // Only populated within one paint pass. Avoid N backward code-run
     // searches for N visible paragraphs without persisting stale line IDs.
     pub(super) paint_code_first: usize,
