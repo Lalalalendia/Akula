@@ -41,6 +41,17 @@ impl TextEditor {
                     ctx.set_clipboard(text);
                 }
             }
+            (Some(Command::CopyCodeBlock), _) if rich => {
+                // The focused code body may be windowed far away from its
+                // opener. Its stable byte identity comes from the async
+                // Markdown checkpoints, not from the visible line index.
+                if let Some((opener, body)) = self.focused_fenced_code_body() {
+                    ctx.set_clipboard(body);
+                    self.copied_code = Some((opener, std::time::Instant::now()));
+                    ctx.request_anim_frame();
+                    ctx.request_render();
+                }
+            }
             (Some(Command::Undo | Command::Redo), _) => edited = self.undo(command == Some(Command::Redo)),
             (Some(Command::SelectAll), _) => {
                 self.anchor = 0;

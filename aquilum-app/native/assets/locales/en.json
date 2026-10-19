@@ -446,6 +446,7 @@
       "italic": "Italic",
       "strikethrough": "Strikethrough",
       "inlineCode": "Inline code (backticks)",
+      "copyCodeBlock": "Copy code block contents",
       "indent": "Indent",
       "outdent": "Outdent",
       "lineBreak": "Line break in a list item",

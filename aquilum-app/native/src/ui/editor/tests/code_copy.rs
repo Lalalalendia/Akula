@@ -167,3 +167,59 @@ fn code_header_feedback_changes_only_its_control_pixels() {
     assert!(inside >= 8, "copy/check feedback must be visible: {inside} changed pixels");
     assert_eq!(outside, 0, "feedback may not alter content or surrounding pixels");
 }
+
+
+#[test]
+fn keyboard_shortcut_copies_full_fenced_body_without_overwriting_selection() {
+    use masonry::core::keyboard::{Key, Modifiers};
+    use super::support::{press, focused};
+    use crate::test_dir::command;
+
+    let source = "вступление\n~~~rust\nlet x = \"🐱\";\nprintln!(\"done\");\n~~~\nконец";
+    let opener = source.find("~~~rust").unwrap();
+    let caret = source.find("println!").unwrap() + "println".len();
+    let mut root = focused(TextEditor::new(source).markdown(), 590, 340);
+    let id = editor_id(&root);
+    root.edit_widget(id, |mut widget| TextEditor::select_byte_range(&mut widget.downcast(), 0, caret));
+    let _ = root.redraw();
+
+    press(&mut root, Key::Character("c".into()), command() | Modifiers::SHIFT);
+    let editor = root.get_widget_with_tag(TAG).unwrap();
+    assert_eq!(editor.inner().copied_code_for_test(), Some(opener));
+    assert_eq!(selected(&root), &source[..caret], "copy may not change selection");
+    assert_eq!(text(&root), source, "keyboard copy may not edit Markdown");
+
+    // The standard Ctrl/Cmd+C action must remain distinct from whole-code copy.
+    press(&mut root, Key::Character("c".into()), command());
+    assert_eq!(text(&root), source);
+}
+
+#[test]
+fn copy_code_shortcut_does_not_claim_prose_or_math_as_fenced_code() {
+    use masonry::core::keyboard::{Key, Modifiers};
+    use super::support::{press, focused};
+    use crate::test_dir::command;
+
+    let source = "обычный текст\n$$\nx^2\n$$\n~~~rust\nvalid\n~~~";
+    let mut root = focused(TextEditor::new(source).markdown(), 500, 280);
+    let id = editor_id(&root);
+    for caret in [1, source.find("x^2").unwrap()] {
+        root.edit_widget(id, |mut w| TextEditor::select_byte_range(&mut w.downcast(), caret, caret));
+        let _ = root.redraw();
+        press(&mut root, Key::Character("c".into()), command() | Modifiers::SHIFT);
+        assert_eq!(
+            root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
+            None,
+            "ordinary prose/math must not be exposed as a code-copy target"
+        );
+    }
+    let inside = source.find("valid").unwrap() + 2;
+    root.edit_widget(id, |mut w| TextEditor::select_byte_range(&mut w.downcast(), inside, inside));
+    let _ = root.redraw();
+    press(&mut root, Key::Character("c".into()), command() | Modifiers::SHIFT);
+    assert_eq!(
+        root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
+        Some(source.find("~~~rust").unwrap())
+    );
+    assert_eq!(text(&root), source);
+}
