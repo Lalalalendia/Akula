@@ -318,6 +318,12 @@ mod linux {
                 } else if req.path == "/health" {
                     response(200, json!({"status": "ok", "profile": "node-d1-lab"}))
                 } else if req.path == "/v1/note" {
+                    // Never keep the legacy single-note shortcut alive next
+                    // to the new scoped catalog: a wider --note selection
+                    // could otherwise bypass the narrowed reader allowlist.
+                    if scope.is_some() {
+                        return stream.write_all(&response(404, json!({"error": "not found"})));
+                    }
                     match safe_read(root, &config.note) {
                         Ok((content, hash)) => response(200, json!({
                             "note": config.note, "content": content, "rawBlake3": hash
