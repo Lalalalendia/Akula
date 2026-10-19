@@ -1456,3 +1456,227 @@ fn bounded_ext4_inventory_audit_after_remount() {
         size
     );
 }
+
+/// P2P-09b: examine pinned redb 4.4.0 tables without opening an FsStore
+/// writer or mutating the source DB. Run ONLY on disposable bounded ext4
+/// after P2P-09a journal / external audit fixtures completed.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires P2P-09a seeded isolated ext4 image and closed FsStore"]
+async fn bounded_ext4_redb_read_only_real_external_and_inline() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits,
+        bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger,
+        redb_inventory::{RedbHold, audit_pinned_redb},
+    };
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("isolated bounded mount root"),
+    );
+    let volume = StagingVolumeGuard::open(&root).expect("real bounded ext4 mount");
+
+    // First inspect the EXACT existing P2P-09a saved large file+journal,
+    // including redb complete/owned state and possible inlined Bao metadata.
+    let large_size = (1024 * 1024 + 17) as u64;
+    let large_policy = AdmissionLimits {
+        max_object_bytes: large_size,
+        max_tracked_bytes: large_size,
+        max_peer_bytes: large_size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let large_ledger = DurableLedger::open(&root.join("reconciliation-ledger"), large_policy)
+        .expect("one exclusive disk ledger owner");
+    let actual_db = root.join("real-fsstore").join("blobs.db");
+    let original_bytes = fs::read(&actual_db).expect("real FsStore database");
+    let evidence = audit_pinned_redb(&volume, &large_ledger, "real-fsstore")
+        .expect("pinned complete Owned record matches trusted journal");
+    assert_eq!(evidence.blob_records, 1);
+    assert_eq!(
+        evidence.journal_generation,
+        large_ledger.snapshot().unwrap().generation
+    );
+    assert!(evidence.database_unchanged);
+    assert!(!evidence.file_gate_ready);
+    assert!(evidence.bao_verification_pending);
+    assert_eq!(fs::read(&actual_db).unwrap(), original_bytes);
+    drop(large_ledger);
+
+    // Create a second actual iroh-blobs store holding data INLINE in redb;
+    // no production workspace is touched. A pathname-only audit is unable to
+    // establish this small blob's integrity: read-only redb must do so.
+    let small = b"p2p-blob-09b-readonly-inlined-contents";
+    let small_hash = Hash::new(small);
+    let store_dir = root.join("small-inline-fsstore");
+    let store = FsStore::load(&store_dir)
+        .await
+        .expect("create temporary pinned FsStore");
+    let tag = store
+        .add_slice(small)
+        .await
+        .expect("persist small inline test blob");
+    assert_eq!(tag.hash, small_hash);
+    store.shutdown().await.expect("close DB actor and flush");
+    drop(store);
+    drop(tag);
+    let ledger_dir = root.join("small-inline-ledger");
+    fs::create_dir(&ledger_dir).expect("private durable ledger");
+    fs::set_permissions(&ledger_dir, fs::Permissions::from_mode(0o700)).expect("lock down ledger");
+    let count = small.len() as u64;
+    let policy = AdmissionLimits {
+        max_object_bytes: count,
+        max_tracked_bytes: count,
+        max_peer_bytes: count,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let mut journal = DurableLedger::open(&ledger_dir, policy).unwrap();
+    let exact = *small_hash.as_bytes();
+    journal
+        .reserve(SecretKey::generate().public(), exact, count)
+        .unwrap();
+    journal.verify_full(exact, small).unwrap();
+    let db_path = store_dir.join("blobs.db");
+    let before = fs::read(&db_path).expect("original source DB");
+    let journal_before = fs::read(ledger_dir.join("reservations.v1")).unwrap();
+    let valid = audit_pinned_redb(&volume, &journal, "small-inline-fsstore")
+        .expect("complete small inline blob must be verified from redb");
+    assert_eq!(valid.blob_records, 1);
+    assert_eq!(valid.inline_data_entries, 1);
+    assert_eq!(valid.verified_inline_bytes, count);
+    assert!(valid.database_unchanged);
+    assert!(!valid.file_gate_ready);
+    assert!(valid.bao_verification_pending);
+    assert_eq!(fs::read(&db_path).unwrap(), before);
+    assert_eq!(
+        fs::read(ledger_dir.join("reservations.v1")).unwrap(),
+        journal_before
+    );
+
+    // Negative: mutate ONLY AN INDEPENDENT TEST COPY, never original DB.
+    // The copy retains an actual real FsStore schema and B3-addressed record.
+    let altered_store = root.join("tampered-inline-copy");
+    fs::create_dir(&altered_store).unwrap();
+    fs::copy(&db_path, altered_store.join("blobs.db")).unwrap();
+    {
+        let db = redb::Database::open(altered_store.join("blobs.db")).unwrap();
+        let txn = db.begin_write().unwrap();
+        {
+            const INLINE_TABLE: redb::TableDefinition<Hash, &[u8]> =
+                redb::TableDefinition::new("inline-data-0");
+            let mut table = txn.open_table(INLINE_TABLE).unwrap();
+            let mut corrupted = small.to_vec();
+            corrupted[0] ^= 0x80;
+            table.insert(small_hash, corrupted.as_slice()).unwrap();
+        }
+        txn.commit().unwrap();
+    }
+    assert!(matches!(
+        audit_pinned_redb(&volume, &journal, "tampered-inline-copy"),
+        Err(RedbHold::InvalidInlineData)
+    ));
+
+    // Unknown extra table in a throwaway copy must NOT be silently skipped.
+    let extra_store = root.join("unknown-schema-copy");
+    fs::create_dir(&extra_store).unwrap();
+    fs::copy(&db_path, extra_store.join("blobs.db")).unwrap();
+    {
+        let db = redb::Database::open(extra_store.join("blobs.db")).unwrap();
+        let txn = db.begin_write().unwrap();
+        {
+            const FOREIGN: redb::TableDefinition<&str, &str> =
+                redb::TableDefinition::new("unknown-schema-version");
+            let mut table = txn.open_table(FOREIGN).unwrap();
+            table.insert("unexpected", "data").unwrap();
+        }
+        txn.commit().unwrap();
+    }
+    assert!(matches!(
+        audit_pinned_redb(&volume, &journal, "unknown-schema-copy"),
+        Err(RedbHold::UnsupportedSchema)
+    ));
+
+    // A second real FsStore writes another valid inline hash, BUT the
+    // associated durable journal only authorizes the FIRST hash. No free
+    // capacity is inferred from the new DB record; HOLD instead.
+    let orphan_dir = root.join("orphan-in-redb");
+    let original_store = FsStore::load(&orphan_dir).await.unwrap();
+    let _a = original_store.add_slice(small).await.unwrap();
+    let _foreign = original_store
+        .add_slice(b"unapproved-new-valid-small-blob")
+        .await
+        .unwrap();
+    original_store.shutdown().await.unwrap();
+    drop(original_store);
+    assert!(matches!(
+        audit_pinned_redb(&volume, &journal, "orphan-in-redb"),
+        Err(RedbHold::OrphanDatabaseBlob)
+    ));
+
+    // Neither negative copy nor even a malformed foreign DB may alter the
+    // original source database or the independently fsynced ledger snapshot.
+    assert_eq!(fs::read(&db_path).unwrap(), before);
+    assert_eq!(
+        fs::read(ledger_dir.join("reservations.v1")).unwrap(),
+        journal_before
+    );
+    drop(journal);
+    println!(
+        "P2P_BLOB09B_REDB_READONLY external=1 inline=1 inline_b3=true unknown_table_hold=true mutated_copy_hold=true foreign_db_blob_hold=true source_db_unchanged=true journal_unchanged=true bao_pending=true file_gate_ready=false"
+    );
+}
+
+/// Observe precisely the SAME two durable journals and FsStores after a real
+/// umount/mount of the bounded ext4 image. Audit uses ReadOnlyDatabase only.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires remount of disposable ext4 image after prior redb fixture"]
+fn bounded_ext4_redb_read_only_after_remount() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, redb_inventory::audit_pinned_redb,
+    };
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted bounded ext4 image"),
+    );
+    let guard = StagingVolumeGuard::open(&root).expect("separate physical filesystem");
+
+    let large = (1024 * 1024 + 17) as u64;
+    let limit = AdmissionLimits {
+        max_object_bytes: large,
+        max_tracked_bytes: large,
+        max_peer_bytes: large,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let ledger = DurableLedger::open(&root.join("reconciliation-ledger"), limit)
+        .expect("reopen persisted physical journal");
+    let big = audit_pinned_redb(&guard, &ledger, "real-fsstore").unwrap();
+    assert_eq!(big.blob_records, 1);
+    assert!(big.database_unchanged);
+    assert!(!big.file_gate_ready);
+    drop(ledger);
+
+    let small = b"p2p-blob-09b-readonly-inlined-contents";
+    let count = small.len() as u64;
+    let policy = AdmissionLimits {
+        max_object_bytes: count,
+        max_tracked_bytes: count,
+        max_peer_bytes: count,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let small_ledger = DurableLedger::open(&root.join("small-inline-ledger"), policy)
+        .expect("reopen signed-by-test fsynced inline reservation");
+    let inline = audit_pinned_redb(&guard, &small_ledger, "small-inline-fsstore").unwrap();
+    assert_eq!(inline.blob_records, 1);
+    assert_eq!(inline.verified_inline_bytes, count);
+    assert_eq!(inline.inline_data_entries, 1);
+    assert!(inline.bao_verification_pending);
+    assert!(!inline.file_gate_ready);
+    println!(
+        "P2P_BLOB09B_REDB_REMOUNT persistent_ledger_and_redb=true inline_b3=true external_owned_status=true no_db_writes=true file_gate_ready=false"
+    );
+}

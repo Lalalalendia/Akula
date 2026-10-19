@@ -54,6 +54,7 @@ dependencies = [
  "futures-util",
  "iroh",
  "iroh-blobs",
+ "redb",
  "tempfile",
  "tokio",
 ]

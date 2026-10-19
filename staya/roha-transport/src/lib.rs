@@ -18,6 +18,8 @@ pub mod bounded_staging;
 pub mod durable_admission;
 #[cfg(target_os = "linux")]
 pub mod reconcile_inventory;
+#[cfg(target_os = "linux")]
+pub mod redb_inventory;
 pub mod transfer;
 
 /// Explicitly authorized endpoint keys. The pairing workflow owns this list.
