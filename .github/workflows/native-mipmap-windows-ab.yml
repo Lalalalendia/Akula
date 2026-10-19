@@ -46,6 +46,12 @@ jobs:
           python --version
           python -m py_compile scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_mipmap_windows_ab.py
           if ($LASTEXITCODE -ne 0) { throw 'Python benchmark syntax failed' }
+      - name: Fail-fast Win32 desktop and memory API preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -c "import os, sys; sys.path.insert(0, 'scripts/benchmarks'); from native_mipmap_window_ab import windows_peak_rss_kib; from native_mipmap_windows_ab import windows_scenes; assert windows_peak_rss_kib(os.getpid()) > 0, 'No Win32 process memory sample'; windows_scenes()"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows GUI/RSS instrumentation unavailable' }
       - name: Build developer-only native Windows release executable
         shell: pwsh
         working-directory: aquilum-app

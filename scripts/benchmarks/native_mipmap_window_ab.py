@@ -154,21 +154,46 @@ if os.name == "nt":
     _window_title = _user32.GetWindowTextW
     _window_title.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     _window_title.restype = ctypes.c_int
+    _is_minimized = _user32.IsIconic
+    _is_minimized.argtypes = [wintypes.HWND]
+    _is_minimized.restype = wintypes.BOOL
+    _get_system_metrics = _user32.GetSystemMetrics
+    _get_system_metrics.argtypes = [ctypes.c_int]
+    _get_system_metrics.restype = ctypes.c_int
+    _dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
+    _dwm_get_attribute = _dwm.DwmGetWindowAttribute
+    _dwm_get_attribute.argtypes = [
+        wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    _dwm_get_attribute.restype = ctypes.c_long
 
 
 def windows_gui_witness(pid: int) -> dict | None:
     if os.name != "nt":
         return None
     matches = []
+    desktop_w = _get_system_metrics(0)
+    desktop_h = _get_system_metrics(1)
+    if desktop_w < 800 or desktop_h < 600:
+        return None
 
     @_window_proc
     def scan(hwnd, _):
         owner = wintypes.DWORD()
         _window_pid(hwnd, ctypes.byref(owner))
-        if owner.value != pid or not _is_visible(hwnd):
+        if owner.value != pid or not _is_visible(hwnd) or _is_minimized(hwnd):
+            return True
+        # Akula uses DWM cloaking while its initial scene is being prepared.
+        # IsWindowVisible alone can return TRUE for a cloaked window.
+        cloaked = wintypes.DWORD(0)
+        if (_dwm_get_attribute(hwnd, 14, ctypes.byref(cloaked),
+                               ctypes.sizeof(cloaked)) != 0 or cloaked.value != 0):
             return True
         bounds = _WinRect()
         if not _window_rect(hwnd, ctypes.byref(bounds)):
+            return True
+        if (bounds.right <= 0 or bounds.bottom <= 0
+                or bounds.left >= desktop_w or bounds.top >= desktop_h):
             return True
         width, height = bounds.right - bounds.left, bounds.bottom - bounds.top
         if width < 400 or height < 300:
@@ -179,7 +204,10 @@ def windows_gui_witness(pid: int) -> dict | None:
         # the very same process owns a visible normal application window.
         if "Akula" not in buf.value:
             return True
-        matches.append({"width": width, "height": height, "title_akula": True})
+        matches.append({
+            "width": width, "height": height, "title_akula": True,
+            "uncloaked": True, "on_primary_desktop": True,
+        })
         return False
 
     _enum_windows(scan, 0)

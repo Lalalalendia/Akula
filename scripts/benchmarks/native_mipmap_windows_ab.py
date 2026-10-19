@@ -81,6 +81,8 @@ def report(rows: list[dict], exe_hash: str,
                 raise ValueError(f"Mipmap positive/negative witness failed: {scene}/{mode}")
             witnesses = [row.get("window_witness") for row in group]
             if not all(isinstance(w, dict) and w.get("title_akula") is True
+                       and w.get("uncloaked") is True
+                       and w.get("on_primary_desktop") is True
                        and w.get("width", 0) >= 400 and w.get("height", 0) >= 300
                        for w in witnesses):
                 raise ValueError(f"Missing real visible Win32 HWND/PID evidence: {scene}/{mode}")
