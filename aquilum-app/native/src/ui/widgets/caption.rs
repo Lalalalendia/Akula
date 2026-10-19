@@ -334,6 +334,7 @@ mod tests {
     use masonry::dpi::{PhysicalPosition, PhysicalSize};
     use masonry::kurbo::Point;
     use masonry::theme::default_property_set;
+    use masonry::widgets::Flex;
 
     const WIDTH: u32 = 440;
     const HEIGHT: u32 = 40;
@@ -361,7 +362,8 @@ mod tests {
             scale_factor: 1.0,
             test_font: None,
         };
-        let mut root = RenderRoot::new(NewWidget::new(Caption::new(NAME).copyable_file_name()).erased(),
+        let header = NewWidget::new(Flex::row().with(NewWidget::new(Caption::new(NAME).copyable_file_name()), 1.0));
+        let mut root = RenderRoot::new(header.erased(),
             move |signal| sink.borrow_mut().push(signal), opts);
         let _ = root.redraw();
 
