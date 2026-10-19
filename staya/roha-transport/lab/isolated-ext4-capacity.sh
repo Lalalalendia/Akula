@@ -209,6 +209,21 @@ cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
   --test iroh_blobs_compare bounded_ext4_joint_staging_checkpoint_after_remount \
   -- --exact --ignored --nocapture
 
+# P2P-BLOB-10b: actual FsStore with >8MiB complete data and external
+# *.obao4 pre-order file. Verify every Bao hash parent/chunk against the
+# locked journal root, reject tampered outboard on a SEPARATE copy, and
+# recover the same intact proof from the same ext4 image after unmount.
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_owned_bao_crypto_proof \
+  -- --exact --ignored --nocapture
+
+sync
+sudo umount "$volume"
+mount_image
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_owned_bao_after_remount \
+  -- --exact --ignored --nocapture
+
 # A missing mount must NOT cause staging to continue on its host parent.
 sudo umount "$volume"
 cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
