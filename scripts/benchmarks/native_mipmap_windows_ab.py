@@ -90,9 +90,24 @@ def report(rows: list[dict], exe_hash: str,
             frame = median(metric(row, "frameP95Ms") for row in group)
             raster = median(metric(row, "rasterP95Ms") for row in group)
             rss = median(row["peak_rss_kib"] for row in group) / 1024
+            frames = [
+                float(value)
+                for row in group
+                for value in row["metrics"]["frameSamplesMs"]
+            ]
+            if not frames or not all(0 <= value < float("inf") for value in frames):
+                raise ValueError(f"Missing/non-finite per-frame times in {scene}/{mode}")
+            # p95 alone can conceal a single costly first-time mip generation.
+            # These are CPU frame-work samples, NOT physical scanout misses.
+            worst = max(frames)
+            over_60hz = sum(value > 1000 / 60 for value in frames)
             lines.append(
                 f"| {scene} | {viewport} | {mode} | {frame:.3f} | "
                 f"{raster:.3f} | {rss:.1f} |"
+            )
+            lines.append(
+                f"{scene}/{mode}: worst CPU frame {worst:.3f} ms; "
+                f"work samples > 16.67ms: {over_60hz}/{len(frames)}."
             )
             sizes = [f"{w['width']}x{w['height']}" for w in witnesses]
             lines.append(f"{scene}/{mode}: observed PID-matched Win32 window extents {sizes}.")
