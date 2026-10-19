@@ -1118,3 +1118,138 @@ mod fractional_odd_quality_tests {
         assert_eq!(cases, 18);
     }
 }
+
+
+// Adversarial alpha/clip scene following the same brush transform and rounded
+// crop semantics as ui::editor::embed::media::paint::draw_image.
+// Transparent saturated RGB must never bleed onto a white background.
+#[cfg(test)]
+mod mipmap_crop_alpha_edge_tests {
+    use super::*;
+    use masonry::peniko::{ImageAlphaType, ImageQuality};
+    use vello_cpu::color::palette::css::WHITE;
+    use vello_cpu::kurbo::{RoundedRect, Shape as _};
+    use vello_cpu::{RasterizerSettings, RenderContext, RenderSettings, Resources, TargetInit};
+
+    const W: u16 = 127;
+    const H: u16 = 129;
+
+    fn alpha_edge_fixture() -> Vec<u8> {
+        let mut rgba = Vec::with_capacity(usize::from(W) * usize::from(H) * 4);
+        for y in 0..usize::from(H) {
+            for x in 0..usize::from(W) {
+                let distance = (x.min(126 - x)).min(y.min(128 - y));
+                let alpha = if (27..100).contains(&x) && (23..108).contains(&y) {
+                    255
+                } else if distance < 9 {
+                    0
+                } else {
+                    [0, 64, 128, 192][(x + y) % 4]
+                };
+                // Fully transparent magenta is deliberately adversarial;
+                // every VISIBLE texel is achromatic black.
+                if alpha == 0 {
+                    rgba.extend_from_slice(&[255, 0, 255, 0]);
+                } else {
+                    rgba.extend_from_slice(&[0, 0, 0, alpha]);
+                }
+            }
+        }
+        rgba
+    }
+
+    fn render(scale: f64, rounded: bool, enabled: bool, workers: u16) -> Pixmap {
+        let brush = crate::render::pixels::from_rgba(
+            alpha_edge_fixture(), u32::from(W), u32::from(H), ImageAlphaType::Alpha,
+        )
+        .expect("valid RGBA")
+        .with_quality(ImageQuality::High);
+        let original_id = brush.image.data.id();
+        let image_transform = Affine::translate((14.75, 8.35)) * Affine::scale(scale);
+        let mut images = Images::default();
+        let (paint, brush_transform) = brush_to_paint_candidate_tuned(
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
+            image_transform, Affine::IDENTITY, enabled, true,
+        );
+        assert_eq!(images.mips.is_empty(), !enabled);
+        assert_eq!(brush.image.data.id(), original_id, "converter mutated source");
+        let Brush::Image(image) = &paint else { panic!("image required") };
+        assert_eq!(
+            image.sampler.quality,
+            if enabled { ImageQuality::Medium } else { ImageQuality::High },
+        );
+
+        let clip = Rect::new(24.0, 18.0, 44.0, 36.0);
+        let mut ctx = RenderContext::new_with(
+            64, 56, RenderSettings { num_threads: workers, ..RenderSettings::default() },
+        );
+        ctx.set_transform(Affine::IDENTITY);
+        if rounded {
+            let clip_path = RoundedRect::from_rect(clip, 5.0).to_path(0.1);
+            ctx.push_clip_path(&clip_path);
+        } else {
+            ctx.push_clip_rect(&clip);
+        }
+        ctx.set_transform(image_transform);
+        ctx.set_paint_transform(brush_transform);
+        ctx.set_paint(paint);
+        ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(W), f64::from(H)));
+        ctx.pop_clip();
+        ctx.flush();
+        let mut out = Pixmap::new(64, 56);
+        ctx.render_with(
+            &mut out, &mut Resources::default(),
+            RasterizerSettings {
+                target_init: TargetInit::Clear(WHITE),
+                ..RasterizerSettings::default()
+            },
+        );
+        out
+    }
+
+    #[test]
+    fn transparent_chroma_does_not_bleed_through_real_crop_or_rounded_clip() {
+        let mut checked = 0;
+        for scale in [0.241, 0.313] {
+            for rounded in [false, true] {
+                for workers in [0, 2] {
+                    for enabled in [false, true] {
+                        let frame = render(scale, rounded, enabled, workers);
+                        let mut darkest = 255u8;
+                        let mut worst_chroma_spread = 0u8;
+                        for y in 0..usize::from(frame.height()) {
+                            for x in 0..usize::from(frame.width()) {
+                                let p = frame.data()[y * usize::from(frame.width()) + x];
+                                let min_rgb = p.r.min(p.g).min(p.b);
+                                let max_rgb = p.r.max(p.g).max(p.b);
+                                worst_chroma_spread = worst_chroma_spread.max(max_rgb - min_rgb);
+                                if (x <= 22 || x >= 46) || (y <= 16 || y >= 38) {
+                                    assert_eq!(
+                                        [p.r, p.g, p.b, p.a], [255, 255, 255, 255],
+                                        "cropped image leaked outside frame at ({x},{y})"
+                                    );
+                                } else {
+                                    darkest = darkest.min(min_rgb);
+                                }
+                            }
+                        }
+                        assert!(darkest <= 64, "test rendered no opaque black content");
+                        assert!(
+                            worst_chroma_spread <= 2,
+                            "transparent RGB created coloured halo: scale={scale} \
+                             rounded={rounded} enabled={enabled} workers={workers} \
+                             max_channel_spread={worst_chroma_spread}"
+                        );
+                        println!(
+                            "AKULA_MIP_CROP_CHROMA scale={scale} rounded={rounded} \
+                             enabled={enabled} workers={workers} \
+                             darkest={darkest} max_chroma_spread={worst_chroma_spread}"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 16);
+    }
+}
