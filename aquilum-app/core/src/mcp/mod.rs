@@ -1,4 +1,5 @@
 pub mod active;
+mod agent_principals;
 pub mod bridge;
 mod http;
 mod protocol;
