@@ -1,7 +1,7 @@
 use super::http::{refused, Connection, Failure, Head, Response};
 use super::protocol;
 use serde_json::Value;
-use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -11,7 +11,7 @@ const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
 const MAX_PARALLEL_READS: usize = 4;
 // Bound how long the accept loop waits for a reclaimed *idle* connection.
-const RECLAIM_WAIT: Duration = Duration::from_millis(250);
+const RECLAIM_WAIT: Duration = Duration::from_millis(500);
 
 pub type SharedToolCaller = Arc<dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync>;
 
@@ -39,7 +39,6 @@ struct ConnectionSlots {
 
 struct IdleConnection {
     id: u64,
-    socket: TcpStream,
     evicted: Arc<AtomicBool>,
 }
 
@@ -171,8 +170,10 @@ impl Slot {
             // even been observed by the client.
             if !slots.idle.is_empty() {
                 let idle = slots.idle.remove(0);
+                // Portable cooperative wakeup. On Windows, shutdown on a
+                // cloned socket does not reliably wake another recv thread.
+                // The idle header reader polls the eviction bit every 50 ms.
                 idle.evicted.store(true, Ordering::SeqCst);
-                let _ = idle.socket.shutdown(Shutdown::Both);
                 let (next, _) = endpoint
                     .freed
                     .wait_timeout_while(slots, RECLAIM_WAIT, |slots| {
@@ -199,18 +200,15 @@ impl Slot {
         })
     }
 
-    fn idle(&self, stream: &TcpStream) {
-        // With pipelined input or any incomplete request we intentionally do
-        // not advertise an idle slot. The caller invokes this only after
-        // sending a complete response, outside the dispatch permit.
-        let Ok(socket) = stream.try_clone() else { return };
+    fn idle(&self) {
+        // Register only between complete replies and the next request head.
+        // No duplicated kernel socket or forced TCP reset is necessary.
         let mut slots = lock(&self.endpoint.open);
         if !self.endpoint.stopping.load(Ordering::SeqCst)
             && !self.evicted.load(Ordering::SeqCst)
         {
             slots.idle.push(IdleConnection {
                 id: self.id,
-                socket,
                 evicted: Arc::clone(&self.evicted),
             });
         }
@@ -332,7 +330,7 @@ fn serve(stream: &TcpStream, slot: &Slot) {
         match exchange(&mut connection, &slot.endpoint, slot) {
             Ok(true) => {
                 if !connection.has_buffered_data() {
-                    slot.idle(stream);
+                    slot.idle();
                 }
             }
             Ok(false) => break Ok(()),
@@ -346,7 +344,13 @@ fn serve(stream: &TcpStream, slot: &Slot) {
 }
 
 fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Result<bool, Failure> {
-    let head = connection.read_head(|| slot.activate())?;
+    let head = connection.read_head(|received| {
+        if received {
+            slot.activate()
+        } else {
+            !slot.evicted.load(Ordering::SeqCst)
+        }
+    })?;
     if !slot.activate() {
         return Err(Failure::Gone);
     }
