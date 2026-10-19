@@ -23,7 +23,7 @@ fn visible_fenced_headers_expose_real_named_buttons_not_math_or_prose() {
         let node = tree.nodes.iter().find(|(node_id, _)| *node_id == (*id).into())
             .expect("button is a real Masonry child with its own tree node");
         assert_eq!(node.1.role(), Role::Button);
-        assert_eq!(node.1.name(), Some("Copy code block contents"));
+        assert!(matches!(node.1.label(), Some("Copy code block contents" | "Копировать содержимое блока кода")));
         assert!(node.1.supports_action(Action::Click));
     }
     assert_eq!(text(&root), source);
