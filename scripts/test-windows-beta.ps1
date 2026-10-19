@@ -104,8 +104,8 @@ function Start-And-Close {
       [System.IO.File]::ReadAllText($traceFile)
     } else { '' }
     $keyboardEvents = [regex]::Matches($traceText, 'KeyboardInput').Count
-    $imeCommits = [regex]::Matches($traceText, 'Ime\\(Commit').Count
-    $focusedEvents = [regex]::Matches($traceText, 'Focused\\(true\\)').Count
+    $imeCommits = [regex]::Matches($traceText, 'Ime\(Commit').Count
+    $focusedEvents = [regex]::Matches($traceText, 'Focused\(true\)').Count
     $saveErrors = [regex]::Matches($traceText, 'не сохранён|NeedsReview|SaveError|write refused|HOLD').Count
     # Exact note/title/error contents and raw winit event traces stay private.
     Write-Host "AKULA_WINDOWS_GUI_DIAGNOSTIC note_title=$noteWindowTitle keyboard_events=$keyboardEvents ime_commits=$imeCommits focus_events=$focusedEvents save_error_hints=$saveErrors trace_bytes=$($traceText.Length) saved_before_close=$published saved_after_close=$postClosePublished"
