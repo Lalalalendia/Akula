@@ -133,6 +133,34 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_body_resolver_recovers_opener_outside_the_windowed_paragraphs() {
+        let body: String = (0..12_000)
+            .map(|n| format!("println!(\"line-{n}-🐱\");\n"))
+            .collect();
+        let source = format!("~~~rust\n{body}~~~\nafter");
+        let caret = source.find("line-7500").expect("far code body") + 6;
+        let mut editor = TextEditor::windowed(crop::Rope::from(source.as_str())).markdown();
+        editor.focus = caret;
+        editor.doc.include(caret);
+        assert!(editor.doc.loaded().0 > 0, "the opener must be outside the loaded window");
+
+        let copied = (0..300).find_map(|_| {
+            editor.doc.track((0.0, 0.0));
+            editor.refresh_code_window_opener();
+            let result = editor.focused_fenced_code_body();
+            if result.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            result
+        });
+        let (opener, text) = copied.expect("completed parser checkpoint should recover opening fence");
+        assert_eq!(opener, 0);
+        assert_eq!(text, body.trim_end_matches('\n'), "copy must include the unloaded tail");
+        assert!(text.contains("line-11999-🐱"));
+        assert_eq!(editor.doc.whole(), source);
+    }
+
+    #[test]
     fn code_copy_is_not_offered_for_plain_text_or_indented_code() {
         let indented = TextEditor::new("    println!(\"indented\");\n\ntext").markdown();
         assert_eq!(indented.fenced_code_body(0), None);
