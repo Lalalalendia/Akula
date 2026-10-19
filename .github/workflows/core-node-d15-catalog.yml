@@ -1,0 +1,41 @@
+name: Akula Node D1.5 read catalog Linux proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/lib.rs'
+      - 'aquilum-app/core/src/node_catalog_lab.rs'
+      - 'aquilum-app/core/tests/node_catalog_lab.rs'
+      - 'docs/platforms/AKULA-DEPLOY-D15-CATALOG.md'
+      - '.github/workflows/core-node-d15-catalog.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-headless-d15-catalog-v1
+          cache-workspace-crates: true
+      - name: Verify 5 real filesystem read-catalog tests with pinned Linux fd
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-catalog-lab --test node_catalog_lab -- --nocapture
+      - name: Verify the default Core feature set has not changed
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
