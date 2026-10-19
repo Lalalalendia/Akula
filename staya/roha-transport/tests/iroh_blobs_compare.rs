@@ -1941,6 +1941,16 @@ async fn bounded_ext4_owned_bao_crypto_proof() {
         "tampered Bao parent must cause HOLD even when data and ledger are valid"
     );
 
+    // A valid proof plus trailing attacker-controlled bytes is not the
+    // canonical physical Bao format: require exact expected outboard length.
+    let mut with_trailing = original_outboard.clone();
+    with_trailing.extend_from_slice(b"untrusted-trailing-proof");
+    fs::write(&copied_outboard, with_trailing).unwrap();
+    assert!(matches!(
+        audit_complete_owned_preorder(&mount, &ledger, "bao-corrupted-copy", hash, size),
+        Err(BaoHold::MissingBaoNodes)
+    ));
+
     // Remove the proof entirely: the P2P-10a pathname+DB join cannot attest
     // Bao correctness; this new proof gate MUST notice its absence.
     fs::remove_file(&copied_outboard).unwrap();
@@ -1956,7 +1966,7 @@ async fn bounded_ext4_owned_bao_crypto_proof() {
     );
     drop(ledger);
     println!(
-        "P2P_BLOB10B_OWNED_BAO size={} outboard_bytes={} full_root_proof=true tampered_parent_hold=true missing_proof_hold=true source_unchanged=true fsynced_ledger_unchanged=true partial_bitfields_unchecked=true file_gate_ready=false",
+        "P2P_BLOB10B_OWNED_BAO size={} outboard_bytes={} full_root_proof=true tampered_parent_hold=true trailing_bytes_hold=true missing_proof_hold=true source_unchanged=true fsynced_ledger_unchanged=true partial_bitfields_unchecked=true file_gate_ready=false",
         size, proof.outboard_bytes
     );
 }
