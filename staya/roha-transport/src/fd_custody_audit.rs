@@ -16,7 +16,7 @@
 
 use std::{
     fs::{File, Metadata},
-    io::{self, Read},
+    io,
     os::{
         fd::AsRawFd,
         unix::fs::{FileExt, MetadataExt},
@@ -89,8 +89,7 @@ fn valid_component(name: &str) -> bool {
         && name.len() <= 80
         && name
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
-                || b == b'.')
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
         && name != "."
         && name != ".."
         && !name.contains("..")
@@ -107,8 +106,7 @@ fn child(parent: &File, name: &str, dir: bool) -> Result<File, FdHold> {
     if dir {
         flags |= OFlags::DIRECTORY;
     }
-    let resolve =
-        ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_XDEV;
+    let resolve = ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_XDEV;
     let fd = openat2(parent, name, flags, Mode::empty(), resolve)
         .map_err(|_| FdHold::UnsafeRelativePath)?;
     Ok(File::from(fd))
@@ -241,9 +239,12 @@ impl<'a> PinnedFsStore<'a> {
         Ok(())
     }
 
-    fn open_blob_part(&self, hash: [u8; 32], extension: &str, max: u64)
-        -> Result<(String, File, Metadata), FdHold>
-    {
+    fn open_blob_part(
+        &self,
+        hash: [u8; 32],
+        extension: &str,
+        max: u64,
+    ) -> Result<(String, File, Metadata), FdHold> {
         let hex = blake3::Hash::from_bytes(hash).to_hex();
         let name = format!("{hex}.{extension}");
         let file = child(&self.data, &name, false)?;
@@ -251,9 +252,7 @@ impl<'a> PinnedFsStore<'a> {
         Ok((name, file, metadata))
     }
 
-    fn check_blob_binding(&self, name: &str, file: &File, before: &Metadata)
-        -> Result<(), FdHold>
-    {
+    fn check_blob_binding(&self, name: &str, file: &File, before: &Metadata) -> Result<(), FdHold> {
         let current = child(&self.data, name, false)?;
         if !same_file(&current.metadata()?, before)
             || !unchanged_in_place(before, &file.metadata()?)
@@ -293,7 +292,8 @@ pub fn audit_fd_complete_owned(
         return Err(FdHold::InvalidObjectLength);
     }
     let start = ledger.snapshot()?;
-    let found = ledger.reservation_inventory()?
+    let found = ledger
+        .reservation_inventory()?
         .into_iter()
         .find(|r| r.hash == expected_hash)
         .ok_or(FdHold::UnverifiedOrUnknownReservation)?;
@@ -317,12 +317,14 @@ pub fn audit_fd_complete_owned(
     // CLOEXEC-protected DB FD. No DB path from redb/remote data is followed.
     // On a system lacking procfs this fails closed; never reopen by pathname.
     let proc_db = format!("/proc/self/fd/{}", pinned.db.as_raw_fd());
-    let ro_db = ReadOnlyDatabase::open(&proc_db)
+    let ro_db = ReadOnlyDatabase::open(&proc_db).map_err(|_| FdHold::RedbReadOnlyUnavailable)?;
+    let read_tx = ro_db
+        .begin_read()
         .map_err(|_| FdHold::RedbReadOnlyUnavailable)?;
-    let read_tx = ro_db.begin_read().map_err(|_| FdHold::RedbReadOnlyUnavailable)?;
 
     let (data_name, data, data_before) = pinned.open_blob_part(expected_hash, "data", MAX_DATA)?;
-    let (bao_name, bao, bao_before) = pinned.open_blob_part(expected_hash, "obao4", MAX_OUTBOARD)?;
+    let (bao_name, bao, bao_before) =
+        pinned.open_blob_part(expected_hash, "obao4", MAX_OUTBOARD)?;
     if data_before.len() != expected_len {
         return Err(FdHold::InvalidObjectLength);
     }
@@ -342,7 +344,8 @@ pub fn audit_fd_complete_owned(
         },
         &ChunkRanges::all(),
         io::sink(),
-    ).map_err(|_| FdHold::InvalidBaoProof)?;
+    )
+    .map_err(|_| FdHold::InvalidBaoProof)?;
 
     pinned.check_blob_binding(&data_name, &data, &data_before)?;
     pinned.check_blob_binding(&bao_name, &bao, &bao_before)?;
@@ -391,7 +394,10 @@ mod tests {
             Err(FdHold::UnsafeRelativePath)
         ));
         for bad in ["..", "../real", "a/b", "/etc/passwd", "", "a..b"] {
-            assert!(matches!(child(&root, bad, false), Err(FdHold::InvalidChildName)));
+            assert!(matches!(
+                child(&root, bad, false),
+                Err(FdHold::InvalidChildName)
+            ));
         }
     }
 }
