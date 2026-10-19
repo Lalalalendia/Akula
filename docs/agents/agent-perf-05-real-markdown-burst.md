@@ -22,3 +22,19 @@ PR #364 provided bounded concurrency of four known-safe readers, #368 added opti
 ## Next decision
 
 If p95 and retry amplification are excessive at 100 clients, do not raise `MAX_CONNECTIONS` blindly. First examine request-level admission, fairness and per-agent quotas, authenticated ingress, keep-alive pressure, and bounded backoff or `Retry-After` semantics. Keep existing four-reader/one-writer safety invariants.
+## Measured CI evidence — 19 October 2026
+
+Source: Application CI run 39271521676 on PR head `d88b4b5`, required Rust workspace and Main PR gate green. Three sequential repetitions on one Linux CI runner. Each logical request can contain bounded retries, so `req/s` divides **successful logical requests** by end-to-end wall time, not TCP attempts.
+
+| BLAKE3 revision | Clients | Logical requests / run | Median req/s | Median p95 | 503 per run | Transport resets per run | Exhausted |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Off | 10 | 60 | 3597.7 | 4.731ms | 0 | 0 | 0 |
+| Off | 32 | 192 | 3013.2 | 26.614ms | 15–18 | 23–28 | 0 |
+| Off | 100 | 600 | 2729.1 | 96.684ms | 437–502 | 175–205 | 0 |
+| On | 10 | 60 | 3326.9 | 3.871ms | 0 | 0 | 0 |
+| On | 32 | 192 | 2889.0 | 30.899ms | 19–27 | 17–30 | 0 |
+| On | 100 | 600 | 2672.4 | 101.969ms | 479–517 | 188–208 | 0 |
+
+Interpretation: throughput plateaus and then falls beyond 16 concurrent HTTP connections. For 100 clients, successful logical reads require hundreds of extra attempts caused by 503 and connection churn; this is transport admission overhead, not evidence that Markdown parsing or BLAKE3 is the main bottleneck. The modest difference between hash and non-hash modes is not a controlled microbenchmark of hashing alone.
+
+Follow-up experiment: when the transport sees actual saturation, proactively close completed HTTP replies instead of leaving them as idle keep-alives. That should let queued fresh connections reuse slots without forced idle eviction. Keep the existing 16-socket and 4-concurrent-read limits, authentication and File Gate semantics; re-run the identical 10/32/100 benchmark before adopting. No claim about 100 concurrent in-flight tool calls.
