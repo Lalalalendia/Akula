@@ -1,0 +1,52 @@
+name: Staya RN4B signed app scope — format and bounded denies
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4b-signed-object-scope-*"
+    paths:
+      - "experiments/staya-filegate-receipt-02/src/peer_scope.rs"
+      - "experiments/staya-filegate-receipt-02/src/lib.rs"
+      - ".github/workflows/staya-rn4b-app-grant.yml"
+  pull_request:
+    paths:
+      - "experiments/staya-filegate-receipt-02/src/peer_scope.rs"
+      - "experiments/staya-filegate-receipt-02/src/lib.rs"
+      - ".github/workflows/staya-rn4b-app-grant.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  source-hygiene:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Verify signed grant module rustfmt without pulling app dependencies
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check experiments/staya-filegate-receipt-02/src/peer_scope.rs
+      - name: Verify isolated research cannot mutate production Core or transport source
+        run: |
+          set -euo pipefail
+          git diff --name-only 89ad1d34c952fe395c7ee36098fadfd06c4b80d9..HEAD > /tmp/changed
+          python3 - <<'PY'
+          from pathlib import Path
+          allowed = {
+            "docs/sync/staya-app-grant-01.md",
+            "experiments/staya-filegate-receipt-02/src/lib.rs",
+            "experiments/staya-filegate-receipt-02/src/peer_scope.rs",
+            ".github/workflows/staya-rn4b-app-grant.yml"
+          }
+          found = set(Path("/tmp/changed").read_text().splitlines())
+          assert found <= allowed, f"unexpected production/core edits: {found - allowed}"
+          assert "experiments/staya-filegate-receipt-02/src/peer_scope.rs" in found
+          print("PASS exact research-only source scope")
+          PY
