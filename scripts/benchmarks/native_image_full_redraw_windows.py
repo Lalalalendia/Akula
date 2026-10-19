@@ -138,6 +138,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     env["AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER"] = "1"
     env["AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF"] = "1"
     env["AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW"] = "1"
+    env["AKULA_EXPERIMENTAL_IMAGE_SCROLL_SCAN"] = "1"
     env["AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF"] = "1"
     env["AKULA_EXPERIMENTAL_FRAME_SAMPLES"] = "1"
     env["AKULA_EXPERIMENTAL_FRAME_STAGES"] = "1"
@@ -177,6 +178,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: image mipmap was never used")
     if "AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED" not in log:
         raise ValueError(f"{sample}: full redraw was not enabled")
+    if "AKULA_IMAGE_SCROLL_SCAN_APPLIED logical_step=240" not in log:
+        raise ValueError(f"{sample}: native direct-pixel scroll scan was not applied")
     lines = [line for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     if not lines:
         raise ValueError(f"{sample}: no source/eviction diagnostic line")
@@ -221,6 +224,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         ).hexdigest(),
         "note_sha256": hashlib.sha256(note.encode()).hexdigest(),
         "unique_image_sources_in_note": len(hashes),
+        "replay_scroll_scan_logical_pixels": 240,
         "unique_mip_source_ids_requested": unique,
         "distinct_decoded_pixel_fingerprints": unique_pixels,
         "cpu_p95_ms": p95, "cpu_p99_ms": p99,
