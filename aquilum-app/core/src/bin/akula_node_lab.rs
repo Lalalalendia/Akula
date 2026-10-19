@@ -322,13 +322,14 @@ mod linux {
                     // to the new scoped catalog: a wider --note selection
                     // could otherwise bypass the narrowed reader allowlist.
                     if scope.is_some() {
-                        return stream.write_all(&response(404, json!({"error": "not found"})));
-                    }
-                    match safe_read(root, &config.note) {
-                        Ok((content, hash)) => response(200, json!({
-                            "note": config.note, "content": content, "rawBlake3": hash
-                        })),
-                        Err(status) => response(status, json!({"error": "read refused"})),
+                        response(404, json!({"error": "not found"}))
+                    } else {
+                        match safe_read(root, &config.note) {
+                            Ok((content, hash)) => response(200, json!({
+                                "note": config.note, "content": content, "rawBlake3": hash
+                            })),
+                            Err(status) => response(status, json!({"error": "read refused"})),
+                        }
                     }
                 } else if req.path == "/v1/documents" || req.path.starts_with("/v1/documents/") {
                     catalog_response(&req.path, scope)
