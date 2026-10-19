@@ -252,7 +252,15 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
     env["AKULA_EXPERIMENTAL_FRAME_SAMPLES"] = "1"
     env["AKULA_VELLO_SINGLE_RECT"] = "1"
     env.pop("AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT", None)
-    if mode != "baseline":
+    env.pop("AKULA_EXPERIMENTAL_IMAGE_FILTER_ONLY", None)
+    env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_DIRECT_L2", None)
+    # All 2×2 cells must explicitly force the real image brush to High/Medium.
+    # Never rely on the app's default image sampling quality.
+    env["AKULA_EXPERIMENTAL_IMAGE_FILTER_FORCE"] = (
+        "medium" if mode in ("filter_medium", "mip_medium") else "high"
+    )
+    env["AKULA_EXPERIMENTAL_IMAGE_FILTER_PROOF"] = "1"
+    if mode not in ("baseline", "filter_medium"):
         env["AKULA_EXPERIMENTAL_IMAGE_MIP"] = "1"
         env["AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF"] = "1"
         if mode in ("mip_medium", "mip_medium_linger"):
@@ -293,11 +301,22 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         raise ValueError(f"{scene}/{trial}/{mode}: no visible, PID-matched Win32 Akula window")
     log = log_file.read_text(errors="replace")
     applied = "AKULA_MIP_APPLIED level=" in log
-    if applied != (mode != "baseline"):
+    mip_expected = mode not in ("baseline", "filter_medium")
+    if applied != mip_expected:
         raise ValueError(
             f"{scene}/{trial}/{mode}: mip path witness mismatch, "
             f"applied={applied}; see {log_file}"
         )
+    selected_high = "AKULA_FILTER_FORCED_HIGH_APPLIED" in log
+    selected_medium = "AKULA_FILTER_FORCED_MEDIUM_APPLIED" in log
+    expected_medium = mode in ("filter_medium", "mip_medium")
+    if (selected_medium != expected_medium
+            or selected_high != (not expected_medium)):
+        raise ValueError(
+            f"{scene}/{trial}/{mode}: exact-quality witness mismatch: "
+            f"High={selected_high} Medium={selected_medium}; see {log_file}"
+        )
+    medium_only_applied = mode == "filter_medium" and selected_medium
 
     replay = json.loads(replay_file.read_text())
     metrics = json.loads(metrics_file.read_text())
@@ -321,7 +340,7 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
     samples = [dict(pair.split("=", 1) for pair in line.split()[2:] if "=" in pair)
                for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     diagnostics = samples[-1] if samples else {}
-    if mode != "baseline":
+    if mip_expected:
         if len(samples) < 2 or int(diagnostics.get("final_hits", 0)) == 0:
             raise ValueError(f"{scene}/{trial}/{mode}: missing warm-cache diagnostics")
     else:
@@ -331,7 +350,7 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         trial=trial, mode=mode, scene=scene, size=size,
         note_sha256=note_hash, image_sha256=image_hash,
         peak_rss_kib=rss, window_witness=window_witness,
-        applied=applied, replay=replay, metrics=metrics,
+        applied=applied, filter_only_applied=medium_only_applied, forced_quality=("medium" if selected_medium else "high"), replay=replay, metrics=metrics,
         frame_distribution=distribution, cache=diagnostics,
     )
     (root / "sample.json").write_text(json.dumps(result, indent=2) + "\n")
