@@ -49,6 +49,13 @@ jobs:
             render::paint::mipmap::tests -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             render::paint::convert::mipmap_integration_tests -- --nocapture --test-threads=1
+      - name: Compare byte-exact scalar and packed RGBA reduction (diagnostic only)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            packed_reduction_microbench_diagnostic -- --ignored --nocapture --test-threads=1
       - name: Real PNG, alpha-crop, fractional and odd-size QA
         working-directory: aquilum-app
         shell: bash
