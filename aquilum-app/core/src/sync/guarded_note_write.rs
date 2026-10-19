@@ -444,6 +444,104 @@ mod tests {
         assert_eq!(fs::read(&outside).unwrap(), b"original");
     }
 
+    #[test]
+    fn p0g3c_rejects_foreign_core_and_note_before_primary_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let data_a = temp.path().join("appdata-a");
+        let data_b = temp.path().join("appdata-b");
+        for path in [&root, &data_a, &data_b] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let core_a = Core::open(&data_a, Arc::new(|_: CoreEvent| {}));
+        let core_b = Core::open(&data_b, Arc::new(|_: CoreEvent| {}));
+        let note = root.join("Bound.md");
+        let foreign_note = root.join("Foreign.md");
+        fs::write(&note, b"protected original").unwrap();
+        fs::write(&foreign_note, b"protected original").unwrap();
+        let hash = blake3::hash(b"protected original").to_hex().to_string();
+        let permit = HeldCustodyHistoryPermit {
+            core: &core_a,
+            note: &note,
+        };
+        assert!(permit.binds_core_and_note(&core_a, &note));
+        assert!(permit.binds_history_and_note(&core_a.history, &note));
+
+        // White-box test for a future accidental cross-Core call: a forged
+        // misplaced permit must never enter the primary writer or prewrite.
+        let mut called = false;
+        let wrong_core = gate::write_checked_history_with_prewrite(
+            &permit, &core_b, &note, "forbidden", &hash,
+            Source::External, None,
+            || { called = true; Ok(()) },
+        );
+        assert!(matches!(wrong_core, Err(CheckedHistoryError::Primary(
+            FileCommandError::Task { .. }
+        ))));
+        assert!(!called, "wrong Core invoked primary prewrite");
+        assert_eq!(fs::read(&note).unwrap(), b"protected original");
+
+        let mut called = false;
+        let wrong_note = gate::write_checked_history_with_prewrite(
+            &permit, &core_a, &foreign_note, "forbidden", &hash,
+            Source::External, None,
+            || { called = true; Ok(()) },
+        );
+        assert!(matches!(wrong_note, Err(CheckedHistoryError::Primary(
+            FileCommandError::Task { .. }
+        ))));
+        assert!(!called, "wrong note invoked primary prewrite");
+        assert_eq!(fs::read(&foreign_note).unwrap(), b"protected original");
+    }
+
+    #[test]
+    fn p0g3c_history_rejects_foreign_instance_and_path_before_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let data_a = temp.path().join("appdata-a");
+        let data_b = temp.path().join("appdata-b");
+        for path in [&root, &data_a, &data_b] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let core_a = Core::open(&data_a, Arc::new(|_: CoreEvent| {}));
+        let core_b = Core::open(&data_b, Arc::new(|_: CoreEvent| {}));
+        let note = root.join("Bound.md");
+        let other_note = root.join("Other.md");
+        fs::write(&note, b"protected original").unwrap();
+        fs::write(&other_note, b"protected original").unwrap();
+        let hash = blake3::hash(b"forbidden history snapshot").to_hex().to_string();
+        let permit = HeldCustodyHistoryPermit {
+            core: &core_a,
+            note: &note,
+        };
+        let write = || crate::history::NoteWrite {
+            disk_before: None,
+            text: "forbidden history snapshot",
+            hash: &hash,
+            source: Source::External,
+            name: None,
+        };
+        let roots = || vec![root.clone()];
+        let wrong_core = core_b.history.try_saved_with_custody(
+            &permit, &roots, &note, write(),
+        );
+        assert!(wrong_core.is_err(), "legacy custody accepted foreign HistoryService");
+        let wrong_strict = core_b.history.try_saved_with_custody_verified_version(
+            &permit, &roots, &note, write(),
+        );
+        assert!(wrong_strict.is_err(), "strict evidence accepted foreign HistoryService");
+        let wrong_note = core_a.history.try_saved_with_custody(
+            &permit, &roots, &other_note, write(),
+        );
+        assert!(wrong_note.is_err(), "legacy custody accepted a different note");
+        let strict_wrong_note = core_a.history.try_saved_with_custody_verified_version(
+            &permit, &roots, &other_note, write(),
+        );
+        assert!(strict_wrong_note.is_err(), "strict custody accepted a different note");
+        assert_eq!(fs::read(&note).unwrap(), b"protected original");
+        assert_eq!(fs::read(&other_note).unwrap(), b"protected original");
+    }
+
     #[path = "guarded_note_transaction_tests.rs"]
     mod transaction;
 }
