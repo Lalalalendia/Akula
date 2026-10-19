@@ -800,10 +800,13 @@ mod mipmap_stage_benchmarks {
                 let (convert_p50, convert_p95) = stats_us(&convert_samples);
                 let (encode_p50, encode_p95) = stats_us(&encode_samples);
                 let (raster_p50, raster_p95) = stats_us(&raster_samples);
-                let expected_levels = if enable_mip { 2 } else { 0 };
+                // The direct-hit fast path intentionally keeps the requested
+                // final level warm while intermediate levels expire after two
+                // frames; a healthy warm cache therefore holds ONE level.
+                let expected_levels = if enable_mip { 1 } else { 0 };
                 assert_eq!(
                     images.mips.len(), expected_levels,
-                    "warm image must not repeatedly rebuild or evaporate",
+                    "final mip must remain warm without retaining intermediates",
                 );
                 println!(
                     "AKULA_MIP_STAGES workers={workers} mode={mode} \
