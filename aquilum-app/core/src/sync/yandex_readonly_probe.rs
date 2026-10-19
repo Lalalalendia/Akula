@@ -75,6 +75,16 @@ pub async fn probe_yandex_s3_read_only(
         .build();
 
     let client = aws_sdk_s3::Client::from_conf(config);
+    probe_with_client(&client, bucket).await
+}
+
+// This small request boundary is separately exercised against disposable
+// localhost MinIO. The production caller above constructs a *fixed* Yandex
+// endpoint; no public method accepts an arbitrary probe destination.
+async fn probe_with_client(
+    client: &aws_sdk_s3::Client,
+    bucket: &str,
+) -> Result<(), YandexS3ProbeError> {
     client
         .list_objects_v2()
         .bucket(bucket)
@@ -168,6 +178,54 @@ mod tests {
         assert_eq!(classify_service_error(Some("AuthorizationHeaderMalformed")), YandexS3ProbeError::WrongRegion);
         assert_eq!(classify_service_error(None), YandexS3ProbeError::ServiceUnavailable);
         assert_eq!(classify_service_error(Some("Arbitrary")), YandexS3ProbeError::ServiceUnavailable);
+    }
+
+
+    /// Exercises the exact production LIST builder against a disposable
+    /// localhost S3 server. Fixture management (create/delete bucket) is
+    /// test-only; probe_with_client performs no writes or file operations.
+    #[tokio::test]
+    #[ignore = "requires CI's isolated localhost MinIO"]
+    async fn live_minio_yandex_probe_request_is_read_only() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").expect("local S3 test endpoint");
+        // Fail closed if the test was pointed at a real S3 account.
+        assert_eq!(endpoint, "http://127.0.0.1:9000");
+        let access = std::env::var("AWS_ACCESS_KEY_ID").expect("CI synthetic access key");
+        let secret = std::env::var("AWS_SECRET_ACCESS_KEY").expect("CI synthetic secret");
+
+        async fn client(endpoint: &str, access: &str, secret: &str) -> aws_sdk_s3::Client {
+            let creds = Credentials::new(access.to_owned(), secret.to_owned(), None, None, "minio-only");
+            let shared = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .region(Region::new("us-east-1"))
+                .credentials_provider(creds)
+                .load()
+                .await;
+            let config = aws_sdk_s3::config::Builder::from(&shared)
+                .endpoint_url(endpoint)
+                .force_path_style(true)
+                .retry_config(RetryConfig::standard().with_max_attempts(1))
+                .build();
+            aws_sdk_s3::Client::from_conf(config)
+        }
+
+        let admin = client(&endpoint, &access, &secret).await;
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let bucket = format!("akula-yc-probe-{}-{nonce}", std::process::id());
+        assert!(YandexS3Onboarding::valid_bucket(&bucket));
+        assert!(admin.create_bucket().bucket(&bucket).send().await.is_ok(),
+            "could not create disposable MinIO-only fixture");
+        // Empty bucket is healthy; absence of a matching object is not failure.
+        assert_eq!(probe_with_client(&admin, &bucket).await, Ok(()));
+        assert_eq!(probe_with_client(&admin, &format!("{bucket}-missing")).await,
+            Err(YandexS3ProbeError::BucketNotFound));
+
+        let untrusted = client(&endpoint, "akula-invalid-probe-key", "invalid-probe-secret").await;
+        assert_eq!(probe_with_client(&untrusted, &bucket).await,
+            Err(YandexS3ProbeError::CredentialsRejected));
+        assert!(admin.delete_bucket().bucket(&bucket).send().await.is_ok(),
+            "could not delete disposable MinIO-only fixture");
     }
 
     #[test]
