@@ -6,6 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { request as rawHttpRequest } from "node:http";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -64,6 +65,35 @@ async function deniedWrite(headers = {}) {
   });
 }
 
+async function deniedHost(host) {
+  const body = JSON.stringify({
+    jsonrpc: "2.0", id: 990, method: "tools/call",
+    params: { name: "update_note", arguments: {
+      note: "Conformance.md", workspace, mode: "replace",
+      content: "HOST_REBINDING_OVERWRITE", open: false,
+    }},
+  });
+  return new Promise((resolve, reject) => {
+    const request = rawHttpRequest(endpoint, {
+      method: "POST",
+      headers: {
+        Host: host,
+        Authorization: "Bearer " + bearer,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "Content-Length": Buffer.byteLength(body),
+      },
+      timeout: 5000,
+    }, response => {
+      response.resume();
+      response.on("end", () => resolve(response.statusCode));
+    });
+    request.on("timeout", () => request.destroy(new Error("Host denial timed out")));
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
 const { sdk: agentA, transport: transportA } = client("agent-a");
 const { sdk: agentB, transport: transportB } = client("agent-b");
 let connectedA = false;
@@ -105,9 +135,19 @@ try {
     "MCP-Protocol-Version": "2026-07-28",
   });
   assert.equal(wrongVersion.status, 400);
+  for (const host of [
+    "attacker.example",
+    "localhost.evil.example",
+    "127.0.0.1.evil.example",
+    "127.0.0.1@" + "attacker.example",
+    "127.0.0.1:" + (Number(port) === 65535 ? 65534 : Number(port) + 1),
+  ]) {
+    assert.equal(await deniedHost(host), 403, "Host rebinding denial: " + host);
+  }
   const stillOriginal = toolJson(await agentA.callTool({ name: "read_note", arguments: args }));
   assert.equal(stillOriginal.revision, a.revision, "denied request modified the document");
   assert.equal(stillOriginal.content, a.content);
+  assert.ok(!stillOriginal.content.includes("HOST_REBINDING_OVERWRITE"));
 
   // Two independent official SDK clients race on one raw-byte revision.
   // Exactly one may change the note, and the loser must re-read.
@@ -138,6 +178,7 @@ try {
 
   console.log("AKAI_DIRECT_SDK_RESULT initialize=PASS tools_list=PASS read_note=PASS");
   console.log("AKAI_DIRECT_SDK_RESULT auth_missing=401 auth_wrong=401 origin_wrong=403 version_unsupported=400");
+  console.log("AKAI_DIRECT_SDK_RESULT host_rebinding_denied=5 leaked_writes=0");
   console.log("AKAI_DIRECT_SDK_RESULT concurrent_cas_winners=1 conflicts=1 stale_overwrites=0");
 } finally {
   if (connectedB) await agentB.close().catch(() => {});
