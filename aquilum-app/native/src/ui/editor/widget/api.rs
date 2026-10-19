@@ -66,6 +66,7 @@ impl TextEditor {
         for button in std::mem::take(&mut this.widget.access_code_buttons) {
             this.ctx.remove_child(button.widget);
         }
+        this.widget.access_code_window_size = None;
         let widget = &mut *this.widget;
         widget.videos.stop();
         widget.doc.set_rope(text);

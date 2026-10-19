@@ -141,6 +141,7 @@ impl TextEditor {
     /// graph changes to the mutate pass instead of editing the widget arena
     /// during layout or emitting virtual NodeIds without event routing.
     pub(super) fn refresh_access_code_buttons(&mut self, ctx: &mut ComposeCtx<'_>, top: f64, bottom: f64) {
+        self.access_code_window_size = Some(ctx.window_size());
         let visible = self.visible_copy_headers(top, bottom);
         let differs = visible.len() != self.access_code_buttons.len()
             || visible.iter().any(|(opener, rect)| {
@@ -199,7 +200,8 @@ impl TextEditor {
         // A platform may deliver an accessibility Click after a scroll but
         // before the deferred child-removal pass runs. Never allow an
         // offscreen, previously exposed node to copy stale content.
-        let (top, bottom) = super::visible(ctx.window_transform(), ctx.window_size());
+        let Some(window_size) = self.access_code_window_size else { return };
+        let (top, bottom) = super::visible(ctx.window_transform(), window_size);
         if !top.is_finite() || !bottom.is_finite()
             || original.y1 <= top || original.y0 >= bottom
         {
