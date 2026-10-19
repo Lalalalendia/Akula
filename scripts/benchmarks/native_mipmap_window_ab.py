@@ -16,6 +16,7 @@ import sys
 import time
 from pathlib import Path
 from statistics import median
+from math import ceil, isfinite
 from native_scroll_window_ab import number
 
 REPO = Path(__file__).resolve().parents[2]
@@ -23,6 +24,39 @@ SOURCE = REPO / "aquilum-app/native/assets/city-cover.png"
 SCENES = (("image_compact", "1000x600"), ("image_large", "1750x1051"))
 TRIALS = (1, 2, 3, 4)
 MODES = ("baseline", "mip_high", "mip_medium", "mip_medium_linger")
+
+
+def p95(samples: list[float]) -> float:
+    if not samples or not all(isfinite(s) and s >= 0 for s in samples):
+        raise ValueError("invalid frame time samples")
+    ordered = sorted(samples)
+    return ordered[max(0, ceil(len(ordered) * 0.95) - 1)]
+
+
+def frame_distribution(metrics: dict) -> dict:
+    frames = metrics.get("frameSamplesMs")
+    raster = metrics.get("rasterSamplesMs")
+    if not isinstance(frames, list) or not isinstance(raster, list):
+        raise ValueError("missing required opt-in per-frame data")
+    if len(frames) != len(raster) or len(frames) != int(metrics["frames"]) - 1:
+        raise ValueError("incorrect frame/raster series length")
+    if len(frames) < 80:
+        raise ValueError("too few independently timed frames")
+    chunks = []
+    for quarter in range(4):
+        lo = quarter * len(frames) // 4
+        hi = (quarter + 1) * len(frames) // 4
+        chunks.append({
+            "quarter": quarter + 1,
+            "frame_p95_ms": p95(frames[lo:hi]),
+            "raster_p95_ms": p95(raster[lo:hi]),
+        })
+    return {
+        "frames_sampled": len(frames),
+        "frame_p95_first_half_ms": p95(frames[:len(frames) // 2]),
+        "frame_p95_second_half_ms": p95(frames[len(frames) // 2:]),
+        "quarters": chunks,
+    }
 
 
 def fixture() -> str:
@@ -74,6 +108,7 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         "--replay-scroll", str(replay_file), "--metrics", str(metrics_file),
     ]
     env = os.environ.copy()
+    env["AKULA_EXPERIMENTAL_FRAME_SAMPLES"] = "1"
     env["AKULA_VELLO_SINGLE_RECT"] = "1"
     env.pop("AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT", None)
     if mode != "baseline":
@@ -129,6 +164,13 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         number(metrics, key, 0.00001)
     if number(metrics, "threads") != 2 or number(metrics, "frames") < frames:
         raise ValueError(f"{scene}/{mode}: invalid host metrics")
+    distribution = frame_distribution(metrics)
+    # The host computes p95 on the same samples; tolerate only rounding
+    # (summary is written to 2 decimal places).
+    if abs(p95(metrics["frameSamplesMs"]) - metrics["frameP95Ms"]) > 0.06:
+        raise ValueError(f"{scene}/{mode}: raw frame sample p95 disagrees with host")
+    if abs(p95(metrics["rasterSamplesMs"]) - metrics["rasterP95Ms"]) > 0.06:
+        raise ValueError(f"{scene}/{mode}: raw raster sample p95 disagrees with host")
     import re
     samples = [dict(pair.split("=", 1) for pair in line.split()[2:] if "=" in pair)
                for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
@@ -143,7 +185,7 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         trial=trial, mode=mode, scene=scene, size=size,
         note_sha256=note_hash, image_sha256=image_hash,
         peak_rss_kib=rss, applied=applied, replay=replay, metrics=metrics,
-        cache=diagnostics,
+        frame_distribution=distribution, cache=diagnostics,
     )
     (root / "sample.json").write_text(json.dumps(result, indent=2) + "\n")
     print(
@@ -169,6 +211,7 @@ def report(rows: list[dict], binary_hash: str) -> str:
         "Modes: original High, mip+High, mip+Medium, mip+Medium+512-frame LRU.",
         "All mip modes require affirmative native witness; baseline must not.",
         "Timings and RSS are diagnostic, not a user-visible physical FPS measurement.",
+        "Per-frame raster/total samples are developer-only; all modes measured identically.",
         "",
         "| Scene | Mode | Work avg (ms) | Raster p95 (ms) | Frame p95 (ms) | Peak RSS (MiB) |",
         "|---|---|---:|---:|---:|---:|",
@@ -213,6 +256,35 @@ def report(rows: list[dict], binary_hash: str) -> str:
                 f"{median(int(x['final_hits']) for x in cache):.0f}, "
                 f"generated_levels={median(int(x['generated']) for x in cache):.0f}, "
                 f"generated_ms={median(float(x['generated_ms']) for x in cache):.2f}."
+            )
+        # Pair each candidate process with its baseline from the same trial.
+        # A median of separately aggregated p95 values can hide noisy runs.
+        pairs = []
+        for trial in TRIALS:
+            trial_rows = {r["mode"]: r for r in selected if r["trial"] == trial}
+            delta = (
+                trial_rows["mip_medium_linger"]["metrics"]["frameP95Ms"]
+                - trial_rows["baseline"]["metrics"]["frameP95Ms"]
+            )
+            pairs.append(delta)
+        lines.append(
+            f"{scene}: paired 512-frame vs baseline frame-p95 differences (ms) "
+            f"={[round(d, 3) for d in pairs]}, "
+            f"wins={sum(d < 0 for d in pairs)}/{len(pairs)}, "
+            f"median_delta_ms={median(pairs):+.3f}."
+        )
+        for mode in ("baseline", "mip_medium_linger"):
+            sub = [r for r in selected if r["mode"] == mode]
+            quarter_medians = [
+                median(r["frame_distribution"]["quarters"][q]["frame_p95_ms"] for r in sub)
+                for q in range(4)
+            ]
+            early = median(r["frame_distribution"]["frame_p95_first_half_ms"] for r in sub)
+            late = median(r["frame_distribution"]["frame_p95_second_half_ms"] for r in sub)
+            lines.append(
+                f"{scene}/{mode}: quarter frame-p95 (ms) "
+                f"{[round(t, 3) for t in quarter_medians]}, "
+                f"first_half={early:.3f}, second_half={late:.3f}."
             )
         linger = values["mip_medium_linger"]
         lines.append(
