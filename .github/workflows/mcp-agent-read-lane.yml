@@ -1,0 +1,57 @@
+name: MCP agent concurrent read-lane experiment
+
+# Separate opt-in experiment. No feature is enabled in the published
+# local-only build; default MCP keeps its original serialized semantics.
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/mcp/server.rs'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/native/Cargo.toml'
+      - '.github/workflows/mcp-agent-read-lane.yml'
+      - 'docs/agents/mcp-read-lane-experiment.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mcp-agent-lane:
+    name: MCP read lane (opt-in) / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-mcp-agent-lane
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-mcp-agent-lane
+          key: mcp-agent-lane-${{ matrix.os }}
+          cache-workspace-crates: true
+      - name: Default MCP still serializes unknown and write tools
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --no-default-features mcp::server::tests::runs_one_tool_call_at_a_time -- --nocapture
+      - name: Opt-in read lane proofs over actual loopback HTTP
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --no-default-features --features mcp-parallel-reads mcp::server::tests -- --nocapture
+      - name: Native feature wiring without AWS
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo tree --locked -p aquilum-native --no-default-features --features mcp-parallel-reads > feature-tree.txt
+          if grep -E 'aws-(config|sdk-s3|sdk-sts) ' feature-tree.txt; then
+            echo 'MCP read experiment unexpectedly activates AWS/S3'
+            exit 1
+          fi
