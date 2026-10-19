@@ -602,6 +602,53 @@ mod tests {
     }
 
     #[test]
+    fn independent_process_connections_cannot_both_revoke_and_rotate() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("agents.sqlite3");
+        let mut host = AgentCredentialStore::open(&path).unwrap();
+        let issued = host.issue_principal("Concurrent agent", None).unwrap();
+        let old_token = issued.bearer_once().to_owned();
+        let id = issued.credential;
+        drop(host);
+
+        let start = Arc::new(Barrier::new(3));
+        let revoke_path = path.clone();
+        let revoke_barrier = Arc::clone(&start);
+        let revoker = thread::spawn(move || {
+            let mut store = AgentCredentialStore::open(&revoke_path).unwrap();
+            revoke_barrier.wait();
+            store.revoke(id)
+        });
+        let rotate_path = path.clone();
+        let rotate_barrier = Arc::clone(&start);
+        let rotator = thread::spawn(move || {
+            let mut store = AgentCredentialStore::open(&rotate_path).unwrap();
+            rotate_barrier.wait();
+            store.rotate(id, None)
+        });
+        start.wait();
+        let revoked = revoker.join().unwrap();
+        let rotated = rotator.join().unwrap();
+        assert_ne!(revoked.is_ok(), rotated.is_ok(), "exactly one transaction must win");
+        assert_eq!(
+            revoked.as_ref().err().or(rotated.as_ref().err()),
+            Some(&AgentCredentialError::Denied)
+        );
+
+        let reopened = AgentCredentialStore::open(&path).unwrap();
+        assert_eq!(reopened.authenticate(&old_token), Err(AgentCredentialError::Denied));
+        if let Ok(new_key) = rotated {
+            assert_eq!(
+                reopened.authenticate(new_key.bearer_once()).unwrap().principal,
+                new_key.principal
+            );
+        }
+    }
+
+    #[test]
     fn rotate_invalidates_old_bearer_and_increments_epoch_once() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("agents.sqlite3");
