@@ -228,7 +228,22 @@
       "keysRemoveCancelled": "Удаление ключей отменено.",
       "keysConfirmTitle": "Удаление ключей S3",
       "keysConfirmText": "Удалить сохранённые для этого бакета ключи из Windows Credential Manager? Файлы Akula не будут затронуты. Это НЕ отзывает ключи в Yandex Cloud: отзыв нужно выполнить отдельно в консоли.",
-"checkConnection": "Проверить подключение · недоступно"
+"checkConnection": "Проверить подключение · недоступно",
+      "checkConnectionPreview": "Проверить доступ S3 · только чтение (тест)",
+      "probeStatus": "Результат проверки S3",
+      "probeChecking": "Проверка доступа к бакету… Синхронизация выключена.",
+      "probeVerifiedReadOnly": "Чтение списка объектов доступно. Синхронизация выключена.",
+      "probeMissingKeys": "Ключи для этого бакета не найдены в Windows.",
+      "probeInvalidStoredKeys": "Сохранённые ключи повреждены или имеют неверный формат.",
+      "probeKeyStoreUnavailable": "Windows Credential Manager недоступен.",
+      "probeRejected": "Ключи отклонены сервером. Проверьте Access Key ID и Secret Access Key.",
+      "probeDenied": "Недостаточно прав для просмотра списка объектов бакета.",
+      "probeMissingBucket": "Бакет не найден (либо сервер ограничил сведения о нём).",
+      "probeClock": "Расхождение системного времени. Проверьте время Windows.",
+      "probeRegion": "Неверный регион или адрес S3.",
+      "probeTimeout": "Время проверки истекло. Повторите вручную.",
+      "probeNetwork": "Сетевой сбой или ошибка TLS.",
+      "probeServer": "S3 вернул непроверенный ответ. Доступ не подтверждён."
     },
     "sync": {
       "title": "Восстановление синхронизации · только чтение",
