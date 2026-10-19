@@ -1,5 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Do not accidentally package an experimental live network control. QA may
+// compile it only in non-release builds; production release requires separate
+// acceptance, code change and review.
+#[cfg(all(feature = "yandex-s3-connection-preview", not(debug_assertions)))]
+compile_error!("Yandex S3 connection preview must not ship in release builds");
+
 macro_rules! report {
     ($($arg:tt)*) => {
         $crate::host::report(&format!($($arg)*))
