@@ -1,0 +1,105 @@
+name: Staya isolated adapter — Android API35 native QUIC lab
+
+on:
+  push:
+    branches:
+      - "feat/staya-roha-transport-combined-*"
+    paths:
+      - "staya/roha-transport/**"
+      - ".github/workflows/staya-android-peer-lab.yml"
+      - ".github/scripts/staya-android-peer-tests.sh"
+  pull_request:
+    paths:
+      - "staya/roha-transport/**"
+      - ".github/workflows/staya-android-peer-lab.yml"
+      - ".github/scripts/staya-android-peer-tests.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-emulator:
+    name: Android emulator — authorized and unknown QUIC peers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      TARGET: x86_64-linux-android
+      ROHA_PIN: "554d5202b63e32b8a79156f7da2807d0f4859e4b"
+      NOQ_PIN: "538346e8fb300598991de560566289121e9528e9"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91"
+          targets: x86_64-linux-android
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779
+        id: ndk
+        with:
+          ndk-version: r25c
+          add-to-path: true
+      - name: Install reproducible Android cargo wrapper
+        run: |
+          set -euo pipefail
+          cargo install --locked --version 4.1.2 cargo-ndk
+      - name: Assert exact pinned Git dependencies and checked-in lock
+        working-directory: staya/roha-transport
+        run: |
+          set -euo pipefail
+          test -f Cargo.lock
+          test "$(grep -F -c "$ROHA_PIN" Cargo.toml)" -eq 1
+          test "$(grep -F -c "$NOQ_PIN" Cargo.toml)" -eq 3
+          cargo metadata --locked --format-version 1 > /tmp/staya-android-cargo.json
+          python3 - <<'PY'
+          import json, os
+          m=json.load(open("/tmp/staya-android-cargo.json"))
+          expected={
+            "iroh":("https://github.com/calex794/roha",os.environ["ROHA_PIN"]),
+            "noq":("https://github.com/calex794/noq",os.environ["NOQ_PIN"]),
+            "noq-proto":("https://github.com/calex794/noq",os.environ["NOQ_PIN"]),
+            "noq-udp":("https://github.com/calex794/noq",os.environ["NOQ_PIN"])
+          }
+          for name,(repo,sha) in expected.items():
+            packages=[p for p in m["packages"] if p["name"]==name]
+            assert len(packages)==1,(name,len(packages))
+            assert packages[0]["source"]==f"git+{repo}?rev={sha}#{sha}",(name,packages[0]["source"])
+          print("PASS: four exact Git sources, one each, immutable Cargo.lock")
+          PY
+      - name: Cross-compile Akula isolated adapter integration tests for Android
+        working-directory: staya/roha-transport
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          cargo ndk --target "$TARGET" test --locked --no-run --test peer_transfer
+          # Android compilation creates an untracked target/ directory;
+          # assert immutability of manifests/lock instead of a clean worktree.
+          git diff --exit-code -- Cargo.toml Cargo.lock
+          binary=$(find "target/$TARGET/debug/deps" -maxdepth 1 -type f -name 'peer_transfer-*' -perm /111 -print -quit)
+          test -n "$binary"
+          printf 'Compiled Android peer test binary: %s\n' "$binary"
+      - name: Allow KVM accelerator when available
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+          fi
+      - name: Execute existing Akula/Staya QUIC integration tests inside Android emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -netfast -no-metrics
+          script: bash .github/scripts/staya-android-peer-tests.sh
+      - name: Record verified limits
+        run: |
+          echo "Android API35 x86_64 Staya isolated adapter: 3/3 native QUIC peer tests PASS." >> "$GITHUB_STEP_SUMMARY"
+          echo "Scope: no Android app, no phone pair, no File Gate write authority, no durable file sync." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,87 @@
+name: Staya adapter — combined Roha/noq source and peer gates
+
+on:
+  push:
+    branches:
+      - "feat/staya-roha-transport-combined-*"
+    paths:
+      - "staya/roha-transport/**"
+      - ".github/workflows/staya-roha-combined-gate.yml"
+  pull_request:
+    paths:
+      - "staya/roha-transport/**"
+      - ".github/workflows/staya-roha-combined-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned:
+    name: Isolated Akula/Staya peer tests — ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        working-directory: staya/roha-transport
+        shell: bash
+    env:
+      ROHA_PIN: "554d5202b63e32b8a79156f7da2807d0f4859e4b"
+      NOQ_PIN: "538346e8fb300598991de560566289121e9528e9"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91"
+          components: rustfmt
+      - name: Verify checked-in standalone lock and exact 4 Git dependencies
+        run: |
+          set -euo pipefail
+          test -f Cargo.lock
+          cargo metadata --locked --format-version 1 > .source-graph.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          m = json.loads(pathlib.Path(".source-graph.json").read_text())
+          expected = {
+              "iroh": ("https://github.com/calex794/roha", os.environ["ROHA_PIN"]),
+              "noq": ("https://github.com/calex794/noq", os.environ["NOQ_PIN"]),
+              "noq-proto": ("https://github.com/calex794/noq", os.environ["NOQ_PIN"]),
+              "noq-udp": ("https://github.com/calex794/noq", os.environ["NOQ_PIN"])
+          }
+          for name, (repo, sha) in expected.items():
+              pkgs = [p for p in m["packages"] if p["name"] == name]
+              if len(pkgs) != 1:
+                  raise SystemExit(f"{name}: expected one package, got {len(pkgs)}")
+              got = pkgs[0]["source"]
+              wanted = f"git+{repo}?rev={sha}#{sha}"
+              if got != wanted:
+                  raise SystemExit(f"{name}: wanted {wanted}, got {got}")
+              print(f"PIN VERIFIED: {name} = {sha}")
+          PY
+          rm -f .source-graph.json
+      - name: Run end-to-end two local QUIC endpoints, ALPN, permissions and bounded frame tests
+        run: |
+          set -euo pipefail
+          cargo test --locked --all-targets -- --nocapture
+      - name: Format and no tracked modifications to P0 Akula workspace
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          git diff --exit-code -- Cargo.toml Cargo.lock
+      - name: Record immutable, checked-in standalone lock evidence
+        run: |
+          echo "Isolated adapter tested on ${{ matrix.platform }} with Roha $ROHA_PIN and noq $NOQ_PIN." >> "$GITHUB_STEP_SUMMARY"
+          echo "Checked-in Cargo.lock blob 25446f6e7d10ae24a131167d520de6dff936b017; no desktop Sync Core/File Gate modifications." >> "$GITHUB_STEP_SUMMARY"
+      - name: Save candidate Cargo.lock for reproducibility review
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: staya-transport-lock-${{ matrix.platform }}
+          path: staya/roha-transport/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
