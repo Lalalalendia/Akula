@@ -195,9 +195,9 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
         if let Control::Buttons(buttons) = &row.control {
             for button in buttons {
                 match &button.action {
-                    Action::OpenUrl(url) if !button.enabled => {
+                    Action::CheckYandexConnection => {
                         disabled_probe += 1;
-                        assert!(url.starts_with("https://yandex.cloud/"));
+                        assert!(!button.enabled, "blank bucket must forbid network check");
                     }
                     Action::OpenUrl(url) => {
                         links += 1;
@@ -260,6 +260,22 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     assert_eq!(buttons.iter().find(|b| b.action == Action::RemoveYandexKeys)
         .unwrap().enabled, cfg!(target_os = "windows"));
     assert!(present[0].rows.iter().any(|r| r.label == t("settings.yandex.keyStatus")));
+    let check = buttons.iter().find(|b| b.action == Action::CheckYandexConnection).unwrap();
+    assert_eq!(check.enabled,
+        cfg!(all(target_os = "windows", feature = "yandex-s3-connection-preview")));
+    ctx_with_keys.yandex_probe_busy = true;
+    let busy = blocks(Section::Sync, &config, &ctx_with_keys);
+    let busy_check = busy[0].rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(), _ => &[],
+    }).find(|b| b.action == Action::CheckYandexConnection).unwrap();
+    assert!(!busy_check.enabled, "a single-flight check cannot start twice");
+    ctx_with_keys.yandex_probe_busy = false;
+    ctx_with_keys.yandex_probe = crate::yandex_probe_session::ProbeView::ReadOnlyListVerified;
+    let success = blocks(Section::Sync, &config, &ctx_with_keys);
+    assert!(success[0].rows.iter().any(|r| r.label == t("settings.yandex.probeStatus")),
+        "read-only status should appear after an explicit worker completion");
+    assert!(success[0].rows.iter().any(|r| r.label == t("settings.yandex.explanation")),
+        "successful listing must not remove the explicit inactive Sync status");
 
     i18n::set_language("en");
     let english = blocks(Section::Sync, &config, &ctx);
