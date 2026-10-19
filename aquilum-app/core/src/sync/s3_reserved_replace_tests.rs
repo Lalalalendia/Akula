@@ -329,3 +329,95 @@ fn postflight_tamper_requires_review_and_releases_only_editor_reservation() {
     assert_reservation_released(&f);
     assert_no_remote_ack(&f);
 }
+
+
+// P0g-3d-02 tests exercise a fresh, strictly read-only SQLite recovery-open.
+// They intentionally do NOT assert crash durability or issue S3 apply authority.
+fn inert_cold_review(f: &Fixture) -> Result<InertColdS3Review, FileCommandError> {
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root)
+        .map_err(refused)?;
+    let journal = SqliteSyncJournal::open_existing_read_only(
+        &f.appdata.join("journal.sqlite"),
+    ).map_err(refused)?;
+    let protected = SqliteProtectionStore::open_existing_read_only(
+        &f.appdata.join("originals.sqlite"),
+    ).map_err(refused)?;
+    inspect_cold_s3_replace_hold(
+        &admission, &f.bindings, &journal, &protected, f.intent.operation_id,
+    )
+}
+
+#[test]
+fn p0g3d02_cold_review_original_still_visible_remains_hold() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    {
+        let _prepared = prepare(&f, &admission).unwrap();
+        assert_editor_reserved(&f);
+    }
+    drop(admission);
+    let review = inert_cold_review(&f).unwrap();
+    assert_eq!(review.operation_id, f.intent.operation_id);
+    assert_eq!(review.file_state, InertColdS3FileState::OriginalStillVisible);
+    assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
+        b"unchanged private original");
+    assert_no_remote_ack(&f);
+}
+
+#[test]
+fn p0g3d02_cold_review_after_real_filegate_publication_remains_hold() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let written = save_existing_note_with_checks_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope,
+        &f.intent.path, &f.new_text, &f.old_hash,
+        Source::External, Some("cold-review-test"),
+        || prepare(&f, &admission),
+        |prepared, result| prepared.inspect_after_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected, result,
+        ),
+    );
+    assert!(written.is_ok(), "fixture File Gate publication: {written:?}");
+    drop(admission);
+    let review = inert_cold_review(&f).unwrap();
+    assert_eq!(review.file_state,
+        InertColdS3FileState::CandidateVisibleWithoutReceipt);
+    assert_no_remote_ack(&f);
+}
+
+#[test]
+fn p0g3d02_cold_review_inplace_modification_is_needs_review_not_receipt() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let prepared = prepare(&f, &admission).unwrap();
+    drop(prepared);
+    drop(admission);
+    let path = f.root.join(f.intent.path.as_str());
+    // Same inode / file ID, but neither protected original nor staged target:
+    // cannot be mistaken for an authorized atomic replacement.
+    fs::write(&path, b"untrusted direct local edit").unwrap();
+    let review = inert_cold_review(&f).unwrap();
+    assert_eq!(review.file_state, InertColdS3FileState::NeedsReview);
+    assert_no_remote_ack(&f);
+}
+
+#[test]
+fn p0g3d02_cold_review_missing_claim_and_corrupted_original_fail_closed() {
+    let f = fixture();
+    // A protected BLOB without a V7 claim is NOT a clean restart permit.
+    assert!(inert_cold_review(&f).is_err());
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let prepared = prepare(&f, &admission).unwrap();
+    drop(prepared);
+    drop(admission);
+    let corrupted = rusqlite::Connection::open(
+        f.appdata.join("originals.sqlite"),
+    ).unwrap();
+    corrupted.execute(
+        "UPDATE bound_preimages SET source_file = 'invalid' WHERE operation_id = ?1",
+        [f.intent.operation_id.to_string()],
+    ).unwrap();
+    drop(corrupted);
+    assert!(inert_cold_review(&f).is_err());
+    assert_no_remote_ack(&f);
+}
