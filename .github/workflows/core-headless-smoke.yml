@@ -1,0 +1,38 @@
+name: Akula headless Core D0 smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/tests/headless_core_smoke.rs'
+      - 'docs/platforms/AKULA-DEPLOY-D0.md'
+      - '.github/workflows/core-headless-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gui-free-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-headless-d0-v1
+          cache-workspace-crates: true
+      - name: Verify GUI-free core startup, read, shutdown and restart
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --no-default-features -p aquilum-core --test headless_core_smoke -- --nocapture
+      - name: Verify optional host-custody Core flavor
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --features host-custody -p aquilum-core --test headless_core_smoke -- --nocapture
