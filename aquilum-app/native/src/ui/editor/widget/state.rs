@@ -20,6 +20,8 @@ pub struct TextEditor {
     pub(super) focused: bool,
     pub(super) table: Option<crate::ui::editor::table::Session>,
     pub(super) hovered_table: Option<usize>,
+    pub(super) hovered_code_copy: Option<usize>,
+    pub(super) copied_code: Option<(usize, std::time::Instant)>,
     pub(super) table_scrolls: std::collections::HashMap<usize, f64>,
     pub(super) media: media::MediaState,
     pub(super) videos: crate::video::Owned,
