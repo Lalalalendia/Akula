@@ -35,7 +35,8 @@ fn accesskit_click_copies_fenced_code_without_changing_markdown_or_caret() {
     let mut root = focused(TextEditor::new(source).markdown(), 580, 310);
     root.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
     let _ = root.redraw();
-    let [(opener, id)] = buttons(&root).as_slice() else { panic!("one visible button"); };
+    let mounted = buttons(&root);
+    let [(opener, id)] = mounted.as_slice() else { panic!("one visible button"); };
     assert_eq!(*opener, source.find("~~~rust").unwrap());
     let before_caret = root.get_widget_with_tag(TAG).unwrap().inner().caret_offset();
     root.handle_access_event(ActionRequest {
@@ -55,7 +56,8 @@ fn accesskit_click_copies_fenced_code_without_changing_markdown_or_caret() {
 fn focused_semantic_button_activates_on_enter_and_space_without_typing() {
     let source = "~~~rust\nvery long line 🐱\n~~~";
     let mut root = focused(TextEditor::new(source).markdown(), 530, 240);
-    let [(opener, button)] = buttons(&root).as_slice() else { panic!("one button"); };
+    let mounted = buttons(&root);
+    let [(opener, button)] = mounted.as_slice() else { panic!("one button"); };
     let (opener, button) = (*opener, *button);
     root.focus_on(Some(button));
     let _ = root.redraw();
