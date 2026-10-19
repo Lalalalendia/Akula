@@ -362,7 +362,8 @@ impl HistoryService {
                 "direct history save lacks pinned S3 custody",
             ));
         }
-        self.try_saved_impl(roots, note, write, false)
+        self.try_saved_impl(roots, note, write, false, false)
+            .map(|outcome| outcome.changed())
     }
 
     /// A host-bound ordinary File Gate note write is admitted only while the
@@ -379,7 +380,8 @@ impl HistoryService {
         if !permit.binds_history(self) {
             return Err(HistorySaveFailure::new("host history epoch", "wrong Core owner"));
         }
-        self.try_saved_impl(roots, note, write, true)
+        self.try_saved_impl(roots, note, write, true, false)
+            .map(|outcome| outcome.changed())
     }
 
     /// Narrow checked File Gate exception. The sealed token can be created
@@ -392,7 +394,28 @@ impl HistoryService {
         note: &Path,
         write: NoteWrite<'_>,
     ) -> Result<bool, HistorySaveFailure> {
-        self.try_saved_impl(roots, note, write, true)
+        self.try_saved_impl(roots, note, write, true, false)
+            .map(|outcome| outcome.changed())
+    }
+
+    /// Strict internal history-version proof for a future protected receipt.
+    /// The sealed custody token must originate from the guarded File Gate.
+    /// No proof is returned for quiet, label-only, revert, missing history
+    /// location, or a version that cannot be read back byte-for-byte.
+    /// This does not provide the OS file/directory durability evidence.
+    #[allow(dead_code)]
+    pub(crate) fn try_saved_with_custody_verified_version(
+        &self,
+        _permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+        roots: Roots<'_>,
+        note: &Path,
+        write: NoteWrite<'_>,
+    ) -> Result<VerifiedHistoryVersion, HistorySaveFailure> {
+        self.try_saved_impl(roots, note, write, true, true)?
+            .verified_version
+            .ok_or_else(|| HistorySaveFailure::new(
+                "history version proof", "snapshot verification was unavailable",
+            ))
     }
 
     fn try_saved_impl(
@@ -401,7 +424,8 @@ impl HistoryService {
         note: &Path,
         write: NoteWrite<'_>,
         custody_verified: bool,
-    ) -> Result<bool, HistorySaveFailure> {
+        require_verified_version: bool,
+    ) -> Result<HistorySaveOutcome, HistorySaveFailure> {
         #[cfg(feature = "save-stage-probe")]
         let profile_start = std::time::Instant::now();
         let now = SystemTime::now();
@@ -420,7 +444,13 @@ impl HistoryService {
             ));
         }
         let Some(located) = locate(&mut state, roots, note) else {
-            return Ok(false);
+            return if require_verified_version {
+                Err(HistorySaveFailure::new(
+                    "history version proof", "registered note has no history location",
+                ))
+            } else {
+                Ok(HistorySaveOutcome::unchanged())
+            };
         };
         if history_blocked(&state, &located) {
             return Err(HistorySaveFailure::new("history relocation pending", "pending or unreadable version-transfer intent; history write refused"));
@@ -467,16 +497,16 @@ impl HistoryService {
         let profile_planned = profile_start.elapsed();
         let quiet = matches!(&plan, MilestonePlan::Quiet);
         let dir = &located.dir;
-        let outcome = (|| -> Result<bool, HistorySaveFailure> {
+        let outcome = (|| -> Result<HistorySaveEffect, HistorySaveFailure> {
             match plan {
-                MilestonePlan::Quiet => Ok(false),
+                MilestonePlan::Quiet => Ok(HistorySaveEffect::NoChange),
                 MilestonePlan::Skip => match (write.name, versions.last()) {
                     (Some(name), Some(latest)) => {
                         self.write_name(dir, &latest.id, name, now)
                             .map_err(|error| HistorySaveFailure::new("write version name", error))?;
-                        Ok(true)
+                        Ok(HistorySaveEffect::LabelOnly)
                     }
-                    _ => Ok(false),
+                    _ => Ok(HistorySaveEffect::NoChange),
                 },
                 MilestonePlan::RevertToPrevious { remove_id } => {
                     let removed = self.remove_version_and_names(dir, &remove_id);
@@ -486,7 +516,7 @@ impl HistoryService {
                         entry.last_edit = None;
                     }
                     removed.map_err(|error| HistorySaveFailure::new("remove version", error))?;
-                    Ok(true)
+                    Ok(HistorySaveEffect::Reverted)
                 }
                 MilestonePlan::UpdateLatest { id } => {
                     self.update_version(dir, &id, write.text)
@@ -496,7 +526,7 @@ impl HistoryService {
                         self.write_name(dir, &id, name, now)
                             .map_err(|error| HistorySaveFailure::new("write version name", error))?;
                     }
-                    Ok(true)
+                    Ok(HistorySaveEffect::Updated(id))
                 }
                 MilestonePlan::CreateNew { baseline, snapshot } => {
                     if let Some(baseline) = baseline {
@@ -514,7 +544,12 @@ impl HistoryService {
                         self.write_name(dir, id, name, now)
                             .map_err(|error| HistorySaveFailure::new("write version name", error))?;
                     }
-                    Ok(true)
+                    let id = path.file_name()
+                        .and_then(|component| component.to_str())
+                        .ok_or_else(|| HistorySaveFailure::new(
+                            "history version identity", "written history ID not UTF-8",
+                        ))?.to_owned();
+                    Ok(HistorySaveEffect::Created(id))
                 }
             }
         })();
@@ -534,14 +569,30 @@ impl HistoryService {
             );
         }
         match outcome {
-            Ok(changed) => {
+            Ok(effect) => {
+                // This check stays INSIDE PROCESS_HISTORY_FILES and the
+                // HistoryService state lock, never a later page() observation.
+                // Re-read the exact version created/updated by this call.
+                let verified_version = if require_verified_version {
+                    let id = effect.candidate_version().ok_or_else(|| {
+                        HistorySaveFailure::new(
+                            "history version proof",
+                            "no new or updated snapshot to attest",
+                        )
+                    })?;
+                    Some(Self::verify_history_version(
+                        dir, id, write.text, write.hash,
+                    )?)
+                } else {
+                    None
+                };
                 // A quiet reader update must not discard a failed baseline
                 // awaiting the next real save.
                 if !quiet || entry.pending_before.is_none() {
                     entry.written_hash = Some(write.hash.to_owned());
                     entry.pending_before = None;
                 }
-                Ok(changed)
+                Ok(HistorySaveOutcome { effect, verified_version })
             }
             Err(error) => {
                 if versions.is_empty() && entry.pending_before.is_none() {
@@ -550,6 +601,56 @@ impl HistoryService {
                 Err(error)
             }
         }
+    }
+
+    /// Read back only the precise file ID returned by this mutation. The
+    /// ordinary history API deliberately skips this expensive validation.
+    /// It is not proof against hostile same-UID substitution after unlock.
+    fn verify_history_version(
+        dir: &Path,
+        id: &str,
+        expected: &str,
+        expected_hash: &str,
+    ) -> Result<VerifiedHistoryVersion, HistorySaveFailure> {
+        use std::io::Read;
+        const MAX_RECEIPT_HISTORY_BYTES: u64 = 32 * 1024 * 1024;
+        let path = dir.join(id);
+        let mut file = fs::File::open(&path).map_err(|e|
+            HistorySaveFailure::new("history readback", e)
+        )?;
+        let before = file.metadata().map_err(|e|
+            HistorySaveFailure::new("history metadata", e)
+        )?;
+        if !before.is_file()
+            || before.len() > MAX_RECEIPT_HISTORY_BYTES
+            || before.len() != expected.len() as u64
+        {
+            return Err(HistorySaveFailure::new(
+                "history version proof", "invalid history size or file type",
+            ));
+        }
+        let mut bytes = Vec::with_capacity(expected.len());
+        file.read_to_end(&mut bytes).map_err(|e|
+            HistorySaveFailure::new("history readback", e)
+        )?;
+        let after = file.metadata().map_err(|e|
+            HistorySaveFailure::new("history metadata", e)
+        )?;
+        let digest = blake3::hash(&bytes).to_hex().to_string();
+        if bytes != expected.as_bytes()
+            || digest != expected_hash
+            || before.len() != after.len()
+            || bytes.len() != expected.len()
+        {
+            return Err(HistorySaveFailure::new(
+                "history version proof", "history contents differ after persistence",
+            ));
+        }
+        Ok(VerifiedHistoryVersion {
+            version_id: id.to_owned(),
+            content_hash: digest,
+            content_length: bytes.len(),
+        })
     }
 
     fn write_version(&self, dir: &Path, snapshot: &milestone::Snapshot<'_>) -> Result<PathBuf, FileCommandError> {
