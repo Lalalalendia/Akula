@@ -126,7 +126,8 @@ pub fn authorize_pull(
         .map_err(|_| AdmissionError::InvalidSignature)?;
 
     let scope = &signed.scope;
-    if request_operation != RequestedOperation::Pull || scope.operation != RequestedOperation::Pull {
+    if request_operation != RequestedOperation::Pull || scope.operation != RequestedOperation::Pull
+    {
         return Err(AdmissionError::UnsupportedOperation);
     }
     if policy.revoked || policy.binding.is_none() {
@@ -231,12 +232,21 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         assert_eq!(
             guarded_fixture_filegate_publish(
-                temp.path(), 1, &policy, [21; 32], object,
-                RequestedOperation::Pull, &grant, 100,
+                temp.path(),
+                1,
+                &policy,
+                [21; 32],
+                object,
+                RequestedOperation::Pull,
+                &grant,
+                100,
             ),
             Ok(())
         );
-        assert_eq!(std::fs::read(crate::file_path(temp.path(), 1)).unwrap(), crate::TEXT.as_bytes());
+        assert_eq!(
+            std::fs::read(crate::file_path(temp.path(), 1)).unwrap(),
+            crate::TEXT.as_bytes()
+        );
         assert_eq!(
             crate::admit_after_restart(temp.path(), 1),
             Err(crate::ReceiptError::MissingReceipt),
@@ -244,8 +254,14 @@ mod tests {
         );
         assert_eq!(
             guarded_fixture_filegate_publish(
-                temp.path(), 1, &policy, [21; 32], object,
-                RequestedOperation::Pull, &grant, 100,
+                temp.path(),
+                1,
+                &policy,
+                [21; 32],
+                object,
+                RequestedOperation::Pull,
+                &grant,
+                100,
             ),
             Err(AdmissionError::FileGateRejected),
             "no overwrite/replay as a new filename"
@@ -259,8 +275,14 @@ mod tests {
         grant.scope.binding.vault_id[0] ^= 1; // modified without resigning
         assert_eq!(
             guarded_fixture_filegate_publish(
-                temp.path(), 1, &policy, [21; 32], object,
-                RequestedOperation::Pull, &grant, 100,
+                temp.path(),
+                1,
+                &policy,
+                [21; 32],
+                object,
+                RequestedOperation::Pull,
+                &grant,
+                100,
             ),
             Err(AdmissionError::InvalidSignature)
         );
@@ -268,13 +290,27 @@ mod tests {
         grant.scope.binding.vault_id[0] ^= 1;
         grant.signature[0] ^= 1;
         assert_eq!(
-            authorize_pull(&policy, [21; 32], object, RequestedOperation::Pull, &grant, 100),
+            authorize_pull(
+                &policy,
+                [21; 32],
+                object,
+                RequestedOperation::Pull,
+                &grant,
+                100
+            ),
             Err(AdmissionError::InvalidSignature)
         );
         let (_, mut policy, grant, _) = fixture();
         policy.trusted_issuer = SigningKey::from_bytes(&[99u8; 32]).verifying_key();
         assert_eq!(
-            authorize_pull(&policy, [21; 32], object, RequestedOperation::Pull, &grant, 100),
+            authorize_pull(
+                &policy,
+                [21; 32],
+                object,
+                RequestedOperation::Pull,
+                &grant,
+                100
+            ),
             Err(AdmissionError::InvalidSignature)
         );
         let _ = signer;
@@ -286,70 +322,188 @@ mod tests {
         let mut trials = Vec::new();
         let mut p = policy.clone();
         p.binding = None;
-        trials.push((p, grant, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::UnknownOrRevokedPeer));
+        trials.push((
+            p,
+            grant,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::UnknownOrRevokedPeer,
+        ));
 
         let mut p = policy.clone();
         p.revoked = true;
-        trials.push((p, grant, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::UnknownOrRevokedPeer));
+        trials.push((
+            p,
+            grant,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::UnknownOrRevokedPeer,
+        ));
 
-        trials.push((policy.clone(), grant, [22; 32], object, RequestedOperation::Pull, 100, AdmissionError::WrongPeerBinding));
+        trials.push((
+            policy.clone(),
+            grant,
+            [22; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::WrongPeerBinding,
+        ));
 
         let mut g = grant;
         g.scope.binding.device_id[0] ^= 1;
         re_sign(&signer, &mut g);
-        trials.push((policy.clone(), g, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::WrongVaultOrDevice));
+        trials.push((
+            policy.clone(),
+            g,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::WrongVaultOrDevice,
+        ));
 
         let mut g = grant;
         g.scope.binding.vault_id[0] ^= 1;
         re_sign(&signer, &mut g);
-        trials.push((policy.clone(), g, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::WrongVaultOrDevice));
+        trials.push((
+            policy.clone(),
+            g,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::WrongVaultOrDevice,
+        ));
 
         let mut p = policy.clone();
         p.epoch = 8; // revoke by bumping local policy generation
-        trials.push((p, grant, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::StalePolicy));
+        trials.push((
+            p,
+            grant,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::StalePolicy,
+        ));
 
         let mut p = policy.clone();
         p.expected_nonce[0] ^= 1;
-        trials.push((p, grant, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::WrongNonce));
+        trials.push((
+            p,
+            grant,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::WrongNonce,
+        ));
 
         let mut p = policy.clone();
         p.approved_object = None;
-        trials.push((p, grant, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::UnapprovedObject));
+        trials.push((
+            p,
+            grant,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::UnapprovedObject,
+        ));
 
         let mut other = object;
         other.blake3[0] ^= 1;
-        trials.push((policy.clone(), grant, [21; 32], other, RequestedOperation::Pull, 100, AdmissionError::UnapprovedObject));
+        trials.push((
+            policy.clone(),
+            grant,
+            [21; 32],
+            other,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::UnapprovedObject,
+        ));
 
-        trials.push((policy.clone(), grant, [21; 32], object, RequestedOperation::Pull, 200, AdmissionError::ExpiredGrant));
+        trials.push((
+            policy.clone(),
+            grant,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            200,
+            AdmissionError::ExpiredGrant,
+        ));
 
         let mut g = grant;
         g.scope.operation = RequestedOperation::Push;
         re_sign(&signer, &mut g);
-        trials.push((policy.clone(), g, [21; 32], object, RequestedOperation::Push, 100, AdmissionError::UnsupportedOperation));
+        trials.push((
+            policy.clone(),
+            g,
+            [21; 32],
+            object,
+            RequestedOperation::Push,
+            100,
+            AdmissionError::UnsupportedOperation,
+        ));
 
         let mut g = grant;
         g.scope.operation = RequestedOperation::Delete;
         re_sign(&signer, &mut g);
-        trials.push((policy.clone(), g, [21; 32], object, RequestedOperation::Delete, 100, AdmissionError::UnsupportedOperation));
+        trials.push((
+            policy.clone(),
+            g,
+            [21; 32],
+            object,
+            RequestedOperation::Delete,
+            100,
+            AdmissionError::UnsupportedOperation,
+        ));
 
         let mut g = grant;
         g.scope.object.byte_len += 1;
         re_sign(&signer, &mut g);
-        trials.push((policy, g, [21; 32], object, RequestedOperation::Pull, 100, AdmissionError::UnapprovedObject));
+        trials.push((
+            policy,
+            g,
+            [21; 32],
+            object,
+            RequestedOperation::Pull,
+            100,
+            AdmissionError::UnapprovedObject,
+        ));
 
         assert_eq!(trials.len(), 13);
-        for (i, (p, signed, endpoint, requested, operation, now, expected)) in trials.into_iter().enumerate() {
+        for (i, (p, signed, endpoint, requested, operation, now, expected)) in
+            trials.into_iter().enumerate()
+        {
             let temp = tempfile::tempdir().unwrap();
             assert_eq!(
                 guarded_fixture_filegate_publish(
-                    temp.path(), 1, &p, endpoint, requested,
-                    operation, &signed, now,
+                    temp.path(),
+                    1,
+                    &p,
+                    endpoint,
+                    requested,
+                    operation,
+                    &signed,
+                    now,
                 ),
                 Err(expected),
                 "case {i}"
             );
-            assert!(!crate::file_path(temp.path(), 1).exists(), "case {i} created an unexpected file");
-            assert!(!crate::receipt_path(temp.path(), 1).exists(), "case {i} created a receipt");
+            assert!(
+                !crate::file_path(temp.path(), 1).exists(),
+                "case {i} created an unexpected file"
+            );
+            assert!(
+                !crate::receipt_path(temp.path(), 1).exists(),
+                "case {i} created a receipt"
+            );
         }
     }
 
@@ -364,7 +518,14 @@ mod tests {
         re_sign(&signer, &mut grant);
         policy.approved_object = Some(oversized);
         assert_eq!(
-            authorize_pull(&policy, [21; 32], oversized, RequestedOperation::Pull, &grant, 100),
+            authorize_pull(
+                &policy,
+                [21; 32],
+                oversized,
+                RequestedOperation::Pull,
+                &grant,
+                100
+            ),
             Err(AdmissionError::UnapprovedObject)
         );
     }
