@@ -474,6 +474,84 @@ mod tests {
         assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"old-info");
     }
 
+    #[test]
+    fn child_crash_at_transaction_boundary() {
+        let Ok(phase) = std::env::var("AKULA_TEST_CRASH_PHASE") else {
+            return; // This is a subprocess helper, not a normal fixture.
+        };
+        let home = PathBuf::from(std::env::var_os("AKULA_TEST_CRASH_HOME").unwrap());
+        let marker = PathBuf::from(std::env::var_os("AKULA_TEST_CRASH_MARKER").unwrap());
+        let app = home.join("Applications").join(APP_NAME);
+        let gate = AppGate::acquire(&app, &home).unwrap();
+        let stage = gate.new_stage("abcdef0123456789abcdef0123456789").unwrap();
+        let fresh = stage.join(APP_NAME);
+        fs::create_dir_all(fresh.join("Contents/MacOS")).unwrap();
+        fs::write(fresh.join("Contents/Info.plist"), b"new-info").unwrap();
+        fs::write(fresh.join("Contents/MacOS/aquilum-app"), b"new-binary").unwrap();
+        match phase.as_str() {
+            "after-backup" => fs::rename(&app, stage.join(OLD_NAME)).unwrap(),
+            "after-promotion" => gate.promote(&stage).unwrap(),
+            _ => panic!("unknown test crash phase"),
+        }
+        fs::write(marker, b"ready to kill").unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        panic!("subprocess was not terminated at transaction boundary");
+    }
+
+    fn kill_child_at(phase: &str) -> Fixture {
+        use std::process::{Command, Stdio};
+        use std::thread;
+        use std::time::Duration;
+        let fixture = Fixture::new();
+        let marker = fixture.home.join("crash-marker");
+        let helper = format!("{}::child_crash_at_transaction_boundary", module_path!());
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(helper)
+            .arg("--nocapture")
+            .env("AKULA_TEST_CRASH_PHASE", phase)
+            .env("AKULA_TEST_CRASH_HOME", &fixture.home)
+            .env("AKULA_TEST_CRASH_MARKER", &marker)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut reached = false;
+        for _ in 0..200 {
+            if marker.is_file() {
+                reached = true;
+                break;
+            }
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(reached, "child never reached the target crash window");
+        fixture
+    }
+
+    #[test]
+    fn actual_killed_child_after_backup_releases_lock_and_restores_old_app() {
+        let fixture = kill_child_at("after-backup");
+        let guard = fixture.lock();
+        assert_eq!(guard.recover().unwrap(), Recovery::PreviousRestored);
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"old-info");
+    }
+
+    #[test]
+    fn actual_killed_child_after_new_publication_preserves_both_versions() {
+        let fixture = kill_child_at("after-promotion");
+        let guard = fixture.lock();
+        assert!(guard.recover().unwrap_err().contains("requires review"));
+        assert_eq!(fs::read(fixture.app.join("Contents/Info.plist")).unwrap(), b"new-info");
+        let stage = fixture.parent.join(".akula-install.abcdef0123456789abcdef0123456789");
+        assert_eq!(fs::read(stage.join(OLD_NAME).join("Contents/Info.plist")).unwrap(), b"old-info");
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn native_bsd_lockf_refuses_same_lock_held_from_rust() {
