@@ -52,6 +52,7 @@ struct Slot {
     evicted: Arc<AtomicBool>,
 }
 
+#[derive(Debug)]
 enum Capacity {
     Stopping,
     Saturated,
