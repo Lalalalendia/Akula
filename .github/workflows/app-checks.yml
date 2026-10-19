@@ -113,6 +113,15 @@ jobs:
           rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_tar_test_harness.rs" -o "$RUNNER_TEMP/akula_tar_security_tests"
           "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
 
+      - name: Test macOS updater transaction with shared installer lock and crash recovery
+        if: needs.classify.outputs.mode != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#[path = "%s"] mod txn;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/macos_transaction.rs" > "$RUNNER_TEMP/akula_updater_txn_harness.rs"
+          rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_updater_txn_harness.rs" -o "$RUNNER_TEMP/akula_updater_txn_tests"
+          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture
+
 
       - name: Restore shared main Rust cache (read-only on PRs)
         uses: swatinem/rust-cache@v2
