@@ -297,26 +297,32 @@ fn modified_binding_identity_or_generation_denies_grants() {
     ledger.bind_vault_once(vault).unwrap();
     let issued = ledger.issue(proposal(vault, device)).unwrap();
     let other = rusqlite::Connection::open(&db).unwrap();
-    other.execute(
-        "UPDATE vault_binding SET generation=2 WHERE singleton=1",
-        [],
-    ).unwrap();
+    other
+        .execute(
+            "UPDATE vault_binding SET generation=2 WHERE singleton=1",
+            [],
+        )
+        .unwrap();
     assert!(matches!(
         ledger.read_active(vault, device, 10),
         Err(GrantLedgerError::CorruptRow)
     ));
-    other.execute(
-        "UPDATE vault_binding SET generation=1, root_ino='invalid'
+    other
+        .execute(
+            "UPDATE vault_binding SET generation=1, root_ino='invalid'
          WHERE singleton=1",
-        [],
-    ).unwrap();
+            [],
+        )
+        .unwrap();
     assert!(matches!(
         ledger.with_fenced_pull_preflight(issued, [7; 32], 10, |_| {
             panic!("incorrect physical identity must deny callback");
         }),
         Err(GrantLedgerError::RootMismatch)
     ));
-    other.execute("DELETE FROM vault_binding WHERE singleton=1", []).unwrap();
+    other
+        .execute("DELETE FROM vault_binding WHERE singleton=1", [])
+        .unwrap();
     assert!(matches!(
         ledger.read_active(vault, device, 10),
         Err(GrantLedgerError::MissingVaultBinding)

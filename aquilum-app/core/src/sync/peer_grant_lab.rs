@@ -114,7 +114,6 @@ fn bytes<const N: usize>(raw: Vec<u8>) -> Result<[u8; N]> {
     raw.try_into().map_err(|_| GrantLedgerError::CorruptRow)
 }
 
-
 fn registered_root_row(
     connection: &Connection,
     admission: &RegisteredReadAdmission<'_>,
@@ -122,15 +121,15 @@ fn registered_root_row(
     let (dev, ino) = admission.registered_root_identity_for_profile()?;
     let expected = (
         admission.registered_workspace_id().to_string(),
-        admission.registered_root_path().to_string_lossy().into_owned(),
+        admission
+            .registered_root_path()
+            .to_string_lossy()
+            .into_owned(),
         dev.to_string(),
         ino.to_string(),
     );
-    let rows: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM root_binding",
-        [],
-        |row| row.get(0),
-    )?;
+    let rows: i64 =
+        connection.query_row("SELECT COUNT(*) FROM root_binding", [], |row| row.get(0))?;
     if rows != 1 {
         return Err(GrantLedgerError::InvalidSchema);
     }
@@ -156,8 +155,7 @@ fn require_bound_vault(
     admission: &RegisteredReadAdmission<'_>,
     requested_vault: VaultId,
 ) -> Result<()> {
-    let (workspace, root_path, root_dev, root_ino) =
-        registered_root_row(connection, admission)?;
+    let (workspace, root_path, root_dev, root_ino) = registered_root_row(connection, admission)?;
     let stored: Option<(String, String, String, String, String, i64)> = connection
         .query_row(
             "SELECT vault,workspace,root_path,root_dev,root_ino,generation
@@ -165,19 +163,24 @@ fn require_bound_vault(
             [],
             |row| {
                 Ok((
-                    row.get(0)?, row.get(1)?, row.get(2)?,
-                    row.get(3)?, row.get(4)?, row.get(5)?,
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((vault, bound_workspace, bound_path, bound_dev, bound_ino, generation)) =
-        stored
+    let Some((vault, bound_workspace, bound_path, bound_dev, bound_ino, generation)) = stored
     else {
         return Err(GrantLedgerError::MissingVaultBinding);
     };
-    if bound_workspace != workspace || bound_path != root_path
-        || bound_dev != root_dev || bound_ino != root_ino
+    if bound_workspace != workspace
+        || bound_path != root_path
+        || bound_dev != root_dev
+        || bound_ino != root_ino
     {
         return Err(GrantLedgerError::RootMismatch);
     }
@@ -367,7 +370,6 @@ impl<'a> RegisteredPullGrantLedger<'a> {
         &self.db_path
     }
 
-
     /// Host-only, explicitly provisioned one-time mapping. The network and
     /// incoming signed object descriptors must NEVER invoke this operation.
     /// No rebinding/migration exists in the lab: old grants and their epochs
@@ -384,8 +386,7 @@ impl<'a> RegisteredPullGrantLedger<'a> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (workspace, root_path, dev, ino) =
-            registered_root_row(&tx, &self.admission)?;
+        let (workspace, root_path, dev, ino) = registered_root_row(&tx, &self.admission)?;
         let existing_grants: i64 =
             tx.query_row("SELECT COUNT(*) FROM pull_grants", [], |row| row.get(0))?;
         if existing_grants != 0 {
