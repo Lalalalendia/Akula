@@ -36,6 +36,8 @@ def stat(row: dict) -> dict:
         "vello_mean_ms": sum(float(s["velloMs"]) for s in replay_stages) / len(replay_stages),
         "encode_mean_ms": sum(float(s["encodeMs"]) for s in replay_stages) / len(replay_stages),
         "mip_build_ms": sum(float(s["mipBuildMs"]) for s in all_stage),
+        "mip_build_replay_ms": sum(float(s["mipBuildMs"]) for s in replay_stages),
+        "mip_build_replay_events": sum(int(s["mipGenerated"] > 0) for s in replay_stages),
         "mip_generated": sum(int(s["mipGenerated"]) for s in all_stage),
         "peak_rss_mib": row["peak_rss_kib"] / 1024,
     }
@@ -51,12 +53,14 @@ def report(rows: list[dict], binary_sha: str, scenes: tuple[tuple[str, str], ...
         "Single pinned PNG 1280x884: filter and mip factors vary independently.",
         "Modes: baseline High/no mip; Medium/no mip; mip+High; mip+Medium.",
         "Same renderer sample clocks and 4s scroll replay for every mode.",
+        "WARNING: mipmap cells use original 2-frame cache lifetime (512-frame linger OFF).",
+        "Whole-process mip costs INCLUDE replay rebuilds; they are NOT startup-only costs.",
         "No shipped pixel behavior or sampler defaults change.",
         "Pure Medium vs mip Medium is NOT a pixel-identical image-quality comparison.",
         "These are CPU-work durations, not visible monitor frame-pacing or scanout.",
         "",
-        "| Scene | Size | Mode | CPU p95 (ms) | CPU p99 (ms) | Mean encode (ms) | Mean Vello (ms) | Cold mip (ms) | RSS (MiB) |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|",
+        "| Scene | Size | Mode | CPU p95 (ms) | CPU p99 (ms) | Mean encode (ms) | Mean Vello (ms) | Whole-process mip (ms) | Replay mip (ms) | Replay rebuilds | RSS (MiB) |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     allstats = {}
     for scene, size in scenes:
@@ -86,6 +90,8 @@ def report(rows: list[dict], binary_sha: str, scenes: tuple[tuple[str, str], ...
                 f"| {scene} | {size} | {mode} | {med['cpu_p95_ms']:.3f} | "
                 f"{med['cpu_p99_ms']:.3f} | {med['encode_mean_ms']:.3f} | "
                 f"{med['vello_mean_ms']:.3f} | {med['mip_build_ms']:.3f} | "
+                f"{med['mip_build_replay_ms']:.3f} | "
+                f"{med['mip_build_replay_events']:.0f} | "
                 f"{med['peak_rss_mib']:.1f} |"
             )
         allstats[scene] = table
