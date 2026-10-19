@@ -11,6 +11,7 @@ const app = read('aquilum-app/native/Cargo.toml');
 const config = JSON.parse(read('aquilum-app/native/packaging/akula-windows.json'));
 const workflow = read('.github/workflows/windows-beta.yml');
 const script = read('scripts/test-windows-beta.ps1');
+const guiInput = read('scripts/windows-beta-gui-input.ps1');
 const workspace = read('aquilum-app/native/src/workspace.rs');
 const autostart = read('aquilum-app/native/src/autostart.rs');
 const instance = read('aquilum-app/native/src/instance.rs');
@@ -76,4 +77,40 @@ test('installer smoke checks distinct directories and preserves existing Aquilum
     assert.ok(script.includes(str), 'missing smoke contract: ' + str);
   }
   assert.doesNotMatch(script, /gh release download|Freaction\/Aquilum|Remove-Item .*Aquilum/);
+});
+
+test('installed Windows beta GUI edit must use OS-level input into its own foreground editor', () => {
+  for (const value of [
+    'scripts/windows-beta-gui-input.ps1',
+    'scripts/test-windows-beta.ps1',
+  ]) {
+    assert.ok(workflow.includes(value), 'missing Windows CI path: ' + value);
+  }
+  for (const value of [
+    'Start-And-Close -EditNote',
+    "if ($EditNote) { $arguments += ' --focus' }",
+    'Send-AkulaBetaText -Process $app -Text $syntheticEdit',
+    'AKULA_WINDOWS_BETA_GUI_EDIT_PASS',
+    'Restart changed the previously edited note',
+    'Uninstall changed the edited local document',
+  ]) {
+    assert.ok(script.includes(value), 'missing real GUI persistence assertion: ' + value);
+  }
+  assert.match(guiInput, /RUNNER_ENVIRONMENT.*github-hosted/);
+  assert.match(guiInput, /RUNNER_OS.*Windows/);
+  assert.match(guiInput, /GetWindowThreadProcessId/);
+  assert.match(guiInput, /GetForegroundWindow/);
+  assert.match(guiInput, /SendInput/);
+  assert.match(guiInput, /VkKeyScanExW/);
+  assert.match(guiInput, /MapVirtualKeyExW/);
+  assert.match(guiInput, /TypeAsciiKeys/);
+  assert.match(guiInput, /KEYEVENTF_KEYUP/);
+  assert.match(guiInput, /GetKeyboardLayout/);
+  assert.doesNotMatch(guiInput, /KEYEVENTF_UNICODE|TypeUnicode/,
+    'VK_PACKET bypasses normal native key translation on current Windows host');
+  assert.match(guiInput, /Window PID does not match launched Akula/);
+  assert.match(guiInput, /Refusing to type into a nonforeground window/);
+  assert.doesNotMatch(guiInput, /\bSet-Content\b|\bAdd-Content\b|\bWriteAllText\b/);
+  assert.doesNotMatch(script, /AKULA_WINDOWS_BETA_SMOKE_PASS/,
+    'a launch-only smoke must not be mistaken for true GUI editing');
 });

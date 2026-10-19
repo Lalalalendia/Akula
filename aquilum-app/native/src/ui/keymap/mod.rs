@@ -55,6 +55,7 @@ pub enum Command {
     ZoomOut,
     ZoomReset,
     Copy,
+    CopyCodeBlock,
     Cut,
     Paste,
     Undo,
