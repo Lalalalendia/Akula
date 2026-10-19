@@ -127,7 +127,8 @@ pub fn audit_quiescent_staging(
     // Ledger has one immutable snapshot for the duration of this shared borrow.
     let prior = ledger.snapshot()?;
     let db = audit_pinned_redb_manifest(volume, ledger, store_child)?;
-    let file = audit_external_inventory_with_inline(volume, ledger, store_child, &db.inline_hashes)?;
+    let file =
+        audit_external_inventory_with_inline(volume, ledger, store_child, &db.inline_hashes)?;
 
     // Verify all three independent decisions refer to the same durable
     // revision, the same number of validated objects and the exact byte sum.
