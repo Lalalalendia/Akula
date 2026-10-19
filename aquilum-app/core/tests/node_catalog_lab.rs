@@ -145,6 +145,34 @@ fn symlink_swap_and_new_file_revision_cannot_be_silently_accepted() {
 }
 
 #[test]
+fn externally_pinned_fd_prevents_second_root_path_resolution() {
+    use rustix::fs::{open, Mode, OFlags};
+    use std::fs::File;
+
+    let (scratch, root) = setup();
+    fs::write(root.join("safe.md"), b"ORIGINAL trusted directory").unwrap();
+    let pinned = File::from(
+        open(&root, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW
+            | OFlags::CLOEXEC, Mode::empty()).unwrap()
+    );
+    // The original root path is replaced BEFORE catalog admission. A second
+    // open(root_path) would bind a different directory, but the already
+    // pinned File must bind the admitted catalog to the original inode.
+    let retired = scratch.path().join("retired");
+    fs::rename(&root, &retired).unwrap();
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("safe.md"), b"REPLACEMENT untrusted directory").unwrap();
+
+    let catalog = ReadCatalog::from_pinned_root(
+        pinned, vault_id(), &["safe.md"]
+    ).unwrap();
+    assert_eq!(catalog.read(&id_of(&catalog, "safe.md")).unwrap().content,
+        "ORIGINAL trusted directory");
+    assert_eq!(fs::read(root.join("safe.md")).unwrap(),
+        b"REPLACEMENT untrusted directory");
+}
+
+#[test]
 fn bounded_read_rejects_changed_sizes_and_invalid_utf8() {
     let (_scratch, root) = setup();
     let large = vec![b'X'; MAX_DOCUMENT_BYTES as usize];
