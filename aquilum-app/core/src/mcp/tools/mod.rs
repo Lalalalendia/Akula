@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod authority_inventory;
 mod frontmatter;
 mod history;
 mod notes;
