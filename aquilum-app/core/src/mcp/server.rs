@@ -23,6 +23,7 @@ pub struct RunningServer {
 
 struct Endpoint {
     token: String,
+    listen_port: u16,
     call: SharedToolCaller,
     stopping: AtomicBool,
     turn: DispatchGate,
@@ -237,6 +238,7 @@ impl RunningServer {
         let address = listener.local_addr().map_err(|error| error.to_string())?;
         let endpoint = Arc::new(Endpoint {
             token,
+            listen_port: address.port(),
             call,
             stopping: AtomicBool::new(false),
             turn: DispatchGate::new(),
@@ -354,16 +356,31 @@ fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Re
     if !slot.activate() {
         return Err(Failure::Gone);
     }
-    admit(&head, &endpoint.token)?;
+    admit(&head, &endpoint.token, endpoint.listen_port)?;
     let body = connection.read_body(&head, MAX_BODY_BYTES)?;
     let body = String::from_utf8(body).map_err(|_| refused(400, "Тело запроса не в UTF-8"))?;
     endpoint.answer(&body, connection, head.keeps_alive())
 }
 
-fn admit(head: &Head, token: &str) -> Result<(), Failure> {
+fn admit(head: &Head, token: &str, listen_port: u16) -> Result<(), Failure> {
     if head.method != "POST" {
         let response = Response::text(405, "Поддерживается только POST").allowing("POST");
         return Err(Failure::Refused(response));
+    }
+    // Loopback binding and Origin checks do not protect against DNS rebinding
+    // when an attacker-controlled hostname resolves to 127.0.0.1. Require
+    // exactly one literal loopback Host before processing authentication or
+    // any MCP tool. The TCP port (if specified) must match this listener.
+    if head.header_count("host") != 1
+        || head.header("host").is_none_or(|value| value.trim().is_empty())
+    {
+        return Err(refused(400, "Отсутствует или дублируется Host"));
+    }
+    if !head
+        .header("host")
+        .is_some_and(|value| is_loopback_host(value, listen_port))
+    {
+        return Err(refused(403, "Запрещённый Host"));
     }
     if !head.header("origin").is_none_or(is_loopback_origin) {
         return Err(refused(403, "Источник запроса запрещён"));
@@ -382,6 +399,30 @@ fn admit(head: &Head, token: &str) -> Result<(), Failure> {
         return Err(refused(400, "Неподдерживаемая версия MCP-Protocol-Version"));
     }
     Ok(())
+}
+
+// The listener is fixed to IPv4 loopback. A literal loopback Host
+// allowlist avoids hostname resolution and suffix-trick bypasses. Permit
+// absent port for older native HTTP clients, but never a different port.
+fn is_loopback_host(value: &str, listen_port: u16) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    let suffix = ["127.0.0.1", "localhost", "[::1]"]
+        .iter()
+        .find_map(|host| {
+            value
+                .strip_prefix(*host)
+                .filter(|suffix| suffix.is_empty() || suffix.starts_with(':'))
+        });
+    let Some(suffix) = suffix else {
+        return false;
+    };
+    if suffix.is_empty() {
+        return true;
+    }
+    let digits = &suffix[1..];
+    !digits.is_empty()
+        && digits.bytes().all(|byte| byte.is_ascii_digit())
+        && digits.parse::<u16>().ok() == Some(listen_port)
 }
 
 fn is_loopback_origin(origin: &str) -> bool {
@@ -711,6 +752,101 @@ mod tests {
             .unwrap_err();
         assert!(matches!(anonymous, ureq::Error::Status(401, _)));
         assert!(matches!(wrong, ureq::Error::Status(401, _)));
+        server.stop();
+    }
+
+    #[test]
+    fn host_allowlist_rejects_dns_rebinding_and_port_spoofing() {
+        let port = 8787;
+        for allowed in [
+            "127.0.0.1",
+            "127.0.0.1:8787",
+            "localhost",
+            "LOCALHOST:8787",
+            "[::1]:8787",
+        ] {
+            assert!(
+                is_loopback_host(allowed, port),
+                "valid local host: {allowed}"
+            );
+        }
+        for forbidden in [
+            "",
+            "attacker.example",
+            "attacker.example:8787",
+            "localhost.evil.example:8787",
+            "127.0.0.1.evil.example",
+            "localhost@evil.example",
+            "127.0.0.1, attacker.example",
+            "http://127.0.0.1:8787",
+            "localhost:8788",
+            "localhost:0",
+            "localhost:",
+            "localhost:8787:1",
+            "[::1]@evil.example",
+            "[::ffff:127.0.0.1]:8787",
+            "2130706433:8787",
+            "0x7f000001:8787",
+        ] {
+            assert!(
+                !is_loopback_host(forbidden, port),
+                "unexpectedly allowed Host: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_foreign_missing_and_duplicate_host_before_tool_dispatch() {
+        let invoked = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&invoked);
+        let (server, _) = start(Arc::new(move |_name, _arguments| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Value::Null)
+        }));
+        let body = tool_call("read_note");
+
+        let send_with_host = |host_headers: &str| -> Answer {
+            let mut client = Client::connect(&server);
+            let message = format!(
+                "POST /mcp HTTP/1.1\r\n{host_headers}Authorization: Bearer {TOKEN}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            client.send(&message);
+            client.answer()
+        };
+
+        for valid in [
+            format!("Host: localhost:{}\r\n", server.port()),
+            format!("Host: 127.0.0.1:{}\r\n", server.port()),
+            "Host: localhost\r\n".to_owned(),
+        ] {
+            assert_eq!(send_with_host(&valid).status, 200);
+        }
+        assert_eq!(invoked.load(Ordering::SeqCst), 3);
+
+        let wrong_port = if server.port() == u16::MAX {
+            server.port() - 1
+        } else {
+            server.port() + 1
+        };
+        for forbidden in [
+            "Host: attacker.example\r\n".to_owned(),
+            format!("Host: attacker.example:{}\r\n", server.port()),
+            format!("Host: localhost.evil.example:{}\r\n", server.port()),
+            format!("Host: localhost:{wrong_port}\r\n"),
+            "Host: 127.0.0.1@attacker.example\r\n".to_owned(),
+        ] {
+            assert_eq!(send_with_host(&forbidden).status, 403, "{forbidden}");
+            assert_eq!(invoked.load(Ordering::SeqCst), 3);
+        }
+        for malformed in [
+            String::new(),
+            "Host: \r\n".to_owned(),
+            "Host: localhost\r\nHost: localhost\r\n".to_owned(),
+        ] {
+            assert_eq!(send_with_host(&malformed).status, 400, "{malformed}");
+            assert_eq!(invoked.load(Ordering::SeqCst), 3);
+        }
         server.stop();
     }
 
