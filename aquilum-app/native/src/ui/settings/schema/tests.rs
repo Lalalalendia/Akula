@@ -171,3 +171,65 @@ fn m1de_native_review_only_offers_explicit_nondestructive_intents() {
         _ => false,
     }), "forged selection cannot expose even a confirmation action");
 }
+
+#[test]
+fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
+    let ctx = Context::new(1.0);
+    let mut config = AppConfig::default();
+    i18n::set_language("ru");
+    let sections = blocks(Section::Sync, &config, &ctx);
+    assert_eq!(sections.len(), 2);
+    let setup = &sections[0];
+    assert_eq!(setup.title, t("settings.yandex.title"));
+    let mut links = 0;
+    let mut disabled_probe = 0;
+    let mut writable_fields = 0;
+    for row in &setup.rows {
+        if row.setter.is_some() {
+            writable_fields += 1;
+            assert!(matches!(&row.control, Control::Text { commit: true, .. }),
+                "Only committed nonsecret setup fields may persist");
+        }
+        if let Control::Buttons(buttons) = &row.control {
+            for button in buttons {
+                match &button.action {
+                    Action::OpenUrl(url) if !button.enabled => {
+                        disabled_probe += 1;
+                        assert!(url.starts_with("https://yandex.cloud/"));
+                    }
+                    Action::OpenUrl(url) => {
+                        links += 1;
+                        assert!(url.starts_with("https://yandex.cloud/")
+                            || *url == "https://console.yandex.cloud/",
+                            "Only pinned HTTPS Yandex documentation destinations are allowed");
+                    }
+                    other => panic!("An S3 setup button must not grant write/sync capability: {other:?}"),
+                }
+            }
+        }
+    }
+    assert_eq!(writable_fields, 2);
+    assert_eq!(links, 5);
+    assert_eq!(disabled_probe, 1);
+    assert!(setup.rows.iter().any(|row| row.label == t("settings.yandex.credentialSafety")));
+    assert!(setup.rows.iter().any(|row| row.label == t("settings.yandex.explanation")));
+
+    // The only editable fields are public bucket/profile names. They never
+    // grant remote File Gate authority or select an actual credential provider.
+    let bucket = setup.rows.iter().find(|row| row.label == t("settings.yandex.bucket")).unwrap();
+    let profile = setup.rows.iter().find(|row| row.label == t("settings.yandex.profile")).unwrap();
+    let Some(Setter::Config(set_bucket)) = bucket.setter else { panic!("bucket setter missing") };
+    let Some(Setter::Config(set_profile)) = profile.setter else { panic!("profile setter missing") };
+    set_bucket(&mut config, &Value::Text("private-akula-bucket".into()));
+    set_profile(&mut config, &Value::Text("akula_yc".into()));
+    assert_eq!(config.s3_onboarding.bucket, "private-akula-bucket");
+    assert_eq!(config.s3_onboarding.aws_profile_name, "akula_yc");
+    set_bucket(&mut config, &Value::Text("https://evil.test/secret".into()));
+    set_profile(&mut config, &Value::Text("keys=not-safe".into()));
+    assert_eq!(config.s3_onboarding.bucket, "private-akula-bucket");
+    assert_eq!(config.s3_onboarding.aws_profile_name, "akula_yc");
+    i18n::set_language("en");
+    let english = blocks(Section::Sync, &config, &ctx);
+    assert_eq!(english[0].title, t("settings.yandex.title"));
+    assert!(english[0].rows.iter().any(|row| row.label == t("settings.yandex.credentialSafety")));
+}
