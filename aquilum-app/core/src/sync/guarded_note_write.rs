@@ -475,9 +475,11 @@ mod tests {
             Source::External, None,
             || { called = true; Ok(()) },
         );
-        assert!(matches!(wrong_core, Err(CheckedHistoryError::Primary(
-            FileCommandError::Task { .. }
-        ))));
+        assert!(matches!(
+            wrong_core,
+            Err(CheckedHistoryError::Primary(FileCommandError::Task { message }))
+                if message == "held custody permit belongs to a different Core or note"
+        ));
         assert!(!called, "wrong Core invoked primary prewrite");
         assert_eq!(fs::read(&note).unwrap(), b"protected original");
 
@@ -487,9 +489,11 @@ mod tests {
             Source::External, None,
             || { called = true; Ok(()) },
         );
-        assert!(matches!(wrong_note, Err(CheckedHistoryError::Primary(
-            FileCommandError::Task { .. }
-        ))));
+        assert!(matches!(
+            wrong_note,
+            Err(CheckedHistoryError::Primary(FileCommandError::Task { message }))
+                if message == "held custody permit belongs to a different Core or note"
+        ));
         assert!(!called, "wrong note invoked primary prewrite");
         assert_eq!(fs::read(&foreign_note).unwrap(), b"protected original");
     }
@@ -527,19 +531,23 @@ mod tests {
         let wrong_core = core_b.history.try_saved_with_custody(
             &permit, &roots, &note, note_write(&hash),
         );
-        assert!(wrong_core.is_err(), "legacy custody accepted foreign HistoryService");
+        assert_eq!(wrong_core.unwrap_err().action, "custody history owner",
+            "legacy custody must fail because of mismatched owner");
         let wrong_strict = core_b.history.try_saved_with_custody_verified_version(
             &permit, &roots, &note, note_write(&hash),
         );
-        assert!(wrong_strict.is_err(), "strict evidence accepted foreign HistoryService");
+        assert_eq!(wrong_strict.unwrap_err().action, "custody history owner",
+            "strict proof must fail because of mismatched owner");
         let wrong_note = core_a.history.try_saved_with_custody(
             &permit, &roots, &other_note, note_write(&hash),
         );
-        assert!(wrong_note.is_err(), "legacy custody accepted a different note");
+        assert_eq!(wrong_note.unwrap_err().action, "custody history owner",
+            "legacy custody must fail because of mismatched note");
         let strict_wrong_note = core_a.history.try_saved_with_custody_verified_version(
             &permit, &roots, &other_note, note_write(&hash),
         );
-        assert!(strict_wrong_note.is_err(), "strict custody accepted a different note");
+        assert_eq!(strict_wrong_note.unwrap_err().action, "custody history owner",
+            "strict proof must fail because of mismatched note");
         assert_eq!(fs::read(&note).unwrap(), b"protected original");
         assert_eq!(fs::read(&other_note).unwrap(), b"protected original");
     }
