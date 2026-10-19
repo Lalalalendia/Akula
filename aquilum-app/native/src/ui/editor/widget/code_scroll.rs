@@ -437,6 +437,11 @@ impl TextEditor {
     }
 
     pub(super) fn code_scroll_wheel(&mut self, ctx: &mut EventCtx<'_>, point: Point, delta: f64) -> bool {
+        // A completed async parser checkpoint may arrive without causing a
+        // layout. Recover the opener on the user's next actual scroll event.
+        if self.code_window_opener.is_none() && self.doc.loaded().0 > 0 {
+            self.refresh_code_window_opener();
+        }
         let Some(line) = self.index_at(point) else { return false };
         let Some(viewport) = self.code_viewport(line).filter(|rect| rect.contains(point)) else { return false };
         let Some(opener) = self.code_opener_at(line) else { return false };

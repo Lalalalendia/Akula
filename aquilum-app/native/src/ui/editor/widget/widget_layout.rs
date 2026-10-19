@@ -78,6 +78,13 @@ impl TextEditor {
         if self.doc.track((top, bottom)) {
             ctx.request_layout();
         }
+        // Checkpoint completion does not necessarily change Markdown state
+        // or request layout, but it may resolve an off-window fence identity.
+        let previous = self.code_window_opener;
+        self.refresh_code_window_opener();
+        if previous != self.code_window_opener {
+            ctx.request_paint_only();
+        }
         if self.doc.growing() {
             crate::ui::timer::wake(ctx.widget_id(), std::time::Instant::now());
         }
