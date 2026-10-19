@@ -4,7 +4,8 @@ use super::{offset,
     content, content_or_empty, flag, limit, open_after_write, optional_content, optional_names, optional_text,
     require_write, shorten, text, tool, version_name_property, workspace_property, write_retrying,
 };
-use crate::files::document::read_text;
+use crate::files::document::{read_file_snapshot_impl, read_text};
+use crate::files::error::FileCommandError;
 use crate::files::gate;
 use crate::history::Source;
 use crate::search::headings::{self, Heading};
@@ -29,6 +30,7 @@ pub fn definitions() -> Vec<Value> {
                 "heading": { "type": "string", "description": "Читать только этот раздел: заголовок и текст до следующего заголовка того же или более высокого уровня" },
                 "offset": { "type": "integer", "description": "С какого символа читать" },
                 "limit": { "type": "integer", "description": "Сколько символов вернуть, по умолчанию 8000" },
+                "includeRevision": { "type": "boolean", "description": "Вернуть BLAKE3-хэш исходных байтов всей заметки (revision) для условной записи; по умолчанию нет" },
                 "workspace": workspace_property(),
             }),
             &["note"],
@@ -62,6 +64,7 @@ pub fn definitions() -> Vec<Value> {
                 "all": { "type": "boolean", "description": "В режиме findReplace заменить все вхождения; по умолчанию нет, и на нескольких вхождениях вернётся ошибка с их числом" },
                 "open": { "type": "boolean", "description": "Открыть заметку вкладкой в приложении, по умолчанию да; в другой базе вкладка не открывается" },
                 "versionName": version_name_property(),
+                "expectedRevision": { "type": "string", "description": "Необязательный BLAKE3 revision из read_note includeRevision=true; если файл изменён, запись отвергается без повтора" },
                 "workspace": workspace_property(),
             }),
             &["note", "content"],
@@ -171,7 +174,12 @@ fn read_note(core: &Core, arguments: &Value) -> Result<Value, String> {
 
 fn read_one(vault: &Vault, name: &str, arguments: &Value, size: usize) -> Result<Value, String> {
     let note = vault.note(name)?;
-    let content = read_text(&note).map_err(|error| error.to_string())?;
+    let (content, revision) = if flag(arguments, "includeRevision", false) {
+        let snapshot = read_file_snapshot_impl(&note).map_err(|error| error.to_string())?;
+        (snapshot.content, Some(snapshot.hash))
+    } else {
+        (read_text(&note).map_err(|error| error.to_string())?, None)
+    };
     let meta = super::frontmatter::map(&content);
     let (content, section) = match optional_text(arguments, "heading").as_deref() {
         Some(wanted) => {
@@ -190,7 +198,7 @@ fn read_one(vault: &Vault, name: &str, arguments: &Value, size: usize) -> Result
     let shown = size.min(total.saturating_sub(offset));
     let end = offset.saturating_add(shown);
 
-    Ok(json!({
+    let mut result = json!({
         "path": vault.relative(&note),
         "frontmatter": meta,
         "heading": section,
@@ -198,7 +206,11 @@ fn read_one(vault: &Vault, name: &str, arguments: &Value, size: usize) -> Result
         "totalChars": total,
         "truncated": end < total,
         "nextOffset": (end < total).then_some(end),
-    }))
+    });
+    if let Some(revision) = revision {
+        result["revision"] = json!(revision);
+    }
+    Ok(result)
 }
 
 pub fn window(text: &str, offset: usize, size: usize) -> Result<(&str, usize), String> {
@@ -361,18 +373,88 @@ fn update_note(core: &Core, arguments: &Value) -> Result<Value, String> {
     let note = vault.note_argument(arguments)?;
     let edit = edit_from(arguments)?;
     let version_name = optional_text(arguments, "versionName");
-    let (changed, next) = write_retrying(core, &note, Source::Agent, version_name.as_deref(), |current| {
-        compose(current, &edit)
-    })?;
-    if !changed {
+    let expected = expected_revision(arguments)?;
+    let (changed, next, revision) = match expected.as_deref() {
+        Some(expected) => {
+            let (changed, next, revision) = write_with_expected_revision(
+                core, &vault, &note, &edit, expected, version_name.as_deref()
+            )?;
+            (changed, next, Some(revision))
+        }
+        None => {
+            let (changed, next) = write_retrying(
+                core, &note, Source::Agent, version_name.as_deref(),
+                |current| compose(current, &edit),
+            )?;
+            (changed, next, None)
+        }
+    };
+    if !changed && revision.is_none() {
         return Ok(json!({ "path": vault.relative(&note), "changed": false }));
     }
-    open_after_write(core, &vault, &note, arguments);
-    Ok(json!({
+    if changed {
+        open_after_write(core, &vault, &note, arguments);
+    }
+    let mut result = json!({
         "path": vault.relative(&note),
-        "changed": true,
+        "changed": changed,
         "chars": next.chars().count(),
-    }))
+    });
+    if let Some(revision) = revision {
+        result["revision"] = json!(revision);
+    }
+    Ok(result)
+}
+
+fn expected_revision(arguments: &Value) -> Result<Option<String>, String> {
+    if arguments.get("expectedRevision").is_none() {
+        return Ok(None);
+    }
+    let value = text(arguments, "expectedRevision")?;
+    if value.len() != 64
+        || !value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("expectedRevision должен быть 64-символьным BLAKE3 в нижнем регистре".to_owned());
+    }
+    Ok(Some(value))
+}
+
+fn revision_conflict(vault: &Vault, note: &Path, expected: &str, actual: Option<&str>) -> String {
+    json!({
+        "code": "MCP_REVISION_CONFLICT",
+        "path": vault.relative(note),
+        "expectedRevision": expected,
+        "actualRevision": actual,
+        "retryable": false,
+        "message": "Заметка изменилась; перечитайте её и заново подготовьте правку",
+    })
+    .to_string()
+}
+
+fn write_with_expected_revision(
+    core: &Core,
+    vault: &Vault,
+    note: &Path,
+    edit: &Edit,
+    expected: &str,
+    version_name: Option<&str>,
+) -> Result<(bool, String, String), String> {
+    let snapshot = read_file_snapshot_impl(note).map_err(|error| error.to_string())?;
+    if snapshot.hash != expected {
+        return Err(revision_conflict(vault, note, expected, Some(&snapshot.hash)));
+    }
+    let content = compose(&snapshot.content, edit)?;
+    if content == snapshot.content {
+        return Ok((false, content, snapshot.hash));
+    }
+    match gate::write(core, note, &content, Some(expected), Source::Agent, version_name) {
+        Ok(published) => Ok((true, content, published.hash)),
+        Err(FileCommandError::Conflict { .. }) => {
+            let actual = read_file_snapshot_impl(note).ok().map(|latest| latest.hash);
+            Err(revision_conflict(vault, note, expected, actual.as_deref()))
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 struct Edit {
@@ -788,4 +870,9 @@ mod tests {
         assert_eq!(fs::read(&old_note).unwrap(), b"untouched original");
     }
 
+}
+
+#[cfg(test)]
+mod revision_tests {
+    include!("notes/revision_tests.rs");
 }
