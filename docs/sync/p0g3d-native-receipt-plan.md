@@ -1,7 +1,7 @@
 # SYNC-P0g-3d — native durable receipt and cold-start recovery
 
-**Status:** design-only; production S3 apply remains HOLD.  
-**Dependencies:** #358 (File Gate identity), #363 (strict HistoryService witness), #385 (Core/path-bound custody permit), SQLite V7 one-shot journal.  
+**Status:** design-only; production S3 apply remains HOLD.
+**Dependencies:** #358 (File Gate identity), #363 (strict HistoryService witness), #385 (Core/path-bound custody permit), SQLite V7 one-shot journal.
 **Platforms:** Windows and Linux. macOS Frozen/P2 per MAC-HOLD-01.
 
 
