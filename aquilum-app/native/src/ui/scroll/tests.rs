@@ -164,3 +164,18 @@ fn horizontal_page_wheel_is_handled_by_scroll_container() {
     scroll(&mut root, ScrollDelta::PixelDelta(PhysicalPosition::new(100_000.0, 0.0)));
     assert_eq!(offset(&root), 0.0);
 }
+
+#[test]
+fn nonfinite_scroll_input_is_rejected_before_reaching_nested_offsets() {
+    use masonry::core::ScrollDelta;
+    use masonry::dpi::PhysicalPosition;
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let pixel = super::pixels(&ScrollDelta::PixelDelta(PhysicalPosition::new(value, 40.0)), 1.0, 600.0);
+        assert_eq!(pixel, masonry::kurbo::Vec2::ZERO);
+        let page = super::pixels(&ScrollDelta::PageDelta(1.0, value), 1.0, 600.0);
+        assert_eq!(page, masonry::kurbo::Vec2::ZERO);
+        let line = super::pixels(&ScrollDelta::LineDelta(value as f32, 1.0), 1.0, 600.0);
+        assert_eq!(line, masonry::kurbo::Vec2::ZERO);
+        assert_eq!(super::sideways(masonry::kurbo::Vec2::new(value, 0.0), false), 0.0);
+    }
+}
