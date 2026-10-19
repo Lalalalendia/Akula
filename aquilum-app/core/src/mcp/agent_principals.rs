@@ -62,8 +62,13 @@ pub(crate) struct IssuedAgentCredential {
 }
 
 impl IssuedAgentCredential {
-    pub(crate) fn bearer_once(&self) -> &str {
-        &self.bearer
+    /// Move the credential to a zeroizing holder for one-time host display.
+    /// A second extraction returns None, even before this struct is dropped.
+    pub(crate) fn take_bearer_once(&mut self) -> Option<Zeroizing<String>> {
+        if self.bearer.is_empty() {
+            return None;
+        }
+        Some(Zeroizing::new(std::mem::take(&mut self.bearer)))
     }
 }
 
@@ -564,20 +569,24 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("agent-credentials.sqlite3");
         let mut store = AgentCredentialStore::open(&path).unwrap();
-        let alice = store.issue_principal("Agent A", None).unwrap();
-        let bob = store.issue_principal("Agent B", None).unwrap();
+        let mut alice = store.issue_principal("Agent A", None).unwrap();
+        let mut bob = store.issue_principal("Agent B", None).unwrap();
+        let alice_token = alice.take_bearer_once().unwrap();
+        let bob_token = bob.take_bearer_once().unwrap();
+        assert!(alice.take_bearer_once().is_none());
+        assert!(bob.take_bearer_once().is_none());
         assert_ne!(alice.principal, bob.principal);
         assert_ne!(alice.credential, bob.credential);
-        assert_ne!(alice.bearer_once(), bob.bearer_once());
-        assert_eq!(store.authenticate(alice.bearer_once()).unwrap().principal, alice.principal);
-        assert_eq!(store.authenticate(bob.bearer_once()).unwrap().principal, bob.principal);
+        assert_ne!(alice_token.as_str(), bob_token.as_str());
+        assert_eq!(store.authenticate(alice_token.as_str()).unwrap().principal, alice.principal);
+        assert_eq!(store.authenticate(bob_token.as_str()).unwrap().principal, bob.principal);
         let forged = format!(
             "{TOKEN_PREFIX}.{}.{}",
             bob.credential.0,
-            alice.bearer_once().split('.').next_back().unwrap()
+            alice_token.split('.').next_back().unwrap()
         );
         assert_eq!(store.authenticate(&forged), Err(AgentCredentialError::Denied));
-        let secret = alice.bearer_once().as_bytes().to_vec();
+        let secret = alice_token.as_bytes().to_vec();
         drop(store);
         let disk = std::fs::read(&path).unwrap();
         assert!(!disk.windows(secret.len()).any(|window| window == secret));
@@ -588,8 +597,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("agents.sqlite3");
         let mut store = AgentCredentialStore::open(&path).unwrap();
-        let issued = store.issue_principal("Reader", None).unwrap();
-        let token = issued.bearer_once().to_owned();
+        let mut issued = store.issue_principal("Reader", None).unwrap();
+        let token = issued.take_bearer_once().unwrap();
         let old_epoch = store.authenticate(&token).unwrap().epoch;
         let new_epoch = store.revoke(issued.credential).unwrap();
         assert!(new_epoch > old_epoch);
@@ -609,8 +618,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("agents.sqlite3");
         let mut host = AgentCredentialStore::open(&path).unwrap();
-        let issued = host.issue_principal("Concurrent agent", None).unwrap();
-        let old_token = issued.bearer_once().to_owned();
+        let mut issued = host.issue_principal("Concurrent agent", None).unwrap();
+        let old_token = issued.take_bearer_once().unwrap();
         let id = issued.credential;
         drop(host);
 
@@ -640,9 +649,10 @@ mod tests {
 
         let reopened = AgentCredentialStore::open(&path).unwrap();
         assert_eq!(reopened.authenticate(&old_token), Err(AgentCredentialError::Denied));
-        if let Ok(new_key) = rotated {
+        if let Ok(mut new_key) = rotated {
+            let new_token = new_key.take_bearer_once().unwrap();
             assert_eq!(
-                reopened.authenticate(new_key.bearer_once()).unwrap().principal,
+                reopened.authenticate(new_token.as_str()).unwrap().principal,
                 new_key.principal
             );
         }
@@ -653,17 +663,18 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("agents.sqlite3");
         let mut store = AgentCredentialStore::open(&path).unwrap();
-        let first = store.issue_principal("Indexer", None).unwrap();
-        let original = first.bearer_once().to_owned();
-        let next = store.rotate(first.credential, None).unwrap();
+        let mut first = store.issue_principal("Indexer", None).unwrap();
+        let original = first.take_bearer_once().unwrap();
+        let mut next = store.rotate(first.credential, None).unwrap();
+        let next_token = next.take_bearer_once().unwrap();
         assert_eq!(first.principal, next.principal);
         assert_eq!(next.epoch, first.epoch + 1);
         assert_eq!(store.authenticate(&original), Err(AgentCredentialError::Denied));
-        assert_eq!(store.authenticate(next.bearer_once()).unwrap().epoch, next.epoch);
+        assert_eq!(store.authenticate(next_token.as_str()).unwrap().epoch, next.epoch);
         drop(store);
         let reopened = AgentCredentialStore::open(&path).unwrap();
         assert_eq!(reopened.authenticate(&original), Err(AgentCredentialError::Denied));
-        assert!(reopened.authenticate(next.bearer_once()).is_ok());
+        assert!(reopened.authenticate(next_token.as_str()).is_ok());
     }
 
     #[test]
@@ -671,14 +682,15 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("agents.sqlite3");
         let mut store = AgentCredentialStore::open(&path).unwrap();
-        let issued = store.issue_principal("Job runner", None).unwrap();
+        let mut issued = store.issue_principal("Job runner", None).unwrap();
+        let token = issued.take_bearer_once().unwrap();
         let epoch = store.disable_principal(issued.principal).unwrap();
         assert!(epoch > issued.epoch);
-        assert_eq!(store.authenticate(issued.bearer_once()), Err(AgentCredentialError::Denied));
+        assert_eq!(store.authenticate(token.as_str()), Err(AgentCredentialError::Denied));
         assert_eq!(store.rotate(issued.credential, None).err(), Some(AgentCredentialError::Denied));
         drop(store);
         let reopened = AgentCredentialStore::open(&path).unwrap();
-        assert_eq!(reopened.authenticate(issued.bearer_once()), Err(AgentCredentialError::Denied));
+        assert_eq!(reopened.authenticate(token.as_str()), Err(AgentCredentialError::Denied));
     }
 
     #[test]
@@ -691,12 +703,13 @@ mod tests {
             store.issue_principal("agent", Some(1)).err(),
             Some(AgentCredentialError::InvalidExpiry)
         );
-        let issued = store.issue_principal("Temporary", None).unwrap();
+        let mut issued = store.issue_principal("Temporary", None).unwrap();
+        let token = issued.take_bearer_once().unwrap();
         store.db.execute(
             "UPDATE agent_credentials SET expires_at=1 WHERE id=?1",
             [issued.credential.0.to_string()],
         ).unwrap();
-        assert_eq!(store.authenticate(issued.bearer_once()), Err(AgentCredentialError::Denied));
+        assert_eq!(store.authenticate(token.as_str()), Err(AgentCredentialError::Denied));
     }
 
     #[test]
