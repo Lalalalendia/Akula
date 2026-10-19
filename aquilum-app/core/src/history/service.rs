@@ -2137,6 +2137,35 @@ mod tests {
     }
 
     #[test]
+    fn p0g3b_strict_history_proof_refuses_coalesced_update() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Coalesced.md");
+        let original = "first local edit";
+        let revised = "first local edit, amended immediately";
+        fs::write(&note, original).unwrap();
+        let first_hash = blake3::hash(original.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(original, Source::Me, &first_hash, None),
+        ).unwrap());
+        fs::write(&note, revised).unwrap();
+        let second_hash = blake3::hash(revised.as_bytes()).to_hex().to_string();
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(revised, Source::Me, &second_hash, None), true, true,
+        );
+        assert!(result.is_err(),
+            "a mutable/coalesced version cannot prove immutable history identity");
+        let stored = versions(&fixture.history_of("Coalesced.md"));
+        assert_eq!(stored.len(), 1,
+            "normal history coalescing is preserved even when strict evidence is refused");
+        assert_eq!(fs::read_to_string(
+            fixture.history_of("Coalesced.md").join(&stored[0].id),
+        ).unwrap(), revised);
+    }
+
+    #[test]
     fn p0g3b_strict_history_proof_refuses_forged_expected_hash_after_write() {
         let fixture = Fixture::new();
         let history = fixture.service();
