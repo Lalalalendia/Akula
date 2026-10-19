@@ -55,6 +55,14 @@ jobs:
           cargo test --locked -p aquilum-core --lib mcp::agent_principals::tests:: -- --nocapture --test-threads=1 2>&1 |
             Tee-Object -FilePath ../mcp-principals-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify scoped JSON-RPC authority denial on native Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::protocol::tests::scoped_mode_hides_tool_names_and_denies_every_batched_tool_call -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-scoped-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve native MCP test transcripts
         if: always()
         uses: actions/upload-artifact@v7
@@ -64,4 +72,5 @@ jobs:
             mcp-http-windows.log
             mcp-authority-windows.log
             mcp-principals-windows.log
+            mcp-scoped-windows.log
           retention-days: 30
