@@ -1,9 +1,6 @@
 //! The Aquilum core: notes on disk, documents, search, history, settings and UI state, with no
 //! knowledge of the UI that hosts it.
 
-#[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
-pub mod node_catalog_lab;
-
 pub mod app_core;
 pub mod documents;
 pub mod files;
@@ -22,3 +19,6 @@ pub mod web_agent;
 pub mod wikixiv;
 
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
+
+#[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
+pub mod node_catalog_lab;

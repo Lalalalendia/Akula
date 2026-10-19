@@ -103,6 +103,19 @@ impl VerifiedHistoryVersion {
     }
 }
 
+/// Read-only cold-start observation for one registered note/version.
+/// Deliberately not authority to replace any primary file or to acknowledge S3.
+#[must_use = "a cold history observation is forensic only"]
+#[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct InertColdHistoryNote {
+    registered_root: PathBuf,
+    note: PathBuf,
+    version_id: String,
+    content_hash: String,
+    content_length: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum HistorySaveEffect {
     NoChange,
@@ -722,6 +735,155 @@ impl HistoryService {
             version_id: id.to_owned(),
             content_hash: digest,
             content_length: bytes.len(),
+        })
+    }
+
+    /// P0g-3d-05: reconstruct a *non-authoritative* exact external version
+    /// observation from the registered note after HistoryService reopens.
+    ///
+    /// This is a bounded read with the process HistoryService mutex held.
+    /// It cannot grant a File Gate write, S3 apply/ACK, V8 receipt promotion
+    /// or ConfirmedBaseline advancement. Nor does it prove a power-cut-safe
+    /// directory entry or exclude hostile same-UID namespace replacement.
+    #[allow(dead_code)]
+    pub(crate) fn inspect_cold_external_version(
+        &self,
+        roots: Roots<'_>,
+        note: &Path,
+        id: &str,
+        expected_hash: &str,
+        expected_length: u64,
+    ) -> Result<InertColdHistoryNote, HistorySaveFailure> {
+        use std::io::Read;
+        const LIMIT: u64 = 32 * 1024 * 1024;
+        let good_hash = expected_hash.len() == 64
+            && expected_hash.bytes().all(|b|
+                b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !good_hash || expected_length > LIMIT || id.is_empty() {
+            return Err(HistorySaveFailure::new(
+                "cold history proof", "invalid immutable version bounds",
+            ));
+        }
+
+        let Some(mut state) = self.files_lock() else {
+            return Err(HistorySaveFailure::new(
+                "cold history lock", "history mutex poisoned",
+            ));
+        };
+        // Cold-read authority uses CURRENT host registration, not previously
+        // cached roots retained by an earlier call to locate().
+        let active_roots=roots();
+        if active_roots.iter().filter(|root|
+            relative_inside(root,note).is_some()
+        ).count()!=1 {
+            return Err(HistorySaveFailure::new(
+                "cold history location", "note not in exactly one active root",
+            ));
+        }
+        state.roots=active_roots.clone();
+        let located = locate(&mut state, &||active_roots.clone(), note)
+            .ok_or_else(||HistorySaveFailure::new(
+                "cold history location", "note outside registered roots",
+            ))?;
+        if history_blocked(&state, &located)
+            || !allowed_history_directory(&located.vault, &located.dir)
+        {
+            return Err(HistorySaveFailure::new(
+                "cold history location", "unsafe or blocked history directory",
+            ));
+        }
+        // Filename and Source::External must BOTH originate from the parser
+        // for THIS note's history directory, not from untrusted receipt text.
+        let listed = store::versions(&located.dir).into_iter()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| HistorySaveFailure::new(
+                "cold history version", "version ID absent for registered note",
+            ))?;
+        if listed.source != Source::External {
+            return Err(HistorySaveFailure::new(
+                "cold history version", "version was not an external CreateNew",
+            ));
+        }
+        let name = located.dir.join(&listed.id);
+        let named = fs::symlink_metadata(&name).map_err(|e|
+            HistorySaveFailure::new("cold history metadata", e)
+        )?;
+        if !named.is_file() || named.file_type().is_symlink() {
+            return Err(HistorySaveFailure::new(
+                "cold history file", "version is not a plain regular file",
+            ));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if named.file_attributes() & 0x0000_0400 != 0 {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "Windows reparse point refused",
+                ));
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if named.nlink() != 1 {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "hardlinked history version refused",
+                ));
+            }
+        }
+        let mut file = fs::File::open(&name).map_err(|e|
+            HistorySaveFailure::new("cold history file open", e)
+        )?;
+        let before = file.metadata().map_err(|e|
+            HistorySaveFailure::new("cold history file metadata", e)
+        )?;
+        if !before.is_file() || before.len() != expected_length {
+            return Err(HistorySaveFailure::new(
+                "cold history bytes", "wrong file type or length",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (named.dev(), named.ino()) != (before.dev(), before.ino()) {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "name and opened handle differ",
+                ));
+            }
+        }
+        let mut bytes=Vec::with_capacity(expected_length as usize);
+        (&mut file).take(LIMIT+1).read_to_end(&mut bytes).map_err(|e|
+            HistorySaveFailure::new("cold history file read", e)
+        )?;
+        let after = file.metadata().map_err(|e|
+            HistorySaveFailure::new("cold history file metadata", e)
+        )?;
+        if bytes.len() as u64 != expected_length
+            || before.len()!=after.len()
+            || std::str::from_utf8(&bytes).is_err()
+            || blake3::hash(&bytes).to_hex().as_str() != expected_hash
+        {
+            return Err(HistorySaveFailure::new(
+                "cold history bytes", "version bytes or digest changed",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (before.dev(),before.ino())!=(after.dev(),after.ino()) {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "opened handle identity changed",
+                ));
+            }
+        }
+        // Bind the readback to the resolved registered location. This is
+        // deliberately not the non-Clone VerifiedHistoryVersion write token.
+        Ok(InertColdHistoryNote {
+            registered_root: located.vault,
+            note: note.to_path_buf(),
+            version_id: listed.id,
+            content_hash: expected_hash.to_owned(),
+            content_length: expected_length,
         })
     }
 
@@ -2126,6 +2288,115 @@ mod tests {
 
         assert!(history.version(&|| fixture.roots(), &note, Some("../../../Секрет.md")).is_none());
         assert!(history.version(&|| fixture.roots(), &note, Some("0000000000000_aaaaaaaa_me.md")).is_none());
+    }
+
+    #[test]
+    fn p0g3d05_cold_history_version_is_bound_to_one_note_after_service_reopen() {
+        let fixture = Fixture::new();
+        let note = fixture.vault.join("BoundCold.md");
+        let text = "exact immutable external snapshot";
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        let previous = "preserved local version";
+        fs::write(&note,text).unwrap();
+        let history = fixture.service();
+        let result = history.try_saved_impl(
+            &||fixture.roots(),&note,
+            NoteWrite {
+                disk_before:Some((
+                    previous.to_owned(),std::time::SystemTime::now(),
+                )),
+                text,hash:&hash,source:Source::External,name:None,
+            },
+            true,true,
+        ).unwrap();
+        let strict = result.verified_version.unwrap();
+        let id = strict.version_id().to_owned();
+        drop(history);
+        // New HistoryService state: no in-memory version witness survives.
+        let fresh = fixture.service();
+        let cold = fresh.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).unwrap();
+        assert_eq!(cold.registered_root,fixture.vault);
+        assert_eq!(cold.note,note);
+        assert_eq!(cold.version_id,id);
+        assert_eq!(cold.content_hash,hash);
+        assert_eq!(cold.content_length,text.len() as u64);
+        let unrelated = fixture.vault.join("Other.md");
+        fs::write(&unrelated,text).unwrap();
+        assert!(fresh.inspect_cold_external_version(
+            &||fixture.roots(),&unrelated,&id,&hash,text.len() as u64,
+        ).is_err(),"a different note cannot inherit this version");
+        assert!(fresh.inspect_cold_external_version(
+            &||vec![fixture.vault.join("not-registered")],
+            &note,&id,&hash,text.len() as u64,
+        ).is_err(),"a different registration cannot inherit this version");
+        assert_eq!(fs::read_to_string(&note).unwrap(),text);
+    }
+
+    #[test]
+    fn p0g3d05_cold_history_rejects_mutation_length_hash_and_non_external_source() {
+        let fixture = Fixture::new();
+        let note = fixture.vault.join("ColdTamper.md");
+        let text = "external version to be inspected";
+        let history = fixture.service();
+        fixture.save(&history,&note,text,Source::External);
+        let id=history.page(&||fixture.roots(),&note,0,1)
+            .versions[0].id.clone();
+        let hash=blake3::hash(text.as_bytes()).to_hex().to_string();
+        let read=|h:&HistoryService| h.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        );
+        assert!(read(&history).is_ok());
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,32*1024*1024+1,
+        ).is_err());
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&"e".repeat(64),text.len() as u64,
+        ).is_err());
+        let file=fixture.history_of("ColdTamper.md").join(&id);
+        fs::write(&file,"X".repeat(text.len())).unwrap();
+        let cold=fixture.service();
+        assert!(read(&cold).is_err(),
+            "equal-length history mutation must fail after cold-open");
+
+        let local=fixture.vault.join("LocallyTyped.md");
+        fixture.save(&history,&local,"local",Source::Agent);
+        let version=history.page(&||fixture.roots(),&local,0,1)
+            .versions[0].id.clone();
+        let localhash=blake3::hash(b"local").to_hex().to_string();
+        assert!(cold.inspect_cold_external_version(
+            &||fixture.roots(),&local,&version,&localhash,5,
+        ).is_err(),"an Agent/Me version must never masquerade as external");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn p0g3d05_cold_history_refuses_hardlink_and_symlink_version_files() {
+        use std::os::unix::fs::symlink;
+        let fixture=Fixture::new();
+        let history=fixture.service();
+        let note=fixture.vault.join("Aliased.md");
+        let text="external history snapshot";
+        fixture.save(&history,&note,text,Source::External);
+        let id=history.page(&||fixture.roots(),&note,0,1)
+            .versions[0].id.clone();
+        let dir=fixture.history_of("Aliased.md");
+        let version=dir.join(&id);
+        let hash=blake3::hash(text.as_bytes()).to_hex().to_string();
+        let extra=dir.join("hardlinked-other-name");
+        fs::hard_link(&version,&extra).unwrap();
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).is_err());
+        fs::remove_file(&extra).unwrap();
+        fs::remove_file(&version).unwrap();
+        let external=fixture.vault.join("External.md");
+        fs::write(&external,text).unwrap();
+        symlink(&external,&version).unwrap();
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).is_err());
     }
 
     #[test]

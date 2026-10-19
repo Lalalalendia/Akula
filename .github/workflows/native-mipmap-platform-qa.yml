@@ -63,6 +63,20 @@ jobs:
           set -euo pipefail
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             direct_l2_microbench_diagnostic -- --ignored --nocapture --test-threads=1
+      - name: Verify selective L2, late zoom, strict budget and 1-10-100 images
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::adaptive_lod_tests -- --nocapture --test-threads=1
+      - name: Compare eager pyramid with selective L2 cache (diagnostic only)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            adaptive_lod_multi_image_microbench_diagnostic -- --ignored --nocapture --test-threads=1
       - name: Real PNG, alpha-crop, fractional and odd-size QA
         working-directory: aquilum-app
         shell: bash

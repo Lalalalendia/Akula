@@ -9,7 +9,7 @@ workspace = ".."
 
 [features]
 default = []
-# Developer-only Linux loopback read-only Node (D1). Not a released Akula service.
+# Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.

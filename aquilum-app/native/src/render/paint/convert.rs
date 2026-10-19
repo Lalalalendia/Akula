@@ -32,6 +32,17 @@ fn mip_linger_enabled() -> bool {
     })
 }
 
+// Developer-only selective L2 experiment. This is never an installed feature.
+#[cfg(any(test, not(feature = "installed")))]
+fn mip_direct_l2_enabled() -> bool {
+    static DIRECT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DIRECT.get_or_init(|| {
+        !cfg!(feature = "installed")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_DIRECT_L2").ok().as_deref() == Some("1")
+    })
+}
+
 // Counters are local to an opt-in developer renderer, with no logging in the
 // per-image hot path. Installed builds do not compile these fields.
 #[cfg(not(feature = "installed"))]
@@ -98,6 +109,17 @@ impl Images {
         &mut self, id: u64, original: &ImageSource, level: u8,
         budget: usize, reclaim_old: bool,
     ) -> Option<ImageSource> {
+        self.mip_source_with_strategy(
+            id, original, level, budget, reclaim_old, mip_direct_l2_enabled(),
+        )
+    }
+
+    // Explicit strategy parameter prevents env-dependence in deterministic tests.
+    #[cfg(any(test, not(feature = "installed")))]
+    fn mip_source_with_strategy(
+        &mut self, id: u64, original: &ImageSource, level: u8,
+        budget: usize, reclaim_old: bool, direct_l2: bool,
+    ) -> Option<ImageSource> {
         let ImageSource::Pixmap(base) = original else { return None };
         if level == 0 || level > mipmap::MAX_LEVELS
             || base.width() == 0 || base.height() == 0
@@ -119,6 +141,10 @@ impl Images {
             }
             return Some(ImageSource::Pixmap(Arc::clone(cached)));
         }
+        // The optional cold direct L2 path reserves no unused L1.
+        // If L1 already exists, retain the original incremental algorithm.
+        let direct_cold_l2 = direct_l2 && level == 2
+            && !self.mips.contains_key(&(id, 1));
         let used_bytes: usize = self.mips.values()
             .map(|(mip, _)| usize::from(mip.width()) * usize::from(mip.height()) * 4)
             .sum();
@@ -128,7 +154,9 @@ impl Images {
             if width == 1 && height == 1 { return None; }
             width = width.div_ceil(2);
             height = height.div_ceil(2);
-            if !self.mips.contains_key(&(id, current)) {
+            if !(direct_cold_l2 && current == 1)
+                && !self.mips.contains_key(&(id, current))
+            {
                 new_bytes = new_bytes.saturating_add(width * height * 4);
             }
         }
@@ -167,6 +195,21 @@ impl Images {
             }
         }
 
+        // The L2-only reduction is byte-identical to two rounded box passes,
+        // but writes only the final level. Missing L1 is built lazily on zoom.
+        if direct_cold_l2 {
+            #[cfg(not(feature = "installed"))]
+            let started = std::time::Instant::now();
+            let next = Arc::new(mipmap::direct_l2_packed(base)?);
+            #[cfg(not(feature = "installed"))]
+            {
+                self.diag.generated += 1;
+                self.diag.generated_pixels += u64::from(next.width()) * u64::from(next.height());
+                self.diag.build_nanos += started.elapsed().as_nanos();
+            }
+            self.mips.insert((id, 2), (Arc::clone(&next), self.frame));
+            return Some(ImageSource::Pixmap(next));
+        }
         let mut previous = Arc::clone(base);
         let frame = self.frame;
         for current in 1..=level {
@@ -278,7 +321,9 @@ pub fn brush_to_paint_trial(
         std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1")
     });
     if !enabled {
-        return (brush_to_paint(brush, composite, images), brush_transform);
+        let mut paint = brush_to_paint(brush, composite, images);
+        apply_factorial_filter_from_env(&mut paint);
+        return (paint, brush_transform);
     }
     static BILINEAR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let use_bilinear = *BILINEAR.get_or_init(|| {
@@ -287,6 +332,45 @@ pub fn brush_to_paint_trial(
     brush_to_paint_candidate_tuned(
         brush, composite, images, effective_geometry, brush_transform, true, use_bilinear,
     )
+}
+
+// Four-cell sampler × mipmap experiment: the original image brush may
+// already have Medium quality, so a no-op "High→Medium" downgrade is not
+// adequate evidence. Force the exact sampler quality in *all four* developer
+// processes, then demand a positive native image brush witness.
+#[cfg(any(test, not(feature = "installed")))]
+fn force_image_sample_quality(paint: &mut PaintType, selection: u8) -> bool {
+    let Brush::Image(image) = paint else { return false };
+    match selection {
+        1 => image.sampler.quality = ImageQuality::High,
+        2 => image.sampler.quality = ImageQuality::Medium,
+        _ => return false,
+    }
+    true
+}
+
+#[cfg(not(feature = "installed"))]
+fn apply_factorial_filter_from_env(paint: &mut PaintType) {
+    static FORCE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    let selected = *FORCE.get_or_init(|| {
+        match std::env::var("AKULA_EXPERIMENTAL_IMAGE_FILTER_FORCE").ok().as_deref() {
+            Some("high") => 1,
+            Some("medium") => 2,
+            _ => 0,
+        }
+    });
+    if !force_image_sample_quality(paint, selected) {
+        return;
+    }
+    if std::env::var("AKULA_EXPERIMENTAL_IMAGE_FILTER_PROOF").ok().as_deref() == Some("1") {
+        static HIGH: std::sync::Once = std::sync::Once::new();
+        static MEDIUM: std::sync::Once = std::sync::Once::new();
+        match selected {
+            1 => HIGH.call_once(|| eprintln!("AKULA_FILTER_FORCED_HIGH_APPLIED")),
+            2 => MEDIUM.call_once(|| eprintln!("AKULA_FILTER_FORCED_MEDIUM_APPLIED")),
+            _ => {}
+        }
+    }
 }
 
 // Test-only direct activation, independent of environment and OnceLock.
@@ -322,6 +406,8 @@ fn brush_to_paint_candidate_tuned(
         None
     };
     let mut paint = brush_to_paint(brush, composite, images);
+    #[cfg(not(feature = "installed"))]
+    apply_factorial_filter_from_env(&mut paint);
     if !enabled {
         return (paint, brush_transform);
     }
@@ -457,6 +543,26 @@ mod mipmap_integration_tests {
         assert_eq!((original.width(), original.height()), (128, 128));
         assert_eq!(brush_transform, Affine::IDENTITY);
         assert!(images.mips.is_empty(), "installed build must not generate mips");
+    }
+
+    #[test]
+    fn factorial_force_proves_both_samplers_from_a_medium_default() {
+        let original = test_brush(128, 129).with_quality(ImageQuality::Medium);
+        let mut images = Images::default();
+        let mut paint = brush_to_paint(BrushRef::Image(original.as_ref()), Composite::default(), &mut images);
+        assert!(force_image_sample_quality(&mut paint, 1));
+        let Brush::Image(high) = &paint else { panic!("expected image") };
+        assert_eq!(high.sampler.quality, ImageQuality::High);
+        let ImageSource::Pixmap(ref high_px) = high.image else { panic!("pixmap expected") };
+        assert_eq!((high_px.width(), high_px.height()), (128, 129));
+        let high_bytes = high_px.data_as_u8_slice().to_vec();
+        assert!(force_image_sample_quality(&mut paint, 2));
+        let Brush::Image(medium) = &paint else { panic!("expected image") };
+        assert_eq!(medium.sampler.quality, ImageQuality::Medium);
+        let ImageSource::Pixmap(ref medium_px) = medium.image else { panic!("pixmap expected") };
+        assert_eq!(medium_px.data_as_u8_slice(), high_bytes.as_slice());
+        assert!(images.mips.is_empty(), "quality override cannot build mip levels");
+        assert!(!force_image_sample_quality(&mut paint, 0));
     }
 
     #[test]
@@ -1494,3 +1600,7 @@ mod mipmap_rounded_coverage_tests {
         assert_eq!(checked, 4);
     }
 }
+
+#[cfg(test)]
+#[path = "convert_adaptive_lod_tests.rs"]
+mod adaptive_lod_tests;
