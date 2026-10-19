@@ -713,6 +713,62 @@ mod tests {
     }
 
     #[test]
+    fn partial_header_after_keep_alive_stops_idle_reclamation() {
+        let (server, _) = server();
+        let mut held = (0..MAX_CONNECTIONS)
+            .map(|_| {
+                let mut client = Client::connect(&server);
+                client.send(&sized(&initialize(), ""));
+                assert_eq!(client.answer().status, 200);
+                client
+            })
+            .collect::<Vec<_>>();
+
+        let mut all_idle = false;
+        for _ in 0..2500 {
+            if lock(&server.endpoint.open).idle.len() == MAX_CONNECTIONS {
+                all_idle = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(all_idle, "pooled connections never became idle");
+
+        let partial = sized(&tool_call("partially-framed"), "");
+        assert!(partial.starts_with("POST"));
+        held[0].send(&partial[..1]);
+
+        let mut became_active = false;
+        for _ in 0..2500 {
+            let slots = lock(&server.endpoint.open);
+            if slots.idle.len() == MAX_CONNECTIONS - 1
+                && slots.idle.iter().all(|idle| idle.id != 0)
+            {
+                became_active = true;
+                break;
+            }
+            drop(slots);
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(became_active, "first header byte must clear idle registration");
+
+        let mut incoming = Client::connect(&server);
+        incoming.send(&sized(&tool_call("fresh"), ""));
+        assert_eq!(incoming.answer().status, 200);
+
+        // The in-progress header is not a reclamation victim: finish and
+        // process it while a *different* already-idle socket was evicted.
+        held[0].send(&partial[1..]);
+        let original = held[0].answer();
+        assert_eq!(original.status, 200);
+        assert!(original.body.contains("partially-framed"));
+
+        drop(incoming);
+        drop(held);
+        server.stop();
+    }
+
+    #[test]
     fn returns_bounded_503_when_all_sockets_are_mid_request() {
         use std::time::Instant;
         let (server, _) = server();
