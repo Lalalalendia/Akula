@@ -1,7 +1,7 @@
 # AKAI-HOST-01 — fail-closed loopback Host validation for MCP HTTP
 
-**Status:** code in Draft PR; not verified until exact-head CI passes.  
-**Parent:** [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de), M0 protocol/transport hardening, precursor to M1 agent grants.  
+**Status:** code in Draft PR; not verified until exact-head CI passes.
+**Parent:** [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de), M0 protocol/transport hardening, precursor to M1 agent grants.
 **Based on:** [AKAI-CONF-03](https://github.com/Lalalalendia/Akula/pull/389) official TypeScript SDK two-client direct test (squash `3c599707cfa1886b0677245510c56f342c138585`).
 
 ## Vulnerability boundary and motivation
