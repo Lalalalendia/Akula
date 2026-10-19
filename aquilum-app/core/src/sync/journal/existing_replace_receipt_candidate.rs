@@ -13,7 +13,7 @@ use crate::sync::protection_store::BoundProtectedOriginal;
 
 /// Never export a constructor accepting an untyped history-version ID.
 /// The only production builder accepts HistoryService's non-Clone, sealed
-/// VerifyHistoryVersion and checks its exact bytes/size against the V7 target.
+/// VerifiedHistoryVersion and checks its exact bytes/size against the V7 target.
 #[must_use = "forensic receipt candidates never grant automatic S3 apply"]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -423,7 +423,7 @@ mod tests {
             SqliteSyncJournal::open_existing_read_only(&file),
             Err(JournalError::UnsupportedSchema(7))
         ));
-        let upgraded=SqliteSyncJournal::open(&file).unwrap();
+        let mut upgraded=SqliteSyncJournal::open(&file).unwrap();
         assert_eq!(upgraded.baseline(intent.vault_id,intent.document_id)
             .unwrap(),baseline);
         assert_eq!(upgraded.read_existing_replace_attempt(intent.operation_id)
