@@ -180,6 +180,20 @@ cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
   --test iroh_blobs_compare bounded_ext4_inventory_audit_after_remount \
   -- --exact --ignored --nocapture
 
+# P2P-BLOB-09b: STRICT read-only redb table audit against the real
+# durable journal, including a real small blob inlined in blobs.db. All
+# intentionally damaged / foreign DB examples are separate disposable COPIES.
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_redb_read_only_real_external_and_inline \
+  -- --exact --ignored --nocapture
+
+sync
+sudo umount "$volume"
+mount_image
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_redb_read_only_after_remount \
+  -- --exact --ignored --nocapture
+
 # A missing mount must NOT cause staging to continue on its host parent.
 sudo umount "$volume"
 cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
