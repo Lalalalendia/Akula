@@ -80,6 +80,21 @@ function Start-And-Close {
   }
   if (!$visible) { throw 'Akula window did not appear' }
   if ($EditNote) {
+    # Guard document identity before typing. A process/HWND-only check cannot
+    # distinguish an editor from an Akula home page or an open-error pane.
+    $noteWindowReady = $false
+    for ($i = 0; $i -lt 15; $i++) {
+      $app.Refresh()
+      if ($app.HasExited) { throw 'Akula exited before opening the requested note' }
+      if ($app.MainWindowTitle -like 'First note*' -and $app.MainWindowTitle -like '*Akula*') {
+        $noteWindowReady = $true
+        break
+      }
+      Start-Sleep -Milliseconds 250
+    }
+    if (!$noteWindowReady) {
+      throw 'Installed Akula did not show the requested note title before OS input'
+    }
     # This must be genuine OS input into the installed foreground editor.
     # After initial fixture creation this script never writes to $note.
     $noteWindowTitle = $app.MainWindowTitle -like '*First note*'
