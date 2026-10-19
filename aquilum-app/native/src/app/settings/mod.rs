@@ -67,9 +67,17 @@ impl App {
         } else {
             None
         };
+        let yandex_keys = if section == Section::Sync {
+            let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
+            crate::yandex_credentials::present(&bucket).ok()
+        } else {
+            None
+        };
         Context {
             workspace,
             sync_recovery,
+            yandex_keys,
+            yandex_notice: None,
             sync_selected: None,
             sync_notice: None,
             scale: self.interface.scale(),

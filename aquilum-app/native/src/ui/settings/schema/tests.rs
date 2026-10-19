@@ -183,6 +183,8 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     assert_eq!(setup.title, t("settings.yandex.title"));
     let mut links = 0;
     let mut disabled_probe = 0;
+    let mut store_keys = 0;
+    let mut remove_keys = 0;
     let mut writable_fields = 0;
     for row in &setup.rows {
         if row.setter.is_some() {
@@ -203,7 +205,15 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
                             || *url == "https://console.yandex.cloud/",
                             "Only pinned HTTPS Yandex documentation destinations are allowed");
                     }
-                    other => panic!("An S3 setup button must not grant write/sync capability: {other:?}"),
+                    Action::StoreYandexKeys => {
+                        store_keys += 1;
+                        assert!(!button.enabled, "No bucket: cannot open credential UI");
+                    }
+                    Action::RemoveYandexKeys => {
+                        remove_keys += 1;
+                        assert!(!button.enabled, "No verified local credential: cannot remove");
+                    }
+                    other => panic!("S3 setup must not grant remote write/sync capability: {other:?}"),
                 }
             }
         }
@@ -211,6 +221,7 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     assert_eq!(writable_fields, 2);
     assert_eq!(links, 5);
     assert_eq!(disabled_probe, 1);
+    assert_eq!((store_keys, remove_keys), (1, 1));
     assert!(setup.rows.iter().any(|row| row.label == t("settings.yandex.credentialSafety")));
     assert!(setup.rows.iter().any(|row| row.label == t("settings.yandex.explanation")));
 
@@ -228,6 +239,28 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     set_profile(&mut config, &Value::Text("keys=not-safe".into()));
     assert_eq!(config.s3_onboarding.bucket, "private-akula-bucket");
     assert_eq!(config.s3_onboarding.aws_profile_name, "akula_yc");
+    // Only a Windows user with a chosen bucket can invoke the native
+    // OS credential dialog; the button never starts S3 network traffic.
+    let user_controls = blocks(Section::Sync, &config, &ctx);
+    let buttons = user_controls[0].rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(),
+        _ => &[],
+    }).collect::<Vec<_>>();
+    let save = buttons.iter().find(|b| b.action == Action::StoreYandexKeys).unwrap();
+    let delete = buttons.iter().find(|b| b.action == Action::RemoveYandexKeys).unwrap();
+    assert_eq!(save.enabled, cfg!(target_os = "windows"));
+    assert!(!delete.enabled);
+    let mut ctx_with_keys = Context::new(1.0);
+    ctx_with_keys.yandex_keys = Some(true);
+    let present = blocks(Section::Sync, &config, &ctx_with_keys);
+    let buttons = present[0].rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(),
+        _ => &[],
+    }).collect::<Vec<_>>();
+    assert_eq!(buttons.iter().find(|b| b.action == Action::RemoveYandexKeys)
+        .unwrap().enabled, cfg!(target_os = "windows"));
+    assert!(present[0].rows.iter().any(|r| r.label == t("settings.yandex.keyStatus")));
+
     i18n::set_language("en");
     let english = blocks(Section::Sync, &config, &ctx);
     assert_eq!(english[0].title, t("settings.yandex.title"));

@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::t;
 
 impl App {
     pub(super) fn press(&mut self, dialog: &mut SettingsDialog, action: Action) -> Effect {
@@ -53,6 +54,47 @@ impl App {
                 system::open_url(url);
                 Effect::None
             }
+            Action::StoreYandexKeys if dialog.section == Section::Sync => {
+                let bucket = core.settings.get_config().s3_onboarding.bucket;
+                let result = crate::yandex_credentials::prompt_and_save(
+                    &bucket,
+                    &t("settings.yandex.promptTitle"),
+                    &t("settings.yandex.promptText"),
+                );
+                let key = match result {
+                    Ok(crate::yandex_credentials::SaveOutcome::Saved) =>
+                        "settings.yandex.keysSaved",
+                    Ok(crate::yandex_credentials::SaveOutcome::Cancelled) =>
+                        "settings.yandex.keysCancelled",
+                    Err(crate::yandex_credentials::VaultError::InvalidKeys) =>
+                        "settings.yandex.keysInvalid",
+                    Err(_) => "settings.yandex.keysStoreFailed",
+                };
+                // Only a fixed localized outcome is reported to the UI.
+                // Never print a key, username or raw Windows error.
+                dialog.yandex_notice = Some(t(key));
+                Effect::Content
+            }
+            Action::RemoveYandexKeys if dialog.section == Section::Sync => {
+                let bucket = core.settings.get_config().s3_onboarding.bucket;
+                let confirmed = rfd::MessageDialog::new()
+                    .set_title(t("settings.yandex.keysConfirmTitle"))
+                    .set_description(t("settings.yandex.keysConfirmText"))
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show() == rfd::MessageDialogResult::Yes;
+                let key = if !confirmed {
+                    "settings.yandex.keysRemoveCancelled"
+                } else {
+                    match crate::yandex_credentials::remove(&bucket) {
+                        Ok(()) => "settings.yandex.keysRemoved",
+                        Err(_) => "settings.yandex.keysRemoveFailed",
+                    }
+                };
+                dialog.yandex_notice = Some(t(key));
+                Effect::Content
+            }
+            Action::StoreYandexKeys | Action::RemoveYandexKeys => Effect::None,
         }
     }
 

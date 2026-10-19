@@ -75,6 +75,7 @@ mod vsync;
 mod ui;
 mod updater;
 mod window_state;
+mod yandex_credentials;
 mod workspace;
 
 pub use args::Args;

@@ -49,6 +49,7 @@ pub struct SettingsDialog {
     pub trash_page: usize,
     pub sync_selected: Option<aquilum_core::sync::NativeRecoveryCasePreview>,
     pub sync_notice: Option<String>,
+    pub yandex_notice: Option<String>,
     pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
 }
 
@@ -98,7 +99,7 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
         .with_fixed(Rule::new(Axis::Horizontal, || theme::current().border_default))
         .with(NewWidget::new(body), 1.0);
     let (copied, trash_page) = (ctx.copied, ctx.trash_page);
-    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None };
+    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, yandex_notice: ctx.yandex_notice.clone(), sync_confirm: None };
     (NewWidget::new(card), finish)
 }
 

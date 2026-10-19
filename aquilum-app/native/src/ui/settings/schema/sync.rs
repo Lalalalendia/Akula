@@ -13,9 +13,22 @@ pub(super) const YANDEX_AWS_PROFILE_DOCS: &str = "https://yandex.cloud/ru/docs/s
 /// YC-S3-T01, UI stage only. A validated draft is NOT authorization, remote
 /// account identity proof, a live S3 HEAD, or permission to start syncing.
 /// Explicitly no field accepts a secret: native TextEditor fields are plaintext.
-pub(super) fn yandex_setup(config: &AppConfig) -> Block {
+pub(super) fn yandex_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.s3_onboarding;
-    let rows = vec![
+    let bucket_ready = !draft.bucket.is_empty() && YandexS3Onboarding::valid_bucket(&draft.bucket);
+    let supported = cfg!(target_os = "windows");
+    let (key_status, key_tone) = if !supported {
+        (t("settings.yandex.keysUnsupported"), Tone::Muted)
+    } else if !bucket_ready {
+        (t("settings.yandex.keysNeedBucket"), Tone::Secondary)
+    } else {
+        match ctx.yandex_keys {
+            Some(true) => (t("settings.yandex.keysStoredUnverified"), Tone::Secondary),
+            Some(false) => (t("settings.yandex.keysMissing"), Tone::Secondary),
+            None => (t("settings.yandex.keysUnavailable"), Tone::Danger),
+        }
+    };
+    let mut rows = vec![
         info(t("settings.yandex.explanation"), Some(t("settings.yandex.explanationHint")),
             Control::Status { text: t("settings.yandex.inactive"), tone: Tone::Danger }),
         info(t("settings.yandex.stepAccount"), Some(t("settings.yandex.stepAccountHint")),
@@ -63,6 +76,15 @@ pub(super) fn yandex_setup(config: &AppConfig) -> Block {
             Control::Status { text: "ru-central1".into(), tone: Tone::Secondary }),
         info(t("settings.yandex.credentialSafety"), Some(t("settings.yandex.credentialSafetyHint")),
             Control::Status { text: t("settings.yandex.neverPasteKeys"), tone: Tone::Danger }),
+        info(t("settings.yandex.keyStatus"), Some(t("settings.yandex.keyStatusHint")),
+            Control::Status { text: key_status, tone: key_tone }),
+        info(t("settings.yandex.manageKeys"), Some(t("settings.yandex.manageKeysHint")),
+            Control::Buttons(vec![
+                Button::new(t("settings.yandex.addKeys"), Action::StoreYandexKeys)
+                    .enabled(supported && bucket_ready),
+                Button::new(t("settings.yandex.removeKeys"), Action::RemoveYandexKeys)
+                    .enabled(supported && bucket_ready && ctx.yandex_keys == Some(true)),
+            ])),
         info(t("settings.yandex.connectionTest"), Some(t("settings.yandex.connectionTestHint")),
             Control::Buttons(vec![
                 // Explicitly unavailable until keychain + read-only probe +
@@ -70,6 +92,10 @@ pub(super) fn yandex_setup(config: &AppConfig) -> Block {
                 Button::new(t("settings.yandex.checkConnection"), Action::OpenUrl(YANDEX_KEY_DOCS)).enabled(false),
             ])),
     ];
+    if let Some(notice) = &ctx.yandex_notice {
+        rows.push(info(t("settings.yandex.keyActionResult"), None,
+            Control::Status { text: notice.clone(), tone: Tone::Secondary }));
+    }
     Block { title: t("settings.yandex.title"), rows }
 }
 
