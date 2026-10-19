@@ -51,6 +51,72 @@ pub fn half(source: &Pixmap) -> Option<Pixmap> {
     ))
 }
 
+/// B2: direct L2 without allocating/materializing L1, preserving the
+/// **two separate roundings** of half(half(src)). Test-only.
+#[cfg(any(test, not(feature = "installed")))]
+#[inline]
+fn packed_average4(a: u32, b: u32, c: u32, d: u32) -> u32 {
+    const RB: u32 = 0x00ff_00ff;
+    const ROUND: u32 = 0x0002_0002;
+    let even = (a & RB) + (b & RB) + (c & RB) + (d & RB);
+    let odd = ((a >> 8) & RB) + ((b >> 8) & RB)
+        + ((c >> 8) & RB) + ((d >> 8) & RB);
+    (((even + ROUND) >> 2) & RB) | ((((odd + ROUND) >> 2) & RB) << 8)
+}
+
+#[cfg(any(test, not(feature = "installed")))]
+pub fn direct_l2_packed(source: &Pixmap) -> Option<Pixmap> {
+    let (w, h) = (source.width(), source.height());
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let (mid_w, mid_h) = (w.div_ceil(2), h.div_ceil(2));
+    // half() on the first mip returns None for an already 1x1 image.
+    if mid_w == 1 && mid_h == 1 {
+        return None;
+    }
+    let (out_w, out_h) = (mid_w.div_ceil(2), mid_h.div_ceil(2));
+    let source_bytes = source.data_as_u8_slice();
+    let source_stride = usize::from(w) * 4;
+    let (max_x, max_y) = (usize::from(w) - 1, usize::from(h) - 1);
+    let (max_mid_x, max_mid_y) = (usize::from(mid_w) - 1, usize::from(mid_h) - 1);
+
+    let source_word = |x: usize, y: usize| {
+        let at = y * source_stride + x * 4;
+        u32::from_le_bytes(source_bytes[at..at + 4].try_into().expect("complete premul RGBA"))
+    };
+    let virtual_l1 = |x: usize, y: usize| {
+        let (x0, y0) = (2 * x, 2 * y);
+        let (x1, y1) = ((x0 + 1).min(max_x), (y0 + 1).min(max_y));
+        packed_average4(
+            source_word(x0, y0), source_word(x1, y0),
+            source_word(x0, y1), source_word(x1, y1),
+        )
+    };
+    let mut bytes = Vec::with_capacity(usize::from(out_w) * usize::from(out_h) * 4);
+    let mut may_have_transparency = false;
+    for y in 0..usize::from(out_h) {
+        for x in 0..usize::from(out_w) {
+            // Crucial for odd widths/heights: clamp in L1 coordinate
+            // space *before* evaluating its 2x2 source box. This
+            // reproduces half(half(src)) even for 1xN and Nx1 images.
+            let (x0, y0) = (2 * x, 2 * y);
+            let (x1, y1) = ((x0 + 1).min(max_mid_x), (y0 + 1).min(max_mid_y));
+            let result = packed_average4(
+                virtual_l1(x0, y0), virtual_l1(x1, y0),
+                virtual_l1(x0, y1), virtual_l1(x1, y1),
+            );
+            may_have_transparency |= (result >> 24) != 255;
+            bytes.extend_from_slice(&result.to_le_bytes());
+        }
+    }
+    Some(Pixmap::from_parts(
+        bytes, out_w, out_h,
+        PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, may_have_transparency),
+    ))
+}
+
+
 /// How many 2x box reductions keep the final scale at or above 1/2.
 /// Intentionally supports only positive axis-aligned image transforms.
 pub fn level_for_transform(transform: vello_cpu::kurbo::Affine) -> u8 {
@@ -382,69 +448,6 @@ mod tests {
     }
 
 
-    /// B2: direct L2 without allocating/materializing L1, preserving the
-    /// **two separate roundings** of half(half(src)). Test-only.
-    #[inline]
-    fn packed_average4(a: u32, b: u32, c: u32, d: u32) -> u32 {
-        const RB: u32 = 0x00ff_00ff;
-        const ROUND: u32 = 0x0002_0002;
-        let even = (a & RB) + (b & RB) + (c & RB) + (d & RB);
-        let odd = ((a >> 8) & RB) + ((b >> 8) & RB)
-            + ((c >> 8) & RB) + ((d >> 8) & RB);
-        (((even + ROUND) >> 2) & RB) | ((((odd + ROUND) >> 2) & RB) << 8)
-    }
-
-    fn direct_l2_packed_trial(source: &Pixmap) -> Option<Pixmap> {
-        let (w, h) = (source.width(), source.height());
-        if w == 0 || h == 0 {
-            return None;
-        }
-        let (mid_w, mid_h) = (w.div_ceil(2), h.div_ceil(2));
-        // half() on the first mip returns None for an already 1x1 image.
-        if mid_w == 1 && mid_h == 1 {
-            return None;
-        }
-        let (out_w, out_h) = (mid_w.div_ceil(2), mid_h.div_ceil(2));
-        let source_bytes = source.data_as_u8_slice();
-        let source_stride = usize::from(w) * 4;
-        let (max_x, max_y) = (usize::from(w) - 1, usize::from(h) - 1);
-        let (max_mid_x, max_mid_y) = (usize::from(mid_w) - 1, usize::from(mid_h) - 1);
-
-        let source_word = |x: usize, y: usize| {
-            let at = y * source_stride + x * 4;
-            u32::from_le_bytes(source_bytes[at..at + 4].try_into().expect("complete premul RGBA"))
-        };
-        let virtual_l1 = |x: usize, y: usize| {
-            let (x0, y0) = (2 * x, 2 * y);
-            let (x1, y1) = ((x0 + 1).min(max_x), (y0 + 1).min(max_y));
-            packed_average4(
-                source_word(x0, y0), source_word(x1, y0),
-                source_word(x0, y1), source_word(x1, y1),
-            )
-        };
-        let mut bytes = Vec::with_capacity(usize::from(out_w) * usize::from(out_h) * 4);
-        let mut may_have_transparency = false;
-        for y in 0..usize::from(out_h) {
-            for x in 0..usize::from(out_w) {
-                // Crucial for odd widths/heights: clamp in L1 coordinate
-                // space *before* evaluating its 2x2 source box. This
-                // reproduces half(half(src)) even for 1xN and Nx1 images.
-                let (x0, y0) = (2 * x, 2 * y);
-                let (x1, y1) = ((x0 + 1).min(max_mid_x), (y0 + 1).min(max_mid_y));
-                let result = packed_average4(
-                    virtual_l1(x0, y0), virtual_l1(x1, y0),
-                    virtual_l1(x0, y1), virtual_l1(x1, y1),
-                );
-                may_have_transparency |= (result >> 24) != 255;
-                bytes.extend_from_slice(&result.to_le_bytes());
-            }
-        }
-        Some(Pixmap::from_parts(
-            bytes, out_w, out_h,
-            PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, may_have_transparency),
-        ))
-    }
-
     #[test]
     fn direct_l2_matches_two_separate_roundings_even_odd_and_premul() {
         let mut sizes: Vec<(u16, u16)> = (1..=11)
@@ -461,7 +464,7 @@ mod tests {
                     let scalar = half(&input).and_then(|l1| half(&l1));
                     let packed_two_pass = half_packed_trial(&input)
                         .and_then(|l1| half_packed_trial(&l1));
-                    let direct = direct_l2_packed_trial(&input);
+                    let direct = direct_l2_packed(&input);
                     assert_eq!(scalar.is_some(), direct.is_some(),
                         "None mismatch at {w}x{h}");
                     assert_eq!(packed_two_pass.is_some(), direct.is_some(),
@@ -508,7 +511,7 @@ mod tests {
                         0 => half(black_box(&source)).and_then(|l1| half(&l1)),
                         1 => half_packed_trial(black_box(&source))
                             .and_then(|l1| half_packed_trial(&l1)),
-                        _ => direct_l2_packed_trial(black_box(&source)),
+                        _ => direct_l2_packed(black_box(&source)),
                     }.expect("source supports two levels");
                     black_box(result.data_as_u8_slice());
                     let duration_ms = start.elapsed().as_secs_f64() * 1000.0;

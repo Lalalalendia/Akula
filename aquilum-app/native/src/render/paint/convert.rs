@@ -32,6 +32,17 @@ fn mip_linger_enabled() -> bool {
     })
 }
 
+// Developer-only selective L2 experiment. This is never an installed feature.
+#[cfg(any(test, not(feature = "installed")))]
+fn mip_direct_l2_enabled() -> bool {
+    static DIRECT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DIRECT.get_or_init(|| {
+        !cfg!(feature = "installed")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_DIRECT_L2").ok().as_deref() == Some("1")
+    })
+}
+
 // Counters are local to an opt-in developer renderer, with no logging in the
 // per-image hot path. Installed builds do not compile these fields.
 #[cfg(not(feature = "installed"))]
@@ -98,6 +109,17 @@ impl Images {
         &mut self, id: u64, original: &ImageSource, level: u8,
         budget: usize, reclaim_old: bool,
     ) -> Option<ImageSource> {
+        self.mip_source_with_strategy(
+            id, original, level, budget, reclaim_old, mip_direct_l2_enabled(),
+        )
+    }
+
+    // Explicit strategy parameter prevents env-dependence in deterministic tests.
+    #[cfg(any(test, not(feature = "installed")))]
+    fn mip_source_with_strategy(
+        &mut self, id: u64, original: &ImageSource, level: u8,
+        budget: usize, reclaim_old: bool, direct_l2: bool,
+    ) -> Option<ImageSource> {
         let ImageSource::Pixmap(base) = original else { return None };
         if level == 0 || level > mipmap::MAX_LEVELS
             || base.width() == 0 || base.height() == 0
@@ -119,6 +141,10 @@ impl Images {
             }
             return Some(ImageSource::Pixmap(Arc::clone(cached)));
         }
+        // The optional cold direct L2 path reserves no unused L1.
+        // If L1 already exists, retain the original incremental algorithm.
+        let direct_cold_l2 = direct_l2 && level == 2
+            && !self.mips.contains_key(&(id, 1));
         let used_bytes: usize = self.mips.values()
             .map(|(mip, _)| usize::from(mip.width()) * usize::from(mip.height()) * 4)
             .sum();
@@ -128,7 +154,9 @@ impl Images {
             if width == 1 && height == 1 { return None; }
             width = width.div_ceil(2);
             height = height.div_ceil(2);
-            if !self.mips.contains_key(&(id, current)) {
+            if !(direct_cold_l2 && current == 1)
+                && !self.mips.contains_key(&(id, current))
+            {
                 new_bytes = new_bytes.saturating_add(width * height * 4);
             }
         }
@@ -167,6 +195,21 @@ impl Images {
             }
         }
 
+        // The L2-only reduction is byte-identical to two rounded box passes,
+        // but writes only the final level. Missing L1 is built lazily on zoom.
+        if direct_cold_l2 {
+            #[cfg(not(feature = "installed"))]
+            let started = std::time::Instant::now();
+            let next = Arc::new(mipmap::direct_l2_packed(base)?);
+            #[cfg(not(feature = "installed"))]
+            {
+                self.diag.generated += 1;
+                self.diag.generated_pixels += u64::from(next.width()) * u64::from(next.height());
+                self.diag.build_nanos += started.elapsed().as_nanos();
+            }
+            self.mips.insert((id, 2), (Arc::clone(&next), self.frame));
+            return Some(ImageSource::Pixmap(next));
+        }
         let mut previous = Arc::clone(base);
         let frame = self.frame;
         for current in 1..=level {
@@ -1494,3 +1537,7 @@ mod mipmap_rounded_coverage_tests {
         assert_eq!(checked, 4);
     }
 }
+
+#[cfg(test)]
+#[path = "convert_adaptive_lod_tests.rs"]
+mod adaptive_lod_tests;
