@@ -74,11 +74,13 @@ fn actual_tab_navigation_reaches_both_visible_buttons_in_document_order() {
     let source = "~~~rust\nfirst_code\n~~~\nprose\n~~~python\nsecond_code\n~~~";
     let second = source.find("~~~python").unwrap();
     let mut root = focused(TextEditor::new(source).markdown(), 590, 320);
-    assert_eq!(buttons(&root).len(), 2, "both semantic buttons are mounted");
+    let mounted = buttons(&root);
+    assert_eq!(mounted.len(), 2, "both semantic buttons are mounted");
 
     // Do not call focus_on(button): this must exercise Masonry's real Tab
     // traversal from the editor and then activation through Enter.
     press(&mut root, Key::Named(NamedKey::Tab), Modifiers::empty());
+    assert_eq!(root.focused_widget(), Some(mounted[0].1), "first Tab must focus the first real child");
     press(&mut root, Key::Named(NamedKey::Enter), Modifiers::empty());
     assert_eq!(
         root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
@@ -88,6 +90,7 @@ fn actual_tab_navigation_reaches_both_visible_buttons_in_document_order() {
     assert_eq!(text(&root), source);
 
     press(&mut root, Key::Named(NamedKey::Tab), Modifiers::empty());
+    assert_eq!(root.focused_widget(), Some(mounted[1].1), "second Tab must focus the second real child");
     press(&mut root, Key::Named(NamedKey::Enter), Modifiers::empty());
     assert_eq!(
         root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
@@ -95,7 +98,27 @@ fn actual_tab_navigation_reaches_both_visible_buttons_in_document_order() {
         "second Tab must reach the next visible code-header button"
     );
     assert_eq!(text(&root), source);
+    press(&mut root, Key::Named(NamedKey::Tab), Modifiers::SHIFT);
+    assert_eq!(root.focused_widget(), Some(mounted[0].1), "Shift+Tab must traverse backward");
+    assert_eq!(text(&root), source);
 }
+
+
+#[test]
+fn tab_in_fenced_code_body_keeps_editing_focus_instead_of_jumping_to_copy() {
+    let source = "~~~rust\nlet x = 1;\n~~~";
+    let at = source.find("let x").unwrap();
+    let mut root = focused(TextEditor::new(source).markdown(), 590, 300);
+    let eid = editor_id(&root);
+    assert_eq!(buttons(&root).len(), 1, "there is a visible Copy affordance");
+    root.edit_widget(eid, |mut widget| {
+        TextEditor::select_byte_range(&mut widget.downcast(), at, at);
+    });
+    press(&mut root, Key::Named(NamedKey::Tab), Modifiers::empty());
+    assert_eq!(root.focused_widget(), Some(eid), "Tab inside the code body retains the editable focus");
+    assert_eq!(root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(), None);
+}
+
 
 #[test]
 fn removed_code_fence_removes_old_widget_id_without_rebinding_it() {
@@ -170,8 +193,9 @@ fn delayed_accesskit_click_after_scroll_cannot_copy_an_offscreen_fence() {
         );
     });
 
-    // Simulates a queued UI Automation action targeted to the formerly
-    // visible node before the next explicit rendering pass.
+    // Scroll mutations can reclaim a child before the next explicit redraw.
+    // A late UIA action referencing that deleted NodeId must be ignored,
+    // not panic inside the vendored Masonry event dispatcher.
     root.handle_access_event(ActionRequest {
         target_tree: TreeId::ROOT,
         target_node: stale_id.into(),
