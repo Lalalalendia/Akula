@@ -32,6 +32,8 @@ pub enum GrantLedgerError {
     MissingGrant,
     Revoked,
     StaleEpoch,
+    WrongAuthenticatedEndpoint,
+    ScopeChanged,
     CorruptRow,
 }
 
@@ -106,6 +108,61 @@ fn checked_db_location(admission: &RegisteredReadAdmission<'_>, path: &Path) -> 
 
 fn bytes<const N: usize>(raw: Vec<u8>) -> Result<[u8; N]> {
     raw.try_into().map_err(|_| GrantLedgerError::CorruptRow)
+}
+
+/// Internal shared decoding: the same schema validation applies to free
+/// read_active snapshots and to reads *inside* a BEGIN IMMEDIATE fence.
+fn load_active_from_connection(
+    connection: &Connection,
+    vault: VaultId,
+    device: DeviceId,
+    now: u64,
+) -> Result<StoredPull> {
+    let raw: Option<(Vec<u8>, Vec<u8>, Vec<u8>, i64, i64, i64, Vec<u8>, i64)> = connection
+        .query_row(
+            "SELECT endpoint,issuer,content,content_len,epoch,expiry,nonce,active
+             FROM pull_grants WHERE vault=?1 AND device=?2",
+            params![vault.to_string(), device.to_string()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )
+        .optional()?;
+    let (endpoint, issuer, content, content_len, epoch, expiry, nonce, active) =
+        raw.ok_or(GrantLedgerError::MissingGrant)?;
+    if active == 0 {
+        return Err(GrantLedgerError::Revoked);
+    }
+    if active != 1 || epoch <= 0 || content_len < 0 || expiry <= 0 {
+        return Err(GrantLedgerError::CorruptRow);
+    }
+    let endpoint = bytes(endpoint)?;
+    let issuer = bytes(issuer)?;
+    let content = bytes(content)?;
+    let nonce = bytes(nonce)?;
+    if content_len as u64 > MAX_LAB_GRANT_BYTES || now >= expiry as u64 {
+        return Err(GrantLedgerError::InvalidProposal);
+    }
+    Ok(StoredPull {
+        vault_id: vault,
+        device_id: device,
+        authenticated_endpoint: endpoint,
+        trusted_issuer: issuer,
+        object_blake3: content,
+        object_length: content_len as u64,
+        epoch: epoch as u64,
+        expires_at: expiry as u64,
+        nonce,
+    })
 }
 
 impl<'a> RegisteredPullGrantLedger<'a> {
@@ -280,57 +337,59 @@ impl<'a> RegisteredPullGrantLedger<'a> {
         })
     }
 
-    /// Read-only snapshot, NOT a lease and NOT authority to publish a file.
-    /// A caller must revalidate immediately before using real bytes.
+    /// A read-only observation, not a revocation fence or a File Gate permit.
     pub fn read_active(&self, vault: VaultId, device: DeviceId, now: u64) -> Result<StoredPull> {
         self.admission.recheck_registered_root()?;
-        let raw: Option<(Vec<u8>, Vec<u8>, Vec<u8>, i64, i64, i64, Vec<u8>, i64)> = self
+        let active = load_active_from_connection(&self.db, vault, device, now)?;
+        self.admission.recheck_registered_root()?;
+        Ok(active)
+    }
+
+    /// RN-4D: exercise a bounded *cooperative SQLite policy fence*.
+    ///
+    /// BEGIN IMMEDIATE linearizes this preflight against issue/revoke writers
+    /// sharing this SQLite database. If revocation committed first, the gate
+    /// rejects it. If the gate took the lock first, a concurrent revocation
+    /// cannot commit until this callback returns and the transaction closes.
+    ///
+    /// The callback is only for research-time *read-only* checks; no Core
+    /// File Gate, mutator, network transfer, replica receipt or APPLIED
+    /// capability is exposed. Run potentially long Bao/QUIC transfer BEFORE
+    /// acquiring this lock. This is NOT an OS installer/host custody fence:
+    /// same-user hostile file replacement, untrusted clock/EndpointId,
+    /// verifier-key compromise and non-cooperating writers remain unsafe.
+    ///
+    /// The expected snapshot must contain the full previously approved
+    /// scope; merely matching (vault, device, epoch) is insufficient.
+    /// `authenticated_remote` must originate at trusted caller-side
+    /// Connection::remote_id(), not in a remote manifest.
+    pub fn with_fenced_pull_preflight(
+        &mut self,
+        expected: StoredPull,
+        authenticated_remote: [u8; 32],
+        trusted_now: u64,
+        read_only_probe: impl FnOnce(&StoredPull) -> Result<()>,
+    ) -> Result<()> {
+        self.admission.recheck_registered_root()?;
+        let tx = self
             .db
-            .query_row(
-                "SELECT endpoint,issuer,content,content_len,epoch,expiry,nonce,active
-                 FROM pull_grants WHERE vault=?1 AND device=?2",
-                params![vault.to_string(), device.to_string()],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let (endpoint, issuer, content, content_len, epoch, expiry, nonce, active) =
-            raw.ok_or(GrantLedgerError::MissingGrant)?;
-        if active == 0 {
-            return Err(GrantLedgerError::Revoked);
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current =
+            load_active_from_connection(&tx, expected.vault_id, expected.device_id, trusted_now)?;
+        if current.epoch != expected.epoch {
+            return Err(GrantLedgerError::StaleEpoch);
         }
-        if active != 1 || epoch <= 0 || content_len < 0 || expiry <= 0 {
-            return Err(GrantLedgerError::CorruptRow);
+        if current != expected {
+            return Err(GrantLedgerError::ScopeChanged);
         }
-        let endpoint = bytes(endpoint)?;
-        let issuer = bytes(issuer)?;
-        let content = bytes(content)?;
-        let nonce = bytes(nonce)?;
-        if content_len as u64 > MAX_LAB_GRANT_BYTES || now >= expiry as u64 {
-            return Err(GrantLedgerError::InvalidProposal);
+        if current.authenticated_endpoint != authenticated_remote {
+            return Err(GrantLedgerError::WrongAuthenticatedEndpoint);
         }
         self.admission.recheck_registered_root()?;
-        Ok(StoredPull {
-            vault_id: vault,
-            device_id: device,
-            authenticated_endpoint: endpoint,
-            trusted_issuer: issuer,
-            object_blake3: content,
-            object_length: content_len as u64,
-            epoch: epoch as u64,
-            expires_at: expiry as u64,
-            nonce,
-        })
+        read_only_probe(&current)?;
+        self.admission.recheck_registered_root()?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Atomic compare-and-set revocation, monotonic epoch tombstone.
