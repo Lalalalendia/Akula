@@ -20,7 +20,7 @@ fn visible_fenced_headers_expose_real_named_buttons_not_math_or_prose() {
     assert_eq!(list[1].0, source.find("~~~python").unwrap());
     let tree = update.expect("accessibility tree must be emitted when enabled");
     for (_, id) in &list {
-        let node = tree.nodes.iter().find(|(node_id, _)| *node_id == (*id).into())
+        let node = tree.nodes.iter().find(|(node_id, _)| *node_id == masonry::accesskit::NodeId::from(*id))
             .expect("button is a real Masonry child with its own tree node");
         assert_eq!(node.1.role(), Role::Button);
         assert!(matches!(node.1.label(), Some("Copy code block contents" | "Копировать содержимое блока кода")));
