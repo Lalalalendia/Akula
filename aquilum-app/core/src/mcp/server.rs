@@ -591,8 +591,9 @@ mod tests {
         server.stop();
     }
 
-    #[path = "server/throughput_probe.rs"]
-    mod throughput_probe;
+    mod throughput_probe {
+        include!("server/throughput_probe.rs");
+    }
 
     #[test]
     fn runs_one_tool_call_at_a_time() {
