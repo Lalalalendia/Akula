@@ -36,8 +36,8 @@ enum ProbeError {
     Ambiguous(String),
 }
 
-fn io(err: impl std::fmt::Display) -> ProbeError {
-    ProbeError::Io(err.to_string())
+fn io(err: impl std::fmt::Debug) -> ProbeError {
+    ProbeError::Io(format!("{err:?}"))
 }
 
 fn identity(file: &File) -> Result<PinnedFileIdentity, ProbeError> {
