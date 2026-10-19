@@ -424,3 +424,54 @@ fn p0g3d02_cold_review_missing_claim_and_corrupted_original_fail_closed() {
     assert!(inert_cold_review(&f).is_err());
     assert_no_remote_ack(&f);
 }
+
+
+#[test]
+fn p0g3d02_cold_review_same_bytes_foreign_inode_is_needs_review() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let held = prepare(&f, &admission).unwrap();
+    drop(held);
+    drop(admission);
+    let target = f.root.join(f.intent.path.as_str());
+    let parked = f.root.join("physically-retained-original.md");
+    fs::rename(&target, &parked).unwrap();
+    fs::write(&target, b"unchanged private original").unwrap();
+    let review = inert_cold_review(&f).unwrap();
+    assert_eq!(review.file_state, InertColdS3FileState::NeedsReview,
+        "a new file with identical bytes cannot inherit original identity");
+    assert_eq!(fs::read(&parked).unwrap(), b"unchanged private original");
+    assert_no_remote_ack(&f);
+}
+
+#[test]
+fn p0g3d02_cold_review_changed_baseline_refuses_without_mutating_file() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let held = prepare(&f, &admission).unwrap();
+    drop(held);
+    drop(admission);
+    // A changed durable baseline is disqualifying even if the primary bytes
+    // and the independent protected-original BLOB are still identical.
+    let connection = rusqlite::Connection::open(
+        f.appdata.join("journal.sqlite"),
+    ).unwrap();
+    connection.execute(
+        "UPDATE sync_baselines SET revision_id = ?1 WHERE vault_id = ?2 AND document_id = ?3",
+        rusqlite::params![
+            RevisionId::new().to_string(),
+            f.intent.vault_id.to_string(),
+            f.intent.document_id.to_string(),
+        ],
+    ).unwrap();
+    drop(connection);
+    assert!(inert_cold_review(&f).is_err(),
+        "stale baseline must reject cold forensic binding");
+    assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
+        b"unchanged private original");
+    let journal = SqliteSyncJournal::open_existing_read_only(
+        &f.appdata.join("journal.sqlite"),
+    ).unwrap();
+    assert_eq!(journal.get(f.intent.operation_id).unwrap().unwrap().phase,
+        JournalPhase::Staged);
+}
