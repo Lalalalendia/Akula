@@ -16,9 +16,9 @@ The new `peer_scope` module only accepts **Pull** of a precisely bounded object.
 3. current policy epoch, grant expiration and locally expected nonce;
 4. the operation byte.
 
-The grant is independently verified with an app-provided trusted issuer key. A local `LocalPolicy` must also bind the exact endpoint, device, vault, hash, size, generation and nonce; missing, revoked, expired or stale is **denied**. Signature alone never enrolls a peer or creates a grant.
+The grant is independently verified with an app-provided trusted issuer key. A local `LocalPolicy` must also bind the exact endpoint, device, vault, hash, size, generation and nonce; missing, revoked, expired or stale is **denied**. The existing file-gate fixture identifies destinations using a numeric `tag`. The local policy now **also pins that tag** so a correctly signed grant cannot be replayed into another test workspace. This tag is **not** a production VaultId-to-path identity or an OS inode custody proof. Signature alone never enrolls a peer or creates a grant.
 
-Negative tests exercise: mutated/wrong signature and issuer key; unregistered or revoked peer; authenticated endpoint mismatch; device/vault mismatch even under a *valid* signature; stale epoch; nonce mismatch; expired grant; absent or mismatched object; oversized object; properly signed PUSH and DELETE. Every negative gate test asserts that there is **no created user file and no receipt**.
+Negative tests exercise: mutated/wrong signature and issuer key; unregistered or revoked peer; authenticated endpoint mismatch; device/vault mismatch even under a *valid* signature; **cross-workspace destination tag despite a valid signed grant**; stale epoch; nonce mismatch; expired grant; absent or mismatched object; oversized object; properly signed PUSH and DELETE. Every negative gate test asserts that there is **no created user file and no receipt**.
 
 A positive **fixture-only** path calls the **existing** real File Gate function to create one fixed, known local note. It explicitly confirms that its network grant and file readback **do not** produce a replica/durable receipt, and second publication cannot overwrite. The existing signed receipt and crash/reopen studies remain unchanged.
 
