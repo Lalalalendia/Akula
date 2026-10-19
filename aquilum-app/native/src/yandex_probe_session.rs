@@ -13,6 +13,9 @@ use aquilum_core::settings::models::YandexS3Onboarding;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProbeFailure {
+    MissingKeys,
+    InvalidStoredKeys,
+    CredentialStoreUnavailable,
     CredentialsRejected,
     AccessDenied,
     BucketNotFound,
