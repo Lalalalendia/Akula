@@ -105,7 +105,7 @@ impl TextEditor {
         markdown::paint_backgrounds(painter, p.layout(), p.decor(), self.shift() + self.doc.origin(i));
     }
 
-    pub(super) fn paint_marks(&self, painter: &mut Painter<'_>, i: usize, palette: &[Brush]) {
+    pub(super) fn paint_marks(&self, painter: &mut Painter<'_, impl masonry::imaging::PaintSink + ?Sized>, i: usize, palette: &[Brush]) {
         let tm = theme::current();
         let p = self.doc.paragraph(i);
         let layout = p.layout();
