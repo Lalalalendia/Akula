@@ -185,14 +185,18 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         for item in lines[-1].split()[1:] if "=" in item
     }
     unique = int(counters.get("distinct_requested_ids", 0))
+    unique_pixels = int(counters.get("distinct_sampled_pixel_fingerprints", 0))
+    if unique_pixels > unique:
+        raise ValueError(f"{sample}: pixel fingerprint count exceeds distinct IDs")
     # At 1280x884, 24 eager L1+L2 pyramids exceed the real 32-MiB
     # budget. A 100-file note with only a handful of visible images
     # would not constitute cache-pressure evidence.
     minimum = {1: 1, 10: 8, 100: 24}[images]
-    if unique < minimum:
+    if unique < minimum or unique_pixels < minimum:
         raise ValueError(
-            f"{sample}: only {unique}/{images} unique mip images exercised; "
-            f"required at least {minimum} for a meaningful workload"
+            f"{sample}: only {unique} runtime IDs and {unique_pixels} "
+            f"independently sampled decoded-pixel fingerprints for "
+            f"{images} seeded PNG files; both must reach at least {minimum}"
         )
     parsed_replay = json.loads(replay.read_text(encoding="utf-8"))
     parsed_metrics = json.loads(metrics.read_text(encoding="utf-8"))
@@ -218,6 +222,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "note_sha256": hashlib.sha256(note.encode()).hexdigest(),
         "unique_image_sources_in_note": len(hashes),
         "unique_mip_source_ids_requested": unique,
+        "distinct_decoded_pixel_fingerprints": unique_pixels,
         "cpu_p95_ms": p95, "cpu_p99_ms": p99,
         "cpu_mean_ms": sum(work) / len(work),
         "full_damage_pixels_median": median(raster),
@@ -248,8 +253,8 @@ def report(rows: list[dict], binary_hash: str) -> str:
         "Replay uses 6s native fling + developer-only full raster of every drawn frame.",
         "Work times are CPU, not physical scanout/FPS. Image-quality comparison is separate.",
         "",
-        "| Sources in note | Mode | Distinct actually requested | CPU p95 ms | CPU p99 ms | Replay mip build ms | Peak RSS MiB |",
-        "|---:|---|---:|---:|---:|---:|---:|",
+        "| Sources in note | Mode | Runtime IDs | Distinct pixel fingerprints | CPU p95 ms | CPU p99 ms | Replay mip build ms | Peak RSS MiB |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|",
     ]
     for count in COUNTS:
         parts = [row for row in rows if row["count"] == count]
@@ -261,12 +266,14 @@ def report(rows: list[dict], binary_hash: str) -> str:
             group = [row for row in parts if row["mode"] == mode]
             if sorted(x["trial"] for x in group) != list(TRIALS):
                 raise ValueError(f"{count}/{mode}: paired trial missing")
-            keys = ("unique_mip_source_ids_requested", "cpu_p95_ms", "cpu_p99_ms",
+            keys = ("unique_mip_source_ids_requested", "distinct_decoded_pixel_fingerprints",
+                    "cpu_p95_ms", "cpu_p99_ms",
                     "mip_build_replay_ms", "peak_rss_mib")
             averages = {key: median(float(row[key]) for row in group) for key in keys}
             mode_aggregates[mode] = averages
             lines.append(
                 f"| {count} | {mode} | {averages['unique_mip_source_ids_requested']:.0f} | "
+                f"{averages['distinct_decoded_pixel_fingerprints']:.0f} | "
                 f"{averages['cpu_p95_ms']:.3f} | {averages['cpu_p99_ms']:.3f} | "
                 f"{averages['mip_build_replay_ms']:.3f} | {averages['peak_rss_mib']:.1f} |"
             )
