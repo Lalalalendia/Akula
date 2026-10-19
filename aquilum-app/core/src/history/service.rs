@@ -2057,6 +2057,85 @@ mod tests {
     }
 
     #[test]
+    fn p0g3b_strict_history_proof_identifies_new_version_under_history_lock() {
+        use super::HistorySaveEffect;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("BoundHistory.md");
+        let original = "protected old revision";
+        let updated = "fresh external S3 candidate for strict history proof";
+        fs::write(&note, updated).unwrap();
+        let new_hash = blake3::hash(updated.as_bytes()).to_hex().to_string();
+        let outcome = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            NoteWrite {
+                disk_before: Some((
+                    original.to_owned(), std::time::SystemTime::now(),
+                )),
+                text: updated, hash: &new_hash,
+                source: Source::External, name: Some("candidate"),
+            }, true, true,
+        ).expect("one current snapshot must be proven");
+        let id = match &outcome.effect {
+            HistorySaveEffect::Created(id) => id.clone(),
+            unexpected => panic!("expected new snapshot: {unexpected:?}"),
+        };
+        let proof = outcome.verified_version.unwrap();
+        assert_eq!(proof.version_id, id);
+        assert_eq!(proof.content_hash, new_hash);
+        assert_eq!(proof.content_length, updated.len());
+        assert_eq!(fs::read(fixture.history_of("BoundHistory.md").join(&id))
+            .unwrap(), updated.as_bytes());
+        assert!(outcome.changed());
+    }
+
+    #[test]
+    fn p0g3b_strict_history_proof_refuses_skip_and_label_only() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("SameContent.md");
+        let text = "already saved";
+        fs::write(&note, text).unwrap();
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write(text, Source::External, &hash, None),
+        ).unwrap());
+        // Normal legacy saves preserve their existing quiet/skip result.
+        assert!(!history.try_saved(
+            &|| fixture.roots(), &note, write(text, Source::External, &hash, None),
+        ).unwrap());
+        let strict = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &hash, None), true, true,
+        );
+        assert!(strict.is_err(), "Skip has no unique snapshot commit receipt");
+        let label_only = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &hash, Some("label only")), true, true,
+        );
+        assert!(label_only.is_err(), "A label is not a content-version receipt");
+        assert_eq!(versions(&fixture.history_of("SameContent.md")).len(), 1);
+    }
+
+    #[test]
+    fn p0g3b_strict_history_proof_refuses_forged_expected_hash_after_write() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("TamperedDigest.md");
+        let text = "trusted bytes in local history";
+        fs::write(&note, text).unwrap();
+        let forged_hash = "a".repeat(64);
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &forged_hash, None), true, true,
+        );
+        assert!(result.is_err(), "a wrong digest must never attest a snapshot");
+        assert!(versions(&fixture.history_of("TamperedDigest.md")).len() > 0,
+            "bytes may already be durable: refusal must be inspection-only");
+        // The method does not return a verified version on uncertain write.
+    }
+
+    #[test]
     fn a_note_outside_known_workspaces_has_no_history() {
         let fixture = Fixture::new();
         let history = fixture.service();
