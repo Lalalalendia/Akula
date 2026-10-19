@@ -9,6 +9,7 @@ on:
       - "aquilum-app/core/src/sync/pinned_read.rs"
       - "aquilum-app/core/src/sync/local_create.rs"
       - "aquilum-app/core/src/sync/native_existing_replace_probe.rs"
+      - "aquilum-app/core/src/sync/native_windows_replace_probe.rs"
       - "aquilum-app/core/src/sync/local_recovery.rs"
       - "aquilum-app/core/src/sync/recovery_dashboard.rs"
       - "aquilum-app/core/src/sync/recovery_existing_replace_tests.rs"
@@ -140,6 +141,10 @@ jobs:
       - name: Native existing-file name exchange experiment (test only)
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine native_existing_replace_probe::tests -- --nocapture
+      - name: Windows ReplaceFileW original-backup and error-state probe (test only)
+        if: matrix.os == 'windows-latest'
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine native_windows_replace_probe::tests -- --nocapture
       - name: OS two-process File Gate advisory lock probe (test-only)
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine oslock_ -- --nocapture
