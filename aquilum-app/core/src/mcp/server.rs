@@ -342,7 +342,7 @@ fn serve(stream: &TcpStream, slot: &Slot) {
 }
 
 fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Result<bool, Failure> {
-    let head = connection.read_head()?;
+    let head = connection.read_head(|| slot.activate())?;
     if !slot.activate() {
         return Err(Failure::Gone);
     }
