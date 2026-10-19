@@ -30,6 +30,9 @@ struct Endpoint {
     turn: DispatchGate,
     open: Mutex<ConnectionSlots>,
     freed: Condvar,
+    // Benchmark-only control; absent from production builds.
+    #[cfg(test)]
+    disable_pressure_close: AtomicBool,
 }
 
 #[derive(Default)]
@@ -248,6 +251,8 @@ impl RunningServer {
             turn: DispatchGate::new(),
             open: Mutex::new(ConnectionSlots::default()),
             freed: Condvar::new(),
+            #[cfg(test)]
+            disable_pressure_close: AtomicBool::new(false),
         });
         let accepted = Arc::clone(&endpoint);
         let accepting = thread::Builder::new()
@@ -284,6 +289,12 @@ impl Endpoint {
         // If the parser already accepted bytes of another pipelined HTTP
         // request, finish handling that request rather than silently drop it.
         if buffered {
+            return true;
+        }
+        // Allows a true A/B control on the same runner without changing
+        // production policy or altering File Gate/authorization.
+        #[cfg(test)]
+        if self.disable_pressure_close.load(Ordering::Relaxed) {
             return true;
         }
         lock(&self.open)
