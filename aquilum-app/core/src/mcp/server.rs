@@ -12,6 +12,8 @@ const MAX_CONNECTIONS: usize = 16;
 const MAX_PARALLEL_READS: usize = 4;
 // Bound how long the accept loop waits for a reclaimed *idle* connection.
 const RECLAIM_WAIT: Duration = Duration::from_millis(500);
+// Bounded grace for active (non-idle) slots; no socket or worker expansion.
+const ACTIVE_SLOT_GRACE: Duration = Duration::from_millis(5);
 
 pub type SharedToolCaller = Arc<dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync>;
 
@@ -28,6 +30,8 @@ struct Endpoint {
     turn: DispatchGate,
     open: Mutex<ConnectionSlots>,
     freed: Condvar,
+    #[cfg(test)]
+    disable_busy_grace: AtomicBool,
 }
 
 #[derive(Default)]
@@ -182,6 +186,18 @@ impl Slot {
                     })
                     .unwrap_or_else(PoisonError::into_inner);
                 slots = next;
+            } else if endpoint.busy_grace_enabled() {
+                // No idle socket is safe to reclaim. A short, bounded wait
+                // gives already-running calls time to finish, then the
+                // existing 503 path applies. Never evict an active request.
+                let (next, _) = endpoint
+                    .freed
+                    .wait_timeout_while(slots, ACTIVE_SLOT_GRACE, |slots| {
+                        slots.count >= MAX_CONNECTIONS
+                            && !endpoint.stopping.load(Ordering::SeqCst)
+                    })
+                    .unwrap_or_else(PoisonError::into_inner);
+                slots = next;
             }
         }
         if endpoint.stopping.load(Ordering::SeqCst) {
@@ -242,6 +258,8 @@ impl RunningServer {
             turn: DispatchGate::new(),
             open: Mutex::new(ConnectionSlots::default()),
             freed: Condvar::new(),
+            #[cfg(test)]
+            disable_busy_grace: AtomicBool::new(false),
         });
         let accepted = Arc::clone(&endpoint);
         let accepting = thread::Builder::new()
@@ -271,6 +289,14 @@ impl RunningServer {
 }
 
 impl Endpoint {
+    fn busy_grace_enabled(&self) -> bool {
+        #[cfg(test)]
+        if self.disable_busy_grace.load(Ordering::Relaxed) {
+            return false;
+        }
+        true
+    }
+
     fn answer(
         &self,
         body: &str,
@@ -772,6 +798,28 @@ mod tests {
         assert!(original.body.contains("partially-framed"));
 
         drop(incoming);
+        drop(held);
+        server.stop();
+    }
+
+    #[test]
+    fn busy_admission_grace_never_evicts_active_slots() {
+        let (server, _) = server();
+        let mut held = (0..MAX_CONNECTIONS)
+            .map(|_| Slot::acquire(&server.endpoint).expect("available slot"))
+            .collect::<Vec<_>>();
+        assert_eq!(lock(&server.endpoint.open).count, MAX_CONNECTIONS);
+
+        let started = Instant::now();
+        assert!(matches!(Slot::acquire(&server.endpoint), Err(Capacity::Saturated)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(lock(&server.endpoint.open).count, MAX_CONNECTIONS);
+
+        // Admission still succeeds when one active owner exits.
+        drop(held.pop());
+        let replacement = Slot::acquire(&server.endpoint).expect("released slot");
+        assert_eq!(lock(&server.endpoint.open).count, MAX_CONNECTIONS);
+        drop(replacement);
         drop(held);
         server.stop();
     }
