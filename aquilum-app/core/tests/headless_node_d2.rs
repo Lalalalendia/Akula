@@ -86,7 +86,10 @@ fn bearer_scope_is_enforced_before_listing_or_reading_hidden_document() {
     let public_id = id(&catalog, "public.md");
     let hidden_id = id(&catalog, "hidden.md");
 
-    let (child, address) = launch(&vault, &state, vault_id(), 10);
+    let (child, address) = launch(&vault, &state, vault_id(), 11);
+    // Once scoped multi-file mode is enabled, the original single-note route
+    // must never bypass the reader allowlist.
+    assert_eq!(request(&address, "GET", "/v1/note", Some(&token())).0, 404);
     assert_eq!(request(&address, "GET", "/v1/documents", None).0, 401);
     assert_eq!(request(&address, "GET", "/v1/documents", Some(&wrong_token())).0, 401);
 
