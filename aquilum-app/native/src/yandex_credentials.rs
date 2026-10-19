@@ -13,6 +13,7 @@ use aquilum_core::settings::models::YandexS3Onboarding;
 pub enum VaultError {
     InvalidBucket,
     InvalidKeys,
+    MissingKeys,
     Unavailable,
     Unsupported,
 }
@@ -66,6 +67,29 @@ pub fn prompt_and_save(
     }
 }
 
+/// Access the saved bucket-specific keys only within a short-lived closure.
+/// Intended for an explicitly invoked **background** read-only probe after
+/// PR #408 is accepted. Never invoke this from settings render/GUI callbacks,
+/// serialize the values, return them in closure output, or log SDK errors.
+///
+/// This function performs NO network operation or authorization itself.
+#[allow(dead_code)]
+pub(crate) fn with_stored_keys<R>(
+    bucket: &str,
+    action: impl FnOnce(&str, &str) -> R,
+) -> Result<R, VaultError> {
+    check_bucket(bucket)?;
+    #[cfg(target_os = "windows")]
+    {
+        windows_vault::with_stored_keys(bucket, action)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = action;
+        Err(VaultError::Unsupported)
+    }
+}
+
 pub fn remove(bucket: &str) -> Result<(), VaultError> {
     check_bucket(bucket)?;
     #[cfg(target_os = "windows")]
@@ -100,6 +124,79 @@ mod windows_vault {
         text.iter().position(|c| *c == 0).unwrap_or(text.len())
     }
 
+    /// Windows allocates one credential buffer for CredReadW. Return it on
+    /// *every* path, including corrupt credential values and callback panics.
+    struct ReadCredential(*mut CREDENTIALW);
+    impl Drop for ReadCredential {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { CredFree(self.0.cast::<c_void>()) };
+            }
+        }
+    }
+
+    /// Decode only credentials written to Akula's versioned per-bucket target.
+    /// Never expose any decoded values to a settings control or error string.
+    pub(super) fn with_stored_keys<R>(
+        bucket: &str,
+        action: impl FnOnce(&str, &str) -> R,
+    ) -> Result<R, VaultError> {
+        let name = target_name(bucket)?;
+        let target = wide(&name);
+        let mut raw: *mut CREDENTIALW = std::ptr::null_mut();
+        if unsafe { CredReadW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None, &mut raw) }.is_err() {
+            return if unsafe { GetLastError() } == ERROR_NOT_FOUND {
+                Err(VaultError::MissingKeys)
+            } else {
+                Err(VaultError::Unavailable)
+            };
+        }
+        let allocation = ReadCredential(raw);
+        if raw.is_null() {
+            return Err(VaultError::Unavailable);
+        }
+        // CredReadW returns a Windows-owned NUL-terminated UserName. We bound
+        // inspection and reject untrusted/non-ASCII values before allocating
+        // application strings. This is not a substitute for WinAPI's validity.
+        let stored = unsafe { &*allocation.0 };
+        let username = stored.UserName.0;
+        if username.is_null() || stored.CredentialBlob.is_null()
+            || !(8..=255).contains(&(stored.CredentialBlobSize as usize))
+        {
+            return Err(VaultError::InvalidKeys);
+        }
+        let mut len = 0usize;
+        while len <= 128 && unsafe { *username.add(len) } != 0 {
+            len += 1;
+        }
+        if !(3..=128).contains(&len) {
+            return Err(VaultError::InvalidKeys);
+        }
+        let wide_user = unsafe { std::slice::from_raw_parts(username, len) };
+        if !wide_user.iter().all(|c| {
+            *c < 128 && ((*c as u8).is_ascii_alphanumeric()
+                || *c == u16::from(b'-') || *c == u16::from(b'_'))
+        }) {
+            return Err(VaultError::InvalidKeys);
+        }
+        let id = Zeroizing::new(
+            String::from_utf16(wide_user).map_err(|_| VaultError::InvalidKeys)?
+        );
+        let secret_blob = Zeroizing::new(unsafe {
+            std::slice::from_raw_parts(stored.CredentialBlob, stored.CredentialBlobSize as usize)
+                .to_vec()
+        });
+        if !secret_blob.iter().all(u8::is_ascii_graphic) {
+            return Err(VaultError::InvalidKeys);
+        }
+        // The UTF-8 conversion is a transient duplicate. Both copies are
+        // zeroized on every path, including unwinding through the closure.
+        let secret = Zeroizing::new(
+            String::from_utf8(secret_blob.to_vec()).map_err(|_| VaultError::InvalidKeys)?
+        );
+        Ok(action(&id, &secret))
+    }
+
     pub(super) fn present(bucket: &str) -> Result<bool, VaultError> {
         let name = target_name(bucket)?;
         let target = wide(&name);
@@ -117,10 +214,10 @@ mod windows_vault {
                 Err(VaultError::Unavailable)
             };
         }
-        if cred.is_null() {
+        let allocated = ReadCredential(cred);
+        if allocated.0.is_null() {
             return Err(VaultError::Unavailable);
         }
-        unsafe { CredFree(cred.cast::<c_void>()) };
         Ok(true)
     }
 
@@ -267,13 +364,29 @@ mod tests {
 
         save_fake(b"synthetic-test-secret-v1");
         assert!(present(&bucket).unwrap());
+        assert_eq!(with_stored_keys(&bucket, |id, secret| {
+            id == "akula-test-access-id" && secret == "synthetic-test-secret-v1"
+        }), Ok(true));
         assert!(!present("akula-test-unrelated-bucket").unwrap());
+        assert_eq!(with_stored_keys("akula-test-unrelated-bucket", |_, _| ()),
+            Err(VaultError::MissingKeys));
 
         // Updating the same bucket must retain the same target identity.
+        save_fake(b"synthetic-test-secret-v2");
+        assert_eq!(with_stored_keys(&bucket, |_, secret| {
+            secret == "synthetic-test-secret-v2"
+        }), Ok(true));
+        // Corrupt stored bytes must fail closed: malformed legacy or
+        // overwritten Credential Manager entries are never sent to an SDK.
+        save_fake(b"non-graphic\nsecret");
+        assert_eq!(with_stored_keys(&bucket, |_, _| ()),
+            Err(VaultError::InvalidKeys));
         save_fake(b"synthetic-test-secret-v2");
         assert!(present(&bucket).unwrap());
         remove(&bucket).expect("test-only delete from Credential Manager");
         assert!(!present(&bucket).unwrap(), "delete must revoke local presence");
+        assert_eq!(with_stored_keys(&bucket, |_, _| ()),
+            Err(VaultError::MissingKeys));
         remove(&bucket).expect("repeated delete should be idempotent");
         assert_eq!(remove("not.valid"), Err(VaultError::InvalidBucket));
     }
@@ -283,6 +396,8 @@ mod tests {
     fn unsupported_platform_never_prompts_or_writes_credentials() {
         assert_eq!(present("bucket-one"), Err(VaultError::Unsupported));
         assert_eq!(remove("bucket-one"), Err(VaultError::Unsupported));
+        assert_eq!(with_stored_keys("bucket-one", |_, _| ()), Err(VaultError::Unsupported));
+        assert_eq!(with_stored_keys("", |_, _| ()), Err(VaultError::InvalidBucket));
         assert_eq!(prompt_and_save("bucket-one", "title", "message"),
             Err(VaultError::Unsupported));
     }
