@@ -578,6 +578,32 @@ mod mipmap_integration_tests {
     }
 
     #[test]
+    fn long_lived_multi_image_churn_obeys_budget_and_reuses_recent_entries() {
+        // Exercise the exact 32-MiB policy under a tiny budget, avoiding
+        // enormous synthetic images on a shared CI runner.
+        const MIP_BYTES: usize = (64 * 64 + 32 * 32) * 4;
+        const BUDGET: usize = MIP_BYTES * 5;
+        let brushes: Vec<_> = (0..16).map(|_| test_brush(128, 128)).collect();
+        let mut images = Images::default();
+        for turn in 0..3 {
+            for brush in &brushes {
+                images.next_frame_with_mip_lifetime(EXPERIMENTAL_MIP_LINGER_FRAMES);
+                let source = images.source(&brush.image);
+                let id = brush.image.data.id();
+                let mip = images.mip_source_with_policy(id, &source, 2, BUDGET, true);
+                assert!(mip.is_some(), "bounded LRU failed at turn={turn}");
+                let used: usize = images.mips.values()
+                    .map(|(p, _)| usize::from(p.width()) * usize::from(p.height()) * 4)
+                    .sum();
+                assert!(used <= BUDGET, "cache exceeded hard budget: {used}");
+                assert!(images.mips.contains_key(&(id, 2)));
+            }
+        }
+        assert!(!images.mips.contains_key(&(brushes[0].image.data.id(), 2)));
+        assert!(images.mips.contains_key(&(brushes[15].image.data.id(), 2)));
+    }
+
+    #[test]
     fn optional_bilinear_is_applied_only_after_successful_prefilter() {
         let brush = test_brush(128, 128);
         let mut images = Images::default();
@@ -939,5 +965,156 @@ mod mipmap_stage_benchmarks {
                 );
             }
         }
+    }
+}
+
+
+// Independent fractional-footprint reference for odd real-photo dimensions.
+// Unlike mipmap::half, expected output integrates the actual ORIGINAL RGBA.
+#[cfg(test)]
+mod fractional_odd_quality_tests {
+    use super::*;
+    use masonry::peniko::{ImageAlphaType, ImageQuality};
+    use vello_cpu::color::palette::css::WHITE;
+    use vello_cpu::{RasterizerSettings, RenderContext, RenderSettings, Resources, TargetInit};
+
+    fn input(w: u16, h: u16, alpha: bool) -> Vec<u8> {
+        let png = image::load_from_memory(include_bytes!("../../../assets/city-cover.png"))
+            .expect("pinned cover PNG").to_rgba8();
+        let mut rgba = image::imageops::resize(
+            &png, u32::from(w), u32::from(h), image::imageops::FilterType::Lanczos3,
+        ).into_raw();
+        if alpha {
+            for y in 0..usize::from(h) {
+                for x in 0..usize::from(w) {
+                    let i = (y * usize::from(w) + x) * 4;
+                    // Nonzero RGB under zero alpha catches straight-alpha halos.
+                    rgba[i + 3] = [0, 64, 128, 192, 255][(x / 7 + y / 9) % 5];
+                }
+            }
+        }
+        rgba
+    }
+
+    fn render(src: &[u8], w: u16, h: u16, scale: f64,
+              enabled: bool, workers: u16) -> Pixmap {
+        let brush = crate::render::pixels::from_rgba(
+            src.to_vec(), u32::from(w), u32::from(h), ImageAlphaType::Alpha,
+        ).expect("RGBA image").with_quality(ImageQuality::High);
+        let geometry = Affine::scale(scale);
+        let mut images = Images::default();
+        let (paint, brush_transform) = brush_to_paint_candidate_tuned(
+            BrushRef::Image(brush.as_ref()), Composite::default(),
+            &mut images, geometry, Affine::IDENTITY, enabled, true,
+        );
+        assert_eq!(images.mips.is_empty(), !enabled, "mip path was not exercised");
+        let Brush::Image(painted) = &paint else { panic!("expected image") };
+        assert_eq!(
+            painted.sampler.quality,
+            if enabled { ImageQuality::Medium } else { ImageQuality::High },
+        );
+        let cw = (f64::from(w) * scale).ceil() as u16 + 2;
+        let ch = (f64::from(h) * scale).ceil() as u16 + 2;
+        let mut ctx = RenderContext::new_with(
+            cw, ch, RenderSettings { num_threads: workers, ..RenderSettings::default() },
+        );
+        ctx.set_transform(geometry);
+        ctx.set_paint_transform(brush_transform);
+        ctx.set_paint(paint);
+        ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(w), f64::from(h)));
+        ctx.flush();
+        let mut out = Pixmap::new(cw, ch);
+        ctx.render_with(
+            &mut out, &mut Resources::default(),
+            RasterizerSettings {
+                target_init: TargetInit::Clear(WHITE),
+                ..RasterizerSettings::default()
+            },
+        );
+        // No transformed geometry may contaminate the extra white canvas.
+        let border = out.data()[usize::from(ch - 1) * usize::from(cw) + usize::from(cw - 1)];
+        assert_eq!([border.r, border.g, border.b, border.a], [255, 255, 255, 255]);
+        out
+    }
+
+    fn exact_pixel(src: &[u8], w: usize, h: usize, x: usize, y: usize,
+                   scale: f64) -> [f64; 3] {
+        let u0 = (x as f64 / scale).clamp(0.0, w as f64);
+        let u1 = ((x + 1) as f64 / scale).clamp(0.0, w as f64);
+        let v0 = (y as f64 / scale).clamp(0.0, h as f64);
+        let v1 = ((y + 1) as f64 / scale).clamp(0.0, h as f64);
+        let area = (u1 - u0) * (v1 - v0);
+        assert!(area > 0.0);
+        let mut premul = [0.0f64; 3];
+        let mut alpha_sum = 0.0;
+        for iy in (v0.floor() as usize)..(v1.ceil() as usize).min(h) {
+            let wy = (v1.min((iy + 1) as f64) - v0.max(iy as f64)).max(0.0);
+            for ix in (u0.floor() as usize)..(u1.ceil() as usize).min(w) {
+                let wx = (u1.min((ix + 1) as f64) - u0.max(ix as f64)).max(0.0);
+                let weight = wx * wy;
+                let i = (iy * w + ix) * 4;
+                let alpha = f64::from(src[i + 3]) / 255.0;
+                for channel in 0..3 {
+                    premul[channel] += weight * alpha * f64::from(src[i + channel]);
+                }
+                alpha_sum += weight * alpha;
+            }
+        }
+        std::array::from_fn(|channel| {
+            premul[channel] / area + 255.0 * (1.0 - alpha_sum / area)
+        })
+    }
+
+    fn quality(src: &[u8], w: u16, h: u16, scale: f64, frame: &Pixmap) -> (f64, f64) {
+        let stride = usize::from(frame.width());
+        let max_x = (f64::from(w) * scale).floor() as usize;
+        let max_y = (f64::from(h) * scale).floor() as usize;
+        let (mut total, mut worst, mut count) = (0.0f64, 0.0f64, 0usize);
+        // Compare the image interior; destination clipping is checked above.
+        for y in 2..max_y.saturating_sub(2) {
+            for x in 2..max_x.saturating_sub(2) {
+                let expected = exact_pixel(
+                    src, usize::from(w), usize::from(h), x, y, scale,
+                );
+                let pixel = frame.data()[y * stride + x];
+                for (actual, wanted) in [pixel.r, pixel.g, pixel.b].into_iter().zip(expected) {
+                    let error = (f64::from(actual) - wanted).abs();
+                    total += error;
+                    worst = worst.max(error);
+                    count += 1;
+                }
+            }
+        }
+        assert!(count > 0);
+        (total / count as f64, worst)
+    }
+
+    #[test]
+    fn fractional_photo_alpha_and_odd_dimensions_have_bounded_area_error() {
+        let mut cases = 0;
+        for (w, h) in [(127u16, 129u16), (131, 89), (128, 127)] {
+            for (scale, alpha) in [(0.241, false), (0.315, true), (0.413, true)] {
+                let rgba = input(w, h, alpha);
+                for workers in [0u16, 2u16] {
+                    let baseline = render(&rgba, w, h, scale, false, workers);
+                    let candidate = render(&rgba, w, h, scale, true, workers);
+                    let (base_mae, _) = quality(&rgba, w, h, scale, &baseline);
+                    let (mip_mae, mip_worst) = quality(&rgba, w, h, scale, &candidate);
+                    println!(
+                        "AKULA_MIP_FRACTIONAL size={w}x{h} scale={scale:.3} alpha={alpha} \
+                         workers={workers} baseline_mae={base_mae:.3} \
+                         mip_mae={mip_mae:.3} mip_worst={mip_worst:.3}"
+                    );
+                    assert!(
+                        mip_mae <= base_mae + 4.0 && mip_mae <= 12.0,
+                        "fractional/odd mip area regression: {w}x{h} \
+                         scale={scale} alpha={alpha} workers={workers}: \
+                         original={base_mae:.3} candidate={mip_mae:.3}"
+                    );
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 18);
     }
 }
