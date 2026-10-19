@@ -38,6 +38,8 @@ impl TextEditor {
             hovered_table: None,
             table_scrolls: std::collections::HashMap::new(),
             code_scrolls: code_scroll::Offsets::default(),
+            code_window_base: None,
+            code_window_opener: None,
             paint_code_first: 0,
             paint_code_offsets: Vec::new(),
             media: media::MediaState::default(),
