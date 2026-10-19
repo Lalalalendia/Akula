@@ -1,7 +1,8 @@
 use super::http::{refused, Connection, Failure, Head, Response};
 use super::protocol;
 use serde_json::Value;
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -9,6 +10,8 @@ use std::thread::{self, JoinHandle};
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
 const MAX_PARALLEL_READS: usize = 4;
+// Bound how long the accept loop waits for a reclaimed *idle* connection.
+const RECLAIM_WAIT: Duration = Duration::from_millis(250);
 
 pub type SharedToolCaller = Arc<dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync>;
 
@@ -23,11 +26,33 @@ struct Endpoint {
     call: SharedToolCaller,
     stopping: AtomicBool,
     turn: DispatchGate,
-    open: Mutex<usize>,
+    open: Mutex<ConnectionSlots>,
     freed: Condvar,
 }
 
-struct Slot(Arc<Endpoint>);
+#[derive(Default)]
+struct ConnectionSlots {
+    count: usize,
+    next_id: u64,
+    idle: Vec<IdleConnection>,
+}
+
+struct IdleConnection {
+    id: u64,
+    socket: TcpStream,
+    evicted: Arc<AtomicBool>,
+}
+
+struct Slot {
+    endpoint: Arc<Endpoint>,
+    id: u64,
+    evicted: Arc<AtomicBool>,
+}
+
+enum Capacity {
+    Stopping,
+    Saturated,
+}
 
 // Admission is bounded independently of TCP keep-alive connections.
 // Pending writers block *new* readers to prevent read-heavy agent traffic
@@ -132,23 +157,74 @@ impl Drop for DispatchPermit<'_> {
 }
 
 impl Slot {
-    fn wait(endpoint: &Arc<Endpoint>) -> Option<Self> {
-        let mut open = lock(&endpoint.open);
-        while *open >= MAX_CONNECTIONS && !endpoint.stopping.load(Ordering::SeqCst) {
-            open = endpoint.freed.wait(open).unwrap_or_else(PoisonError::into_inner);
+    fn acquire(endpoint: &Arc<Endpoint>) -> Result<Self, Capacity> {
+        let mut slots = lock(&endpoint.open);
+        if endpoint.stopping.load(Ordering::SeqCst) {
+            return Err(Capacity::Stopping);
+        }
+        if slots.count >= MAX_CONNECTIONS {
+            // A completed HTTP reply is idle and has no tool mutation in
+            // progress. Reclaim only that socket; never interrupt active
+            // headers, request bodies, tool calls or response writes.
+            if let Some(idle) = slots.idle.pop() {
+                idle.evicted.store(true, Ordering::SeqCst);
+                let _ = idle.socket.shutdown(Shutdown::Both);
+                let (next, _) = endpoint
+                    .freed
+                    .wait_timeout_while(slots, RECLAIM_WAIT, |slots| {
+                        slots.count >= MAX_CONNECTIONS
+                            && !endpoint.stopping.load(Ordering::SeqCst)
+                    })
+                    .unwrap_or_else(PoisonError::into_inner);
+                slots = next;
+            }
         }
         if endpoint.stopping.load(Ordering::SeqCst) {
-            return None;
+            return Err(Capacity::Stopping);
         }
-        *open += 1;
-        Some(Self(Arc::clone(endpoint)))
+        if slots.count >= MAX_CONNECTIONS {
+            return Err(Capacity::Saturated);
+        }
+        let id = slots.next_id;
+        slots.next_id = slots.next_id.wrapping_add(1);
+        slots.count += 1;
+        Ok(Self {
+            endpoint: Arc::clone(endpoint),
+            id,
+            evicted: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    fn idle(&self, stream: &TcpStream) {
+        // With pipelined input or any incomplete request we intentionally do
+        // not advertise an idle slot. The caller invokes this only after
+        // sending a complete response, outside the dispatch permit.
+        let Ok(socket) = stream.try_clone() else { return };
+        let mut slots = lock(&self.endpoint.open);
+        if !self.endpoint.stopping.load(Ordering::SeqCst)
+            && !self.evicted.load(Ordering::SeqCst)
+        {
+            slots.idle.push(IdleConnection {
+                id: self.id,
+                socket,
+                evicted: Arc::clone(&self.evicted),
+            });
+        }
+    }
+
+    fn activate(&self) -> bool {
+        let mut slots = lock(&self.endpoint.open);
+        slots.idle.retain(|connection| connection.id != self.id);
+        !self.evicted.load(Ordering::SeqCst)
     }
 }
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        *lock(&self.0.open) -= 1;
-        self.0.freed.notify_one();
+        let mut slots = lock(&self.endpoint.open);
+        slots.idle.retain(|connection| connection.id != self.id);
+        slots.count -= 1;
+        self.endpoint.freed.notify_all();
     }
 }
 
@@ -162,7 +238,7 @@ impl RunningServer {
             call,
             stopping: AtomicBool::new(false),
             turn: DispatchGate::new(),
-            open: Mutex::new(0),
+            open: Mutex::new(ConnectionSlots::default()),
             freed: Condvar::new(),
         });
         let accepted = Arc::clone(&endpoint);
@@ -222,22 +298,39 @@ fn accept(listener: &TcpListener, endpoint: &Arc<Endpoint>) {
             return;
         }
         let Ok(stream) = stream else { continue };
-        let Some(slot) = Slot::wait(endpoint) else {
-            return;
+        let slot = match Slot::acquire(endpoint) {
+            Ok(slot) => slot,
+            Err(Capacity::Stopping) => return,
+            Err(Capacity::Saturated) => {
+                // Explicit bounded backpressure instead of holding the accept
+                // loop behind 16 occupied sockets for up to 60 seconds.
+                let _ = stream.set_write_timeout(Some(RECLAIM_WAIT));
+                if let Ok(mut connection) = Connection::new(&stream) {
+                    let _ = connection.send(
+                        &Response::text(503, "MCP: все соединения заняты, повторите запрос"),
+                        false,
+                    );
+                }
+                continue;
+            }
         };
         let _ = thread::Builder::new()
             .name("aquilum-mcp-connection".to_owned())
-            .spawn(move || serve(&stream, &slot.0));
+            .spawn(move || serve(&stream, &slot));
     }
 }
 
-fn serve(stream: &TcpStream, endpoint: &Endpoint) {
+fn serve(stream: &TcpStream, slot: &Slot) {
     let Ok(mut connection) = Connection::new(stream) else {
         return;
     };
     let closing = loop {
-        match exchange(&mut connection, endpoint) {
-            Ok(true) => {}
+        match exchange(&mut connection, &slot.endpoint, slot) {
+            Ok(true) => {
+                if !connection.has_buffered_data() {
+                    slot.idle(stream);
+                }
+            }
             Ok(false) => break Ok(()),
             Err(Failure::Refused(response)) => break connection.send(&response, false),
             Err(Failure::Gone) => return,
@@ -248,8 +341,11 @@ fn serve(stream: &TcpStream, endpoint: &Endpoint) {
     }
 }
 
-fn exchange(connection: &mut Connection, endpoint: &Endpoint) -> Result<bool, Failure> {
+fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Result<bool, Failure> {
     let head = connection.read_head()?;
+    if !slot.activate() {
+        return Err(Failure::Gone);
+    }
     admit(&head, &endpoint.token)?;
     let body = connection.read_body(&head, MAX_BODY_BYTES)?;
     let body = String::from_utf8(body).map_err(|_| refused(400, "Тело запроса не в UTF-8"))?;
