@@ -177,12 +177,66 @@ pub fn search_sync_verified(
         expected_generation,
         selection: selected,
     }], model_id, query, limit)?;
-    for hit in &result.hits {
-        let expected = selection.revisions.iter().find(|r| r.id == hit.revision_id)
-            .and_then(|r| r.source_hash.as_deref());
-        if expected != Some(hit.source_hash.as_str()) {
-            return Err(ProbeError::RevisionCollision);
+    // Validate immutable content provenance for EACH indexed revision,
+    // including revisions whose vector index is valid but has zero chunks.
+    // Checking hits alone would miss corrupted records of empty documents.
+    for revision in selection.revisions.iter().filter(|r| r.kind == RevisionKind::Content) {
+        let stored: Option<String> = connection.query_row(
+            "SELECT source_hash FROM semantic_probe_v2_revisions
+             WHERE scope_id=?1 AND source_id=?2 AND revision_id=?3",
+            params![scope_id, selection.document_id, revision.id],
+            |row| row.get(0),
+        ).optional()?;
+        if let Some(stored) = stored {
+            if revision.source_hash.as_deref() != Some(stored.as_str()) {
+                return Err(ProbeError::RevisionCollision);
+            }
         }
+    }
+    Ok(result)
+}
+
+/// A snapshot provided by the trusted host. Epochs MUST be monotonic and
+/// checked against real authorization and a synchronized source snapshot.
+/// This struct neither grants access nor verifies a caller's identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReadObservation {
+    pub(crate) grant_epoch: u64,
+    pub(crate) owner_epoch: u64,
+    pub(crate) index_generation: u64,
+    pub(crate) selection: OwnedSelection,
+}
+
+/// Execute an isolated search with a freshly revalidated host observation.
+///
+/// The host callback must check the live grant and obtain its monotonic epoch,
+/// then derive revisions from a trusted Sync DAG or provider snapshot. It runs
+/// once before scoring and once before the result is returned. Any revocation,
+/// permission change, source change, or read failure must return an error.
+/// The final RPC/response transport STILL needs its own admission protection:
+/// another revocation can happen immediately after this function returns.
+pub(crate) fn search_sync_revalidated<F>(
+    connection: &Connection,
+    scope_id: &str,
+    model_id: &str,
+    query: &[f32],
+    limit: usize,
+    mut observe: F,
+) -> Result<SearchResult, ProbeError>
+where
+    F: FnMut() -> Result<ReadObservation, ProbeError>,
+{
+    let before = observe()?;
+    if before.grant_epoch == 0 || before.owner_epoch == 0 || before.index_generation == 0 {
+        return Err(ProbeError::StaleSource);
+    }
+    let result = search_sync_verified(
+        connection, scope_id, before.index_generation, &before.selection,
+        model_id, query, limit,
+    )?;
+    let after = observe()?;
+    if before != after {
+        return Err(ProbeError::StaleSource);
     }
     Ok(result)
 }
@@ -803,6 +857,100 @@ mod tests {
         ));
         let historical = resolve_sync_revisions(&dag, doc, Some(rev)).unwrap();
         assert!(historical.historical);
+    }
+
+    #[test]
+    fn no_chunk_revision_must_still_match_dag_content_hash() {
+        let mut dag = RevisionDag::new();
+        let doc = DocumentId::new();
+        let revision = add_dag_revision(&mut dag, doc, vec![], "expected");
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let source_id = doc.to_string();
+        register_source(&db, "vault", &source_id).unwrap();
+        replace_revision_chunks(
+            &mut db, "vault", &source_id, 1, &revision.to_string(),
+            &hash("wrong"), MODEL, 2, &[],
+        ).unwrap();
+        let selection = resolve_sync_revisions(&dag, doc, None).unwrap();
+        assert!(matches!(
+            search_sync_verified(&db, "vault", 1, &selection, MODEL, &[1.0, 0.0], 10),
+            Err(ProbeError::RevisionCollision)
+        ));
+    }
+
+    #[test]
+    fn revoked_grant_during_search_never_returns_hits() {
+        let mut dag = RevisionDag::new();
+        let doc = DocumentId::new();
+        let revision = add_dag_revision(&mut dag, doc, vec![], "document");
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let source_id = doc.to_string();
+        register_source(&db, "vault", &source_id).unwrap();
+        put(&mut db, "vault", &source_id, 1, &revision.to_string(), "document", &[1.0, 0.0]);
+        let selected = resolve_sync_revisions(&dag, doc, None).unwrap();
+        let mut checks = 0usize;
+        assert!(matches!(
+            search_sync_revalidated(&db, "vault", MODEL, &[1.0, 0.0], 10, || {
+                checks += 1;
+                if checks == 2 {
+                    Err(ProbeError::StaleSource)
+                } else {
+                    Ok(ReadObservation {
+                        grant_epoch: 1, owner_epoch: 1, index_generation: 1,
+                        selection: selected.clone(),
+                    })
+                }
+            }),
+            Err(ProbeError::StaleSource)
+        ));
+        assert_eq!(checks, 2);
+    }
+
+    #[test]
+    fn grant_or_source_epoch_change_rejects_results_but_stable_read_passes() {
+        let mut dag = RevisionDag::new();
+        let doc = DocumentId::new();
+        let revision = add_dag_revision(&mut dag, doc, vec![], "document");
+        let mut db = Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        let source_id = doc.to_string();
+        register_source(&db, "vault", &source_id).unwrap();
+        put(&mut db, "vault", &source_id, 1, &revision.to_string(), "document", &[1.0, 0.0]);
+        let selected = resolve_sync_revisions(&dag, doc, None).unwrap();
+        let stable = ReadObservation {
+            grant_epoch: 5, owner_epoch: 9, index_generation: 1,
+            selection: selected.clone(),
+        };
+        assert_eq!(
+            search_sync_revalidated(&db, "vault", MODEL, &[1.0, 0.0], 10,
+                || Ok(stable.clone())).unwrap().hits.len(), 1
+        );
+        let mut calls = 0;
+        assert!(matches!(
+            search_sync_revalidated(&db, "vault", MODEL, &[1.0, 0.0], 10, || {
+                calls += 1;
+                let mut observation = stable.clone();
+                if calls == 2 {
+                    observation.grant_epoch += 1;
+                }
+                Ok(observation)
+            }),
+            Err(ProbeError::StaleSource)
+        ));
+        let mut calls = 0;
+        assert!(matches!(
+            search_sync_revalidated(&db, "vault", MODEL, &[1.0, 0.0], 10, || {
+                calls += 1;
+                let mut observation = stable.clone();
+                if calls == 2 {
+                    observation.owner_epoch += 1;
+                }
+                Ok(observation)
+            }),
+            Err(ProbeError::StaleSource)
+        ));
     }
 
     #[test]
