@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use crate::ui::editor::change::Change;
-use crate::ui::editor::highlight::Lang;
 use super::{Affinity, Block, Cursor, EventCtx, Point, Rect, TextEditor};
 
 const MAX_TRACKED_BLOCKS: usize = 512;
