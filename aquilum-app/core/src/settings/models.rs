@@ -230,7 +230,7 @@ impl YandexS3Onboarding {
         }
         let b = value.as_bytes();
         (3..=63).contains(&b.len())
-            && b.first().is_some_and(u8::is_ascii_lowercase)
+            && b.first().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
             && b.last().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
             && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
             && !value.contains("--")
@@ -292,5 +292,44 @@ pub struct UpdateSettings {
 impl Default for UpdateSettings {
     fn default() -> Self {
         Self { auto: true }
+    }
+}
+
+#[cfg(test)]
+mod yandex_onboarding_tests {
+    use super::{AppConfig, YandexS3Onboarding};
+
+    #[test]
+    fn onboarding_fields_are_nonsecret_and_legacy_json_works() {
+        let mut config: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(config.s3_onboarding.bucket.is_empty());
+        assert!(config.s3_onboarding.aws_profile_name.is_empty());
+        config.s3_onboarding.bucket = "book-archive-2026".into();
+        config.s3_onboarding.aws_profile_name = "akula_yandex".into();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("book-archive-2026"));
+        assert!(json.contains("awsProfileName"));
+        assert!(!json.contains("secretAccessKey"));
+        assert!(!json.contains("accessKeyId"));
+        assert_eq!(serde_json::from_str::<AppConfig>(&json).unwrap()
+            .s3_onboarding, config.s3_onboarding);
+    }
+
+    #[test]
+    fn user_editable_draft_does_not_accept_urls_or_credential_payloads() {
+        for valid in ["", "abc", "s3-vault-2026", "0private-9"] {
+            assert!(YandexS3Onboarding::valid_bucket(valid), "{valid}");
+        }
+        for invalid in ["x", "https://storage.yandexcloud.net", "my.bucket",
+                        "BUCKET", "secret_key=this-is-not-a-bucket", "spaces inside"] {
+            assert!(!YandexS3Onboarding::valid_bucket(invalid), "{invalid}");
+        }
+        for valid in ["", "default", "akula_yandex", "profile-01"] {
+            assert!(YandexS3Onboarding::valid_profile_name(valid));
+        }
+        for invalid in ["../../.aws/credentials", "Access Key ID", "aws;rm -rf /",
+                        "profile=secret", "приватный_ключ"] {
+            assert!(!YandexS3Onboarding::valid_profile_name(invalid), "{invalid}");
+        }
     }
 }
