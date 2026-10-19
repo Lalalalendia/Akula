@@ -104,3 +104,78 @@ fn continuous_wheel_moves_every_frame_without_jolts() {
     assert!(steps.iter().all(|&s| s > 0.0), "кадр без движения при непрерывном вращении: {steps:?}");
     assert!(steps.windows(2).all(|w| w[1] / w[0] < 2.0 && w[0] / w[1] < 2.0), "скачок скорости между кадрами: {steps:?}");
 }
+
+#[test]
+fn nested_horizontal_wheel_normalizes_all_delta_units() {
+    use masonry::core::ScrollDelta;
+    use masonry::dpi::PhysicalPosition;
+    let pixel = super::pixels(&ScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 80.0)), 2.0, 600.0);
+    assert_eq!(pixel.y, 40.0);
+    assert_eq!(super::sideways(pixel, true), 40.0);
+    assert_eq!(super::sideways(pixel, false), 0.0);
+    let lines = super::pixels(&ScrollDelta::LineDelta(2.0, 1.0), 2.0, 600.0);
+    assert_eq!(lines.x, 2.0 * super::LINE);
+    assert_eq!(super::sideways(lines, false), lines.x);
+    let page = super::pixels(&ScrollDelta::PageDelta(0.0, 1.0), 1.0, 600.0);
+    assert_eq!(super::sideways(page, true), 600.0);
+    assert_eq!(super::sideways(page, false), 0.0);
+}
+
+#[test]
+fn invalid_geometry_does_not_create_nonfinite_horizontal_motion() {
+    use masonry::core::ScrollDelta;
+    use masonry::dpi::PhysicalPosition;
+    assert_eq!(super::pixels(&ScrollDelta::PixelDelta(PhysicalPosition::new(50.0, 100.0)), 0.0, 600.0).x, 0.0);
+    assert_eq!(super::pixels(&ScrollDelta::PageDelta(1.0, 1.0), 1.0, f64::NAN).x, 0.0);
+    assert_eq!(super::sideways(super::pixels(&ScrollDelta::LineDelta(0.0, 1.0), 1.0, 500.0), true), super::LINE);
+}
+
+fn horizontal_root() -> RenderRoot {
+    let content = NewWidget::new(SizedBox::empty().width(Length::px(5_000.0)));
+    let options = RenderRootOptions {
+        default_properties: Arc::new(default_property_set()),
+        use_system_fonts: false,
+        size_policy: WindowSizePolicy::User,
+        size: PhysicalSize::new(400, 300),
+        scale_factor: 1.0,
+        test_font: None,
+    };
+    let mut root = RenderRoot::new(
+        NewWidget::new(ScrollArea::horizontal(content)).with_tag(TAG).erased(),
+        |_| {},
+        options,
+    );
+    let _ = root.redraw();
+    root
+}
+
+#[test]
+fn horizontal_page_wheel_is_handled_by_scroll_container() {
+    let mut root = horizontal_root();
+    let mut trace = Vec::new();
+    // A horizontal page command scrolls by the viewport, not by LINE pixels.
+    scroll(&mut root, ScrollDelta::PageDelta(-1.0, 0.0));
+    frames(&mut root, 40, &mut trace);
+    assert!((offset(&root) - 400.0).abs() < 0.01,
+        "horizontal page event did not advance by viewport: {trace:?}");
+    // Precision touchpad remains immediate; large deltas must clamp safely.
+    scroll(&mut root, ScrollDelta::PixelDelta(PhysicalPosition::new(-100_000.0, 0.0)));
+    assert!((offset(&root) - (5_000.0 - 400.0)).abs() < 0.01);
+    scroll(&mut root, ScrollDelta::PixelDelta(PhysicalPosition::new(100_000.0, 0.0)));
+    assert_eq!(offset(&root), 0.0);
+}
+
+#[test]
+fn nonfinite_scroll_input_is_rejected_before_reaching_nested_offsets() {
+    use masonry::core::ScrollDelta;
+    use masonry::dpi::PhysicalPosition;
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let pixel = super::pixels(&ScrollDelta::PixelDelta(PhysicalPosition::new(value, 40.0)), 1.0, 600.0);
+        assert_eq!(pixel, masonry::kurbo::Vec2::ZERO);
+        let page = super::pixels(&ScrollDelta::PageDelta(1.0, value as f32), 1.0, 600.0);
+        assert_eq!(page, masonry::kurbo::Vec2::ZERO);
+        let line = super::pixels(&ScrollDelta::LineDelta(value as f32, 1.0), 1.0, 600.0);
+        assert_eq!(line, masonry::kurbo::Vec2::ZERO);
+        assert_eq!(super::sideways(masonry::kurbo::Vec2::new(value, 0.0), false), 0.0);
+    }
+}
