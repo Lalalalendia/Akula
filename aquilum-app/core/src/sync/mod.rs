@@ -50,6 +50,8 @@ mod protection_store;
 #[cfg(feature = "sync-s3")]
 mod s3_preimage_capture;
 #[cfg(feature = "sync-s3")]
+mod s3_reserved_replace;
+#[cfg(feature = "sync-s3")]
 mod profile_binding;
 mod path;
 mod pinned_read;
