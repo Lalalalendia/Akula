@@ -1,7 +1,7 @@
 # AKAI-AUTH-00 — tool authority inventory and agent-principal integration contract
 
-**Status:** implementation foundation only; **no production per-agent authorization exists in this PR**.  
-**Program:** [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de) / M1.  
+**Status:** implementation foundation only; **no production per-agent authorization exists in this PR**.
+**Program:** [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de) / M1.
 **Prerequisites:** merged direct real-client CAS/auth proof [#389](https://github.com/Lalalalendia/Akula/pull/389) and Host/DNS rebinding hardening [#393](https://github.com/Lalalalendia/Akula/pull/393).
 
 ## Code audit: don't mistake plugin identity for agent identity
