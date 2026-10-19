@@ -78,11 +78,21 @@ impl fmt::Display for HistorySaveFailure {
 /// PROCESS_HISTORY_FILES. Normal retention, reversion and direct same-user
 /// edits can later remove/alter these bytes. This is NOT a persistent immutable
 /// archive, an OS publication receipt or remote baseline authority.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Deliberately non-Clone and sealed: another crate module may inspect
+/// this bounded observation but cannot manufacture a "verified" version.
+#[must_use = "a verified version is only evidence at the time of inspection"]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedHistoryVersion {
-    pub version_id: String,
-    pub content_hash: String,
-    pub content_length: usize,
+    version_id: String,
+    content_hash: String,
+    content_length: usize,
+}
+
+#[allow(dead_code)]
+impl VerifiedHistoryVersion {
+    pub(crate) fn version_id(&self) -> &str { &self.version_id }
+    pub(crate) fn content_hash(&self) -> &str { &self.content_hash }
+    pub(crate) fn content_length(&self) -> usize { self.content_length }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
