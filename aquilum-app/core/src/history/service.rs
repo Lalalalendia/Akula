@@ -90,9 +90,17 @@ pub(crate) struct VerifiedHistoryVersion {
 
 #[allow(dead_code)]
 impl VerifiedHistoryVersion {
-    pub(crate) fn version_id(&self) -> &str { &self.version_id }
-    pub(crate) fn content_hash(&self) -> &str { &self.content_hash }
-    pub(crate) fn content_length(&self) -> usize { self.content_length }
+    pub(crate) fn version_id(&self) -> &str {
+        &self.version_id
+    }
+
+    pub(crate) fn content_hash(&self) -> &str {
+        &self.content_hash
+    }
+
+    pub(crate) fn content_length(&self) -> usize {
+        self.content_length
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
