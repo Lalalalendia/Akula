@@ -100,7 +100,7 @@ impl HistorySaveEffect {
 
     fn candidate_version(&self) -> Option<&str> {
         match self {
-            Self::Updated(id) | Self::Created(id) => Some(id),
+            Self::Created(id) => Some(id),
             _ => None,
         }
     }
@@ -400,8 +400,10 @@ impl HistoryService {
 
     /// Strict internal history-version proof for a future protected receipt.
     /// The sealed custody token must originate from the guarded File Gate.
-    /// No proof is returned for quiet, label-only, revert, missing history
-    /// location, or a version that cannot be read back byte-for-byte.
+    /// No proof is returned for quiet, label-only, revert, coalesced update,
+    /// missing history location or failed byte-for-byte readback.
+    /// A coalesced latest version is MUTABLE and cannot serve as an immutable
+    /// history identity for a future native publication receipt.
     /// This does not provide the OS file/directory durability evidence.
     #[allow(dead_code)]
     pub(crate) fn try_saved_with_custody_verified_version(
