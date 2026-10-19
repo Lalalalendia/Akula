@@ -3,6 +3,7 @@ mod dialogs;
 mod external;
 mod folder_colors;
 mod graph;
+mod image_files;
 mod harness;
 mod keys;
 #[cfg(feature = "memory-probe")]

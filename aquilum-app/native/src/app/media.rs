@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use masonry::app::RenderRoot;
 use masonry::kurbo::Point;
@@ -16,7 +17,50 @@ fn natural_width(source: &Source<'_>) -> Option<f64> {
     Some(f64::from(width))
 }
 
+// Keep the first standalone-image preview bounded and inside the open vault.
+// It is a preflight guard, not a replacement for an OS-level decode sandbox.
+const MAX_IMAGE_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
+
+fn local_image_preview(vault: &Path, source: &Path) -> Option<masonry::peniko::ImageBrush> {
+    // The tree filters symlink entries; enforce the boundary again at open time.
+    if !std::fs::symlink_metadata(source).ok()?.file_type().is_file() {
+        return None;
+    }
+    let root = std::fs::canonicalize(vault).ok()?;
+    let canonical = std::fs::canonicalize(source).ok()?;
+    if !canonical.starts_with(&root) {
+        return None;
+    }
+    let file = std::fs::File::open(canonical).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_IMAGE_PREVIEW_BYTES {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_IMAGE_PREVIEW_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > MAX_IMAGE_PREVIEW_BYTES {
+        return None;
+    }
+    // The current decoder already limits displayed dimensions/pixels.
+    crate::images::decode(&bytes)
+}
+
 impl App {
+    // Opening an image from the file tree is a read-only modal preview.
+    // In particular it must not replace the active note, change tabs or save.
+    pub(super) fn open_tree_file(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool) -> bool {
+        if kind(&path.to_string_lossy()) != Some(MediaKind::Image) {
+            return self.open_in(root, path, new_tab);
+        }
+        let preview = self.tree.root().and_then(|vault| local_image_preview(vault, &path));
+        if let Some(image) = preview {
+            self.open_viewer(root, image);
+        } else {
+            report!("изображение не открыто (повреждено, недоступно или больше 32 МиБ): {}", path.display());
+        }
+        false // Window title and navigation remain on the current document.
+    }
+
     pub fn paste_image(&mut self, root: &mut RenderRoot, png: &[u8]) -> bool {
         if self.note_ids.as_ref().is_none_or(|ids| root.focused_widget() != Some(ids.body.id())) {
             return false;

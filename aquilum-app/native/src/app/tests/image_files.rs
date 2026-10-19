@@ -1,0 +1,98 @@
+use super::*;
+use std::path::Path;
+
+fn click_file(h: &mut Harness, path: &Path) {
+    h.app.tree.paths_changed(&mut h.root, &[path.to_path_buf()]);
+    h.settle();
+    let name = path.file_name().unwrap().to_str().unwrap();
+    let row = h.app.tree.row_id(name).expect("изображение должно быть видно в дереве");
+    let at = h.root.get_widget(row).unwrap().ctx().bounding_box().center();
+    h.click(at.x, at.y);
+}
+
+#[test]
+fn png_jpeg_and_webp_open_from_tree_without_replacing_the_note() {
+    let mut h = Harness::new();
+    let vault = h.vault.path().to_path_buf();
+    let note = vault.join("a.md");
+    assert!(h.app.open(&mut h.root, note.clone()));
+    let active = h.app.tabs.active_id();
+    let initial_text = h.body_text();
+
+    for (name, format) in [
+        ("Фотография.PnG", image::ImageFormat::Png),
+        ("снимок.JPEG", image::ImageFormat::Jpeg),
+        ("рисунок.webp", image::ImageFormat::WebP),
+    ] {
+        let path = vault.join(name);
+        if format == image::ImageFormat::Jpeg {
+            image::RgbImage::from_pixel(24, 12, image::Rgb([20, 80, 190]))
+                .save_with_format(&path, format).unwrap();
+        } else {
+            image::RgbaImage::from_pixel(24, 12, image::Rgba([20, 80, 190, 255]))
+                .save_with_format(&path, format).unwrap();
+        }
+        let before = std::fs::read(&path).unwrap();
+        click_file(&mut h, &path);
+        let layer = match h.app.popup {
+            Some(Popup::Viewer { layer }) => layer,
+            _ => panic!("отдельное изображение не открылось: {name}"),
+        };
+        assert!(h.root.get_widget(layer).and_then(|w| w.downcast::<crate::ui::viewer::Viewer>()).is_some());
+        assert_eq!(h.app.tabs.active_id(), active);
+        assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
+        assert_eq!(h.body_text(), initial_text);
+        assert_eq!(std::fs::read(&path).unwrap(), before, "просмотр изменил исходник");
+        h.escape();
+        assert!(h.app.popup.is_none(), "Escape не закрыл просмотр");
+    }
+}
+
+#[test]
+fn corrupt_oversized_and_unsupported_files_do_not_open_or_modify_the_note() {
+    let mut h = Harness::new();
+    let vault = h.vault.path().to_path_buf();
+    let note = vault.join("a.md");
+    assert!(h.app.open(&mut h.root, note.clone()));
+    let active = h.app.tabs.active_id();
+    let original_text = h.body_text();
+
+    let corrupt = vault.join("повреждено.png");
+    std::fs::write(&corrupt, b"not-an-image").unwrap();
+    click_file(&mut h, &corrupt);
+    assert!(h.app.popup.is_none(), "повреждённое изображение открылось");
+
+    let large = vault.join("слишком-большое.jpg");
+    std::fs::File::create(&large).unwrap().set_len(33 * 1024 * 1024).unwrap();
+    click_file(&mut h, &large);
+    assert!(h.app.popup.is_none(), "превышен лимит 32 МиБ");
+
+    let unsupported = vault.join("вектор.svg");
+    std::fs::write(&unsupported, b"<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
+    click_file(&mut h, &unsupported);
+    assert!(h.app.popup.is_none(), "SVG пока не поддерживается просмотрщиком");
+
+    assert_eq!(h.app.tabs.active_id(), active);
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
+    assert_eq!(h.body_text(), original_text);
+    assert_eq!(std::fs::read(&corrupt).unwrap(), b"not-an-image");
+}
+
+#[test]
+fn tree_image_preview_refuses_files_outside_the_open_vault() {
+    let mut h = Harness::new();
+    let outside = tempfile::tempdir().unwrap();
+    let picture = outside.path().join("private.png");
+    image::RgbaImage::new(8, 8).save(&picture).unwrap();
+
+    assert!(!h.app.open_tree_file(&mut h.root, picture, false));
+    assert!(h.app.popup.is_none(), "нельзя смотреть за пределами рабочей папки");
+
+    #[cfg(unix)]
+    {
+        let link = h.vault.path().join("внешняя.png");
+        std::os::unix::fs::symlink(outside.path().join("private.png"), &link).unwrap();
+        assert!(!h.app.open_tree_file(&mut h.root, link, false));
+        assert!(h.app.popup.is_none(), "ссылка не должна обходить рабочую папку");
+    }
+}
