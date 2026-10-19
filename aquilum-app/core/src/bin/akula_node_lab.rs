@@ -29,7 +29,7 @@ mod linux {
     use std::os::unix::fs::MetadataExt;
     use std::path::{Component, Path, PathBuf};
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     const MAX_HEADERS: usize = 8192;
     const MAX_FILE_BYTES: u64 = 64 * 1024;
@@ -118,7 +118,14 @@ mod linux {
     fn request(stream: &mut TcpStream) -> Result<Request, u16> {
         let mut bytes = [0u8; MAX_HEADERS];
         let mut len = 0;
+        // SO_RCVTIMEO alone is a per-read timeout: a slow peer can send one
+        // byte before every timeout and monopolize this single-connection lab.
+        // The whole header must finish within a fixed wall-clock budget.
+        let deadline = Instant::now() + Duration::from_secs(3);
         loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { return Err(408); }
+            stream.set_read_timeout(Some(remaining)).map_err(|_| 408u16)?;
             if len == MAX_HEADERS { return Err(431); }
             let n = match stream.read(&mut bytes[len..]) {
                 Ok(0) => return Err(400),
