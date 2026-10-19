@@ -2006,3 +2006,226 @@ fn bounded_ext4_owned_bao_after_remount() {
         size
     );
 }
+
+
+/// P2P-BLOB-10c: a pinned FsStore writes external DATA while retaining its
+/// much smaller authentic PRE-ORDER Bao proof inside the redb inline-outboard
+/// table. Negative DB mutations affect ONLY a test copy on disposable ext4.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "requires the independent disposable 64MiB ext4 CI mount"]
+async fn bounded_ext4_inline_bao_crypto_proof() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits,
+        bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger,
+        joint_staging_audit::JointHold,
+        redb_inventory::{
+            InlineBaoHold, RedbHold, audit_pinned_inline_bao,
+        },
+    };
+    use redb::{ReadableDatabase, ReadableTable};
+    use std::fs;
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("isolated ext4 CI-only mount"),
+    );
+    let guard = StagingVolumeGuard::open(&root).unwrap();
+    // External .data (>16KiB), but raw preorder Bao proof (<16KiB).
+    let payload = bytes(128 * 1024 + 37);
+    let hash = Hash::new(&payload);
+    let size = payload.len() as u64;
+    let store_root = root.join("bao-inline-fsstore");
+    let store = FsStore::load(&store_root).await.unwrap();
+    let tag = store.add_slice(&payload).await.unwrap();
+    assert_eq!(tag.hash, hash);
+    store.shutdown().await.unwrap();
+    drop(store);
+    drop(tag);
+
+    let hex = hash.to_hex().to_string();
+    let data_name = format!("{hex}.data");
+    let data_path = store_root.join("data").join(&data_name);
+    assert_eq!(fs::metadata(&data_path).unwrap().len(), size);
+    assert!(
+        !store_root.join("data").join(format!("{hex}.obao4")).exists(),
+        "mid-size FsStore Bao proof must be really inline"
+    );
+    let db_path = store_root.join("blobs.db");
+    let original_db = fs::read(&db_path).unwrap();
+    const INLINE_PROOFS: redb::TableDefinition<Hash, &[u8]> =
+        redb::TableDefinition::new("inline-outboard-0");
+    let original_proof = {
+        let db = redb::ReadOnlyDatabase::open(&db_path).unwrap();
+        let tx = db.begin_read().unwrap();
+        let table = tx.open_table(INLINE_PROOFS).unwrap();
+        let row = table.get(hash).unwrap().expect("physical inline proof exists");
+        row.value().to_vec()
+    };
+    assert!(!original_proof.is_empty());
+
+    let journal_root = root.join("bao-inline-ledger");
+    fs::create_dir(&journal_root).unwrap();
+    let policy = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let mut journal = DurableLedger::open(&journal_root, policy).unwrap();
+    journal
+        .reserve(SecretKey::generate().public(), *hash.as_bytes(), size)
+        .unwrap();
+    journal.verify_full(*hash.as_bytes(), &payload).unwrap();
+    let original_ledger = fs::read(journal_root.join("reservations.v1")).unwrap();
+    let evidence = audit_pinned_inline_bao(
+        &guard,
+        &journal,
+        "bao-inline-fsstore",
+    ).expect("prove real pinned inline Bao against journal");
+    assert_eq!(evidence.verified_inline_bao_outboards, 1);
+    assert_eq!(evidence.verified_inline_data_blobs, 0);
+    assert!(evidence.all_outboard_rows_checked);
+    assert!(!evidence.file_gate_ready);
+    assert!(!evidence.atomic_filesystem_snapshot);
+    assert!(evidence.partial_bitfields_unchecked);
+
+    // Original metadata and .data are never modified in negative scenarios.
+    let copy = root.join("bao-inline-corrupted-copy");
+    fs::create_dir(&copy).unwrap();
+    fs::create_dir(copy.join("data")).unwrap();
+    fs::create_dir(copy.join("temp")).unwrap();
+    fs::copy(&db_path, copy.join("blobs.db")).unwrap();
+    fs::copy(&data_path, copy.join("data").join(&data_name)).unwrap();
+    let copy_db = copy.join("blobs.db");
+
+    // Authenticated data bytes remain correct while a Bao PARENT is corrupted.
+    {
+        let db = redb::Database::open(&copy_db).unwrap();
+        let tx = db.begin_write().unwrap();
+        {
+            let mut t = tx.open_table(INLINE_PROOFS).unwrap();
+            let mut proof = original_proof.clone();
+            proof[0] ^= 0x40;
+            t.insert(hash, proof.as_slice()).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    assert!(matches!(
+        audit_pinned_inline_bao(&guard, &journal, "bao-inline-corrupted-copy"),
+        Err(InlineBaoHold::Redb(RedbHold::InvalidInlineBaoProof))
+    ));
+
+    // No prefix, suffix or trailing proof bytes belong in this raw redb row.
+    {
+        let db = redb::Database::open(&copy_db).unwrap();
+        let tx = db.begin_write().unwrap();
+        {
+            let mut t = tx.open_table(INLINE_PROOFS).unwrap();
+            let mut appended = original_proof.clone();
+            appended.extend_from_slice(b"unexpected-trailing-proof");
+            t.insert(hash, appended.as_slice()).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    assert!(matches!(
+        audit_pinned_inline_bao(&guard, &journal, "bao-inline-corrupted-copy"),
+        Err(InlineBaoHold::Redb(RedbHold::InvalidInlineBaoLength))
+    ));
+
+    // The required row must not silently disappear from the redb manifest.
+    {
+        let db = redb::Database::open(&copy_db).unwrap();
+        let tx = db.begin_write().unwrap();
+        {
+            let mut t = tx.open_table(INLINE_PROOFS).unwrap();
+            t.remove(hash).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    assert!(matches!(
+        audit_pinned_inline_bao(&guard, &journal, "bao-inline-corrupted-copy"),
+        Err(InlineBaoHold::Joint(JointHold::Redb(RedbHold::MissingInlineOutboard)))
+    ));
+
+    // Even a separate valid verified ledger for an unrelated equal-length
+    // object must never authenticate this actual redb object.
+    let wrong_root = root.join("bao-inline-wrong-ledger");
+    fs::create_dir(&wrong_root).unwrap();
+    let mut wrong_bytes = payload.clone();
+    wrong_bytes[0] ^= 0x80;
+    let wrong_hash = *Hash::new(&wrong_bytes).as_bytes();
+    let mut wrong = DurableLedger::open(&wrong_root, policy).unwrap();
+    wrong
+        .reserve(SecretKey::generate().public(), wrong_hash, size)
+        .unwrap();
+    wrong.verify_full(wrong_hash, &wrong_bytes).unwrap();
+    assert!(matches!(
+        audit_pinned_inline_bao(&guard, &wrong, "bao-inline-fsstore"),
+        Err(InlineBaoHold::Joint(JointHold::Redb(RedbHold::OrphanDatabaseBlob)))
+    ));
+    drop(wrong);
+
+    // Existing tiny inline data has no Bao nodes and NotNeeded is valid.
+    let tiny = b"p2p-blob-09b-readonly-inlined-contents";
+    let tiny_policy = AdmissionLimits {
+        max_object_bytes: tiny.len() as u64,
+        max_tracked_bytes: tiny.len() as u64,
+        max_peer_bytes: tiny.len() as u64,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let tiny_journal = DurableLedger::open(&root.join("small-inline-ledger"), tiny_policy).unwrap();
+    let tiny_evidence =
+        audit_pinned_inline_bao(&guard, &tiny_journal, "small-inline-fsstore").unwrap();
+    assert_eq!(tiny_evidence.verified_inline_bao_outboards, 0);
+    assert_eq!(tiny_evidence.verified_inline_data_blobs, 1);
+    assert!(!tiny_evidence.file_gate_ready);
+    drop(tiny_journal);
+
+    assert_eq!(fs::read(&db_path).unwrap(), original_db);
+    assert_eq!(fs::read(&data_path).unwrap(), payload);
+    assert_eq!(fs::read(journal_root.join("reservations.v1")).unwrap(), original_ledger);
+    drop(journal);
+    println!(
+        "P2P_BLOB10C_INLINE_BAO external_data_bytes={} inline_bao_bytes={} complete_proof=true corrupted_parent_hold=true trailing_bytes_hold=true missing_row_hold=true wrong_ledger_hold=true tiny_notneeded=true source_unchanged=true file_gate_ready=false",
+        size,
+        original_proof.len(),
+    );
+}
+
+/// Open the SAME unmodified redb and fsynced journal after real ext4 umount.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires remounted disposable ext4 image and previous real FsStore"]
+fn bounded_ext4_inline_bao_after_remount() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits,
+        bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger,
+        redb_inventory::audit_pinned_inline_bao,
+    };
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 image"),
+    );
+    let guard = StagingVolumeGuard::open(&root).unwrap();
+    let size = (128 * 1024 + 37) as u64;
+    let policy = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let journal = DurableLedger::open(&root.join("bao-inline-ledger"), policy).unwrap();
+    let valid =
+        audit_pinned_inline_bao(&guard, &journal, "bao-inline-fsstore").unwrap();
+    assert_eq!(valid.verified_inline_bao_outboards, 1);
+    assert_eq!(valid.verified_inline_data_blobs, 0);
+    assert!(!valid.file_gate_ready);
+    assert!(!valid.atomic_filesystem_snapshot);
+    println!(
+        "P2P_BLOB10C_INLINE_BAO_REMOUNT same_external_data=true raw_redb_proof_authenticated=true fsynced_journal_recovered=true file_gate_ready=false"
+    );
+}
