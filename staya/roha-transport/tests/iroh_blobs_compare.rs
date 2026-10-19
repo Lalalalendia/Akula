@@ -2021,8 +2021,8 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
         joint_staging_audit::JointHold,
         redb_inventory::{InlineBaoHold, RedbHold, audit_pinned_inline_bao},
     };
-    use redb::{ReadableDatabase, ReadableTable};
-    use std::fs;
+    use redb::ReadableDatabase;
+    use std::{fs, os::unix::fs::PermissionsExt};
 
     let root = std::path::PathBuf::from(
         std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("isolated ext4 CI-only mount"),
@@ -2069,6 +2069,7 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
 
     let journal_root = root.join("bao-inline-ledger");
     fs::create_dir(&journal_root).unwrap();
+    fs::set_permissions(&journal_root, fs::Permissions::from_mode(0o700)).unwrap();
     let policy = AdmissionLimits {
         max_object_bytes: size,
         max_tracked_bytes: size,
@@ -2155,6 +2156,7 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
     // object must never authenticate this actual redb object.
     let wrong_root = root.join("bao-inline-wrong-ledger");
     fs::create_dir(&wrong_root).unwrap();
+    fs::set_permissions(&wrong_root, fs::Permissions::from_mode(0o700)).unwrap();
     let mut wrong_bytes = payload.clone();
     wrong_bytes[0] ^= 0x80;
     let wrong_hash = *Hash::new(&wrong_bytes).as_bytes();
