@@ -21,6 +21,7 @@ impl TextEditor {
             let (fcx, lcx) = ctx.text_contexts();
             self.doc.ensure(first..=last, fcx, lcx, &self.styles, self.focused.then_some(self.focus));
         }
+        self.prepare_code_paint_offsets(first, last);
         let shown = first..=last;
         let texts: Vec<usize> = shown.clone().filter(|&i| {
             let p = self.doc.paragraph(i);
@@ -81,6 +82,9 @@ impl TextEditor {
                 render_text(painter, Affine::translate(origin), self.doc.paragraph(i).layout(), &palette, true);
             }
         }
+        // Drop computed indices before event handling or a different document
+        // window could make the same line index refer to different source.
+        self.paint_code_offsets.clear();
     }
 
     pub(super) fn do_post_paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {

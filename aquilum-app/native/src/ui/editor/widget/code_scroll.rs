@@ -196,6 +196,29 @@ mod tests {
     }
 
     #[test]
+    fn paint_pass_resolves_long_code_runs_once_and_keeps_neighboring_offsets_independent() {
+        let mut source = String::from("prose\\n~~~rust\\n");
+        for n in 0..1_200 {
+            source.push_str(&format!("line{n} : длинный код\\n"));
+        }
+        source.push_str("~~~\\nafter\\n~~~python\\nexample\\n~~~");
+        let mut editor = TextEditor::new(&source).markdown();
+        let first = source.find("~~~rust").unwrap();
+        let second = source.find("~~~python").unwrap();
+        assert!(editor.code_scrolls.advance(first, 80.0, 320.0, 160.0));
+        assert!(editor.code_scrolls.advance(second, 30.0, 320.0, 160.0));
+        let count = editor.doc.line_count();
+        editor.prepare_code_paint_offsets(0, count - 1);
+        assert_eq!(editor.paint_code_offsets.len(), count);
+        assert_eq!(editor.code_offset_at(0), 0.0);
+        assert_eq!(editor.code_offset_at(800), 80.0);
+        let second_line = editor.doc.at_offset(second);
+        assert_eq!(editor.code_offset_at(second_line), 30.0);
+        assert_eq!(editor.code_offset_at(second_line - 1), 0.0);
+        editor.paint_code_offsets.clear();
+    }
+
+    #[test]
     fn direct_edit_map_can_preserve_before_and_delete_crossing_fence() {
         let mut offsets = Offsets::default();
         assert!(offsets.advance(100, 45.0, 400.0, 200.0));
@@ -242,7 +265,33 @@ impl TextEditor {
     }
 
     pub(super) fn code_offset_at(&self, line: usize) -> f64 {
+        if let Some(index) = line.checked_sub(self.paint_code_first)
+            && let Some(value) = self.paint_code_offsets.get(index)
+        {
+            return *value;
+        }
         self.code_opener_at(line).map_or(0.0, |opener| self.code_scrolls.get(opener))
+    }
+
+    /// Resolve the opening fence once for the first rendered line and move
+    /// forward over the visible range. Layout rendering stays O(N) in the
+    /// number of shown paragraphs, not O(N²) on long fenced blocks.
+    pub(super) fn prepare_code_paint_offsets(&mut self, first: usize, last: usize) {
+        self.paint_code_first = first;
+        self.paint_code_offsets.clear();
+        if first > last || self.doc.markdown.is_none() {
+            return;
+        }
+        let mut opener = self.code_opener_at(first);
+        for line in first..=last {
+            if !self.doc.fenced_code(line) {
+                opener = None;
+            } else if matches!(self.doc.block(line), Block::Code { first: true, fence: true, .. }) {
+                opener = Some(self.doc.paragraph(line).start);
+            }
+            let offset = opener.map_or(0.0, |at| self.code_scrolls.get(at));
+            self.paint_code_offsets.push(offset);
+        }
     }
 
     /// Natural, unwrapped width of mounted paragraphs in this one fence run.
