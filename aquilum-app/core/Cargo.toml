@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Developer-only Linux loopback read-only Node (D1). Not a released Akula service.
+node-lab = []
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
@@ -27,6 +29,11 @@ sync-installed-host-witness = ["sync-installed-host"]
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness"]
 # Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
 sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
+
+[[bin]]
+name = "akula-node-lab"
+path = "src/bin/akula_node_lab.rs"
+required-features = ["node-lab"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
