@@ -79,6 +79,11 @@ def report(rows: list[dict], exe_hash: str,
                 raise ValueError(f"Incomplete {scene}/{mode} trial IDs")
             if not all(row["applied"] == (mode != "baseline") for row in group):
                 raise ValueError(f"Mipmap positive/negative witness failed: {scene}/{mode}")
+            witnesses = [row.get("window_witness") for row in group]
+            if not all(isinstance(w, dict) and w.get("title_akula") is True
+                       and w.get("width", 0) >= 400 and w.get("height", 0) >= 300
+                       for w in witnesses):
+                raise ValueError(f"Missing real visible Win32 HWND/PID evidence: {scene}/{mode}")
             by_mode[mode] = group
             frame = median(metric(row, "frameP95Ms") for row in group)
             raster = median(metric(row, "rasterP95Ms") for row in group)
@@ -87,6 +92,8 @@ def report(rows: list[dict], exe_hash: str,
                 f"| {scene} | {viewport} | {mode} | {frame:.3f} | "
                 f"{raster:.3f} | {rss:.1f} |"
             )
+            sizes = [f"{w['width']}x{w['height']}" for w in witnesses]
+            lines.append(f"{scene}/{mode}: observed PID-matched Win32 window extents {sizes}.")
         differences = []
         for trial in TRIALS:
             base = next(row for row in by_mode["baseline"] if row["trial"] == trial)
