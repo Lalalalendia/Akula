@@ -275,7 +275,12 @@ impl Images {
             self.diag.evicted += (previous_count - self.mips.len()) as u64;
             // This diagnostic prints once per 128 real frame passes, not per
             // image paint, so it cannot dominate the measured frame p95.
-            if frame % 128 == 0
+            // Keep normal diagnostics sparse; in the multisource stress
+            // experiment report every 32 frames so the last sample does not
+            // undercount sources visited during a six-second fling.
+            let multisource = std::env::var("AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF")
+                .ok().as_deref() == Some("1");
+            if (frame % 128 == 0 || (multisource && frame % 32 == 0))
                 && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF").ok().as_deref() == Some("1")
             {
                 eprintln!(
