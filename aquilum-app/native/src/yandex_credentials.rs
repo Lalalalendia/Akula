@@ -194,6 +194,9 @@ mod windows_vault {
         let secret = Zeroizing::new(
             String::from_utf8(secret_blob.to_vec()).map_err(|_| VaultError::InvalidKeys)?
         );
+        // Release the extra OS allocation before invoking user code.
+        // No Win32 credential pointers escape this function.
+        drop(allocation);
         Ok(action(&id, &secret))
     }
 
