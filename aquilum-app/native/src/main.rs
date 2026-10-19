@@ -94,7 +94,7 @@ fn main() {
     let result = args::parse().and_then(host::run);
     if let Err(err) = &result {
         report!("{err}");
-        rfd::MessageDialog::new().set_title("Aquilum").set_description(err).set_level(rfd::MessageLevel::Error).show();
+        rfd::MessageDialog::new().set_title(if cfg!(target_os = "windows") { "Akula" } else { "Aquilum" }).set_description(err).set_level(rfd::MessageLevel::Error).show();
     }
     std::process::exit(i32::from(result.is_err()));
 }

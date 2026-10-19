@@ -1,0 +1,25 @@
+{
+  "productName": "Akula",
+  "version": "0.3.9",
+  "identifier": "io.github.lalalendia.akula",
+  "description": "Local-first Markdown and knowledge workspace",
+  "homepage": "https://github.com/Lalalalendia/Akula",
+  "publisher": "Akula",
+  "binaries": [
+    {
+      "path": "akula-app",
+      "main": true
+    }
+  ],
+  "icons": [
+    "../icons/32x32.png",
+    "../icons/128x128.png",
+    "../icons/128x128@2x.png",
+    "../icons/icon.ico"
+  ],
+  "nsis": {
+    "installerIcon": "../icons/icon.ico"
+  },
+  "name": "aquilum-native",
+  "binariesDir": "../../../.artifacts/cargo-native/release"
+}

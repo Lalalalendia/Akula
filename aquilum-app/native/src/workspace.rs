@@ -9,6 +9,9 @@ use std::sync::mpsc::{Receiver, channel};
 
 use aquilum_core::{Core, CoreEvent, EventSink};
 
+#[cfg(target_os = "windows")]
+pub const APP_ID: &str = "io.github.lalalendia.akula";
+#[cfg(not(target_os = "windows"))]
 pub const APP_ID: &str = "com.dmitriy.aquilum-app";
 
 pub struct Workspace {
@@ -26,6 +29,9 @@ impl Workspace {
     pub fn open(data_dir: Option<&Path>, vault: Option<&Path>, wake: impl Fn() + Send + Sync + 'static) -> Result<Self, String> {
         let data_dir = data_dir_or_default(data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
+        // Akula on Windows deliberately never imports Aquilum/Quantum app data.
+        // Explicit migration, with review and backups, belongs to a separate tool.
+        #[cfg(not(target_os = "windows"))]
         if data_dir.ends_with(APP_ID) {
             aquilum_core::migration::migrate_legacy_data(&data_dir);
         }

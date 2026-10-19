@@ -1,0 +1,127 @@
+name: Dataview field exact-source ABBA
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/search/dataview/rows.rs'
+      - '.github/bench/dataview-field-ab.rs'
+      - '.github/workflows/dataview-field-abba.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-dataview-field-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Extract exact baseline and PR Row::field implementations
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          SRC='aquilum-app/core/src/search/dataview/rows.rs'
+          for side in base head; do
+            if [ "$side" = base ]; then sha="$BASE_SHA"; else sha="$HEAD_SHA"; fi
+            git cat-file -e "$sha^{commit}"
+            git show "$sha:$SRC" > "$RUNNER_TEMP/rows-$side.rs"
+            python3 - "$RUNNER_TEMP/rows-$side.rs" "$RUNNER_TEMP/row-method-$side.rs" <<'PY'
+          import sys
+          from pathlib import Path
+          data = Path(sys.argv[1]).read_text()
+          marker = 'impl Row {'
+          suffix = '\n}\n\nuse super::constants'
+          assert data.count(marker) == 1 and data.count(suffix) == 1
+          start = data.index(marker)
+          end = data.index(suffix, start) + 2
+          fragment = data[start:end] + '\n'
+          assert 'pub fn field' in fragment
+          Path(sys.argv[2]).write_text(fragment)
+          PY
+            AKULA_DATAVIEW_IMPL="$RUNNER_TEMP/row-method-$side.rs" \
+              rustc --edition=2021 -O -Awarnings \
+              .github/bench/dataview-field-ab.rs -o "$RUNNER_TEMP/dataview-$side"
+          done
+          {
+            echo "base=$BASE_SHA"
+            echo "head=$HEAD_SHA"
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } | tee dataview-environment.log
+      - name: Measure exact method behavior A/B/B/A on one runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          trial=0
+          for side in base head head base base head head base; do
+            trial=$((trial + 1))
+            "$RUNNER_TEMP/dataview-$side" | tee "dataview-$trial-$side.log"
+          done
+      - name: Verify checksums and report isolated medians
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import statistics
+          from pathlib import Path
+
+          names = ('ascii_late', 'ascii_miss', 'mixed_unicode')
+          regex = re.compile(r'DATAVIEW_FIELD_AB case=(\w+) elapsed_ms=([0-9.]+) checksum=(\d+)')
+          runs = {'base': [], 'head': []}
+          for path in Path('.').glob('dataview-*-*.log'):
+              tag = re.fullmatch(r'dataview-\d+-(base|head)\.log', path.name)
+              if not tag:
+                  continue
+              parsed = {case: (float(ms), digest) for case, ms, digest
+                        in regex.findall(path.read_text())}
+              assert set(parsed) == set(names), f'Incomplete run: {path}'
+              runs[tag.group(1)].append(parsed)
+          assert len(runs['base']) == len(runs['head']) == 4, runs
+          lines = [
+              '## Dataview Row::field exact-source ABBA',
+              '',
+              '| Lookup | Base median ms | PR median ms | Difference |',
+              '|---|---:|---:|---:|',
+          ]
+          for case in names:
+              digests = {r[case][1] for samples in runs.values() for r in samples}
+              assert len(digests) == 1, f'Behavioral mismatch: {case} {digests}'
+              a = statistics.median(r[case][0] for r in runs['base'])
+              b = statistics.median(r[case][0] for r in runs['head'])
+              assert a > 0 and b > 0
+              lines.append(f'| {case} | {a:.4f} | {b:.4f} | {100*(b/a-1):+.1f}% |')
+          lines += [
+              '',
+              'Isolated exact source Row::field with substituted record shape.',
+              'No SQLite, parse, WHERE/SORT/TABLE, or editor round-trip included.',
+              'No timing-based merge gate; require unchanged semantics and core CI.',
+          ]
+          report = '\n'.join(lines) + '\n'
+          print(report)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(report)
+          Path('dataview-abba-summary.md').write_text(report)
+          PY
+      - name: Upload safe numeric diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataview-field-${{ github.event.pull_request.head.sha }}
+          path: |
+            dataview-environment.log
+            dataview-*-*.log
+            dataview-abba-summary.md
+          if-no-files-found: warn
+          retention-days: 14

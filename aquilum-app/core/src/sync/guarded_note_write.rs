@@ -20,9 +20,9 @@ const MAX_NOTE_BYTES: usize = 32 * 1024 * 1024;
 /// previously verified pinned OS custody lock callback. It is NOT clonable.
 pub(crate) struct HeldCustodyHistoryPermit(());
 
-/// Denied means that this API did not enter the primary writer. NeedsReview
-/// means that bytes and/or history *might* have changed, even when an
-/// OS-lock/custody post-check failed. Never automatically retry NeedsReview.
+/// Denied means neither preparation nor the primary writer was entered.
+/// NeedsReview means durable preparation, bytes or history might have changed,
+/// including an OS-lock/custody post-check failure. Never retry automatically.
 #[derive(Debug)]
 pub(crate) enum GuardedNoteWriteError {
     Denied(String),
@@ -112,36 +112,74 @@ pub(crate) fn save_existing_note_under_custody(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<FileWriteResult, GuardedNoteWriteError> {
+    save_existing_note_with_checks_under_custody(
+        admission, custody, vault_id, custody_scope, relative, content,
+        expected_hash, source, version_name, || Ok(()), |_, _| Ok(()),
+    )
+}
+
+/// Single cooperative OS lifetime for preparation, the existing File Gate
+/// writer, HistoryService and postflight. `T` (for example, a reservation or
+/// one-shot attempt observation) stays alive through postflight, cannot be
+/// returned as a writer permit, and is dropped before custody is released.
+///
+/// Callbacks are trusted synchronous host code, NOT UI/plugin hooks. They
+/// must not reacquire custody or issue UI notifications. File Gate keeps its
+/// existing lock order and releases its mutex before HistoryService locks.
+/// Preparation can commit durable evidence before returning an error: every
+/// error after entering it is NeedsReview, even if primary bytes are intact.
+/// Postflight runs only after successful primary AND history persistence.
+///
+/// This internal bridge does not validate a remote DAG, mint a native receipt,
+/// change installed-host policy or commit a Sync baseline. Its Ok is only the
+/// existing local FileWriteResult, not an S3 apply acknowledgement.
+#[allow(dead_code)]
+pub(crate) fn save_existing_note_with_checks_under_custody<T>(
+    admission: &RegisteredReadAdmission<'_>,
+    custody: &SqliteCustodyIdentityStore,
+    vault_id: VaultId,
+    custody_scope: &Path,
+    relative: &SyncRelativePath,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prepare: impl FnOnce() -> Result<T, FileCommandError>,
+    postflight: impl FnOnce(&T, &FileWriteResult) -> Result<(), FileCommandError>,
+) -> Result<FileWriteResult, GuardedNoteWriteError> {
     let core = admission.registered_core();
     let target = admission.registered_root_path().join(relative.as_str());
-    let mut attempted = false;
+    let mut entered = false;
+    let mut history_changed = false;
     let outcome = custody.with_cooperative_writer_lifetime(
         admission, vault_id, custody_scope, || {
             let checked = existing_note(
                 admission.registered_root_path(), relative, expected_hash, content,
             ).map_err(CheckedHistoryError::Primary)?;
-            attempted = true;
+            entered = true;
+            let prepared = prepare().map_err(CheckedHistoryError::Primary)?;
             let permit = HeldCustodyHistoryPermit(());
-            gate::write_checked_history(
+            let (result, changed) = gate::write_checked_history(
                 &permit, core, &checked, content, expected_hash, source, version_name,
-            )
+            )?;
+            history_changed = changed;
+            postflight(&prepared, &result).map_err(CheckedHistoryError::Primary)?;
+            Ok(result)
         },
     );
 
     // No callback into the UI/search service while the OS lock is held.
-    // An attempted primary write requires a rescan even on ambiguous errors.
-    if attempted {
+    // Completed history must be announced even if a later postflight fails.
+    if entered {
         core.search.notify_content_path(target.clone());
     }
+    if history_changed {
+        core.emit(CoreEvent::NoteHistoryChanged(NoteHistoryChanged {
+            path: target.to_string_lossy().into_owned(),
+        }));
+    }
     match outcome {
-        Ok(Ok((result, history_changed))) => {
-            if history_changed {
-                core.emit(CoreEvent::NoteHistoryChanged(NoteHistoryChanged {
-                    path: target.to_string_lossy().into_owned(),
-                }));
-            }
-            Ok(result)
-        }
+        Ok(Ok(result)) => Ok(result),
         Ok(Err(error)) => {
             if let CheckedHistoryError::History(failure) = &error {
                 core.emit(CoreEvent::NoteHistorySaveFailed(NoteHistorySaveFailed {
@@ -151,13 +189,13 @@ pub(crate) fn save_existing_note_under_custody(
                 }));
             }
             let message = format!("{error:?}");
-            if attempted {
+            if entered {
                 Err(GuardedNoteWriteError::NeedsReview(message))
             } else {
                 Err(GuardedNoteWriteError::Denied(message))
             }
         }
-        Err(error) if attempted => Err(GuardedNoteWriteError::NeedsReview(format!("{error:?}"))),
+        Err(error) if entered => Err(GuardedNoteWriteError::NeedsReview(format!("{error:?}"))),
         Err(error) => Err(GuardedNoteWriteError::Denied(format!("{error:?}"))),
     }
 }
@@ -354,4 +392,7 @@ mod tests {
         }
         assert_eq!(fs::read(&outside).unwrap(), b"original");
     }
+
+    #[path = "guarded_note_transaction_tests.rs"]
+    mod transaction;
 }

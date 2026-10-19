@@ -2,7 +2,7 @@ use std::fs::{File, TryLockError};
 use std::path::Path;
 
 #[cfg(windows)]
-pub const WINDOW_CLASS: &str = "AquilumWindow";
+pub const WINDOW_CLASS: &str = "AkulaWindow";
 
 pub enum Instance {
     First(Option<File>),

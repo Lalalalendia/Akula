@@ -11,6 +11,12 @@ on:
 permissions:
   contents: read
 
+# New commits on one PR supersede its older experimental/diagnostic checks.
+# Explicit workflow_dispatch runs are never preempted automatically.
+concurrency:
+  group: akula-sync-text-delta-history-s3-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   history-delta:
     runs-on: ubuntu-24.04

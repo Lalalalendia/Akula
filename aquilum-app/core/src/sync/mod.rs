@@ -21,6 +21,8 @@ mod host_ledger_identity;
 pub(crate) mod host_custody_registry;
 #[cfg(feature = "sync-installed-host-witness")]
 pub(crate) mod host_install_witness;
+#[cfg(feature = "sync-installed-host-unix-root-witness")]
+mod host_install_unix_root;
 #[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
 pub(crate) mod guarded_note_write;
@@ -36,6 +38,8 @@ mod fault_matrix;
 mod identity;
 mod journal;
 mod local_create;
+#[cfg(test)]
+mod native_existing_replace_probe;
 mod local_recovery;
 mod recovery_review;
 /// Crypto envelope contract only: no production key custody or archive writer yet.
@@ -43,6 +47,8 @@ pub mod sealed_archive;
 mod recovery_dashboard;
 mod planner;
 mod protection_store;
+#[cfg(feature = "sync-s3")]
+mod s3_preimage_capture;
 #[cfg(feature = "sync-s3")]
 mod profile_binding;
 mod path;

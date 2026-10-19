@@ -1,0 +1,34 @@
+name: Native macOS updater integration
+
+# A Linux workspace test cannot compile target_os=macos apply.rs. Keep this
+# targeted lane separate from inexpensive docs and ordinary UI PR checks.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/updater/apply.rs'
+      - 'aquilum-app/native/src/updater/macos_transaction.rs'
+      - 'aquilum-app/native/src/updater/mod.rs'
+      - '.github/workflows/macos-updater-integration.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-updater-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-macos-updater:
+    name: Native macOS updater compile
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check actual updater integration on macOS
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check -p aquilum-native --features installed --locked
