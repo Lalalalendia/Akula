@@ -336,6 +336,9 @@ fn postflight_tamper_requires_review_and_releases_only_editor_reservation() {
 fn inert_cold_review(f: &Fixture) -> Result<InertColdS3Review, FileCommandError> {
     let admission = RegisteredReadAdmission::open(&f.core, &f.root)
         .map_err(refused)?;
+    let bindings = SqliteRegisteredS3Bindings::open_existing_read_only(
+        &admission, &f.appdata.join("profile.sqlite"),
+    ).map_err(refused)?;
     let journal = SqliteSyncJournal::open_existing_read_only(
         &f.appdata.join("journal.sqlite"),
     ).map_err(refused)?;
@@ -343,7 +346,7 @@ fn inert_cold_review(f: &Fixture) -> Result<InertColdS3Review, FileCommandError>
         &f.appdata.join("originals.sqlite"),
     ).map_err(refused)?;
     inspect_cold_s3_replace_hold(
-        &admission, &f.bindings, &journal, &protected, f.intent.operation_id,
+        &admission, &bindings, &journal, &protected, f.intent.operation_id,
     )
 }
 
