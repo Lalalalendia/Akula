@@ -1,0 +1,64 @@
+name: Native image mipmap pixel proof (Windows/macOS)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/render/paint/convert.rs'
+      - 'aquilum-app/native/src/render/paint/mipmap.rs'
+      - '.github/workflows/native-mipmap-platform-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-image-platform-qa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-quality:
+    name: Mipmap photo, alpha and fractional CPU raster / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-mipmap-image-platform-v1
+          save-if: false
+          cache-workspace-crates: true
+      - name: Exact CI source and compiler
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          rustc --version
+          cargo --version
+      - name: Strict mip reduction, cache budget and lifetime QA
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::mipmap::tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_integration_tests -- --nocapture --test-threads=1
+      - name: Real PNG, alpha-crop, fractional and odd-size QA
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::image_scene_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::fractional_odd_quality_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_crop_alpha_edge_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_rounded_coverage_tests -- --nocapture --test-threads=1

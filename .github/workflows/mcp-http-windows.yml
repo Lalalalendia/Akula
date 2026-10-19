@@ -1,0 +1,45 @@
+name: MCP Windows connection admission
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/mcp/server.rs'
+      - 'aquilum-app/core/src/mcp/http/**'
+      - '.github/workflows/mcp-http-windows.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-http-windows-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  socket-admission:
+    name: MCP Windows idle eviction and saturation
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: mcp-http-windows-v1
+          save-if: false
+      - name: Test real Windows TCP admission and stop
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::server::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-http-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve native socket test transcript
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mcp-http-windows-${{ github.event.pull_request.head.sha }}
+          path: mcp-http-windows.log
+          retention-days: 30
