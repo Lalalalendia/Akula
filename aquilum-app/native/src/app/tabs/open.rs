@@ -83,7 +83,7 @@ impl App {
 
         #[cfg(test)]
         let started = std::time::Instant::now();
-        self.version_view = None;
+        self.discard_version_view(root);
         self.show_version(root);
         #[cfg(test)]
         record_stage(|s| s.version = started.elapsed());
