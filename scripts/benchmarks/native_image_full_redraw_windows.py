@@ -79,10 +79,26 @@ def assets(out: Path, n: int) -> tuple[Path, dict[str, str]]:
 
 
 def document(n: int) -> str:
-    parts = ["# IMG-PERF-08 multi-image native replay\n\n"]
-    for i in range(n):
-        name = f"photo_{i:03d}.png"
-        parts.append(f"## Image {i + 1}\n![200]({name})\n\n")
+    # Mirror the *known working* 240-section note in the original
+    # city-cover Windows A/B. A one-image/one-heading document does
+    # not scroll; it previously yielded zero actual mip requests.
+    # Always keep real scrollable text and repeat early images, while
+    # the 10/100-image runs also visit every distinct source filename.
+    parts = [
+        "# IMG-PERF-08 multi-image native replay\n\n",
+        "![200](photo_000.png)\n\n",
+        "![200|crop=10,10,90,90](photo_000.png)\n\n",
+    ]
+    for i in range(240):
+        parts.append(
+            f"## Section {i}\n"
+            "Markdown, **bold**, *italic*, unicode, [[Akula]] and wrapped text.\n\n"
+        )
+        if i < n or i % 12 == 0:
+            chosen = i if i < n else i % n
+            parts.append(f"![200](photo_{chosen:03d}.png)\n\n")
+        if i % 24 == 0:
+            parts.append(f"![200|crop=10,10,90,90](photo_{(i % n):03d}.png)\n\n")
     return "".join(parts)
 
 
