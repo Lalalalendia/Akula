@@ -497,6 +497,21 @@ impl HistoryService {
         );
         #[cfg(feature = "save-stage-probe")]
         let profile_planned = profile_start.elapsed();
+        // A strict receipt request must not mutate history then announce
+        // refusal. Quiet, label-only, revert and mutable latest-version
+        // coalescing are rejected BEFORE *any* history-store filesystem write.
+        // Existing non-strict editor/host APIs retain their legacy semantics.
+        if require_verified_version {
+            const MAX_RECEIPT_HISTORY_BYTES: usize = 32 * 1024 * 1024;
+            if write.text.len() > MAX_RECEIPT_HISTORY_BYTES
+                || !matches!(&plan, MilestonePlan::CreateNew { .. })
+            {
+                return Err(HistorySaveFailure::new(
+                    "history version proof",
+                    "not a bounded immutable CreateNew snapshot",
+                ));
+            }
+        }
         let quiet = matches!(&plan, MilestonePlan::Quiet);
         let dir = &located.dir;
         let outcome = (|| -> Result<HistorySaveEffect, HistorySaveFailure> {
