@@ -371,6 +371,16 @@ fn admit(head: &Head, token: &str) -> Result<(), Failure> {
     if !authorized(head, token) {
         return Err(refused(401, "Неверный токен"));
     }
+    // The legacy HTTP endpoint supports only 2025-06-18. An explicit
+    // modern/unknown header cannot silently enable another wire protocol.
+    // Missing headers remain a documented legacy-bridge compatibility case.
+    if head.header_count("mcp-protocol-version") > 1
+        || head
+            .header("mcp-protocol-version")
+            .is_some_and(|value| value.trim() != protocol::PROTOCOL_VERSION)
+    {
+        return Err(refused(400, "Неподдерживаемая версия MCP-Protocol-Version"));
+    }
     Ok(())
 }
 
@@ -454,7 +464,17 @@ mod tests {
     }
 
     fn initialize() -> String {
-        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }).to_string()
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": protocol::PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": { "name": "Akula HTTP test", "version": "1.0" }
+            }
+        })
+        .to_string()
     }
 
     fn tool_call(name: &str) -> String {
@@ -574,6 +594,52 @@ mod tests {
         assert!(response.header("Content-Type").unwrap().contains("application/json"));
         let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
         assert_eq!(body["result"]["serverInfo"]["name"], "aquilum");
+        server.stop();
+    }
+
+    #[test]
+    fn explicit_http_protocol_version_is_checked_before_any_tool_call() {
+        let invoked = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&invoked);
+        let (server, url) = start(Arc::new(move |_name, _args| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Value::Null)
+        }));
+        let call = tool_call("read_note");
+
+        let allowed = ureq::post(&url)
+            .set("Authorization", &bearer())
+            .set("MCP-Protocol-Version", protocol::PROTOCOL_VERSION)
+            .send_string(&call)
+            .unwrap();
+        assert_eq!(allowed.status(), 200);
+        assert_eq!(invoked.load(Ordering::SeqCst), 1);
+
+        for requested in ["2025-11-25", "2026-07-28", "2099-01-01", ""] {
+            let denied = ureq::post(&url)
+                .set("Authorization", &bearer())
+                .set("MCP-Protocol-Version", requested)
+                .send_string(&call)
+                .unwrap_err();
+            assert_eq!(status(Err(denied)), Some(400), "{requested}");
+            assert_eq!(invoked.load(Ordering::SeqCst), 1);
+        }
+
+        let mut duplicate = Client::connect(&server);
+        duplicate.send(&sized(
+            &call,
+            "MCP-Protocol-Version: 2025-06-18\r\nMCP-Protocol-Version: 2026-07-28\r\n",
+        ));
+        assert_eq!(duplicate.answer().status, 400);
+        assert_eq!(invoked.load(Ordering::SeqCst), 1);
+
+        // Authorization is evaluated first. A remote process cannot learn
+        // an accepted protocol version without a valid bearer.
+        let unauthorized = ureq::post(&url)
+            .set("MCP-Protocol-Version", "2026-07-28")
+            .send_string(&call)
+            .unwrap_err();
+        assert_eq!(status(Err(unauthorized)), Some(401));
         server.stop();
     }
 
