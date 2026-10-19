@@ -101,7 +101,13 @@ test('installed Windows beta GUI edit must use OS-level input into its own foreg
   assert.match(guiInput, /GetWindowThreadProcessId/);
   assert.match(guiInput, /GetForegroundWindow/);
   assert.match(guiInput, /SendInput/);
-  assert.match(guiInput, /KEYEVENTF_UNICODE/);
+  assert.match(guiInput, /VkKeyScanExW/);
+  assert.match(guiInput, /MapVirtualKeyExW/);
+  assert.match(guiInput, /TypeAsciiKeys/);
+  assert.match(guiInput, /KEYEVENTF_KEYUP/);
+  assert.match(guiInput, /GetKeyboardLayout/);
+  assert.doesNotMatch(guiInput, /KEYEVENTF_UNICODE\\s*=|TypeUnicode\\(/,
+    'VK_PACKET bypasses normal native key translation on current Windows host');
   assert.match(guiInput, /Window PID does not match launched Akula/);
   assert.match(guiInput, /Refusing to type into a nonforeground window/);
   assert.doesNotMatch(guiInput, /\bSet-Content\b|\bAdd-Content\b|\bWriteAllText\b/);
