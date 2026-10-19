@@ -58,3 +58,14 @@ jobs:
           # No performance hard threshold on noisy shared CI hosts.
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             render::paint::convert::mipmap_stage_benchmarks -- --ignored --nocapture --test-threads=1
+      - name: Installed feature compiles out opt-in image machinery
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native --features installed \
+            render::paint::convert::mipmap_integration_tests::installed_build_uses_original_paint_path_without_mipmaps \
+            -- --nocapture --test-threads=1
+          # The normal installed application, not only the test harness,
+          # must compile without developer-only mip/flag helpers.
+          cargo check --release --locked -p aquilum-native --features installed

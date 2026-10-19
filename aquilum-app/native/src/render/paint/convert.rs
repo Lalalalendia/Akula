@@ -5,17 +5,24 @@ use std::sync::{Arc, Weak};
 
 use masonry::imaging::{ClipRef, Composite, Filter, GeometryRef};
 use masonry::kurbo::{Affine, BezPath, Rect, Shape as _, StrokeOpts, stroke};
-use masonry::peniko::{Brush, BrushRef, Extend, Fill, ImageData, ImageQuality};
+use masonry::peniko::{Brush, BrushRef, Fill, ImageData};
+#[cfg(any(test, not(feature = "installed")))]
+use masonry::peniko::{Extend, ImageQuality};
 use vello_cpu::filter_effects::{EdgeMode, Filter as VelloFilter, FilterGraph, FilterPrimitive};
-use vello_cpu::{Image, ImageSource, PaintType, Pixmap};
+use vello_cpu::{Image, ImageSource, PaintType};
+#[cfg(any(test, not(feature = "installed")))]
+use vello_cpu::Pixmap;
 
+#[cfg(any(test, not(feature = "installed")))]
 use super::mipmap;
 
 const IMAGE_FRAMES: u64 = 2;
+#[cfg(any(test, not(feature = "installed")))]
 const EXPERIMENTAL_MIP_LINGER_FRAMES: u64 = 512;
 
 // Experimental, per-process fixed cache policy. The installed binary cannot
 // activate it. Explicit opt-in keeps the old 2-frame policy intact otherwise.
+#[cfg(any(test, not(feature = "installed")))]
 fn mip_linger_enabled() -> bool {
     static LINGER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *LINGER.get_or_init(|| {
@@ -41,7 +48,9 @@ struct MipDiagnostics {
 #[derive(Default)]
 pub struct Images {
     sources: HashMap<u64, (ImageSource, u64, Option<Weak<()>>)>,
-    /// Image ID + reduction level, restricted to a 32 MiB two-frame budget.
+    /// Image ID + level, strictly bounded to 32 MiB. Only developer builds
+    /// compile/use this cache; installed production has no mip-cache field.
+    #[cfg(any(test, not(feature = "installed")))]
     mips: HashMap<(u64, u8), (Arc<Pixmap>, u64)>,
     frame: u64,
     #[cfg(not(feature = "installed"))]
@@ -67,16 +76,19 @@ impl Images {
     }
 
     /// Reuse a premultiplied mipmap for the same image ID and level.
+    #[cfg(any(test, not(feature = "installed")))]
     fn mip_source(&mut self, id: u64, original: &ImageSource, level: u8) -> Option<ImageSource> {
         self.mip_source_budget(id, original, level, mipmap::MAX_EXTRA_BYTES)
     }
 
     /// Reserve every missing mip level BEFORE allocating anything. A request
     /// denied by the budget must not populate partial, unusable cache levels.
+    #[cfg(any(test, not(feature = "installed")))]
     fn mip_source_budget(&mut self, id: u64, original: &ImageSource, level: u8, budget: usize) -> Option<ImageSource> {
         self.mip_source_with_policy(id, original, level, budget, mip_linger_enabled())
     }
 
+    #[cfg(any(test, not(feature = "installed")))]
     fn mip_source_with_policy(
         &mut self, id: u64, original: &ImageSource, level: u8,
         budget: usize, reclaim_old: bool,
@@ -174,14 +186,27 @@ impl Images {
     }
 
     pub fn next_frame(&mut self) {
-        let mip_frames = if mip_linger_enabled() {
-            EXPERIMENTAL_MIP_LINGER_FRAMES
-        } else {
-            IMAGE_FRAMES
-        };
-        self.next_frame_with_mip_lifetime(mip_frames);
+        #[cfg(all(feature = "installed", not(test)))]
+        {
+            self.frame += 1;
+            let frame = self.frame;
+            self.sources.retain(|_, (_, used, owner)| {
+                frame - *used < IMAGE_FRAMES
+                    && owner.as_ref().is_none_or(|o| o.strong_count() > 0)
+            });
+        }
+        #[cfg(any(test, not(feature = "installed")))]
+        {
+            let mip_frames = if mip_linger_enabled() {
+                EXPERIMENTAL_MIP_LINGER_FRAMES
+            } else {
+                IMAGE_FRAMES
+            };
+            self.next_frame_with_mip_lifetime(mip_frames);
+        }
     }
 
+    #[cfg(any(test, not(feature = "installed")))]
     fn next_frame_with_mip_lifetime(&mut self, mip_frames: u64) {
         self.frame += 1;
         let frame = self.frame;
@@ -259,8 +284,8 @@ pub fn brush_to_paint_trial(
     )
 }
 
-// Testable decision path without changing process environment or allowing the
-// experimental setting to leak between concurrently running Rust tests.
+// Test-only direct activation, independent of environment and OnceLock.
+#[cfg(test)]
 fn brush_to_paint_candidate(
     brush: BrushRef<'_>,
     composite: Composite,
@@ -276,6 +301,7 @@ fn brush_to_paint_candidate(
 
 // Compare the existing bicubic mip candidate to a developer-only bilinear
 // candidate without changing users' original ImageBrush quality.
+#[cfg(any(test, not(feature = "installed")))]
 fn brush_to_paint_candidate_tuned(
     brush: BrushRef<'_>,
     composite: Composite,
