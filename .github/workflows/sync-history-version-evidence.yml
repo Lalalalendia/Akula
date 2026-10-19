@@ -1,0 +1,45 @@
+name: Sync history version evidence
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/history/service.rs'
+      - 'aquilum-app/core/src/history/milestone.rs'
+      - 'aquilum-app/core/src/history/store.rs'
+      - '.github/workflows/sync-history-version-evidence.yml'
+      - 'docs/sync/p0g3b-history-version-evidence.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: history-evidence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  history-evidence:
+    name: Exact HistoryService proof / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: history-evidence-${{ matrix.os }}
+      - name: Strict newly-created immutable history proof, negative gates
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 p0g3b_strict_history_proof -- --nocapture --test-threads=1
+      - name: Complete HistoryService compatibility suite
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 history::service::tests -- --nocapture --test-threads=1
