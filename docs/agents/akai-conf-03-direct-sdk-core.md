@@ -1,7 +1,7 @@
 # AKAI-CONF-03 — official MCP SDK direct-to-Core integration
 
-**Status:** Experimental; exact-head CI pending.  
-**Canonical program:** [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de), M0/P0.  
+**Status:** Experimental; exact-head CI pending.
+**Canonical program:** [AKULA-AGENT-MASTER-01](https://app.notion.com/p/3fe32a84beec818fb8d5f4f81d5d46de), M0/P0.
 **Prerequisites:** [#377](https://github.com/Lalalalendia/Akula/pull/377) version negotiation, [#368](https://github.com/Lalalalendia/Akula/pull/368) revision CAS, [#380](https://github.com/Lalalalendia/Akula/pull/380) official conformance harness; [#384](https://github.com/Lalalalendia/Akula/pull/384) full pass/fail triage.
 
 ## Why
