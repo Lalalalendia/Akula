@@ -90,6 +90,16 @@ pub(crate) fn with_stored_keys<R>(
     }
 }
 
+/// A point-in-time recheck after an explicit read-only network request.
+/// No key bytes escape this helper; this does NOT guarantee that a key
+/// cannot be replaced again after the check returns.
+#[allow(dead_code)]
+pub(crate) fn still_matches(bucket: &str, expected_id: &str, expected_secret: &str) -> bool {
+    with_stored_keys(bucket, |id, secret| {
+        id == expected_id && secret == expected_secret
+    }).unwrap_or(false)
+}
+
 pub fn remove(bucket: &str) -> Result<(), VaultError> {
     check_bucket(bucket)?;
     #[cfg(target_os = "windows")]
@@ -366,6 +376,7 @@ mod tests {
         };
 
         save_fake(b"synthetic-test-secret-v1");
+        assert!(still_matches(&bucket, "akula-test-access-id", "synthetic-test-secret-v1"));
         assert!(present(&bucket).unwrap());
         assert_eq!(with_stored_keys(&bucket, |id, secret| {
             id == "akula-test-access-id" && secret == "synthetic-test-secret-v1"
@@ -376,6 +387,9 @@ mod tests {
 
         // Updating the same bucket must retain the same target identity.
         save_fake(b"synthetic-test-secret-v2");
+        assert!(!still_matches(&bucket, "akula-test-access-id", "synthetic-test-secret-v1"),
+            "old S3 authorization must not survive a Windows credential overwrite");
+        assert!(still_matches(&bucket, "akula-test-access-id", "synthetic-test-secret-v2"));
         assert_eq!(with_stored_keys(&bucket, |_, secret| {
             secret == "synthetic-test-secret-v2"
         }), Ok(true));
@@ -388,6 +402,7 @@ mod tests {
         assert!(present(&bucket).unwrap());
         remove(&bucket).expect("test-only delete from Credential Manager");
         assert!(!present(&bucket).unwrap(), "delete must revoke local presence");
+        assert!(!still_matches(&bucket, "akula-test-access-id", "synthetic-test-secret-v2"));
         assert_eq!(with_stored_keys(&bucket, |_, _| ()),
             Err(VaultError::MissingKeys));
         remove(&bucket).expect("repeated delete should be idempotent");
