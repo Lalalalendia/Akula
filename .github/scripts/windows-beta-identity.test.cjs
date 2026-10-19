@@ -114,3 +114,35 @@ test('installed Windows beta GUI edit must use OS-level input into its own foreg
   assert.doesNotMatch(script, /AKULA_WINDOWS_BETA_SMOKE_PASS/,
     'a launch-only smoke must not be mistaken for true GUI editing');
 });
+
+test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
+  const provenance = read('scripts/windows-beta-candidate-manifest.ps1');
+  const smoke = workflow.indexOf('Install, type into GUI, save, restart and uninstall');
+  const manifest = workflow.indexOf('Verify candidate provenance and write manifest');
+  const upload = workflow.indexOf('Upload candidate (not a release)');
+  assert.ok(smoke >= 0 && manifest > smoke && upload > manifest,
+    'candidate may be uploaded only after installed GUI persistence succeeds');
+  for (const required of [
+    'scripts/windows-beta-candidate-manifest.ps1',
+    'dist/candidate-manifest.json',
+    'if-no-files-found: error',
+    'github.run_id',
+    'github.run_attempt',
+  ]) {
+    assert.ok(workflow.includes(required), 'candidate artifact missing: ' + required);
+  }
+  for (const required of [
+    'git -C $env:GITHUB_WORKSPACE rev-parse HEAD',
+    "$env:GITHUB_EVENT_NAME -eq 'pull_request'",
+    'Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256',
+    'Get-FileHash -LiteralPath $binary -Algorithm SHA256',
+    'Get-FileHash -LiteralPath $lock -Algorithm SHA256',
+    'actual_checkout_sha = $source',
+    'gui_persistence_smoke',
+    'AKULA_WINDOWS_BETA_PROVENANCE_PASS',
+  ]) {
+    assert.ok(provenance.includes(required), 'provenance invariant missing: ' + required);
+  }
+  assert.doesNotMatch(provenance, /gh release create|Invoke-WebRequest|Start-Process/,
+    'manifest must neither distribute a release nor run other executables');
+});
