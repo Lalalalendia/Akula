@@ -47,6 +47,8 @@ jobs:
             render::paint::convert::mipmap_integration_tests -- --nocapture --test-threads=1
           cargo test --release --locked -p aquilum-native --bin aquilum-native \
             render::paint::convert::image_scene_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::fractional_odd_quality_tests -- --nocapture --test-threads=1
           # Informational only: equivalent warm-image draws, splitting source
           # conversion from Vello command encoding and actual CPU raster time.
           # No performance hard threshold on noisy shared CI hosts.
