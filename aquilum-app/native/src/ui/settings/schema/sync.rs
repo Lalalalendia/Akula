@@ -1,6 +1,7 @@
 use super::*;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryDecision};
 use aquilum_core::settings::models::YandexS3Onboarding;
+use crate::yandex_probe_session::{ProbeFailure, ProbeView};
 
 /// User-controlled *documentation* endpoints. Never use arbitrary input as a
 /// link target, endpoint or credential provider inside this setup surface.
@@ -28,6 +29,29 @@ pub(super) fn yandex_setup(config: &AppConfig, ctx: &Context) -> Block {
             None => (t("settings.yandex.keysUnavailable"), Tone::Danger),
         }
     };
+    // Read-only proof is narrower than remote Vault trust. All statuses are
+    // fixed localized categories: NEVER display S3 object names or SDK errors.
+    let (probe_status, probe_tone) = match ctx.yandex_probe {
+        ProbeView::NotChecked => (t("settings.yandex.keysStoredUnverified"), Tone::Secondary),
+        ProbeView::Checking => (t("settings.yandex.probeChecking"), Tone::Secondary),
+        ProbeView::ReadOnlyListVerified => (t("settings.yandex.probeVerifiedReadOnly"), Tone::Secondary),
+        ProbeView::Failed(reason) => (t(match reason {
+            ProbeFailure::MissingKeys => "settings.yandex.probeMissingKeys",
+            ProbeFailure::InvalidStoredKeys => "settings.yandex.probeInvalidStoredKeys",
+            ProbeFailure::CredentialStoreUnavailable => "settings.yandex.probeKeyStoreUnavailable",
+            ProbeFailure::CredentialsRejected => "settings.yandex.probeRejected",
+            ProbeFailure::AccessDenied => "settings.yandex.probeDenied",
+            ProbeFailure::BucketNotFound => "settings.yandex.probeMissingBucket",
+            ProbeFailure::ClockSkew => "settings.yandex.probeClock",
+            ProbeFailure::WrongRegion => "settings.yandex.probeRegion",
+            ProbeFailure::Timeout => "settings.yandex.probeTimeout",
+            ProbeFailure::NetworkOrTls => "settings.yandex.probeNetwork",
+            ProbeFailure::ServiceUnavailable => "settings.yandex.probeServer",
+        }), Tone::Danger),
+    };
+    // A preview feature may only be enabled in an isolated Windows QA build.
+    // The normal installed Akula binary has this permanently disabled.
+    let preview = cfg!(all(target_os = "windows", feature = "yandex-s3-connection-preview"));
     let mut rows = vec![
         info(t("settings.yandex.explanation"), Some(t("settings.yandex.explanationHint")),
             Control::Status { text: t("settings.yandex.inactive"), tone: Tone::Danger }),
@@ -87,11 +111,18 @@ pub(super) fn yandex_setup(config: &AppConfig, ctx: &Context) -> Block {
             ])),
         info(t("settings.yandex.connectionTest"), Some(t("settings.yandex.connectionTestHint")),
             Control::Buttons(vec![
-                // Explicitly unavailable until keychain + read-only probe +
-                // Yandex-specific trust bootstrap are implemented and tested.
-                Button::new(t("settings.yandex.checkConnection"), Action::OpenUrl(YANDEX_KEY_DOCS)).enabled(false),
+                Button::new(
+                    if preview { t("settings.yandex.checkConnectionPreview") }
+                    else { t("settings.yandex.checkConnection") },
+                    Action::CheckYandexConnection,
+                ).enabled(preview && supported && bucket_ready
+                    && ctx.yandex_keys == Some(true) && !ctx.yandex_probe_busy),
             ])),
     ];
+    if !matches!(ctx.yandex_probe, ProbeView::NotChecked) {
+        rows.push(info(t("settings.yandex.probeStatus"), None,
+            Control::Status { text: probe_status, tone: probe_tone }));
+    }
     if let Some(notice) = &ctx.yandex_notice {
         rows.push(info(t("settings.yandex.keyActionResult"), None,
             Control::Status { text: notice.clone(), tone: Tone::Secondary }));
