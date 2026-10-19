@@ -198,6 +198,48 @@ pub fn search_sync_verified(
     Ok(result)
 }
 
+/// A conservative host-side binding for a CURRENT, single-head local note.
+/// This does not conflate the UI NoteId with the Sync DocumentId. Instead the
+/// host supplies a pinned note path, its verified on-disk BLAKE3 and a complete
+/// trusted DAG; cross-document aliases, pending revisions and conflicts deny.
+/// Historical revisions require a separate explicit grant not provided here.
+pub(crate) fn bind_current_note_to_sync(
+    dag: &crate::sync::RevisionDag,
+    relative_path: &str,
+    observed_content_hash: &str,
+) -> Result<OwnedSelection, ProbeError> {
+    use crate::sync::{RevisionOperation, SyncRelativePath};
+    let path = SyncRelativePath::parse(relative_path)
+        .map_err(|_| ProbeError::AccessDenied)?;
+    if path.as_str() != relative_path {
+        return Err(ProbeError::AccessDenied);
+    }
+    digest(observed_content_hash)?;
+    let candidates = dag.current_path_claimants(&path);
+    if candidates.len() != 1 {
+        return Err(ProbeError::AccessDenied);
+    }
+    let document = *candidates.iter().next().ok_or(ProbeError::AccessDenied)?;
+    let selection = resolve_sync_revisions(dag, document, None)?;
+    if selection.historical || selection.conflict || selection.revisions.len() != 1 {
+        return Err(ProbeError::AccessDenied);
+    }
+    let revision_id: crate::sync::RevisionId = selection.revisions[0].id.parse()
+        .map_err(|_| ProbeError::AccessDenied)?;
+    let record = dag.get(revision_id).ok_or(ProbeError::StaleSource)?;
+    let current_path = match &record.operation {
+        RevisionOperation::Content { path, .. } => path,
+        RevisionOperation::Rename { to, .. } => to,
+        RevisionOperation::Tombstone { .. } => return Err(ProbeError::AccessDenied),
+    };
+    if current_path != &path || selection.revisions[0].source_hash.as_deref()
+        != Some(observed_content_hash)
+    {
+        return Err(ProbeError::AccessDenied);
+    }
+    Ok(selection)
+}
+
 /// Restricted, host-only plugin path. Uses the EXISTING PermissionBroker grant
 /// for NotesSearch rather than inventing a second permission system.
 ///
@@ -1177,6 +1219,55 @@ mod tests {
             }),
         );
         assert!(matches!(response, Err(ProbeError::AccessDenied)));
+    }
+
+    #[test]
+    fn host_note_binding_rejects_wrong_hash_conflict_and_cross_document_path() {
+        let mut dag = RevisionDag::new();
+        let doc = DocumentId::new();
+        add_dag_revision(&mut dag, doc, vec![], "first");
+        assert_eq!(
+            bind_current_note_to_sync(&dag, "notes/claim.md", &hash("first"))
+                .unwrap().document_id,
+            doc.to_string()
+        );
+        assert!(bind_current_note_to_sync(&dag, "notes/claim.md", &hash("other")).is_err());
+        assert!(bind_current_note_to_sync(&dag, "../claim.md", &hash("first")).is_err());
+        add_dag_revision(&mut dag, DocumentId::new(), vec![], "first");
+        assert!(bind_current_note_to_sync(&dag, "notes/claim.md", &hash("first")).is_err());
+    }
+
+    #[test]
+    fn host_note_binding_rejects_conflict_and_pending_and_tombstone() {
+        let mut dag = RevisionDag::new();
+        let doc = DocumentId::new();
+        let root = add_dag_revision(&mut dag, doc, vec![], "root");
+        add_dag_revision(&mut dag, doc, vec![root], "left");
+        add_dag_revision(&mut dag, doc, vec![root], "right");
+        assert!(bind_current_note_to_sync(&dag, "notes/claim.md", &hash("left")).is_err());
+        let mut clean = RevisionDag::new();
+        let doc = DocumentId::new();
+        add_dag_revision(&mut clean, doc, vec![], "root");
+        let pending = RevisionRecord {
+            id: RevisionId::new(), document_id: doc,
+            parents: vec![RevisionId::new()],
+            operation: RevisionOperation::Content {
+                path: SyncRelativePath::parse("notes/claim.md").unwrap(),
+                blob_hash: hash("later"),
+            },
+        };
+        clean.ingest(pending).unwrap();
+        assert!(bind_current_note_to_sync(&clean, "notes/claim.md", &hash("root")).is_err());
+        let mut erased = RevisionDag::new();
+        let doc = DocumentId::new();
+        let root = add_dag_revision(&mut erased, doc, vec![], "root");
+        erased.ingest(RevisionRecord {
+            id: RevisionId::new(), document_id: doc, parents: vec![root],
+            operation: RevisionOperation::Tombstone {
+                path: SyncRelativePath::parse("notes/claim.md").unwrap(),
+            },
+        }).unwrap();
+        assert!(bind_current_note_to_sync(&erased, "notes/claim.md", &hash("root")).is_err());
     }
 
     #[test]
