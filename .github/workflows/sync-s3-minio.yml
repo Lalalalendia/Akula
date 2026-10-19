@@ -96,6 +96,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 yandex_readonly_probe::tests
+      - name: Prove bounded Yandex-style signed read-only LIST on MinIO
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 live_minio_yandex_probe_request_is_read_only -- --ignored --test-threads=1
       - name: Prove real MinIO server-side conditions and bounded streaming
         shell: bash
         working-directory: aquilum-app
