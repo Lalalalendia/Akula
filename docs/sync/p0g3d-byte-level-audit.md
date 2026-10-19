@@ -1,7 +1,7 @@
 # P0g-3d-01: byte-level custody, publication and crash-window audit
 
-**Status:** source-level audit completed; **not** a durability proof or permission to enable StageDownload apply.  
-**Source baseline:** Akula main `2c1d0e954affd96ccc12caffa570e5c9f278487e` (accepted #385).  
+**Status:** source-level audit completed; **not** a durability proof or permission to enable StageDownload apply.
+**Source baseline:** Akula main `2c1d0e954affd96ccc12caffa570e5c9f278487e` (accepted #385).
 **Target:** Windows + Linux. macOS remains Frozen/P2.
 
 ## 1. Actual pipeline and evidence boundaries
