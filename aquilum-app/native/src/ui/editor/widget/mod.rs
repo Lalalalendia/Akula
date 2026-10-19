@@ -13,7 +13,7 @@ pub(super) use super::markdown::{Block, Callout};
 pub(super) use super::history::Kind;
 pub(super) use crate::ui::tokens::size;
 use masonry::core::{
-    AccessCtx, ActionCtx, AccessEvent, ChildrenIds, ComposeCtx, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, PaintCtx,
+    AccessCtx, ActionCtx, ChildrenIds, ComposeCtx, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, PaintCtx,
     PointerEvent, PropertiesMut, PropertiesRef, QueryCtx, RegisterCtx, StyleProperty, StyleSet, TextEvent, Update,
     UpdateCtx, Widget, WidgetMut,
 };
