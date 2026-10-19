@@ -27,6 +27,12 @@ A production quality decision CANNOT be made on CPU timings alone. Medium withou
 - Report replay-only CPU p95/p99 and per-stage encode/Vello mean, cold mip build, peak RSS. Paired contrasts are: (Medium - High) without mip, (Medium - High) with mip, (mip - no mip) under High, and (mip - no mip) under Medium. The difference of those differences is descriptive, not a causal estimate of user-visible fluidity.
 - Explicitly exclude first-run UI startup from replay metrics while retaining separate all-frame cold-stage timing.
 
+## Crucial cache-lifetime finding from first complete matrix
+
+The 24-process exact-Windows run at 83b56a8 passed all quality/witness gates but used the *original short* `IMAGE_FRAMES=2` eviction policy. The 512-frame linger flag was absent, and each mip mode repeatedly reconstructed both levels during the same 4-second replay: 7 extra builds in compact 768×522; 6 in large 983×675. The summary previously labeled cumulative mip-build time as "Cold mip", but that was inaccurate: `metrics.frameStages` covers all frames, including those after replay begins. The benchmark now reports **whole-process mip time**, **replay-only mip time** and **replay rebuild event count** independently. The cached mip levels (L1/L2) are often absent between redraws, driving occasional ~3ms CPU frames even when average sampling is inexpensive.
+
+This is evidence about the 2-frame *experimental* mip cache; it must not be generalized to a separate 512-frame-linger policy or the installed product. Comparing `High` vs `Medium` also changes interpolation quality; a 2×2 CPU factorial cannot approve visible image fidelity. See [full evidence review](https://github.com/Lalalalendia/Akula/pull/406#issuecomment-6277450584).
+
 ## Limitations / next gate
 
 This trial changes both mip source resolution and image sampling *when mip is enabled*, so a true pure-policy cache experiment requires holding reducer and filter fixed. One repeated source is an insufficient 10/100-image cache-churn workload. A later Windows GUI pass must use **multiple independently hashed PNGs**, forced meaningful image-covered damage/full redraw and zoom changes, with image pixel-quality comparison at several scales. Preserve user-facing installed path and the production-fidelity gate.
