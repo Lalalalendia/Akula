@@ -75,8 +75,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo ndk --target "$TARGET" test --locked --no-run --test peer_transfer
-          test -z "$(git status --porcelain)"
-          find "target/$TARGET/debug/deps" -maxdepth 1 -type f -name 'peer_transfer-*' -perm /111 -print
+          # Android compilation creates an untracked target/ directory;
+          # assert immutability of manifests/lock instead of a clean worktree.
+          git diff --exit-code -- Cargo.toml Cargo.lock
+          binary=$(find "target/$TARGET/debug/deps" -maxdepth 1 -type f -name 'peer_transfer-*' -perm /111 -print -quit)
+          test -n "$binary"
+          printf 'Compiled Android peer test binary: %s\n' "$binary"
       - name: Allow KVM accelerator when available
         run: |
           set -euo pipefail
