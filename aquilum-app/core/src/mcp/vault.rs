@@ -121,6 +121,11 @@ impl Vault {
             return Err(format!("Путь должен быть внутри базы знаний: {input}"));
         }
         if Path::new(trimmed).is_absolute() {
+            // A nonexistent ancestor can make canonical_path fall back to the
+            // original lexical path. Never accept unresolved ".." in that case.
+            if Path::new(trimmed).components().any(|part| part == Component::ParentDir) {
+                return Err(format!("Путь должен быть внутри базы знаний: {input}"));
+            }
             let path = crate::search::paths::canonical_path(Path::new(trimmed));
             return self.ensure_inside(path);
         }
@@ -258,6 +263,8 @@ mod tests {
         assert!(vault.note_path(r"\\server\share\secrets.md").is_err());
         assert!(vault.note_path(r"\Windows\system.ini").is_err());
         assert!(vault.note_path("/etc/passwd").is_err());
+        let unresolved_parent = vault.root.join("missing/../../../outside.md");
+        assert!(vault.note_path(&unresolved_parent.to_string_lossy()).is_err());
     }
 
     #[test]
