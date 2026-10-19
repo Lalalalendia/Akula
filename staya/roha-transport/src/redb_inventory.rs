@@ -351,8 +351,8 @@ fn audit_pinned_redb_manifest_inner(
             DataLocation::Owned(_) => return Err(RedbHold::WrongDeclaredLength),
         }
         if verify_inline_bao {
-            let proof_size = BaoTree::new(reservation.expected_bytes, IROH_BLOCK_SIZE)
-                .outboard_size();
+            let proof_size =
+                BaoTree::new(reservation.expected_bytes, IROH_BLOCK_SIZE).outboard_size();
             match state.outboard {
                 OutboardLocation::NotNeeded if proof_size != 0 => {
                     return Err(RedbHold::InvalidInlineBaoLength);
@@ -588,8 +588,8 @@ pub fn audit_pinned_inline_bao(
 ) -> Result<InlineBaoEvidenceOnly, InlineBaoHold> {
     // 10a first refuses stray physical data and validates full BLAKE3.
     // 10c then validates exact state/proof rows within one redb read txn.
-    let joint = audit_quiescent_staging(volume, ledger, store_child)
-        .map_err(InlineBaoHold::Joint)?;
+    let joint =
+        audit_quiescent_staging(volume, ledger, store_child).map_err(InlineBaoHold::Joint)?;
     let manifest = audit_pinned_redb_manifest_inner(volume, ledger, store_child, true)
         .map_err(InlineBaoHold::Redb)?;
     if joint.file_gate_ready
