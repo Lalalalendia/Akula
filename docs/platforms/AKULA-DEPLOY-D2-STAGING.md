@@ -6,7 +6,7 @@
 
 - Feature-gated Linux-only `aquilum-core/node-lab` also enables the distinct `node-catalog-lab` module. Ordinary Core and installed Akula DO NOT enable them by default.
 - Existing D1 standalone process still uses the same hardcoded `127.0.0.1` binding, fixed 3-second total header deadline, one request per socket, maximum 32 requests and 3-second socket I/O timeout.
-- Optional **operator-supplied** `--vault-id UUID`, repeated `--catalog-note NAME` and `--reader-note NAME` enable multi-document mode. The catalog is pinned to a Linux dirfd, with at most 16 top-level Markdown notes of at most 64 KiB each. The process refuses unknown, duplicated or noncatalogued reader names **before calling Core::open**.
+- Optional **operator-supplied** `--vault-id UUID`, repeated `--catalog-note NAME` and `--reader-note NAME` enable multi-document mode. The catalog is admitted using a **duplicate of the D1 host's already-pinned root directory fd** (no second pathname lookup after the host's inode preflight), with at most 16 top-level Markdown notes of at most 64 KiB each. The process refuses unknown, duplicated or noncatalogued reader names **before calling Core::open**.
 - A single test Bearer token is associated with exactly one static scope `reader_ids`. `GET /v1/documents` returns only granted filenames and stable VaultId-scoped IDs; `GET /v1/documents/<64hex-id>` reads permitted original UTF-8 content with raw-byte BLAKE3 revision. `?rev=<64hex>` requests conditional revision verification; stale => 409.
 - **Authentication precedes ALL metadata/permission checks and file access.** Unknown and known-but-ungranted IDs produce the same 404. Scope is checked before the pinned filesystem read. Invalid paths never enter a file resolver. Only `GET` is available. No writer, upload, editor mutation, MCP router, S3, network relay or public listener is added.
 - The previous single-note `GET /v1/note` remains available only when multi-document mode is disabled (to preserve existing D1 tests); in scoped multi-document mode that route is explicitly **404**, preventing bypass of the narrower reader permission set.
@@ -41,7 +41,7 @@ The new `core/tests/headless_node_d2.rs` opens actual TCP connections to a separ
 7. Replaced leaf inode after admission returns 409 and does not leak new content.
 8. Vault bytes remain unchanged on normal run; the existing D1 test suite continues checking absolute HTTP deadlines, pin-root behavior, forced process death and RSS.
 
-The dedicated workflow `core-node-d2-scoped-read.yml` executes three test suites: D1 real-process security (9 tests), D1.5 catalog (5 tests), D2 end-to-end (4 tests), plus default-feature Core check. A green profile is necessary but **not sufficient** for shipping or main merge.
+The dedicated workflow `core-node-d2-scoped-read.yml` executes three test suites: D1 real-process security (9 tests), D1.5 catalog including an externally pinned root FD race regression (6 tests), D2 end-to-end (4 tests), plus default-feature Core check. A green profile is necessary but **not sufficient** for shipping or main merge.
 
 ## Remaining security blockers
 
