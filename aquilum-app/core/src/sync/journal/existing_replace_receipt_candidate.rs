@@ -108,7 +108,6 @@ impl InertExistingReplaceReceiptCandidate {
             || self.history_version_id.len() > 255
             || self.history_version_id.chars().any(|c|
                 c.is_control() || c == '/' || c == '\\')
-            || self.target_length == 0
             || self.target_length > 32 * 1024 * 1024
             || self.original_length > 32 * 1024 * 1024
             || self.history_length != self.target_length
