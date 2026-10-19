@@ -89,7 +89,7 @@ enum HistorySaveEffect {
     NoChange,
     LabelOnly,
     Reverted,
-    Updated(String),
+    Updated,
     Created(String),
 }
 
@@ -528,7 +528,7 @@ impl HistoryService {
                         self.write_name(dir, &id, name, now)
                             .map_err(|error| HistorySaveFailure::new("write version name", error))?;
                     }
-                    Ok(HistorySaveEffect::Updated(id))
+                    Ok(HistorySaveEffect::Updated)
                 }
                 MilestonePlan::CreateNew { baseline, snapshot } => {
                     if let Some(baseline) = baseline {
