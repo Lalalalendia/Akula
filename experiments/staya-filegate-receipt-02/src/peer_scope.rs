@@ -89,6 +89,9 @@ pub struct LocalPolicy {
     pub trusted_issuer: VerifyingKey,
     pub binding: Option<PeerBinding>,
     pub approved_object: Option<ObjectManifest>,
+    /// Lab-only trusted destination mapping. Production must resolve VaultId
+    /// to a Core-owned, identity-checked File Gate root under one custody lease.
+    pub local_target_tag: u8,
     pub epoch: u64,
     pub expected_nonce: [u8; 16],
     pub revoked: bool,
@@ -178,6 +181,9 @@ pub fn guarded_fixture_filegate_publish(
         signed,
         trusted_now,
     )?;
+    if tag != policy.local_target_tag {
+        return Err(AdmissionError::WrongVaultOrDevice);
+    }
     if request_object != ObjectManifest::for_bytes(crate::TEXT.as_bytes()) {
         return Err(AdmissionError::UnapprovedObject);
     }
@@ -215,6 +221,7 @@ mod tests {
             trusted_issuer: signer.verifying_key(),
             binding: Some(binding),
             approved_object: Some(object),
+            local_target_tag: 1,
             epoch: 7,
             expected_nonce: [88; 16],
             revoked: false,
@@ -266,6 +273,29 @@ mod tests {
             Err(AdmissionError::FileGateRejected),
             "no overwrite/replay as a new filename"
         );
+    }
+
+    #[test]
+    fn signed_vault_grant_cannot_be_replayed_at_another_local_filegate_target() {
+        let (_, policy, grant, object) = fixture();
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            guarded_fixture_filegate_publish(
+                temp.path(),
+                2,
+                &policy,
+                [21; 32],
+                object,
+                RequestedOperation::Pull,
+                &grant,
+                100,
+            ),
+            Err(AdmissionError::WrongVaultOrDevice)
+        );
+        assert!(!crate::file_path(temp.path(), 1).exists());
+        assert!(!crate::file_path(temp.path(), 2).exists());
+        assert!(!crate::receipt_path(temp.path(), 1).exists());
+        assert!(!crate::receipt_path(temp.path(), 2).exists());
     }
 
     #[test]
