@@ -153,6 +153,14 @@ pub(crate) fn write_checked_history_with_prewrite(
     version_name: Option<&str>,
     prewrite: impl FnOnce() -> Result<(), FileCommandError>,
 ) -> Result<(FileWriteResult, bool), CheckedHistoryError> {
+    // A mismatched Core or target must be rejected BEFORE ANY primary write
+    // and before the prewrite callback, not after a successful publication.
+    // This capability is only constructed within one held OS custody lifetime.
+    if !permit.binds_core_and_note(core, path) {
+        return Err(CheckedHistoryError::Primary(FileCommandError::Task {
+            message: "held custody permit belongs to a different Core or note".into(),
+        }));
+    }
     // Only Core's own File Gate mutex is held here, after the external OS
     // lock. Release it BEFORE taking HistoryService's files/state mutexes.
     let (before, result) = {

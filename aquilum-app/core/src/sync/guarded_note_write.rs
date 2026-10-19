@@ -4,7 +4,8 @@
 
 use super::filegate_custody_identity::SqliteCustodyIdentityStore;
 use super::{filegate_lock_custody, resolve_no_symlinks, RegisteredReadAdmission, SyncRelativePath, VaultId};
-use crate::app_core::{CoreEvent};
+use crate::app_core::{Core, CoreEvent};
+use crate::history::service::HistoryService;
 use crate::files::error::FileCommandError;
 use crate::files::gate::{self, CheckedHistoryError, NoteHistoryChanged, NoteHistorySaveFailed};
 use crate::files::models::FileWriteResult;
@@ -15,10 +16,30 @@ use std::path::{Path, PathBuf};
 
 const MAX_NOTE_BYTES: usize = 32 * 1024 * 1024;
 
-/// The constructor is deliberately private to this module. This proof is
-/// borrowed only by the real File Gate checked history write, from within a
-/// previously verified pinned OS custody lock callback. It is NOT clonable.
-pub(crate) struct HeldCustodyHistoryPermit(());
+/// P0g-3c: a non-Clone lexical capability minted ONLY inside the held
+/// external OS-custody callback, for the exact registered Core and checked
+/// note pathname. It is not an OS lock handle or remote baseline authority.
+/// Borrowed Core/path references keep the capability scoped to that writer.
+pub(crate) struct HeldCustodyHistoryPermit<'a> {
+    core: &'a Core,
+    note: &'a Path,
+}
+
+impl HeldCustodyHistoryPermit<'_> {
+    /// Check before the File Gate primary mutation, not only after the write.
+    pub(crate) fn binds_core_and_note(&self, core: &Core, note: &Path) -> bool {
+        std::ptr::eq(self.core, core) && self.note == note
+    }
+
+    /// Check again inside HistoryService before any history-store mutation.
+    pub(crate) fn binds_history_and_note(
+        &self,
+        history: &HistoryService,
+        note: &Path,
+    ) -> bool {
+        std::ptr::eq(&self.core.history, history) && self.note == note
+    }
+}
 
 /// Denied means neither preparation nor the primary writer was entered.
 /// NeedsReview means durable preparation, bytes or history might have changed,
@@ -184,7 +205,10 @@ pub(crate) fn save_existing_note_with_prewrite_under_custody<T>(
             ).map_err(CheckedHistoryError::Primary)?;
             entered = true;
             let prepared = prepare().map_err(CheckedHistoryError::Primary)?;
-            let permit = HeldCustodyHistoryPermit(());
+            let permit = HeldCustodyHistoryPermit {
+                core,
+                note: &checked,
+            };
             let (result, changed) = gate::write_checked_history_with_prewrite(
                 &permit, core, &checked, content, expected_hash, source, version_name,
                 || prewrite(&prepared),

@@ -408,11 +408,16 @@ impl HistoryService {
     /// No direct Core/host caller can construct that token.
     pub(crate) fn try_saved_with_custody(
         &self,
-        _permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+        permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
         roots: Roots<'_>,
         note: &Path,
         write: NoteWrite<'_>,
     ) -> Result<bool, HistorySaveFailure> {
+        if !permit.binds_history_and_note(self, note) {
+            return Err(HistorySaveFailure::new(
+                "custody history owner", "wrong Core/HistoryService or note",
+            ));
+        }
         self.try_saved_impl(roots, note, write, true, false)
             .map(|outcome| outcome.changed())
     }
@@ -427,11 +432,16 @@ impl HistoryService {
     #[allow(dead_code)]
     pub(crate) fn try_saved_with_custody_verified_version(
         &self,
-        _permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+        permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
         roots: Roots<'_>,
         note: &Path,
         write: NoteWrite<'_>,
     ) -> Result<VerifiedHistoryVersion, HistorySaveFailure> {
+        if !permit.binds_history_and_note(self, note) {
+            return Err(HistorySaveFailure::new(
+                "custody history owner", "wrong Core/HistoryService or note",
+            ));
+        }
         self.try_saved_impl(roots, note, write, true, true)?
             .verified_version
             .ok_or_else(|| HistorySaveFailure::new(
