@@ -600,6 +600,8 @@ mod tests {
             Err(ProtectionStoreError::CorruptedRecord)
         ));
 
+    }
+
     #[test]
     fn cold_open_existing_original_is_read_only_and_survives_reopen() {
         let tmp = tempfile::tempdir().unwrap();
@@ -664,6 +666,5 @@ mod tests {
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(migrated, 0);
-    }
     }
 }
