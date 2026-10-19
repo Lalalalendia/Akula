@@ -38,6 +38,10 @@ struct DispatchState {
     readers: usize,
     writer: bool,
     waiting_writers: usize,
+    next_read_ticket: u64,
+    serving_read_ticket: u64,
+    next_write_ticket: u64,
+    serving_write_ticket: u64,
 }
 
 struct DispatchGate {
@@ -60,14 +64,24 @@ impl DispatchGate {
 
     fn acquire(&self, read: bool, stopping: &AtomicBool) -> Option<DispatchPermit<'_>> {
         let mut state = lock(&self.state);
-        if !read {
+        let ticket = if read {
+            let ticket = state.next_read_ticket;
+            state.next_read_ticket = state.next_read_ticket.wrapping_add(1);
+            ticket
+        } else {
+            let ticket = state.next_write_ticket;
+            state.next_write_ticket = state.next_write_ticket.wrapping_add(1);
             state.waiting_writers += 1;
-        }
+            ticket
+        };
         loop {
             let blocked = if read {
-                state.writer || state.waiting_writers != 0 || state.readers >= MAX_PARALLEL_READS
+                state.writer
+                    || state.waiting_writers != 0
+                    || state.readers >= MAX_PARALLEL_READS
+                    || ticket != state.serving_read_ticket
             } else {
-                state.writer || state.readers != 0
+                state.writer || state.readers != 0 || ticket != state.serving_write_ticket
             };
             if !blocked || stopping.load(Ordering::SeqCst) {
                 break;
@@ -83,6 +97,8 @@ impl DispatchGate {
         }
         if read {
             state.readers += 1;
+            state.serving_read_ticket = state.serving_read_ticket.wrapping_add(1);
+            self.ready.notify_all();
         } else {
             state.writer = true;
         }
@@ -109,6 +125,7 @@ impl Drop for DispatchPermit<'_> {
             state.readers -= 1;
         } else {
             state.writer = false;
+            state.serving_write_ticket = state.serving_write_ticket.wrapping_add(1);
         }
         self.gate.ready.notify_all();
     }
@@ -834,6 +851,43 @@ mod tests {
         assert_eq!(writer.join().unwrap(), Some(503));
         assert_eq!(finished_reads.load(Ordering::SeqCst), MAX_PARALLEL_READS);
         assert_eq!(started_writes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn waiting_writers_get_fifo_admission() {
+        let gate = Arc::new(DispatchGate::new());
+        let stopping = Arc::new(AtomicBool::new(false));
+        let held_read = gate.acquire(true, &stopping).unwrap();
+        let (sent, received) = mpsc::channel();
+        let mut writers = Vec::new();
+
+        for number in 0..4 {
+            let waiting_gate = Arc::clone(&gate);
+            let waiting_stop = Arc::clone(&stopping);
+            let sender = sent.clone();
+            writers.push(thread::spawn(move || {
+                let _permit = waiting_gate.acquire(false, &waiting_stop).unwrap();
+                sender.send(number).unwrap();
+                thread::sleep(Duration::from_millis(10));
+            }));
+            let mut queued = false;
+            for _ in 0..1000 {
+                if lock(&gate.state).waiting_writers == number + 1 {
+                    queued = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert!(queued, "writer {number} was not queued in time");
+        }
+
+        drop(held_read);
+        for expected in 0..4 {
+            assert_eq!(received.recv_timeout(Duration::from_secs(5)).unwrap(), expected);
+        }
+        for writer in writers {
+            writer.join().unwrap();
+        }
     }
 
     #[test]
