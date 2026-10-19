@@ -31,10 +31,7 @@ pub fn check(bucket: &str) -> ProbeOutcome {
                 // at the end; never keep a success for a different key pair.
                 // This remains a point-in-time observation, not permanent
                 // authorization, and does not grant remote Sync authority.
-                let unchanged = yandex_credentials::with_stored_keys(
-                    bucket,
-                    |updated_id, updated_secret| id == updated_id && secret == updated_secret,
-                ).unwrap_or(false);
+                let unchanged = yandex_credentials::still_matches(bucket, id, secret);
                 if unchanged {
                     ProbeOutcome::ReadOnlyListVerified
                 } else {
