@@ -10,6 +10,7 @@
 use super::*;
 use crate::history::service::VerifiedHistoryVersion;
 use crate::sync::protection_store::BoundProtectedOriginal;
+use crate::sync::pinned_read::IdentifiedRead;
 
 /// Never export a constructor accepting an untyped history-version ID.
 /// The only production builder accepts HistoryService's non-Clone, sealed
@@ -48,10 +49,15 @@ impl InertExistingReplaceReceiptCandidate {
         claim: &ReadOnlyExistingReplaceAttempt,
         protected: &BoundProtectedOriginal,
         history: &VerifiedHistoryVersion,
-        published_file: PinnedFileIdentity,
-        observed_target_bytes: &[u8],
+        observed_target: &IdentifiedRead,
     ) -> JournalResult<Self> {
-        if observed_target_bytes.len() > 32 * 1024 * 1024
+        // Native file identity and bytes MUST come from the same OS-pinned
+        // descriptor read, not two independent path lookups supplied by host.
+        let published_file = observed_target.identity
+            .ok_or(JournalError::InvalidTransition)?;
+        let observed_target_bytes = &observed_target.snapshot.bytes;
+        if observed_target.snapshot.content_hash != claim.target_hash
+            || observed_target_bytes.len() > 32 * 1024 * 1024
             || protected.original.operation_id != claim.operation_id
             || protected.original.path != claim.path
             || protected.original.content_hash != claim.preimage_hash
