@@ -197,11 +197,11 @@ mod tests {
 
     #[test]
     fn paint_pass_resolves_long_code_runs_once_and_keeps_neighboring_offsets_independent() {
-        let mut source = String::from("prose\\n~~~rust\\n");
+        let mut source = String::from("prose\n~~~rust\n");
         for n in 0..1_200 {
-            source.push_str(&format!("line{n} : длинный код\\n"));
+            source.push_str(&format!("line{n} : длинный код\n"));
         }
-        source.push_str("~~~\\nafter\\n~~~python\\nexample\\n~~~");
+        source.push_str("~~~\nafter\n~~~python\nexample\n~~~");
         let mut editor = TextEditor::new(&source).markdown();
         let first = source.find("~~~rust").unwrap();
         let second = source.find("~~~python").unwrap();
