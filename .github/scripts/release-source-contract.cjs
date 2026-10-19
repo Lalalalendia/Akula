@@ -32,6 +32,7 @@ function validateRelease(yaml) {
     errors.push('Source job does not publish a verified Git commit SHA');
   }
 
+  const frozenMac = yaml.includes('MAC-HOLD-01');
   const pinnedRef = /ref: \$\{\{\s*needs\.source\.outputs\.sha\s*\}\}/g;
   const builds = /^\s*run:\s*cargo build --release -p aquilum-native[^\n]*$/gm;
   for (const job of ['windows', 'macos', 'linux', 'manifest']) {
@@ -41,7 +42,7 @@ function validateRelease(yaml) {
       continue;
     }
     const needs = job === 'manifest'
-      ? 'needs: [source, windows, macos, linux]'
+      ? (frozenMac ? 'needs: [source, windows, linux]' : 'needs: [source, windows, macos, linux]')
       : 'needs: source';
     if (!body.includes(needs)) errors.push(job + ' does not depend on pinned source');
     if (count(body, pinnedRef) !== 1) {
@@ -55,6 +56,9 @@ function validateRelease(yaml) {
     }
 
     if (job === 'macos') {
+      if (frozenMac && !body.includes('if: ${{ false }} # MAC-HOLD-01')) {
+        errors.push('macos release must remain disabled under MAC-HOLD-01');
+      }
       const packageStep = body.indexOf('      - name: Package');
       const identityStep = body.indexOf('      - name: Verify pinned Akula publisher and notarized DMG');
       const uploadStep = body.indexOf('      - uses: actions/upload-artifact@v7');
@@ -95,6 +99,15 @@ function validateRelease(yaml) {
     }
   }
 
+  if (frozenMac) {
+    const manifest = section(yaml, 'manifest');
+    if (/\"darwin-[^\"]+\"/.test(manifest)) {
+      errors.push('frozen release cannot publish darwin manifest entries');
+    }
+    if (!manifest.includes('for f in "$setup" "$appimage" "$deb" "$rpm"; do')) {
+      errors.push('frozen manifest must require exactly Windows/Linux packages');
+    }
+  }
   if (count(yaml, builds) !== 3) {
     errors.push('Release should contain exactly three production build commands');
   }
