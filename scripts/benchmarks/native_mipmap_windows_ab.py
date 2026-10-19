@@ -90,9 +90,10 @@ def stage_samples(row: dict) -> tuple[list[dict], list[dict]]:
                 raise ValueError(f"Missing, negative or non-finite stage: {key}")
     total_built = sum(item["mipGenerated"] for item in whole)
     total_build_ms = sum(item["mipBuildMs"] for item in whole)
-    if row["mode"] == "baseline" and (total_built or total_build_ms):
-        raise ValueError("Baseline unexpectedly builds mipmap")
-    if row["mode"] != "baseline" and total_built < 2:
+    non_mip_modes = ("baseline", "filter_medium")
+    if row["mode"] in non_mip_modes and (total_built or total_build_ms):
+        raise ValueError("Non-mip filter mode unexpectedly builds mipmap")
+    if row["mode"] not in non_mip_modes and total_built < 2:
         raise ValueError("Mipmap mode never built both levels in measured frames")
     return whole, live
 

@@ -321,7 +321,9 @@ pub fn brush_to_paint_trial(
         std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1")
     });
     if !enabled {
-        return (brush_to_paint(brush, composite, images), brush_transform);
+        let mut paint = brush_to_paint(brush, composite, images);
+        apply_factorial_filter_from_env(&mut paint);
+        return (paint, brush_transform);
     }
     static BILINEAR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let use_bilinear = *BILINEAR.get_or_init(|| {
@@ -330,6 +332,45 @@ pub fn brush_to_paint_trial(
     brush_to_paint_candidate_tuned(
         brush, composite, images, effective_geometry, brush_transform, true, use_bilinear,
     )
+}
+
+// Four-cell sampler × mipmap experiment: the original image brush may
+// already have Medium quality, so a no-op "High→Medium" downgrade is not
+// adequate evidence. Force the exact sampler quality in *all four* developer
+// processes, then demand a positive native image brush witness.
+#[cfg(any(test, not(feature = "installed")))]
+fn force_image_sample_quality(paint: &mut PaintType, selection: u8) -> bool {
+    let Brush::Image(image) = paint else { return false };
+    match selection {
+        1 => image.sampler.quality = ImageQuality::High,
+        2 => image.sampler.quality = ImageQuality::Medium,
+        _ => return false,
+    }
+    true
+}
+
+#[cfg(not(feature = "installed"))]
+fn apply_factorial_filter_from_env(paint: &mut PaintType) {
+    static FORCE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    let selected = *FORCE.get_or_init(|| {
+        match std::env::var("AKULA_EXPERIMENTAL_IMAGE_FILTER_FORCE").ok().as_deref() {
+            Some("high") => 1,
+            Some("medium") => 2,
+            _ => 0,
+        }
+    });
+    if !force_image_sample_quality(paint, selected) {
+        return;
+    }
+    if std::env::var("AKULA_EXPERIMENTAL_IMAGE_FILTER_PROOF").ok().as_deref() == Some("1") {
+        static HIGH: std::sync::Once = std::sync::Once::new();
+        static MEDIUM: std::sync::Once = std::sync::Once::new();
+        match selected {
+            1 => HIGH.call_once(|| eprintln!("AKULA_FILTER_FORCED_HIGH_APPLIED")),
+            2 => MEDIUM.call_once(|| eprintln!("AKULA_FILTER_FORCED_MEDIUM_APPLIED")),
+            _ => {}
+        }
+    }
 }
 
 // Test-only direct activation, independent of environment and OnceLock.
@@ -365,6 +406,8 @@ fn brush_to_paint_candidate_tuned(
         None
     };
     let mut paint = brush_to_paint(brush, composite, images);
+    #[cfg(not(feature = "installed"))]
+    apply_factorial_filter_from_env(&mut paint);
     if !enabled {
         return (paint, brush_transform);
     }
@@ -500,6 +543,26 @@ mod mipmap_integration_tests {
         assert_eq!((original.width(), original.height()), (128, 128));
         assert_eq!(brush_transform, Affine::IDENTITY);
         assert!(images.mips.is_empty(), "installed build must not generate mips");
+    }
+
+    #[test]
+    fn factorial_force_proves_both_samplers_from_a_medium_default() {
+        let original = test_brush(128, 129).with_quality(ImageQuality::Medium);
+        let mut images = Images::default();
+        let mut paint = brush_to_paint(BrushRef::Image(original.as_ref()), Composite::default(), &mut images);
+        assert!(force_image_sample_quality(&mut paint, 1));
+        let Brush::Image(high) = &paint else { panic!("expected image") };
+        assert_eq!(high.sampler.quality, ImageQuality::High);
+        let ImageSource::Pixmap(ref high_px) = high.image else { panic!("pixmap expected") };
+        assert_eq!((high_px.width(), high_px.height()), (128, 129));
+        let high_bytes = high_px.data_as_u8_slice().to_vec();
+        assert!(force_image_sample_quality(&mut paint, 2));
+        let Brush::Image(medium) = &paint else { panic!("expected image") };
+        assert_eq!(medium.sampler.quality, ImageQuality::Medium);
+        let ImageSource::Pixmap(ref medium_px) = medium.image else { panic!("pixmap expected") };
+        assert_eq!(medium_px.data_as_u8_slice(), high_bytes.as_slice());
+        assert!(images.mips.is_empty(), "quality override cannot build mip levels");
+        assert!(!force_image_sample_quality(&mut paint, 0));
     }
 
     #[test]
