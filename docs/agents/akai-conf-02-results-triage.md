@@ -1,8 +1,8 @@
 # AKAI-CONF-02 — triage of official MCP 2025-06-18 results (2026-10-19)
 
-**Status:** Evidence recorded, **not a conformance certification**.  
-**Implementation:** merged [PR #380](https://github.com/Lalalalendia/Akula/pull/380), squash `51a50adc0e3849281163de22e48391c5f61bb373` (diagnostic branch head `870ea7f3960fd415da07eef808fe490f4795d1f9`).  
-**Authoritative CI:** [run #39297147717](https://github.com/Lalalalendia/Akula/actions/runs/39297147717), artifact ID `12207878015` (`checks.json` for 27 invocations plus `conformance-summary.json` and raw logs).  
+**Status:** Evidence recorded, **not a conformance certification**.
+**Implementation:** merged [PR #380](https://github.com/Lalalalendia/Akula/pull/380), squash `51a50adc0e3849281163de22e48391c5f61bb373` (diagnostic branch head `870ea7f3960fd415da07eef808fe490f4795d1f9`).
+**Authoritative CI:** [run #39297147717](https://github.com/Lalalalendia/Akula/actions/runs/39297147717), artifact ID `12207878015` (`checks.json` for 27 invocations plus `conformance-summary.json` and raw logs).
 **Harness:** upstream `@modelcontextprotocol/conformance@0.1.16`; `server-initialize` + `--suite active --spec-version 2025-06-18`. Real disposable Akula Core and temporary vault behind a **test-only loopback Bearer proxy**.
 
 ## Counts — what the runner actually says
