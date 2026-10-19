@@ -2235,3 +2235,129 @@ fn bounded_ext4_inline_bao_after_remount() {
         "P2P_BLOB10C_INLINE_BAO_REMOUNT same_external_data=true raw_redb_proof_authenticated=true fsynced_journal_recovered=true file_gate_ready=false"
     );
 }
+
+/// P2P-BLOB-11a: verify a real >8MiB pinned FsStore using only openat2
+/// descriptors for the *new* data+Bao proof pass. All path mutation fixtures
+/// operate on independent disposable stores, never the real FsStore/ledger.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires prior genuine owned Bao FsStore and isolated mounted ext4 image"]
+fn bounded_ext4_fd_relative_bao_custody() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits,
+        bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger,
+        fd_custody_audit::{FdHold, PinnedFsStore, audit_fd_complete_owned},
+    };
+    use std::{fs, os::unix::fs::symlink};
+
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("disposable ext4 mount"),
+    );
+    let guard = StagingVolumeGuard::open(&root).unwrap();
+    let payload = bytes(8 * 1024 * 1024 + 17);
+    let hash = *Hash::new(&payload).as_bytes();
+    let size = payload.len() as u64;
+    let limits = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let journal_root = root.join("bao-owned-ledger");
+    let db = root.join("bao-owned-fsstore/blobs.db");
+    let source_db = fs::read(&db).unwrap();
+    let source_journal = fs::read(journal_root.join("reservations.v1")).unwrap();
+    let ledger = DurableLedger::open(&journal_root, limits).unwrap();
+
+    let checked = audit_fd_complete_owned(&guard, &ledger, "bao-owned-fsstore", hash, size)
+        .expect("real 8MiB Bao pair must be reverified via pinned descriptor");
+    assert_eq!(checked.verified_object_bytes, size);
+    assert!(checked.fd_relative_no_symlink_no_xdev);
+    assert!(checked.pinned_db_opened_read_only);
+    assert!(checked.pinned_data_and_bao_authenticated);
+    assert!(checked.independent_writer_exclusion_unproven);
+    assert!(!checked.atomic_filesystem_snapshot);
+    assert!(!checked.file_gate_ready);
+
+    // Final-component symlink must be refused at the openat2 syscall, not
+    // followed and detected only after reading attacker-controlled data.
+    let link = root.join("p2p11-symlink-store");
+    symlink("bao-owned-fsstore", &link).unwrap();
+    assert!(matches!(
+        PinnedFsStore::open(&guard, "p2p11-symlink-store"),
+        Err(FdHold::UnsafeRelativePath)
+    ));
+    fs::remove_file(&link).unwrap();
+    assert!(matches!(
+        PinnedFsStore::open(&guard, "../bao-owned-fsstore"),
+        Err(FdHold::InvalidChildName)
+    ));
+
+    // On a disposable copy, change the named data DIRECTORY after a safe
+    // open. The held inode remains pinned; its original pathname no longer
+    // points to it, so continued audit is HOLD.
+    let copy = root.join("p2p11-swappable-copy");
+    fs::create_dir(&copy).unwrap();
+    fs::create_dir(copy.join("data")).unwrap();
+    fs::create_dir(copy.join("temp")).unwrap();
+    fs::copy(&db, copy.join("blobs.db")).unwrap();
+    let pinned = PinnedFsStore::open(&guard, "p2p11-swappable-copy").unwrap();
+    pinned.check_bindings().unwrap();
+    let parked = root.join("p2p11-parked-data-copy");
+    fs::rename(copy.join("data"), &parked).unwrap();
+    fs::create_dir(copy.join("data")).unwrap();
+    assert!(matches!(
+        pinned.check_bindings(),
+        Err(FdHold::ChangedDirectoryBinding)
+    ));
+
+    // All real source bytes and the durable reservation remain bit-identical.
+    assert_eq!(fs::read(&db).unwrap(), source_db);
+    assert_eq!(
+        fs::read(journal_root.join("reservations.v1")).unwrap(),
+        source_journal
+    );
+    drop(ledger);
+    println!(
+        "P2P_BLOB11A_FD_CUSTODY size={} pinned_bao=true redb_fd_read_only=true symlink_hold=true escape_hold=true renamed_data_dir_hold=true originals_unchanged=true noncooperative_writer_excluded=false atomic_snapshot=false file_gate_ready=false",
+        size
+    );
+}
+
+/// Restart-proof pinning: close all audit handles, physically umount ext4,
+/// and open new pinned FDs from the same saved original FsStore/journal.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires actual remounted 64MiB disposable ext4 and previous pinned fixture"]
+fn bounded_ext4_fd_relative_after_remount() {
+    use akula_roha_transport::{
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, fd_custody_audit::audit_fd_complete_owned,
+    };
+    let root = std::path::PathBuf::from(
+        std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 mount"),
+    );
+    let guard = StagingVolumeGuard::open(&root).unwrap();
+    let data = bytes(8 * 1024 * 1024 + 17);
+    let size = data.len() as u64;
+    let hash = *Hash::new(&data).as_bytes();
+    let limit = AdmissionLimits {
+        max_object_bytes: size,
+        max_tracked_bytes: size,
+        max_peer_bytes: size,
+        max_active: 1,
+        max_peer_active: 1,
+    };
+    let journal = DurableLedger::open(&root.join("bao-owned-ledger"), limit).unwrap();
+    let valid = audit_fd_complete_owned(&guard, &journal, "bao-owned-fsstore", hash, size)
+        .expect("original outboard must revalidate from new FDs after remount");
+    assert!(valid.fd_relative_no_symlink_no_xdev);
+    assert!(valid.pinned_data_and_bao_authenticated);
+    assert!(valid.independent_writer_exclusion_unproven);
+    assert!(!valid.file_gate_ready);
+    println!(
+        "P2P_BLOB11A_FD_REMOUNT ext4_remounted=true real_store_rebound_to_pinned_fds=true cryptographic_proof=true no_user_files=true production_writer_exclusion=false file_gate_ready=false"
+    );
+}

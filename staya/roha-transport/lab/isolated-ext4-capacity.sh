@@ -238,6 +238,21 @@ cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
   --test iroh_blobs_compare bounded_ext4_inline_bao_after_remount \
   -- --exact --ignored --nocapture
 
+# P2P-BLOB-11a: use openat2 anchored to a pinned volume descriptor,
+# verify the SAME opened data and .obao4 handles, reject symlinks/renames,
+# and make a fresh descriptor pass after physically remounting ext4.
+# This is NOT an atomic snapshot or an exclusion of arbitrary FS writers.
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_fd_relative_bao_custody \
+  -- --exact --ignored --nocapture
+
+sync
+sudo umount "$volume"
+mount_image
+cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
+  --test iroh_blobs_compare bounded_ext4_fd_relative_after_remount \
+  -- --exact --ignored --nocapture
+
 # A missing mount must NOT cause staging to continue on its host parent.
 sudo umount "$volume"
 cargo test --locked --manifest-path staya/roha-transport/Cargo.toml \
