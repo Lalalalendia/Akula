@@ -24,7 +24,8 @@ pub enum NativeRecoveryOverview {
     /// Human investigation is needed. These are historical operation names,
     /// not proof those filenames currently exist.
     RequiresReview { total_claims: usize, examples: Vec<NativeRecoveryExample> },
-    /// Registration, SQLite read, schema, path integrity or size check failed.
+    /// Registration, SQLite read, schema, path integrity or size check failed,
+    /// or this additive-only overview cannot represent existing-file attempts.
     /// Never translate this to "clean" or implicitly repair the database.
     InspectionUnavailable,
 }
@@ -123,6 +124,14 @@ pub fn native_recovery_overview(
     if journal.require_appdata_outside_vault(&vault).is_err() {
         return InspectionUnavailable;
     }
+    // V7 existing-file attempts are not additive publication claims. Their
+    // remote VaultId is not necessarily the local workspace UUID either.
+    // Until a dedicated bound replacement-review UI exists, fail closed for
+    // the whole journal rather than hide a claim or expose another vault's
+    // paths. This bounded presence read does not load evidence or file bytes.
+    if !matches!(journal.existing_replace_attempts_present(), Ok(false)) {
+        return InspectionUnavailable;
+    }
     let Ok(known_count) = journal.local_publication_count() else {
         return InspectionUnavailable;
     };
@@ -139,6 +148,11 @@ pub fn native_recovery_overview(
     let selected: Vec<_> = entries.iter()
         .filter(|entry| entry.vault_id == workspace_id).collect();
     if host.recheck_registered_root().is_err() {
+        return InspectionUnavailable;
+    }
+    // Notice a claim committed while the additive list was being read.
+    // This screen is still an observation, not an atomic admission receipt.
+    if !matches!(journal.existing_replace_attempts_present(), Ok(false)) {
         return InspectionUnavailable;
     }
     if selected.is_empty() {
@@ -544,4 +558,6 @@ mod tests {
         assert_eq!(native_recovery_overview(&core, &appdata, &root),
             NativeRecoveryOverview::InspectionUnavailable);
     }
+
+    include!("recovery_existing_replace_tests.rs");
 }
