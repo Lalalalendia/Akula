@@ -8,7 +8,7 @@ use crate::sync::filegate_custody_identity::SqliteCustodyIdentityStore;
 use crate::sync::filegate_lock_custody::scoped_leaf;
 use crate::sync::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
 use crate::sync::guarded_note_write::{save_existing_note_with_checks_under_custody,
-    GuardedNoteWriteError};
+    save_existing_note_with_prewrite_under_custody, GuardedNoteWriteError};
 use crate::sync::s3_preimage_capture::capture_registered_s3_update_preimage;
 use crate::sync::{DocumentId, JournalAction, JournalError, OperationId, RemoteGuard,
     RevisionId, S3HeadPointerV1, S3ManifestV1, S3VerifiedHead, SyncRelativePath, VaultId};
@@ -160,6 +160,84 @@ fn reservation_spans_actual_filegate_history_and_s3_postflight() {
     let mut reopened = SqliteSyncJournal::open(&f.appdata.join("journal.sqlite")).unwrap();
     assert!(matches!(reopened.record_existing_replace_attempt_once(&f.intent, &original),
         Err(JournalError::ExistingReplaceAttemptAlreadyRecorded)));
+}
+
+#[test]
+fn p0g3a_prewrite_runs_once_inside_actual_filegate_before_primary_history() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let preflight_count = Cell::new(0usize);
+    let postflight_count = Cell::new(0usize);
+    let result = save_existing_note_with_prewrite_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope, &f.intent.path,
+        &f.new_text, &f.old_hash, Source::External, Some("single-filegate-prewrite"),
+        || prepare(&f, &admission),
+        |held| {
+            preflight_count.set(preflight_count.get() + 1);
+            assert!(matches!(f.core.file_mutations.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)),
+                "prepublication validation must run INSIDE the real File Gate mutex");
+            assert_editor_reserved(&f);
+            held.inspect_before_write(&admission, &f.bindings,
+                &f.journal.borrow(), &f.protected)
+        },
+        |held, written| {
+            postflight_count.set(postflight_count.get() + 1);
+            assert_editor_reserved(&f);
+            held.inspect_after_write(&admission, &f.bindings,
+                &f.journal.borrow(), &f.protected, written)
+        },
+    );
+    assert!(result.is_ok(), "one File Gate publication failed: {result:?}");
+    assert_eq!(preflight_count.get(), 1);
+    assert_eq!(postflight_count.get(), 1);
+    assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
+        f.new_text.as_bytes());
+    assert_reservation_released(&f);
+    assert_no_remote_ack(&f);
+    let note = f.root.join(f.intent.path.as_str());
+    assert!(f.core.history.page(&|| vec![f.root.clone()], &note, 0, 8).total > 0);
+}
+
+#[test]
+fn p0g3a_same_bytes_foreign_inode_after_claim_refuses_before_filegate_write() {
+    let f = fixture();
+    let target = f.root.join(f.intent.path.as_str());
+    let original_parked = f.root.join("retained-original-after-claim.md");
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let preflight_count = Cell::new(0usize);
+    let postflight_called = Cell::new(false);
+
+    let result = save_existing_note_with_prewrite_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope, &f.intent.path,
+        &f.new_text, &f.old_hash, Source::External, Some("must-not-write-foreign-file"),
+        || {
+            let held = prepare(&f, &admission)?;
+            assert_editor_reserved(&f);
+            // Deterministic same-user identity attack only in a disposable
+            // test workspace, after the durable claim but before File Gate.
+            fs::rename(&target, &original_parked).unwrap();
+            fs::write(&target, b"unchanged private original").unwrap();
+            Ok(held)
+        },
+        |held| {
+            preflight_count.set(preflight_count.get() + 1);
+            assert_editor_reserved(&f);
+            held.inspect_before_write(&admission, &f.bindings,
+                &f.journal.borrow(), &f.protected)
+        },
+        |_, _| { postflight_called.set(true); Ok(()) },
+    );
+    assert!(matches!(result, Err(GuardedNoteWriteError::NeedsReview(_))),
+        "postclaim inode change must be HOLD, not a successful write: {result:?}");
+    assert_eq!(preflight_count.get(), 1);
+    assert!(!postflight_called.get(), "File Gate must not publish foreign inode");
+    assert_eq!(fs::read(&target).unwrap(), b"unchanged private original");
+    assert_eq!(fs::read(&original_parked).unwrap(), b"unchanged private original");
+    assert!(f.journal.borrow().read_existing_replace_attempt(f.intent.operation_id)
+        .unwrap().is_some(), "immutable V7 claim survives prewrite refusal");
+    assert_reservation_released(&f);
+    assert_no_remote_ack(&f);
 }
 
 #[test]

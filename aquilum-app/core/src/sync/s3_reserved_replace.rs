@@ -61,6 +61,28 @@ pub(crate) struct ReservedS3Replace<'a> {
 
 #[allow(dead_code)]
 impl ReservedS3Replace<'_> {
+    /// Only the real File Gate may invoke this under its mutation mutex AND
+    /// the registered external custody lock. Recheck the exact old inode
+    /// (not merely identical bytes) after the irreversible V7 claim and
+    /// immediately before the one canonical primary publication.
+    ///
+    /// On any failure the existing claim remains HOLD. This narrows a
+    /// cooperative race; AtomicWriteFile is still pathname-based and this
+    /// cannot exclude malicious same-user replacement after the check.
+    /// No OS durability or remote-baseline receipt is generated here.
+    #[allow(dead_code)]
+    pub(crate) fn inspect_before_write(
+        &self,
+        admission: &RegisteredReadAdmission<'_>,
+        bindings: &SqliteRegisteredS3Bindings,
+        journal: &SqliteSyncJournal,
+        protected: &SqliteProtectionStore,
+    ) -> Result<(), FileCommandError> {
+        self.check_evidence(admission, bindings, journal, protected)?;
+        self.check_original()?;
+        self.check_evidence(admission, bindings, journal, protected)
+    }
+
     /// Pinned readback and private evidence consistency ONLY. Does not fsync,
     /// attest the new inode as a native publication, or authorize journal apply.
     pub(crate) fn inspect_after_write(
