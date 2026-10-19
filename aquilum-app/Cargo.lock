@@ -262,6 +262,7 @@ dependencies = [
  "skrifa",
  "softbuffer",
  "tempfile",
+ "tokio",
  "unicode-segmentation",
  "uuid",
  "vello_cpu",
