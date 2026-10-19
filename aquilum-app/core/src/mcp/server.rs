@@ -703,6 +703,10 @@ mod tests {
         include!("server/throughput_probe.rs");
     }
 
+    mod real_file_gate {
+        include!("server/real_file_gate.rs");
+    }
+
     #[test]
     fn parallel_reads_are_bounded_and_never_overlap_exclusive_writes() {
         use std::sync::Barrier;

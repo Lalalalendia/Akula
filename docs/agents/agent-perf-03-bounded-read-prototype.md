@@ -24,6 +24,10 @@ The allowlist is evaluated from the **entire JSON-RPC body** after HTTP token/or
 
 The initial allowlist intentionally **excludes** `search_notes`, `find_notes`, `related_notes`, `list_notes sort=links` (may initialize guest indexes); `note_history` and `read_version` (history synchronization needs independent review); `get_workspace` and `list_workspaces` (application state); and all UI, file, trash, version and frontmatter changes. Unrecognized tools remain exclusive.
 
+## Real Markdown/File Gate integration (added in draft)
+
+A regression test creates two disposable Markdown notes through the real File Gate, overlaps four authenticated MCP readers with twenty CAS-backed real disk/history revisions, verifies every read is an entire old-or-new revision rather than torn bytes, and confirms an unrelated note remains untouched. After the overlap, an actual MCP `update_note` is applied and the returned text is checked against the disk bytes and nonempty note history. This is a **local regression**, not proof against concurrent external processes, crash recovery, S3 or symlink races.
+
 ## Evidence and acceptance
 
 - Protocol tests: classify benign requests/batches; mixed and unknown batches fail closed.
