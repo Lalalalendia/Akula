@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 SOURCE = REPO / "aquilum-app/native/assets/city-cover.png"
 SCENES = (("image_compact", "1000x600"), ("image_large", "1750x1051"))
 TRIALS = (1, 2, 3)
-MODES = ("baseline", "candidate")
+MODES = ("baseline", "mip_high", "mip_medium")
 
 
 def fixture() -> str:
@@ -76,12 +76,17 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
     env = os.environ.copy()
     env["AKULA_VELLO_SINGLE_RECT"] = "1"
     env.pop("AKULA_EXPERIMENTAL_VELLO_SINGLE_RECT", None)
-    if mode == "candidate":
+    if mode != "baseline":
         env["AKULA_EXPERIMENTAL_IMAGE_MIP"] = "1"
         env["AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF"] = "1"
+        if mode == "mip_medium":
+            env["AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER"] = "medium"
+        else:
+            env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER", None)
     else:
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP", None)
         env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF", None)
+        env.pop("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER", None)
     rss = 0
     with log_file.open("wb") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
@@ -102,7 +107,7 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         raise ValueError(f"{scene}/{trial}/{mode}: missing process RSS")
     log = log_file.read_text(errors="replace")
     applied = "AKULA_MIP_APPLIED level=" in log
-    if applied != (mode == "candidate"):
+    if applied != (mode != "baseline"):
         raise ValueError(
             f"{scene}/{trial}/{mode}: mip path witness mismatch, "
             f"applied={applied}; see {log_file}"
@@ -119,10 +124,21 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
         number(metrics, key, 0.00001)
     if number(metrics, "threads") != 2 or number(metrics, "frames") < frames:
         raise ValueError(f"{scene}/{mode}: invalid host metrics")
+    import re
+    samples = [dict(pair.split("=", 1) for pair in line.split()[2:] if "=" in pair)
+               for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
+    diagnostics = samples[-1] if samples else {}
+    if mode != "baseline":
+        if len(samples) < 2 or int(diagnostics.get("final_hits", 0)) == 0:
+            raise ValueError(f"{scene}/{trial}/{mode}: missing warm-cache diagnostics")
+    else:
+        if samples:
+            raise ValueError(f"{scene}/{trial}/{mode}: baseline unexpectedly reported mip cache")
     result = dict(
         trial=trial, mode=mode, scene=scene, size=size,
         note_sha256=note_hash, image_sha256=image_hash,
         peak_rss_kib=rss, applied=applied, replay=replay, metrics=metrics,
+        cache=diagnostics,
     )
     (root / "sample.json").write_text(json.dumps(result, indent=2) + "\n")
     print(
@@ -137,15 +153,16 @@ def run_one(binary: Path, out: Path, trial: int, mode: str,
 
 def report(rows: list[dict], binary_hash: str) -> str:
     if len(rows) != len(TRIALS) * len(SCENES) * len(MODES):
-        raise ValueError("Incomplete 12-run native window A/B")
+        raise ValueError("Incomplete 18-run native window A/B")
     lines = [
         "# Akula real Markdown image scroll A/B",
         "",
         f"Same release executable SHA-256: {binary_hash}.",
         "Real city-cover PNG 1280x884 rendered at 200px, also cropped.",
         "Winit/Masonry/softbuffer on Linux Xvfb/Openbox, 2 workers.",
-        "Same input bytes; three fresh process pairs in alternating order.",
-        "Candidate requires affirmative native mip witness; baseline must not have it.",
+        "Same input bytes; three fresh runs per mode in rotating order.",
+        "Compare original High/bicubic, mip+High/bicubic and mip+Medium/bilinear.",
+        "Both mip modes require affirmative native witness; baseline must not.",
         "Timings and RSS are diagnostic, not a user-visible physical FPS measurement.",
         "",
         "| Scene | Mode | Work avg (ms) | Raster p95 (ms) | Frame p95 (ms) | Peak RSS (MiB) |",
@@ -170,11 +187,29 @@ def report(rows: list[dict], binary_hash: str) -> str:
                 f"| {scene} | {mode} | {work:.3f} | {raster:.3f} | "
                 f"{frame:.3f} | {memory:.1f} |"
             )
-        old, new = values["baseline"], values["candidate"]
+        old = values["baseline"]
+        for mode in ("mip_high", "mip_medium"):
+            new = values[mode]
+            lines.append(
+                f"\n{scene}/{mode}: CPU work {(new[0] / old[0] - 1)*100:+.2f}%, "
+                f"frame p95 {(new[2] / old[2] - 1)*100:+.2f}%, "
+                f"sampled RSS {(new[3] / old[3] - 1)*100:+.2f}% vs baseline."
+            )
+        high, medium = values["mip_high"], values["mip_medium"]
         lines.append(
-            f"\n{scene}: candidate CPU work {(new[0] / old[0] - 1)*100:+.2f}%, "
-            f"sampled RSS {(new[3] / old[3] - 1)*100:+.2f}% vs baseline.\n"
+            f"\n{scene}: bilinear vs mipped bicubic frame p95 "
+            f"{(medium[2] / high[2] - 1)*100:+.2f}%; "
+            f"raster p95 {(medium[1] / high[1] - 1)*100:+.2f}%."
         )
+        for mode in ("mip_high", "mip_medium"):
+            cache = [r["cache"] for r in selected if r["mode"] == mode]
+            lines.append(
+                f"{scene}/{mode}: median cache final_hits="
+                f"{median(int(x['final_hits']) for x in cache):.0f}, "
+                f"generated_levels={median(int(x['generated']) for x in cache):.0f}, "
+                f"generated_ms={median(float(x['generated_ms']) for x in cache):.2f}."
+            )
+        lines.append("")
     lines.append(
         "No timing threshold: this Xvfb experiment cannot verify physical "
         "frame smoothness and does not replace photo/alpha pixel fidelity gates."
@@ -202,7 +237,7 @@ def main() -> int:
     print(f"AKULA_MIP_BINARY sha256={digest} source_px={width}x{height}")
     rows = []
     for trial in TRIALS:
-        order = MODES if trial % 2 else tuple(reversed(MODES))
+        order = MODES[trial - 1:] + MODES[:trial - 1]
         for scene, size in SCENES:
             for mode in order:
                 rows.append(run_one(binary, out, trial, mode, scene, size, args.timeout))

@@ -168,8 +168,10 @@ pub fn brush_to_paint_trial(
 ) -> (PaintType, Affine) {
     let enabled = !cfg!(feature = "installed")
         && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1");
-    brush_to_paint_candidate(
-        brush, composite, images, effective_geometry, brush_transform, enabled,
+    let use_bilinear = enabled && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER")
+        .ok().as_deref() == Some("medium");
+    brush_to_paint_candidate_tuned(
+        brush, composite, images, effective_geometry, brush_transform, enabled, use_bilinear,
     )
 }
 
@@ -182,6 +184,22 @@ fn brush_to_paint_candidate(
     effective_geometry: Affine,
     brush_transform: Affine,
     enabled: bool,
+) -> (PaintType, Affine) {
+    brush_to_paint_candidate_tuned(
+        brush, composite, images, effective_geometry, brush_transform, enabled, false,
+    )
+}
+
+// Compare the existing bicubic mip candidate to a developer-only bilinear
+// candidate without changing users' original ImageBrush quality.
+fn brush_to_paint_candidate_tuned(
+    brush: BrushRef<'_>,
+    composite: Composite,
+    images: &mut Images,
+    effective_geometry: Affine,
+    brush_transform: Affine,
+    enabled: bool,
+    use_bilinear: bool,
 ) -> (PaintType, Affine) {
     let original_id = if let BrushRef::Image(image) = &brush {
         Some(image.image.data.id())
@@ -212,6 +230,12 @@ fn brush_to_paint_candidate(
             FIRST_APPLIED.call_once(|| eprintln!("AKULA_MIP_APPLIED level={level}"));
         }
         image.image = reduced;
+        if use_bilinear && image.sampler.quality == ImageQuality::High {
+            // mipmap::half has already integrated the larger source area.
+            // Compare Vello's optimized bilinear path with the current
+            // bicubic path; never change Medium/Low or non-mip brushes.
+            image.sampler.quality = ImageQuality::Medium;
+        }
         // Compensate the reduced image inside the existing brush transform.
         // Geometry, clipping, draw alpha and alignment stay unchanged.
         return (paint, brush_transform * Affine::scale(f64::from(1_u16 << level)));
@@ -434,6 +458,35 @@ mod mipmap_integration_tests {
     }
 
     #[test]
+    fn optional_bilinear_is_applied_only_after_successful_prefilter() {
+        let brush = test_brush(128, 128);
+        let mut images = Images::default();
+        let (base, _) = brush_to_paint_candidate_tuned(
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
+            Affine::IDENTITY, Affine::IDENTITY, true, true,
+        );
+        let Brush::Image(base) = base else { panic!("image expected") };
+        assert_eq!(base.sampler.quality, ImageQuality::High, "no mip, no downgrade");
+
+        let (mipped, transform) = brush_to_paint_candidate_tuned(
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
+            Affine::scale(1.0 / 8.0), Affine::IDENTITY, true, true,
+        );
+        let Brush::Image(mipped) = mipped else { panic!("image expected") };
+        assert_eq!(mipped.sampler.quality, ImageQuality::Medium);
+        assert_eq!(transform, Affine::scale(4.0));
+        assert_eq!(brush.sampler.quality, ImageQuality::High, "original brush unchanged");
+
+        let (disabled, transform) = brush_to_paint_candidate_tuned(
+            BrushRef::Image(brush.as_ref()), Composite::default(), &mut images,
+            Affine::scale(1.0 / 8.0), Affine::IDENTITY, false, true,
+        );
+        let Brush::Image(disabled) = disabled else { panic!("image expected") };
+        assert_eq!(disabled.sampler.quality, ImageQuality::High);
+        assert_eq!(transform, Affine::IDENTITY);
+    }
+
+    #[test]
     fn image_low_quality_retains_legacy_sampling() {
         let brush = test_brush(127, 129).with_quality(ImageQuality::Low);
         let mut images = Images::default();
@@ -498,7 +551,7 @@ mod image_scene_tests {
         }
     }
 
-    fn draw(data: &[u8], ratio: u16, scene: Scene, enabled: bool, workers: u16) -> (Pixmap, usize) {
+    fn draw(data: &[u8], ratio: u16, scene: Scene, enabled: bool, bilinear: bool, workers: u16) -> (Pixmap, usize) {
         let brush = crate::render::pixels::from_rgba(
             data.to_vec(), SIDE as u32, SIDE as u32, ImageAlphaType::Alpha,
         )
@@ -507,10 +560,16 @@ mod image_scene_tests {
 
         let transform = Affine::scale(1.0 / f64::from(ratio));
         let mut images = Images::default();
-        let (paint, brush_transform) = brush_to_paint_candidate(
+        let (paint, brush_transform) = brush_to_paint_candidate_tuned(
             BrushRef::Image(brush.as_ref()), Composite::default(),
-            &mut images, transform, Affine::IDENTITY, enabled,
+            &mut images, transform, Affine::IDENTITY, enabled, bilinear,
         );
+        if let Brush::Image(image) = &paint {
+            let expected = if enabled && bilinear { ImageQuality::Medium } else { ImageQuality::High };
+            assert_eq!(image.sampler.quality, expected);
+        } else {
+            panic!("expected image brush");
+        }
         let allocated = images.mips.len();
         if enabled {
             assert!(allocated > 0, "a quality test must exercise actual mip generation");
@@ -603,38 +662,39 @@ mod image_scene_tests {
             for scene in [Scene::Photo, Scene::AlphaCrop] {
                 let data = fixture(scene);
                 for ratio in [4u16, 8, 16] {
-                    let (before, _) = draw(&data, ratio, scene, false, workers);
-                    let (after, mips) = draw(&data, ratio, scene, true, workers);
+                    let (before, _) = draw(&data, ratio, scene, false, false, workers);
                     let (base_mae, base_max, pixels) =
                         error_against_area(&data, &before, ratio, scene);
-                    let (trial_mae, trial_max, _) =
-                        error_against_area(&data, &after, ratio, scene);
+                    for bilinear in [false, true] {
+                        let (after, mips) = draw(&data, ratio, scene, true, bilinear, workers);
+                        let (trial_mae, trial_max, _) =
+                            error_against_area(&data, &after, ratio, scene);
 
-                    if matches!(scene, Scene::AlphaCrop) {
-                        // Cropping must not move the brush or paint into the
-                        // untouched top-left corner of the white canvas.
-                        let corner = after.data()[0];
-                        assert_eq!([corner.r, corner.g, corner.b, corner.a], [255, 255, 255, 255]);
+                        if matches!(scene, Scene::AlphaCrop) {
+                            let corner = after.data()[0];
+                            assert_eq!(
+                                [corner.r, corner.g, corner.b, corner.a],
+                                [255, 255, 255, 255], "crop moved under sampler switch"
+                            );
+                        }
+                        println!(
+                            "AKULA_MIP_REALPNG scene={scene:?} ratio={ratio} workers={workers} \
+                             filter={} baseline_mae={base_mae:.3} candidate_mae={trial_mae:.3} \
+                             baseline_max={base_max} candidate_max={trial_max} \
+                             compared_channels={pixels} allocated_mips={mips}",
+                            if bilinear { "bilinear" } else { "bicubic" },
+                        );
+                        assert!(
+                            trial_mae <= base_mae + 4.0 && trial_mae <= 25.0,
+                            "candidate quality regression scene={scene:?} ratio={ratio} \
+                             workers={workers} bilinear={bilinear} \
+                             baseline_mae={base_mae:.3} candidate_mae={trial_mae:.3}"
+                        );
+                        checked += 1;
                     }
-                    println!(
-                        "AKULA_MIP_REALPNG scene={scene:?} ratio={ratio} workers={workers} \
-                         baseline_mae={base_mae:.3} candidate_mae={trial_mae:.3} \
-                         baseline_max={base_max} candidate_max={trial_max} \
-                         compared_channels={pixels} allocated_mips={mips}"
-                    );
-                    // Fail on a material quality loss rather than asking only
-                    // whether the specialized stripe fixture became green.
-                    // Tighten once we inspect the independent A/B distributions.
-                    assert!(
-                        trial_mae <= base_mae + 4.0 && trial_mae <= 25.0,
-                        "candidate outside conservative real-image quality guard \
-                         scene={scene:?} ratio={ratio} workers={workers} \
-                         baseline={base_mae:.3} candidate={trial_mae:.3}"
-                    );
-                    checked += 1;
                 }
             }
         }
-        assert_eq!(checked, 12);
+        assert_eq!(checked, 24);
     }
 }
