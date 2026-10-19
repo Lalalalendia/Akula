@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest] # MAC-HOLD-01: macOS frozen
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'

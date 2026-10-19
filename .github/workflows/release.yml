@@ -1,4 +1,4 @@
-# Release packages for Windows, macOS and Linux: cargo-packager (NSIS, .app, DMG, AppImage) and nfpm (deb, rpm).
+# MAC-HOLD-01: Windows/Linux packages only. The macOS source and disabled job remain for an explicit later resumption.
 # Run by hand. Every package is installed and launched on a clean machine before it is uploaded as an artifact;
 # the GitHub release is created from these artifacts by hand, so the updater never sees an unchecked build.
 name: Release
@@ -164,6 +164,7 @@ jobs:
           retention-days: 7
 
   macos:
+    if: ${{ false }} # MAC-HOLD-01: do not schedule Apple runners or packages
     needs: source
     strategy:
       fail-fast: false
@@ -453,7 +454,7 @@ jobs:
           retention-days: 7
 
   manifest:
-    needs: [source, windows, macos, linux]
+    needs: [source, windows, linux] # MAC-HOLD-01
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -502,7 +503,7 @@ jobs:
           appimage="Aquilum_${version}_amd64.AppImage"
           deb="Aquilum_${version}_amd64.deb"
           rpm="Aquilum-${version}-1.x86_64.rpm"
-          for f in "$setup" Aquilum_aarch64.app.tar.gz Aquilum_x64.app.tar.gz "$appimage" "$deb" "$rpm" "Aquilum_${version}_aarch64.dmg" "Aquilum_${version}_x64.dmg"; do
+          for f in "$setup" "$appimage" "$deb" "$rpm"; do
             test -f "$f" || { echo "missing $f"; exit 1; }
           done
           cat > latest.json <<EOF
@@ -513,10 +514,6 @@ jobs:
             "platforms": {
               "windows-x86_64": $(entry "$setup"),
               "windows-x86_64-nsis": $(entry "$setup"),
-              "darwin-aarch64": $(entry Aquilum_aarch64.app.tar.gz),
-              "darwin-aarch64-app": $(entry Aquilum_aarch64.app.tar.gz),
-              "darwin-x86_64": $(entry Aquilum_x64.app.tar.gz),
-              "darwin-x86_64-app": $(entry Aquilum_x64.app.tar.gz),
               "linux-x86_64": $(entry "$appimage"),
               "linux-x86_64-appimage": $(entry "$appimage"),
               "linux-x86_64-deb": $(entry "$deb"),
