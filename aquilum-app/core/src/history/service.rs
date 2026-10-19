@@ -2281,6 +2281,115 @@ mod tests {
     }
 
     #[test]
+    fn p0g3d05_cold_history_version_is_bound_to_one_note_after_service_reopen() {
+        let fixture = Fixture::new();
+        let note = fixture.vault.join("BoundCold.md");
+        let text = "exact immutable external snapshot";
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        let previous = "preserved local version";
+        fs::write(&note,text).unwrap();
+        let history = fixture.service();
+        let result = history.try_saved_impl(
+            &||fixture.roots(),&note,
+            NoteWrite {
+                disk_before:Some((
+                    previous.to_owned(),std::time::SystemTime::now(),
+                )),
+                text,hash:&hash,source:Source::External,name:None,
+            },
+            true,true,
+        ).unwrap();
+        let strict = result.verified_version.unwrap();
+        let id = strict.version_id().to_owned();
+        drop(history);
+        // New HistoryService state: no in-memory version witness survives.
+        let fresh = fixture.service();
+        let cold = fresh.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).unwrap();
+        assert_eq!(cold.registered_root,fixture.vault);
+        assert_eq!(cold.note,note);
+        assert_eq!(cold.version_id,id);
+        assert_eq!(cold.content_hash,hash);
+        assert_eq!(cold.content_length,text.len() as u64);
+        let unrelated = fixture.vault.join("Other.md");
+        fs::write(&unrelated,text).unwrap();
+        assert!(fresh.inspect_cold_external_version(
+            &||fixture.roots(),&unrelated,&id,&hash,text.len() as u64,
+        ).is_err(),"a different note cannot inherit this version");
+        assert!(fresh.inspect_cold_external_version(
+            &||vec![fixture.vault.join("not-registered")],
+            &note,&id,&hash,text.len() as u64,
+        ).is_err(),"a different registration cannot inherit this version");
+        assert_eq!(fs::read_to_string(&note).unwrap(),text);
+    }
+
+    #[test]
+    fn p0g3d05_cold_history_rejects_mutation_length_hash_and_non_external_source() {
+        let fixture = Fixture::new();
+        let note = fixture.vault.join("ColdTamper.md");
+        let text = "external version to be inspected";
+        let history = fixture.service();
+        fixture.save(&history,&note,text,Source::External);
+        let id=history.page(&||fixture.roots(),&note,0,1)
+            .versions[0].id.clone();
+        let hash=blake3::hash(text.as_bytes()).to_hex().to_string();
+        let read=|h:&HistoryService| h.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        );
+        assert!(read(&history).is_ok());
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,32*1024*1024+1,
+        ).is_err());
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&"e".repeat(64),text.len() as u64,
+        ).is_err());
+        let file=fixture.history_of("ColdTamper.md").join(&id);
+        fs::write(&file,"X".repeat(text.len())).unwrap();
+        let cold=fixture.service();
+        assert!(read(&cold).is_err(),
+            "equal-length history mutation must fail after cold-open");
+
+        let local=fixture.vault.join("LocallyTyped.md");
+        fixture.save(&history,&local,"local",Source::Agent);
+        let version=history.page(&||fixture.roots(),&local,0,1)
+            .versions[0].id.clone();
+        let localhash=blake3::hash(b"local").to_hex().to_string();
+        assert!(cold.inspect_cold_external_version(
+            &||fixture.roots(),&local,&version,&localhash,5,
+        ).is_err(),"an Agent/Me version must never masquerade as external");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn p0g3d05_cold_history_refuses_hardlink_and_symlink_version_files() {
+        use std::os::unix::fs::symlink;
+        let fixture=Fixture::new();
+        let history=fixture.service();
+        let note=fixture.vault.join("Aliased.md");
+        let text="external history snapshot";
+        fixture.save(&history,&note,text,Source::External);
+        let id=history.page(&||fixture.roots(),&note,0,1)
+            .versions[0].id.clone();
+        let dir=fixture.history_of("Aliased.md");
+        let version=dir.join(&id);
+        let hash=blake3::hash(text.as_bytes()).to_hex().to_string();
+        let extra=dir.join("hardlinked-other-name");
+        fs::hard_link(&version,&extra).unwrap();
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).is_err());
+        fs::remove_file(&extra).unwrap();
+        fs::remove_file(&version).unwrap();
+        let external=fixture.vault.join("External.md");
+        fs::write(&external,text).unwrap();
+        symlink(&external,&version).unwrap();
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).is_err());
+    }
+
+    #[test]
     fn p0g3b_strict_history_proof_identifies_new_version_under_history_lock() {
         use super::HistorySaveEffect;
         let fixture = Fixture::new();
