@@ -10,11 +10,11 @@ license = "AGPL-3.0-only"
 resolver = "2"
 
 [dependencies]
-iroh = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49", default-features = false, features = ["tls-ring"] }
+iroh = { git = "https://github.com/calex794/roha", rev = "554d5202b63e32b8a79156f7da2807d0f4859e4b", default-features = false, features = ["tls-ring"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 blake3 = "1.8.5"
 
 [patch.crates-io]
-noq = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
-noq-proto = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
-noq-udp = { git = "https://github.com/calex794/noq", rev = "2eabf9895d40c263aa3369afd66efcf4a5d95056" }
+noq = { git = "https://github.com/calex794/noq", rev = "538346e8fb300598991de560566289121e9528e9" }
+noq-proto = { git = "https://github.com/calex794/noq", rev = "538346e8fb300598991de560566289121e9528e9" }
+noq-udp = { git = "https://github.com/calex794/noq", rev = "538346e8fb300598991de560566289121e9528e9" }
