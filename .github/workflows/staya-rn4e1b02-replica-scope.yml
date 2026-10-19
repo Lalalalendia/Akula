@@ -1,0 +1,78 @@
+name: Staya RN4E1b02 — replica-scoped vault evidence lab
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b02-host-vault-unique-*"
+    paths:
+      - "aquilum-app/core/src/sync/host_custody_registry.rs"
+      - ".github/workflows/staya-rn4e1b02-replica-scope.yml"
+      - "docs/sync/staya-rn4e1b02-replica-scope.md"
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/sync/host_custody_registry.rs"
+      - ".github/workflows/staya-rn4e1b02-replica-scope.yml"
+      - "docs/sync/staya-rn4e1b02-replica-scope.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replica-scope:
+    name: Shared VaultId / separate local replicas — ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTFLAGS: "-Zcrate-attr=feature(if_let_guard)"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly
+      - name: Check exact isolated change scope
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = subprocess.check_output(
+              ["git", "rev-parse", "HEAD^"], text=True
+          ).strip()
+          changed = set(subprocess.check_output([
+              "git", "diff", "--name-only", f"{base}..HEAD"
+          ], text=True).splitlines())
+          allowed = {
+              "aquilum-app/core/src/sync/host_custody_registry.rs",
+              ".github/workflows/staya-rn4e1b02-replica-scope.yml",
+              "docs/sync/staya-rn4e1b02-replica-scope.md",
+          }
+          assert changed == allowed, f"unexpected difference: {changed ^ allowed}"
+          assert not any(p.startswith("aquilum-app/native/") for p in changed)
+          PY
+          if grep -q 'staya-core-grant-lab' aquilum-app/native/Cargo.toml; then
+            echo "unexpected product P2P grant activation" >&2
+            exit 1
+          fi
+      - name: Run all registered host custody tests on Linux/Windows
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features host-custody --lib \
+            sync::host_custody_registry::tests \
+            -- --nocapture --test-threads=1
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Record exact nonproduction trust boundary
+        run: |
+          echo "Multiple registered physical replicas may share remote VaultId; scope must include root, profile and external lock." >> "$GITHUB_STEP_SUMMARY"
+          echo "No File Gate P2P grant: no real Connection::remote_id(), installed OS broker, signed receipt, Bao, or APPLIED." >> "$GITHUB_STEP_SUMMARY"
