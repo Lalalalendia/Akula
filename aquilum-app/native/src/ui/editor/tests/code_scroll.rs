@@ -127,3 +127,25 @@ fn native_pixels_outside_code_viewport_are_unchanged_by_long_code_text() {
     }
     assert!(changed_inside > 8, "control: changed source must alter visible code glyphs");
 }
+
+
+#[test]
+fn scroll_area_routes_code_horizontal_wheel_without_stealing_vertical_page_scroll() {
+    use super::support::{scrolled, wheel, PAGE};
+    let long_code = "abcdef0123456789_🐱".repeat(100);
+    let prose = "ordinary note paragraph\n".repeat(150);
+    let source = format!("~~~rust\n{long_code}\n~~~\n{prose}");
+    let mut root = scrolled(TextEditor::new(&source).markdown(), 260, 180);
+    let code_y = root.get_widget_with_tag(TAG).unwrap().inner()
+        .top_of("~~~rust\n".len()).expect("code line laid out") + 7.0;
+    let before_page = root.get_widget_with_tag(PAGE).unwrap().inner().offset();
+    wheel(&mut root, (90.0, code_y), (-160.0, 0.0));
+    let after_code = root.get_widget_with_tag(TAG).unwrap().inner().code_scroll_for_test(0);
+    let after_page = root.get_widget_with_tag(PAGE).unwrap().inner().offset();
+    assert!(after_code > 0.0, "horizontal wheel must reach the fenced block inside ScrollArea");
+    assert_eq!(after_page, before_page, "scrolling the code must not move the parent page");
+
+    wheel(&mut root, (90.0, 130.0), (0.0, -120.0));
+    let after_vertical = root.get_widget_with_tag(PAGE).unwrap().inner().offset();
+    assert!(after_vertical > before_page, "ordinary vertical wheel must still reach ScrollArea");
+}
