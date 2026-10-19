@@ -40,10 +40,10 @@ jobs:
         with:
           toolchain: "1.91"
           components: rustfmt
-      - name: Generate temporary standalone lock, then prove all 4 Git dependencies
+      - name: Verify checked-in standalone lock and exact 4 Git dependencies
         run: |
           set -euo pipefail
-          cargo generate-lockfile
+          test -f Cargo.lock
           cargo metadata --locked --format-version 1 > .source-graph.json
           python3 - <<'PY'
           import json, os, pathlib
@@ -73,11 +73,11 @@ jobs:
         run: |
           set -euo pipefail
           cargo fmt --all -- --check
-          git diff --exit-code -- Cargo.toml
-      - name: Evidence only (generated lock is not yet checked in)
+          git diff --exit-code -- Cargo.toml Cargo.lock
+      - name: Record immutable, checked-in standalone lock evidence
         run: |
           echo "Isolated adapter tested on ${{ matrix.platform }} with Roha $ROHA_PIN and noq $NOQ_PIN." >> "$GITHUB_STEP_SUMMARY"
-          echo "Temporary generated Cargo.lock: must be tracked/attested before promotion. No desktop Sync Core/File Gate modifications." >> "$GITHUB_STEP_SUMMARY"
+          echo "Checked-in Cargo.lock blob 25446f6e7d10ae24a131167d520de6dff936b017; no desktop Sync Core/File Gate modifications." >> "$GITHUB_STEP_SUMMARY"
       - name: Save candidate Cargo.lock for reproducibility review
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
