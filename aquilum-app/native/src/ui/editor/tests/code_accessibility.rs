@@ -68,6 +68,35 @@ fn focused_semantic_button_activates_on_enter_and_space_without_typing() {
     assert_eq!(text(&root), source, "Space on a button must not insert space into code");
 }
 
+
+#[test]
+fn actual_tab_navigation_reaches_both_visible_buttons_in_document_order() {
+    let source = "~~~rust\nfirst_code\n~~~\nprose\n~~~python\nsecond_code\n~~~";
+    let second = source.find("~~~python").unwrap();
+    let mut root = focused(TextEditor::new(source).markdown(), 590, 320);
+    assert_eq!(buttons(&root).len(), 2, "both semantic buttons are mounted");
+
+    // Do not call focus_on(button): this must exercise Masonry's real Tab
+    // traversal from the editor and then activation through Enter.
+    press(&mut root, Key::Named(NamedKey::Tab), Modifiers::empty());
+    press(&mut root, Key::Named(NamedKey::Enter), Modifiers::empty());
+    assert_eq!(
+        root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
+        Some(0),
+        "first Tab must reach the first code-header button"
+    );
+    assert_eq!(text(&root), source);
+
+    press(&mut root, Key::Named(NamedKey::Tab), Modifiers::empty());
+    press(&mut root, Key::Named(NamedKey::Enter), Modifiers::empty());
+    assert_eq!(
+        root.get_widget_with_tag(TAG).unwrap().inner().copied_code_for_test(),
+        Some(second),
+        "second Tab must reach the next visible code-header button"
+    );
+    assert_eq!(text(&root), source);
+}
+
 #[test]
 fn removed_code_fence_removes_old_widget_id_without_rebinding_it() {
     let source = "~~~rust\nold\n~~~\nnormal";
