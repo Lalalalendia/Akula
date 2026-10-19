@@ -44,7 +44,6 @@ impl Driver {
         }
     }
 
-    #[cfg(not(feature = "installed"))]
     fn probe(value: &str) -> Result<Self, String> {
         match value {
             "warp" => Ok(Self::Warp),
