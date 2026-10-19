@@ -653,6 +653,9 @@ mod tests {
         assert_eq!(fs::read(&other_note).unwrap(), b"protected original");
     }
 
+    #[path = "guarded_strict_history_tests.rs"]
+    mod strict_history;
+
     #[path = "guarded_note_transaction_tests.rs"]
     mod transaction;
 }
