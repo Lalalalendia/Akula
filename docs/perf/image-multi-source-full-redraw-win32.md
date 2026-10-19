@@ -1,0 +1,30 @@
+# IMG-PERF-08 — Native Windows multi-image, full-redraw LOD strategy stress
+
+Status: **uninstalled developer-only**, not a production change. Builds on [IMG-PERF-06 PR #401](https://github.com/Lalalalendia/Akula/pull/401) merged as da7cbfe. The existing single-photo scroll benchmark is mostly a BGRA row-copy benchmark and is unable to expose the benefit of image sampling. This experiment forces real full raster during replay and uses many separately hashed PNG sources.
+
+## Invariants
+
+- Each source file is a genuinely distinct 1280×884 RGBA8 PNG, created deterministically by a pure-Python PNG writer using a compressed sequence of color/alpha bands and per-file seeds. Individual SHA-256 values must be unique; filenames by themselves are insufficient.
+- Test fixtures contain **1, 10 and 100 distinct image embeds**, displayed 200px wide so the normal mip level selector uses L2.
+- Mode Eager: existing opt-in mipmap, Medium filtering, 512-frame cache lifetime, builds L1 and L2 using scalar 2×2 reduction.
+- Mode Selective: **identical image content, viewport, Medium sampler, image source identifiers and 32-MiB budget**, but opt-in developer-only direct packed L2, without initial L1 allocation; lazy L1 remains possible.
+- Developer-only \`AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW=1\` forces a complete raster during an active replay, defeating optimization of copying existing BGRA rows. Positive \`AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED\` witness is mandatory. Normal and installed rendering paths remain unchanged.
+- Opt-in \`AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF=1\` instruments actual **distinct source image IDs used by mipmap**; samples are logged at least every 32 frames. A note with 100 image links but only 3 actually sampled sources **must fail**.
+
+## Acceptance
+
+One native Windows release binary, visible uncloaked PID-owned Win32 HWND and monitored peak working set. For each of 1/10/100 source-count scenes, run two process-level Eager/Selective pairs (12 total) in alternating AB/BA order, each with a native six-second fling replay. Record:
+
+- original fixture hashes, number of source IDs **actually requested by mipmap**, positive mip and full-raster witnesses;
+- replay-only CPU-work p95/p99/mean and aligned per-replay renderer stage metrics;
+- all-frame and replay-only mip build costs, total generated levels, cache hits/evictions/retained levels;
+- peak process RSS, median fully damaged raster pixel area, Win32 window dimensions and exact binary SHA;
+- paired difference in p95. Never interpret CPU work as physical display presentation or user-visible FPS.
+
+Minimum valid source coverage: scene 1 → **1** used, scene 10 → **8** used, scene 100 → **24** used. Why 24? For 1280×884 L1+L2, 24×1,414,400 bytes exceeds the old 32 MiB cache, so this scene actually challenges retention. The 100-file scenario must not pass by displaying only the first picture. A 24-image unique access count is not proof that 24 are simultaneously resident; compare evictions, timing and memory honestly.
+
+All sample files are pure-SHA deterministic and require no external Python packages. GUI startup and loading are not excluded from the whole-process stage array but **are excluded** from replay p95/p99. More trials are necessary if two pairs disagree.
+
+## Attribution caveat
+
+This compares **combined** Eager-scalar-pyramid vs Selective-packed-direct-L2-and-lazy-L1. Even with identical Medium sampling and rendered pixels, differences in cold latency cannot be attributed solely to caching policy: the reduction algorithm also differs. A pure policy-only comparison must hold the reducer constant (packed eager vs packed direct). Keep that for a separate factorial study. This PR neither changes the installed renderer nor proposes automatic mipmap rollout. Pixel-fidelity screenshots/pattern checks are still required before production approval.
