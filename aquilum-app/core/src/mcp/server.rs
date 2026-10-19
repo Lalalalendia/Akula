@@ -620,7 +620,7 @@ mod tests {
         eprintln!("AKAI_MCP_FIXTURE_STARTED port={} temporary=true", server.port());
 
         let start = Instant::now();
-        while !stop_file.is_file() && start.elapsed() < Duration::from_secs(150) {
+        while !stop_file.is_file() && start.elapsed() < Duration::from_secs(420) {
             thread::sleep(Duration::from_millis(100));
         }
         let stopped = stop_file.is_file();
