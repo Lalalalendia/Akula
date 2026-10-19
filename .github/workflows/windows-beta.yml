@@ -49,6 +49,13 @@ jobs:
       - name: Build local-only native application
         working-directory: aquilum-app
         run: cargo build --release --locked -p aquilum-native --features installed
+      - name: Validate stale S3 probe replies and single-flight Windows GUI gate
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          # No Yandex keys, endpoint, SDK, or network is used by this test.
+          cargo test --release --locked -p aquilum-native --features installed --bin aquilum-native yandex_probe_session::tests -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "S3 probe session stale-result test failed" }
       - name: Package independent Akula identity
         shell: pwsh
         working-directory: aquilum-app
