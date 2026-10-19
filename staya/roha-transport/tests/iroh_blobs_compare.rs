@@ -2007,7 +2007,6 @@ fn bounded_ext4_owned_bao_after_remount() {
     );
 }
 
-
 /// P2P-BLOB-10c: a pinned FsStore writes external DATA while retaining its
 /// much smaller authentic PRE-ORDER Bao proof inside the redb inline-outboard
 /// table. Negative DB mutations affect ONLY a test copy on disposable ext4.
@@ -2020,9 +2019,7 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
         bounded_staging::StagingVolumeGuard,
         durable_admission::DurableLedger,
         joint_staging_audit::JointHold,
-        redb_inventory::{
-            InlineBaoHold, RedbHold, audit_pinned_inline_bao,
-        },
+        redb_inventory::{InlineBaoHold, RedbHold, audit_pinned_inline_bao},
     };
     use redb::{ReadableDatabase, ReadableTable};
     use std::fs;
@@ -2048,7 +2045,10 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
     let data_path = store_root.join("data").join(&data_name);
     assert_eq!(fs::metadata(&data_path).unwrap().len(), size);
     assert!(
-        !store_root.join("data").join(format!("{hex}.obao4")).exists(),
+        !store_root
+            .join("data")
+            .join(format!("{hex}.obao4"))
+            .exists(),
         "mid-size FsStore Bao proof must be really inline"
     );
     let db_path = store_root.join("blobs.db");
@@ -2059,7 +2059,10 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
         let db = redb::ReadOnlyDatabase::open(&db_path).unwrap();
         let tx = db.begin_read().unwrap();
         let table = tx.open_table(INLINE_PROOFS).unwrap();
-        let row = table.get(hash).unwrap().expect("physical inline proof exists");
+        let row = table
+            .get(hash)
+            .unwrap()
+            .expect("physical inline proof exists");
         row.value().to_vec()
     };
     assert!(!original_proof.is_empty());
@@ -2079,11 +2082,8 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
         .unwrap();
     journal.verify_full(*hash.as_bytes(), &payload).unwrap();
     let original_ledger = fs::read(journal_root.join("reservations.v1")).unwrap();
-    let evidence = audit_pinned_inline_bao(
-        &guard,
-        &journal,
-        "bao-inline-fsstore",
-    ).expect("prove real pinned inline Bao against journal");
+    let evidence = audit_pinned_inline_bao(&guard, &journal, "bao-inline-fsstore")
+        .expect("prove real pinned inline Bao against journal");
     assert_eq!(evidence.verified_inline_bao_outboards, 1);
     assert_eq!(evidence.verified_inline_data_blobs, 0);
     assert!(evidence.all_outboard_rows_checked);
@@ -2146,7 +2146,9 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
     }
     assert!(matches!(
         audit_pinned_inline_bao(&guard, &journal, "bao-inline-corrupted-copy"),
-        Err(InlineBaoHold::Joint(JointHold::Redb(RedbHold::MissingInlineOutboard)))
+        Err(InlineBaoHold::Joint(JointHold::Redb(
+            RedbHold::MissingInlineOutboard
+        )))
     ));
 
     // Even a separate valid verified ledger for an unrelated equal-length
@@ -2163,7 +2165,9 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
     wrong.verify_full(wrong_hash, &wrong_bytes).unwrap();
     assert!(matches!(
         audit_pinned_inline_bao(&guard, &wrong, "bao-inline-fsstore"),
-        Err(InlineBaoHold::Joint(JointHold::Redb(RedbHold::OrphanDatabaseBlob)))
+        Err(InlineBaoHold::Joint(JointHold::Redb(
+            RedbHold::OrphanDatabaseBlob
+        )))
     ));
     drop(wrong);
 
@@ -2186,7 +2190,10 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
 
     assert_eq!(fs::read(&db_path).unwrap(), original_db);
     assert_eq!(fs::read(&data_path).unwrap(), payload);
-    assert_eq!(fs::read(journal_root.join("reservations.v1")).unwrap(), original_ledger);
+    assert_eq!(
+        fs::read(journal_root.join("reservations.v1")).unwrap(),
+        original_ledger
+    );
     drop(journal);
     println!(
         "P2P_BLOB10C_INLINE_BAO external_data_bytes={} inline_bao_bytes={} complete_proof=true corrupted_parent_hold=true trailing_bytes_hold=true missing_row_hold=true wrong_ledger_hold=true tiny_notneeded=true source_unchanged=true file_gate_ready=false",
@@ -2201,10 +2208,8 @@ async fn bounded_ext4_inline_bao_crypto_proof() {
 #[ignore = "requires remounted disposable ext4 image and previous real FsStore"]
 fn bounded_ext4_inline_bao_after_remount() {
     use akula_roha_transport::{
-        admission::AdmissionLimits,
-        bounded_staging::StagingVolumeGuard,
-        durable_admission::DurableLedger,
-        redb_inventory::audit_pinned_inline_bao,
+        admission::AdmissionLimits, bounded_staging::StagingVolumeGuard,
+        durable_admission::DurableLedger, redb_inventory::audit_pinned_inline_bao,
     };
     let root = std::path::PathBuf::from(
         std::env::var("AKULA_BOUNDED_EXT4_ROOT").expect("remounted ext4 image"),
@@ -2219,8 +2224,7 @@ fn bounded_ext4_inline_bao_after_remount() {
         max_peer_active: 1,
     };
     let journal = DurableLedger::open(&root.join("bao-inline-ledger"), policy).unwrap();
-    let valid =
-        audit_pinned_inline_bao(&guard, &journal, "bao-inline-fsstore").unwrap();
+    let valid = audit_pinned_inline_bao(&guard, &journal, "bao-inline-fsstore").unwrap();
     assert_eq!(valid.verified_inline_bao_outboards, 1);
     assert_eq!(valid.verified_inline_data_blobs, 0);
     assert!(!valid.file_gate_ready);
