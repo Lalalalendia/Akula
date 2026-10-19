@@ -54,6 +54,7 @@ struct MipDiagnostics {
     generated_pixels: u64,
     evicted: u64,
     build_nanos: u128,
+    distinct_requested_ids: std::collections::HashSet<u64>,
 }
 
 #[derive(Default)]
@@ -130,6 +131,13 @@ impl Images {
         #[cfg(not(feature = "installed"))]
         {
             self.diag.requests += 1;
+            // Count distinct source images actually used by the sampler,
+            // not just filenames enumerated in a benchmark note. Enabled
+            // only for multisource diagnostic runs.
+            static DISTINCT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *DISTINCT.get_or_init(|| std::env::var("AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF").ok().as_deref() == Some("1")) {
+                self.diag.distinct_requested_ids.insert(id);
+            }
         }
         // A warmed final level is the common scrolling case. Avoid scanning
         // the budget and walking intermediate mip levels just to reuse it.
@@ -271,10 +279,11 @@ impl Images {
                 && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF").ok().as_deref() == Some("1")
             {
                 eprintln!(
-                    "AKULA_MIP_CACHE frames={frame} requests={} final_hits={} generated={} generated_pixels={} evicted={} generated_ms={:.3} resident_levels={}",
+                    "AKULA_MIP_CACHE frames={frame} requests={} final_hits={} generated={} generated_pixels={} evicted={} generated_ms={:.3} resident_levels={} distinct_requested_ids={}",
                     self.diag.requests, self.diag.final_hits, self.diag.generated,
                     self.diag.generated_pixels, self.diag.evicted,
                     self.diag.build_nanos as f64 / 1_000_000.0, self.mips.len(),
+                    self.diag.distinct_requested_ids.len(),
                 );
             }
         }
