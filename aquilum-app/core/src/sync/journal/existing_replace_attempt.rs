@@ -407,6 +407,7 @@ mod tests {
         let conn=rusqlite::Connection::open(&file).unwrap();
         conn.execute_batch(
             "BEGIN IMMEDIATE;
+             DROP TABLE sync_existing_replace_receipt_candidates;
              DROP TABLE sync_existing_replace_attempts;
              PRAGMA user_version = 6;
              COMMIT;",
