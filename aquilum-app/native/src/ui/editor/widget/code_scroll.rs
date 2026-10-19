@@ -224,6 +224,24 @@ mod tests {
 
 
     #[test]
+    fn editing_code_body_invalidates_window_cache_without_losing_scroll_identity() {
+        let source = "~~~rust\nlong_source_text_here\n~~~";
+        let mut editor = TextEditor::new(source).markdown();
+        assert!(editor.code_scrolls.advance(0, 42.0, 300.0, 100.0));
+        editor.code_window_base = Some(0);
+        editor.code_window_opener = Some(0);
+        editor.paint_code_first = 0;
+        editor.paint_code_offsets = vec![42.0; 3];
+
+        editor.apply_change(12..12, "_inserted".into());
+
+        assert_eq!(editor.code_window_base, None, "cached window base must be invalidated");
+        assert_eq!(editor.code_window_opener, None, "cached opener must be re-resolved");
+        assert!(editor.paint_code_offsets.is_empty(), "paint cache must not survive edits");
+        assert_eq!(editor.code_scrolls.get(0), 42.0, "body edit must keep the original fence identity");
+    }
+
+    #[test]
     fn scrolling_position_survives_far_window_moves_inside_one_large_fence() {
         let body: String = (0..30_000).map(|n| format!("code_{n}_with_data\n")).collect();
         let source = format!("before\n~~~rust\n{body}~~~\nafter");
