@@ -22,7 +22,7 @@ The official MCP SDK transport guidance defaults to literal loopback Host allowl
 
 1. Unit test loopback literal parser: accepted and rejected hostnames, ports, scheme/userinfo, IPv6 bracket formatting, DNS suffix spoofing and encoded numeric aliases.
 2. Real HTTP socket test: allowed local Host values return 200; hostile values return 403, missing/empty/duplicate Host return 400. Tool invocation count does not increment for any denied Host, including requests bearing the correct token.
-3. Re-run **AKAI-CONF-03** against real disposable Core + official `@modelcontextprotocol/sdk@1.27.1`: negotiated version `2025-06-18`, `read_note`, read revision, two competing conditional writes, and authorized/malformed protocol behavior must remain green. No credential proxy.
+3. Re-run **AKAI-CONF-03** against real disposable Core + official `@modelcontextprotocol/sdk@1.27.1`: negotiated version `2025-06-18`, `read_note`, read revision, two competing conditional writes, and authorized/malformed protocol behavior must remain green. Also use Node's direct HTTP client with a valid test Bearer and hostile Host values to attempt actual `update_note` calls; require five HTTP 403 results and unchanged Markdown bytes/revision. No credential proxy.
 4. Native Windows MCP socket tests, Rust workspace, sync-engine, frame checks, Main PR gate on the exact SHA. Archive diagnostic output. Only after verified results may this Host change merge.
 5. No assumptions about full 2025 conformance, modern MCP `2026-07-28`, public remote access or isolation of multiple per-agent grant identities.
 
