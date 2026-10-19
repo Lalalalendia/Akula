@@ -121,10 +121,10 @@ impl AgentCredentialStore {
     pub(crate) fn open(path: &Path) -> Result<Self, AgentCredentialError> {
         let db = Connection::open(path).map_err(|_| AgentCredentialError::StoreUnavailable)?;
         db.execute_batch(
-            "PRAGMA foreign_keys = ON;
+            "PRAGMA busy_timeout = 2000;
+             PRAGMA foreign_keys = ON;
              PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = FULL;
-             PRAGMA busy_timeout = 2000;",
+             PRAGMA synchronous = FULL;",
         )
         .map_err(|_| AgentCredentialError::StoreUnavailable)?;
         let version: i64 = db
