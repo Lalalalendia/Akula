@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/native/src/host/frame.rs'
+      - 'aquilum-app/native/src/host/replay.rs'
       - 'aquilum-app/native/src/render/paint/convert.rs'
       - 'scripts/benchmarks/native_image_full_redraw_windows.py'
       - '.github/workflows/native-image-full-redraw-windows.yml'
