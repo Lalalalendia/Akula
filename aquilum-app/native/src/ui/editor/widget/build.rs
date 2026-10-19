@@ -38,6 +38,7 @@ impl TextEditor {
             hovered_table: None,
             hovered_code_copy: None,
             copied_code: None,
+            access_code_buttons: Vec::new(),
             table_scrolls: std::collections::HashMap::new(),
             code_scrolls: code_scroll::Offsets::default(),
             code_window_base: None,

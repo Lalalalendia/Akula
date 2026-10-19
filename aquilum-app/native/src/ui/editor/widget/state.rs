@@ -22,6 +22,9 @@ pub struct TextEditor {
     pub(super) hovered_table: Option<usize>,
     pub(super) hovered_code_copy: Option<usize>,
     pub(super) copied_code: Option<(usize, std::time::Instant)>,
+    // Real, focusable Masonry children for visible code-header copy buttons.
+    // Never reuse the child WidgetId for a different fence opener.
+    pub(super) access_code_buttons: Vec<code_access::VisibleCopyButton>,
     pub(super) table_scrolls: std::collections::HashMap<usize, f64>,
     pub(super) code_scrolls: code_scroll::Offsets,
     pub(super) code_window_base: Option<usize>,
