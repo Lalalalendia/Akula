@@ -3,9 +3,9 @@ pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
     use windows::core::{HSTRING, w};
-    let dir = std::env::temp_dir().join(format!("aquilum-update-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("akula-update-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let installer = dir.join("Aquilum-setup.exe");
+    let installer = dir.join("Akula-setup.exe");
     std::fs::write(&installer, payload).map_err(|e| e.to_string())?;
     before_exit();
     let started = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(installer.as_os_str()), &HSTRING::from("/S /R /UPDATE /ARGS"), None, SW_SHOW) };
