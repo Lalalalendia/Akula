@@ -35,12 +35,16 @@ impl Widget for CodeCopyButton {
         event: &TextEvent,
     ) {
         if let TextEvent::Keyboard(key) = event {
-            if key.state == KeyState::Up
-                && (key.key == Key::Named(NamedKey::Enter)
-                    || matches!(&key.key, Key::Character(c) if c == " "))
+            if key.key == Key::Named(NamedKey::Enter)
+                || matches!(&key.key, Key::Character(c) if c == " ")
             {
-                ctx.submit_action::<CopyPressed>(CopyPressed);
+                // Stop *both* key phases. Otherwise KeyDown bubbles to the
+                // editable parent and inserts a newline or space before the
+                // child can activate on KeyUp.
                 ctx.set_handled();
+                if key.state == KeyState::Up {
+                    ctx.submit_action::<CopyPressed>(CopyPressed);
+                }
             }
         }
     }
