@@ -29,6 +29,8 @@ mod api;
 mod build;
 mod caret;
 mod code_copy;
+mod code_header;
+mod code_scroll;
 mod edit;
 mod find;
 mod matching;

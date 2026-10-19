@@ -1,0 +1,150 @@
+name: Dataview full query exact-source ABBA
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/search/dataview/rows.rs'
+      - 'aquilum-app/core/src/search/dataview/eval.rs'
+      - '.github/bench/dataview-query-ab.rs'
+      - '.github/workflows/dataview-query-abba.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-dataview-query-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  query-abba:
+    name: Real Dataview WHERE SORT TABLE/LIST A/B
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Record exact baseline and candidate code versions
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          git worktree add --detach "$RUNNER_TEMP/dv-query-base" "$BASE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/dv-query-head" "$HEAD_SHA"
+          for side in base head; do
+            cp .github/bench/dataview-query-ab.rs \
+              "$RUNNER_TEMP/dv-query-$side/aquilum-app/core/tests/dataview_query_perf.rs"
+          done
+          {
+            echo "base=$BASE_SHA"
+            echo "head=$HEAD_SHA"
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+            cargo --version
+          } | tee dataview-query-environment.log
+      - name: Compile identical query harness on both immutable revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for side in base head; do
+            (
+              cd "$RUNNER_TEMP/dv-query-$side/aquilum-app"
+              CARGO_TARGET_DIR="$RUNNER_TEMP/dv-query-target-$side" \
+                cargo test --release --locked -p aquilum-core --test dataview_query_perf --no-run
+            )
+          done
+      - name: A B B A repeated, at 1000 and 5000 deterministic notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          trial=0
+          for side in base head head base base head head base; do
+            trial=$((trial + 1))
+            for size in 1000 5000; do
+              (
+                cd "$RUNNER_TEMP/dv-query-$side/aquilum-app"
+                CARGO_TARGET_DIR="$RUNNER_TEMP/dv-query-target-$side" \
+                  AKULA_DATAVIEW_QUERY_SIZE="$size" \
+                    cargo test --release --locked -p aquilum-core --test dataview_query_perf \
+                    -- --ignored --nocapture --test-threads=1
+              ) 2>&1 | tee "dataview-query-$trial-$side-$size.log"
+            done
+          done
+      - name: Compare full serialized output and paired query timing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import statistics
+          from pathlib import Path
+
+          names = ('table_numeric', 'list_filter', 'table_unicode')
+          sizes = (1000, 5000)
+          pattern = re.compile(
+              r'DATAVIEW_QUERY_AB size=(\d+) case=(\w+) '
+              r'p50_ms=([\d.]+) p95_upper_ms=([\d.]+) digest=([0-9a-f]+)'
+          )
+          values = {(side, size): [] for side in ('base', 'head') for size in sizes}
+          for path in Path('.').glob('dataview-query-*-*.log'):
+              match = re.fullmatch(r'dataview-query-\d+-(base|head)-(1000|5000)\.log', path.name)
+              if not match:
+                  continue
+              side, size = match.group(1), int(match.group(2))
+              found = {
+                  name: (float(p50), float(p95), digest)
+                  for read_size, name, p50, p95, digest in pattern.findall(path.read_text())
+                  if int(read_size) == size
+              }
+              assert set(found) == set(names), f'missing cases: {path}: {found.keys()}'
+              values[side, size].append(found)
+          for samples in values.values():
+              assert len(samples) == 4, f'incomplete ABBA: {values.keys()}'
+          output = [
+              '## Dataview real execute::run query A/B on exact commits',
+              '',
+              '| Query | Notes | Base p50 (ms) | Candidate p50 (ms) | Change |',
+              '|---|---:|---:|---:|---:|',
+          ]
+          for size in sizes:
+              for name in names:
+                  digests = {run[name][2] for side in ('base', 'head')
+                             for run in values[side, size]}
+                  assert len(digests) == 1, f'Output difference in {size}/{name}: {digests}'
+                  a = statistics.median(run[name][0] for run in values['base', size])
+                  b = statistics.median(run[name][0] for run in values['head', size])
+                  assert a > 0 and b > 0
+                  output.append(f'| {name} | {size} | {a:.4f} | {b:.4f} | {100*(b/a-1):+.1f}% |')
+          output += [
+              '',
+              'Full serde_json QueryOutput BLAKE3 digests agree for each scenario,',
+              'within runs and between both exact Git revisions. p50 above is median',
+              'of four per-process 7-query-run medians in ABBA order.',
+              'Each 7-run p95_upper is only its observed maximum; not a stable',
+              'end-user p95. Includes execute::run WHERE/SORT/materialization,',
+              'excludes indexing, loading SQLite rows, UI and cold startup.',
+              'No performance-based automatic pass threshold.',
+          ]
+          summary = '\n'.join(output) + '\n'
+          print(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(summary)
+          Path('dataview-query-summary.md').write_text(summary)
+          PY
+      - name: Upload reproducible logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataview-query-abba-${{ github.event.pull_request.head.sha }}
+          path: |
+            dataview-query-environment.log
+            dataview-query-*-*.log
+            dataview-query-summary.md
+          if-no-files-found: warn
+          retention-days: 14

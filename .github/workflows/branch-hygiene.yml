@@ -34,6 +34,11 @@ jobs:
     name: Branch-hygiene unit tests
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Cancel stale PR unit tests without interrupting privileged branch cleanup.
+    concurrency:
+      group: akula-branch-hygiene-unit-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -49,6 +54,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true)
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: write
       pull-requests: read
@@ -76,4 +82,5 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_JOB_TIMING_SAMPLE: '1'
         run: node .github/scripts/ci-run-budget.cjs

@@ -1,7 +1,8 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {percentile,elapsed,analyze,report,fetchPage,sampleRecent,run,MAX_PAGES}=require('./ci-run-budget.cjs');
+const {percentile,elapsed,analyze,report,fetchPage,sampleRecent,run,MAX_PAGES,
+  analyzeJobTimings,sampleJobTimings,jobTimingReport,MAX_TIMING_RUNS_PER_WORKFLOW}=require('./ci-run-budget.cjs');
 const t=n=>new Date(Date.UTC(2026,9,17,0,n)).toISOString();
 const make=(name,id,minutes=7,conclusion='success',override={})=>({
   event:'pull_request',head_branch:'feature/'+id,head_sha:id,
@@ -115,4 +116,61 @@ test('bounded maximum reports truncation rather than pretending full coverage',a
   assert.equal(sample.truncated,true);
   const result={...analyze(sample.runs,now),pages:sample.pages,truncated:sample.truncated};
   assert.match(report(result),/WARNING: sample stopped/);
+});
+
+test('job timing uses real job timestamps and excludes skipped or invalid jobs',()=>{
+  const jobs=[
+    {name:'Required Rust tests',status:'completed',conclusion:'success',
+      created_at:t(0),started_at:t(4),completed_at:t(5)},
+    {name:'Required Rust tests',status:'completed',conclusion:'success',
+      created_at:t(0),started_at:t(2),completed_at:t(5)},
+    {name:'Skipped lane',status:'completed',conclusion:'skipped',
+      created_at:t(0),started_at:t(0),completed_at:t(0)},
+    {name:'Invalid lane',status:'completed',conclusion:'failure',
+      created_at:t(6),started_at:t(4),completed_at:t(9)}
+  ];
+  const d=analyzeJobTimings([{workflow:'Application checks',jobs}]);
+  assert.equal(d.sampledRuns,1);
+  assert.equal(d.completedJobs,2);
+  assert.deepEqual(d.rows.map(r=>r.name),['Required Rust tests']);
+  assert.equal(d.rows[0].n,2);
+  assert.equal(d.rows[0].queueMedian,2);
+  assert.equal(d.rows[0].queueP90,4);
+  assert.equal(d.rows[0].durationMedian,1);
+  assert.match(jobTimingReport(d),/Queue p50/);
+  assert.match(jobTimingReport(d),/2\.0 \/ 4\.0/);
+});
+test('sampled job requests are capped, authenticated, and limited to completed PR runs',async()=>{
+  const requests=[];
+  const fake=async(url,opts)=>{
+    requests.push({url,opts});
+    return {ok:true,json:async()=>({total_count:1,jobs:[{
+      name:'Required Rust tests',status:'completed',conclusion:'success',
+      created_at:t(0),started_at:t(4),completed_at:t(6)}]})};
+  };
+  const runs=[
+    ...Array.from({length:MAX_TIMING_RUNS_PER_WORKFLOW+3},(_,i)=>make('Application checks',String(i),3,'success',{id:100+i})),
+    make('Docs and installer checks','docs',1,'success',{id:200}),
+    make('Application checks','incomplete',1,null,{id:201,status:'queued'}),
+    make('Non-selected workflow','other',1,'success',{id:202})
+  ];
+  const d=await sampleJobTimings('token','owner/repo',runs,fake,Date.parse(t(30)));
+  assert.equal(requests.length,MAX_TIMING_RUNS_PER_WORKFLOW+1);
+  assert.equal(d.sampledRuns,MAX_TIMING_RUNS_PER_WORKFLOW+1);
+  assert.equal(d.completedJobs,MAX_TIMING_RUNS_PER_WORKFLOW+1);
+  assert.ok(requests.every(x=>x.url.includes('/actions/runs/')&&x.url.endsWith('/jobs?per_page=100')));
+  assert.ok(requests.every(x=>x.opts.headers.Authorization==='Bearer token'));
+  assert.ok(requests.every(x=>!x.url.includes('/201/')&&!x.url.includes('/202/')));
+});
+test('job timing API failure does not hide the existing weekly audit',async()=>{
+  const fake=async(url)=>{
+    if(url.includes('/jobs?'))return {ok:false,status:503};
+    return {ok:true,json:async()=>({workflow_runs:[
+      make('Application checks','x',2,'success',{id:45})]})};
+  };
+  const summary=await run({
+    GH_TOKEN:'token',GITHUB_REPOSITORY:'owner/repo',CI_JOB_TIMING_SAMPLE:'1'
+  },fake,Date.parse(t(30)));
+  assert.match(summary,/Weekly CI/);
+  assert.match(summary,/Sampling unavailable: Actions jobs API HTTP 503/);
 });

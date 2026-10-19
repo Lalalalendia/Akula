@@ -1,7 +1,7 @@
 use std::ops::{Range, RangeInclusive};
 use masonry::core::{PaintCtx, PropertiesRef, render_text};
 use masonry::imaging::Painter;
-use masonry::kurbo::{Affine, RoundedRect};
+use masonry::kurbo::{Affine, RoundedRect, Vec2};
 use masonry::parley::{Affinity, BoundingBox, Cursor};
 use masonry::properties::{ContentColor, SelectionColor};
 use super::Fold;
@@ -21,6 +21,7 @@ impl TextEditor {
             let (fcx, lcx) = ctx.text_contexts();
             self.doc.ensure(first..=last, fcx, lcx, &self.styles, self.focused.then_some(self.focus));
         }
+        self.prepare_code_paint_offsets(first, last);
         let shown = first..=last;
         let texts: Vec<usize> = shown.clone().filter(|&i| {
             let p = self.doc.paragraph(i);
@@ -64,11 +65,26 @@ impl TextEditor {
             self.paint_link_hover(painter, i);
         }
         for i in texts {
-            if markdown {
-                self.paint_marks(painter, i, &palette);
+            let origin = self.shift() + self.doc.origin(i) - Vec2::new(self.code_offset_at(i), 0.0);
+            if let Some(viewport) = self.code_viewport(i) {
+                // The clipped sub-painter has an independent borrow lifetime.
+                // Use an inline closure, not a pretyped Painter<'_> callback.
+                painter.with_fill_clip(viewport, |p| {
+                    if markdown {
+                        self.paint_marks(p, i, &palette);
+                    }
+                    render_text(p, Affine::translate(origin), self.doc.paragraph(i).layout(), &palette, true);
+                });
+            } else {
+                if markdown {
+                    self.paint_marks(painter, i, &palette);
+                }
+                render_text(painter, Affine::translate(origin), self.doc.paragraph(i).layout(), &palette, true);
             }
-            render_text(painter, Affine::translate(self.shift() + self.doc.origin(i)), self.doc.paragraph(i).layout(), &palette, true);
         }
+        // Drop computed indices before event handling or a different document
+        // window could make the same line index refer to different source.
+        self.paint_code_offsets.clear();
     }
 
     pub(super) fn do_post_paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
@@ -85,8 +101,16 @@ impl TextEditor {
         if !self.caret_visible {
             return;
         }
-        painter.fill(RoundedRect::from_rect(self.caret(), size::CARET_RADIUS), theme::current().caret_color).draw();
-        self.paint_extra_carets(painter, theme::current().caret_color);
+        let caret = self.caret();
+        let ink = theme::current().caret_color;
+        if let Some(viewport) = self.code_viewport(self.doc.at_offset(self.focus)) {
+            painter.with_fill_clip(viewport, |p| {
+                p.fill(RoundedRect::from_rect(caret, size::CARET_RADIUS), ink).draw();
+            });
+        } else {
+            painter.fill(RoundedRect::from_rect(caret, size::CARET_RADIUS), ink).draw();
+        }
+        self.paint_extra_carets(painter, ink);
     }
 
     pub(super) fn paint_range(&self, painter: &mut Painter<'_>, shown: RangeInclusive<usize>, range: Range<usize>, color: masonry::peniko::Color) {
@@ -95,16 +119,38 @@ impl TextEditor {
             if !(matches!(p.fold, Fold::None | Fold::Above) && p.laid().is_some() && p.start <= range.end && p.end() >= range.start) {
                 continue;
             }
-            let origin = self.doc.origin(i);
+            let origin = self.doc.origin(i) - Vec2::new(self.code_offset_at(i), 0.0);
             let layout = p.layout();
             let a = range.start.max(p.start) - p.start;
             let b = range.end.min(p.end()) - p.start;
-            for (bounds, _) in markdown::range_rects(layout, a, b) {
-                painter.fill(super::rect(BoundingBox::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1), 0.0) + origin + self.shift(), color).draw();
-            }
-            if range.end > p.end() && b == p.len as usize {
+            let range_rects: Vec<_> = markdown::range_rects(layout, a, b)
+                .into_iter()
+                .map(|(bounds, _)| {
+                    super::rect(BoundingBox::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1), 0.0) + origin + self.shift()
+                })
+                .collect();
+            let continuation = if range.end > p.end() && b == p.len as usize {
                 let end = Cursor::from_byte_index(layout, p.len as usize, Affinity::Upstream).geometry(layout, 1.0);
-                painter.fill(super::rect(BoundingBox::new(end.x0, end.y0, end.x0 + 8.0, end.y1), 0.0) + origin + self.shift(), color).draw();
+                Some(super::rect(BoundingBox::new(end.x0, end.y0, end.x0 + 8.0, end.y1), 0.0) + origin + self.shift())
+            } else {
+                None
+            };
+            if let Some(viewport) = self.code_viewport(i) {
+                painter.with_fill_clip(viewport, |clipped| {
+                    for rect in &range_rects {
+                        clipped.fill(*rect, color).draw();
+                    }
+                    if let Some(rect) = continuation {
+                        clipped.fill(rect, color).draw();
+                    }
+                });
+            } else {
+                for rect in range_rects {
+                    painter.fill(rect, color).draw();
+                }
+                if let Some(rect) = continuation {
+                    painter.fill(rect, color).draw();
+                }
             }
         }
     }

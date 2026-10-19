@@ -108,15 +108,95 @@ async function sampleRecent(token,repo,fetchImpl=fetch,now=Date.now()){
   }
   return {runs,pages,truncated};
 }
+
+const MAX_TIMING_RUNS_PER_WORKFLOW=6;
+const TIMING_WORKFLOWS=['Application checks','Docs and installer checks'];
+
+function analyzeJobTimings(entries) {
+  const grouped=new Map();
+  let completedJobs=0;
+  for(const entry of entries) {
+    for(const job of entry.jobs) {
+      if(job.status!=='completed'||!['success','failure'].includes(job.conclusion)) continue;
+      const queue=elapsed(job.created_at,job.started_at);
+      const duration=elapsed(job.started_at,job.completed_at);
+      if(queue===null||duration===null) continue;
+      const name=entry.workflow+' / '+job.name;
+      if(!grouped.has(name)) grouped.set(name,{
+        workflow:entry.workflow,name:job.name,queue:[],duration:[]
+      });
+      grouped.get(name).queue.push(queue);
+      grouped.get(name).duration.push(duration);
+      completedJobs++;
+    }
+  }
+  const rows=[...grouped.values()].map(x=>({
+    workflow:x.workflow,name:x.name,n:x.queue.length,
+    queueMedian:percentile(x.queue,.5),queueP90:percentile(x.queue,.9),
+    durationMedian:percentile(x.duration,.5),durationP90:percentile(x.duration,.9)
+  })).sort((a,b)=>b.n-a.n||a.workflow.localeCompare(b.workflow)||a.name.localeCompare(b.name));
+  return {sampledRuns:entries.length,completedJobs,rows};
+}
+async function sampleJobTimings(token,repo,runs,fetchImpl=fetch,now=Date.now()) {
+  const after=+now-DAYS*86400000;
+  const selected=TIMING_WORKFLOWS.flatMap(name=>runs
+    .filter(r=>r.name===name&&r.status==='completed'
+      &&['success','failure'].includes(r.conclusion)
+      &&Number.isInteger(r.id)&&Date.parse(r.created_at)>=after)
+    .sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))
+    .slice(0,MAX_TIMING_RUNS_PER_WORKFLOW));
+  const entries=[];
+  // Keep API requests bounded and avoid concurrent bursts against GitHub.
+  for(const run of selected) {
+    const url='https://api.github.com/repos/'+repo+'/actions/runs/'+run.id+'/jobs?per_page=100';
+    const resp=await fetchImpl(url,{headers:{
+      Authorization:'Bearer '+token,
+      Accept:'application/vnd.github+json',
+      'X-GitHub-Api-Version':'2022-11-28'
+    },signal:AbortSignal.timeout(15000)});
+    if(!resp.ok) throw Error('Actions jobs API HTTP '+resp.status);
+    const data=await resp.json();
+    if(!Array.isArray(data.jobs)||data.total_count>100)
+      throw Error('Missing or incomplete Actions jobs page');
+    entries.push({workflow:run.name,jobs:data.jobs});
+  }
+  return analyzeJobTimings(entries);
+}
+function jobTimingReport(timing) {
+  const out=['','### Sampled runner queue wait vs execution','',
+    'Up to '+MAX_TIMING_RUNS_PER_WORKFLOW+' recent completed PR runs per workflow; '+
+      timing.sampledRuns+' workflow runs and '+timing.completedJobs+' completed jobs sampled.','',
+    '| Workflow | Job | n | Queue p50 / p90 (min) | Execution p50 / p90 (min) |',
+    '| --- | --- | ---: | ---: | ---: |'];
+  for(const row of timing.rows.slice(0,15))
+    out.push('| '+row.workflow.replace(/[|\r\n]/g,' ')+' | '+row.name.replace(/[|\r\n]/g,' ')+
+      ' | '+row.n+' | '+format(row.queueMedian)+' / '+format(row.queueP90)+
+      ' | '+format(row.durationMedian)+' / '+format(row.durationP90)+' |');
+  if(!timing.rows.length) out.push('| No eligible completed jobs | — | 0 | n/a | n/a |');
+  out.push('','Queue = job.created_at to job.started_at; execution = started_at to completed_at. '+
+    'Skipped, cancelled, incomplete and still-queued jobs are excluded. '+
+    'This is a bounded recent sample, not an unbiased estimate of the entire week.','');
+  return out.join('\n');
+}
+
 async function run(env=process.env,fetchImpl=fetch,now=Date.now()){
   const token=env.GH_TOKEN,repo=env.GITHUB_REPOSITORY;
   if(!token||!repo||!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw Error('GH_TOKEN and GITHUB_REPOSITORY are required');
   const sample=await sampleRecent(token,repo,fetchImpl,now);
   const result={...analyze(sample.runs,now),pages:sample.pages,truncated:sample.truncated};
-  const summary=report(result);
+  let summary=report(result);
+  if(env.CI_JOB_TIMING_SAMPLE==='1') {
+    try {
+      summary+=jobTimingReport(await sampleJobTimings(token,repo,sample.runs,fetchImpl,now));
+    } catch(err) {
+      summary+='\n### Runner queue timing\n\nSampling unavailable: '+err.message+
+        '. Existing workflow-run telemetry is unaffected.\n';
+    }
+  }
   process.stdout.write(summary);
   if(env.GITHUB_STEP_SUMMARY)fs.appendFileSync(env.GITHUB_STEP_SUMMARY,summary+'\n');
   return summary;
 }
 if(require.main===module)run().catch(e=>{console.error('CI budget telemetry: '+e.message);process.exitCode=1;});
-module.exports={percentile,elapsed,analyze,report,fetchPage,sampleRecent,run,MAX_PAGES};
+module.exports={percentile,elapsed,analyze,report,fetchPage,sampleRecent,run,MAX_PAGES,
+  analyzeJobTimings,sampleJobTimings,jobTimingReport,MAX_TIMING_RUNS_PER_WORKFLOW};

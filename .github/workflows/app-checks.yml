@@ -26,6 +26,7 @@ jobs:
     if: github.event_name == 'pull_request'
     name: Classify required CI lanes
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
     steps:
@@ -47,6 +48,8 @@ jobs:
     needs: classify
     name: Required Rust tests and policy checks
     runs-on: ubuntu-24.04
+    # Fail boundedly if cold compilation or Rust tests hang.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,8 +83,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh
+          bash -n scripts/install.sh scripts/uninstall.sh scripts/test-install-scripts.sh scripts/verify-macos-release.sh scripts/test-macos-release-verifier.sh
           bash scripts/test-install-scripts.sh
+          bash scripts/test-macos-release-verifier.sh
           node --test .github/scripts/branch-hygiene.test.cjs
 
       - name: Release source and custody flavor contract
@@ -91,8 +95,33 @@ jobs:
           node --test .github/scripts/release-source-contract.test.cjs
           node .github/scripts/release-source-contract.cjs
 
+      - name: macOS updater TAR and signed-DMG content parity (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
+
       - uses: dtolnay/rust-toolchain@stable
         if: needs.classify.outputs.mode != 'none'
+
+      - name: Security-test macOS updater TAR parser on Linux too
+        if: needs.classify.outputs.mode != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#[path = "%s"] mod tar;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/tar.rs" > "$RUNNER_TEMP/akula_tar_test_harness.rs"
+          rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_tar_test_harness.rs" -o "$RUNNER_TEMP/akula_tar_security_tests"
+          "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
+
+      - name: Test macOS updater transaction with shared installer lock and crash recovery
+        if: needs.classify.outputs.mode != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#[path = "%s"] mod txn;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/macos_transaction.rs" > "$RUNNER_TEMP/akula_updater_txn_harness.rs"
+          rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_updater_txn_harness.rs" -o "$RUNNER_TEMP/akula_updater_txn_tests"
+          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture
+
 
       - name: Restore shared main Rust cache (read-only on PRs)
         uses: swatinem/rust-cache@v2
@@ -173,6 +202,7 @@ jobs:
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs: [classify, required-tests, native-frames]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Enforce all required lanes (fail closed)
         shell: bash

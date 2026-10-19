@@ -2,9 +2,10 @@ use super::*;
 
 impl App {
     pub fn title(&self) -> String {
+        let product = if cfg!(target_os = "windows") { "Akula" } else { "Aquilum" };
         match &self.note {
-            Some(note) => format!("{} — Aquilum", note.path.file_stem().unwrap_or_default().to_string_lossy()),
-            None => "Aquilum".to_owned(),
+            Some(note) => format!("{} — {product}", note.path.file_stem().unwrap_or_default().to_string_lossy()),
+            None => product.to_owned(),
         }
     }
 

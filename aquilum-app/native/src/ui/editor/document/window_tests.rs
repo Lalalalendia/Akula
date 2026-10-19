@@ -109,3 +109,37 @@ fn long_code_fence_remains_a_code_block_after_a_jump_with_smaller_window() {
     assert!(reached, "the middle of a huge code fence must classify as code");
     agrees(&doc, &text);
 }
+
+#[test]
+fn windowed_code_recovers_original_opener_outside_loaded_lines() {
+    let text = format!("before\n~~~rust\n{}~~~\nafter\n", lines(30_000));
+    let opener = text.find("~~~rust").unwrap();
+    let mut doc = windowed(&text);
+    doc.include(text.len() / 2);
+    assert!(doc.loaded().0 > opener, "opener must be outside the mounted window");
+    let mut recovered = None;
+    for _ in 0..300 {
+        doc.track((0.0, 0.0));
+        recovered = doc.window_fence_opener();
+        if recovered.is_some() { break; }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(recovered, Some(opener), "windowed parser must retain global fence identity");
+}
+
+#[test]
+fn checkpoints_identify_the_second_windowed_fence_not_the_first() {
+    let text = format!("~~~rust\n{}~~~\nprose\n~~~python\n{}~~~\n", lines(5_000), lines(7_000));
+    let second = text.find("~~~python").unwrap();
+    let mut doc = windowed(&text);
+    doc.include(text.len() - 300);
+    assert!(doc.loaded().0 > second, "second opener must be outside window");
+    let mut recovered = None;
+    for _ in 0..300 {
+        doc.track((0.0, 0.0));
+        recovered = doc.window_fence_opener();
+        if recovered.is_some() { break; }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(recovered, Some(second), "offset must never migrate to an older code block");
+}

@@ -30,7 +30,11 @@ impl TextEditor {
         for &(_, focus) in &self.extra_cursors {
             if focus <= self.doc.len() {
                 let caret = self.caret_at(focus, 0, Affinity::Downstream);
-                painter.fill(caret, color).draw();
+                if let Some(viewport) = self.code_viewport(self.doc.at_offset(focus)) {
+                    painter.with_fill_clip(viewport, |p| { p.fill(caret, color).draw(); });
+                } else {
+                    painter.fill(caret, color).draw();
+                }
             }
         }
     }

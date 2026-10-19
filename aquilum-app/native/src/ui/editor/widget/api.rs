@@ -65,6 +65,12 @@ impl TextEditor {
         widget.history.clear();
         widget.refind(&[]);
         widget.table_scrolls.clear();
+        widget.hovered_code_copy = None;
+        widget.copied_code = None;
+        widget.code_scrolls.clear();
+        widget.code_window_base = None;
+        widget.code_window_opener = None;
+        widget.code_last_viewport = None;
         widget.compose = None;
         widget.extra_cursors.clear();
         widget.media = Default::default();

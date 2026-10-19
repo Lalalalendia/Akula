@@ -54,6 +54,7 @@ impl TextEditor {
                     painter.fill(RoundedRect::new(x, top, x + inner, bottom, BLOCK_RADIUS), tm.block_bg).draw();
                     let border = RoundedRect::new(x + 0.5, top + 0.5, x + inner - 0.5, bottom - 0.5, BLOCK_RADIUS - 0.5);
                     painter.stroke(border, &Stroke::new(size::BORDER_1), tm.block_border).draw();
+                    self.paint_code_header(painter, a);
                 }
             } else if !matches!(self.doc.block(a), Block::Quote { callout: Some((_, Callout::Book)), .. }) {
                 let ink = match self.doc.block(a) {
@@ -105,7 +106,7 @@ impl TextEditor {
         markdown::paint_backgrounds(painter, p.layout(), p.decor(), self.shift() + self.doc.origin(i));
     }
 
-    pub(super) fn paint_marks(&self, painter: &mut Painter<'_>, i: usize, palette: &[Brush]) {
+    pub(super) fn paint_marks(&self, painter: &mut Painter<'_, impl masonry::imaging::PaintSink + ?Sized>, i: usize, palette: &[Brush]) {
         let tm = theme::current();
         let p = self.doc.paragraph(i);
         let layout = p.layout();

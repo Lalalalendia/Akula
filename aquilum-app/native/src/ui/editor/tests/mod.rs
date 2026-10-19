@@ -2,6 +2,7 @@ mod cards;
 mod emoji;
 mod clipboard;
 mod code_copy;
+mod code_scroll;
 mod images;
 mod input;
 mod keys;

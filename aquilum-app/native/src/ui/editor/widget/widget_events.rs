@@ -22,6 +22,7 @@ impl TextEditor {
             ctx.request_compose();
         }
         self.media_tick(ctx, interval);
+        self.code_header_tick(ctx);
         let (changed, playing) = self.videos.tick();
         if changed {
             ctx.request_post_paint();
@@ -58,7 +59,8 @@ impl TextEditor {
                 self.close_suggest();
                 let point = ctx.local_position(state.position);
                 let new_tab = crate::ui::keymap::action(state.modifiers);
-                if self.table_press(ctx, point, state.modifiers.shift(), new_tab, state.count)
+                if self.code_header_press(ctx, point)
+                    || self.table_press(ctx, point, state.modifiers.shift(), new_tab, state.count)
                     || self.media_press(ctx, point, state.count)
                     || self.card_click(ctx, point, new_tab)
                     || self.toggle_task(ctx, point)
@@ -108,6 +110,7 @@ impl TextEditor {
             }
             PointerEvent::Leave(_) => {
                 self.media_leave(ctx);
+                self.code_header_leave(ctx);
                 if self.hovered_link.take().is_some() {
                     ctx.request_render();
                 }
@@ -123,7 +126,9 @@ impl TextEditor {
                     _ => (0.0, 0.0),
                 };
                 let (dx, dy) = if scroll.state.modifiers.shift() && dx == 0.0 { (dy, 0.0) } else { (dx, dy) };
-                if dx.abs() > dy.abs() && self.table_scroll(ctx, point, -dx) {
+                if dx.abs() > dy.abs()
+                    && (self.table_scroll(ctx, point, -dx) || self.code_scroll_wheel(ctx, point, -dx))
+                {
                     ctx.set_handled();
                 }
             }

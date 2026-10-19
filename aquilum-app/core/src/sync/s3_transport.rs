@@ -32,6 +32,8 @@ mod scale_probe;
 mod coord_scale_probe;
 mod replan;
 mod core_stage;
+mod guarded_update_plan;
+mod existing_content_stage;
 mod additive_receive;
 pub use replan::{plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError};
 mod snapshot_store;

@@ -35,6 +35,11 @@ pub(crate) fn read_installer_witness(
     {
         return Err(HostCustodyError::InvalidHostLocation);
     }
+    // This stronger, non-shipping flavor refuses to trust a merely distinct
+    // but same-user-editable file. Windows intentionally remains HOLD because
+    // no approved owner/DACL/privileged broker attestation exists yet.
+    #[cfg(feature = "sync-installed-host-unix-root-witness")]
+    super::host_install_unix_root::require_root_owned_witness_path(witness_path)?;
     let db_parent = db_path.parent().ok_or(HostCustodyError::InvalidHostLocation)?;
     let witness_parent = witness_path.parent()
         .ok_or(HostCustodyError::InvalidHostLocation)?;
@@ -63,6 +68,8 @@ pub(crate) fn read_installer_witness(
         return Err(HostCustodyError::InvalidHostLocation);
     }
     pinned_witness_parent.recheck_root()?;
+    #[cfg(feature = "sync-installed-host-unix-root-witness")]
+    super::host_install_unix_root::require_root_owned_witness_path(witness_path)?;
     let record: InstallWitness = serde_json::from_slice(&bytes)
         .map_err(|_| HostCustodyError::InvalidHostLocation)?;
     if record.version != WITNESS_VERSION
@@ -98,6 +105,9 @@ pub(crate) fn create_test_witness_once(
     let mut file = OpenOptions::new().write(true).create_new(true).open(witness_path)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
+    // The disposable test issuer has no privileged ownership and is
+    // intentionally refused in the Unix-root-only installer flavor.
+    #[cfg(not(feature = "sync-installed-host-unix-root-witness"))]
     assert_eq!(read_installer_witness(db_path, witness_path)?, expected);
     Ok(())
 }

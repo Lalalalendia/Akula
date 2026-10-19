@@ -54,6 +54,26 @@ function validateRelease(yaml) {
       errors.push(job + ' does not bind checkout verification to source job');
     }
 
+    if (job === 'macos') {
+      const packageStep = body.indexOf('      - name: Package');
+      const identityStep = body.indexOf('      - name: Verify pinned Akula publisher and notarized DMG');
+      const uploadStep = body.indexOf('      - uses: actions/upload-artifact@v7');
+      if (packageStep < 0 || identityStep <= packageStep || uploadStep <= identityStep) {
+        errors.push('macos must verify genuine signed DMG after packaging and before artifact upload');
+      }
+      for (const required of [
+        'dmgs=(dist/Aquilum_*_${{ matrix.arch }}.dmg)',
+        'if [[ "${#dmgs[@]}" -ne 1 ]]',
+        'archives=(dist/Aquilum_${{ matrix.arch }}.app.tar.gz)',
+        'if [[ "${#archives[@]}" -ne 1',
+        'bash scripts/verify-macos-release.sh scripts/install.sh "${dmgs[0]}" "${archives[0]}"',
+      ]) {
+        if (!body.includes(required)) {
+          errors.push('macos release verifier must use exact pinned source and DMG: ' + required);
+        }
+      }
+    }
+
     if (job !== 'manifest') {
       const found = [...body.matchAll(builds)].map(m => m[0].trim().replace(/^run:\s*/, ''));
       const expected = 'cargo build --release -p aquilum-native --features installed'

@@ -26,7 +26,7 @@ impl TextEditor {
         let (offset, _) = self.hit(point);
         let i = self.doc.at_offset(offset);
         let p = self.doc.paragraph(i);
-        let local = point - self.shift() - self.doc.origin(i);
+        let local = point - self.shift() - self.doc.origin(i) + Vec2::new(self.code_offset_at(i), 0.0);
         match count {
             2 => {
                 let Some(layout) = p.laid() else { return offset..offset };

@@ -15,16 +15,20 @@ pub fn tokens(line: &str, lang: Lang) -> Vec<(Range<usize>, Token)> {
     while i < line.len() {
         let rest = &line[i..];
         let c = rest.chars().next().unwrap_or(' ');
-        if let Some(open) = lang.comment().iter().find(|m| rest.starts_with(**m)) {
-            let close = match *open {
-                "/*" => rest[2..].find("*/").map(|j| i + j + 4),
-                "<!--" => rest[4..].find("-->").map(|j| i + j + 7),
-                _ => None,
-            };
-            let end = close.unwrap_or(line.len());
-            out.push((i..end, Token::Comment));
-            i = end;
-            continue;
+        if matches!(c, '/' | '#' | '-' | '<') {
+            // No supported comment marker begins with any other character.
+            // Keep language-specific checks at the possible prefix only.
+            if let Some(open) = lang.comment().iter().find(|m| rest.starts_with(**m)) {
+                let close = match *open {
+                    "/*" => rest[2..].find("*/").map(|j| i + j + 4),
+                    "<!--" => rest[4..].find("-->").map(|j| i + j + 7),
+                    _ => None,
+                };
+                let end = close.unwrap_or(line.len());
+                out.push((i..end, Token::Comment));
+                i = end;
+                continue;
+            }
         }
         if lang == Lang::Markup && c == '<' {
             let name = rest[1..].trim_start_matches(['/', '!']);
@@ -73,7 +77,14 @@ pub fn tokens(line: &str, lang: Lang) -> Vec<(Range<usize>, Token)> {
             let word = &line[i..end];
             let after = line[end..].trim_start();
             let keywords = lang.keywords();
-            let token = if (matches!(lang, Lang::Sql | Lang::Dataview) && keywords.contains(&word.to_ascii_lowercase().as_str())) || keywords.contains(&word) {
+            // The fixed SQL/Dataview keyword sets contain ASCII-only words.
+            // Match those words without allocating a temporary lowercase String.
+            let is_keyword = if matches!(lang, Lang::Sql | Lang::Dataview) {
+                keywords.iter().any(|keyword| word.eq_ignore_ascii_case(keyword))
+            } else {
+                keywords.contains(&word)
+            };
+            let token = if is_keyword {
                 Some(Token::Keyword)
             } else if in_tag || (lang == Lang::Css && after.starts_with(':')) || (lang == Lang::Yaml && after.starts_with(':') && line[..i].trim().is_empty()) {
                 Some(Token::Property)

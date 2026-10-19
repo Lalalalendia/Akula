@@ -43,6 +43,27 @@ impl TextEditor {
         let removed = self.doc.copy(range.clone());
         self.doc.replace(range.clone(), &inserted);
         let change = Change { at: range.start, removed, inserted };
+        // Keep code-view offsets bound to their opening fence, never to a
+        // line index that can be reused after an edit or document replacement.
+        self.code_scrolls.remap(&change);
+        // Deleting a newline before a fence, or editing its interior ticks,
+        // can turn the opener into ordinary prose without touching its first
+        // byte. Never silently transfer a view offset to that prose.
+        let doc = &self.doc;
+        self.code_scrolls.retain_openers(|opener| {
+            let line = doc.line_at(opener);
+            line.start == opener
+                && aquilum_core::markdown::fence::Fence::open(&doc.copy(line), usize::MAX).is_some()
+        });
+        // A shorter body can eliminate overflow without changing viewport.
+        self.code_last_viewport = None;
+        // Mounted-window byte offsets and paint-time line indexes can become
+        // stale after an edit even if the window base does not move.
+        // Re-resolve the opener from checkpoints at the next layout, rather
+        // than associating this code offset with a different fence.
+        self.code_window_base = None;
+        self.code_window_opener = None;
+        self.paint_code_offsets.clear();
         let map = |at: usize| change.map(at);
         for (anchor, focus) in &mut self.extra_cursors {
             (*anchor, *focus) = (map(*anchor), map(*focus));
