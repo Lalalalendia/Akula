@@ -13,6 +13,7 @@ impl TextEditor {
                     }
                 }
                 self.doc.fonts_changed();
+                self.code_last_viewport = None;
                 ctx.request_layout();
             }
             Update::FocusChanged(focused) => {

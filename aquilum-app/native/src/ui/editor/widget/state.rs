@@ -24,6 +24,7 @@ pub struct TextEditor {
     pub(super) code_scrolls: code_scroll::Offsets,
     pub(super) code_window_base: Option<usize>,
     pub(super) code_window_opener: Option<usize>,
+    pub(super) code_last_viewport: Option<f64>,
     // Only populated within one paint pass. Avoid N backward code-run
     // searches for N visible paragraphs without persisting stale line IDs.
     pub(super) paint_code_first: usize,

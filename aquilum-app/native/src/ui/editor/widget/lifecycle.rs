@@ -37,5 +37,6 @@ impl TextEditor {
         self.doc.pins = [self.anchor, self.focus].into_iter().chain(self.extra_cursors.iter().flat_map(|&(a, f)| [a, f])).collect();
         self.doc.layout(fcx, lcx, &self.styles, wrap, compose, self.focused.then_some(self.focus));
         self.refresh_code_window_opener();
+        self.clamp_code_offsets_after_layout();
     }
 }

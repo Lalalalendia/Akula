@@ -40,6 +40,7 @@ impl TextEditor {
             code_scrolls: code_scroll::Offsets::default(),
             code_window_base: None,
             code_window_opener: None,
+            code_last_viewport: None,
             paint_code_first: 0,
             paint_code_offsets: Vec::new(),
             media: media::MediaState::default(),

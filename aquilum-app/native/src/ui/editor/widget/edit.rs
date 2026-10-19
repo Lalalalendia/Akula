@@ -55,6 +55,8 @@ impl TextEditor {
             line.start == opener
                 && aquilum_core::markdown::fence::Fence::open(&doc.copy(line), usize::MAX).is_some()
         });
+        // A shorter body can eliminate overflow without changing viewport.
+        self.code_last_viewport = None;
         let map = |at: usize| change.map(at);
         for (anchor, focus) in &mut self.extra_cursors {
             (*anchor, *focus) = (map(*anchor), map(*focus));

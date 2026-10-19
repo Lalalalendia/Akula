@@ -19,6 +19,10 @@ pub(super) struct Offsets {
 
 #[allow(dead_code)] // Read/update methods are exercised by tests; GUI integration follows after pixel A/B.
 impl Offsets {
+    pub(super) fn tracked(&self) -> Vec<usize> {
+        self.positions.keys().copied().collect()
+    }
+
     pub(super) fn get(&self, opener: usize) -> f64 {
         self.positions.get(&opener).copied().unwrap_or(0.0)
     }
@@ -243,6 +247,24 @@ mod tests {
     }
 
     #[test]
+    fn resize_to_fit_releases_stale_horizontal_offset() {
+        use masonry::parley::{FontContext, LayoutContext};
+
+        let source = format!("~~~rust\n{}\n~~~", "longword".repeat(80));
+        let mut editor = TextEditor::new(&source).markdown();
+        editor.doc.keep = (0.0, 20_000.0);
+        let mut fcx = FontContext::default();
+        let mut lcx = LayoutContext::new();
+        editor.ensure_layout(&mut fcx, &mut lcx, 200.0);
+        let width = editor.complete_mounted_code_width(0).expect("fully laid fenced block");
+        let viewport = (editor.inner_width() - 24.0).max(0.0);
+        assert!(width > viewport + 100.0);
+        assert!(editor.code_scrolls.advance(0, 180.0, width, viewport));
+        editor.ensure_layout(&mut fcx, &mut lcx, 12_000.0);
+        assert_eq!(editor.code_scrolls.get(0), 0.0, "fully fitting code must reset its X offset");
+    }
+
+    #[test]
     fn direct_edit_map_can_preserve_before_and_delete_crossing_fence() {
         let mut offsets = Offsets::default();
         assert!(offsets.advance(100, 45.0, 400.0, 200.0));
@@ -330,6 +352,51 @@ impl TextEditor {
             }
             let offset = opener.map_or(0.0, |at| self.code_scrolls.get(at));
             self.paint_code_offsets.push(offset);
+        }
+    }
+
+    /// Only clamp with complete, measured evidence. An unloaded or partially
+    /// laid-out block could have a longer line outside the current window.
+    fn complete_mounted_code_width(&self, opener: usize) -> Option<f64> {
+        let (base, end) = self.doc.loaded_range();
+        if opener < base || opener >= end { return None; }
+        let start = self.doc.at_offset(opener);
+        if self.doc.paragraph(start).start != opener
+            || !matches!(self.doc.block(start), Block::Code { first: true, fence: true, .. })
+            || !self.doc.fenced_code(start)
+        {
+            return None;
+        }
+        let mut maximum = 0.0_f64;
+        for line in start..self.doc.line_count() {
+            if !self.doc.fenced_code(line) {
+                return Some(maximum);
+            }
+            let laid = self.doc.paragraph(line).laid()?;
+            maximum = maximum.max(f64::from(laid.width()));
+            if matches!(self.doc.block(line), Block::Code { first: false, last: true, fence: true, .. }) {
+                return Some(maximum);
+            }
+            if line + 1 == self.doc.line_count() {
+                return (end == self.doc.len()).then_some(maximum);
+            }
+        }
+        None
+    }
+
+    /// On resize/font reflow/content edits, do not strand the viewport beyond
+    /// the last glyph. Incomplete windowed blocks stay untouched for safety.
+    pub(super) fn clamp_code_offsets_after_layout(&mut self) {
+        const PAD: f64 = 12.0;
+        let viewport = (self.inner_width() - 2.0 * PAD).max(0.0);
+        if self.code_last_viewport.replace(viewport) == Some(viewport) {
+            return;
+        }
+        let tracked = self.code_scrolls.tracked();
+        for opener in tracked {
+            if let Some(content) = self.complete_mounted_code_width(opener) {
+                self.code_scrolls.clamp_to(opener, content, viewport);
+            }
         }
     }
 

@@ -68,6 +68,7 @@ impl TextEditor {
         widget.code_scrolls.clear();
         widget.code_window_base = None;
         widget.code_window_opener = None;
+        widget.code_last_viewport = None;
         widget.compose = None;
         widget.extra_cursors.clear();
         widget.media = Default::default();
