@@ -1,0 +1,117 @@
+name: Exact-source highlight tokenizer ABBA
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/src/ui/editor/highlight/tokens.rs'
+      - 'aquilum-app/native/src/ui/editor/highlight/tests.rs'
+      - 'aquilum-app/native/src/ui/editor/highlight/langs.rs'
+      - '.github/bench/highlight-tokens-ab.rs'
+      - '.github/workflows/highlight-tokens-probe.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-highlight-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  token-benchmark:
+    name: Pinned base/head highlight token semantic/parity and ABBA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Extract real base and PR head tokenizer and vocabulary
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for side in base head; do
+            if [ "$side" = base ]; then ref="$BASE_SHA"; else ref="$HEAD_SHA"; fi
+            git cat-file -e "$ref^{commit}"
+            git show "$ref:aquilum-app/native/src/ui/editor/highlight/tokens.rs" > "$RUNNER_TEMP/highlight-$side.rs"
+            git show "$ref:aquilum-app/native/src/ui/editor/highlight/langs.rs" > "$RUNNER_TEMP/highlight-langs-$side.rs"
+          done
+          {
+            echo "base=$BASE_SHA"
+            echo "head=$HEAD_SHA"
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            rustc --version
+          } | tee highlight-environment.log
+      - name: Compile actual production tokens.rs for each commit, no runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for side in base head; do
+            AKULA_HIGHLIGHT_TOKENS="$RUNNER_TEMP/highlight-$side.rs" \
+            AKULA_HIGHLIGHT_LANGS="$RUNNER_TEMP/highlight-langs-$side.rs" \
+              rustc --edition=2021 -O -Awarnings \
+                .github/bench/highlight-tokens-ab.rs -o "$RUNNER_TEMP/highlight-$side"
+          done
+      - name: ABBA paired across five languages and deterministic Unicode fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          i=0
+          for side in base head head base base head head base; do
+            i=$((i+1))
+            "$RUNNER_TEMP/highlight-$side" | tee "highlight-$i-$side.log"
+          done
+      - name: Verify identical token bytes and report measured medians
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import statistics
+          from pathlib import Path
+          names = ('sql','dataview','rust','markup','python')
+          pattern = re.compile(r'HIGHLIGHT_AB case=(\w+) elapsed_ms=([0-9.]+) checksum=(\d+)')
+          results = {'base': [], 'head': []}
+          for path in Path('.').glob('highlight-*-*.log'):
+              match = re.fullmatch(r'highlight-\d+-(base|head)\.log',path.name)
+              if not match:
+                  continue
+              found = {case:(float(ms), digest) for case,ms,digest in pattern.findall(path.read_text())}
+              assert set(found) == set(names), f'missing cases in {path}'
+              results[match.group(1)].append(found)
+          assert len(results['base']) == len(results['head']) == 4
+          output = ['## Exact pinned production tokenizer ABBA on same runner',
+                    '',
+                    '| Language | Base (ms) | PR head (ms) | Difference |',
+                    '|---|---:|---:|---:|']
+          for name in names:
+              checksums = {r[name][1] for side in results.values() for r in side}
+              assert len(checksums) == 1, f'token boundaries/types changed: {name}, {checksums}'
+              a = statistics.median(r[name][0] for r in results['base'])
+              b = statistics.median(r[name][0] for r in results['head'])
+              assert a > 0 and b > 0
+              output.append(f'| {name} | {a:.4f} | {b:.4f} | {100*(b/a-1):+.1f}% |')
+          output += ['', 'Checksum covers every token range and token kind.',
+                     'This is a tokenizer-kernel comparison, not a full input-to-frame claim.',
+                     'No automatic time-based pass threshold. Full native Rust/GUI gates required.']
+          report = '\n'.join(output) + '\n'
+          print(report)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(report)
+          Path('highlight-summary.md').write_text(report)
+          PY
+      - name: Preserve source checksums and numeric diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-highlight-${{ github.event.pull_request.head.sha }}
+          path: |
+            highlight-environment.log
+            highlight-*-*.log
+            highlight-summary.md
+          if-no-files-found: warn
+          retention-days: 14

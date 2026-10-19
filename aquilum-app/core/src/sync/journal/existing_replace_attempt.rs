@@ -23,6 +23,23 @@ pub(crate) struct ReadOnlyExistingReplaceAttempt {
 }
 
 impl SqliteSyncJournal {
+    /// Negative UI admission only. The current recovery overview understands
+    /// additive claims, not existing-file replacement or remote VaultId mapping.
+    /// Any replacement row must prevent a misleading empty/partial overview.
+    /// Do not load evidence_json, original bytes, or enumerate all attempts.
+    /// Even a corrupt evidence payload requires inspection, never "clean".
+    pub(crate) fn existing_replace_attempts_present(&self) -> JournalResult<bool> {
+        let present: i64 = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sync_existing_replace_attempts LIMIT 1)",
+            [], |row| row.get(0),
+        )?;
+        match present {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(JournalError::CorruptedRecord),
+        }
+    }
+
     /// Permanently claim one (vault, portable path, prior baseline).
     /// A different NEW baseline requires a separately proven native receipt.
     /// BoundProtectedOriginal must come from registered pinned Core capture;

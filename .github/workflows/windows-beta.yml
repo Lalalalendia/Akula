@@ -1,0 +1,79 @@
+# Windows-only Akula NSIS candidate, never publishes a GitHub Release.
+# Isolation is mandatory: no migration from upstream Freaction/Aquilum.
+name: Akula Windows beta candidate
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-beta.yml'
+      - '.github/scripts/windows-beta-identity.test.cjs'
+      - 'scripts/test-windows-beta.ps1'
+      - 'aquilum-app/native/packaging/akula-windows.json'
+      - 'aquilum-app/native/src/**'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Candidate branch or pinned commit
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-windows-beta-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-beta:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+      - name: Verify standalone packaging policy
+        shell: pwsh
+        run: node --test .github/scripts/windows-beta-identity.test.cjs
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: standalone-windows-beta
+          cache-on-failure: true
+      - name: Install pinned NSIS packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+      - name: Build local-only native application
+        working-directory: aquilum-app
+        run: cargo build --release --locked -p aquilum-native --features installed
+      - name: Package independent Akula identity
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release'
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item (Join-Path $release 'aquilum-native.exe') (Join-Path $release 'akula-app.exe') -Force
+          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --out-dir $dist
+          if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
+          $setup = @(Get-ChildItem $dist -Filter '*-setup.exe')
+          if ($setup.Count -ne 1) { throw "Expected one Akula NSIS package; found $($setup.Count)" }
+          if ($setup[0].Name -notmatch '^(Akula|akula-app)_') {
+            throw "Unexpected installer name $($setup[0].Name): original packaging config may have been used"
+          }
+          if ($setup[0].Name.StartsWith('akula-app_')) {
+            Rename-Item $setup[0].FullName -NewName ($setup[0].Name -replace '^akula-app_', 'Akula_')
+          }
+          Get-ChildItem $dist | Format-Table Name, Length
+      - name: Install, launch, restart and uninstall beside Aquilum sentinel
+        shell: pwsh
+        run: ./scripts/test-windows-beta.ps1
+      - name: Upload candidate (not a release)
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-windows-beta-candidate-${{ github.sha }}
+          path: dist/Akula_*-setup.exe
+          retention-days: 14

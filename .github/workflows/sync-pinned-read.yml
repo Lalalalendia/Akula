@@ -12,6 +12,8 @@ on:
       - "aquilum-app/core/src/sync/native_windows_replace_probe.rs"
       - "aquilum-app/core/src/sync/local_recovery.rs"
       - "aquilum-app/core/src/sync/recovery_dashboard.rs"
+      - "aquilum-app/core/src/sync/recovery_existing_replace_tests.rs"
+      - "aquilum-app/core/src/sync/journal/existing_replace_attempt.rs"
       - "aquilum-app/core/src/sync/recovery_review.rs"
       - "aquilum-app/core/src/sync/sealed_archive.rs"
       - "aquilum-app/core/src/sync/local_create_tests.rs"
@@ -93,6 +95,9 @@ jobs:
       - name: M1d-d read-only recovery status and non-mutating SQLite gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1dd_ -- --nocapture
+      - name: Existing replacement claims cannot hide behind additive-only recovery UI
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine recovery_dashboard::tests -- --nocapture
       - name: M1d-e explicit native review and no-mutation gates
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-engine m1de_ -- --nocapture
