@@ -1,3 +1,4 @@
+use super::agent_principals::{AgentCredentialStore, AuthenticatedAgent};
 use super::http::{refused, Connection, Failure, Head, Response};
 use super::protocol;
 use serde_json::Value;
@@ -21,8 +22,42 @@ pub struct RunningServer {
     accepting: JoinHandle<()>,
 }
 
+/// Never treat host-issued agent credentials as the legacy full-access bearer.
+/// ScopedDenyAll is an opt-in bootstrap until per-vault grants exist.
+enum AuthenticationMode {
+    Legacy(String),
+    ScopedDenyAll(Arc<Mutex<AgentCredentialStore>>),
+}
+
+/// Host-owned identity, never created from MCP clientInfo or tool arguments.
+/// No Agent variant has data capabilities at this bootstrap stage.
+enum RequestPrincipal {
+    Legacy,
+    Agent(AuthenticatedAgent),
+}
+
+impl AuthenticationMode {
+    fn authenticate(&self, head: &Head) -> Option<RequestPrincipal> {
+        match self {
+            Self::Legacy(token) => authorized(head, token).then_some(RequestPrincipal::Legacy),
+            Self::ScopedDenyAll(store) => {
+                if head.header_count("authorization") != 1 {
+                    return None;
+                }
+                let (scheme, credential) = head.header("authorization")?
+                    .trim().split_once(' ')?;
+                if !scheme.eq_ignore_ascii_case("bearer") || credential.trim().is_empty() {
+                    return None;
+                }
+                let store = store.lock().ok()?;
+                store.authenticate(credential.trim()).ok().map(RequestPrincipal::Agent)
+            }
+        }
+    }
+}
+
 struct Endpoint {
-    token: String,
+    authentication: AuthenticationMode,
     listen_port: u16,
     call: SharedToolCaller,
     stopping: AtomicBool,
@@ -233,11 +268,31 @@ impl Drop for Slot {
 
 impl RunningServer {
     pub fn start(port: u16, token: String, call: SharedToolCaller) -> Result<Self, String> {
+        Self::start_with_auth(port, AuthenticationMode::Legacy(token), call)
+    }
+
+    /// Host-only opt-in admission with no tools. In particular, do not pass
+    /// an unrestricted tool caller after agent credential validation.
+    pub(crate) fn start_scoped_deny_all(
+        port: u16,
+        store: Arc<Mutex<AgentCredentialStore>>,
+    ) -> Result<Self, String> {
+        let deny: SharedToolCaller = Arc::new(|_name, _args| {
+            Err("MCP_AGENT_SCOPE_DENIED".to_owned())
+        });
+        Self::start_with_auth(port, AuthenticationMode::ScopedDenyAll(store), deny)
+    }
+
+    fn start_with_auth(
+        port: u16,
+        authentication: AuthenticationMode,
+        call: SharedToolCaller,
+    ) -> Result<Self, String> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))
             .map_err(|error| error.to_string())?;
         let address = listener.local_addr().map_err(|error| error.to_string())?;
         let endpoint = Arc::new(Endpoint {
-            token,
+            authentication,
             listen_port: address.port(),
             call,
             stopping: AtomicBool::new(false),
@@ -276,6 +331,7 @@ impl Endpoint {
     fn answer(
         &self,
         body: &str,
+        principal: RequestPrincipal,
         connection: &mut Connection,
         keep_alive: bool,
     ) -> Result<bool, Failure> {
@@ -287,7 +343,11 @@ impl Endpoint {
         if self.stopping.load(Ordering::SeqCst) {
             return Err(refused(503, "MCP-сервер остановлен"));
         }
-        let response = match protocol::handle_message(body, self.call.as_ref()) {
+        let output = match principal {
+            RequestPrincipal::Legacy => protocol::handle_message(body, self.call.as_ref()),
+            RequestPrincipal::Agent(_agent) => protocol::handle_without_tools(body),
+        };
+        let response = match output {
             Some(payload) => Response::json(payload),
             None => Response::text(202, ""),
         };
@@ -356,13 +416,17 @@ fn exchange(connection: &mut Connection, endpoint: &Endpoint, slot: &Slot) -> Re
     if !slot.activate() {
         return Err(Failure::Gone);
     }
-    admit(&head, &endpoint.token, endpoint.listen_port)?;
+    let principal = admit(&head, &endpoint.authentication, endpoint.listen_port)?;
     let body = connection.read_body(&head, MAX_BODY_BYTES)?;
     let body = String::from_utf8(body).map_err(|_| refused(400, "Тело запроса не в UTF-8"))?;
-    endpoint.answer(&body, connection, head.keeps_alive())
+    endpoint.answer(&body, principal, connection, head.keeps_alive())
 }
 
-fn admit(head: &Head, token: &str, listen_port: u16) -> Result<(), Failure> {
+fn admit(
+    head: &Head,
+    authentication: &AuthenticationMode,
+    listen_port: u16,
+) -> Result<RequestPrincipal, Failure> {
     if head.method != "POST" {
         let response = Response::text(405, "Поддерживается только POST").allowing("POST");
         return Err(Failure::Refused(response));
@@ -385,9 +449,8 @@ fn admit(head: &Head, token: &str, listen_port: u16) -> Result<(), Failure> {
     if !head.header("origin").is_none_or(is_loopback_origin) {
         return Err(refused(403, "Источник запроса запрещён"));
     }
-    if !authorized(head, token) {
-        return Err(refused(401, "Неверный токен"));
-    }
+    let principal = authentication.authenticate(head)
+        .ok_or_else(|| refused(401, "Неверный токен"))?;
     // The legacy HTTP endpoint supports only 2025-06-18. An explicit
     // modern/unknown header cannot silently enable another wire protocol.
     // Missing headers remain a documented legacy-bridge compatibility case.
@@ -398,7 +461,7 @@ fn admit(head: &Head, token: &str, listen_port: u16) -> Result<(), Failure> {
     {
         return Err(refused(400, "Неподдерживаемая версия MCP-Protocol-Version"));
     }
-    Ok(())
+    Ok(principal)
 }
 
 // The listener is fixed to IPv4 loopback. A literal loopback Host
@@ -752,6 +815,97 @@ mod tests {
             .unwrap_err();
         assert!(matches!(anonymous, ureq::Error::Status(401, _)));
         assert!(matches!(wrong, ureq::Error::Status(401, _)));
+        server.stop();
+    }
+
+    #[test]
+    fn scoped_agent_http_rejects_legacy_token_and_exposes_no_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut credential_store =
+            AgentCredentialStore::open(&dir.path().join("agent-creds.sqlite3")).unwrap();
+        let mut agent_a = credential_store.issue_principal("A", None).unwrap();
+        let mut agent_b = credential_store.issue_principal("B", None).unwrap();
+        let bearer_a = agent_a.take_bearer_once().unwrap();
+        let bearer_b = agent_b.take_bearer_once().unwrap();
+        let store = Arc::new(Mutex::new(credential_store));
+        let server = RunningServer::start_scoped_deny_all(0, Arc::clone(&store)).unwrap();
+        let url = format!("http://127.0.0.1:{}/mcp", server.port());
+
+        // No credential, unknown credential or the historical global bearer
+        // may ever trigger an MCP tool in a scoped listener.
+        for unauthorized in [None, Some(TOKEN), Some("unknown-credential")] {
+            let mut request = ureq::post(&url);
+            if let Some(token) = unauthorized {
+                request = request.set("Authorization", &format!("Bearer {token}"));
+            }
+            let denied = request.send_string(&initialize()).unwrap_err();
+            assert_eq!(status(Err(denied)), Some(401));
+        }
+
+        for token in [bearer_a.as_str(), bearer_b.as_str()] {
+            let bearer_header = format!("Bearer {token}");
+            let initialized: Value = ureq::post(&url)
+                .set("Authorization", &bearer_header)
+                .send_string(&initialize())
+                .unwrap()
+                .into_string()
+                .map(|raw| serde_json::from_str(&raw).unwrap())
+                .unwrap();
+            assert_eq!(initialized["result"]["serverInfo"]["name"], "aquilum");
+            let listed: Value = ureq::post(&url)
+                .set("Authorization", &bearer_header)
+                .send_string(&json!({
+                    "jsonrpc":"2.0","id":3,"method":"tools/list"
+                }).to_string())
+                .unwrap()
+                .into_string()
+                .map(|raw| serde_json::from_str(&raw).unwrap())
+                .unwrap();
+            assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 0);
+            let denied_tool: Value = ureq::post(&url)
+                .set("Authorization", &bearer_header)
+                .send_string(&tool_call("read_note"))
+                .unwrap()
+                .into_string()
+                .map(|raw| serde_json::from_str(&raw).unwrap())
+                .unwrap();
+            assert_eq!(denied_tool["result"]["isError"], true);
+            assert!(denied_tool["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("MCP_AGENT_SCOPE_DENIED"));
+        }
+
+        // A long-lived TCP connection must not cache a principal/session
+        // across HTTP requests. Revoke the same bearer *between* two writes
+        // to exactly the same socket: the second request must fail with 401.
+        let mut persistent = Client::connect(&server);
+        let body = initialize();
+        let same_socket = format!(
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}",
+            bearer_b.as_str(), body.len(), body
+        );
+        persistent.send(&same_socket);
+        assert_eq!(persistent.answer().status, 200);
+        store.lock().unwrap().revoke(agent_b.credential).unwrap();
+        persistent.send(&same_socket);
+        assert_eq!(persistent.answer().status, 401);
+        assert!(persistent.hung_up());
+
+        // A fresh connection with the same revoked token also fails.
+        let revoked = ureq::post(&url)
+            .set("Authorization", &format!("Bearer {}", bearer_b.as_str()))
+            .send_string(&initialize())
+            .unwrap_err();
+        assert_eq!(status(Err(revoked)), Some(401));
+        assert_eq!(
+            ureq::post(&url)
+                .set("Authorization", &format!("Bearer {}", bearer_a.as_str()))
+                .send_string(&initialize())
+                .unwrap()
+                .status(),
+            200
+        );
         server.stop();
     }
 

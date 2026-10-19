@@ -75,6 +75,20 @@ fn parallel_read_member(message: &Value) -> bool {
 }
 
 pub fn handle_message(body: &str, call: ToolCaller<'_>) -> Option<String> {
+    handle_with_scope(body, call, false)
+}
+
+/// A newly authenticated agent has no note, metadata or tool authority until
+/// host-granted vault scoping is implemented and proven. No tool is advertised
+/// or executed in this mode; legacy dispatch is never a fallback.
+pub(crate) fn handle_without_tools(body: &str) -> Option<String> {
+    let never_call = |_name: &str, _args: &Value| -> Result<Value, String> {
+        Err("MCP_AGENT_SCOPE_DENIED".to_owned())
+    };
+    handle_with_scope(body, &never_call, true)
+}
+
+fn handle_with_scope(body: &str, call: ToolCaller<'_>, deny_tools: bool) -> Option<String> {
     let message = match serde_json::from_str::<Value>(body) {
         Ok(value) => value,
         Err(error) => {
@@ -86,22 +100,22 @@ pub fn handle_message(body: &str, call: ToolCaller<'_>) -> Option<String> {
         Value::Array(items) => {
             let responses = items
                 .into_iter()
-                .filter_map(|item| handle_single(item, call))
+                .filter_map(|item| handle_single(item, call, deny_tools))
                 .collect::<Vec<_>>();
             (!responses.is_empty()).then(|| Value::Array(responses).to_string())
         }
-        single => handle_single(single, call).map(|value| value.to_string()),
+        single => handle_single(single, call, deny_tools).map(|value| value.to_string()),
     }
 }
 
-fn handle_single(message: Value, call: ToolCaller<'_>) -> Option<Value> {
+fn handle_single(message: Value, call: ToolCaller<'_>, deny_tools: bool) -> Option<Value> {
     let request = match serde_json::from_value::<RpcRequest>(message) {
         Ok(request) => request,
         Err(error) => return Some(failure(Value::Null, PARSE_ERROR, &error.to_string())),
     };
     let id = request.id.filter(|id| !id.is_null())?;
 
-    Some(match dispatch(&request.method, request.params, call) {
+    Some(match dispatch(&request.method, request.params, call, deny_tools) {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
         Err((code, message)) => failure(id, code, &message),
     })
@@ -111,6 +125,7 @@ fn dispatch(
     method: &str,
     params: Option<Value>,
     call: ToolCaller<'_>,
+    deny_tools: bool,
 ) -> Result<Value, (i32, String)> {
     match method {
         "initialize" => {
@@ -135,12 +150,22 @@ fn dispatch(
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": { "tools": { "listChanged": false } },
                 "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
-                "instructions": tools::INSTRUCTIONS,
+                "instructions": if deny_tools {
+                    "Authenticated MCP agent. No tools are authorized. Request access from the Akula host."
+                } else {
+                    tools::INSTRUCTIONS
+                },
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({ "tools": tools::definitions() })),
+        "tools/list" => {
+            let visible = if deny_tools { Vec::new() } else { tools::definitions() };
+            Ok(json!({ "tools": visible }))
+        }
         "tools/call" => {
+            if deny_tools {
+                return Ok(tool_result(Err("MCP_AGENT_SCOPE_DENIED".to_owned())));
+            }
             let request = serde_json::from_value::<ToolCall>(params.unwrap_or(Value::Null))
                 .map_err(|error| (INVALID_PARAMS, error.to_string()))?;
             Ok(tool_result(call(&request.name, &request.arguments)))
@@ -181,6 +206,42 @@ mod tests {
 
     fn handle(body: &str) -> Option<Value> {
         handle_message(body, &no_tools).map(|value| serde_json::from_str(&value).unwrap())
+    }
+
+    #[test]
+    fn scoped_mode_hides_tool_names_and_denies_every_batched_tool_call() {
+        let body = json!([
+            { "jsonrpc":"2.0", "id":1, "method":"tools/list" },
+            { "jsonrpc":"2.0", "id":2, "method":"tools/call",
+              "params": { "name":"read_note", "arguments": { "workspace":"foreign", "note":"secret.md" } } },
+            { "jsonrpc":"2.0", "id":3, "method":"tools/call",
+              "params": { "name":"list_workspaces" } },
+        ]);
+        let response: Value = serde_json::from_str(
+            &handle_without_tools(&body.to_string()).unwrap()
+        ).unwrap();
+        let replies = response.as_array().unwrap();
+        assert_eq!(replies.len(), 3);
+        assert!(replies[0]["result"]["tools"].as_array().unwrap().is_empty());
+        let initialized: Value = serde_json::from_str(
+            &handle_without_tools(&json!({
+                "jsonrpc": "2.0", "id": 9, "method": "initialize",
+                "params": { "protocolVersion": PROTOCOL_VERSION,
+                            "capabilities": {},
+                            "clientInfo": {"name":"scoped","version":"1.0"} }
+            }).to_string()).unwrap()
+        ).unwrap();
+        let instructions = initialized["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("No tools are authorized"));
+        assert!(!instructions.contains("switch_workspace"));
+
+        for result in [&replies[1], &replies[2]] {
+            assert_eq!(result["result"]["isError"], true);
+            let message = result["result"]["content"][0]["text"].as_str().unwrap();
+            assert_eq!(message, "MCP_AGENT_SCOPE_DENIED");
+            assert!(!message.contains("secret.md"));
+            assert!(!message.contains("foreign"));
+        }
     }
 
     #[test]
