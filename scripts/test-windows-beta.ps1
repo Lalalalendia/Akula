@@ -200,6 +200,15 @@ Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
 Assert-LegacyUntouched
 
+# On the installed executable, reproduce the original crash with a long,
+# windowed Markdown document. The fixture exists only on this disposable runner.
+. (Join-Path $PSScriptRoot 'windows-beta-replace-all.ps1')
+Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData
+if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) {
+  throw 'Long-document paste regression unexpectedly changed the first note'
+}
+Assert-LegacyUntouched
+
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
 if (!(Test-Path $uninstall)) { throw 'Akula uninstaller missing' }
 $removed = Start-Process $uninstall -ArgumentList '/S' -Wait -PassThru
