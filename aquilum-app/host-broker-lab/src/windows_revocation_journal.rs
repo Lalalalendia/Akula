@@ -313,6 +313,46 @@ mod tests {
         assert_eq!(revoke_existing(Path::new(&path), ANCHOR, REPLICA, 0), Ok(1));
     }
 
+    /// Real separate process exits without Rust destructors after a short
+    /// durable write, as a crash-like negative fixture (not a power cut).
+    #[test]
+    fn child_incomplete_record_exit() {
+        let Ok(path) = std::env::var("AKULA_TEST_TORN_JOURNAL") else { return };
+        let mut f = OpenOptions::new().append(true).open(path).unwrap();
+        f.write_all(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee]).unwrap();
+        f.sync_all().unwrap();
+        std::process::exit(79);
+    }
+
+    #[test]
+    fn process_exit_during_incomplete_record_requires_manual_review() {
+        let journal = TempJournal::create("crash");
+        let child = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("windows_revocation_journal::tests::child_incomplete_record_exit")
+            .env("AKULA_TEST_TORN_JOURNAL", &journal.file)
+            .status()
+            .unwrap();
+        assert_eq!(child.code(), Some(79));
+        assert_eq!(current_floor(&journal.file, REPLICA), Err(Hold::CorruptOrTorn));
+        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Err(Hold::CorruptOrTorn));
+    }
+
+    #[test]
+    fn old_valid_snapshot_rollback_is_unprotected_and_must_not_issue_grants() {
+        let journal = TempJournal::create("rollback");
+        let legitimate_old_bytes = std::fs::read(&journal.file).unwrap();
+        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Ok(1));
+        // A powerful attacker who can REPLACE the file between openings
+        // can replay a valid old byte-for-byte snapshot. No checksum/CRC
+        // can recognize this. The returned zero demonstrates a RELEASE
+        // BLOCKER: external installer-protected anti-rollback is required.
+        std::fs::write(&journal.file, legitimate_old_bytes).unwrap();
+        assert_eq!(current_floor(&journal.file, REPLICA), Ok(0));
+        // There is NO access-grant API, so the lowered floor cannot
+        // accidentally become File Gate or P2P publication authority.
+    }
+
     #[test]
     fn two_real_os_processes_cannot_both_commit_one_cas_epoch() {
         let journal = TempJournal::create("race");
