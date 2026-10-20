@@ -62,6 +62,13 @@ impl PublisherPolicyV1 {
         Ok(blake3::hash(&b).to_hex().to_string())
     }
     pub fn epoch(&self) -> u64 { self.epoch }
+
+    // E2b must source read-only publisher authority from the CURRENT
+    // durable policy, never a cached policy from the remote S3 server.
+    #[cfg(feature = "signed-vault-policy-receipt-lab")]
+    pub(crate) fn trusted_publishers(&self) -> (&[[u8; 32]], usize) {
+        (&self.publisher_keys, self.publisher_quorum)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
