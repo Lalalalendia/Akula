@@ -217,8 +217,9 @@ fn service_process_id() -> io::Result<u32> {
     } == 0 {
         return Err(io::Error::last_os_error());
     }
-    if bytes < size_of::<ServiceStatusProcess>() as u32
-        || status.current_state != SERVICE_RUNNING
+    // On success pcbBytesNeeded may not report the structure size.
+    // QueryServiceStatusEx initializes the fixed-size output on success.
+    if status.current_state != SERVICE_RUNNING
         || status.service_type & SERVICE_WIN32_OWN_PROCESS == 0
         || status.process_id == 0
     {
@@ -446,6 +447,9 @@ mod tests {
             )
         }).unwrap();
         let pid = unsafe { GetCurrentProcessId() };
+        // Read the real owner PID from an actual user-created named pipe,
+        // rather than relying only on a mocked PID comparison.
+        assert_eq!(pipe_server_pid(fake.0).unwrap(), pid);
         // CI is ordinarily an unprivileged or interactive admin process.
         // If it is actually SYSTEM (future privileged runner), this unit
         // cannot act as a hostile normal user; do not claim a negative proof.
@@ -479,6 +483,7 @@ mod tests {
                 1, 128, 128, 5000, ptr::null_mut(),
             )
         }).unwrap();
+        assert_eq!(pipe_server_pid(pipe.0).unwrap(), unsafe { GetCurrentProcessId() });
         let wrong_pid = unsafe { GetCurrentProcessId() }.wrapping_add(10_000);
         assert!(verified_process_for_pipe(pipe.0, wrong_pid).is_err());
     }
