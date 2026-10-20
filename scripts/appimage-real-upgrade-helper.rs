@@ -38,7 +38,7 @@ fn check_ci_root(active: &Path) -> Result<PathBuf, String> {
     if canonical.parent() != Some(Path::new("/tmp"))
         || !canonical.file_name().and_then(|n| n.to_str())
             .is_some_and(|n| n.starts_with("akula-release-e2e-"))
-        || parent != canonical
+        || parent != canonical.as_path()
     {
         return Err(hold("only immediate /tmp disposable test directory allowed"));
     }
@@ -51,13 +51,13 @@ fn run() -> Result<(), String> {
         return Err(hold("usage: e2e-helper publish|rollback ABSOLUTE_DISPOSABLE_V1 [V2]"));
     }
     let command = argv[1].to_str().ok_or_else(|| hold("bad mode"))?;
-    let installed = PathBuf::from(&argv[2]);
+    let installed = PathBuf::from(argv[2].clone());
     let root = check_ci_root(&installed)?;
     let gate = Gate::acquire(&installed)?;
     let stage = root.join(format!(".akula-appimage-update.{NONCE}"));
     match command {
         "publish" if argv.len() == 4 => {
-            let candidate = PathBuf::from(&argv[3]);
+            let candidate = PathBuf::from(argv[3].clone());
             if !candidate.is_absolute() || candidate.file_name()
                 .and_then(|n| n.to_str()) != Some("akula-app_0.3.10_x86_64.AppImage")
             {
