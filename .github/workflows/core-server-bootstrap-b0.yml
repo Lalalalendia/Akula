@@ -1,0 +1,45 @@
+name: Akula Bootstrap B0 inert preflight contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/lib.rs"
+      - "aquilum-app/core/src/server_bootstrap_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b0.rs"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0.md"
+      - ".github/workflows/core-server-bootstrap-b0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-bootstrap-b0-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pure-preview-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-server-bootstrap-b0-v1
+          cache-workspace-crates: true
+      - name: Pinned host-key refusal and deterministic dry-run tests
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b0-lab --test server_bootstrap_b0 -- --nocapture
+      - name: Ordinary Core feature set is unchanged
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
