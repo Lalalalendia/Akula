@@ -16,7 +16,7 @@ test('AppImage has an independent explicit Akula packager identity', () => {
   assert.equal(cfg.productName, 'Akula');
   assert.equal(cfg.version, '0.3.9');
   assert.equal(cfg.identifier, 'io.github.lalalendia.akula');
-  assert.equal(cfg.homepage, 'https://github.com/Lalalendia/Akula');
+  assert.equal(cfg.homepage, 'https://github.com/Lalalalendia/Akula');
   assert.deepEqual(cfg.binaries, [{ path: 'akula-app', main: true }]);
   assert.equal(cfg.binariesDir, '../../../.artifacts/cargo-native/release');
   assert.ok(cfg.icons.every((v) => v.startsWith('../icons/')));

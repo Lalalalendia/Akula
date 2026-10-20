@@ -2,7 +2,7 @@
 
 Status: Draft CI-only candidate; NOT a signed or published release.
 
-Depends on accepted RELEASE-LINUX-ID-01 [PR #439](https://github.com/Lalalendia/Akula/pull/439): Linux AppData ID io.github.lalalendia.akula and automatic Aquilum legacy import disabled.
+Depends on accepted RELEASE-LINUX-ID-01 [PR #439](https://github.com/Lalalalendia/Akula/pull/439): Linux AppData ID io.github.lalalendia.akula and automatic Aquilum legacy import disabled.
 
 The existing Cargo.toml [package.metadata.packager] intentionally retains Aquilum fields for historical compatibility and must never be used for Akula packaging. The independent `native/packaging/akula-linux.json` explicitly declares Akula productName, binary akula-app, icon resources, identifier io.github.lalalendia.akula, and immutable-git-SHA gstreamer linuxdeploy plugin URL.
 
