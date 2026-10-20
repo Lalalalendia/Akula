@@ -1029,8 +1029,6 @@ const P0G3D08C_WRITER_CHILD: &str =
     "sync::s3_reserved_replace::tests::p0g3d08c_writer_abort_entrypoint";
 
 fn p0g3d08c_abort_at(workdir: &std::path::Path, stage: &str) -> ! {
-    fs::write(workdir.join("p0g3d08c-crash-marker"), stage)
-        .expect("write independent test-only crash marker");
     if std::env::var("AKULA_P0G3D08D_VM_PAUSE").as_deref() == Ok("1") {
         // Only the final V8 seam is authorized for this first Linux VM lab.
         // The host receives this marker over live SSH stdout and force-kills
@@ -1044,6 +1042,11 @@ fn p0g3d08c_abort_at(workdir: &std::path::Path, stage: &str) -> ! {
             std::thread::park();
         }
     }
+    // Ordinary #444 process-crash tests retain their disposable disk marker.
+    // The VM mode above must perform ZERO guest-disk writes after V8 before
+    // the external QEMU kill; only the host owns the live marker.
+    fs::write(workdir.join("p0g3d08c-crash-marker"), stage)
+        .expect("write independent test-only crash marker");
     std::process::abort();
 }
 
