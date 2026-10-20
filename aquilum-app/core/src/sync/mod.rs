@@ -180,6 +180,11 @@ pub use s3_join_genesis_lab::{
     review_offline_join_genesis, IndependentlyApprovedJoin, JoinGenesisError,
     JoinGenesisReview, JOIN_GENESIS_TYPE,
 };
+#[cfg(feature = "signed-vault-pinned-join-lab")]
+pub use s3_join_pinned_lab::{
+    inspect_pinned_join_receipt, preview_yandex_join_genesis_read_only,
+    PinnedJoinError, PinnedJoinReadOnlyObservation,
+};
 #[cfg(feature = "signed-vault-policy-lab")]
 pub use s3_publisher_policy_lab::{
     verify_policy_transition, PolicyLabError, PolicyTransitionObservation,
