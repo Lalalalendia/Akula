@@ -46,6 +46,7 @@ echo 'AKULA_APPIMAGE_STRUCTURE_PASS apprun=1 own_bin=1 own_desktop=1 upstream_pa
 # Optional second real version is created only by the isolated signed-staging
 # PR job. Its absence in normal beta builds is not an E2E success.
 e2e_args=()
+e2e_lock_digest=""
 if [[ -d "$PWD/dist/e2e-v2" ]]; then
   v2="$PWD/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage"
   helper="$PWD/dist/e2e-v2/transaction-helper"
@@ -54,6 +55,15 @@ if [[ -d "$PWD/dist/e2e-v2" ]]; then
     exit 1
   }
   e2e_args=("/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage" "/dist/e2e-v2/transaction-helper")
+  [[ -s "$PWD/dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt" ]] || {
+    echo 'CI-only v2 lockfile provenance missing' >&2
+    exit 1
+  }
+  e2e_lock_digest="$(cat "$PWD/dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt")"
+  [[ "$e2e_lock_digest" =~ ^[a-f0-9]{64}$ ]] || {
+    echo 'CI-only lockfile digest malformed' >&2
+    exit 1
+  }
 fi
 
 # The AppImage is executed in an isolated Docker root FS with isolated
@@ -63,6 +73,7 @@ fi
 # pipefail preserves container exit failures when output is captured by tee.
 docker run --rm -i \
   -e GITHUB_ACTIONS=true -e AKULA_DISPOSABLE_UPDATE_LAB=1 \
+  -e AKULA_E2E_SOURCE_COMMIT="${GITHUB_SHA:-}" -e AKULA_E2E_LOCK_SHA256="$e2e_lock_digest" \
   -v "$PWD/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" \
   ubuntu:22.04 bash -s -- "/dist/$(basename "$image")" "${e2e_args[@]}" <<'UBUNTU' | tee "$container_log"
 set -euo pipefail
