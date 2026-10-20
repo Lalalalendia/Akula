@@ -98,15 +98,13 @@ pub fn supported() -> bool {
 
 #[cfg(target_os = "linux")]
 pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let image = appimage().ok_or("обновление поддерживается только для AppImage")?;
-    let fresh = image.with_extension("update");
-    std::fs::write(&fresh, payload).map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-    before_exit();
-    std::fs::rename(&fresh, &image).map_err(|e| e.to_string())?;
-    let _ = std::process::Command::new(&image).spawn();
-    std::process::exit(0);
+    // Direct in-place rename destroyed the previous AppImage before the new
+    // generation could prove a healthy startup. All Linux update entrypoints
+    // now share the native transaction module's explicit fail-closed gate.
+    // Even a mistaken future channel_ready() enablement cannot re-enable
+    // the old overwrite. The crash-tested state machine is compiled into
+    // the app, but production signing evidence + first-render ACK are HOLD.
+    super::linux_transaction::guarded_runtime_apply(payload, before_exit)
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

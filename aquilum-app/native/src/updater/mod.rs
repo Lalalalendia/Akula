@@ -1,6 +1,9 @@
 mod apply;
 mod download_guard;
 mod release;
+#[cfg(target_os = "linux")]
+#[allow(dead_code)] // Transaction primitives compile; publisher/GUI ACK admission remains HOLD.
+mod linux_transaction;
 #[cfg(target_os = "macos")]
 mod tar;
 #[cfg(any(target_os = "macos", all(test, target_os = "linux")))]

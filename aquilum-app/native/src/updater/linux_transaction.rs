@@ -1,7 +1,7 @@
-//! RELEASE-LINUX-ROLLBACK-01: inert, cooperative Linux AppImage filesystem lab.
-//! This file is deliberately NOT linked into the shipped updater.
-//! It proves cross-process SIGKILL recovery on real rename/fsync operations,
-//! not publisher identity, power-loss durability, or a production startup ACK.
+//! RELEASE-LINUX-RUNTIME-GATE-01: Linux AppImage transaction engine, compiled
+//! with the native updater but intentionally denied release admission.
+//! Tested with real cross-process SIGKILL rename/fsync recovery. It does not
+//! establish publisher identity, power-loss durability or a real GUI startup ACK.
 #![cfg(target_os = "linux")]
 
 use std::ffi::OsStr;
@@ -267,6 +267,20 @@ impl Gate {
     }
 }
 
+
+/** The shipped Linux updater must not mutate user files until it has both a
+ * production publisher-bound signed admission and a generation-specific GUI
+ * startup acknowledgement protocol. Neither is provided yet.
+ *
+ * This deliberately callable runtime entrypoint is what apply.rs invokes.
+ * Its refusal occurs before shutdown, lock acquisition, staging or renames.
+ * The transaction engine below is compiled but has no live admission path.
+ */
+pub(crate) fn guarded_runtime_apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
+    let _ = (payload, before_exit);
+    Err(bad("signed Akula candidate admission and first-render ACK are not approved"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +325,17 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+
+    #[test]
+    fn guarded_runtime_apply_refuses_payload_before_shutdown() {
+        let mut shutdown_called = false;
+        let failure = guarded_runtime_apply(b"forged unsigned update", || {
+            shutdown_called = true;
+        }).unwrap_err();
+        assert!(failure.contains("HOLD"));
+        assert!(!shutdown_called, "refusal must happen before shutdown or writes");
     }
 
     #[test]
@@ -426,10 +451,16 @@ mod tests {
         let list = Command::new(&exe).arg("--list").output().unwrap();
         assert!(list.status.success());
         let listing = String::from_utf8_lossy(&list.stdout);
+        // Select only the helper from THIS module. The macOS transaction
+        // harness registers another helper with the same short name.
+        let suite = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest);
+        let exact = format!("{suite}::child_crash_at_transaction_boundary");
         let helper = listing.lines()
             .filter_map(|line| line.strip_suffix(": test"))
-            .find(|name| name.ends_with("::child_crash_at_transaction_boundary"))
-            .unwrap();
+            .find(|name| *name == exact.as_str())
+            .expect("this Linux crash subprocess helper was not registered");
         let mut child = Command::new(exe)
             .arg("--exact").arg(helper).arg("--nocapture")
             .env("AKULA_LINUX_CRASH_PHASE", phase)

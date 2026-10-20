@@ -26,3 +26,15 @@ fn disabled_update_channel_never_starts_network_work() {
     updater.install();
     assert_eq!(updater.status(), Status::Idle);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn installed_linux_apply_refuses_unauthorized_bytes_without_shutdown() {
+    let mut shutdown_called = false;
+    let result = super::apply(b"untrusted fake AppImage", || {
+        shutdown_called = true;
+    });
+    let error = result.unwrap_err();
+    assert!(error.contains("HOLD"), "Linux apply must refuse absent publisher and GUI ACK");
+    assert!(!shutdown_called, "Linux apply cannot stop Akula before trusted admission");
+}
