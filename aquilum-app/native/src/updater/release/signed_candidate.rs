@@ -483,10 +483,51 @@ mod tests {
         assert!(error.contains("authentication failed"), "{error}");
 
         let error = admit_with_trusted_key(
-            &manifest, &signature, payload, &key,
+            &manifest, &signature, payload.clone(), &key,
             TARGET_LINUX_APPIMAGE, "0.3.10",
         ).unwrap_err();
         assert!(error.contains("not strictly newer"), "{error}");
+
+        #[cfg(target_os = "linux")]
+        {
+            // A real ephemeral Minisign signature is the *only* positive
+            // source for this sealed candidate; stage its exact bytes on
+            // Linux under a genuine flock and rehash the written inode.
+            let installation = root.join("signed-stage-fixture");
+            fs::create_dir(&installation).unwrap();
+            let active = installation.join("akula-app_0.3.9_x86_64.AppImage");
+            let unrelated = installation.join("Aquilum.AppImage");
+            let old = b"old installed Akula, never overwritten during staging";
+            let sentinel = b"pre-existing Aquilum bytes: do not mutate";
+            fs::write(&active, old).unwrap();
+            fs::write(&unrelated, sentinel).unwrap();
+
+            let lease = crate::updater::linux_signed_stage::stage_verified_for_test(
+                &active, "0123456789abcdef0123456789abcdef", candidate,
+            ).expect("exact signed bytes must be admitted to a locked stage");
+            assert_eq!(lease.version(), "0.3.10");
+            assert_eq!(lease.source_commit(), "a".repeat(40));
+            assert_eq!(lease.digest(), digest_hex(&payload));
+            lease.rehash().expect("disk inode must still match signed candidate");
+            let staged = lease.stage_path().join("candidate.AppImage");
+            assert_eq!(fs::read(&staged).unwrap(), payload);
+            assert_eq!(fs::read(&active).unwrap(), old);
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+
+            let mut damaged = payload.clone();
+            damaged[0] ^= 1;
+            fs::write(&staged, &damaged).unwrap();
+            assert!(lease.rehash().unwrap_err().contains("staged disk bytes"));
+            assert_eq!(fs::read(&active).unwrap(), old);
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+
+            fs::remove_file(&staged).unwrap();
+            std::os::unix::fs::symlink(&unrelated, &staged).unwrap();
+            assert!(lease.rehash().is_err(), "symlink must fail closed");
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+            drop(lease);
+            println!("AKULA_SIGNED_LINUX_STAGE_PASS real_minisign=1 fsync=1 disk_sha256=1 tamper_hold=1 aquilum_intact=1");
+        }
     }
 
     #[test]
