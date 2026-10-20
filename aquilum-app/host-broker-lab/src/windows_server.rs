@@ -68,8 +68,20 @@ extern "system" {
         attributes: *const SecurityAttributes,
     ) -> Handle;
     fn ConnectNamedPipe(handle: Handle, overlapped: Handle) -> i32;
-    fn ReadFile(handle: Handle, output: *mut c_void, size: u32, read: *mut u32, overlapped: Handle) -> i32;
-    fn WriteFile(handle: Handle, input: *const c_void, size: u32, written: *mut u32, overlapped: Handle) -> i32;
+    fn ReadFile(
+        handle: Handle,
+        output: *mut c_void,
+        size: u32,
+        read: *mut u32,
+        overlapped: Handle,
+    ) -> i32;
+    fn WriteFile(
+        handle: Handle,
+        input: *const c_void,
+        size: u32,
+        written: *mut u32,
+        overlapped: Handle,
+    ) -> i32;
     fn FlushFileBuffers(handle: Handle) -> i32;
     fn DisconnectNamedPipe(handle: Handle) -> i32;
 }
@@ -78,7 +90,13 @@ extern "system" {
 extern "system" {
     fn OpenProcessToken(process: Handle, access: u32, result: *mut Handle) -> i32;
     fn OpenThreadToken(thread: Handle, access: u32, open_as_self: i32, result: *mut Handle) -> i32;
-    fn GetTokenInformation(token: Handle, info_class: u32, output: Handle, size: u32, required: *mut u32) -> i32;
+    fn GetTokenInformation(
+        token: Handle,
+        info_class: u32,
+        output: Handle,
+        size: u32,
+        required: *mut u32,
+    ) -> i32;
     fn IsValidSid(sid: Handle) -> i32;
     fn EqualSid(left: Handle, right: Handle) -> i32;
     fn CreateWellKnownSid(kind: u32, domain: Handle, output: Handle, size: *mut u32) -> i32;
@@ -132,7 +150,10 @@ fn denied(message: &str) -> io::Error {
 }
 
 fn wide(text: &str) -> Vec<u16> {
-    std::ffi::OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect()
+    std::ffi::OsStr::new(text)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 fn token_user_sid_is_system(token: Handle) -> io::Result<bool> {
@@ -148,10 +169,14 @@ fn token_user_sid_is_system(token: Handle) -> io::Result<bool> {
     let mut storage = vec![0usize; words];
     if unsafe {
         GetTokenInformation(
-            token, TOKEN_USER_CLASS, storage.as_mut_ptr().cast(),
-            (words * size_of::<usize>()) as u32, &mut bytes
+            token,
+            TOKEN_USER_CLASS,
+            storage.as_mut_ptr().cast(),
+            (words * size_of::<usize>()) as u32,
+            &mut bytes,
         )
-    } == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: A successful TokenUser query initialized the aligned header.
@@ -163,9 +188,13 @@ fn token_user_sid_is_system(token: Handle) -> io::Result<bool> {
     let mut sid_bytes = (system.len() * size_of::<usize>()) as u32;
     if unsafe {
         CreateWellKnownSid(
-            WIN_LOCAL_SYSTEM_SID, ptr::null_mut(), system.as_mut_ptr().cast(), &mut sid_bytes
+            WIN_LOCAL_SYSTEM_SID,
+            ptr::null_mut(),
+            system.as_mut_ptr().cast(),
+            &mut sid_bytes,
         )
-    } == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     Ok(unsafe { EqualSid(user_sid, system.as_mut_ptr().cast()) } != 0)
@@ -178,7 +207,9 @@ fn require_system_service_identity() -> io::Result<()> {
     }
     let token = OwnedHandle::new(token)?;
     if !token_user_sid_is_system(token.0)? {
-        return Err(denied("probe requires a pre-existing LocalSystem service identity"));
+        return Err(denied(
+            "probe requires a pre-existing LocalSystem service identity",
+        ));
     }
     Ok(())
 }
@@ -218,9 +249,13 @@ pub fn run_one_denied_connection() -> io::Result<()> {
     let mut raw_descriptor = ptr::null_mut();
     if unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl.as_ptr(), 1, &mut raw_descriptor, ptr::null_mut()
+            sddl.as_ptr(),
+            1,
+            &mut raw_descriptor,
+            ptr::null_mut(),
         )
-    } == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     let descriptor = OwnedSecurityDescriptor(raw_descriptor);
@@ -235,7 +270,11 @@ pub fn run_one_denied_connection() -> io::Result<()> {
             name.as_ptr(),
             PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_REJECT_REMOTE_CLIENTS,
-            1, 512, 512, 5000, &attributes,
+            1,
+            512,
+            512,
+            5000,
+            &attributes,
         )
     })?;
 
@@ -250,21 +289,32 @@ pub fn run_one_denied_connection() -> io::Result<()> {
         // A message longer than 32 bytes yields ERROR_MORE_DATA and is denied.
         if unsafe {
             ReadFile(
-                pipe.0, input.as_mut_ptr().cast(), REQUEST_BYTES as u32,
-                &mut count, ptr::null_mut()
+                pipe.0,
+                input.as_mut_ptr().cast(),
+                REQUEST_BYTES as u32,
+                &mut count,
+                ptr::null_mut(),
             )
-        } == 0 {
-            return Err(denied("broker probe refused oversized or unreadable message"));
+        } == 0
+        {
+            return Err(denied(
+                "broker probe refused oversized or unreadable message",
+            ));
         }
         observe_client_token_after_message(pipe.0)?;
         let response = deny_frame(&input[..count as usize]);
         let mut written = 0u32;
         if unsafe {
             WriteFile(
-                pipe.0, response.as_ptr().cast(),
-                response.len() as u32, &mut written, ptr::null_mut()
+                pipe.0,
+                response.as_ptr().cast(),
+                response.len() as u32,
+                &mut written,
+                ptr::null_mut(),
             )
-        } == 0 || written as usize != response.len() {
+        } == 0
+            || written as usize != response.len()
+        {
             return Err(io::Error::last_os_error());
         }
         unsafe { FlushFileBuffers(pipe.0) };
