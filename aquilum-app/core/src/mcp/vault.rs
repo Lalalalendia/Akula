@@ -1,3 +1,5 @@
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use crate::app_core::Core;
 use crate::search::paths::{markdown_files, relative_slash_path, strip_root};
@@ -75,14 +77,18 @@ impl Vault {
 
     pub fn note_path(&self, input: &str) -> Result<PathBuf, String> {
         let path = self.any_path(input)?;
-        Ok(match path.extension() {
+        let path = match path.extension() {
             Some(extension) if extension.eq_ignore_ascii_case("md") => path,
             _ => {
                 let mut value = path.into_os_string();
                 value.push(".md");
                 PathBuf::from(value)
             }
-        })
+        };
+        // The actual .md target matters: checking just the extensionless
+        // input would miss an existing final-component symbolic link.
+        self.check_existing_components(&path)?;
+        Ok(path)
     }
 
     pub fn folder(&self, input: &str) -> Result<PathBuf, String> {
@@ -115,6 +121,11 @@ impl Vault {
             return Err(format!("Путь должен быть внутри базы знаний: {input}"));
         }
         if Path::new(trimmed).is_absolute() {
+            // A nonexistent ancestor can make canonical_path fall back to the
+            // original lexical path. Never accept unresolved ".." in that case.
+            if Path::new(trimmed).components().any(|part| part == Component::ParentDir) {
+                return Err(format!("Путь должен быть внутри базы знаний: {input}"));
+            }
             let path = crate::search::paths::canonical_path(Path::new(trimmed));
             return self.ensure_inside(path);
         }
@@ -129,7 +140,39 @@ impl Vault {
         if relative.as_os_str().is_empty() {
             return Err("Пустой путь".to_owned());
         }
-        Ok(self.root.join(relative))
+        let candidate = self.root.join(relative);
+        self.check_existing_components(&candidate)?;
+        Ok(candidate)
+    }
+
+    // This denies known symlink/reparse traversal in MCP path resolution,
+    // including ancestors of as-yet-uncreated notes. It is a preflight only:
+    // a hostile local process can still race a later filesystem open.
+    fn check_existing_components(&self, path: &Path) -> Result<(), String> {
+        let relative = path.strip_prefix(&self.root)
+            .map_err(|_| format!("Путь вне базы знаний: {}", path.display()))?;
+        let mut current = self.root.clone();
+        for component in relative.components() {
+            let Component::Normal(name) = component else {
+                return Err(format!("Недопустимый путь: {}", path.display()));
+            };
+            current.push(name);
+            match fs::symlink_metadata(&current) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink() || windows_reparse_point(&metadata) {
+                        return Err(format!(
+                            "Символическая ссылка или reparse point запрещены в MCP: {}",
+                            current.display()
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => break,
+                Err(error) => {
+                    return Err(format!("Нельзя проверить путь {}: {error}", current.display()));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn ensure_inside(&self, path: PathBuf) -> Result<PathBuf, String> {
@@ -152,6 +195,18 @@ impl Vault {
             .filter(|path| Self::title(path).to_lowercase() == needle)
             .collect()
     }
+}
+
+#[cfg(windows)]
+fn windows_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn windows_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
 }
 
 fn is_windows_absolute_path(value: &str) -> bool {
@@ -208,6 +263,8 @@ mod tests {
         assert!(vault.note_path(r"\\server\share\secrets.md").is_err());
         assert!(vault.note_path(r"\Windows\system.ini").is_err());
         assert!(vault.note_path("/etc/passwd").is_err());
+        let unresolved_parent = vault.root.join("missing/../../../outside.md");
+        assert!(vault.note_path(&unresolved_parent.to_string_lossy()).is_err());
     }
 
     #[test]
@@ -258,6 +315,79 @@ mod tests {
             "точный путь остаётся однозначным"
         );
         assert!(vault.note("Aquilum").is_err(), "по названию два кандидата");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn denies_existing_symlink_files_and_parent_directories() {
+        use std::os::unix::fs::symlink;
+
+        let (_guard, vault) = vault();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secrets.md");
+        fs::write(&secret, "private, never available to the MCP tool").unwrap();
+        symlink(&secret, vault.root.join("Escape.md")).unwrap();
+        symlink(outside.path(), vault.root.join("External")).unwrap();
+        symlink(vault.root.join("Идея.md"), vault.root.join("Alias.md")).unwrap();
+
+        assert!(vault.note("Escape.md").is_err());
+        assert!(vault.note("Escape").is_err());
+        assert!(vault.note_path("Escape.md").is_err());
+        assert!(vault.note_path("External/new.md").is_err());
+        assert!(vault.folder("External").is_err());
+        assert!(vault.note("Alias.md").is_err(), "in-vault aliases also bypass path identity");
+        assert_eq!(fs::read_to_string(&secret).unwrap(), "private, never available to the MCP tool");
+        assert_eq!(fs::read_to_string(vault.root.join("Идея.md")).unwrap(), "другая");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn denies_windows_junction_reparse_point_without_skipping() {
+        use std::process::Command;
+
+        let (_guard, vault) = vault();
+        let outside = tempfile::tempdir().unwrap();
+        let junction = vault.root.join("Junction");
+        let escape_ps = |value: &std::path::Path| {
+            value.to_string_lossy().replace('\'', "''")
+        };
+        let script = format!(
+            "New-Item -ItemType Junction -Path '{}' -Target '{}' -ErrorAction Stop | Out-Null",
+            escape_ps(&junction),
+            escape_ps(outside.path())
+        );
+        let created = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .expect("PowerShell is required to test Windows junctions");
+        assert!(
+            created.status.success(),
+            "junction creation failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&created.stdout),
+            String::from_utf8_lossy(&created.stderr)
+        );
+        let metadata = fs::symlink_metadata(&junction).unwrap();
+        assert!(
+            super::windows_reparse_point(&metadata),
+            "test did not produce a real Windows reparse point"
+        );
+        assert!(vault.folder("Junction").is_err());
+        assert!(vault.note_path("Junction/new.md").is_err());
+        fs::remove_dir(&junction).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn denies_windows_symbolic_directory_when_test_host_allows_creation() {
+        let (_guard, vault) = vault();
+        let outside = tempfile::tempdir().unwrap();
+        let parent = vault.root.join("External");
+        if let Err(error) = std::os::windows::fs::symlink_dir(outside.path(), &parent) {
+            eprintln!("Windows symlink creation unavailable on this CI host: {error}");
+            return;
+        }
+        assert!(vault.folder("External").is_err());
+        assert!(vault.note_path("External/new.md").is_err());
     }
 
     #[test]

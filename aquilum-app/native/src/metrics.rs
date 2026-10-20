@@ -18,6 +18,8 @@ pub struct Metrics {
     total: Vec<f64>,
     #[cfg(not(feature = "installed"))]
     live: Option<Live>,
+    #[cfg(not(feature = "installed"))]
+    stage_samples: Vec<crate::render::StageSample>,
 }
 
 #[cfg(not(feature = "installed"))]
@@ -89,6 +91,11 @@ impl Metrics {
     }
 
     #[cfg(not(feature = "installed"))]
+    pub fn record_stage(&mut self, stage: crate::render::StageSample) {
+        self.stage_samples.push(stage);
+    }
+
+    #[cfg(not(feature = "installed"))]
     pub fn toggle_live(&mut self) {
         self.live = if self.live.is_some() { None } else { Some(Live::default()) };
     }
@@ -103,7 +110,7 @@ impl Metrics {
 
     pub fn write(&self) {
         let Some(path) = &self.path else { return };
-        let json = format!(
+        let mut json = format!(
             concat!(
                 "{{\"threads\":{},\"scaleFactor\":{},\"windowCreatedMs\":{:.1},\"firstFrameMs\":{:.1},",
                 "\"frames\":{},\"animTicks\":{},\"rasterAvgMs\":{:.2},\"rasterP95Ms\":{:.2},",
@@ -120,6 +127,35 @@ impl Metrics {
             crate::stats::mean(&self.total),
             crate::stats::percentiles(&self.total, [0.95])[0],
         );
+        // Developer-only, explicit diagnostic. Keep the historical summary
+        // JSON byte-for-byte identical for installed builds and ordinary users.
+        // The per-frame vectors are already collected when --metrics is set;
+        // this adds no per-frame work, only a small JSON suffix on final write.
+        #[cfg(not(feature = "installed"))]
+        if std::env::var("AKULA_EXPERIMENTAL_FRAME_SAMPLES").ok().as_deref() == Some("1") {
+            if let (Ok(raster), Ok(frame)) = (
+                serde_json::to_string(&self.raster),
+                serde_json::to_string(&self.total),
+            ) {
+                debug_assert!(json.ends_with('}'));
+                json.pop();
+                json.push_str(&format!(
+                    ",\"rasterSamplesMs\":{raster},\"frameSamplesMs\":{frame}}}"
+                ));
+            }
+        }
+        #[cfg(not(feature = "installed"))]
+        if !self.stage_samples.is_empty() {
+            assert_eq!(self.stage_samples.len(), self.frames as usize,
+                "diagnostic stage collection must include every frame, even the first");
+            let stages = serde_json::to_string(&self.stage_samples)
+                .expect("finite whole-process renderer stages");
+            debug_assert!(json.ends_with('}'));
+            json.pop();
+            json.push_str(",\"frameStages\":");
+            json.push_str(&stages);
+            json.push('}');
+        }
         if let Err(e) = std::fs::write(path, &json) {
             eprintln!("не удалось записать замеры в {}: {e}", path.display());
         }

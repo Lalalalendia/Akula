@@ -1,0 +1,66 @@
+name: Akula Node D2 scoped multi-document read integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/lib.rs'
+      - 'aquilum-app/core/src/node_catalog_lab.rs'
+      - 'aquilum-app/core/src/bin/akula_node_lab.rs'
+      - 'aquilum-app/core/tests/headless_node_d1.rs'
+      - 'aquilum-app/core/tests/headless_node_d2.rs'
+      - 'aquilum-app/core/tests/node_catalog_lab.rs'
+      - 'docs/platforms/AKULA-DEPLOY-D2-STAGING.md'
+      - '.github/workflows/core-node-d2-scoped-read.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-deploy-d2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-d2-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-deploy-d2-integration-v1
+          cache-workspace-crates: true
+      - name: Verify D2 opt-in Linux-only server build
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+      - name: Verify original D1 network failure tests
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-lab --test headless_node_d1 -- --nocapture
+      - name: Verify original D1.5 pinned catalog with typed VaultId
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-catalog-lab --test node_catalog_lab -- --nocapture
+      - name: Verify real HTTP scope and multi-file bounded requests
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-lab --test headless_node_d2 -- --nocapture
+      - name: Verify ordinary GUI-free Core without experimental features
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features

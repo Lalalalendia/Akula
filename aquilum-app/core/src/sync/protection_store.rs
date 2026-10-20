@@ -129,6 +129,32 @@ impl SqliteProtectionStore {
         Ok(Self { connection, database_path })
     }
 
+    /// Read a previously committed protected original after a cold restart.
+    /// Never create or migrate an app-data database from a recovery/UI read.
+    /// This object does not grant File Gate, S3 apply, or baseline authority.
+    pub(crate) fn open_existing_read_only(
+        app_data_database: &Path,
+    ) -> ProtectionResult<Self> {
+        let connection = Connection::open_with_flags(
+            app_data_database,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 250;",
+        )?;
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        )?;
+        if version != SCHEMA_VERSION {
+            return Err(ProtectionStoreError::UnsupportedSchema(version));
+        }
+        let database_path = std::fs::canonicalize(app_data_database)?;
+        Ok(Self { connection, database_path })
+    }
+
     pub(crate) fn database_path(&self) -> &Path {
         &self.database_path
     }
@@ -573,5 +599,72 @@ mod tests {
             ),
             Err(ProtectionStoreError::CorruptedRecord)
         ));
+
+    }
+
+    #[test]
+    fn cold_open_existing_original_is_read_only_and_survives_reopen() {
+        let tmp = tempfile::tempdir().unwrap();
+        let database = tmp.path().join("cold.sqlite");
+        let operation = OperationId::new();
+        let original = b"original bytes for recovery";
+        let hash = blake3::hash(original).to_hex().to_string();
+        let root = opened_id(15, 17);
+        let source = opened_id(15, 19);
+        {
+            let mut writer = SqliteProtectionStore::open(&database).unwrap();
+            writer.store_bound_preimage(
+                operation, &path("folder/a.md"), &hash, original, root, source,
+            ).unwrap();
+        }
+
+        let cold = SqliteProtectionStore::open_existing_read_only(&database).unwrap();
+        let kept = cold.read_bound_preimage(operation).unwrap().unwrap();
+        assert_eq!(kept.original.bytes, original);
+        assert_eq!(kept.original.content_hash, hash);
+        assert_eq!(kept.root, root);
+        assert_eq!(kept.file, source);
+        assert!(cold.connection.execute(
+            "DELETE FROM protected_originals WHERE operation_id = ?1",
+            [operation.to_string()],
+        ).is_err(), "a cold read must not delete protected original");
+        let again = SqliteProtectionStore::open_existing_read_only(&database).unwrap();
+        assert!(again.read_bound_preimage(operation).unwrap().is_some());
+    }
+
+    #[test]
+    fn cold_open_missing_or_legacy_schema_must_not_create_or_migrate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("not-created.sqlite");
+        assert!(SqliteProtectionStore::open_existing_read_only(&missing).is_err());
+        assert!(!missing.exists(), "read-only recovery created an evidence file");
+
+        let legacy = tmp.path().join("legacy-v1.sqlite");
+        let connection = Connection::open(&legacy).unwrap();
+        connection.execute_batch(
+            "PRAGMA user_version = 1;
+             CREATE TABLE protected_originals (
+                 operation_id TEXT PRIMARY KEY NOT NULL,
+                 relative_path TEXT NOT NULL,
+                 content_hash TEXT NOT NULL,
+                 byte_length INTEGER NOT NULL,
+                 original_bytes BLOB NOT NULL
+             );",
+        ).unwrap();
+        drop(connection);
+        assert!(matches!(
+            SqliteProtectionStore::open_existing_read_only(&legacy),
+            Err(ProtectionStoreError::UnsupportedSchema(1))
+        ));
+        let connection = Connection::open(&legacy).unwrap();
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(version, 1);
+        let migrated: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='bound_preimages'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(migrated, 0);
     }
 }

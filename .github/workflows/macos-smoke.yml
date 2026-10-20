@@ -22,6 +22,7 @@ permissions:
 
 jobs:
   launch:
+    if: ${{ false }} # MAC-HOLD-01: macOS smoke is frozen
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}

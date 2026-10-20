@@ -1,5 +1,7 @@
 #[cfg(test)]
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(any(test, not(feature = "installed")))]
+use std::time::Instant;
 
 use masonry::app::VisualLayerPlan;
 use masonry::kurbo::Rect;
@@ -33,6 +35,14 @@ impl Renderer {
     }
 
     pub(super) fn paint(&mut self, layers: &VisualLayerPlan, full: bool, canvas: &mut dyn Canvas, seconds: f64) -> Result<Vec<Area>, PaintError> {
+        #[cfg(not(feature = "installed"))]
+        let stage_on = super::stages_enabled();
+        #[cfg(not(feature = "installed"))]
+        let mut stage = super::StageSample::default();
+        #[cfg(not(feature = "installed"))]
+        {
+            self.last_diagnostic_stages = super::StageSample::default();
+        }
         let Some((width, height, scale, _)) = self.params else {
             self.lift_sprites(canvas, &[]);
             return Ok(Vec::new());
@@ -100,6 +110,16 @@ impl Renderer {
         let bounds = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let layers = self.tracker.live.iter().filter_map(|&(id, rect, transform, shape)| Some(Layer { id, area: area_of(rect, bounds)?, transform, shape })).collect();
         self.refresh_live(layers, &mut damage, full, seconds);
+        #[cfg(not(feature = "installed"))]
+        if stage_on {
+            // Damage can contain overlapping rectangles. Count scheduled
+            // raster work, not distinct screen coverage.
+            stage.raster_pixels = damage.areas.iter()
+                .map(|&(_, _, w, h)| u64::from(w) * u64::from(h)).sum();
+            stage.shifted_pixels = damage.moves.iter()
+                .map(|m| u64::from(m.w) * u64::from(m.h)).sum();
+            stage.raster_rects = damage.areas.len();
+        }
         #[cfg(test)]
         {
             // Measure the *final* scheduled raster and row-shift workload.
@@ -136,6 +156,8 @@ impl Renderer {
         let painter = &mut self.painter;
         painter.seconds = seconds;
         painter.route_for_damage(&damage.areas);
+        #[cfg(not(feature = "installed"))]
+        let mip_before = stage_on.then(|| painter.mip_diagnostic_counters());
         let mut result = Ok(());
         #[cfg(test)]
         let mut encoding = Duration::ZERO;
@@ -148,18 +170,30 @@ impl Renderer {
         #[cfg(test)]
         let mut rasterizing = Duration::ZERO;
         canvas.with_target(&mut |Target { pixels, width, height }| {
+            #[cfg(not(feature = "installed"))]
+            let shift_started = stage_on.then(Instant::now);
             for shift in &damage.moves {
                 let _zone = aq_trace::zone("сдвиг прокрутки");
                 crate::render::scroll::shift_rows(pixels, usize::from(width), *shift);
             }
-            for &(x, y, w, h) in &damage.areas {
+            #[cfg(not(feature = "installed"))]
+            if let Some(start) = shift_started {
+                stage.scroll_shift_ms += start.elapsed().as_secs_f64() * 1000.0;
+            }
+            for (region_index, &(x, y, w, h)) in damage.areas.iter().enumerate() {
                 #[cfg(test)]
                 let encoding_started = Instant::now();
+                #[cfg(not(feature = "installed"))]
+                let stage_encoding_started = stage_on.then(Instant::now);
                 {
                     let _zone = aq_trace::zone("кодирование");
                     #[cfg(test)]
                     let reset_started = Instant::now();
-                    painter.begin(x, y, w, h);
+                    if region_index == 0 {
+                        painter.begin(x, y, w, h);
+                    } else {
+                        painter.begin_region(x, y, w, h);
+                    }
                     #[cfg(test)]
                     {
                         reset_time += reset_started.elapsed();
@@ -186,8 +220,14 @@ impl Renderer {
                 {
                     encoding += encoding_started.elapsed();
                 }
+                #[cfg(not(feature = "installed"))]
+                if let Some(start) = stage_encoding_started {
+                    stage.encode_ms += start.elapsed().as_secs_f64() * 1000.0;
+                }
                 #[cfg(test)]
                 let raster_started = Instant::now();
+                #[cfg(not(feature = "installed"))]
+                let stage_raster_started = stage_on.then(Instant::now);
                 let _zone = aq_trace::zone("растеризация");
                 let pixmap = PixmapMut::new(width, height, bytemuck::cast_slice_mut(&mut *pixels)).expect("холст вывода");
                 let settings = RasterizerSettings { target_init: TargetInit::SrcOver, pixel_format: PixelFormat::Bgra8, offset: (x, y) };
@@ -196,8 +236,20 @@ impl Renderer {
                 {
                     rasterizing += raster_started.elapsed();
                 }
+                #[cfg(not(feature = "installed"))]
+                if let Some(start) = stage_raster_started {
+                    stage.vello_ms += start.elapsed().as_secs_f64() * 1000.0;
+                }
             }
         });
+        #[cfg(not(feature = "installed"))]
+        if let Some((before_ns, before_hits, before_generated)) = mip_before {
+            let (after_ns, after_hits, after_generated) = painter.mip_diagnostic_counters();
+            stage.mip_build_ms = after_ns.saturating_sub(before_ns) as f64 / 1_000_000.0;
+            stage.mip_hits = after_hits.saturating_sub(before_hits);
+            stage.mip_generated = after_generated.saturating_sub(before_generated);
+            self.last_diagnostic_stages = stage;
+        }
         #[cfg(test)]
         {
             stages.encode = encoding;

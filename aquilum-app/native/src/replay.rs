@@ -30,6 +30,8 @@ pub struct Replay {
     next: Option<Instant>,
     presents: Vec<Instant>,
     work: Vec<f64>,
+    // Developer-only stage samples, one per presented replay frame.
+    stages: Vec<crate::render::StageSample>,
 }
 
 impl Replay {
@@ -40,7 +42,7 @@ impl Replay {
             Kind::Graph => 20.0,
             Kind::Focus => FOCUS_SECONDS * 2.0,
         };
-        Replay { kind, length: Duration::from_secs_f64(seconds), output, started: None, next: None, presents: Vec::new(), work: Vec::new() }
+        Replay { kind, length: Duration::from_secs_f64(seconds), output, started: None, next: None, presents: Vec::new(), work: Vec::new(), stages: Vec::new() }
     }
 
     pub fn is_graph(&self) -> bool {
@@ -115,13 +117,24 @@ impl Replay {
     }
 
     pub fn frame(&mut self, presented: Instant, work: Duration) {
+        self.add_frame(presented, work, None);
+    }
+
+    pub fn frame_with_stage(&mut self, presented: Instant, work: Duration, stage: crate::render::StageSample) {
+        self.add_frame(presented, work, Some(stage));
+    }
+
+    fn add_frame(&mut self, presented: Instant, work: Duration, stage: Option<crate::render::StageSample>) {
         if self.started.is_some() && self.next.is_some() {
             self.presents.push(presented);
             self.work.push(work.as_secs_f64() * 1000.0);
+            if let Some(stage) = stage {
+                self.stages.push(stage);
+            }
         }
     }
 
-    pub fn write(&self) {
+    fn report_json(&self, include_work_samples: bool) -> String {
         let intervals: Vec<f64> = self.presents.windows(2).map(|w| (w[1] - w[0]).as_secs_f64() * 1000.0).collect();
         let span = self.presents.last().zip(self.presents.first()).map_or(0.0, |(l, f)| (*l - *f).as_secs_f64());
         let [p95] = crate::stats::percentiles(&intervals, [0.95]);
@@ -134,7 +147,7 @@ impl Replay {
             .map(|(index, interval)| (index, interval.round()))
             .collect::<Vec<_>>();
         let long_json = serde_json::to_string(&long).expect("finite replay interval JSON");
-        let json = format!(
+        let mut json = format!(
             "{{\"quarters\":{:?},\"frames\":{},\"fps\":{:.1},\"intervalAvgMs\":{:.2},\"intervalP95Ms\":{:.2},\"missed\":{},\"workAvgMs\":{:.2},\"long\":{}}}",
             self.work.chunks(self.work.len().div_ceil(4).max(1)).map(|c| (c.iter().sum::<f64>() / c.len() as f64 * 100.0).round() / 100.0).collect::<Vec<_>>(),
             self.presents.len(),
@@ -145,6 +158,33 @@ impl Replay {
             crate::stats::mean(&self.work),
             long_json,
         );
+        // --replay-scroll records only presented replay frames. Unlike the
+        // renderer's --metrics frame samples, this excludes startup.
+        // Extra raw samples stay opt-in and do not change the normal schema.
+        if include_work_samples {
+            let samples = serde_json::to_string(&self.work).expect("finite CPU replay frame times");
+            debug_assert!(json.ends_with('}'));
+            json.pop();
+            json.push_str(",\"workSamplesMs\":");
+            json.push_str(&samples);
+            json.push('}');
+        }
+        if !self.stages.is_empty() {
+            assert_eq!(self.stages.len(), self.work.len(), "every replay frame needs stage data");
+            let stages = serde_json::to_string(&self.stages).expect("finite replay stage samples");
+            debug_assert!(json.ends_with('}'));
+            json.pop();
+            json.push_str(",\"stageSamples\":");
+            json.push_str(&stages);
+            json.push('}');
+        }
+        json
+    }
+
+    pub fn write(&self) {
+        let json = self.report_json(
+            std::env::var("AKULA_EXPERIMENTAL_FRAME_SAMPLES").ok().as_deref() == Some("1"),
+        );
         if let Err(error) = std::fs::write(&self.output, json) {
             eprintln!("замер прокрутки не записан: {error}");
         }
@@ -154,6 +194,45 @@ impl Replay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replay_only_cpu_samples_match_presented_frames_without_changing_default_json() {
+        let mut replay = Replay::new(Kind::Scroll, PathBuf::from("not-used.json"));
+        let start = Instant::now();
+        assert!(matches!(replay.step(start), Some(Step::Wheel(_))));
+        replay.frame(start + Duration::from_millis(2), Duration::from_micros(900));
+        replay.frame(start + Duration::from_millis(18), Duration::from_micros(1200));
+
+        let plain: serde_json::Value = serde_json::from_str(&replay.report_json(false)).unwrap();
+        let measured: serde_json::Value = serde_json::from_str(&replay.report_json(true)).unwrap();
+        assert!(plain.get("workSamplesMs").is_none());
+        let samples = measured["workSamplesMs"].as_array().expect("diagnostic samples");
+        assert_eq!(samples.len(), replay.presents.len());
+        assert_eq!(samples.len(), 2);
+        assert!((samples[0].as_f64().unwrap() - 0.9).abs() < 1e-9);
+        assert!((samples[1].as_f64().unwrap() - 1.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn per_replay_stage_samples_are_aligned_and_opt_in() {
+        let mut replay = Replay::new(Kind::Scroll, PathBuf::from("not-used.json"));
+        let now = Instant::now();
+        assert!(matches!(replay.step(now), Some(Step::Wheel(_))));
+        replay.frame_with_stage(
+            now + Duration::from_millis(3), Duration::from_millis(2),
+            crate::render::StageSample { mip_build_ms: 1.5, raster_pixels: 1234, ..Default::default() },
+        );
+        let report: serde_json::Value = serde_json::from_str(&replay.report_json(true)).unwrap();
+        assert_eq!(report["workSamplesMs"].as_array().unwrap().len(), 1);
+        assert_eq!(report["stageSamples"].as_array().unwrap().len(), 1);
+        assert_eq!(report["stageSamples"][0]["mipBuildMs"], 1.5);
+        assert_eq!(report["stageSamples"][0]["rasterPixels"], 1234);
+        let mut ordinary = Replay::new(Kind::Scroll, PathBuf::from("not-used.json"));
+        ordinary.step(now);
+        ordinary.frame(now + Duration::from_millis(5), Duration::from_millis(1));
+        let ordinary: serde_json::Value = serde_json::from_str(&ordinary.report_json(false)).unwrap();
+        assert!(ordinary.get("stageSamples").is_none());
+    }
 
     #[test]
     fn long_frame_interval_is_valid_json_pair() {

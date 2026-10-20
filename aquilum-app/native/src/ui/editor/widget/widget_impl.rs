@@ -23,7 +23,21 @@ impl Widget for TextEditor {
         true
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
+        for button in &mut self.access_code_buttons {
+            ctx.register_child(&mut button.widget);
+        }
+    }
+
+    fn on_action(
+        &mut self,
+        ctx: &mut ActionCtx<'_>,
+        _props: &mut PropertiesMut<'_>,
+        _action: &masonry::core::ErasedAction,
+        source: masonry::core::WidgetId,
+    ) {
+        self.access_code_action(ctx, source);
+    }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, props: &mut PropertiesMut<'_>, event: &Update) {
         self.do_update(ctx, props, event);
@@ -62,6 +76,6 @@ impl Widget for TextEditor {
     }
 
     fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
+        self.access_code_buttons.iter().map(|button| button.widget.id()).collect()
     }
 }

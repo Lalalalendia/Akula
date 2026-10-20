@@ -74,6 +74,85 @@ impl fmt::Display for HistorySaveFailure {
     }
 }
 
+/// P0g-3b: point-in-time version observation verified while holding
+/// PROCESS_HISTORY_FILES. Normal retention, reversion and direct same-user
+/// edits can later remove/alter these bytes. This is NOT a persistent immutable
+/// archive, an OS publication receipt or remote baseline authority.
+/// Deliberately non-Clone and sealed: another crate module may inspect
+/// this bounded observation but cannot manufacture a "verified" version.
+#[must_use = "a verified version is only evidence at the time of inspection"]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedHistoryVersion {
+    version_id: String,
+    content_hash: String,
+    content_length: usize,
+}
+
+#[allow(dead_code)]
+impl VerifiedHistoryVersion {
+    pub(crate) fn version_id(&self) -> &str {
+        &self.version_id
+    }
+
+    pub(crate) fn content_hash(&self) -> &str {
+        &self.content_hash
+    }
+
+    pub(crate) fn content_length(&self) -> usize {
+        self.content_length
+    }
+}
+
+/// Read-only cold-start observation for one registered note/version.
+/// Deliberately not authority to replace any primary file or to acknowledge S3.
+#[must_use = "a cold history observation is forensic only"]
+#[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct InertColdHistoryNote {
+    registered_root: PathBuf,
+    note: PathBuf,
+    version_id: String,
+    content_hash: String,
+    content_length: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HistorySaveEffect {
+    NoChange,
+    LabelOnly,
+    Reverted,
+    Updated,
+    Created(String),
+}
+
+impl HistorySaveEffect {
+    fn changed(&self) -> bool {
+        !matches!(self, Self::NoChange)
+    }
+
+    fn candidate_version(&self) -> Option<&str> {
+        match self {
+            Self::Created(id) => Some(id),
+            _ => None,
+        }
+    }
+}
+
+struct HistorySaveOutcome {
+    effect: HistorySaveEffect,
+    verified_version: Option<VerifiedHistoryVersion>,
+}
+
+impl HistorySaveOutcome {
+    fn unchanged() -> Self {
+        Self { effect: HistorySaveEffect::NoChange, verified_version: None }
+    }
+
+    fn changed(&self) -> bool {
+        self.effect.changed()
+    }
+}
+
 /// A primary note relocation already succeeded, but moving its history
 /// did not. A partially moved history must not be announced as complete.
 #[derive(Debug)]
@@ -315,7 +394,8 @@ impl HistoryService {
                 "direct history save lacks pinned S3 custody",
             ));
         }
-        self.try_saved_impl(roots, note, write, false)
+        self.try_saved_impl(roots, note, write, false, false)
+            .map(|outcome| outcome.changed())
     }
 
     /// A host-bound ordinary File Gate note write is admitted only while the
@@ -332,7 +412,8 @@ impl HistoryService {
         if !permit.binds_history(self) {
             return Err(HistorySaveFailure::new("host history epoch", "wrong Core owner"));
         }
-        self.try_saved_impl(roots, note, write, true)
+        self.try_saved_impl(roots, note, write, true, false)
+            .map(|outcome| outcome.changed())
     }
 
     /// Narrow checked File Gate exception. The sealed token can be created
@@ -340,12 +421,45 @@ impl HistoryService {
     /// No direct Core/host caller can construct that token.
     pub(crate) fn try_saved_with_custody(
         &self,
-        _permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+        permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
         roots: Roots<'_>,
         note: &Path,
         write: NoteWrite<'_>,
     ) -> Result<bool, HistorySaveFailure> {
-        self.try_saved_impl(roots, note, write, true)
+        if !permit.binds_history_and_note(self, note) {
+            return Err(HistorySaveFailure::new(
+                "custody history owner", "wrong Core/HistoryService or note",
+            ));
+        }
+        self.try_saved_impl(roots, note, write, true, false)
+            .map(|outcome| outcome.changed())
+    }
+
+    /// Strict internal history-version proof for a future protected receipt.
+    /// The sealed custody token must originate from the guarded File Gate.
+    /// No proof is returned for quiet, label-only, revert, coalesced update,
+    /// missing history location or failed byte-for-byte readback.
+    /// A coalesced latest version is MUTABLE and cannot serve as an immutable
+    /// history identity for a future native publication receipt.
+    /// This does not provide the OS file/directory durability evidence.
+    #[allow(dead_code)]
+    pub(crate) fn try_saved_with_custody_verified_version(
+        &self,
+        permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
+        roots: Roots<'_>,
+        note: &Path,
+        write: NoteWrite<'_>,
+    ) -> Result<VerifiedHistoryVersion, HistorySaveFailure> {
+        if !permit.binds_history_and_note(self, note) {
+            return Err(HistorySaveFailure::new(
+                "custody history owner", "wrong Core/HistoryService or note",
+            ));
+        }
+        self.try_saved_impl(roots, note, write, true, true)?
+            .verified_version
+            .ok_or_else(|| HistorySaveFailure::new(
+                "history version proof", "snapshot verification was unavailable",
+            ))
     }
 
     fn try_saved_impl(
@@ -354,7 +468,8 @@ impl HistoryService {
         note: &Path,
         write: NoteWrite<'_>,
         custody_verified: bool,
-    ) -> Result<bool, HistorySaveFailure> {
+        require_verified_version: bool,
+    ) -> Result<HistorySaveOutcome, HistorySaveFailure> {
         #[cfg(feature = "save-stage-probe")]
         let profile_start = std::time::Instant::now();
         let now = SystemTime::now();
@@ -373,7 +488,13 @@ impl HistoryService {
             ));
         }
         let Some(located) = locate(&mut state, roots, note) else {
-            return Ok(false);
+            return if require_verified_version {
+                Err(HistorySaveFailure::new(
+                    "history version proof", "registered note has no history location",
+                ))
+            } else {
+                Ok(HistorySaveOutcome::unchanged())
+            };
         };
         if history_blocked(&state, &located) {
             return Err(HistorySaveFailure::new("history relocation pending", "pending or unreadable version-transfer intent; history write refused"));
@@ -418,18 +539,38 @@ impl HistoryService {
         );
         #[cfg(feature = "save-stage-probe")]
         let profile_planned = profile_start.elapsed();
+        // A strict receipt request must not mutate history then announce
+        // refusal. Quiet, label-only, revert and mutable latest-version
+        // coalescing are rejected BEFORE *any* history-store filesystem write.
+        // Existing non-strict editor/host APIs retain their legacy semantics.
+        if require_verified_version {
+            const MAX_RECEIPT_HISTORY_BYTES: usize = 32 * 1024 * 1024;
+            // A Source::Me snapshot could later be coalesced in-place by
+            // the ordinary editor, invalidating a claimed immutable ID.
+            // The S3 path is external by definition and must never mint
+            // history evidence through a mutable local-typing milestone.
+            if write.text.len() > MAX_RECEIPT_HISTORY_BYTES
+                || write.source != Source::External
+                || !matches!(&plan, MilestonePlan::CreateNew { .. })
+            {
+                return Err(HistorySaveFailure::new(
+                    "history version proof",
+                    "strict evidence requires bounded external CreateNew snapshot",
+                ));
+            }
+        }
         let quiet = matches!(&plan, MilestonePlan::Quiet);
         let dir = &located.dir;
-        let outcome = (|| -> Result<bool, HistorySaveFailure> {
+        let outcome = (|| -> Result<HistorySaveEffect, HistorySaveFailure> {
             match plan {
-                MilestonePlan::Quiet => Ok(false),
+                MilestonePlan::Quiet => Ok(HistorySaveEffect::NoChange),
                 MilestonePlan::Skip => match (write.name, versions.last()) {
                     (Some(name), Some(latest)) => {
                         self.write_name(dir, &latest.id, name, now)
                             .map_err(|error| HistorySaveFailure::new("write version name", error))?;
-                        Ok(true)
+                        Ok(HistorySaveEffect::LabelOnly)
                     }
-                    _ => Ok(false),
+                    _ => Ok(HistorySaveEffect::NoChange),
                 },
                 MilestonePlan::RevertToPrevious { remove_id } => {
                     let removed = self.remove_version_and_names(dir, &remove_id);
@@ -439,7 +580,7 @@ impl HistoryService {
                         entry.last_edit = None;
                     }
                     removed.map_err(|error| HistorySaveFailure::new("remove version", error))?;
-                    Ok(true)
+                    Ok(HistorySaveEffect::Reverted)
                 }
                 MilestonePlan::UpdateLatest { id } => {
                     self.update_version(dir, &id, write.text)
@@ -449,7 +590,7 @@ impl HistoryService {
                         self.write_name(dir, &id, name, now)
                             .map_err(|error| HistorySaveFailure::new("write version name", error))?;
                     }
-                    Ok(true)
+                    Ok(HistorySaveEffect::Updated)
                 }
                 MilestonePlan::CreateNew { baseline, snapshot } => {
                     if let Some(baseline) = baseline {
@@ -467,7 +608,12 @@ impl HistoryService {
                         self.write_name(dir, id, name, now)
                             .map_err(|error| HistorySaveFailure::new("write version name", error))?;
                     }
-                    Ok(true)
+                    let id = path.file_name()
+                        .and_then(|component| component.to_str())
+                        .ok_or_else(|| HistorySaveFailure::new(
+                            "history version identity", "written history ID not UTF-8",
+                        ))?.to_owned();
+                    Ok(HistorySaveEffect::Created(id))
                 }
             }
         })();
@@ -487,14 +633,30 @@ impl HistoryService {
             );
         }
         match outcome {
-            Ok(changed) => {
+            Ok(effect) => {
+                // This check stays INSIDE PROCESS_HISTORY_FILES and the
+                // HistoryService state lock, never a later page() observation.
+                // Re-read the exact version created/updated by this call.
+                let verified_version = if require_verified_version {
+                    let id = effect.candidate_version().ok_or_else(|| {
+                        HistorySaveFailure::new(
+                            "history version proof",
+                            "no new or updated snapshot to attest",
+                        )
+                    })?;
+                    Some(Self::verify_history_version(
+                        dir, id, write.text, write.hash,
+                    )?)
+                } else {
+                    None
+                };
                 // A quiet reader update must not discard a failed baseline
                 // awaiting the next real save.
                 if !quiet || entry.pending_before.is_none() {
                     entry.written_hash = Some(write.hash.to_owned());
                     entry.pending_before = None;
                 }
-                Ok(changed)
+                Ok(HistorySaveOutcome { effect, verified_version })
             }
             Err(error) => {
                 if versions.is_empty() && entry.pending_before.is_none() {
@@ -503,6 +665,226 @@ impl HistoryService {
                 Err(error)
             }
         }
+    }
+
+    /// Read back only the precise file ID returned by this mutation. The
+    /// ordinary history API deliberately skips this expensive validation.
+    /// It is not proof against hostile same-UID substitution after unlock.
+    fn verify_history_version(
+        dir: &Path,
+        id: &str,
+        expected: &str,
+        expected_hash: &str,
+    ) -> Result<VerifiedHistoryVersion, HistorySaveFailure> {
+        use std::io::Read;
+        const MAX_RECEIPT_HISTORY_BYTES: u64 = 32 * 1024 * 1024;
+        let path = dir.join(id);
+        let named = fs::symlink_metadata(&path).map_err(|e|
+            HistorySaveFailure::new("history metadata", e)
+        )?;
+        if !named.is_file() || named.file_type().is_symlink() {
+            return Err(HistorySaveFailure::new(
+                "history version proof", "history version is an alias or non-file",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if named.nlink() != 1 {
+                return Err(HistorySaveFailure::new(
+                    "history version proof", "hardlinked history version",
+                ));
+            }
+        }
+        let mut file = fs::File::open(&path).map_err(|e|
+            HistorySaveFailure::new("history readback", e)
+        )?;
+        let before = file.metadata().map_err(|e|
+            HistorySaveFailure::new("history metadata", e)
+        )?;
+        if !before.is_file()
+            || before.len() > MAX_RECEIPT_HISTORY_BYTES
+            || before.len() != expected.len() as u64
+        {
+            return Err(HistorySaveFailure::new(
+                "history version proof", "invalid history size or file type",
+            ));
+        }
+        // Bound the READ itself, not just the initial metadata. Another
+        // process may grow this pathname while it is being consumed.
+        let mut bytes = Vec::with_capacity(expected.len());
+        (&mut file).take(MAX_RECEIPT_HISTORY_BYTES + 1)
+            .read_to_end(&mut bytes).map_err(|e|
+                HistorySaveFailure::new("history readback", e)
+            )?;
+        let after = file.metadata().map_err(|e|
+            HistorySaveFailure::new("history metadata", e)
+        )?;
+        let digest = blake3::hash(&bytes).to_hex().to_string();
+        if bytes.len() as u64 > MAX_RECEIPT_HISTORY_BYTES
+            || bytes != expected.as_bytes()
+            || digest != expected_hash
+            || before.len() != after.len()
+            || bytes.len() != expected.len()
+        {
+            return Err(HistorySaveFailure::new(
+                "history version proof", "history contents differ after persistence",
+            ));
+        }
+        Ok(VerifiedHistoryVersion {
+            version_id: id.to_owned(),
+            content_hash: digest,
+            content_length: bytes.len(),
+        })
+    }
+
+    /// P0g-3d-05: reconstruct a *non-authoritative* exact external version
+    /// observation from the registered note after HistoryService reopens.
+    ///
+    /// This is a bounded read with the process HistoryService mutex held.
+    /// It cannot grant a File Gate write, S3 apply/ACK, V8 receipt promotion
+    /// or ConfirmedBaseline advancement. Nor does it prove a power-cut-safe
+    /// directory entry or exclude hostile same-UID namespace replacement.
+    #[allow(dead_code)]
+    pub(crate) fn inspect_cold_external_version(
+        &self,
+        roots: Roots<'_>,
+        note: &Path,
+        id: &str,
+        expected_hash: &str,
+        expected_length: u64,
+    ) -> Result<InertColdHistoryNote, HistorySaveFailure> {
+        use std::io::Read;
+        const LIMIT: u64 = 32 * 1024 * 1024;
+        let good_hash = expected_hash.len() == 64
+            && expected_hash.bytes().all(|b|
+                b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !good_hash || expected_length > LIMIT || id.is_empty() {
+            return Err(HistorySaveFailure::new(
+                "cold history proof", "invalid immutable version bounds",
+            ));
+        }
+
+        let Some(mut state) = self.files_lock() else {
+            return Err(HistorySaveFailure::new(
+                "cold history lock", "history mutex poisoned",
+            ));
+        };
+        // Cold-read authority uses CURRENT host registration, not previously
+        // cached roots retained by an earlier call to locate().
+        let active_roots=roots();
+        if active_roots.iter().filter(|root|
+            relative_inside(root,note).is_some()
+        ).count()!=1 {
+            return Err(HistorySaveFailure::new(
+                "cold history location", "note not in exactly one active root",
+            ));
+        }
+        state.roots=active_roots.clone();
+        let located = locate(&mut state, &||active_roots.clone(), note)
+            .ok_or_else(||HistorySaveFailure::new(
+                "cold history location", "note outside registered roots",
+            ))?;
+        if history_blocked(&state, &located)
+            || !allowed_history_directory(&located.vault, &located.dir)
+        {
+            return Err(HistorySaveFailure::new(
+                "cold history location", "unsafe or blocked history directory",
+            ));
+        }
+        // Filename and Source::External must BOTH originate from the parser
+        // for THIS note's history directory, not from untrusted receipt text.
+        let listed = store::versions(&located.dir).into_iter()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| HistorySaveFailure::new(
+                "cold history version", "version ID absent for registered note",
+            ))?;
+        if listed.source != Source::External {
+            return Err(HistorySaveFailure::new(
+                "cold history version", "version was not an external CreateNew",
+            ));
+        }
+        let name = located.dir.join(&listed.id);
+        let named = fs::symlink_metadata(&name).map_err(|e|
+            HistorySaveFailure::new("cold history metadata", e)
+        )?;
+        if !named.is_file() || named.file_type().is_symlink() {
+            return Err(HistorySaveFailure::new(
+                "cold history file", "version is not a plain regular file",
+            ));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if named.file_attributes() & 0x0000_0400 != 0 {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "Windows reparse point refused",
+                ));
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if named.nlink() != 1 {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "hardlinked history version refused",
+                ));
+            }
+        }
+        let mut file = fs::File::open(&name).map_err(|e|
+            HistorySaveFailure::new("cold history file open", e)
+        )?;
+        let before = file.metadata().map_err(|e|
+            HistorySaveFailure::new("cold history file metadata", e)
+        )?;
+        if !before.is_file() || before.len() != expected_length {
+            return Err(HistorySaveFailure::new(
+                "cold history bytes", "wrong file type or length",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (named.dev(), named.ino()) != (before.dev(), before.ino()) {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "name and opened handle differ",
+                ));
+            }
+        }
+        let mut bytes=Vec::with_capacity(expected_length as usize);
+        (&mut file).take(LIMIT+1).read_to_end(&mut bytes).map_err(|e|
+            HistorySaveFailure::new("cold history file read", e)
+        )?;
+        let after = file.metadata().map_err(|e|
+            HistorySaveFailure::new("cold history file metadata", e)
+        )?;
+        if bytes.len() as u64 != expected_length
+            || before.len()!=after.len()
+            || std::str::from_utf8(&bytes).is_err()
+            || blake3::hash(&bytes).to_hex().as_str() != expected_hash
+        {
+            return Err(HistorySaveFailure::new(
+                "cold history bytes", "version bytes or digest changed",
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (before.dev(),before.ino())!=(after.dev(),after.ino()) {
+                return Err(HistorySaveFailure::new(
+                    "cold history file", "opened handle identity changed",
+                ));
+            }
+        }
+        // Bind the readback to the resolved registered location. This is
+        // deliberately not the non-Clone VerifiedHistoryVersion write token.
+        Ok(InertColdHistoryNote {
+            registered_root: located.vault,
+            note: note.to_path_buf(),
+            version_id: listed.id,
+            content_hash: expected_hash.to_owned(),
+            content_length: expected_length,
+        })
     }
 
     fn write_version(&self, dir: &Path, snapshot: &milestone::Snapshot<'_>) -> Result<PathBuf, FileCommandError> {
@@ -1906,6 +2288,317 @@ mod tests {
 
         assert!(history.version(&|| fixture.roots(), &note, Some("../../../Секрет.md")).is_none());
         assert!(history.version(&|| fixture.roots(), &note, Some("0000000000000_aaaaaaaa_me.md")).is_none());
+    }
+
+    #[test]
+    fn p0g3d05_cold_history_version_is_bound_to_one_note_after_service_reopen() {
+        let fixture = Fixture::new();
+        let note = fixture.vault.join("BoundCold.md");
+        let text = "exact immutable external snapshot";
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        let previous = "preserved local version";
+        fs::write(&note,text).unwrap();
+        let history = fixture.service();
+        let result = history.try_saved_impl(
+            &||fixture.roots(),&note,
+            NoteWrite {
+                disk_before:Some((
+                    previous.to_owned(),std::time::SystemTime::now(),
+                )),
+                text,hash:&hash,source:Source::External,name:None,
+            },
+            true,true,
+        ).unwrap();
+        let strict = result.verified_version.unwrap();
+        let id = strict.version_id().to_owned();
+        drop(history);
+        // New HistoryService state: no in-memory version witness survives.
+        let fresh = fixture.service();
+        let cold = fresh.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).unwrap();
+        assert_eq!(cold.registered_root,fixture.vault);
+        assert_eq!(cold.note,note);
+        assert_eq!(cold.version_id,id);
+        assert_eq!(cold.content_hash,hash);
+        assert_eq!(cold.content_length,text.len() as u64);
+        let unrelated = fixture.vault.join("Other.md");
+        fs::write(&unrelated,text).unwrap();
+        assert!(fresh.inspect_cold_external_version(
+            &||fixture.roots(),&unrelated,&id,&hash,text.len() as u64,
+        ).is_err(),"a different note cannot inherit this version");
+        assert!(fresh.inspect_cold_external_version(
+            &||vec![fixture.vault.join("not-registered")],
+            &note,&id,&hash,text.len() as u64,
+        ).is_err(),"a different registration cannot inherit this version");
+        assert_eq!(fs::read_to_string(&note).unwrap(),text);
+    }
+
+    #[test]
+    fn p0g3d05_cold_history_rejects_mutation_length_hash_and_non_external_source() {
+        let fixture = Fixture::new();
+        let note = fixture.vault.join("ColdTamper.md");
+        let text = "external version to be inspected";
+        let history = fixture.service();
+        fixture.save(&history,&note,text,Source::External);
+        let id=history.page(&||fixture.roots(),&note,0,1)
+            .versions[0].id.clone();
+        let hash=blake3::hash(text.as_bytes()).to_hex().to_string();
+        let read=|h:&HistoryService| h.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        );
+        assert!(read(&history).is_ok());
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,32*1024*1024+1,
+        ).is_err());
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&"e".repeat(64),text.len() as u64,
+        ).is_err());
+        let file=fixture.history_of("ColdTamper.md").join(&id);
+        fs::write(&file,"X".repeat(text.len())).unwrap();
+        let cold=fixture.service();
+        assert!(read(&cold).is_err(),
+            "equal-length history mutation must fail after cold-open");
+
+        let local=fixture.vault.join("LocallyTyped.md");
+        fixture.save(&history,&local,"local",Source::Agent);
+        let version=history.page(&||fixture.roots(),&local,0,1)
+            .versions[0].id.clone();
+        let localhash=blake3::hash(b"local").to_hex().to_string();
+        assert!(cold.inspect_cold_external_version(
+            &||fixture.roots(),&local,&version,&localhash,5,
+        ).is_err(),"an Agent/Me version must never masquerade as external");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn p0g3d05_cold_history_refuses_hardlink_and_symlink_version_files() {
+        use std::os::unix::fs::symlink;
+        let fixture=Fixture::new();
+        let history=fixture.service();
+        let note=fixture.vault.join("Aliased.md");
+        let text="external history snapshot";
+        fixture.save(&history,&note,text,Source::External);
+        let id=history.page(&||fixture.roots(),&note,0,1)
+            .versions[0].id.clone();
+        let dir=fixture.history_of("Aliased.md");
+        let version=dir.join(&id);
+        let hash=blake3::hash(text.as_bytes()).to_hex().to_string();
+        let extra=dir.join("hardlinked-other-name");
+        fs::hard_link(&version,&extra).unwrap();
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).is_err());
+        fs::remove_file(&extra).unwrap();
+        fs::remove_file(&version).unwrap();
+        let external=fixture.vault.join("External.md");
+        fs::write(&external,text).unwrap();
+        symlink(&external,&version).unwrap();
+        assert!(history.inspect_cold_external_version(
+            &||fixture.roots(),&note,&id,&hash,text.len() as u64,
+        ).is_err());
+    }
+
+    #[test]
+    fn p0g3b_strict_history_proof_identifies_new_version_under_history_lock() {
+        use super::HistorySaveEffect;
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("BoundHistory.md");
+        let original = "protected old revision";
+        let updated = "fresh external S3 candidate for strict history proof";
+        fs::write(&note, updated).unwrap();
+        let new_hash = blake3::hash(updated.as_bytes()).to_hex().to_string();
+        let outcome = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            NoteWrite {
+                disk_before: Some((
+                    original.to_owned(), std::time::SystemTime::now(),
+                )),
+                text: updated, hash: &new_hash,
+                source: Source::External, name: Some("candidate"),
+            }, true, true,
+        ).expect("one current snapshot must be proven");
+        let id = match &outcome.effect {
+            HistorySaveEffect::Created(id) => id.clone(),
+            unexpected => panic!("expected new snapshot: {unexpected:?}"),
+        };
+        let proof = outcome.verified_version.as_ref().unwrap();
+        assert_eq!(proof.version_id, id);
+        assert_eq!(proof.content_hash, new_hash);
+        assert_eq!(proof.content_length, updated.len());
+        assert_eq!(fs::read(fixture.history_of("BoundHistory.md").join(&id))
+            .unwrap(), updated.as_bytes());
+        assert!(outcome.changed());
+    }
+
+    #[test]
+    fn p0g3b_strict_history_rejects_local_source_before_creating_version() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("LocallyMutable.md");
+        let text = "local typed revision would be coalescible";
+        fs::write(&note, text).unwrap();
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        // This would normally be CreateNew; the strict, non-authorizing S3
+        // proof may only observe an external save. The regular editor still
+        // retains its existing local coalescing path.
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::Me, &hash, None), true, true,
+        );
+        assert!(result.is_err(), "Source::Me would permit later coalescing");
+        assert!(versions(&fixture.history_of("LocallyMutable.md")).is_empty());
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(text, Source::Me, &hash, None),
+        ).unwrap(), "ordinary local save remains supported");
+    }
+
+    #[test]
+    fn p0g3b_history_observation_is_not_permanent_archive() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("ExternalObservation.md");
+        let text = "external revision verified once";
+        fs::write(&note, text).unwrap();
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &hash, None), true, true,
+        ).expect("strictly create history version");
+        let proof = result.verified_version.expect("observed exact version");
+        let dir = fixture.history_of("ExternalObservation.md");
+        assert_eq!(proof.content_hash, hash);
+        // A same-UID writer can mutate even a once-verified version after the
+        // history lock is released. A future native receipt MUST retain its
+        // own protected bytes and independently recheck before remote ACK.
+        fs::write(dir.join(&proof.version_id), b"changed after receipt").unwrap();
+        assert!(super::HistoryService::verify_history_version(
+            &dir, &proof.version_id, text, &hash,
+        ).is_err(), "later history mutation invalidates the old observation");
+    }
+
+    #[test]
+    fn p0g3b_strict_history_proof_refuses_skip_and_label_only() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("SameContent.md");
+        let text = "already saved";
+        fs::write(&note, text).unwrap();
+        let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note, write(text, Source::External, &hash, None),
+        ).unwrap());
+        // Normal legacy saves preserve their existing quiet/skip result.
+        assert!(!history.try_saved(
+            &|| fixture.roots(), &note, write(text, Source::External, &hash, None),
+        ).unwrap());
+        let strict = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &hash, None), true, true,
+        );
+        assert!(strict.is_err(), "Skip has no unique snapshot commit receipt");
+        let label_only = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &hash, Some("label only")), true, true,
+        );
+        assert!(label_only.is_err(), "A label is not a content-version receipt");
+        assert_eq!(versions(&fixture.history_of("SameContent.md")).len(), 1);
+        assert!(crate::history::store::names(
+            &fixture.history_of("SameContent.md")
+        ).is_empty(), "strict refusal must happen before writing a label");
+    }
+
+    #[test]
+    fn p0g3b_strict_history_proof_refuses_coalesced_update() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Coalesced.md");
+        let original = "first local edit";
+        let revised = "first local edit, amended immediately";
+        fs::write(&note, original).unwrap();
+        let first_hash = blake3::hash(original.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(original, Source::Me, &first_hash, None),
+        ).unwrap());
+        fs::write(&note, revised).unwrap();
+        let second_hash = blake3::hash(revised.as_bytes()).to_hex().to_string();
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(revised, Source::Me, &second_hash, None), true, true,
+        );
+        assert!(result.is_err(),
+            "a mutable/coalesced version cannot prove immutable history identity");
+        let stored = versions(&fixture.history_of("Coalesced.md"));
+        assert_eq!(stored.len(), 1,
+            "normal history coalescing is preserved even when strict evidence is refused");
+        assert_eq!(fs::read_to_string(
+            fixture.history_of("Coalesced.md").join(&stored[0].id),
+        ).unwrap(), original,
+            "strict refusal must precede any mutation of the old snapshot");
+        // The normal editor remains allowed to coalesce later, without using
+        // the strict receipt-only path or breaking its old milestone rules.
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(revised, Source::Me, &second_hash, None),
+        ).unwrap());
+        assert_eq!(versions(&fixture.history_of("Coalesced.md")).len(), 1);
+        assert_eq!(fs::read_to_string(
+            fixture.history_of("Coalesced.md").join(&stored[0].id),
+        ).unwrap(), revised);
+    }
+
+    #[test]
+    fn p0g3b_strict_history_proof_never_deletes_reverted_version() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("Revert.md");
+        let earlier = "first history text";
+        let later = "second history text";
+        fs::write(&note, earlier).unwrap();
+        let first_hash = blake3::hash(earlier.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(earlier, Source::External, &first_hash, None),
+        ).unwrap());
+        fs::write(&note, later).unwrap();
+        let second_hash = blake3::hash(later.as_bytes()).to_hex().to_string();
+        assert!(history.try_saved(
+            &|| fixture.roots(), &note,
+            write(later, Source::Me, &second_hash, None),
+        ).unwrap());
+        let dir = fixture.history_of("Revert.md");
+        let saved = versions(&dir);
+        assert_eq!(saved.len(), 2);
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(earlier, Source::Me, &first_hash, None), true, true,
+        );
+        assert!(result.is_err(), "reversion is not an immutable new snapshot");
+        let after = versions(&dir);
+        assert_eq!(after.len(), 2, "strict rejection must not delete a version");
+        assert_eq!(after[1].id, saved[1].id);
+        assert_eq!(fs::read_to_string(dir.join(&saved[1].id)).unwrap(), later);
+    }
+
+    #[test]
+    fn p0g3b_strict_history_proof_refuses_forged_expected_hash_after_write() {
+        let fixture = Fixture::new();
+        let history = fixture.service();
+        let note = fixture.vault.join("TamperedDigest.md");
+        let text = "trusted bytes in local history";
+        fs::write(&note, text).unwrap();
+        let forged_hash = "a".repeat(64);
+        let result = history.try_saved_impl(
+            &|| fixture.roots(), &note,
+            write(text, Source::External, &forged_hash, None), true, true,
+        );
+        assert!(result.is_err(), "a wrong digest must never attest a snapshot");
+        assert!(versions(&fixture.history_of("TamperedDigest.md")).len() > 0,
+            "bytes may already be durable: refusal must be inspection-only");
+        // The method does not return a verified version on uncertain write.
     }
 
     #[test]

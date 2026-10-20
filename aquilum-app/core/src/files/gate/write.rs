@@ -116,9 +116,11 @@ pub(crate) enum CheckedHistoryError {
     History(crate::history::service::HistorySaveFailure),
 }
 
+/// Backward-compatible checked writer: the extra prepublication identity
+/// check is opt-in. Normal local history publication still has one writer.
 #[allow(dead_code)]
 pub(crate) fn write_checked_history(
-    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit,
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
     core: &Core,
     path: &Path,
     content: &str,
@@ -126,14 +128,114 @@ pub(crate) fn write_checked_history(
     source: Source,
     version_name: Option<&str>,
 ) -> Result<(FileWriteResult, bool), CheckedHistoryError> {
-    // Only Core's own File Gate mutex is held here, after the external OS
-    // lock. Release it BEFORE taking HistoryService's files/state mutexes.
+    write_checked_history_with_prewrite(
+        permit, core, path, content, expected_hash, source, version_name,
+        || Ok(()),
+    )
+}
+
+/// P0g-3a: revalidate the prepared PHYSICAL original within Core File Gate,
+/// immediately before the sole existing AtomicWriteFile publisher.
+///
+/// The callback is synchronous trusted host code. It must not reenter File
+/// Gate, custody, HistoryService or the network. This path grants no S3 ACK.
+#[allow(dead_code)]
+pub(crate) fn write_checked_history_with_prewrite(
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
+    core: &Core,
+    path: &Path,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prewrite: impl FnOnce() -> Result<(), FileCommandError>,
+) -> Result<(FileWriteResult, bool), CheckedHistoryError> {
+    let (result, evidence) = write_checked_history_under_gate(
+        permit, core, path, content, expected_hash, source, version_name,
+        HistoryEvidenceMode::Legacy, prewrite,
+    )?;
+    let CheckedHistoryEvidence::LegacyChanged(changed) = evidence else {
+        unreachable!("legacy File Gate cannot return a strict witness");
+    };
+    Ok((result, changed))
+}
+
+/// P0g-3d-03: STRICT, opt-in point-in-time HistoryService witness under the
+/// same held external OS custody and the same single File Gate publication.
+/// A real external CreateNew version is required; mutable/coalesced, quiet,
+/// label-only or no-op history states cannot produce a strict witness.
+/// This observation alone is NEVER a durable primary/history/SQLite receipt.
+#[allow(dead_code)]
+pub(crate) fn write_checked_history_with_prewrite_verified(
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
+    core: &Core,
+    path: &Path,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prewrite: impl FnOnce() -> Result<(), FileCommandError>,
+) -> Result<(FileWriteResult, crate::history::service::VerifiedHistoryVersion), CheckedHistoryError> {
+    let (result, evidence) = write_checked_history_under_gate(
+        permit, core, path, content, expected_hash, source, version_name,
+        HistoryEvidenceMode::ImmutableExternal, prewrite,
+    )?;
+    let CheckedHistoryEvidence::Verified(version) = evidence else {
+        unreachable!("strict File Gate cannot return a legacy bool");
+    };
+    Ok((result, version))
+}
+
+#[derive(Clone, Copy)]
+enum HistoryEvidenceMode {
+    Legacy,
+    ImmutableExternal,
+}
+
+/// Typed to prevent accidentally treating a legacy changed/no-change bool
+/// as immutable HistoryService evidence.
+enum CheckedHistoryEvidence {
+    LegacyChanged(bool),
+    Verified(crate::history::service::VerifiedHistoryVersion),
+}
+
+/// The *only* common File Gate primary publisher for both historical and
+/// opt-in strict history paths. Do not add another rename/swap authority.
+fn write_checked_history_under_gate(
+    permit: &crate::sync::guarded_note_write::HeldCustodyHistoryPermit<'_>,
+    core: &Core,
+    path: &Path,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    mode: HistoryEvidenceMode,
+    prewrite: impl FnOnce() -> Result<(), FileCommandError>,
+) -> Result<(FileWriteResult, CheckedHistoryEvidence), CheckedHistoryError> {
+    // The lexical permit is Core and *note path* specific: deny before any
+    // preparation callback, File Gate lock or primary mutation.
+    if !permit.binds_core_and_note(core, path) {
+        return Err(CheckedHistoryError::Primary(FileCommandError::Task {
+            message: "held custody permit belongs to a different Core or note".into(),
+        }));
+    }
+    // A strict receipt candidate must be External and bounded BEFORE the
+    // destructive primary publication. HistoryService validates immutable
+    // CreateNew semantics and exact byte readback separately after the write.
+    if matches!(mode, HistoryEvidenceMode::ImmutableExternal)
+        && (source != Source::External || content.len() > 32 * 1024 * 1024)
+    {
+        return Err(CheckedHistoryError::Primary(FileCommandError::Task {
+            message: "strict history requires bounded external content".into(),
+        }));
+    }
+
+    // Keep lock order: held external OS lock -> Core File Gate -> release
+    // File Gate -> HistoryService state and filesystem locks.
     let (before, result) = {
-        // The only opt-in exception to the cold-start participant HOLD.
-        // Its caller already validated a fresh DocumentSession one-shot
-        // token, persisted SQLite intent, VaultId, and the held OS lock.
         let _guard = core.file_mutation_guard_for_custody_write()
             .map_err(CheckedHistoryError::Primary)?;
+        prewrite().map_err(CheckedHistoryError::Primary)?;
         let before = core.history.disk_before(path, Some(expected_hash));
         let result = write_file_atomic_impl(path, content, Some(expected_hash))
             .map_err(CheckedHistoryError::Primary)?;
@@ -143,12 +245,25 @@ pub(crate) fn write_checked_history(
         disk_before: before, text: content, hash: &result.hash,
         source, name: version_name,
     };
-    let history_changed = core.history.try_saved_with_custody(
-        permit, &|| core.known_roots(), path, write,
-    ).map_err(CheckedHistoryError::History)?;
-    // The outer custody wrapper announces changes and notifies search only
-    // AFTER releasing its external OS lock, even if postflight failed.
-    Ok((result, history_changed))
+    let evidence = match mode {
+        HistoryEvidenceMode::Legacy => {
+            CheckedHistoryEvidence::LegacyChanged(
+                core.history.try_saved_with_custody(
+                    permit, &|| core.known_roots(), path, write,
+                ).map_err(CheckedHistoryError::History)?
+            )
+        }
+        HistoryEvidenceMode::ImmutableExternal => {
+            CheckedHistoryEvidence::Verified(
+                core.history.try_saved_with_custody_verified_version(
+                    permit, &|| core.known_roots(), path, write,
+                ).map_err(CheckedHistoryError::History)?
+            )
+        }
+    };
+    // Only a point-in-time history observation. No native receipt, no
+    // baseline commit, and no filesystem power-loss durability claim.
+    Ok((result, evidence))
 }
 
 pub fn create(

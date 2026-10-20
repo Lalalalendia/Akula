@@ -13,10 +13,12 @@ on:
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/src/documents/hub.rs'
       - 'aquilum-app/core/src/files/gate/write.rs'
+      - 'aquilum-app/core/src/files/gate/mod.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
       - '.github/workflows/sync-reserved-s3-transaction.yml'
       - 'docs/sync/p0g2-held-s3-editor-reservation.md'
+      - 'docs/sync/p0g3a-single-filegate-prewrite.md'
   workflow_dispatch:
 
 permissions:
@@ -34,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest] # MAC-HOLD-01: macOS frozen
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'

@@ -43,6 +43,10 @@ cargo run -p aquilum-native
 
 On Windows, the inherited `aquilum-app/native/run.bat` provides a release-build-and-run workflow. For active development, use a separate test vault and keep a backup of important files.
 
+## Platform policy
+
+**Active:** Windows and Linux. **macOS:** frozen / P2 (not a supported Akula release target). We have paused macOS development, automatic platform QA, packaging and updater work while retaining its source for a separately approved resumption. A deferred macOS result is **not** a successful test; existing Windows/Linux and data-safety gates remain mandatory. See [MAC-HOLD-01](docs/platforms/MAC-HOLD-01.md).
+
 ## Releases, installation, and updates
 
 Akula has **not yet published its own installer, signed update channel, or public release**. The source tree includes packaging and installation work in progress, but that does not make an installable Akula release available. In particular, do not follow an old README link to install upstream Aquilum by accident.

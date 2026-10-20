@@ -18,6 +18,16 @@ test('pinned multi-platform local-only release contract is valid', () => {
   assert.deepEqual(validateRelease(original), []);
 });
 
+test('MAC-HOLD-01 refuses reenabling Apple release job', () => {
+  const bad = original.replace('if: ${{ false }} # MAC-HOLD-01: do not schedule Apple runners or packages', 'if: ${{ true }}');
+  mustReject(bad, 'macos release must remain disabled');
+});
+
+test('MAC-HOLD-01 refuses a new darwin artifact in active manifest', () => {
+  const bad = original.replace('"windows-x86_64":', '"darwin-aarch64": {"url":"unsafe"},\n                "windows-x86_64":');
+  mustReject(bad, 'frozen release cannot publish darwin manifest entries');
+});
+
 test('moving branch ref substituted in a platform checkout is rejected', () => {
   const bad = original.replace(
     'ref: ${{ needs.source.outputs.sha }}',
@@ -44,8 +54,8 @@ test('releasing arbitrary optional features is rejected', () => {
 
 test('manifest must depend on same immutable source', () => {
   const bad = original.replace(
-    'needs: [source, windows, macos, linux]',
-    'needs: [windows, macos, linux]',
+    'needs: [source, windows, linux]',
+    'needs: [windows, linux]',
   );
   mustReject(bad, 'does not depend');
 });

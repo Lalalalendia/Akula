@@ -41,6 +41,7 @@ pub const BINDINGS: &[Binding] = &[
     bind(Scope::Editor, Italic, "italic", &[letter('i').action()]),
     bind(Scope::Editor, Strike, "strikethrough", &[letter('s').action().shift()]),
     bind(Scope::Editor, Code, "inlineCode", &[letter('e').action()]),
+    bind(Scope::Editor, CopyCodeBlock, "copyCodeBlock", &[letter('c').action().shift()]),
     bind(Scope::Editor, Indent, "indent", &[named(K::Tab)]),
     bind(Scope::Editor, Outdent, "outdent", &[named(K::Tab).shift()]),
     bind(Scope::Editor, LineBreak, "lineBreak", &[named(K::Enter).shift()]),

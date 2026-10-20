@@ -2,6 +2,8 @@ pub(super) mod convert;
 mod cull;
 mod error;
 mod mask;
+#[cfg(any(test, not(feature = "installed")))]
+mod mipmap;
 mod runs;
 mod sink;
 
@@ -46,6 +48,11 @@ pub struct Painter {
 }
 
 impl Painter {
+    #[cfg(not(feature = "installed"))]
+    pub(crate) fn mip_diagnostic_counters(&self) -> (u128, u64, u64) {
+        self.images.diagnostic_counters()
+    }
+
     pub fn new(width: u16, height: u16, settings: RenderSettings) -> Self {
         Painter {
             ctx: RenderContext::new_with(width, height, settings),
@@ -142,14 +149,22 @@ impl Painter {
         self.enable_serial_for_single_damage(max_serial_pixels);
     }
 
+    /// Begin the first damaged region of a frame, advancing image cache age
+    /// exactly once regardless of how many separate dirty regions follow.
     pub fn begin(&mut self, x: u16, y: u16, width: u16, height: u16) {
+        self.images.next_frame();
+        self.begin_region(x, y, width, height);
+    }
+
+    /// Begin an additional region of the same draw pass. Replaying a second
+    /// rectangle must not age/evict the image mipmaps used by the first.
+    pub(crate) fn begin_region(&mut self, x: u16, y: u16, width: u16, height: u16) {
         if self.ctx.width() != width || self.ctx.height() != height {
             self.ctx.reset_and_resize(width, height);
             self.mask_cache.clear();
         } else {
             self.ctx.reset();
         }
-        self.images.next_frame();
         self.frame = Rect::new(f64::from(x), f64::from(y), f64::from(x) + f64::from(width), f64::from(y) + f64::from(height));
         self.shift = Affine::translate((-f64::from(x), -f64::from(y)));
         self.error = None;

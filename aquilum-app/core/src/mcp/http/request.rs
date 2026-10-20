@@ -34,6 +34,13 @@ impl Head {
             .map(|(_, value)| value.as_str())
     }
 
+    pub fn header_count(&self, name: &str) -> usize {
+        self.headers
+            .iter()
+            .filter(|(field, _)| field.eq_ignore_ascii_case(name))
+            .count()
+    }
+
     pub fn keeps_alive(&self) -> bool {
         let connection_says = |option: &str| {
             self.header("connection").is_some_and(|value| {

@@ -124,6 +124,9 @@ fn corrupt_or_missing_replacement_table_cannot_make_overview_clean() {
     let intent = replacement_claim_for_overview(&core, &mut journal);
     drop(journal);
     let direct = rusqlite::Connection::open(&db).unwrap();
+    let schema_before: i64 = direct.query_row(
+        "PRAGMA user_version", [], |row| row.get(0),
+    ).unwrap();
     direct.execute(
         "UPDATE sync_existing_replace_attempts SET evidence_json=?1, evidence_digest='damaged'",
         [b"malformed evidence".as_slice()],
@@ -143,5 +146,5 @@ fn corrupt_or_missing_replacement_table_cannot_make_overview_clean() {
     ).unwrap();
     assert_eq!(count, 0, "inspection must not repair a missing table");
     let version: i64 = direct.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 7, "no read-side migration");
+    assert_eq!(version, schema_before, "no read-side migration");
 }

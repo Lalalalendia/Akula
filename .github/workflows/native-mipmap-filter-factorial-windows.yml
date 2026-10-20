@@ -1,0 +1,82 @@
+name: Win32 Vello filter vs mipmap factorial (developer-only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/render/paint/convert.rs'
+      - 'scripts/benchmarks/native_mipmap_window_ab.py'
+      - 'scripts/benchmarks/native_mipmap_windows_ab.py'
+      - 'scripts/benchmarks/native_mipmap_filter_factorial_windows.py'
+      - '.github/workflows/native-mipmap-filter-factorial-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-image-filter-factorial-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  factorial-win32:
+    name: True native Windows 2x2 filter-mip A/B / 24 processes
+    runs-on: windows-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-image-mip-ab-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Exact source and runner validation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Expected native Windows' }
+          git rev-parse HEAD
+          rustc --version
+          python --version
+          python -m py_compile scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_mipmap_windows_ab.py scripts/benchmarks/native_mipmap_filter_factorial_windows.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax failed' }
+          python -c "import os, sys; sys.path.insert(0, 'scripts/benchmarks'); from native_mipmap_window_ab import windows_peak_rss_kib; from native_mipmap_windows_ab import windows_scenes; assert windows_peak_rss_kib(os.getpid()) > 0; windows_scenes()"
+          if ($LASTEXITCODE -ne 0) { throw 'Win32 monitor/working set APIs failed' }
+      - name: Build one developer release binary
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Developer release build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Missing native executable' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Collect 24 native Win32 real-window factorial trials
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $result = Join-Path $env:GITHUB_WORKSPACE 'filter-factorial-win32-results'
+          python scripts/benchmarks/native_mipmap_filter_factorial_windows.py --binary $binary --out $result --timeout 55
+          if ($LASTEXITCODE -ne 0) { throw 'Filter-mip A/B failed' }
+          Get-Content -LiteralPath (Join-Path $result 'summary.md') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive all paired diagnostic samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-filter-factorial-native-win32
+          path: |
+            filter-factorial-win32-results/summary.md
+            filter-factorial-win32-results/matrix.json
+            filter-factorial-win32-results/**/sample.json
+            filter-factorial-win32-results/**/process.log
+            filter-factorial-win32-results/**/metrics.json
+            filter-factorial-win32-results/**/replay.json
+          retention-days: 14
+          if-no-files-found: warn

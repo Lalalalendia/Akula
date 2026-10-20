@@ -43,6 +43,15 @@ impl TextEditor {
         self.fenced_code_body(index)
     }
 
+    /// Resolve the whole fenced code body under the keyboard caret, even
+    /// when the opening fence is outside the mounted paragraph window.
+    /// This uses the same full-Rope extraction as menu and header actions.
+    pub(super) fn focused_fenced_code_body(&self) -> Option<(usize, String)> {
+        let line = self.doc.at_offset(self.focus);
+        let opener = self.code_opener_at(line)?;
+        self.doc.copy_fenced_body(opener).map(|body| (opener, body))
+    }
+
     pub(super) fn fenced_code_start_at(&self, point: Point) -> Option<usize> {
         let index = self.index_at(point)?;
         let paragraph = self.doc.paragraph(index);
@@ -121,6 +130,34 @@ mod tests {
         let editor = TextEditor::new("$\nx^2 + y^2\n$").markdown();
         assert_eq!(editor.fenced_code_start(0), None);
         assert_eq!(editor.fenced_code_body_from_start(0), None);
+    }
+
+    #[test]
+    fn keyboard_body_resolver_recovers_opener_outside_the_windowed_paragraphs() {
+        let body: String = (0..12_000)
+            .map(|n| format!("println!(\"line-{n}-🐱\");\n"))
+            .collect();
+        let source = format!("~~~rust\n{body}~~~\nafter");
+        let caret = source.find("line-7500").expect("far code body") + 6;
+        let mut editor = TextEditor::windowed(crop::Rope::from(source.as_str())).markdown();
+        editor.focus = caret;
+        editor.doc.include(caret);
+        assert!(editor.doc.loaded().0 > 0, "the opener must be outside the loaded window");
+
+        let copied = (0..300).find_map(|_| {
+            editor.doc.track((0.0, 0.0));
+            editor.refresh_code_window_opener();
+            let result = editor.focused_fenced_code_body();
+            if result.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            result
+        });
+        let (opener, text) = copied.expect("completed parser checkpoint should recover opening fence");
+        assert_eq!(opener, 0);
+        assert_eq!(text, body.trim_end_matches('\n'), "copy must include the unloaded tail");
+        assert!(text.contains("line-11999-🐱"));
+        assert_eq!(editor.doc.whole(), source);
     }
 
     #[test]
