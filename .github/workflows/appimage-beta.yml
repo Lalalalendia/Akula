@@ -9,6 +9,8 @@ on:
       - '.github/workflows/appimage-beta.yml'
       - '.github/scripts/appimage-beta-identity.test.cjs'
       - 'scripts/appimage-beta-smoke.sh'
+      - 'scripts/appimage-real-upgrade-accept.py'
+      - 'scripts/appimage-real-upgrade-helper.rs'
       - 'aquilum-app/native/packaging/akula-linux.json'
       - 'aquilum-app/native/packaging/Akula.desktop'
       - 'aquilum-app/native/src/**'
@@ -137,7 +139,22 @@ jobs:
 
       - name: Verify internal AppImage identity, run installed GUI, preserve Aquilum
         shell: bash
-        run: bash scripts/appimage-beta-smoke.sh
+        run: |
+          set -euo pipefail
+          bash -n scripts/appimage-beta-smoke.sh
+          python3 -m py_compile scripts/appimage-real-upgrade-accept.py
+          bash scripts/appimage-beta-smoke.sh
+      - name: Preserve unsigned v2 CI-only evidence for review (NOT release)
+        if: startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-')
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-e2e-unsigned-0.3.10-NOT-RELEASE-${{ github.sha }}
+          path: |
+            dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage
+            dist/e2e-v2/BOTH_REAL_APPIMAGE_SHA256.txt
+            dist/e2e-v2/CI_GENERATION_PROVENANCE.txt
+          retention-days: 3
+
       - name: Record exact source and AppImage SHA-256
         shell: bash
         run: |
