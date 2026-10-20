@@ -76,6 +76,9 @@ mod s3_publisher_policy_lab;
 // E3a never reads the cloud or enrolls a Vault; read-only join preview only.
 #[cfg(feature = "signed-vault-pairing-lab")]
 mod s3_join_genesis_lab;
+// E3b: opt-in read-only pinned V2 join inspection, not default Akula Sync.
+#[cfg(feature = "signed-vault-pinned-join-lab")]
+mod s3_join_pinned_lab;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
