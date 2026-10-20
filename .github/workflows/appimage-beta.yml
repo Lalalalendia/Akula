@@ -1,0 +1,83 @@
+# RELEASE-APPIMAGE-01: unsigned ephemeral candidate. No public publication,
+# upstream Aquilum upgrade, signing, auto-update or destructive sync.
+name: Akula AppImage beta candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/appimage-beta.yml'
+      - '.github/scripts/appimage-beta-identity.test.cjs'
+      - 'scripts/appimage-beta-smoke.sh'
+      - 'aquilum-app/native/packaging/akula-linux.json'
+      - 'aquilum-app/native/packaging/Akula.desktop'
+      - 'aquilum-app/native/src/**'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-appimage-beta-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  appimage-candidate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prove independent identity and CI-only publication HOLD
+        run: node --test .github/scripts/appimage-beta-identity.test.cjs
+      - name: Install native AppImage packaging dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get remove -y $(dpkg-query -W -f='${Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
+          sudo apt-get install -y libunwind-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            pkg-config curl ca-certificates patchelf file
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: standalone-akula-appimage-beta
+          cache-on-failure: true
+      - name: Build pinned local-only Akula executable
+        working-directory: aquilum-app
+        run: cargo build --release --locked -p aquilum-native --features installed
+      - name: Install pinned cargo-packager 0.11.8
+        run: cargo install cargo-packager --version 0.11.8 --locked
+      - name: Create independent Akula AppImage candidate
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          install -m 0755 ../.artifacts/cargo-native/release/aquilum-native ../.artifacts/cargo-native/release/akula-app
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cargo packager -p aquilum-native --release --formats appimage \
+            --config native/packaging/akula-linux.json --out-dir "$GITHUB_WORKSPACE/dist"
+      - name: Verify internal AppImage identity, run installed GUI, preserve Aquilum
+        shell: bash
+        run: bash scripts/appimage-beta-smoke.sh
+      - name: Record exact source and AppImage SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > dist/SOURCE_SHA256_GIT_COMMIT.txt
+          sha256sum dist/*.AppImage > dist/APPIMAGE_SHA256.txt
+          cat dist/SOURCE_SHA256_GIT_COMMIT.txt dist/APPIMAGE_SHA256.txt
+      - name: Upload ephemeral unsigned AppImage candidate (NOT a release)
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-appimage-candidate-${{ github.sha }}
+          path: |
+            dist/*.AppImage
+            dist/SOURCE_SHA256_GIT_COMMIT.txt
+            dist/APPIMAGE_SHA256.txt
+          retention-days: 14
