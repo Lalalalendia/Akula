@@ -9,6 +9,7 @@ on:
       - '.github/scripts/windows-beta-identity.test.cjs'
       - 'scripts/test-windows-beta.ps1'
       - 'scripts/windows-beta-gui-input.ps1'
+      - 'scripts/windows-beta-candidate-manifest.ps1'
       - 'scripts/windows-accesskit-uia.ps1'
       - 'aquilum-app/native/packaging/akula-windows.json'
       - 'aquilum-app/native/src/**'
@@ -73,9 +74,17 @@ jobs:
       - name: Install, verify UIA Copy, edit, restart and uninstall beside Aquilum sentinel
         shell: pwsh
         run: ./scripts/test-windows-beta.ps1
+      # Provenance is recorded only after the installed UIA/edit/reopen test.
+      # The Git checkout can be a synthetic PR integration commit, not branch HEAD.
+      - name: Verify candidate provenance and write manifest
+        shell: pwsh
+        run: ./scripts/windows-beta-candidate-manifest.ps1
       - name: Upload candidate (not a release)
         uses: actions/upload-artifact@v7
         with:
-          name: akula-windows-beta-candidate-${{ github.sha }}
-          path: dist/Akula_*-setup.exe
+          name: akula-windows-beta-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/Akula_*-setup.exe
+            dist/candidate-manifest.json
+          if-no-files-found: error
           retention-days: 14
