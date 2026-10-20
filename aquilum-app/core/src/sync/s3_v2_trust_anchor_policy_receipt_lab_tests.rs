@@ -732,3 +732,51 @@ fn two_handles_compete_but_only_one_atomic_genesis_is_inserted() {
     ), Err(AtomicJoinError::ConflictingBinding)));
     assert_eq!(first.load(&f.scope).unwrap().unwrap().root(), &root);
 }
+
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn unsigned_successor_cannot_advance_signed_owner_policy_trust() {
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &root, "etag-genesis",
+    );
+    let mut journal = f.open();
+    signed_atomic_join(
+        &f, &mut journal, &root, &policy, &pinned, "etag-genesis",
+        &owner, &owner, &root_pin, &policy_pin,
+    ).unwrap();
+
+    let unsigned = S3PackedHeadV2::new(
+        &f.ns, 2, OperationId::new(),
+        &blake3::hash(b"unsigned-manifest").to_hex().to_string(),
+        OperationId::new(),
+        &blake3::hash(b"unsigned-index").to_hex().to_string(),
+        Some(root_pin),
+    ).unwrap();
+    let full_read_without_signature = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &unsigned, "etag-unsigned",
+    );
+    // A fully pinned, directly linked S3 state still does not demonstrate
+    // publisher authorization. Legacy promotion must HOLD for joined Vaults.
+    assert!(matches!(
+        journal.record_verified_successor(
+            &f.scope, &unsigned, "etag-unsigned",
+            &full_read_without_signature,
+        ),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &root);
+    drop(journal);
+    let reopened = f.open();
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &root);
+    assert_eq!(
+        reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(),
+        policy_pin,
+    );
+}
