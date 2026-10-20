@@ -261,6 +261,12 @@ for i in $(seq 1 100); do
   sleep 0.1
 done
 [[ -S "$sock" ]]
+# Every newly launched helper creates a fresh root:root 0600 socket.
+# Grant transport ONLY to the same group already authorized in the first
+# launch; SO_PEERCRED enforces the exact peer UID independently.
+sudo chgrp "$gid" "$sock"
+sudo chmod 0660 "$sock"
+[[ "$(sudo stat -c '%u:%a' "$sock")" == "0:660" ]]
 send 1 "$tmp/valid.frame"
 sudo journalctl -u "$unit" -o cat --no-pager > "$tmp/restored.log"
 grep -Fq 'B1B3C_ROOT_B1A_SIGNED_FD_PINNED' "$tmp/restored.log"
