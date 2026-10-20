@@ -1,0 +1,87 @@
+name: Akula native multi-image full-redraw LOD A/B (developer only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/host/frame.rs'
+      - 'aquilum-app/native/src/host/replay.rs'
+      - 'aquilum-app/native/src/replay.rs'
+      - 'aquilum-app/native/src/app/note_page/view.rs'
+      - 'aquilum-app/native/src/app/embeds/resolver.rs'
+      - 'aquilum-app/native/src/ui/editor/embed/media/paint.rs'
+      - 'aquilum-app/native/src/ui/editor/widget/widget_paint.rs'
+      - 'aquilum-app/native/src/render/paint/sink.rs'
+      - 'aquilum-app/native/src/render/paint/convert.rs'
+      - 'scripts/benchmarks/native_image_full_redraw_windows.py'
+      - '.github/workflows/native-image-full-redraw-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-image-full-redraw-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-stress:
+    name: Win32 1-10-100 different PNGs, full raster and selected LOD
+    runs-on: windows-latest
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-image-mip-ab-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify runner and reproducible PNG generator
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Expected native Win32 runner' }
+          git rev-parse HEAD
+          python -m py_compile scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_mipmap_windows_ab.py scripts/benchmarks/native_image_full_redraw_windows.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python benchmark syntax error' }
+          python -c "import sys;sys.path.insert(0,'scripts/benchmarks');from native_image_full_redraw_windows import make_image,document,scan_anchors;from native_mipmap_windows_ab import windows_scenes;import hashlib;a=make_image(1);b=make_image(2);assert a[:8]==bytes.fromhex('89504e470d0a1a0a') and hashlib.sha256(a).digest()!=hashlib.sha256(b).digest();assert all(len(scan_anchors(document(n),n))==min(32,n) for n in (1,10,100));windows_scenes()"
+          if ($LASTEXITCODE -ne 0) { throw 'No Win32 viewport or non-unique PNGs' }
+      - name: Compile single developer release binary
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Developer native build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'No Win32 binary' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Run 1, 10 and 100 distinct-source full-redraw paired trials
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $result = Join-Path $env:GITHUB_WORKSPACE 'multi-image-windows-results'
+          python scripts/benchmarks/native_image_full_redraw_windows.py --binary $binary --out $result --timeout 90
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid real GUI full-redraw cache A/B' }
+          Get-Content -LiteralPath (Join-Path $result 'summary.md') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive samples, fixture hashes and strict witnesses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-multi-image-native-full-redraw
+          path: |
+            multi-image-windows-results/summary.md
+            multi-image-windows-results/matrix.json
+            multi-image-windows-results/fixture_hashes.json
+            multi-image-windows-results/runs/**/sample.json
+            multi-image-windows-results/runs/**/process.log
+            multi-image-windows-results/runs/**/metrics.json
+            multi-image-windows-results/runs/**/replay.json
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,94 @@
+# IMG-PERF-08 — Native Windows multi-image, full-redraw LOD strategy stress
+
+Status: **uninstalled developer-only**, not a production change. Builds on [IMG-PERF-06 PR #401](https://github.com/Lalalalendia/Akula/pull/401) merged as da7cbfe. The existing single-photo scroll benchmark is mostly a BGRA row-copy benchmark and is unable to expose the benefit of image sampling. This experiment forces real full raster during replay and uses many separately hashed PNG sources.
+
+## Invariants
+
+- Each source file is a genuinely distinct 1280×884 RGBA8 PNG, created deterministically by a pure-Python PNG writer using a compressed sequence of color/alpha bands and per-file seeds. Individual SHA-256 values must be unique; filenames by themselves are insufficient.
+- Test fixtures contain **1, 10 and 100 distinct PNG source files** with all filenames embedded across a **240-section scrollable note**, plus repeated images to force actual repaint. A single image followed by one heading was insufficient to drive a valid replay in the first CI attempt (0 mip requests). Images display at 200px width. **The ordinary adaptive decoder does not leave most 1280px source buffers intact**, so their normal mip selector correctly skips mipmaps.
+- This new developer-only **forced full-source decode** mode (`AKULA_EXPERIMENTAL_IMAGE_FORCE_NATIVE_DECODE=1`) retains the 1280×884 decoded pixels *only in the synthetic stress process* and requires a positive witness plus actual `decoded_w=1280 decoded_h=884` at `MediaView::paint`. Installed Akula's adaptive decoding is unchanged. Thus Eager/Selective timings in this branch are **high-resolution stress numbers, not representative-user speedups**.
+- Mode Eager: existing opt-in mipmap, Medium filtering, 512-frame cache lifetime, builds L1 and L2 using scalar 2×2 reduction.
+- Mode Selective: **identical image content, viewport, Medium sampler, image source identifiers and 32-MiB budget**, but opt-in developer-only direct packed L2, without initial L1 allocation; lazy L1 remains possible.
+- Developer-only \`AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW=1\` forces a complete raster during an active replay, defeating optimization of copying existing BGRA rows. Positive \`AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED\` witness is mandatory. Normal and installed rendering paths remain unchanged.
+- Opt-in `AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF=1` records both **distinct runtime image IDs** and **distinct sampled decoded-pixel fingerprints**, reported at least every 32 frames. For each newly seen ID, BLAKE3 hashes dimensions and three complete decoded RGBA scanlines (first/center/last). That samples about 15 KiB per image rather than hashing 4.3 MiB during the measured frame; it is **not a complete file hash**. The generator's 100 seeded fixtures differ in these scanlines, and separate fixture SHA-256 still proves their original files differ. Require **both** counts to reach the threshold so repeated instances of one PNG cannot masquerade as different images.
+
+## Real image-anchor scan after two invalid wheel coverage attempts
+
+The original smooth-wheel and the follow-up 240-pixel `PixelDelta` full-redraw Windows [run #39342283980](https://github.com/Lalalalendia/Akula/actions/runs/39342283980) each displayed only **3 distinct pixel contents out of 10 PNG files**, despite a 6-second replay, positive redraw witness and more than 300 timed frames. This proves neither a cache-policy failure nor a valid many-source stress test. Wheel motion alone does not guarantee asynchronously decoded, paint-visible images.
+
+The new **developer-only byte-anchor scan** lists the UTF-8 start offsets of `![200](photo_NNN.png)` paragraphs in the actual note and sends those anchors to the existing editor's `top_of(byte)` and `App::reveal(root,byte)` path, through the **same native render root**. The six-second fling clock is divided into two three-second passes: visit up to **32 distinct image anchors** in forward order, then reverse. Each anchor remains the target for **3000 / min(N,32) milliseconds** (300ms for 10, ≈93.75ms for 100). No fake render calls, skipped decoders or new sample clock. The positive `AKULA_IMAGE_ANCHOR_SCAN_APPLIED count=N schedule=forward-reverse` witness is required; a missing note layout or failed seek cannot emit the positive witness. Logged seek positions are diagnostic only — acceptance still requires actual different decoded pixels to reach 1 / 8 / 24.
+
+Eager and Selective use the exact same anchors, fixture hashes, timetable, Medium sampler, 32 MiB budget and 512-frame TTL. This is a deliberately artificial **coverage stress scan**, not a claim about ordinary human scrolling or physical FPS. Some images may never decode before the next seek; if the strict thresholds still fail, inspect editor lazy/decode timing and per-image visibility instead of lowering them. The restored default fling path is unchanged when the developer scan variable is absent.
+
+## Four-stage source reachability proof
+
+[The exact-head native Windows run #39351030514](https://github.com/Lalalalendia/Akula/actions/runs/39351030514) proved that *all ten* synthetic `photo_NNN.png` sources reached the asynchronous resolver in both `Pending` and `Ready` states. Despite this, the mipmap raster saw only **two distinct decoded pixel fingerprints**. The experiment now distinguishes four checkpoints, for **each** distinct source rather than merely counting PNG files:
+
+1. `AKULA_IMAGE_RESOLVE_STATE ... pending`: image paragraph asked for asynchronous media decode.
+2. `AKULA_IMAGE_RESOLVE_STATE ... ready`: usable decoded image pixels returned.
+3. `AKULA_IMAGE_EMBED_PAINT ... ready=true`: an actual `MediaView` with ready pixels was visited by the live editor painter. A ready-but-never-painted source must not be counted as an LOD cache load.
+4. `AKULA_MIP_CACHE ... distinct_sampled_pixel_fingerprints=N`: the actual Vello mip sampling path received different source pixels and built or hit an appropriate LOD.
+
+The paint checkpoint is developer-only, active only for artificial `photo_NNN.png` fixtures and an explicit opt-in flag. No user path/content is logged. If the resolver Ready count is high but MediaView paint coverage is low, investigate editor virtualization, layout invalidation, stale scroll transforms and visibility clipping. If the MediaView count is high but Vello mip coverage low, investigate clip/raster sampling and dimensions. The **unchanged** strict 1/8/24 final decoded-pixel fingerprints remain the real admission; none of these preliminary stages can substitute for actual paint work.
+
+## Render command invalidation and CPU raster culling falsifier
+
+[Five-stage Win32 evidence #39378075009](https://github.com/Lalalalendia/Akula/actions/runs/39378075009), [raw process archive](https://github.com/Lalalalendia/Akula/actions/runs/39378075009/artifacts/12244482487): all **10/10** synthetic PNGs pass async Pending→Ready, visible editor paragraphs and materialized embeds, and **all ten actual `MediaView::paint` calls have non-empty images**. The artificial anchor scan reaches 3318px scroll offset; the Vello CPU mip path sees only **2/10** distinct source pixel fingerprints and no evictions. Thus the remaining gap is between a *recorded draw_image call* and the final CPU raster candidate; do not blame missing files, decode, editor virtualization or cache pressure.
+
+The next test includes **two independent developer-only changes**, neither installed:
+- On the real editor-byte anchor transition, invalidate `TextEditor`'s retained painting via `WidgetMut.ctx.request_render()`, in addition to `ScrollArea`'s normal layout/compose/post-paint. This tests whether only moving a retained scene leaves new-image draw commands clipped to old recording conditions.
+- Join each synthetic `MediaView` brush's **actual image data ID** with the same ID observed at the Akula Vello CPU `PaintSink::fill` boundary. Record the draw's transformed bounds, raster frame rectangle, offscreen state and sprite state **once per source and state**. Distinguish a command discarded by clipping, an image brush substituted by sprite policy and a command surviving CPU culling but not reaching a mip level. These IDs and frame bounds are developer-only and contain no user filenames or pixel data.
+
+If the repaint fixes true 8/10 and 24/100 decoded-source coverage, we have isolated a retained-command invalidation dependency for this synthetic scan. If it does not, compare the sink ID/bounds logs to the source/ready and actual mip counts, then investigate clip stacks and transform propagation. This run is **not** a production scrolling behavior guarantee; preserve pixel/quality/memory review before enabling any LOD optimization.
+
+## Post-decode layout drift: anchored seek must converge, not fire once
+
+Reinspection of [failed native Win32 trace #39378075009](https://github.com/Lalalalendia/Akula/actions/runs/39378075009/artifacts/12244482487) exposed a test-driver flaw not distinguishable from the source/paint counts alone. The tenth image's **real frame begins at document y=3515.8**, but the `TextEditor::do_paint` viewport covers only **y=2533..3208**. Its MediaView was recorded during the editor's expanded prefetch/paint range, but the CPU renderer **correctly** does not sample an image 308px below the viewport. A `MediaView::paint` call is not visible-pixel coverage proof. The earlier 10/10 MediaView → 2/10 mip count is therefore *consistent with proper clipping*, not evidence of a Vello regression.
+
+The original workload invoked `App::reveal(root, byte)` **only once** upon switching anchors. But async image readiness changes measured paragraph heights and shifts image positions **after** that reveal. A single byte position computed against the old layout can point offscreen. The corrected native driver preserves its original six-second forward-and-reverse 1/10/32-anchor schedule and 8ms ticks, but remembers the currently active image anchor. During dwell it checks `TextEditor::top_of(byte)` against the current scroll/document transform and re-centers **only if the paragraph top is outside the true viewport or fewer than 64 pixels remain below it**. No unnecessary relayout if already visible. This also accepts the first image near the document start, which *cannot* be centered because the scroll offset is clamped at zero. The previously observed image 308px below the viewport remains rejected.
+
+Positive, once-per-actual-byte evidence `AKULA_IMAGE_ANCHOR_ALIGNED byte=N center_error=... top_in_view=... min_band=64` proves real post-layout viewport inclusion (not obligatory centering); `AKULA_IMAGE_ANCHOR_RECENTER` records readjustment. Before admitting any p95/p99/LOD readings, the Python runner requires **1/1, 8/10 or 24/32 distinct image byte anchors actually aligned after current-layout measurement**. Separately, it still requires 1/8/24 *distinct decoded source pixel fingerprints actually used by CPU mipmap*. These are deliberately independent gates. An `AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED` witness is mandatory **if and only if the driver emitted any `AKULA_IMAGE_ANCHOR_RECENTER` corrections**; an image already in the viewport must not be forced through a redundant render solely to produce a witness. If all anchors align yet mip sampling still covers only two PNGs, inspect CPU scene clipping/bounds from the `AKULA_IMAGE_RASTER_FILL` trace; do not relax fidelity or source coverage criteria.
+
+## Win32 evidence and exact mip-decision provenance
+
+[Windows #39382991842](https://github.com/Lalalalendia/Akula/actions/runs/39382991842/artifacts/12247366059) passed every 1-image Eager/Selective trial, then rejected the first 10-image sample: **10 Ready, 10 materialized, 10 MediaView Ready paints, 9 distinct CPU non-offscreen images but 2 unique mip-source requests and 0 evictions**. All ten active byte anchors reported true viewport visibility. A visible CPU FillRef is not proof of a successful mip request.
+
+New **developer-only** logs classify each image's CPU conversion as `quality`, `extend`, `transform`, `unavailable`, or `used`, with actual geometry/brush transforms and source Pixmap status; `AKULA_IMAGE_MIP_CONTENT` binds sampled decoded pixel hashes to runtime blob IDs. `MediaView::paint` records ID changes after async rebinding. The strict runner now requires **1/8/24 distinct fixture source indices both seen in MediaView and successfully mipped** with **1/8/24 different sampled-row fingerprints for precisely those successful fixture IDs**. Global requested-ID counters alone cannot admit unrelated UI brushes or unsuccessful attempts. No renderer semantics, fixture bytes, cache policy, installed binary or thresholds changed.
+
+## Established root cause — ordinary adaptive decode makes most mips unnecessary
+
+[Windows CI #39387356330](https://github.com/Lalalalendia/Akula/actions/runs/39387356330/artifacts/12249480539), exact HEAD `507398d3`, again passed all four 1-image trials but rejected 10-image Eager at 2/10 mips. Crucially **all 10 fixture images were ready, placed, within the viewport, and visible to the CPU sink**; the new per-image converter trace showed `transform` as the reason for the eight intentional skips. Distinct per-fixture image scaling was `0.15625` for source indices 0 and 6 (200 / 1280; L2 used), `0.625` for index 1 (200 / 320; no mip), and `0.598802395...` for indices 2–5 and 7–9 (200 / 334; no mip). The PNG input was 1280px in every case, but the *normal* adaptive decoder had already pre-reduced most pixel buffers. The mip selector only activates at scale < 0.5; **this is correct behavior**, not an image-disappearance fault.
+
+**Correction to the experiment, not production:** selectively disable normal display-size predecode in the developer-only benchmark process, preserving the 1280px source for every test image. Require an affirmative `AKULA_IMAGE_NATIVE_SOURCE_DECODE_APPLIED` witness and actual 1280×884 source dimensions at media paint. Keep fixed 1/8/24 successful fixture-mip and independent pixel-fingerprint gates, native GUI, six-second scan, Medium sampling, 512-frame retention and 32 MiB cap. This isolates a **worst-case LOD/cache pressure** question; no inference about normal Akula should be made without a separate baseline using the ordinary decoder. Never enable this flag for installed or standard user builds.
+
+## Acceptance
+
+One native Windows release binary, visible uncloaked PID-owned Win32 HWND and monitored peak working set. For each of 1/10/100 source-count scenes, run two process-level Eager/Selective pairs (12 total) in alternating AB/BA order, each with a native six-second forward-reverse image-anchor replay. Record:
+
+- original fixture hashes, number of source IDs **actually requested by mipmap**, positive mip and full-raster witnesses;
+- replay-only CPU-work p95/p99/mean and aligned per-replay renderer stage metrics;
+- all-frame and replay-only mip build costs, total generated levels, cache hits/evictions/retained levels;
+- peak process RSS, median fully damaged raster pixel area, Win32 window dimensions and exact binary SHA;
+- paired difference in p95. Never interpret CPU work as physical display presentation or user-visible FPS.
+
+Minimum valid source coverage **for both runtime IDs and pixel fingerprints**: scene 1 → **1** used, scene 10 → **8** used, scene 100 → **24** used. Why 24? For 1280×884 L1+L2, 24×1,414,400 bytes exceeds the old 32 MiB cache, so this scene actually challenges retention. The 100-file scenario must not pass by displaying only the first picture. A 24-image unique access count is not proof that 24 are simultaneously resident; compare evictions, timing and memory honestly.
+
+All sample files are pure-SHA deterministic and require no external Python packages. GUI startup and loading are not excluded from the whole-process stage array but **are excluded** from replay p95/p99. More trials are necessary if two pairs disagree.
+
+## Full 12-process native Win32 evidence — console-report failure only
+
+The exact-head [CI #39398605775](https://github.com/Lalalalendia/Akula/actions/runs/39398605775/artifacts/12256356630) at `88978ecd` **completed all 12 real Win32 samples**: all strict per-fixture viewport/decode/mip/pixel gates passed at 1/1, 10/10 and 32/32 visited sources (thresholds were 1/1, 8/10 and 24/32). The 100-PNG note deliberately scans only 32 unique anchors during the six-second timed window; other sources may decode as the viewport changes. The exact fixture content hashes and `matrix.json`, `summary.md`, replay/stage samples, and raw logs were uploaded despite the final job status being FAILED. This is **not** a full CI PASS: after writing the complete UTF-8 report, the Python runner tried `print(summary)` to Windows cp1252 stdout; the single Unicode `→` in the report caused `UnicodeEncodeError`. The driver now prints a plain ASCII `AKULA_IMAGE_FULL_REDRAW_MATRIX_ACCEPTED samples=12 report=summary.md` marker instead, retaining the real Markdown in `summary.md` for `GITHUB_STEP_SUMMARY`; the exception line is also ASCII-safe.
+
+Collected medians across the two independently launched process trials (native Win32 at 983×675, **forced-full-source**, CPU work not FPS):
+
+| Fixture PNGs | Eager CPU p95/p99 (ms) | Selective CPU p95/p99 (ms) | Eager peak RSS (MiB) | Selective peak RSS (MiB) | Eager cache evictions / trial | Selective evictions / trial |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 3.125 / 3.365 | 2.922 / 3.442 | 62.1 | 59.9 | 0 / 0 | 0 / 0 |
+| 10 | 4.716 / 10.724 | 3.662 / 5.309 | 108.4 | 98.0 | 0 / 0 | 0 / 0 |
+| 100 | 8.134 / 8.989 | 5.318 / 6.317 | 134.2 | 110.8 | 64 / 72 | 0 / 0 |
+
+Two 100-PNG paired p95 differences (Selective minus Eager) were **−3.147 ms** and **−2.485 ms**, and RSS savings were **25.18 MiB** and **21.69 MiB**. The 10-PNG p95 differences were **−1.539 ms** and **−0.570 ms**. The one-PNG p95 deltas disagreed in sign (+0.183 and −0.590 ms), so do not claim an advantage for a single image. This compares **two combined strategies** (scalar Eager L1+L2 versus packed Selective direct L2) and cannot attribute improvements to cache policy or reducer alone. It does not establish production value under the normal adaptive predecoder. No production renderer code was changed.
+
+## Attribution caveat
+
+This compares **combined** Eager-scalar-pyramid vs Selective-packed-direct-L2-and-lazy-L1. Even with identical Medium sampling and rendered pixels, differences in cold latency cannot be attributed solely to caching policy: the reduction algorithm also differs. A pure policy-only comparison must hold the reducer constant (packed eager vs packed direct). Keep that for a separate factorial study. This PR neither changes the installed renderer nor proposes automatic mipmap rollout. Pixel-fidelity screenshots/pattern checks are still required before production approval.

@@ -109,6 +109,39 @@ impl PaintSink for Painter {
     }
 
     fn fill(&mut self, draw: FillRef<'_>) {
+        // IMG-PERF-08 developer-only provenance between the actual editor
+        // ImageBrush ID and Akula's CPU painter scene-culling boundary.
+        // A MediaView::paint call alone is not proof its image fill survived
+        // ancestor clips, region culling and sprite handling. Log at most
+        // one record per (brush ID, offscreen state, sprite state).
+        #[cfg(not(feature = "installed"))]
+        {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *ENABLED.get_or_init(|| {
+                std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF")
+                    .ok().as_deref() == Some("1")
+            }) {
+                if let BrushRef::Image(image) = &draw.brush {
+                    let id = image.image.data.id();
+                    let bounds = draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape));
+                    let offscreen = self.offscreen(bounds);
+                    let sprite = crate::render::sprite::covered(id);
+                    static SEEN: std::sync::OnceLock<
+                        std::sync::Mutex<std::collections::HashSet<(u64, bool, Option<bool>)>>
+                    > = std::sync::OnceLock::new();
+                    if SEEN.get_or_init(Default::default)
+                        .lock().unwrap_or_else(|e| e.into_inner())
+                        .insert((id, offscreen, sprite))
+                    {
+                        eprintln!(
+                            "AKULA_IMAGE_RASTER_FILL image_id={id} offscreen={offscreen} sprite={sprite:?} bounds={:.0},{:.0},{:.0},{:.0} frame={:.0},{:.0},{:.0},{:.0}",
+                            bounds.x0, bounds.y0, bounds.x1, bounds.y1,
+                            self.frame.x0, self.frame.y0, self.frame.x1, self.frame.y1
+                        );
+                    }
+                }
+            }
+        }
         if self.error.is_some() || convert::invisible(&draw.brush, draw.composite) || self.offscreen(draw.transform.transform_rect_bbox(convert::shape_bounds(&draw.shape))) {
             return;
         }

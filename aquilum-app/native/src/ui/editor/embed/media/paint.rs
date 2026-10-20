@@ -44,6 +44,43 @@ impl MediaView {
         if self.frame.area() <= 0.0 {
             return;
         }
+        // IMG-PERF-08 developer-only witness: an asynchronously decoded
+        // image can be Ready without its embed ever being painted by the
+        // virtualized editor. Count actual MediaView paint calls separately
+        // from resolver Ready and Vello mip requests. No user paths logged.
+        #[cfg(not(feature = "installed"))]
+        {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *ENABLED.get_or_init(|| {
+                std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF")
+                    .ok().as_deref() == Some("1")
+            }) {
+                let number = self.line.src.strip_prefix("photo_")
+                    .and_then(|v| v.strip_suffix(".png"))
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .filter(|&n| n < 1000);
+                if let Some(number) = number {
+                    let ready = self.image.is_some();
+                    let image_id = self.image.as_ref().map_or(0, |brush| brush.image.data.id());
+                    // A late async refresh may rebind the same fixture name
+                    // to a different brush. Preserve each observed real ID.
+                    static SEEN: std::sync::OnceLock<
+                        std::sync::Mutex<std::collections::HashSet<(usize, bool, u64)>>
+                    > = std::sync::OnceLock::new();
+                    if SEEN.get_or_init(Default::default)
+                        .lock().unwrap_or_else(|e| e.into_inner())
+                        .insert((number, ready, image_id))
+                    {
+                        let (source_w, source_h) = self.image.as_ref()
+                            .map_or((0, 0), |brush| (brush.image.width, brush.image.height));
+                        eprintln!(
+                            "AKULA_IMAGE_EMBED_PAINT index={number} ready={ready} image_id={image_id} decoded_w={source_w} decoded_h={source_h} y={y:.1} frame_h={:.1}",
+                            self.frame.height()
+                        );
+                    }
+                }
+            }
+        }
         let tm = theme::current();
         let at = Vec2::new(x, y);
         let frame = self.frame + at;

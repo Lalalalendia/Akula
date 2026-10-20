@@ -32,6 +32,9 @@ pub struct Replay {
     work: Vec<f64>,
     // Developer-only stage samples, one per presented replay frame.
     stages: Vec<crate::render::StageSample>,
+    // Developer-only image-stress scan: prevent duplicate anchor seeks
+    // during the many 8ms fling-replay ticks between image dwell slots.
+    image_scan_slot: Option<usize>,
 }
 
 impl Replay {
@@ -42,7 +45,7 @@ impl Replay {
             Kind::Graph => 20.0,
             Kind::Focus => FOCUS_SECONDS * 2.0,
         };
-        Replay { kind, length: Duration::from_secs_f64(seconds), output, started: None, next: None, presents: Vec::new(), work: Vec::new(), stages: Vec::new() }
+        Replay { kind, length: Duration::from_secs_f64(seconds), output, started: None, next: None, presents: Vec::new(), work: Vec::new(), stages: Vec::new(), image_scan_slot: None }
     }
 
     pub fn is_graph(&self) -> bool {
@@ -86,6 +89,44 @@ impl Replay {
         }
         self.next = Some(next + Duration::from_secs_f64(FOCUS_SECONDS));
         Some(Step::Focus)
+    }
+
+    /// Deterministic image-anchor schedule for a developer-only 6-second
+    /// fling replay. Scan the distinct anchors in order during the first
+    /// half, then in reverse; each anchor gets 3s/count to decode and paint.
+    /// This is a workload driver, not a production scrolling algorithm.
+    pub fn image_scan_target(&mut self, now: Instant, count: usize) -> Option<usize> {
+        if self.kind != Kind::Fling || count == 0 || count > 64 {
+            return None;
+        }
+        let start = self.started?;
+        let elapsed = now.saturating_duration_since(start);
+        if elapsed >= self.length {
+            return None;
+        }
+        let slots = count * 2;
+        let slot = ((elapsed.as_nanos() * slots as u128) / self.length.as_nanos()) as usize;
+        let slot = slot.min(slots - 1);
+        if self.image_scan_slot == Some(slot) {
+            return None;
+        }
+        self.image_scan_slot = Some(slot);
+        Some(if slot < count { slot } else { slots - 1 - slot })
+    }
+
+    /// The active artificial image anchor persists across all replay ticks
+    /// in its dwell slot. The caller may re-center it after asynchronous
+    /// image decoding changes Markdown paragraph heights. This does not
+    /// advance the slot, replay clock, or alter ordinary scrolling.
+    pub fn image_scan_active(&self, count: usize) -> Option<usize> {
+        if self.kind != Kind::Fling || count == 0 || count > 64 {
+            return None;
+        }
+        let slot = self.image_scan_slot?;
+        if slot >= count * 2 {
+            return None;
+        }
+        Some(if slot < count { slot } else { count * 2 - 1 - slot })
     }
 
     pub fn wake(&self) -> Option<Instant> {
@@ -194,6 +235,23 @@ impl Replay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_anchor_scan_dwells_and_visits_both_directions_during_six_second_fling() {
+        let mut replay = Replay::new(Kind::Fling, PathBuf::from("not-used.json"));
+        let start = Instant::now();
+        assert!(matches!(replay.step(start), Some(Step::Wheel(_))));
+        assert_eq!(replay.image_scan_target(start, 32), Some(0));
+        assert_eq!(replay.image_scan_target(start + Duration::from_millis(50), 32), None);
+        assert_eq!(replay.image_scan_active(32), Some(0));
+        assert_eq!(replay.image_scan_target(start + Duration::from_millis(100), 32), Some(1));
+        assert_eq!(replay.image_scan_target(start + Duration::from_millis(3000), 32), Some(31));
+        assert_eq!(replay.image_scan_target(start + Duration::from_millis(3100), 32), Some(30));
+        assert_eq!(replay.image_scan_active(32), Some(30));
+        assert_eq!(replay.image_scan_target(start + Duration::from_millis(5990), 32), Some(0));
+        assert_eq!(replay.image_scan_target(start + Duration::from_millis(6000), 32), None);
+        assert_eq!(replay.image_scan_target(start, 0), None);
+    }
 
     #[test]
     fn replay_only_cpu_samples_match_presented_frames_without_changing_default_json() {

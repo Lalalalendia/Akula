@@ -49,7 +49,66 @@ impl Host {
         let state = self.pointer_state();
         match step {
             crate::replay::Step::Wheel(lines) => {
-                self.pointer_event(PointerEvent::Scroll(PointerScrollEvent { pointer: PRIMARY_MOUSE, delta: ScrollDelta::LineDelta(0.0, lines), state }));
+                // Developer-only image workload: a high-frequency smooth wheel
+                // (and even a fixed PixelDelta) traversed only 3 distinct PNG
+                // contents in a 10-source note. Seek to byte anchors of real
+                // image paragraphs through the existing note layout instead.
+                // The same deterministic dwell schedule is used for Eager and
+                // Selective, with no installed feature path.
+                static ANCHORS: std::sync::OnceLock<Option<Vec<usize>>> = std::sync::OnceLock::new();
+                let anchors = ANCHORS.get_or_init(|| {
+                    let raw = std::env::var("AKULA_EXPERIMENTAL_IMAGE_SCAN_BYTES").ok()?;
+                    let values = raw.split(',').map(str::parse::<usize>)
+                        .collect::<Result<Vec<_>, _>>().ok()?;
+                    if values.is_empty() || values.len() > 64
+                        || values.windows(2).any(|pair| pair[0] >= pair[1]) {
+                        return None;
+                    }
+                    Some(values)
+                });
+                if let Some(anchors) = anchors {
+                    // A transition-only seek was stale after asynchronous
+                    // photo decode changed image paragraph heights. On every
+                    // actual 8ms native replay tick, recheck the *active*
+                    // anchor; App::image_scan_reveal is a cheap no-op when
+                    // the latest layout places its top visibly inside the
+                    // viewport with a 64px raster band. This handles anchors
+                    // that cannot center at the start of a document. Never
+                    // advance the 6s sweep clock.
+                    let transition = self.replay.as_mut()
+                        .and_then(|replay| replay.image_scan_target(now, anchors.len()));
+                    let active = self.replay.as_ref()
+                        .and_then(|replay| replay.image_scan_active(anchors.len()));
+                    if let Some(index) = active {
+                        if let Some(root) = self.root.as_mut() {
+                            if let Some((from, to)) = self.app.image_scan_reveal(root, anchors[index]) {
+                                static FIRST: std::sync::Once = std::sync::Once::new();
+                                FIRST.call_once(|| eprintln!(
+                                    "AKULA_IMAGE_ANCHOR_SCAN_APPLIED count={} schedule=forward-reverse",
+                                    anchors.len()
+                                ));
+                                if transition.is_some() && (index % 4 == 0 || index + 1 == anchors.len()) {
+                                    eprintln!(
+                                        "AKULA_IMAGE_ANCHOR_SCAN_SEEK index={} byte={} from={:.0} to={:.0}",
+                                        index, anchors[index], from, to
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    // Each scheduled 8ms fling tick must request another
+                    // native frame even while the same image anchor is held.
+                    // Otherwise only the two anchor transitions render in
+                    // the one-image case, and neither replay CPU metrics nor
+                    // 32-frame cache diagnostics are meaningful. Keep source
+                    // decoders and painting asynchronous, but render during
+                    // the entire per-image dwell interval.
+                    self.request_redraw();
+                } else {
+                    self.pointer_event(PointerEvent::Scroll(PointerScrollEvent {
+                        pointer: PRIMARY_MOUSE, delta: ScrollDelta::LineDelta(0.0, lines), state
+                    }));
+                }
             }
             crate::replay::Step::Pinch(delta) => self.pinch(f64::from(delta)),
             crate::replay::Step::Focus => {

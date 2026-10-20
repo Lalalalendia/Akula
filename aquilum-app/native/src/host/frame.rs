@@ -44,6 +44,22 @@ impl Host {
             output.set_background(u32::from_be_bytes([rgba.a, rgba.r, rgba.g, rgba.b]));
         }
         let full = std::mem::take(&mut self.full_next) || output.fresh();
+        // Developer-only A/B falsifier: force rasterization rather than reuse
+        // copied BGRA rows during a live replay. Normal and installed frames
+        // do not check this environment variable.
+        #[cfg(not(feature = "installed"))]
+        let full = full || {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let enabled = *ENABLED.get_or_init(|| {
+                std::env::var("AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW").ok().as_deref() == Some("1")
+            });
+            let active = enabled && self.replay.as_ref().is_some_and(crate::replay::Replay::running);
+            if active {
+                static FIRST: std::sync::Once = std::sync::Once::new();
+                FIRST.call_once(|| eprintln!("AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED"));
+            }
+            active
+        };
         let raster_start = Instant::now();
         let drawn = match self.renderer.draw(&layers, width, height, scale, background, full, output) {
             Ok(drawn) => drawn,
