@@ -72,7 +72,6 @@ cat > "$lab/seed/user-data" <<CLOUD
 #cloud-config
 hostname: akula-b1b2b
 ssh_deletekeys: true
-ssh_genkeytypes: []
 ssh_keys:
   ed25519_private: |
 $(sed 's/^/    /' "$lab/host")
@@ -168,7 +167,11 @@ test "$ready" = true
 # Ubuntu cloud-init may return status 2 for unrelated warnings. Do not infer
 # trusted provisioning from its exit status; independently prove the *exact*
 # pre-boot public key and guest marker are root-controlled and match the runner.
-ssh_lab "sudo cloud-init status --wait || sudo cloud-init status --long || true"
+# Fail closed on invalid cloud-config; a successful SSH handshake alone is
+# not evidence that the entire cloud-init provisioning schema is valid.
+ssh_lab "sudo cloud-init status --wait"
+ssh_lab "sudo cloud-init schema --system --annotate"
+echo "B1B2B_VM_CLOUD_INIT_SCHEMA_PASS"
 expected_key_sha="$(sha256sum "$lab/v1.pub" | cut -d ' ' -f1)"
 ssh_lab "sudo test -f /etc/akula-b1b2b-lab.marker &&
   test \"\$(sudo sha256sum /etc/akula-b1b2b-lab-public.ed25519 | cut -d ' ' -f1)\" = '$expected_key_sha'"
@@ -190,7 +193,10 @@ ssh_lab "cd /home/akulavm/b1b2b &&
   chmod 0555 b1a-fixture wrapper &&
   sudo bash akula-b1b2b-guest-lab.sh bootstrap"
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh negative"
-# Hard-kill the installer after atomic activation, then recover in a new process.
+# Hard-kill the installer after atomic activation, then reboot the entire
+# guest OS BEFORE recovery. This is an OS reboot, not a VM power cut.
+boot_before="$(ssh_lab cat /proc/sys/kernel/random/boot_id)"
+[[ "$boot_before" =~ ^[0-9a-f-]{36}$ ]]
 set +e
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh crash"
 crash_rc=$?
@@ -199,6 +205,37 @@ if (( crash_rc == 0 )); then
   echo "B1B2B_REFUSED: crash injection did not kill installer" >&2
   exit 1
 fi
+echo "B1B2B_VM_INSTALLER_SIGKILL_CONFIRMED"
+# ssh may exit 0 or nonzero as the kernel drops its session during reboot;
+# prove the boot changed by independently reading the Linux boot_id afterward.
+ssh_lab "sudo systemctl reboot" </dev/null >/dev/null 2>&1 || true
+boot_after=""
+reboot_verified=false
+for i in $(seq 1 260); do
+  if ! kill -0 "$guest_pid" 2>/dev/null; then
+    echo "B1B2B_REFUSED: QEMU terminated during OS reboot" >&2
+    exit 1
+  fi
+  boot_after="$(ssh_lab cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+  if [[ "$boot_after" =~ ^[0-9a-f-]{36}$ && "$boot_after" != "$boot_before" ]]; then
+    reboot_verified=true
+    break
+  fi
+  sleep 2
+done
+if [[ "$reboot_verified" != true ]]; then
+  echo "B1B2B_REFUSED: guest OS reboot was not independently proved" >&2
+  exit 1
+fi
+echo "B1B2B_VM_OS_BOOT_ID_CHANGED"
+# No unconfirmed candidate may auto-start during guest reboot.
+if ssh_lab "sudo systemctl is-active --quiet akula-b1b2b-lab.service"; then
+  echo "B1B2B_REFUSED: unconfirmed candidate auto-started before recovery" >&2
+  exit 1
+fi
+ssh_lab "sudo test -f /opt/akula-b1b2b-lab/in-progress &&
+  test \"\$(sudo readlink /opt/akula-b1b2b-lab/active)\" = releases/0002"
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh recover"
+echo "B1B2B_VM_OS_REBOOT_RECOVERY_PASS"
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh cleanup"
-echo "B1B2B_PASS: GPG-pinned Ubuntu VM, B1a Ed25519 Node, systemd, invalid signed upgrade rollback, SIGKILL recovery"
+echo "B1B2B_PASS: schema-valid Ubuntu VM, B1a signed Node, systemd, rejected bad upgrade, SIGKILL plus guest reboot recovery"

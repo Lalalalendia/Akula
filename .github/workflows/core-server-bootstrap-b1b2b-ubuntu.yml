@@ -9,6 +9,7 @@ on:
       - "scripts/ci/akula-b1b2b-guest-lab.sh"
       - "scripts/ci/akula-b1b2b-node-wrapper.sh"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B.md"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2B1.md"
       - ".github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml"
       - "aquilum-app/core/Cargo.toml"
       - "aquilum-app/core/src/server_release_lab.rs"
