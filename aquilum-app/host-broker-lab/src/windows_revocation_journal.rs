@@ -108,7 +108,7 @@ fn exclusive_existing(path: &Path) -> Result<File, Hold> {
 fn read_log(file: &mut File, expected_anchor: [u8; 16]) -> Result<State, Hold> {
     file.seek(SeekFrom::Start(0)).map_err(invalid_io)?;
     let mut bytes = Vec::new();
-    file.take((MAX_BYTES + 1) as u64)
+    (&mut *file).take((MAX_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(invalid_io)?;
     if bytes.len() < HEADER || bytes.len() > MAX_BYTES {
@@ -317,7 +317,7 @@ mod tests {
     fn two_real_os_processes_cannot_both_commit_one_cas_epoch() {
         let journal = TempJournal::create("race");
         let binary = std::env::current_exe().unwrap();
-        let mut spawn_child = || {
+        let spawn_child = || {
             Command::new(&binary)
                 .arg("--exact")
                 .arg("windows_revocation_journal::tests::child_process_revoke")
