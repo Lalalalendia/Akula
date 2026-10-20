@@ -32,7 +32,7 @@ impl TextEditor {
                     .ok().as_deref() == Some("1")
             }) {
                 static SEEN: std::sync::OnceLock<
-                    std::sync::Mutex<std::collections::HashSet<(usize, bool, Fold)>>
+                    std::sync::Mutex<std::collections::HashSet<(usize, bool, u8)>>
                 > = std::sync::OnceLock::new();
                 let seen = SEEN.get_or_init(Default::default);
                 for i in first..=last {
@@ -46,8 +46,14 @@ impl TextEditor {
                     }).filter(|&n| n < 1000);
                     if let Some(number) = number {
                         let embedded = paragraph.embed.is_some();
+                        let fold_key = match paragraph.fold {
+                            Fold::None => 0u8,
+                            Fold::Head => 1,
+                            Fold::Member => 2,
+                            Fold::Above => 3,
+                        };
                         if seen.lock().unwrap_or_else(|e| e.into_inner())
-                            .insert((number, embedded, paragraph.fold))
+                            .insert((number, embedded, fold_key))
                         {
                             eprintln!(
                                 "AKULA_IMAGE_EDITOR_VISIBLE index={number} embedded={embedded} fold={:?} top={:.1} window_top={top:.1} window_bottom={bottom:.1}",
