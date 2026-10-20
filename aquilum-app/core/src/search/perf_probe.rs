@@ -21,17 +21,22 @@ pub(crate) enum Stage {
     Created,
     TantivyAdd,
     Wiki,
+    WikiParse,
     Fields,
+    FieldsParse,
     Tasks,
+    TasksParse,
     MetadataUpsert,
     TantivyCommit,
+    TantivyPrepare,
+    TantivyFinalize,
     ReaderReload,
     SqliteCommit,
     Prune,
     Maintenance,
 }
 
-const LABELS: [&str; 16] = [
+const LABELS: [&str; 21] = [
     "metadata_load",
     "directory_next",
     "probe",
@@ -40,10 +45,15 @@ const LABELS: [&str; 16] = [
     "created",
     "tantivy_add",
     "wiki",
+    "wiki_parse",
     "fields",
+    "fields_parse",
     "tasks",
+    "tasks_parse",
     "metadata_upsert",
     "tantivy_commit",
+    "tantivy_prepare",
+    "tantivy_finalize",
     "reader_reload",
     "sqlite_commit",
     "prune",
@@ -52,12 +62,20 @@ const LABELS: [&str; 16] = [
 
 struct Metrics {
     ns: [u128; LABELS.len()],
+    commits: u64,
+    wiki_rows: u64,
+    field_rows: u64,
+    task_rows: u64,
 }
 
 impl Default for Metrics {
     fn default() -> Self {
         Self {
             ns: [0; LABELS.len()],
+            commits: 0,
+            wiki_rows: 0,
+            field_rows: 0,
+            task_rows: 0,
         }
     }
 }
@@ -79,6 +97,22 @@ pub(crate) fn add_ns(stage: Stage, nanoseconds: u128) {
         let mut data = cell.borrow_mut();
         data.ns[stage as usize] = data.ns[stage as usize].saturating_add(nanoseconds);
     });
+}
+
+pub(crate) fn record_rows(stage: Stage, count: usize) {
+    METRICS.with(|cell| {
+        let mut data = cell.borrow_mut();
+        match stage {
+            Stage::Wiki => data.wiki_rows += count as u64,
+            Stage::Fields => data.field_rows += count as u64,
+            Stage::Tasks => data.task_rows += count as u64,
+            _ => unreachable!("row counter applies only to structured projections"),
+        }
+    });
+}
+
+pub(crate) fn committed() {
+    METRICS.with(|cell| cell.borrow_mut().commits += 1);
 }
 
 pub(crate) fn time<T>(stage: Stage, operation: impl FnOnce() -> T) -> T {
@@ -113,18 +147,23 @@ impl<I: Iterator> Iterator for TimedIterator<I> {
     }
 }
 
-/// Per-scan wall and stage timings. Timers other than ReadCpu/HashCpu are on
-/// the coordinator thread. ReadCpu/HashCpu are sums across parallel workers:
-/// they overlap PrepareWall, so columns MUST NOT be added into a grand total.
+/// Per-scan wall and stage timings. Nested stages (wiki/wiki_parse,
+/// fields/fields_parse, tasks/tasks_parse and commit/prepare/finalize/reload)
+/// overlap their parent and must not be added into a grand total.
+/// ReadCpu/HashCpu are sums across parallel workers, not CPU clock samples.
 /// This probe is enabled only by an explicit Cargo feature in CI.
 pub(crate) fn print_scan(documents: u64, wall: Duration) {
     METRICS.with(|cell| {
         let data = cell.borrow();
         print!(
-            "INDEX-STAGE documents={documents} prepared={} input_bytes={} wall_ms={:.3}",
+            "INDEX-STAGE documents={documents} prepared={} input_bytes={} wall_ms={:.3} commits={} wiki_rows={} field_rows={} task_rows={}",
             PREPARED.load(Ordering::Relaxed),
             BYTES.load(Ordering::Relaxed),
             wall.as_secs_f64() * 1000.0,
+            data.commits,
+            data.wiki_rows,
+            data.field_rows,
+            data.task_rows,
         );
         for (label, nanoseconds) in LABELS.iter().zip(data.ns.iter()) {
             print!(" {label}_ms={:.3}", *nanoseconds as f64 / 1_000_000.0);
