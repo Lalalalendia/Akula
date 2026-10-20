@@ -1,8 +1,7 @@
-//! RN-4E1b-03b1c: real Windows SCM lifecycle, ZERO policy/IPC.
-//! This experimental service owns no user data, SQLite, File Gate writer,
-//! QUIC connection or permission. It enters the actual SCM dispatcher,
-//! registers a stop/shutdown handler and reports correct service states.
-//! It is NOT installed by Akula and deliberately DOES NOT start a pipe.
+//! Experimental Windows SCM lifecycle with ZERO authority.
+//! A joined custody+pipe mode pins a protected installer-like marker BEFORE
+//! exposing a deny-only OS-owned pipe in the SAME LocalSystem service.
+//! No grant, enrollment, File Gate writer or production installation.
 
 #![cfg(windows)]
 
@@ -173,6 +172,8 @@ fn run_service() -> io::Result<()> {
     } else {
         None
     };
+    // A required custody witness is already held and cannot be bypassed by
+    // falling back to an unchecked IPC service if inspection fails.
     // The named pipe must be created and secured BEFORE SCM reports RUNNING.
     // A service that cannot bind its exact first-instance pipe fails closed.
     let pipe = if IPC_TEST_MODE.load(Ordering::SeqCst) {
@@ -238,6 +239,14 @@ pub fn dispatch_scm_pipe_service() -> io::Result<()> {
 pub fn dispatch_scm_custody_service() -> io::Result<()> {
     CUSTODY_TEST_MODE.store(true, Ordering::SeqCst);
     dispatch_scm(false)
+}
+
+/// Verify pinned, pre-existing OS custody BEFORE binding the secured named
+/// pipe and reporting RUNNING. Both pinned handles remain held for the whole
+/// pipe/SCM lifetime. This research mode cannot return grants or enroll roots.
+pub fn dispatch_scm_custody_pipe_service() -> io::Result<()> {
+    CUSTODY_TEST_MODE.store(true, Ordering::SeqCst);
+    dispatch_scm(true)
 }
 
 fn dispatch_scm(pipe_mode: bool) -> io::Result<()> {

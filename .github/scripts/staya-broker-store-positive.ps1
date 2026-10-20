@@ -1,4 +1,5 @@
 # Disposable Windows CI-only installer-like ACL fixture; no P2P authority.
+param([switch]$JoinedPipe)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
@@ -36,7 +37,8 @@ function Expect-Stop() {
 }
 try {
     Expect-Refusal "--verify-custody"
-    $command = '"' + $exe + '" --service-custody'
+    $mode = if ($JoinedPipe) { '--service-custody-pipe' } else { '--service-custody' }
+    $command = '"' + $exe + '" ' + $mode
     New-Service -Name $name -BinaryPathName $command -StartupType Manual -DisplayName "Akula Custody Research (ephemeral)" | Out-Null
     $createdService = $true
     & sc.exe sidtype $name unrestricted | Out-Null
@@ -74,7 +76,14 @@ try {
     }
     Expect-Success "--verify-scm"
     Expect-Success "--verify-custody"
-    Expect-Refusal "--verify-pipe"
+    if ($JoinedPipe) {
+        # Service PID, SYSTEM token and enabled service SID must match the
+        # live named-pipe process while pinned custody handles are held.
+        Expect-Success "--verify-pipe"
+        Expect-Success "--verify-pipe"
+    } else {
+        Expect-Refusal "--verify-pipe"
+    }
 
     # Even an otherwise valid marker must fail if ordinary Users gain write.
     Must-Icacls -aclArguments @($marker, "/grant:r", "*S-1-5-32-545:W")
@@ -85,12 +94,14 @@ try {
     catch { $tamperedRefused = $true }
     if (-not $tamperedRefused) { throw "SCM accepted user-write policy marker" }
     (Get-Service -Name $name).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(12))
+    Expect-Refusal "--verify-pipe"
 
     Must-Icacls -aclArguments @($marker, "/remove:g", "*S-1-5-32-545")
     Expect-Success "--verify-custody"
     Start-Service -Name $name -ErrorAction Stop
     (Get-Service -Name $name).WaitForStatus("Running", [TimeSpan]::FromSeconds(15))
     Expect-Success "--verify-custody"
+    if ($JoinedPipe) { Expect-Success "--verify-pipe" }
     Expect-Stop
 }
 finally {
