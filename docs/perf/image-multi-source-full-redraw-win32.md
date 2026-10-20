@@ -30,6 +30,16 @@ Eager and Selective use the exact same anchors, fixture hashes, timetable, Mediu
 
 The paint checkpoint is developer-only, active only for artificial `photo_NNN.png` fixtures and an explicit opt-in flag. No user path/content is logged. If the resolver Ready count is high but MediaView paint coverage is low, investigate editor virtualization, layout invalidation, stale scroll transforms and visibility clipping. If the MediaView count is high but Vello mip coverage low, investigate clip/raster sampling and dimensions. The **unchanged** strict 1/8/24 final decoded-pixel fingerprints remain the real admission; none of these preliminary stages can substitute for actual paint work.
 
+## Render command invalidation and CPU raster culling falsifier
+
+[Five-stage Win32 evidence #39378075009](https://github.com/Lalalalendia/Akula/actions/runs/39378075009), [raw process archive](https://github.com/Lalalalendia/Akula/actions/runs/39378075009/artifacts/12244482487): all **10/10** synthetic PNGs pass async Pending→Ready, visible editor paragraphs and materialized embeds, and **all ten actual `MediaView::paint` calls have non-empty images**. The artificial anchor scan reaches 3318px scroll offset; the Vello CPU mip path sees only **2/10** distinct source pixel fingerprints and no evictions. Thus the remaining gap is between a *recorded draw_image call* and the final CPU raster candidate; do not blame missing files, decode, editor virtualization or cache pressure.
+
+The next test includes **two independent developer-only changes**, neither installed:
+- On the real editor-byte anchor transition, invalidate `TextEditor`'s retained painting via `WidgetMut.ctx.request_render()`, in addition to `ScrollArea`'s normal layout/compose/post-paint. This tests whether only moving a retained scene leaves new-image draw commands clipped to old recording conditions.
+- Join each synthetic `MediaView` brush's **actual image data ID** with the same ID observed at the Akula Vello CPU `PaintSink::fill` boundary. Record the draw's transformed bounds, raster frame rectangle, offscreen state and sprite state **once per source and state**. Distinguish a command discarded by clipping, an image brush substituted by sprite policy and a command surviving CPU culling but not reaching a mip level. These IDs and frame bounds are developer-only and contain no user filenames or pixel data.
+
+If the repaint fixes true 8/10 and 24/100 decoded-source coverage, we have isolated a retained-command invalidation dependency for this synthetic scan. If it does not, compare the sink ID/bounds logs to the source/ready and actual mip counts, then investigate clip stacks and transform propagation. This run is **not** a production scrolling behavior guarantee; preserve pixel/quality/memory review before enabling any LOD optimization.
+
 ## Acceptance
 
 One native Windows release binary, visible uncloaked PID-owned Win32 HWND and monitored peak working set. For each of 1/10/100 source-count scenes, run two process-level Eager/Selective pairs (12 total) in alternating AB/BA order, each with a native six-second forward-reverse image-anchor replay. Record:
