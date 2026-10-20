@@ -75,6 +75,11 @@ pub mod windows_store_custody;
 #[cfg(test)]
 mod broker_policy_kernel;
 
+// A Windows OS-process crash/CAS experiment only. This is NEVER compiled
+// into the normal Broker executable or the user's installed Akula.
+#[cfg(all(test, windows))]
+mod windows_revocation_journal;
+
 #[cfg(test)]
 mod tests {
     use super::*;
