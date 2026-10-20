@@ -145,7 +145,7 @@ extern "system" {
         output_buffer: u32,
         input_buffer: u32,
         default_timeout: u32,
-        attributes: Handle,
+        attributes: *const super::windows_server::SecurityAttributes,
     ) -> Handle;
 }
 
