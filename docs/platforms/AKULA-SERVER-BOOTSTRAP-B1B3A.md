@@ -17,7 +17,7 @@ Previous tests proved that a signed Node can be executed and recovered on a disp
 
 ## Tests and evidence required
 
-12 integration tests create **real Linux UnixListener/UnixStream** connections (not mocked peer identity) and test correct kernel UID, valid Ed25519 signature and scope; wrong process UID/policy eUID; wrong approver key; modified signature/body; independently signed but mismatched host/plan/floor; expired/future/overlong claims; bad version/opcode; truncated and pipelined extra bytes; zero nonce. Test seeds and identities are synthetic, never production keys. Dedicated Ubuntu CI plus no-feature Core regression must pass on exact HEAD.
+12 ordinary integration tests create **real Linux UnixListener/UnixStream** connections (not mocked peer identity) and test correct kernel UID, valid Ed25519 signature and scope; wrong process UID/policy eUID; wrong approver key; modified signature/body; independently signed but mismatched host/plan/floor; expired/future/overlong claims; bad version/opcode; truncated and pipelined extra bytes; zero nonce. Test seeds and identities are synthetic, never production keys. An additional ignored-by-default Linux CI test launches a **separate UID 0 process** through passwordless sudo on the ephemeral runner. It sends a valid signed request to a nonroot Unix socket helper and requires SO_PEERCRED to return WrongPeerIdentity; this is not a fake UID string in the payload. Dedicated Ubuntu CI runs this negative test explicitly, plus the 12 ordinary tests and no-feature Core regression. All must pass on exact HEAD.
 
 ## Critical nonclaims
 

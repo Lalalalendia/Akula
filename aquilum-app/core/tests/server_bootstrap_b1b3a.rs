@@ -4,11 +4,12 @@
 
 use aquilum_core::server_installer_ipc_lab::{
     admit_preflight, InertPreflightResult, PreflightClaim, PreflightError,
-    RootTrustedPolicy, SignedPreflight, MAX_VALIDITY_SECONDS, WIRE_BYTES,
+    RootTrustedPolicy, SignedPreflight, MAX_VALIDITY_SECONDS,
 };
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use std::io::Write;
 use std::net::Shutdown;
+use std::process::Command;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 
@@ -168,4 +169,35 @@ fn all_zero_nonce_is_refused_even_when_signed() {
     c.approval_nonce = [0; 16];
     assert_eq!(exchange(anchor(), signed(c).wire_bytes()).unwrap_err(),
         PreflightError::InvalidClaim);
+}
+
+#[test]
+#[ignore = "requires Linux CI runner with passwordless sudo; no production privilege"]
+fn actual_separate_root_process_is_rejected_as_wrong_peer_uid() {
+    // The test server stays unprivileged and admits ONLY its own eUID.
+    // A separate genuine UID 0 process sends a correctly signed frame; the
+    // helper MUST trust the kernel's peer uid, not an owner claim in the frame.
+    assert_ne!(rustix::process::geteuid().as_raw(), 0);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cross-uid-test.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let wire = signed(claim()).wire_bytes();
+    let mut hex = String::with_capacity(wire.len() * 2);
+    for byte in wire {
+        use std::fmt::Write as _;
+        write!(&mut hex, "{byte:02x}").unwrap();
+    }
+    let script = "import socket,sys\ns=socket.socket(socket.AF_UNIX)\ns.connect(sys.argv[1])\ns.sendall(bytes.fromhex(sys.argv[2]))\ns.shutdown(socket.SHUT_WR)\ns.close()\n";
+    let mut peer = Command::new("sudo")
+        .args(["-n", "python3", "-c", script])
+        .arg(&path)
+        .arg(hex)
+        .spawn()
+        .expect("ephemeral Linux runner must support sudo");
+    let (mut accepted, _) = listener.accept().unwrap();
+    assert_eq!(
+        admit_preflight(&mut accepted, &anchor(), NOW).unwrap_err(),
+        PreflightError::WrongPeerIdentity
+    );
+    assert!(peer.wait().unwrap().success());
 }

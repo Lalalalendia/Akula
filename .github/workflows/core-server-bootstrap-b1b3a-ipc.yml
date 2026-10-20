@@ -44,4 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features server-bootstrap-b1b3a-helper-ipc-lab --test server_bootstrap_b1b3a -- --nocapture
+          # A real separate UID 0 process sends a valid signed packet and
+          # must be rejected by SO_PEERCRED. Run only in disposable Linux CI.
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b3a-helper-ipc-lab --test server_bootstrap_b1b3a actual_separate_root_process_is_rejected_as_wrong_peer_uid -- --ignored --exact --nocapture
           cargo check --locked -p aquilum-core --no-default-features
