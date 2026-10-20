@@ -22,6 +22,14 @@ mod linux {
     use aquilum_core::server_installer_ipc_lab::{
         admit_preflight, RootTrustedPolicy,
     };
+    #[cfg(feature = "server-bootstrap-b1b3c-pinned-fd-lab")]
+    use aquilum_core::server_installer_pinned_release_lab::{
+        verify_root_staged,RootPinnedReleaseTrust,RootVerifiedFd,
+    };
+    #[cfg(feature = "server-bootstrap-b1b3c-pinned-fd-lab")]
+    use aquilum_core::server_release_lab::{
+        ReleaseFloor,TrustedReleaseSigner,
+    };
     use rustix::fs::{open, openat, Mode, OFlags};
     use std::fs::{self, File, Permissions};
     use std::io::{Read, Write};
@@ -120,11 +128,51 @@ mod linux {
         })
     }
 
+    #[cfg(feature = "server-bootstrap-b1b3c-pinned-fd-lab")]
+    fn pin_b1a_release(trust:&RootTrustedPolicy)->Result<RootVerifiedFd,String>{
+        // The B1a release signing key resides in independently root-owned
+        // trust state, not in the release directory or a client payload.
+        let root=File::from(open(
+            ROOT,OFlags::RDONLY|OFlags::DIRECTORY|OFlags::NOFOLLOW|OFlags::CLOEXEC,
+            Mode::empty(),
+        ).map_err(|e|format!("root trust directory: {e}"))?);
+        let mut key=File::from(openat(
+            &root,"release.pub",
+            OFlags::RDONLY|OFlags::NOFOLLOW|OFlags::CLOEXEC,
+            Mode::empty(),
+        ).map_err(|e|format!("pinned release trust missing: {e}"))?);
+        strict_file(&key,0o600,Some(32))?;
+        let mut bytes=[0u8;32];
+        key.read_exact(&mut bytes).map_err(|e|e.to_string())?;
+        let now=std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e|e.to_string())?.as_secs();
+        let pinned=verify_root_staged(
+            Path::new("/run/akula-b1b3b-lab/release"),
+            &RootPinnedReleaseTrust{
+                trusted_signer:TrustedReleaseSigner {
+                    signer_id:"akula-b1b2b-ephemeral-test".into(),
+                    ed25519_public:bytes,
+                },
+                previous_floor:ReleaseFloor::initial(),
+                approved_manifest_fingerprint:trust.signed_manifest_fingerprint,
+                approved_package_sha256:trust.staged_package_sha256,
+                approved_release_sequence:trust.expected_release_sequence,
+            },now,
+        ).map_err(|e|format!("B1a root pinned candidate rejected: {e:?}"))?;
+        println!("B1B3C_ROOT_B1A_SIGNED_FD_PINNED");
+        std::io::stdout().flush().map_err(|e|e.to_string())?;
+        Ok(pinned)
+    }
+
     pub fn run() -> Result<(), String> {
         if rustix::process::geteuid().as_raw() != 0 {
             return Err("OS-owned helper must be an actual UID 0 process".into());
         }
         let trust = policy()?;
+        #[cfg(feature = "server-bootstrap-b1b3c-pinned-fd-lab")]
+        let verified_fd=pin_b1a_release(&trust)?;
+
         if Path::new(SOCKET).exists() || Path::new(SOCKET).is_symlink() {
             return Err("existing socket or symlink; refusing replacement".into());
         }
@@ -142,11 +190,15 @@ mod linux {
         // Policy does not change in response to any incoming connection.
         for _ in 0..MAX_PEERS {
             let (mut client, _) = listener.accept().map_err(|e| e.to_string())?;
-            let accepted = admit_preflight(
-                &mut client, &trust,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                    .map_err(|e| e.to_string())?.as_secs(),
-            ).is_ok();
+            let now_unix=std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?.as_secs();
+            #[cfg(feature = "server-bootstrap-b1b3c-pinned-fd-lab")]
+            let still_pinned=verified_fd.valid_at(now_unix).is_ok();
+            #[cfg(not(feature = "server-bootstrap-b1b3c-pinned-fd-lab"))]
+            let still_pinned=true;
+            let accepted=still_pinned &&
+                admit_preflight(&mut client,&trust,now_unix).is_ok();
             let _ = client.write_all(&[if accepted { 1 } else { 0 }]);
             println!("B1B3B_{}", if accepted { "PREVIEW_ONLY" } else { "REFUSED" });
         }
