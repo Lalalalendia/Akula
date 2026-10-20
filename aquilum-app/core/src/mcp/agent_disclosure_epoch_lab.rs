@@ -343,4 +343,140 @@ mod tests {
         assert_eq!(sink.0, b"private");
     }
 
+
+    /// A real loopback TCP socket is used as the output sink. This is still
+    /// a test-only, synthetic HTTP reply, NOT MCP protocol/host registration.
+    #[test]
+    fn real_tcp_reply_reaches_peer_before_either_revoke_can_ack() {
+        use std::io::Read;
+        use std::net::{Ipv4Addr, TcpListener, TcpStream};
+
+        let f = fixture();
+        let (mut credential_epoch, mut grant_epoch) = fence_connections(&f);
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let (mut response_socket, _) = listener.accept().unwrap();
+        response_socket
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+
+        let body = b"agent-only-test-note";
+        let mut reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        reply.extend_from_slice(body);
+        let byte_count = reply.len();
+        let (delivered_tx, delivered_rx) = mpsc::channel::<Vec<u8>>();
+        let peer = thread::spawn(move || {
+            let mut bytes = vec![0; byte_count];
+            client.read_exact(&mut bytes).unwrap();
+            delivered_tx.send(bytes).unwrap();
+        });
+
+        let mut credential_writer = AgentCredentialStore::open(&f.credential_db).unwrap();
+        let mut grant_writer = AgentVaultGrantStore::open_existing(&f.grant_db).unwrap();
+        let begin = Arc::new(Barrier::new(3));
+        let (began_tx, began_rx) = mpsc::channel::<&'static str>();
+        let (ack_tx, ack_rx) = mpsc::channel::<&'static str>();
+
+        let gate_credentials = Arc::clone(&begin);
+        let cred_started = began_tx.clone();
+        let cred_ack = ack_tx.clone();
+        let credential_id = f.credential_id;
+        let revoke_credential = thread::spawn(move || {
+            gate_credentials.wait();
+            cred_started.send("credential").unwrap();
+            credential_writer.revoke(credential_id).unwrap();
+            cred_ack.send("credential").unwrap();
+        });
+
+        let gate_grants = Arc::clone(&begin);
+        let grant_started = began_tx;
+        let grant_ack = ack_tx;
+        let principal = f.principal;
+        let receipt = f.registration;
+        let epoch = f.epoch;
+        let revoke_grant = thread::spawn(move || {
+            gate_grants.wait();
+            grant_started.send("grant").unwrap();
+            grant_writer
+                .revoke_notes_read(principal, receipt, epoch)
+                .unwrap();
+            grant_ack.send("grant").unwrap();
+        });
+
+        let result = disclose_cooperative(
+            &mut credential_epoch,
+            &mut grant_epoch,
+            &f.credentials,
+            &f.grants,
+            f.token.as_str(),
+            f.agent,
+            f.lease,
+            f.registration,
+            &mut response_socket,
+            |socket| {
+                begin.wait();
+                let one = began_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                let two = began_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert_ne!(one, two);
+                assert!(ack_rx.try_recv().is_err(), "revoke ACK before TCP reply");
+                socket.write_all(&reply)?;
+                let delivered = delivered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert_eq!(delivered, reply);
+                assert!(
+                    ack_rx.try_recv().is_err(),
+                    "revoke ACK overtook real TCP delivery inside the epoch"
+                );
+                Ok(())
+            },
+        );
+        assert_eq!(result, DisclosureOutcome::Sent);
+        peer.join().unwrap();
+
+        // Epochs have now been released. Both independent persisted revokes
+        // can ACK, in either order, before the caller attempts another read.
+        let first = ack_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second = ack_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_ne!(first, second);
+        revoke_credential.join().unwrap();
+        revoke_grant.join().unwrap();
+        assert!(f.credentials.authenticate(f.token.as_str()).is_err());
+        assert!(f.grants.authorize_notes_read(f.agent, f.registration).is_err());
+    }
+
+    #[test]
+    fn real_tcp_sender_has_no_bytes_to_emit_after_credential_revoke() {
+        use std::io::Read;
+        use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
+
+        let mut f = fixture();
+        f.credentials.revoke(f.credential_id).unwrap();
+        let (mut credentials, mut grants) = fence_connections(&f);
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let (mut response_socket, _) = listener.accept().unwrap();
+        let decision = disclose_cooperative(
+            &mut credentials,
+            &mut grants,
+            &f.credentials,
+            &f.grants,
+            f.token.as_str(),
+            f.agent,
+            f.lease,
+            f.registration,
+            &mut response_socket,
+            |_socket| panic!("revoked credential must not invoke a TCP writer"),
+        );
+        assert_eq!(decision, DisclosureOutcome::Denied);
+        response_socket.shutdown(Shutdown::Write).unwrap();
+        let mut one_byte = [0u8; 1];
+        assert_eq!(peer.read(&mut one_byte).unwrap(), 0);
+    }
+
 }
