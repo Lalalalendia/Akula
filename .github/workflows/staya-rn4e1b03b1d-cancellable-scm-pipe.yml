@@ -52,7 +52,34 @@ jobs:
               ".github/workflows/staya-rn4e1b03b1d-cancellable-scm-pipe.yml",
               "docs/sync/staya-rn4e1b03b1d-cancellable-scm-pipe.md",
           }
-          assert changed == allowed, f"unexpected changes: {changed ^ allowed}"
+          # Accept only complete, named successive research layers. Earlier
+          # contract jobs run on descendant pull requests as regressions;
+          # unknown paths (including product code) must never pass.
+          research_layer_0 = {
+              "aquilum-app/host-broker-lab/src/broker_policy_kernel.rs",
+              ".github/workflows/staya-rn4e1b03c0-policy-kernel.yml",
+              "docs/sync/staya-rn4e1b03c0-policy-kernel.md",
+          }
+          research_layer_1 = {
+              ".github/scripts/staya-broker-store-positive.ps1",
+              ".github/workflows/staya-rn4e1b03c1a-protected-store.yml",
+              "aquilum-app/host-broker-lab/src/windows_store_custody.rs",
+              "docs/sync/staya-rn4e1b03c1a-protected-store.md",
+          }
+          research_layer_2 = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_journal.rs",
+              ".github/workflows/staya-rn4e1b03c1b0-deny-journal.yml",
+              "docs/sync/staya-rn4e1b03c1b0-deny-journal.md",
+          }
+          research_layer_3 = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_witness.rs",
+              ".github/workflows/staya-rn4e1b03c1b1a-external-witness.yml",
+              "docs/sync/staya-rn4e1b03c1b1a-external-witness.md",
+          }
+          accepted_scopes = (frozenset(allowed), frozenset(allowed | research_layer_0), frozenset(allowed | research_layer_0 | research_layer_1), frozenset(allowed | research_layer_0 | research_layer_1 | research_layer_2), frozenset(allowed | research_layer_0 | research_layer_1 | research_layer_2 | research_layer_3),)
+          assert frozenset(changed) in accepted_scopes, (
+              f"unknown/nonconsecutive descendant research scope: {changed}"
+          )
           assert not any(p.startswith("aquilum-app/native/") for p in changed)
           assert not any(p.startswith("aquilum-app/core/") for p in changed)
           PY
