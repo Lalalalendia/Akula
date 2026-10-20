@@ -345,6 +345,11 @@ impl S3V2TrustedAnchorJournal {
 #[path = "s3_v2_trust_anchor_policy_receipt_lab.rs"]
 mod policy_receipt_lab;
 
+#[cfg(feature = "signed-vault-policy-receipt-lab")]
+pub use policy_receipt_lab::{
+    PolicyReceiptOutcome, V2PolicyReceiptError, V2TrustedPublisherPolicy,
+};
+
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_tests.rs"]
 mod tests;
