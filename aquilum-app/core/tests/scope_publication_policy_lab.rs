@@ -964,3 +964,341 @@ fn forged_contradiction_does_not_create_quarantine_or_modify_checkpoint() {
     assert_eq!(store.checkpoint(), trusted_pin);
     assert_eq!(store.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Allowed);
 }
+
+
+// AK-DATA-CTRL-01D: in-memory simulation of independently queried witness
+// services. No real remote authority or machine-protected storage exists.
+// This tests challenge freshness + at-least-two agreeing signed *latest*
+// reports, not a saved quorum certificate that could itself be replayed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SignedWitnessReply {
+    witness_id: u8,
+    installation: [u8; 16],
+    challenge: [u8; 16],
+    generation: u64,
+    policy_checkpoint: [u8; 32],
+    signature: [u8; 64],
+}
+
+impl SignedWitnessReply {
+    fn bytes_to_sign(&self) -> Vec<u8> {
+        let mut out = b"AKULA:INDEPENDENT-WITNESS:REPLY-V0\0".to_vec();
+        out.push(self.witness_id);
+        out.extend_from_slice(&self.installation);
+        out.extend_from_slice(&self.challenge);
+        out.extend_from_slice(&self.generation.to_be_bytes());
+        out.extend_from_slice(&self.policy_checkpoint);
+        out
+    }
+}
+
+struct SimulatedIndependentWitness {
+    id: u8,
+    key: signature::Ed25519KeyPair,
+    last_generation: u64,
+    last_checkpoint: [u8; 32],
+}
+
+impl SimulatedIndependentWitness {
+    fn new(id: u8) -> Self {
+        Self {
+            id,
+            key: signing_key(60 + id),
+            last_generation: 0,
+            last_checkpoint: [0; 32],
+        }
+    }
+
+    fn public_key(&self) -> [u8; 32] {
+        self.key.public_key().as_ref().try_into().unwrap()
+    }
+
+    fn advance(&mut self, generation: u64, checkpoint: [u8; 32]) -> Result<(), ()> {
+        if generation < self.last_generation {
+            return Err(());
+        }
+        if generation == self.last_generation {
+            return if checkpoint == self.last_checkpoint { Ok(()) } else { Err(()) };
+        }
+        self.last_generation = generation;
+        self.last_checkpoint = checkpoint;
+        Ok(())
+    }
+
+    fn attest(&self, installation: [u8; 16], challenge: [u8; 16]) -> SignedWitnessReply {
+        let mut reply = SignedWitnessReply {
+            witness_id: self.id,
+            installation,
+            challenge,
+            generation: self.last_generation,
+            policy_checkpoint: self.last_checkpoint,
+            signature: [0; 64],
+        };
+        reply.signature = self.key.sign(&reply.bytes_to_sign()).as_ref().try_into().unwrap();
+        reply
+    }
+}
+
+fn test_witnesses() -> (Vec<SimulatedIndependentWitness>, BTreeMap<u8, [u8; 32]>) {
+    let witnesses: Vec<_> = (1..=3).map(SimulatedIndependentWitness::new).collect();
+    let pinned_keys = witnesses.iter().map(|w| (w.id, w.public_key())).collect();
+    (witnesses, pinned_keys)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WitnessQuorumError {
+    WrongInstallation,
+    WrongChallenge,
+    UnknownWitness,
+    BadSignature,
+    DuplicateWitness,
+    SplitHeads,
+    InsufficientWitnesses,
+}
+
+fn verify_fresh_witness_quorum(
+    known_witness_keys: &BTreeMap<u8, [u8; 32]>,
+    expected_installation: [u8; 16],
+    expected_challenge: [u8; 16],
+    replies: &[SignedWitnessReply],
+) -> Result<(u64, [u8; 32]), WitnessQuorumError> {
+    // A fixed, independently pinned test configuration. Never learn quorum
+    // participants, installation ID or signer public keys from a reply.
+    if known_witness_keys.len() != 3 {
+        return Err(WitnessQuorumError::InsufficientWitnesses);
+    }
+    let mut observed_ids = BTreeSet::new();
+    let mut common_head = None;
+    for reply in replies {
+        let trusted_key = known_witness_keys.get(&reply.witness_id)
+            .ok_or(WitnessQuorumError::UnknownWitness)?;
+        if !observed_ids.insert(reply.witness_id) {
+            return Err(WitnessQuorumError::DuplicateWitness);
+        }
+        if reply.installation != expected_installation {
+            return Err(WitnessQuorumError::WrongInstallation);
+        }
+        if reply.challenge != expected_challenge {
+            return Err(WitnessQuorumError::WrongChallenge);
+        }
+        signature::UnparsedPublicKey::new(&signature::ED25519, trusted_key)
+            .verify(&reply.bytes_to_sign(), &reply.signature)
+            .map_err(|_| WitnessQuorumError::BadSignature)?;
+        let value = (reply.generation, reply.policy_checkpoint);
+        if let Some(previous) = common_head {
+            if previous != value {
+                // A partial update or a malicious witness must NOT silently
+                // choose the most convenient old/first head.
+                return Err(WitnessQuorumError::SplitHeads);
+            }
+        } else {
+            common_head = Some(value);
+        }
+    }
+    if observed_ids.len() < 2 {
+        return Err(WitnessQuorumError::InsufficientWitnesses);
+    }
+    common_head.ok_or(WitnessQuorumError::InsufficientWitnesses)
+}
+
+#[derive(Debug)]
+enum WitnessQuorumOpenError {
+    Quorum(WitnessQuorumError),
+    Storage(WitnessError),
+}
+
+fn open_from_current_witness_quorum(
+    path: &Path,
+    anchors: Anchors,
+    trusted_keys: &BTreeMap<u8, [u8; 32]>,
+    installation: [u8; 16],
+    challenge: [u8; 16],
+    replies: &[SignedWitnessReply],
+) -> Result<DurablePolicyLab, WitnessQuorumOpenError> {
+    let (_generation, checkpoint) =
+        verify_fresh_witness_quorum(trusted_keys, installation, challenge, replies)
+            .map_err(WitnessQuorumOpenError::Quorum)?;
+    DurablePolicyLab::open(path, anchors, WitnessPin::Exact(checkpoint))
+        .map_err(WitnessQuorumOpenError::Storage)
+}
+
+const TEST_INSTALLATION: [u8; 16] = [0x4a; 16];
+const TEST_CHALLENGE: [u8; 16] = [0xb1; 16];
+
+fn durable_revoked_fixture() -> (Fixture, tempfile::TempDir, std::path::PathBuf, [u8; 32]) {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("signed-policy.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    store.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2)).unwrap();
+    let checkpoint = store.checkpoint();
+    drop(store);
+    (f, temp, db, checkpoint)
+}
+
+#[test]
+fn two_independent_fresh_witnesses_can_open_after_one_is_lost() {
+    let (f, _temp, db, checkpoint) = durable_revoked_fixture();
+    let (mut witnesses, trusted) = test_witnesses();
+    for witness in &mut witnesses {
+        witness.advance(1, checkpoint).unwrap();
+    }
+    // Witness 2 is offline; two *different* sources still agree on latest.
+    let replies = [
+        witnesses[0].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+        witnesses[2].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+    ];
+    let open = open_from_current_witness_quorum(
+        &db, f.anchors.clone(), &trusted, TEST_INSTALLATION, TEST_CHALLENGE, &replies,
+    ).unwrap();
+    assert_eq!(open.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Blocked);
+}
+
+#[test]
+fn one_remaining_witness_is_never_a_fallback_trust_root() {
+    let (f, _temp, db, checkpoint) = durable_revoked_fixture();
+    let (mut witnesses, trusted) = test_witnesses();
+    for witness in &mut witnesses { witness.advance(1, checkpoint).unwrap(); }
+    let replies = [witnesses[0].attest(TEST_INSTALLATION, TEST_CHALLENGE)];
+    assert!(matches!(
+        open_from_current_witness_quorum(
+            &db, f.anchors.clone(), &trusted, TEST_INSTALLATION, TEST_CHALLENGE, &replies,
+        ),
+        Err(WitnessQuorumOpenError::Quorum(WitnessQuorumError::InsufficientWitnesses))
+    ));
+}
+
+#[test]
+fn recorded_signed_witness_reply_does_not_satisfy_a_new_challenge() {
+    let (_f, _temp, _db, checkpoint) = durable_revoked_fixture();
+    let (mut witnesses, trusted) = test_witnesses();
+    for witness in &mut witnesses { witness.advance(1, checkpoint).unwrap(); }
+    let recorded = [
+        witnesses[0].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+        witnesses[1].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+    ];
+    let fresh_challenge = [0xc2; 16];
+    assert_eq!(
+        verify_fresh_witness_quorum(&trusted, TEST_INSTALLATION, fresh_challenge, &recorded),
+        Err(WitnessQuorumError::WrongChallenge)
+    );
+    assert_eq!(
+        verify_fresh_witness_quorum(&trusted, [0xd1; 16], TEST_CHALLENGE, &recorded),
+        Err(WitnessQuorumError::WrongInstallation)
+    );
+}
+
+#[test]
+fn stale_sqlite_snapshot_refused_when_quorum_remembers_newer_checkpoint() {
+    let f = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("signed-policy.sqlite");
+    let backup = tmp.path().join("old.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    let old_checkpoint = store.checkpoint();
+    store.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(store);
+    std::fs::copy(&db, &backup).unwrap();
+    let mut store = DurablePolicyLab::open(
+        &db, f.anchors.clone(), WitnessPin::Exact(old_checkpoint),
+    ).unwrap();
+    store.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2)).unwrap();
+    let newest = store.checkpoint();
+    store.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(store);
+    let (mut witnesses, trusted) = test_witnesses();
+    for witness in &mut witnesses { witness.advance(2, newest).unwrap(); }
+    std::fs::copy(&backup, &db).unwrap();
+    let replies = [
+        witnesses[0].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+        witnesses[1].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+    ];
+    assert!(matches!(
+        open_from_current_witness_quorum(
+            &db, f.anchors.clone(), &trusted, TEST_INSTALLATION, TEST_CHALLENGE, &replies,
+        ),
+        Err(WitnessQuorumOpenError::Storage(WitnessError::RollbackOrTamper))
+    ));
+}
+
+#[test]
+fn stale_or_split_witnesses_cannot_silently_select_an_old_head() {
+    let (_f, _tmp, _db, checkpoint) = durable_revoked_fixture();
+    let (mut witnesses, trusted) = test_witnesses();
+    witnesses[0].advance(1, checkpoint).unwrap();
+    witnesses[1].advance(1, checkpoint).unwrap();
+    // One witness is on a different signed epoch/head, so no silent fallback.
+    witnesses[2].advance(2, [0x42; 32]).unwrap();
+    let replies = [
+        witnesses[0].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+        witnesses[2].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+    ];
+    assert_eq!(
+        verify_fresh_witness_quorum(&trusted, TEST_INSTALLATION, TEST_CHALLENGE, &replies),
+        Err(WitnessQuorumError::SplitHeads)
+    );
+}
+
+#[test]
+fn duplicate_or_forged_witness_cannot_fake_a_quorum() {
+    let (_f, _tmp, _db, checkpoint) = durable_revoked_fixture();
+    let (mut witnesses, trusted) = test_witnesses();
+    for witness in &mut witnesses { witness.advance(1, checkpoint).unwrap(); }
+    let one = witnesses[0].attest(TEST_INSTALLATION, TEST_CHALLENGE);
+    assert_eq!(
+        verify_fresh_witness_quorum(&trusted, TEST_INSTALLATION, TEST_CHALLENGE, &[one, one]),
+        Err(WitnessQuorumError::DuplicateWitness)
+    );
+    let mut forged = witnesses[1].attest(TEST_INSTALLATION, TEST_CHALLENGE);
+    forged.signature[0] ^= 1;
+    assert_eq!(
+        verify_fresh_witness_quorum(&trusted, TEST_INSTALLATION, TEST_CHALLENGE, &[one, forged]),
+        Err(WitnessQuorumError::BadSignature)
+    );
+}
+
+#[test]
+fn witness_generations_never_roll_back_or_equivocate_locally() {
+    let (mut witnesses, _trusted) = test_witnesses();
+    let w = &mut witnesses[0];
+    assert!(w.advance(1, [11; 32]).is_ok());
+    assert!(w.advance(1, [11; 32]).is_ok());
+    assert!(w.advance(0, [0; 32]).is_err());
+    assert!(w.advance(1, [12; 32]).is_err());
+    assert!(w.advance(2, [13; 32]).is_ok());
+}
+
+
+#[test]
+fn policy_commit_without_witness_quorum_confirmation_fails_closed_after_reboot() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("signed-policy.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    let old_head = store.checkpoint();
+    let (mut witnesses, trusted) = test_witnesses();
+    for witness in &mut witnesses { witness.advance(1, old_head).unwrap(); }
+    // Model failure: the fresh deny reached SQLite, but 2-of-3 witnesses
+    // were not updated. Continuing with the OLD checkpoint would be unsafe.
+    store.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2)).unwrap();
+    drop(store);
+    let still_old = [
+        witnesses[0].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+        witnesses[1].attest(TEST_INSTALLATION, TEST_CHALLENGE),
+    ];
+    assert!(matches!(
+        open_from_current_witness_quorum(
+            &db, f.anchors.clone(), &trusted, TEST_INSTALLATION, TEST_CHALLENGE, &still_old,
+        ),
+        Err(WitnessQuorumOpenError::Storage(WitnessError::RollbackOrTamper))
+    ));
+}

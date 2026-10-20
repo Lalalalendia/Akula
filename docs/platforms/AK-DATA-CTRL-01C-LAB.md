@@ -61,3 +61,29 @@ under the single explicit Core integration test command.
 The proof tables are intentionally experimental and have no compatible
 migration guarantee to prior test-only snapshots. No system/user files are read
 or deleted, and no actual network packets are accepted.
+
+## Independent witness quorum simulation (not production)
+
+The extended in-memory laboratory simulates three separately keyed witnesses.
+Each maintains a monotonically increasing (generation, exact checkpoint) pair
+and replies with an Ed25519 signature over the installation ID and a **fresh
+challenge**. Opening a synthetic SQLite policy state requires two DISTINCT,
+correctly pinned witness identities agreeing on the same checkpoint; the DB
+must then match that exact independent checkpoint. No fallback from one witness,
+no replay of a recorded answer at a new challenge, no accepting conflicting
+or forged witness reports.
+
+New tests cover: two-of-three with one absent; refusal with just one source;
+challenge and installation binding; rejection of restored old SQLite state;
+detection of conflicting signed witness heads; duplicate and forged witnesses;
+monotonic local witness generation; and refusal after the SQLite-deny commit
+if the independent witness quorum still reports the prior checkpoint.
+The lab therefore contains **26 proposed tests** after this extension.
+
+**Limits**: this is NOT a network service, OS-secured local witness, production
+key management, actual live challenge RNG, witness crash durability, Byzantine
+quorum protocol, or atomic commit across the policy SQLite and independent
+witnesses. A realistic partial witness update can block serving pending recovery,
+and the lab explicitly tests fail-closed rather than claiming automatic repair.
+Do not re-use the public test-only signing seeds in production or treat a signed
+reply as a guaranteed fresh record from a dishonest witness.
