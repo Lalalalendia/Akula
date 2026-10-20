@@ -43,6 +43,8 @@ pub mod server_witness_lab;
 
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b3a-helper-ipc-lab"))]
 pub mod server_installer_ipc_lab;
+#[cfg(all(target_os = "linux",feature = "server-bootstrap-b1b3c-pinned-fd-lab"))]
+pub mod server_installer_pinned_release_lab;
 
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;

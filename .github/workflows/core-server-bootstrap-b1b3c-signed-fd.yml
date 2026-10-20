@@ -1,0 +1,71 @@
+name: Akula Bootstrap B1b3c root-owned signed ELF FD proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/lib.rs"
+      - "aquilum-app/core/src/server_installer_pinned_release_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b1b3c.rs"
+      - "aquilum-app/core/src/bin/akula_helper_b1b3b_lab.rs"
+      - "aquilum-app/core/examples/akula_b1b3c_fixture.rs"
+      - "scripts/ci/akula-b1b3c-root-helper-lab.sh"
+      - ".github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B3C.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-bootstrap-b1b3c-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  root-signed-fd-with-actual-inode:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-bootstrap-b1b3c-root-fd-v1
+          cache-workspace-crates: true
+      - name: Rust formatting and Bash syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_installer_pinned_release_lab.rs aquilum-app/core/tests/server_bootstrap_b1b3c.rs
+          rustfmt --edition 2021 aquilum-app/core/src/bin/akula_helper_b1b3b_lab.rs aquilum-app/core/examples/akula_b1b3c_fixture.rs
+          bash -n scripts/ci/akula-b1b3c-root-helper-lab.sh
+      - name: Build existing real Node and signed root helper
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+          cargo build --locked -p aquilum-core --features server-bootstrap-b1b3c-pinned-fd-lab --bin akula-helper-b1b3b-lab --example akula_b1b3c_fixture --example akula_b1b2b_release_fixture
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b3c-pinned-fd-lab --test server_bootstrap_b1b3c --no-run
+          cargo check --locked -p aquilum-core --no-default-features
+      - name: Root-owned inode and B1a negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          for candidate in .artifacts/cargo-native/debug/deps/server_bootstrap_b1b3c-*; do
+            if [[ -f "$candidate" && -x "$candidate" && "$candidate" != *.d ]]; then
+              sudo -n "$PWD/$candidate" --nocapture
+              found=$((found + 1))
+            fi
+          done
+          test "$found" -eq 1
+      - name: Real systemd root process rechecks verified signed ELF FD
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/akula-b1b3c-root-helper-lab.sh
