@@ -129,3 +129,80 @@ jobs:
             save.txt
             editor.txt
           retention-days: 30
+
+  # Explicit PR-only experiment: the production indexing benchmark runs
+  # unmodified on 1k/5k/10k/50k vaults, each in three isolated processes.
+  # Do not run this expensive matrix for unrelated pull requests.
+  index_boot_matrix:
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'research/index-boot-matrix-')
+    name: Index boot (${{ matrix.documents }} notes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        documents: [1000, 5000, 10000, 50000]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: index-boot-matrix
+      - name: Record the exact source and runner
+        shell: bash
+        run: |
+          {
+            echo "PR_HEAD=${{ github.event.pull_request.head.sha }}"
+            echo "CHECKOUT_SHA=$(git rev-parse HEAD)"
+            echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)"
+            echo "VCPUS=$(nproc)"
+            rustc --version
+            cargo --version
+            df -h .
+          } | tee index-${{ matrix.documents }}-environment.txt
+      - name: Compile before timing
+        working-directory: aquilum-app
+        run: cargo test --locked --release -p aquilum-core benchmark_indexing --no-run
+      - name: Measure three independent cold/warm/update/delete passes
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQUILUM_BENCH_SIZES: ${{ matrix.documents }}
+        run: |
+          set -euo pipefail
+          for round in 1 2 3; do
+            log="../index-${{ matrix.documents }}-run${round}.txt"
+            resources="../index-${{ matrix.documents }}-resource-${round}.txt"
+            /usr/bin/time -v -o "$resources" cargo test --locked --release -p aquilum-core benchmark_indexing -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
+            grep 'BENCH-INDEX ' "$log"
+          done
+      - name: Publish raw measurements
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Akula index baseline (${{ matrix.documents }} Markdown notes)'
+            echo 'Three fresh temp vaults, 50 paragraphs/note, production cold/warm/incremental/delete/search path.'
+            echo 'Resource figures include fixture generation and the test process, NOT only indexing.'
+            echo '```text'
+            grep -h 'BENCH-INDEX ' index-${{ matrix.documents }}-run*.txt || true
+            echo '```'
+            for report in index-${{ matrix.documents }}-resource-*.txt; do
+              [ -f "$report" ] || continue
+              echo "### $(basename "$report")"
+              echo '```text'
+              grep -E 'User time|System time|Maximum resident set size|File system inputs|File system outputs|Elapsed \(wall clock\)' "$report" || true
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep environment, timings, CPU and RSS
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-boot-${{ matrix.documents }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            index-${{ matrix.documents }}-environment.txt
+            index-${{ matrix.documents }}-run*.txt
+            index-${{ matrix.documents }}-resource-*.txt
+          retention-days: 30
