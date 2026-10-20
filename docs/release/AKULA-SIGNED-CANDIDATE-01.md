@@ -1,6 +1,6 @@
 # RELEASE-SIGNED-CANDIDATE-01 — typed candidate admission (inactive)
 
-Status: **Rust module compiled and unit tested, but inactive.** No Akula publisher public key has been provisioned; `release::channel_ready()` remains `false`. No installation, autoupdate or publishing is enabled.
+Status: **Rust module implemented; required full CI and real native Minisign test awaiting acceptance; inactive.** No Akula publisher public key has been provisioned; `release::channel_ready()` remains `false`. No installation, autoupdate or publishing is enabled.
 
 Source: [AKULA-MASTER-INDEX-01](https://app.notion.com/p/3fc32a84beec813e869fdf83a61e626b). Earlier [#471](https://github.com/Lalalalendia/Akula/pull/471) proved disposable Minisign signing and verification of the signed manifest with four-platform hashes.
 
@@ -16,12 +16,12 @@ The admission entrypoint `admit()` accepts no caller-controlled trust root or pl
 
 ## Acceptance
 
-The native Application CI must compile with `sha2 = 0.10` already present in `Cargo.lock` and pass tests for exact manifest shape and byte matching, same-size byte tampering, downgrade, wrong product, wrong platform, filename substitution, unknown or duplicate fields, and missing publisher key.
+The native Application CI must compile with direct `sha2 = 0.10`, recorded as `sha2 0.10.9` in the v4 `Cargo.lock` because the repository also contains SHA-2 0.11.1. It must pass the typed schema and byte-matching tests, same-size tampering, downgrade, wrong product, wrong platform, filename substitution, malformed entries on the *other* three platforms, unknown/duplicate JSON keys and missing publisher key. The existing required Rust runner also generates an ephemeral CLI Minisign keypair, signs an exact synthetic JSON manifest and executes the ignored-by-default Rust interoperability test with explicit output assertions. A successful cryptographic test must be observed on the exact PR HEAD; merely adding the test code is not acceptance.
 
 ### Explicit remaining blockers
 
 - This increment does **not** call `admit()` from `find()` or `Updater::download()`: legacy metadata is not yet a signed manifest. It also does **not** connect `SignedCandidate` to the Linux filesystem transaction; therefore nothing is newly installable.
-- Positive Rust integration tests with an independently generated Minisign test key must be added; structural unit tests alone do not prove signing interoperability. The earlier Node/CLI lab #471 is separate.
+- Positive native Rust Minisign interoperability test and CI fixture have been added, but they remain **unverified until CI passes**. The disposable CI key is never an actual Akula publisher key. The earlier Node/CLI lab #471 remains a separate independent proof.
 - The durable monotonic version-floor witness is not implemented; comparing against the running version prevents only some downgrades, not rollback of the *persisted update policy*.
 - Real detached signatures, isolated genuine candidates from a single pinned source commit, publisher key ceremony and independently trusted pinned Akula root are required.
 - Generation-bound Linux first-presented GUI ACK, robust crash rollback, and physical OS acceptance remain pending.
