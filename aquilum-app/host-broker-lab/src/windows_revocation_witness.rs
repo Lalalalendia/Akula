@@ -154,19 +154,31 @@ mod tests {
     #[test]
     fn unprovisioned_witness_is_never_inferred_from_perfectly_valid_journal() {
         let j = JournalFixture::new("no-witness");
-        assert_eq!(inspect(&j.path, None), Outcome::Hold(Hold::NoExternalWitness));
+        assert_eq!(
+            inspect(&j.path, None),
+            Outcome::Hold(Hold::NoExternalWitness)
+        );
         assert_eq!(revoke_existing(&j.path, BINDING, DEVICE_A, 0), Ok(1));
-        assert_eq!(inspect(&j.path, None), Outcome::Hold(Hold::NoExternalWitness));
+        assert_eq!(
+            inspect(&j.path, None),
+            Outcome::Hold(Hold::NoExternalWitness)
+        );
     }
 
     #[test]
     fn matching_external_snapshot_proves_only_consistency_not_authorization() {
         let j = JournalFixture::new("matching");
         let w0 = witness(0, &[]);
-        assert_eq!(inspect(&j.path, Some(&w0)), Outcome::ConsistentDenialSnapshotOnly);
+        assert_eq!(
+            inspect(&j.path, Some(&w0)),
+            Outcome::ConsistentDenialSnapshotOnly
+        );
         assert_eq!(revoke_existing(&j.path, BINDING, DEVICE_A, 0), Ok(1));
         let w1 = witness(1, &[(DEVICE_A, 1)]);
-        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::ConsistentDenialSnapshotOnly);
+        assert_eq!(
+            inspect(&j.path, Some(&w1)),
+            Outcome::ConsistentDenialSnapshotOnly
+        );
         // No permit or positive P2P policy operation exists in this API.
     }
 
@@ -176,11 +188,17 @@ mod tests {
         let valid_old = fs::read(&j.path).unwrap();
         assert_eq!(revoke_existing(&j.path, BINDING, DEVICE_A, 0), Ok(1));
         let w1 = witness(1, &[(DEVICE_A, 1)]);
-        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::ConsistentDenialSnapshotOnly);
+        assert_eq!(
+            inspect(&j.path, Some(&w1)),
+            Outcome::ConsistentDenialSnapshotOnly
+        );
         // The adversary can replace the whole on-disk file while no reader
         // has it open; its CRC/sequence/header remain perfectly valid.
         fs::write(&j.path, valid_old).unwrap();
-        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::Hold(Hold::JournalBehindWitness));
+        assert_eq!(
+            inspect(&j.path, Some(&w1)),
+            Outcome::Hold(Hold::JournalBehindWitness)
+        );
     }
 
     #[test]
@@ -188,10 +206,19 @@ mod tests {
         let j = JournalFixture::new("two-stage");
         let w0 = witness(0, &[]);
         let w1 = witness(1, &[(DEVICE_A, 1)]);
-        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::Hold(Hold::JournalBehindWitness));
+        assert_eq!(
+            inspect(&j.path, Some(&w1)),
+            Outcome::Hold(Hold::JournalBehindWitness)
+        );
         assert_eq!(revoke_existing(&j.path, BINDING, DEVICE_A, 0), Ok(1));
-        assert_eq!(inspect(&j.path, Some(&w0)), Outcome::Hold(Hold::JournalAheadOfWitness));
-        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::ConsistentDenialSnapshotOnly);
+        assert_eq!(
+            inspect(&j.path, Some(&w0)),
+            Outcome::Hold(Hold::JournalAheadOfWitness)
+        );
+        assert_eq!(
+            inspect(&j.path, Some(&w1)),
+            Outcome::ConsistentDenialSnapshotOnly
+        );
     }
 
     #[test]
@@ -204,7 +231,10 @@ mod tests {
             Outcome::Hold(Hold::DivergentFloorMap)
         );
         let matching = witness(1, &[(DEVICE_B, 1)]);
-        assert_eq!(inspect(&j.path, Some(&matching)), Outcome::ConsistentDenialSnapshotOnly);
+        assert_eq!(
+            inspect(&j.path, Some(&matching)),
+            Outcome::ConsistentDenialSnapshotOnly
+        );
     }
 
     #[test]
@@ -236,9 +266,15 @@ mod tests {
     fn any_unknown_earlier_or_later_sequence_stays_hold_not_auto_sync() {
         let j = JournalFixture::new("unknown-sequence");
         let high = witness(u64::MAX, &[]);
-        assert_eq!(inspect(&j.path, Some(&high)), Outcome::Hold(Hold::JournalBehindWitness));
+        assert_eq!(
+            inspect(&j.path, Some(&high)),
+            Outcome::Hold(Hold::JournalBehindWitness)
+        );
         assert_eq!(revoke_existing(&j.path, BINDING, DEVICE_A, 0), Ok(1));
         let empty = witness(0, &[]);
-        assert_eq!(inspect(&j.path, Some(&empty)), Outcome::Hold(Hold::JournalAheadOfWitness));
+        assert_eq!(
+            inspect(&j.path, Some(&empty)),
+            Outcome::Hold(Hold::JournalAheadOfWitness)
+        );
     }
 }

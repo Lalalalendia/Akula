@@ -431,10 +431,7 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         File::create(&go).unwrap();
-        let mut exits = [
-            first.wait().unwrap().code(),
-            second.wait().unwrap().code(),
-        ];
+        let mut exits = [first.wait().unwrap().code(), second.wait().unwrap().code()];
         exits.sort_unstable();
         assert_eq!(
             exits,
