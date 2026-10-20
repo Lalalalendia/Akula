@@ -63,7 +63,7 @@ impl App {
             return None;
         }
         let error = editor_y + top - viewport_y - height * 0.5;
-        if error.abs() <= 8.0 {
+        if error.abs() <= 64.0 {
             // The actual paragraph position is already centered. Don't
             // request an extra layout or rebuild the retained scene just
             // to generate artificial CPU work. Record affirmative per-byte
