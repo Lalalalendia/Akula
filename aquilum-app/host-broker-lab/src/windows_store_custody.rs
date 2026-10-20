@@ -134,7 +134,7 @@ fn wide(s: &str) -> Vec<u16> {
     std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
 }
 fn sid_equal(a: Handle, b: Handle) -> bool {
-    unsafe { EqualSid(a, b) } != 0
+    (unsafe { EqualSid(a, b) }) != 0
 }
 struct OwnedHandle(Handle);
 impl Drop for OwnedHandle {
