@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 const LOCK_NAME: &str = ".akula-appimage-update.lock";
 const PREFIX: &str = ".akula-appimage-update.";
 const RECEIPT: &str = "prepared.v1";
-const CANDIDATE: &str = "candidate.AppImage";
+pub(super) const CANDIDATE: &str = "candidate.AppImage";
 const PREVIOUS: &str = "previous.AppImage";
 const FAILED: &str = "failed.AppImage";
 const MAX_PAYLOAD: usize = 512 * 1024 * 1024;
@@ -70,14 +70,14 @@ enum Recovery {
     PendingUnacknowledged,
 }
 
-struct Gate {
+pub(super) struct Gate {
     _lock: File,
     parent: PathBuf,
     active: PathBuf,
 }
 
 impl Gate {
-    fn acquire(active: &Path) -> Result<Self, String> {
+    pub(super) fn acquire(active: &Path) -> Result<Self, String> {
         let name = active.file_name().and_then(OsStr::to_str)
             .ok_or_else(|| bad("invalid installed AppImage filename"))?;
         if !name.starts_with("akula-app_") || !name.ends_with("_x86_64.AppImage")
@@ -165,7 +165,7 @@ impl Gate {
         Ok(())
     }
 
-    fn prepare(&self, nonce: &str, payload: &[u8]) -> Result<PathBuf, String> {
+    pub(super) fn prepare(&self, nonce: &str, payload: &[u8]) -> Result<PathBuf, String> {
         if !valid_nonce(nonce) || payload.is_empty() || payload.len() > MAX_PAYLOAD {
             return Err(bad("invalid generation or bounded payload"));
         }
