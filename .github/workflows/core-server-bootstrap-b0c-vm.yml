@@ -1,0 +1,40 @@
+name: Akula Bootstrap B0c isolated Ubuntu VM SSH proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/ci/akula-b0c-ubuntu-vm.sh"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0C-VM.md"
+      - ".github/workflows/core-server-bootstrap-b0c-vm.yml"
+      - "aquilum-app/core/src/server_bootstrap_ssh_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b0b.rs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-bootstrap-b0c-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  independent-ubuntu-vm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-bootstrap-b0c-ubuntu-vm-v1
+          cache-workspace-crates: true
+      - name: Run real signed SSH KEX against a separately booted Ubuntu VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/akula-b0c-ubuntu-vm.sh
