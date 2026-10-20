@@ -52,10 +52,28 @@ jobs:
               ".github/scripts/staya-broker-store-positive.ps1",
               "docs/sync/staya-rn4e1b03c1a-protected-store.md",
           }
+          # GitHub also runs this parent workflow on stacked child PRs.
+          # Permit only the precise, independently reviewed research layers;
+          # never accept arbitrary additions, even elsewhere in this crate.
+          journal_layer = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_journal.rs",
+              ".github/workflows/staya-rn4e1b03c1b0-deny-journal.yml",
+              "docs/sync/staya-rn4e1b03c1b0-deny-journal.md",
+          }
+          witness_layer = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_witness.rs",
+              ".github/workflows/staya-rn4e1b03c1b1a-external-witness.yml",
+              "docs/sync/staya-rn4e1b03c1b1a-external-witness.md",
+          }
           changed = set(subprocess.check_output(
               ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
           ).splitlines())
-          assert changed == expected, f"outside research scope: {changed ^ expected}"
+          accepted_scopes = (expected, expected | journal_layer,
+                             expected | journal_layer | witness_layer)
+          assert changed in accepted_scopes, (
+              f"unknown/nonconsecutive research layer or product file: {changed}; "
+              f"accepted: {accepted_scopes}"
+          )
           PY
           git diff --check
       - name: All no-authority tests, Windows API and formatting

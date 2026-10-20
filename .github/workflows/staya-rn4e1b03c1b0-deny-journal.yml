@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import subprocess
-          base = "4a958b22269350bf4739db161c35e815424c3282"
+          base = "e49c923c664fc732d2ca196c23400c7881109975"
           changed = set(subprocess.check_output(
               ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
           ).splitlines())
@@ -51,7 +51,17 @@ jobs:
               ".github/workflows/staya-rn4e1b03c1b0-deny-journal.yml",
               "docs/sync/staya-rn4e1b03c1b0-deny-journal.md",
           }
-          assert changed == expected, f"unauthorized files: {changed ^ expected}"
+          # This job runs on the stacked external-witness PR as well. Its
+          # only permissible extra paths are the three files unique to that
+          # research layer; lib.rs and the journal are already in 'expected'.
+          witness_layer = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_witness.rs",
+              ".github/workflows/staya-rn4e1b03c1b1a-external-witness.yml",
+              "docs/sync/staya-rn4e1b03c1b1a-external-witness.md",
+          }
+          assert changed in (expected, expected | witness_layer), (
+              f"unauthorized files or incomplete research layer: {changed}"
+          )
           assert not any(p.startswith("aquilum-app/core/") for p in changed)
           assert not any(p.startswith("aquilum-app/native/") for p in changed)
           PY
