@@ -2,7 +2,7 @@
 //! non-UTF8 names, symlinks, overlaps and extensions are rejected.
 use super::*;
 use flate2::read::DeflateDecoder;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Cursor, Read};
 
 fn u16le(a: &[u8], p: usize) -> Result<u16, String> {
     let s = a.get(p..p + 2).ok_or("truncated ZIP u16")?;
@@ -249,7 +249,7 @@ mod tests {
         let zip_file = temp.path().join("notion.zip");
         let bytes = stored_zip(&[
             ("Note 11111111111111111111111111111111.md",
-                b"[B](Note%2022222222222222222222222222222.md)"),
+                b"[B](Note%20222222222222222222222222222222.md)"),
             ("Note 22222222222222222222222222222222.md", b"ok"),
             ("Data 33333333333333333333333333333333.csv",
                 b"Title,Notes\r\nA,\"hello,\nworld\"\r\n"),
