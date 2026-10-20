@@ -12,7 +12,7 @@
 use super::{
     review_offline_join_genesis, AwsS3ProbeClient, DecodedDsseEnvelope,
     IndependentlyApprovedJoin, JoinGenesisError, JoinGenesisReview,
-    PublisherPolicyV1, S3ConnectionProfile, S3PackedHeadV2,
+    PublisherPolicyV1, S3PackedHeadV2,
     S3PinnedV2ReadError, S3PinnedV2ReadPreview, S3RemoteAnchorScope,
     S3TransportError, S3Keyspace, MAX_PACK_V2_ROOT_BYTES,
 };
@@ -138,7 +138,7 @@ pub async fn preview_yandex_join_genesis_read_only(
 mod tests {
     use super::*;
     use super::super::{
-        DecodedSignature, OperationId, VaultId, ROOT_PAYLOAD_TYPE,
+        DecodedSignature, OperationId, S3ConnectionProfile, VaultId,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use serde_json::{json, Value};
@@ -174,8 +174,8 @@ mod tests {
                 &blake3::hash(b"e3b-index").to_hex().to_string(),
                 None,
             ).unwrap();
-            let owner = owner(7);
-            let keys = vec![public_key(&owner)];
+            let signing_owner = owner(7);
+            let keys = vec![public_key(&signing_owner)];
             let profile = S3ConnectionProfile {
                 bucket: "akula-private-e3b".to_owned(),
                 region: "ru-central1".to_owned(),
@@ -206,7 +206,7 @@ mod tests {
             let policy = PublisherPolicyV1::parse_for_review(&policy_bytes).unwrap();
             let policy_pin = policy.canonical_digest().unwrap();
             let root_pin = root.digest(&ns).unwrap();
-            Self { ns, root, policy, scope, profile, owner,
+            Self { ns, root, policy, scope, profile, owner: signing_owner,
                 root_pin, policy_pin, keys }
         }
 
