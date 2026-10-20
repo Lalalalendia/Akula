@@ -12,6 +12,8 @@ default = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
+# Opt-in, read-only Notion API diagnostic; no vault/Sync mutation.
+notion-api-probe = []
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = []
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
