@@ -7,6 +7,8 @@
 #![cfg(windows)]
 
 use super::windows_cancellable_pipe::CancelablePipe;
+use super::windows_server::require_system_service_identity;
+use super::windows_store_custody::CustodyWitness;
 use std::ffi::c_void;
 use std::io::{self, ErrorKind};
 #[cfg(test)]
@@ -32,6 +34,7 @@ const INFINITE: u32 = u32::MAX;
 const SCM_NAME: &str = "AkulaHostBrokerResearch";
 static STOP_SIGNAL: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
 static IPC_TEST_MODE: AtomicBool = AtomicBool::new(false);
+static CUSTODY_TEST_MODE: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 struct ServiceTableEntryW {
@@ -153,6 +156,23 @@ fn run_service() -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     report(handler, SERVICE_START_PENDING, 0, 0, 1, 5000)?;
+    // Actual pre-existing installer custody is a prerequisite to reporting
+    // RUNNING. No appdata fallback, provisioning, grants or state writes.
+    let _custody = if CUSTODY_TEST_MODE.load(Ordering::SeqCst) {
+        if let Err(error) = require_system_service_identity() {
+            let _ = report(handler, SERVICE_STOPPED, 0, 1, 0, 0);
+            return Err(error);
+        }
+        match CustodyWitness::inspect_fixed() {
+            Ok(verified) => Some(verified),
+            Err(error) => {
+                let _ = report(handler, SERVICE_STOPPED, 0, 1, 0, 0);
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     // The named pipe must be created and secured BEFORE SCM reports RUNNING.
     // A service that cannot bind its exact first-instance pipe fails closed.
     let pipe = if IPC_TEST_MODE.load(Ordering::SeqCst) {
@@ -212,6 +232,12 @@ pub fn dispatch_scm_service() -> io::Result<()> {
 /// temporary Windows service mode: no request can grant P2P authority.
 pub fn dispatch_scm_pipe_service() -> io::Result<()> {
     dispatch_scm(true)
+}
+
+/// Research-only LocalSystem SCM mode checking installed marker custody.
+pub fn dispatch_scm_custody_service() -> io::Result<()> {
+    CUSTODY_TEST_MODE.store(true, Ordering::SeqCst);
+    dispatch_scm(false)
 }
 
 fn dispatch_scm(pipe_mode: bool) -> io::Result<()> {

@@ -201,7 +201,7 @@ fn token_user_sid_is_system(token: Handle) -> io::Result<bool> {
     Ok(unsafe { EqualSid(user_sid, system.as_mut_ptr().cast()) } != 0)
 }
 
-fn require_system_service_identity() -> io::Result<()> {
+pub(crate) fn require_system_service_identity() -> io::Result<()> {
     let mut token = ptr::null_mut();
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
         return Err(io::Error::last_os_error());
