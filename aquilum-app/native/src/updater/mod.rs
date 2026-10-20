@@ -8,6 +8,14 @@ mod macos_transaction;
 #[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 mod startup_ack;
 
+#[cfg(target_os = "linux")]
+mod linux_first_gui_ack;
+
+#[cfg(all(target_os = "linux", feature = "installed"))]
+pub(crate) fn on_first_presented_frame() {
+    linux_first_gui_ack::on_first_presented_frame();
+}
+
 #[cfg(all(target_os = "macos", feature = "installed"))]
 pub(crate) fn on_first_presented_frame() {
     startup_ack::on_first_presented_frame();
