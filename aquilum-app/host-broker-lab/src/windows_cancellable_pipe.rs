@@ -13,6 +13,7 @@
 use super::windows_server::{create_secure_pipe, OwnedHandle};
 use std::ffi::c_void;
 use std::io::{self, ErrorKind};
+#[cfg(test)]
 use std::mem::size_of;
 use std::ptr;
 
@@ -23,6 +24,7 @@ const ERROR_BROKEN_PIPE: u32 = 109;
 const ERROR_PIPE_NOT_CONNECTED: u32 = 233;
 const ERROR_MORE_DATA: u32 = 234;
 const WAIT_OBJECT_0: u32 = 0;
+const WAIT_TIMEOUT: u32 = 258;
 const INFINITE: u32 = u32::MAX;
 
 /// Win32 OVERLAPPED ABI: two ULONG_PTRs, one pointer-sized offset/union,
@@ -217,8 +219,10 @@ impl CancelablePipe {
             }
             // Prevent runaway acceptance when clients spam one-byte writes.
             // This short pause is also interruptible via the SCM stop event.
-            if unsafe { WaitForSingleObject(stop, 20) } == WAIT_OBJECT_0 {
-                break;
+            match unsafe { WaitForSingleObject(stop, 20) } {
+                WAIT_OBJECT_0 => break,
+                WAIT_TIMEOUT => {}
+                _ => return Err(io::Error::last_os_error()),
             }
         }
         Ok(())
