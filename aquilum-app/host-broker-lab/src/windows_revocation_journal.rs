@@ -113,7 +113,8 @@ fn exclusive_existing(path: &Path) -> Result<File, Hold> {
 fn read_log(file: &mut File, expected_anchor: [u8; 16]) -> Result<State, Hold> {
     file.seek(SeekFrom::Start(0)).map_err(invalid_io)?;
     let mut bytes = Vec::new();
-    (&mut *file).take((MAX_BYTES + 1) as u64)
+    (&mut *file)
+        .take((MAX_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(invalid_io)?;
     if bytes.len() < HEADER || bytes.len() > MAX_BYTES {
@@ -219,8 +220,10 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let dir = std::env::temp_dir()
-                .join(format!("akula-revoke-{test_name}-{}-{tick}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!(
+                "akula-revoke-{test_name}-{}-{tick}",
+                std::process::id()
+            ));
             std::fs::create_dir(&dir).unwrap();
             let file = dir.join("preinstalled-revocation.journal");
             // ONLY the unit-test fixture can provision. The real journal
@@ -257,7 +260,10 @@ mod tests {
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(0));
         assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Ok(1));
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(1));
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Err(Hold::WrongEpoch));
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, REPLICA, 0),
+            Err(Hold::WrongEpoch)
+        );
         assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 1), Ok(2));
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(2));
     }
@@ -290,13 +296,22 @@ mod tests {
             file.write_all(&[0xfa, 0xfb, 0xfc]).unwrap();
             file.sync_all().unwrap();
         }
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 1), Err(Hold::CorruptOrTorn));
-        assert_eq!(current_floor(&journal.file, REPLICA), Err(Hold::CorruptOrTorn));
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, REPLICA, 1),
+            Err(Hold::CorruptOrTorn)
+        );
+        assert_eq!(
+            current_floor(&journal.file, REPLICA),
+            Err(Hold::CorruptOrTorn)
+        );
         let mut damaged = std::fs::read(&journal.file).unwrap();
         damaged.truncate(HEADER + RECORD);
         damaged[HEADER + 10] ^= 0x40;
         std::fs::write(&journal.file, damaged).unwrap();
-        assert_eq!(current_floor(&journal.file, REPLICA), Err(Hold::CorruptOrTorn));
+        assert_eq!(
+            current_floor(&journal.file, REPLICA),
+            Err(Hold::CorruptOrTorn)
+        );
     }
 
     #[test]
@@ -308,13 +323,18 @@ mod tests {
         assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 1), Ok(2));
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(2));
         assert_eq!(current_floor(&journal.file, second), Ok(1));
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, second, 0), Err(Hold::WrongEpoch));
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, second, 0),
+            Err(Hold::WrongEpoch)
+        );
     }
 
     /// Invoked only by the standard Rust libtest binary in a SECOND OS process.
     #[test]
     fn child_process_revoke() {
-        let Ok(path) = std::env::var("AKULA_TEST_REVOKE_JOURNAL") else { return };
+        let Ok(path) = std::env::var("AKULA_TEST_REVOKE_JOURNAL") else {
+            return;
+        };
         assert_eq!(revoke_existing(Path::new(&path), ANCHOR, REPLICA, 0), Ok(1));
     }
 
@@ -322,7 +342,9 @@ mod tests {
     /// durable write, as a crash-like negative fixture (not a power cut).
     #[test]
     fn child_incomplete_record_exit() {
-        let Ok(path) = std::env::var("AKULA_TEST_TORN_JOURNAL") else { return };
+        let Ok(path) = std::env::var("AKULA_TEST_TORN_JOURNAL") else {
+            return;
+        };
         let mut f = OpenOptions::new().append(true).open(path).unwrap();
         f.write_all(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee]).unwrap();
         f.sync_all().unwrap();
@@ -339,8 +361,14 @@ mod tests {
             .status()
             .unwrap();
         assert_eq!(child.code(), Some(79));
-        assert_eq!(current_floor(&journal.file, REPLICA), Err(Hold::CorruptOrTorn));
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Err(Hold::CorruptOrTorn));
+        assert_eq!(
+            current_floor(&journal.file, REPLICA),
+            Err(Hold::CorruptOrTorn)
+        );
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, REPLICA, 0),
+            Err(Hold::CorruptOrTorn)
+        );
     }
 
     #[test]
