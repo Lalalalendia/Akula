@@ -35,6 +35,14 @@ test('CI is not a release and updater stays fail closed', () => {
   assert.match(ci, /actions\/upload-artifact@v7/);
   assert.match(smoke, /AKULA_LINUX_BETA_INSTALL_PASS/);
   assert.match(smoke, /AKULA_LINUX_BETA_COEXIST_PASS/);
+  // The old workflow was a false green: Docker stdin was disabled and
+  // shell scripts never ran. Stdin AND verified child evidence are mandatory.
+  assert.match(smoke, /docker run --rm -i -v[^\n]*ubuntu:22\.04[^\n]*<<'UBUNTU' \| tee "\$ubuntu_log"/);
+  assert.match(smoke, /docker run --rm -i -v[^\n]*fedora:latest[^\n]*<<'FEDORA' \| tee "\$fedora_log"/);
+  assert.match(smoke, /grep -Fxq 'AKULA_LINUX_BETA_INSTALL_PASS[^']*' "\$ubuntu_log"/);
+  assert.match(smoke, /grep -Fxq 'AKULA_LINUX_BETA_COEXIST_PASS[^']*' "\$ubuntu_log"/);
+  assert.match(smoke, /grep -Fxq 'AKULA_LINUX_BETA_COEXIST_PASS[^']*' "\$fedora_log"/);
+  assert.match(smoke, /AKULA_LINUX_BETA_HOST_GATE_PASS/);
   const updater=file('aquilum-app/native/src/updater/release.rs');
   assert.match(updater, /pub\(super\) const PUBLIC_KEY: &str = "";/);
   assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*false\s*\}/);
