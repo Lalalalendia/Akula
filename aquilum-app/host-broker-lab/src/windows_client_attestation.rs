@@ -169,12 +169,7 @@ extern "system" {
         size: u32,
         required: *mut u32,
     ) -> i32;
-    fn CreateWellKnownSid(
-        kind: u32,
-        domain: Handle,
-        output: Handle,
-        size: *mut u32,
-    ) -> i32;
+    fn CreateWellKnownSid(kind: u32, domain: Handle, output: Handle, size: *mut u32) -> i32;
     fn LookupAccountNameW(
         system: *const u16,
         account: *const u16,
@@ -193,7 +188,10 @@ fn deny(reason: &'static str) -> io::Error {
 }
 
 fn wide(text: &str) -> Vec<u16> {
-    OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(text)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 fn service_process_id() -> io::Result<u32> {
@@ -214,7 +212,8 @@ fn service_process_id() -> io::Result<u32> {
             size_of::<ServiceStatusProcess>() as u32,
             &mut bytes,
         )
-    } == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     // On success pcbBytesNeeded may not report the structure size.
@@ -257,7 +256,8 @@ fn token_blob(token: Handle, class: u32) -> io::Result<(Vec<usize>, usize)> {
             (words * size_of::<usize>()) as u32,
             &mut needed,
         )
-    } == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     if needed as usize > storage.len() * size_of::<usize>() {
@@ -276,7 +276,8 @@ fn local_system_sid() -> io::Result<Vec<usize>> {
             words.as_mut_ptr().cast(),
             &mut bytes,
         )
-    } == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     Ok(words)
@@ -317,7 +318,8 @@ fn service_sid() -> io::Result<Vec<usize>> {
             &mut domain_len,
             &mut account_type,
         )
-    } == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     if unsafe { IsValidSid(sid.as_mut_ptr().cast()) } == 0 {
@@ -347,8 +349,11 @@ fn token_has_enabled_service_sid(token: Handle, expected: Handle) -> io::Result<
     let count = header.group_count as usize;
     let offset = offset_of!(TokenGroups, groups);
     let required = offset
-        .checked_add(count.checked_mul(size_of::<SidAndAttributes>())
-            .ok_or_else(|| deny("token group count overflow"))?)
+        .checked_add(
+            count
+                .checked_mul(size_of::<SidAndAttributes>())
+                .ok_or_else(|| deny("token group count overflow"))?,
+        )
         .ok_or_else(|| deny("token group size overflow"))?;
     if required > used || count > 4096 {
         return Err(deny("out of bounds token group list"));
@@ -370,7 +375,9 @@ fn token_has_enabled_service_sid(token: Handle, expected: Handle) -> io::Result<
 
 fn verified_process_for_pipe(pipe: Handle, expected_pid: u32) -> io::Result<PinnedProcess> {
     if pipe_server_pid(pipe)? != expected_pid {
-        return Err(deny("pipe server PID does not equal registered SCM service PID"));
+        return Err(deny(
+            "pipe server PID does not equal registered SCM service PID",
+        ));
     }
     let process = OwnedHandle::new(unsafe {
         OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, expected_pid)
@@ -414,10 +421,7 @@ pub fn inspect_installed_service_pipe_without_sending() -> io::Result<()> {
     })?;
     let pinned = verified_process_for_pipe(pipe.0, service_pid)?;
     let exact_service_sid = service_sid()?;
-    if !token_has_enabled_service_sid(
-        pinned.token.0,
-        exact_service_sid.as_ptr() as Handle,
-    )? {
+    if !token_has_enabled_service_sid(pinned.token.0, exact_service_sid.as_ptr() as Handle)? {
         return Err(deny("named-pipe server token lacks enabled service SID"));
     }
     if pipe_server_pid(pipe.0)? != service_pid || service_process_id()? != service_pid {
@@ -443,9 +447,14 @@ mod tests {
                 pipe_name.as_ptr(),
                 PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
                 PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_REJECT_REMOTE_CLIENTS,
-                1, 128, 128, 5000, ptr::null_mut(),
+                1,
+                128,
+                128,
+                5000,
+                ptr::null_mut(),
             )
-        }).unwrap();
+        })
+        .unwrap();
         let pid = unsafe { GetCurrentProcessId() };
         // Read the real owner PID from an actual user-created named pipe,
         // rather than relying only on a mocked PID comparison.
@@ -457,7 +466,8 @@ mod tests {
             assert!(token_matches_sid(
                 process.token.0,
                 local_system_sid().unwrap().as_ptr() as Handle
-            ).unwrap());
+            )
+            .unwrap());
         }
     }
 
@@ -480,10 +490,17 @@ mod tests {
                 pipe_name.as_ptr(),
                 PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
                 PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_REJECT_REMOTE_CLIENTS,
-                1, 128, 128, 5000, ptr::null_mut(),
+                1,
+                128,
+                128,
+                5000,
+                ptr::null_mut(),
             )
-        }).unwrap();
-        assert_eq!(pipe_server_pid(pipe.0).unwrap(), unsafe { GetCurrentProcessId() });
+        })
+        .unwrap();
+        assert_eq!(pipe_server_pid(pipe.0).unwrap(), unsafe {
+            GetCurrentProcessId()
+        });
         let wrong_pid = unsafe { GetCurrentProcessId() }.wrapping_add(10_000);
         assert!(verified_process_for_pipe(pipe.0, wrong_pid).is_err());
     }
