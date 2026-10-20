@@ -135,6 +135,10 @@ impl S3V2TrustedAnchorJournal {
                  record_schema INTEGER NOT NULL CHECK(record_schema=1)
              );",
         )?;
+        // E2b is an inert, opt-in extension of THIS existing V2 trust row.
+        // Production Sync / normal installed Akula never run this migration.
+        #[cfg(feature = "signed-vault-policy-receipt-lab")]
+        policy_receipt_lab::ensure_policy_columns(&db)?;
         admission.recheck_registered_root()?;
         Ok(Self { db })
     }
@@ -198,6 +202,11 @@ impl S3V2TrustedAnchorJournal {
         {
             return Err(S3V2TrustAnchorError::CorruptedAnchor);
         }
+        // In the opt-in E2b lab, even callers using the OLD root-only API
+        // must fail closed if the associated publisher-policy receipt is
+        // partially written or corrupted. This is NOT a second trust journal.
+        #[cfg(feature = "signed-vault-policy-receipt-lab")]
+        policy_receipt_lab::validate_policy_columns(db, scope)?;
         Ok(Some(S3V2TrustedAnchor {
             root, root_etag: etag, previous_root: previous,
         }))
@@ -334,6 +343,17 @@ impl S3V2TrustedAnchorJournal {
         ).await.map_err(S3V2TrustAnchorError::Reader)
     }
 }
+
+// The policy checkpoint shares this existing guarded SQLite connection and
+// V2 root row. No second policy journal, separate path, or S3 writer.
+#[cfg(feature = "signed-vault-policy-receipt-lab")]
+#[path = "s3_v2_trust_anchor_policy_receipt_lab.rs"]
+mod policy_receipt_lab;
+
+#[cfg(feature = "signed-vault-policy-receipt-lab")]
+pub use policy_receipt_lab::{
+    PolicyReceiptOutcome, V2PolicyReceiptError, V2TrustedPublisherPolicy,
+};
 
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_tests.rs"]

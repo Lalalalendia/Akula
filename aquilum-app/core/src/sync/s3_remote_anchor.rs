@@ -127,6 +127,11 @@ impl S3RemoteAnchorScope {
     pub fn keyspace(&self) -> &S3Keyspace { &self.keyspace }
     pub fn profile_id(&self) -> &str { &self.profile_id }
 
+    // For the gated policy-receipt lab: bind the signed owner policy to the
+    // same protected S3 bucket already fingerprinted by this scope.
+    #[cfg(feature = "signed-vault-policy-receipt-lab")]
+    pub(super) fn policy_bucket(&self) -> &str { &self.profile.bucket }
+
     /// A non-secret context digest. This is NOT an authentication token or MAC.
     pub(super) fn binding_fingerprint(&self) -> &str { &self.fingerprint }
 

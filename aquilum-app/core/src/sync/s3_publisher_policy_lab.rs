@@ -62,6 +62,13 @@ impl PublisherPolicyV1 {
         Ok(blake3::hash(&b).to_hex().to_string())
     }
     pub fn epoch(&self) -> u64 { self.epoch }
+
+    // E2b must source read-only publisher authority from the CURRENT
+    // durable policy, never a cached policy from the remote S3 server.
+    #[cfg(feature = "signed-vault-policy-receipt-lab")]
+    pub(crate) fn trusted_publishers(&self) -> (&[[u8; 32]], usize) {
+        (&self.publisher_keys, self.publisher_quorum)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -83,7 +90,7 @@ fn valid_keys(keys: &[[u8; 32]]) -> bool {
     keys.iter().all(|k| k.iter().any(|b| *b != 0))
         && keys.iter().copied().collect::<BTreeSet<_>>().len() == keys.len()
 }
-fn valid_for_scope(p: &PublisherPolicyV1, bucket: &str, ns: &S3Keyspace) -> bool {
+pub(super) fn valid_for_scope(p: &PublisherPolicyV1, bucket: &str, ns: &S3Keyspace) -> bool {
     let owners: BTreeSet<_> = p.owner_keys.iter().copied().collect();
     let n = p.publisher_keys.len();
     p.schema == 1 && p.epoch > 0

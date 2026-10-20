@@ -140,6 +140,10 @@ pub use s3_remote_anchor::{
     S3RemoteAnchor, S3RemoteAnchorError, S3RemoteAnchorJournal,
     S3RemoteAnchorOutcome, S3RemoteAnchorScope,
 };
+#[cfg(feature = "signed-vault-policy-receipt-lab")]
+pub use s3_v2_trust_anchor::{
+    PolicyReceiptOutcome, V2PolicyReceiptError, V2TrustedPublisherPolicy,
+};
 #[cfg(feature = "sync-s3")]
 pub use s3_v2_trust_anchor::{
     S3V2TrustAnchorError, S3V2TrustAnchorOutcome,

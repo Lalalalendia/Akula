@@ -26,6 +26,8 @@ server-bootstrap-b1b1-floor-lab = ["server-bootstrap-b1b-custody-lab"]
 signed-vault-root-lab = []
 # Inert offline TUF-style owner/publisher policy rotation; requires E1 only.
 signed-vault-policy-lab = ["signed-vault-root-lab"]
+# Research-only receipt extension of existing guarded V2 root journal.
+signed-vault-policy-receipt-lab = ["signed-vault-policy-lab", "sync-s3"]
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.
