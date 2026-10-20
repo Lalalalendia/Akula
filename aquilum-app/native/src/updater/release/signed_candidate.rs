@@ -113,6 +113,42 @@ fn numeric_version(value: &str) -> Result<[u32; 3], String> {
     Ok(version)
 }
 
+// All signed platforms must have usable, bounded, unambiguous metadata.
+// A Linux updater must not accept a malformed signed Windows/DEB/RPM matrix
+// that another OS could interpret differently under the same product key.
+const MAX_RELEASE_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
+
+fn validate_auxiliary_asset(
+    item: &Artifact,
+    expected: &str,
+    platform: &str,
+) -> Result<(), String> {
+    if item.filename != expected
+        || !valid_hex(&item.sha256, 64)
+        || item.size == 0
+        || item.size > MAX_RELEASE_ARTIFACT_BYTES
+    {
+        return Err(hold(&format!("invalid signed {platform} artifact identity")));
+    }
+    Ok(())
+}
+
+fn validate_windows_asset(item: &Artifact, version: &str) -> Result<(), String> {
+    let prefix = format!("Akula_{version}_");
+    let variant = item.filename.strip_prefix(&prefix)
+        .and_then(|name| name.strip_suffix("-setup.exe"))
+        .ok_or_else(|| hold("invalid signed Windows artifact filename"))?;
+    if variant.is_empty()
+        || !variant.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        || !valid_hex(&item.sha256, 64)
+        || item.size == 0
+        || item.size > MAX_RELEASE_ARTIFACT_BYTES
+    {
+        return Err(hold("invalid signed Windows artifact identity"));
+    }
+    Ok(())
+}
+
 /// Strictly validate already-authenticated metadata and package bytes.
 /// This function is NOT itself a signature verifier; it must never be used
 /// directly as a release authorization path.
@@ -143,10 +179,19 @@ fn inspect_authenticated(
     if next <= current {
         return Err(hold("release is not strictly newer than the installed version"));
     }
-    // Exactly these four platform fields must exist, with no aliases.
-    // Their own payload shapes are parsed by deny_unknown_fields.
-    // Automatic replacement is limited to the Linux AppImage path.
-    let _ = (&manifest.artifacts.windows, &manifest.artifacts.deb, &manifest.artifacts.rpm);
+    // Parse and validate all four platform-specific signed entries, not just
+    // the local one. Only the Linux AppImage bytes enter automatic admission.
+    validate_windows_asset(&manifest.artifacts.windows, &manifest.version)?;
+    validate_auxiliary_asset(
+        &manifest.artifacts.deb,
+        &format!("Akula_{}_amd64.deb", manifest.version),
+        "DEB",
+    )?;
+    validate_auxiliary_asset(
+        &manifest.artifacts.rpm,
+        &format!("Akula-{}-1.x86_64.rpm", manifest.version),
+        "RPM",
+    )?;
     let asset = &manifest.artifacts.appimage;
     let required_name = format!("akula-app_{}_x86_64.AppImage", manifest.version);
     if asset.filename != required_name {
@@ -284,6 +329,32 @@ mod tests {
         let repeated = String::from_utf8(raw).unwrap().replace("\"product\":\"Akula\"",
             "\"product\":\"Akula\",\"product\":\"Aquilum\"");
         assert!(inspect_authenticated(repeated.as_bytes(), bytes, TARGET_LINUX_APPIMAGE, "0.3.9").is_err());
+    }
+
+    #[test]
+    fn malformed_other_platform_cannot_hide_inside_signed_linux_candidate() {
+        let bytes = b"new";
+        let raw = fixture(bytes, "0.3.10");
+        for platform in ["windows-x86_64", "linux-x86_64-deb", "linux-x86_64-rpm"] {
+            let mut doc: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+            doc["artifacts"][platform]["sha256"] = json!("not-an-actual-sha256");
+            assert!(
+                inspect_authenticated(
+                    &serde_json::to_vec(&doc).unwrap(), bytes,
+                    TARGET_LINUX_APPIMAGE, "0.3.9",
+                ).is_err(),
+                "malformed {platform} digest was accepted"
+            );
+            let mut doc: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+            doc["artifacts"][platform]["filename"] = json!("Aquilum-malicious-package");
+            assert!(
+                inspect_authenticated(
+                    &serde_json::to_vec(&doc).unwrap(), bytes,
+                    TARGET_LINUX_APPIMAGE, "0.3.9",
+                ).is_err(),
+                "wrong {platform} filename was accepted"
+            );
+        }
     }
 
     #[test]
