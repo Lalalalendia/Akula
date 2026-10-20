@@ -114,14 +114,14 @@ impl OsWitnessLab {
         let marker = pinned_bytes::<{ ENROLLMENT.len() }>(
             &trust_dir, "enrollment", 0o600,
         )?;
-        if marker != ENROLLMENT { return Err(OsWitnessError::TrustBoundary); }
+        if marker.as_slice() != ENROLLMENT { return Err(OsWitnessError::TrustBoundary); }
         let public = pinned_bytes::<32>(&trust_dir, "witness.pub", 0o600)?;
         let mut seed = pinned_bytes::<32>(&trust_dir, "witness.seed", 0o600)?;
         let signer = Ed25519KeyPair::from_seed_unchecked(&seed)
             .map_err(|_| OsWitnessError::SignatureKey);
         seed.zeroize();
         let signer = signer?;
-        if signer.public_key().as_ref() != public {
+        if signer.public_key().as_ref() != public.as_slice() {
             return Err(OsWitnessError::SignatureKey);
         }
         let ledger = InertWitnessLedgerLab::open(journal_path)?;
