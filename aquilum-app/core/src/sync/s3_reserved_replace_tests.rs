@@ -825,6 +825,22 @@ fn p0g3d08_os_process_probe_entrypoint() {
             assert!(result.is_err(),
                 "damaged or incomplete cross-process evidence must fail closed");
         }
+        "vm-classify" => {
+            // A real VM force-off may preserve all domains or only a subset.
+            // HOLD is diagnostic; a partial image MUST be denied, never applied.
+            match result {
+                Ok(review) => {
+                    assert_eq!(review.status, InertColdUnifiedStatus::LocallyConsistentHold);
+                    assert_eq!(review.operation_id, operation);
+                    println!("AKULA_P0G3D08D_VM_COLD_CLASS=HOLD");
+                }
+                Err(error) => {
+                    println!("AKULA_P0G3D08D_VM_COLD_CLASS=DENY ({error:?})");
+                }
+            }
+            assert!(journal.read_existing_replace_attempt(operation)
+                .unwrap().is_some(), "post-V8 VM force-off lost consumed V7 fence");
+        }
         other => panic!("unknown P0g-3d-08 child mode: {other}"),
     }
 
@@ -1013,6 +1029,22 @@ const P0G3D08C_WRITER_CHILD: &str =
     "sync::s3_reserved_replace::tests::p0g3d08c_writer_abort_entrypoint";
 
 fn p0g3d08c_abort_at(workdir: &std::path::Path, stage: &str) -> ! {
+    if std::env::var("AKULA_P0G3D08D_VM_PAUSE").as_deref() == Ok("1") {
+        // Only the final V8 seam is authorized for this first Linux VM lab.
+        // The host receives this marker over live SSH stdout and force-kills
+        // QEMU itself. A guest-side abort or shutdown is NOT the experiment.
+        assert!(cfg!(target_os = "linux") && stage == "after-v8",
+            "VM force-off experiment is restricted to Linux after-v8");
+        println!("AKULA_P0G3D08D_VM_READY=after-v8");
+        std::io::Write::flush(&mut std::io::stdout())
+            .expect("flush out-of-band host witness before VM kill");
+        loop {
+            std::thread::park();
+        }
+    }
+    // Ordinary #444 process-crash tests retain their disposable disk marker.
+    // The VM mode above must perform ZERO guest-disk writes after V8 before
+    // the external QEMU kill; only the host owns the live marker.
     fs::write(workdir.join("p0g3d08c-crash-marker"), stage)
         .expect("write independent test-only crash marker");
     std::process::abort();
@@ -1042,6 +1074,21 @@ fn p0g3d08c_writer_abort_entrypoint() {
     });
     fs::write(workdir.join("p0g3d08c-fixture.json"),
         serde_json::to_vec(&identity).unwrap()).unwrap();
+    if std::env::var("AKULA_P0G3D08D_VM_PAUSE").as_deref() == Ok("1") {
+        assert!(cfg!(target_os = "linux") && stage == "after-v8",
+            "VM force-off test must not pause a different platform or seam");
+        // The fixture (original, previous baseline, SQLite DB namespaces,
+        // registration) is setup, not part of the intentionally ambiguous
+        // destructive step. Flush setup before the V7 / publication window.
+        let status = std::process::Command::new("sync").status()
+            .expect("Linux VM fixture preflight sync");
+        assert!(status.success(), "Linux VM fixture preflight sync failed");
+        // Unlike fixture.json on the tested guest disk, this goes over live
+        // SSH stdout to the host BEFORE any deliberate QEMU force-kill.
+        println!("AKULA_P0G3D08D_VM_FIXTURE={identity}");
+        std::io::Write::flush(&mut std::io::stdout())
+            .expect("flush out-of-band fixture identity to host");
+    }
 
     let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
     if stage == "after-v7" {
