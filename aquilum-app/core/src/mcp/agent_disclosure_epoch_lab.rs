@@ -299,7 +299,7 @@ mod tests {
     struct AmbiguousZeroReport;
     impl Write for AmbiguousZeroReport {
         fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
-            Err(io::Error::new(io::ErrorKind::Interrupted, "report uncertain"))
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "report uncertain"))
         }
         fn flush(&mut self) -> io::Result<()> { Ok(()) }
     }
