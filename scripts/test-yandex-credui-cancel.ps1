@@ -17,6 +17,29 @@ public static class AkulaCredUiQaWindow {
     public static extern IntPtr FindWindow(string className, string windowTitle);
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    private delegate bool EnumWindowsCallback(IntPtr hwnd, IntPtr state);
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr state);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+
+    // CredUIPromptForCredentialsW may be hosted under a localized or generic
+    // Windows Security caption rather than the requested message caption.
+    // Enumerate ONLY windows owned by the independently identified cargo-test
+    // child; never pick an unrelated process's credential prompt.
+    public static IntPtr FindVisibleWindowForProcess(uint requiredPid) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows(delegate (IntPtr hwnd, IntPtr state) {
+            uint ownerPid;
+            GetWindowThreadProcessId(hwnd, out ownerPid);
+            if (ownerPid == requiredPid && IsWindowVisible(hwnd)) {
+                found = hwnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
 }
 '@ -ErrorAction Stop
 
@@ -32,10 +55,21 @@ $argv = @('test', '--locked', '-p', 'aquilum-native',
     '--features', 'installed,yandex-s3-connection-preview',
     '--bin', 'aquilum-native', $testFilter,
     '--', '--exact', '--ignored', '--test-threads=1')
+# Cargo returns SUCCESS even when --exact executes zero tests. Verify
+# the complete Rust test name before launching the interactive process.
+$list = & $cargo test --locked -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview -- --list --ignored
+if ($LASTEXITCODE -ne 0) {
+    throw 'CredUI test discovery failed'
+}
+if (-not (@($list) | Where-Object { $_ -eq "$($testFilter): test" })) {
+    throw 'CredUI ignored test is missing: refusing false-green zero-test CI'
+}
 $proc = $null
 try {
     $proc = Start-Process -FilePath $cargo -ArgumentList $argv -WorkingDirectory $cargoWorkdir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $handle = [IntPtr]::Zero
+    $observedRustTestProcess = $false
+    $discoveredByTestPid = $false
     for ($attempt = 0; $attempt -lt 240; $attempt++) {
         Start-Sleep -Milliseconds 500
         $proc.Refresh()
@@ -44,9 +78,25 @@ try {
         }
         $handle = [AkulaCredUiQaWindow]::FindWindow($null, $title)
         if ($handle -ne [IntPtr]::Zero) { break }
+        # A localized Windows Security modal need not expose the requested
+        # CredUI caption as its TOP-LEVEL window title. Inspect only visible
+        # top-level windows belonging to the cargo-spawned Rust test process.
+        if (($attempt % 4) -ne 0) { continue }
+        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue)
+        foreach ($child in $children) {
+            if ($child.Name -notmatch '^aquilum[-_]native') { continue }
+            $observedRustTestProcess = $true
+            $candidate = [AkulaCredUiQaWindow]::FindVisibleWindowForProcess([uint32]$child.ProcessId)
+            if ($candidate -ne [IntPtr]::Zero) {
+                $handle = $candidate
+                $discoveredByTestPid = $true
+                break
+            }
+        }
+        if ($handle -ne [IntPtr]::Zero) { break }
     }
     if ($handle -eq [IntPtr]::Zero) {
-        throw 'Akula did not present its native CredUI window with the expected synthetic test caption'
+        throw "Native CredUI window unavailable: interactive=$([Environment]::UserInteractive) rust_test_child_seen=$observedRustTestProcess; runner may not expose interactive desktop"
     }
     [uint32]$owner = 0
     if ([AkulaCredUiQaWindow]::GetWindowThreadProcessId($handle, [ref]$owner) -eq 0 -or $owner -eq 0) {
@@ -54,12 +104,16 @@ try {
     }
     # Only act on the actual child launched by the isolated cargo test.
     $testChild = Get-CimInstance Win32_Process -Filter "ProcessId = $owner"
-    if ($null -eq $testChild -or [int]$testChild.ParentProcessId -ne $proc.Id) {
-        throw 'Native credential dialog is not owned by the isolated cargo test child'
+    if ($null -eq $testChild -or [int]$testChild.ParentProcessId -ne $proc.Id -or
+        $testChild.Name -notmatch '^aquilum[-_]native') {
+        throw 'Native credential dialog is not owned by the isolated Rust test child'
     }
     $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
-    if ($null -eq $dialog -or $dialog.Current.Name -ne $title) {
-        throw 'Windows UI Automation cannot identify the actual CredUI dialog'
+    if ($null -eq $dialog) {
+        throw 'Windows UI Automation cannot access the test-child modal'
+    }
+    if ($dialog.Current.Name -ne $title -and -not $discoveredByTestPid) {
+        throw 'CredUI dialog caption mismatch outside the test-child fallback'
     }
     $editType = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
