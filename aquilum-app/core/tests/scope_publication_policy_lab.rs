@@ -423,3 +423,343 @@ fn no_remote_policy_op_can_mutate_original_owner_bytes() {
     assert_eq!(p.state(f.a, f.file, f.v1, &original, false), Publication::Blocked);
     assert_eq!(original, snapshot);
 }
+
+
+// The next tests add a durable, in-memory-verified negative witness. Only a
+// synthetic temp SQLite DB is written: never a user's vault or content file.
+// The trusted checkpoint MUST be held independently of that DB on reopen.
+// No production checkpoint publisher, key-custody or filesystem binding exists.
+use rusqlite::{params, Connection, TransactionBehavior};
+use std::path::Path;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WitnessPin {
+    Genesis,
+    // Only a checkpoint supplied by an INDEPENDENT trusted caller may be used.
+    Exact([u8; 32]),
+}
+
+#[derive(Debug)]
+enum WitnessError {
+    Sql(rusqlite::Error),
+    Policy(PolicyError),
+    CorruptProof,
+    AbsentWitness,
+    UnanchoredReopen,
+    RollbackOrTamper,
+    PoisonedAfterStorageFailure,
+}
+
+fn take_bytes<'a>(remaining: &mut &'a [u8], n: usize) -> Option<&'a [u8]> {
+    if remaining.len() < n { return None; }
+    let (head, rest) = remaining.split_at(n);
+    *remaining = rest;
+    Some(head)
+}
+
+impl SignedDecision {
+    fn durable_proof(&self) -> Vec<u8> {
+        let mut proof = self.bytes_to_sign();
+        proof.extend_from_slice(&self.signature);
+        proof
+    }
+
+    fn decode_durable_proof(data: &[u8]) -> Option<Self> {
+        const DOMAIN: &[u8] = b"AKULA:SCOPE:TWO-LOCK:LAB-V0\0";
+        let mut remaining = data.strip_prefix(DOMAIN)?;
+        let scope = Scope(*take_bytes(&mut remaining, 1)?.first()?);
+        let role = match take_bytes(&mut remaining, 1)?[0] {
+            1 => Role::Owner,
+            2 => Role::Admin,
+            _ => return None,
+        };
+        let action = match take_bytes(&mut remaining, 1)?[0] {
+            1 => Action::Allow,
+            2 => Action::Deny,
+            _ => return None,
+        };
+        let sequence = u64::from_be_bytes(take_bytes(&mut remaining, 8)?.try_into().ok()?);
+        let tag = take_bytes(&mut remaining, 1)?[0];
+        let target = match tag {
+            1 => Target::Object(DocumentId::from_uuid(Uuid::from_bytes(
+                take_bytes(&mut remaining, 16)?.try_into().ok()?,
+            ))),
+            2 => Target::Revision(
+                DocumentId::from_uuid(Uuid::from_bytes(
+                    take_bytes(&mut remaining, 16)?.try_into().ok()?,
+                )),
+                RevisionId::from_uuid(Uuid::from_bytes(
+                    take_bytes(&mut remaining, 16)?.try_into().ok()?,
+                )),
+            ),
+            3 => Target::ExactContent(take_bytes(&mut remaining, 32)?.try_into().ok()?),
+            _ => return None,
+        };
+        let claimed_public_key = take_bytes(&mut remaining, 32)?.try_into().ok()?;
+        let signature = take_bytes(&mut remaining, 64)?.try_into().ok()?;
+        if !remaining.is_empty() { return None; }
+        let event = Self { scope, role, target, action, sequence, claimed_public_key, signature };
+        // A decoding ambiguity must never create a new meaning for signed bytes.
+        if event.durable_proof() != data { return None; }
+        Some(event)
+    }
+
+    fn witness_row_key(&self) -> Vec<u8> {
+        let mut key = vec![
+            self.scope.0,
+            match self.role { Role::Owner => 1, Role::Admin => 2 },
+        ];
+        match self.target {
+            Target::Object(doc) => {
+                key.push(1);
+                key.extend_from_slice(doc.as_uuid().as_bytes());
+            }
+            Target::Revision(doc, revision) => {
+                key.push(2);
+                key.extend_from_slice(doc.as_uuid().as_bytes());
+                key.extend_from_slice(revision.as_uuid().as_bytes());
+            }
+            Target::ExactContent(hash) => {
+                key.push(3);
+                key.extend_from_slice(&hash);
+            }
+        }
+        key
+    }
+}
+
+struct DurablePolicyLab {
+    conn: Connection,
+    policy: PolicyLab,
+    poisoned: bool,
+}
+
+impl DurablePolicyLab {
+    fn open(path: &Path, anchors: Anchors, pin: WitnessPin) -> Result<Self, WitnessError> {
+        let existed = path.exists();
+        match (existed, pin) {
+            (true, WitnessPin::Genesis) => return Err(WitnessError::UnanchoredReopen),
+            (false, WitnessPin::Exact(_)) => return Err(WitnessError::AbsentWitness),
+            _ => {}
+        }
+        let conn = Connection::open(path).map_err(WitnessError::Sql)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=FULL;
+             CREATE TABLE IF NOT EXISTS witnessed_decisions (
+                 record_key BLOB PRIMARY KEY NOT NULL,
+                 signed_proof BLOB NOT NULL
+             ) WITHOUT ROWID;",
+        ).map_err(WitnessError::Sql)?;
+
+        let mut policy = PolicyLab::new(anchors);
+        {
+            let mut query = conn.prepare(
+                "SELECT record_key, signed_proof FROM witnessed_decisions ORDER BY record_key",
+            ).map_err(WitnessError::Sql)?;
+            let rows = query.query_map([], |row| {
+                Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+            }).map_err(WitnessError::Sql)?;
+            for row in rows {
+                let (key, proof) = row.map_err(WitnessError::Sql)?;
+                let event = SignedDecision::decode_durable_proof(&proof)
+                    .ok_or(WitnessError::CorruptProof)?;
+                if event.witness_row_key() != key {
+                    return Err(WitnessError::CorruptProof);
+                }
+                if policy.ingest(event).map_err(WitnessError::Policy)? != Ingest::Applied {
+                    return Err(WitnessError::CorruptProof);
+                }
+            }
+        }
+
+        let store = Self { conn, policy, poisoned: false };
+        if let WitnessPin::Exact(expected) = pin {
+            if store.checkpoint() != expected {
+                return Err(WitnessError::RollbackOrTamper);
+            }
+        }
+        Ok(store)
+    }
+
+    // A snapshot commitment is not itself an independent root of trust.
+    // A production caller must keep the expected hash outside this SQLite DB.
+    fn checkpoint(&self) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"AKULA:SCOPE:WITNESS-CHECKPOINT-V0\0");
+        hasher.update(&(self.policy.latest.len() as u64).to_be_bytes());
+        for ((scope, role, subject), event) in &self.policy.latest {
+            // Include key and exact signed proof, in deterministic BTree order.
+            let key = event.witness_row_key();
+            assert_eq!((*scope, *role, *subject), (event.scope, event.role, event.target));
+            hasher.update(&(key.len() as u32).to_be_bytes());
+            hasher.update(&key);
+            let proof = event.durable_proof();
+            hasher.update(&(proof.len() as u32).to_be_bytes());
+            hasher.update(&proof);
+        }
+        *hasher.finalize().as_bytes()
+    }
+
+    fn ingest(&mut self, event: SignedDecision) -> Result<Ingest, WitnessError> {
+        if self.poisoned {
+            return Err(WitnessError::PoisonedAfterStorageFailure);
+        }
+        // Check signature and causality on a clone BEFORE attempting persistence.
+        let mut next = PolicyLab {
+            anchors: self.policy.anchors.clone(),
+            latest: self.policy.latest.clone(),
+        };
+        let outcome = next.ingest(event.clone()).map_err(WitnessError::Policy)?;
+        if outcome != Ingest::Applied {
+            return Ok(outcome);
+        }
+        let key = event.witness_row_key();
+        let proof = event.durable_proof();
+        // Commit durably BEFORE exposing the next policy state to callers.
+        let result = (|| -> rusqlite::Result<()> {
+            let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute(
+                "INSERT INTO witnessed_decisions(record_key, signed_proof)
+                 VALUES (?1, ?2)
+                 ON CONFLICT(record_key) DO UPDATE SET signed_proof=excluded.signed_proof",
+                params![key, proof],
+            )?;
+            tx.commit()
+        })();
+        if let Err(error) = result {
+            // An uncertain DB outcome must NOT authorize a new publication.
+            self.poisoned = true;
+            return Err(WitnessError::Sql(error));
+        }
+        self.policy = next;
+        Ok(Ingest::Applied)
+    }
+
+    fn state(
+        &self, scope: Scope, doc: DocumentId, revision: RevisionId, plaintext: &[u8],
+    ) -> Publication {
+        if self.poisoned {
+            Publication::Pending
+        } else {
+            self.policy.state(scope, doc, revision, plaintext, false)
+        }
+    }
+}
+
+#[test]
+fn reboot_keeps_signed_anti_meme_and_refuses_old_grant() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("witness.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    let deny = f.event(f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2);
+    assert_eq!(store.ingest(deny.clone()).unwrap(), Ingest::Applied);
+    assert_eq!(store.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Blocked);
+    let pinned_outside_database = store.checkpoint();
+    drop(store);
+    let mut restarted = DurablePolicyLab::open(
+        &db, f.anchors.clone(), WitnessPin::Exact(pinned_outside_database),
+    ).unwrap();
+    assert_eq!(restarted.state(f.a, f.file, f.v2, CONTENT_V2), Publication::Blocked);
+    let replayed = f.event(f.a, Role::Admin, Target::Object(f.file), Action::Allow, 1);
+    assert_eq!(restarted.ingest(replayed).unwrap(), Ingest::Stale(deny));
+}
+
+#[test]
+fn restored_old_sqlite_snapshot_is_detected_with_external_checkpoint() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("witness.sqlite");
+    let backup = temp.path().join("older_snapshot.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    let earlier_pin = store.checkpoint();
+    store.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(store);
+    std::fs::copy(&db, &backup).unwrap();
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(),
+        WitnessPin::Exact(earlier_pin)).unwrap();
+    store.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2)).unwrap();
+    let after_deny_pin = store.checkpoint();
+    store.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(store);
+    std::fs::copy(&backup, &db).unwrap();
+    assert!(matches!(
+        DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Exact(after_deny_pin)),
+        Err(WitnessError::RollbackOrTamper)
+    ));
+    assert!(matches!(
+        DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis),
+        Err(WitnessError::UnanchoredReopen)
+    ));
+}
+
+#[test]
+fn corrupt_signed_proof_or_unpinned_root_cannot_boot() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("witness.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    store.ingest(f.event(f.a, Role::Owner, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    let pin = store.checkpoint();
+    store.conn.execute(
+        "UPDATE witnessed_decisions SET signed_proof = x'00' WHERE record_key =
+         (SELECT record_key FROM witnessed_decisions LIMIT 1)", [],
+    ).unwrap();
+    drop(store);
+    assert!(matches!(
+        DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Exact(pin)),
+        Err(WitnessError::CorruptProof)
+    ));
+}
+
+#[test]
+fn failed_sqlite_commit_does_not_permit_unverified_policy_state() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("witness.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    let trusted_before = store.checkpoint();
+    store.conn.execute_batch(
+        "CREATE TRIGGER synthetic_storage_failure
+         BEFORE UPDATE ON witnessed_decisions
+         BEGIN SELECT RAISE(ABORT, 'synthetic injected failure'); END;",
+    ).unwrap();
+    let failure = store.ingest(f.event(
+        f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2,
+    ));
+    assert!(matches!(failure, Err(WitnessError::Sql(_))));
+    assert_eq!(store.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Pending);
+    assert!(matches!(
+        store.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Allow, 3)),
+        Err(WitnessError::PoisonedAfterStorageFailure)
+    ));
+    drop(store);
+    // A new independently pinned open safely recovers the last committed state;
+    // it must still query owner/admin scope permissions before any real serving.
+    let restarted = DurablePolicyLab::open(
+        &db, f.anchors.clone(), WitnessPin::Exact(trusted_before),
+    ).unwrap();
+    assert_eq!(restarted.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Allowed);
+}
+
+#[test]
+fn removed_witness_cannot_silently_recreate_genesis_from_old_disk() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("deleted.sqlite");
+    let phantom = [7u8; 32];
+    assert!(matches!(
+        DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Exact(phantom)),
+        Err(WitnessError::AbsentWitness)
+    ));
+}
