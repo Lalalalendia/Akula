@@ -359,8 +359,8 @@ fn percent_decode(value: &str) -> Option<String> {
     let mut at = 0;
     while at < bytes.len() {
         if bytes[at] == b'%' {
-            let hi = (bytes.get(at + 1)? as &u8).to_ascii_lowercase();
-            let lo = (bytes.get(at + 2)? as &u8).to_ascii_lowercase();
+            let hi = bytes.get(at + 1)?.to_ascii_lowercase();
+            let lo = bytes.get(at + 2)?.to_ascii_lowercase();
             let hex = |b: u8| match b {
                 b'0'..=b'9' => Some(b - b'0'),
                 b'a'..=b'f' => Some(b - b'a' + 10),
