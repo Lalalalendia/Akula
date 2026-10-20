@@ -58,6 +58,8 @@ jobs:
             cat ../index-stage-data.txt
             echo '\`\`\`'
           } >> "$GITHUB_STEP_SUMMARY"
+          echo 'INDEX-STAGE raw measurements (stdout copy):'
+          cat ../index-stage-data.txt
       - name: Archive complete output
         if: always()
         uses: actions/upload-artifact@v4
