@@ -34,13 +34,53 @@ impl Resolver for Embeds {
                 entries.insert(key.clone(), Entry { value: Fetch::Ready(media), epoch, running: false, stamp, used: true, next: None });
             }
         }
-        self.fetch(|i| &i.media, &key, move |inner| {
+        let result = self.fetch(|i| &i.media, &key, move |inner| {
             let fetched = media::load(inner, &source_owned, wiki);
             if let Fetch::Ready(media) = &fetched {
                 media::remember(shared, media);
             }
             fetched
-        })
+        });
+        // Developer-only real-GUI image stress provenance: distinguish an
+        // image line never reaching the resolver, an async Pending result,
+        // a decoded Ready result, and actual mip painting (tracked elsewhere).
+        // Emit only synthetic photo_NNN.png indices, never user file paths.
+        #[cfg(not(feature = "installed"))]
+        {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let enabled = *ENABLED.get_or_init(|| {
+                std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF")
+                    .ok().as_deref() == Some("1")
+            });
+            if enabled {
+                let number = source.strip_prefix("photo_")
+                    .and_then(|v| v.strip_suffix(".png"))
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .filter(|&n| n < 1000);
+                if let Some(number) = number {
+                    let state = match &result.0 {
+                        Fetch::Pending => 0u8,
+                        Fetch::Ready(media) if media.image.is_some() => 1u8,
+                        Fetch::Ready(_) => 2u8,
+                        Fetch::Missing(_) => 3u8,
+                    };
+                    static SEEN: std::sync::OnceLock<
+                        std::sync::Mutex<std::collections::HashSet<(usize, u8)>>
+                    > = std::sync::OnceLock::new();
+                    if SEEN.get_or_init(Default::default)
+                        .lock().unwrap_or_else(|e| e.into_inner())
+                        .insert((number, state))
+                    {
+                        let label = match state {
+                            0 => "pending", 1 => "ready", 2 => "ready_no_pixels",
+                            _ => "missing",
+                        };
+                        eprintln!("AKULA_IMAGE_RESOLVE_STATE index={number} state={label}");
+                    }
+                }
+            }
+        }
+        result
     }
 
     fn book(&self, target: &str) -> (Fetch<Book>, u64) {
