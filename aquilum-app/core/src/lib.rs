@@ -26,5 +26,8 @@ pub mod server_bootstrap_lab;
 #[cfg(feature = "server-bootstrap-b1a-release-lab")]
 pub mod server_release_lab;
 
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b-custody-lab"))]
+pub mod server_staging_lab;
+
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;

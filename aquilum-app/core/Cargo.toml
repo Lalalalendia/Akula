@@ -16,6 +16,8 @@ node-lab = ["node-catalog-lab"]
 server-bootstrap-b0-lab = []
 # Pure offline release-signature gate; never executes or installs a package.
 server-bootstrap-b1a-release-lab = []
+# Linux-only inert staging laboratory; requires B1a verifier, no executable install.
+server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
