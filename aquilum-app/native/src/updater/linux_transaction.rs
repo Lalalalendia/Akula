@@ -192,7 +192,7 @@ impl Gate {
         Ok(stage)
     }
 
-    fn backup_old(&self, stage: &Path) -> Result<(), String> {
+    pub(crate) fn backup_old(&self, stage: &Path) -> Result<(), String> {
         self.sole_stage(stage)?;
         if !is_real_file(&self.active)? || !is_real_file(&stage.join(CANDIDATE))?
             || is_real_file(&stage.join(PREVIOUS))?
@@ -205,7 +205,7 @@ impl Gate {
         Ok(())
     }
 
-    fn publish_new(&self, stage: &Path) -> Result<(), String> {
+    pub(crate) fn publish_new(&self, stage: &Path) -> Result<(), String> {
         self.sole_stage(stage)?;
         if !is_real_file(&stage.join(PREVIOUS))?
             || !is_real_file(&stage.join(CANDIDATE))?
@@ -248,7 +248,7 @@ impl Gate {
     /// Explicit cold rollback. Caller must independently establish that the
     /// new application has stopped and no generation-bound GUI ACK was issued.
     /// It never deletes the failed candidate; backup survives until final rename.
-    fn rollback_unacknowledged(&self, stage: &Path) -> Result<(), String> {
+    pub(crate) fn rollback_unacknowledged(&self, stage: &Path) -> Result<(), String> {
         self.sole_stage(stage)?;
         if !is_real_file(&stage.join(PREVIOUS))?
             || !is_real_file(&self.active)?
