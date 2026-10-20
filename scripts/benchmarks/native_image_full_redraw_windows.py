@@ -154,6 +154,11 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "--metrics", str(metrics),
     ]
     env = os.environ.copy()
+    # Isolated high-resolution *stress* mode: Akula's normal decoder
+    # correctly shrinks 1280px inputs to ~320-334px for 200px display,
+    # leaving 8/10 PNGs with no reason to create mipmaps. This test
+    # deliberately bypasses that upstream optimization, never in installed.
+    env["AKULA_EXPERIMENTAL_IMAGE_FORCE_NATIVE_DECODE"] = "1"
     env["AKULA_EXPERIMENTAL_IMAGE_MIP"] = "1"
     env["AKULA_EXPERIMENTAL_IMAGE_MIP_FILTER"] = "medium"
     env["AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER"] = "1"
@@ -201,6 +206,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: image mipmap was never used")
     if "AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED" not in log:
         raise ValueError(f"{sample}: full redraw was not enabled")
+    if "AKULA_IMAGE_NATIVE_SOURCE_DECODE_APPLIED max_width=1600" not in log:
+        raise ValueError(f"{sample}: developer full-source decode was not enabled")
     scan_witness = f"AKULA_IMAGE_ANCHOR_SCAN_APPLIED count={len(anchors)} schedule=forward-reverse"
     if scan_witness not in log:
         raise ValueError(f"{sample}: native byte-anchor image scan did not occur")
@@ -275,6 +282,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     # MediaView paint is still not proof the Vello CPU selected its mip.
     painted = {"true": set(), "false": set()}
     brush_ids = {}
+    decoded_sizes = {}
     for line in log.splitlines():
         match = re.search(
             r"AKULA_IMAGE_EMBED_PAINT index=(\d+) ready=(true|false) image_id=(\d+)", line
@@ -285,6 +293,16 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
                 raise ValueError(f"{sample}: painted image not present in fixture: {index}")
             painted[match.group(2)].add(index)
             if match.group(2) == "true":
+                dimensions = re.search(r"decoded_w=(\d+) decoded_h=(\d+)", line)
+                if dimensions is None:
+                    raise ValueError(f"{sample}: fixture decode-dimension witness missing")
+                size = (int(dimensions.group(1)), int(dimensions.group(2)))
+                decoded_sizes.setdefault(index, set()).add(size)
+                if size != (WIDTH, HEIGHT):
+                    raise ValueError(
+                        f"{sample}: image {index} decoded as {size}, expected "
+                        f"native {(WIDTH, HEIGHT)} for a full-source stress workload"
+                    )
                 brush_ids.setdefault(index, set()).add(int(match.group(3)))
     if not any(painted.values()):
         raise ValueError(f"{sample}: no actual MediaView paint witness")
@@ -376,6 +394,9 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         ).hexdigest(),
         "note_sha256": hashlib.sha256(note.encode()).hexdigest(),
         "unique_image_sources_in_note": len(hashes),
+        "decode_policy": "developer_forced_full_source",
+        "native_decode_dimensions": f"{WIDTH}x{HEIGHT}",
+        "decoded_fixture_sources_verified": len(decoded_sizes),
         "replay_image_anchor_count": len(anchors),
         "replay_visible_aligned_anchor_count": len(aligned & set(anchors)),
         "replay_recenter_events": recenter_events,
@@ -421,6 +442,8 @@ def report(rows: list[dict], binary_hash: str) -> str:
         "Eager uses scalar L1→L2; selective uses direct packed L2.",
         "No claim of pure policy-only timing: reducer and retention both change.",
         "All sources have distinct PNG SHA256; actual touched source IDs are reported.",
+        "DEVELOPER-ONLY FORCED FULL-SOURCE DECODE: artificial mip-cache stress, not natural Akula usage.",
+        "Normal native viewer already decodes many 1280px sources near their displayed 200px size.",
         "Replay uses 6s timed forward-reverse real-editor image byte-anchor seeks",
         "plus developer-only full raster of every drawn frame.",
         "Work times are CPU, not physical scanout/FPS. Image-quality comparison is separate.",

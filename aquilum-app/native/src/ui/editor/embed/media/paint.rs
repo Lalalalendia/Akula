@@ -71,8 +71,10 @@ impl MediaView {
                         .lock().unwrap_or_else(|e| e.into_inner())
                         .insert((number, ready, image_id))
                     {
+                        let (source_w, source_h) = self.image.as_ref()
+                            .map_or((0, 0), |brush| (brush.image.width, brush.image.height));
                         eprintln!(
-                            "AKULA_IMAGE_EMBED_PAINT index={number} ready={ready} image_id={image_id} y={y:.1} frame_h={:.1}",
+                            "AKULA_IMAGE_EMBED_PAINT index={number} ready={ready} image_id={image_id} decoded_w={source_w} decoded_h={source_h} y={y:.1} frame_h={:.1}",
                             self.frame.height()
                         );
                     }
