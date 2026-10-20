@@ -163,7 +163,7 @@ jobs:
       # Reuse the existing required Rust runner rather than queuing another job.
       # The test-only publisher key is ephemeral and never leaves RUNNER_TEMP.
       - name: Real ephemeral Minisign signature admitted by native Rust
-        if: needs.classify.outputs.mode == 'workspace' && startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-')
+        if: needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-'))
         working-directory: aquilum-app
         shell: bash
         run: |
@@ -199,7 +199,9 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'test updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes ... ok' "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-minisign.log"
+          grep -Fq 'AKULA_SIGNED_LINUX_STAGE_PASS real_minisign=1 fsync=1 disk_sha256=1 tamper_hold=1 aquilum_intact=1' "$RUNNER_TEMP/akula-native-minisign.log"
           echo 'AKULA_SIGNED_CANDIDATE_RUST_MINISIGN_PASS real_sign=1 wrong_key_refused=1' >> "$GITHUB_STEP_SUMMARY"
+          echo 'AKULA_SIGNED_LINUX_STAGE_PASS signed_to_disk=1 native_inode_rehash=1' >> "$GITHUB_STEP_SUMMARY"
 
       # AGENT-PERF: reuse the already compiled Core tests and the current
       # required-tests runner rather than introducing another queued job.
