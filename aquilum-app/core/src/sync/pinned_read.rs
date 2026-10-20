@@ -261,6 +261,21 @@ impl PinnedReadOnlyRoot {
         Ok(self.read_inner(relative, max_bytes, false)?.snapshot)
     }
 
+    /// MCP scoped-read building block: refuse hard-linked files as well as
+    /// symlink/reparse traversal. The single-link check and bounded byte read
+    /// use the SAME pinned handle. An in-vault hardlink to an out-of-vault
+    /// inode must not inherit the vault's note-read grant.
+    ///
+    /// This is NOT sufficient without a separately attested root, host grant
+    /// and checked response boundary. No production MCP route uses it yet.
+    pub(crate) fn read_bounded_single_link(
+        &self,
+        relative: &SyncRelativePath,
+        max_bytes: u64,
+    ) -> Result<LocalFileSnapshot, VaultPortError> {
+        Ok(self.read_inner(relative, max_bytes, true)?.snapshot)
+    }
+
     /// Preimage capture requires a stable opened-file ID and exactly one hard
     /// link; a second pathname to the same inode must not inherit authority.
     /// This remains *read-only*, and does not provide an atomic filesystem lock.
