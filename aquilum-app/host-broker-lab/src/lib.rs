@@ -53,6 +53,11 @@ pub fn deny_frame(frame: &[u8]) -> [u8; RESPONSE_BYTES] {
 #[cfg(windows)]
 pub mod windows_server;
 
+// No installed Akula caller and no write API; the client only observes
+// Windows SCM + the pipe's pinned SYSTEM/service token before sending bytes.
+#[cfg(windows)]
+pub mod windows_client_attestation;
+
 #[cfg(test)]
 mod tests {
     use super::*;
