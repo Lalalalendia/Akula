@@ -9,6 +9,8 @@ on:
       - 'aquilum-app/core/src/mcp/tools/authority_inventory.rs'
       - 'aquilum-app/core/src/mcp/agent_principals.rs'
       - 'aquilum-app/core/src/mcp/agent_vault_grants.rs'
+      - 'aquilum-app/core/src/mcp/agent_scoped_read.rs'
+      - 'aquilum-app/core/src/sync/pinned_read.rs'
       - 'aquilum-app/core/src/mcp/mod.rs'
       - '.github/workflows/mcp-http-windows.yml'
 
@@ -72,6 +74,14 @@ jobs:
           cargo test --locked -p aquilum-core --lib mcp::agent_vault_grants::tests:: -- --nocapture --test-threads=1 2>&1 |
             Tee-Object -FilePath ../mcp-vault-grants-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify pinned host-root and two-agent denial on Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::agent_scoped_read::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-scoped-pinned-read-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve native MCP test transcripts
         if: always()
         uses: actions/upload-artifact@v7
@@ -83,4 +93,5 @@ jobs:
             mcp-principals-windows.log
             mcp-scoped-windows.log
             mcp-vault-grants-windows.log
+            mcp-scoped-pinned-read-windows.log
           retention-days: 30

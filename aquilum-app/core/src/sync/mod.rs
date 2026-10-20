@@ -32,7 +32,7 @@ pub(crate) mod guarded_editor;
 mod cooperative_gate_tests;
 pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
-pub(crate) use pinned_read::PinnedFileIdentity;
+pub(crate) use pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
 #[cfg(test)]
 mod fault_matrix;
 mod identity;
