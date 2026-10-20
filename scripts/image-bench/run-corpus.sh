@@ -7,6 +7,12 @@ TIER="${CORPUS_TIER:-smoke}"
 REPEATS="${REPEATS:-3}"
 case "$TIER" in smoke|extended|stress) ;; *) echo "invalid corpus tier: $TIER (expected smoke, extended or stress)" >&2; exit 2;; esac
 case "$REPEATS" in 1|2|3|4|5|6|7|8|9|10) ;; *) echo "repeats 1..10 required" >&2; exit 2;; esac
+# Validate the dispatch contract offline before downloading external files.
+# The same validator runs in CI unit tests for smoke/extended/stress.
+if [[ "${BENCH_VALIDATE_CONFIG_ONLY:-0}" == 1 ]]; then
+  printf "BENCH_CONFIG_OK tier=%s repeats=%s\n" "$TIER" "$REPEATS"
+  exit 0
+fi
 mkdir -p "$OUT" "$OUT/inputs" "$OUT/reference"
 : > "$OUT/decode.log"; : > "$OUT/quality.txt"
 printf 'id,format,mode,attempt,status,elapsed_sec,maxrss_kib,user_sec,system_sec\n' > "$OUT/metrics.csv"
