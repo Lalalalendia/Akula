@@ -281,8 +281,15 @@ if ! grep -Eq 'AKULA_P0G3D08D_VM_COLD_CLASS=(HOLD|DENY)' "$lab/recovery.log"; th
   echo "Cold process produced neither an explicit HOLD nor explicit DENY" >&2
   exit 1
 fi
-if ! grep -Fq 'p0g3d08_os_process_probe_entrypoint ... ok' "$lab/recovery.log"; then
-  echo "Cold test filter was not executed successfully" >&2
+# With Rust --nocapture, the guest diagnostic marker can be emitted in
+# the middle of libtest's "test ... ok" line. Require the named test and a
+# clean, non-empty libtest summary independently; do not depend on adjacency.
+if ! grep -Fq 'test sync::s3_reserved_replace::tests::p0g3d08_os_process_probe_entrypoint ...' "$lab/recovery.log"; then
+  echo "Cold verifier did not execute the exact named Rust test" >&2
+  exit 1
+fi
+if ! grep -Eq '^test result: ok\\. 1 passed; 0 failed;' "$lab/recovery.log"; then
+  echo "Cold verifier lacked an explicit successful one-test libtest summary" >&2
   exit 1
 fi
 grep -E 'AKULA_P0G3D08D_VM_COLD_CLASS=' "$lab/recovery.log"
