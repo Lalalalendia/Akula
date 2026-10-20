@@ -26,6 +26,7 @@ fn hold(reason: &str) -> String {
 pub(crate) struct PendingSignedStage {
     _gate: Gate,
     stage: PathBuf,
+    active: PathBuf,
     candidate: SignedCandidate,
 }
 
@@ -54,6 +55,20 @@ impl PendingSignedStage {
     pub(crate) fn digest(&self) -> &str {
         self.candidate.sha256()
     }
+
+    /// Test-only integration: actually rename a signed test generation into
+    /// the active path, simulate an absent first-frame ACK, and exercise the
+    /// SAME recoverable rollback methods that passed SIGKILL process tests.
+    /// This method is not present in any installed Akula executable.
+    #[cfg(test)]
+    pub(crate) fn prove_missing_ack_rollback(&self) -> Result<(), String> {
+        self.rehash()?;
+        self._gate.backup_old(&self.stage)?;
+        self._gate.publish_new(&self.stage)?;
+        self.candidate.verify_staged_file(&self.active)?;
+        self._gate.rollback_unacknowledged(&self.stage)?;
+        Ok(())
+    }
 }
 
 fn stage_checked(
@@ -72,6 +87,7 @@ fn stage_checked(
     Ok(PendingSignedStage {
         _gate: gate,
         stage,
+        active: active.to_path_buf(),
         candidate,
     })
 }
