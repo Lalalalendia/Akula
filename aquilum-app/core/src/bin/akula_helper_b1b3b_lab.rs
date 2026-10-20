@@ -190,15 +190,15 @@ mod linux {
         // Policy does not change in response to any incoming connection.
         for _ in 0..MAX_PEERS {
             let (mut client, _) = listener.accept().map_err(|e| e.to_string())?;
+            let now_unix=std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?.as_secs();
             #[cfg(feature = "server-bootstrap-b1b3c-pinned-fd-lab")]
-            let still_pinned=verified_fd.stable().is_ok();
+            let still_pinned=verified_fd.valid_at(now_unix).is_ok();
             #[cfg(not(feature = "server-bootstrap-b1b3c-pinned-fd-lab"))]
             let still_pinned=true;
-            let accepted=still_pinned && admit_preflight(
-                &mut client, &trust,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                    .map_err(|e| e.to_string())?.as_secs(),
-            ).is_ok();
+            let accepted=still_pinned &&
+                admit_preflight(&mut client,&trust,now_unix).is_ok();
             let _ = client.write_all(&[if accepted { 1 } else { 0 }]);
             println!("B1B3B_{}", if accepted { "PREVIEW_ONLY" } else { "REFUSED" });
         }

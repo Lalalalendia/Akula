@@ -97,12 +97,27 @@ fn same_object(a:&Metadata,b:&Metadata)->bool{
 pub struct RootVerifiedFd{
     file:File,
     meta:Metadata,
+    valid_from_unix:u64,
+    valid_until_unix:u64,
     pub receipt:VerifiedPackageReceipt,
 }
 impl RootVerifiedFd{
     pub fn stable(&self)->Result<(),PinError>{
         if !same_object(&self.meta,&self.file.metadata()?){
             return Err(PinError::ChangedInode);
+        }
+        Ok(())
+    }
+    /// B1a time window must still hold at every new Preview admission.
+    /// FD metadata alone cannot prove a previously verified release is fresh.
+    /// This is NOT owner consent or authorization to install.
+    pub fn valid_at(&self,now_unix:u64)->Result<(),PinError>{
+        self.stable()?;
+        if now_unix<self.valid_from_unix {
+            return Err(PinError::Release(ReleaseError::NotYetValid));
+        }
+        if now_unix>=self.valid_until_unix {
+            return Err(PinError::Release(ReleaseError::Expired));
         }
         Ok(())
     }
@@ -144,6 +159,8 @@ pub fn verify_root_staged(
         &SignedRelease{manifest,signature:sig},
         &trust.trusted_signer,trust.previous_floor,now_unix)?;
     let floor=auth.release_floor_candidate();
+    let valid_from_unix=auth.manifest().not_before_unix;
+    let valid_until_unix=auth.manifest().expires_unix;
     if floor.sequence!=trust.approved_release_sequence||
         floor.signed_manifest_fingerprint!=trust.approved_manifest_fingerprint||
         auth.manifest().package_sha256!=trust.approved_package_sha256{
@@ -159,5 +176,7 @@ pub fn verify_root_staged(
         return Err(PinError::ChangedInode);
     }
     file.seek(SeekFrom::Start(0))?;
-    Ok(RootVerifiedFd{file,meta:after,receipt})
+    Ok(RootVerifiedFd{
+        file,meta:after,receipt,valid_from_unix,valid_until_unix,
+    })
 }

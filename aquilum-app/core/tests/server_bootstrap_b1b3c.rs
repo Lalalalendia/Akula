@@ -105,6 +105,18 @@ fn signed_release_expiry_rejected(){
         Err(PinError::Release(ReleaseError::Expired))));
 }
 #[test]
+fn later_preview_denies_expired_or_not_yet_valid_signed_package(){
+    let (dir,trust)=setup();
+    let pinned=verify_root_staged(dir.path(),&trust,NOW).unwrap();
+    assert!(pinned.valid_at(NOW).is_ok());
+    assert!(pinned.valid_at(NOW+499).is_ok());
+    assert!(matches!(pinned.valid_at(NOW+500),
+        Err(PinError::Release(ReleaseError::Expired))));
+    assert!(matches!(pinned.valid_at(NOW-61),
+        Err(PinError::Release(ReleaseError::NotYetValid))));
+    assert!(pinned.stable().is_ok());
+}
+#[test]
 fn symlink_node_refused_before_read(){
     let (dir,trust)=setup();
     fs::remove_file(dir.path().join("node")).unwrap();
