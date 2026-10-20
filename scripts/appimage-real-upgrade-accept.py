@@ -193,9 +193,15 @@ def check_real_gui_ack(image, root):
 
 def signed_lab_manifest(root, image, sha):
     # This is an isolated integration fixture, not a release signing key.
+    source = os.environ.get("AKULA_E2E_SOURCE_COMMIT", "")
+    locked = os.environ.get("AKULA_E2E_LOCK_SHA256", "")
+    require(len(source) == 40 and all(c in "0123456789abcdef" for c in source),
+            "exact checked-out source SHA was not supplied")
+    require(len(locked) == 64 and all(c in "0123456789abcdef" for c in locked),
+            "exact patched v2 Cargo.lock SHA-256 was not supplied")
     manifest = {
         "schema": 1, "product": "Akula", "version": "0.3.10",
-        "source_commit": "a" * 40, "cargo_lock_sha256": "b" * 64,
+        "source_commit": source, "cargo_lock_sha256": locked,
         "artifacts": {
             "windows-x86_64": {"filename": "Akula_0.3.10_x64-setup.exe",
                                "sha256": "c" * 64, "size": 12},
