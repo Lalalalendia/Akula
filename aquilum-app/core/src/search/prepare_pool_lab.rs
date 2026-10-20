@@ -2,7 +2,7 @@
 // This module is enabled by the opt-in index-pool-lab Cargo feature.
 // No production caller chooses it without the test-only environment gate.
 use super::{prepare_one, PendingPrepare, SearchError};
-use super::index_document::{PreparedFile, Probe};
+use crate::search::index_document::{PreparedFile, Probe};
 use std::sync::mpsc;
 use std::thread;
 
