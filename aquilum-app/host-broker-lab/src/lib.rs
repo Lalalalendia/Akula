@@ -31,9 +31,9 @@ pub fn deny_frame(frame: &[u8]) -> [u8; RESPONSE_BYTES] {
     response[0..4].copy_from_slice(&RESPONSE_MAGIC);
     response[4..6].copy_from_slice(&VERSION.to_le_bytes());
     let status = if frame.len() != REQUEST_BYTES
-        || frame.get(0..4) != Some(&REQUEST_MAGIC)
-        || frame.get(24..32) != Some(&[0u8; 8])
-        || frame.get(8..24) == Some(&[0u8; 16])
+        || frame.get(0..4) != Some(REQUEST_MAGIC.as_slice())
+        || frame.get(24..32) != Some([0u8; 8].as_slice())
+        || frame.get(8..24) == Some([0u8; 16].as_slice())
     {
         Denial::Malformed
     } else {
