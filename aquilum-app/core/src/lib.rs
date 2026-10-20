@@ -10,6 +10,8 @@ pub mod markdown;
 pub mod mcp;
 pub mod plugins;
 pub mod migration;
+#[cfg(feature = "notion-export-probe")]
+pub mod notion_export;
 pub mod search;
 pub mod settings;
 pub mod sync;
