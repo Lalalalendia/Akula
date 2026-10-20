@@ -158,7 +158,7 @@ pub(super) fn read_log(file: &mut File, expected_anchor: [u8; 16]) -> Result<Sta
 /// Full lifetime: OS-exclusive open -> whole-log verification -> exact CAS
 /// -> append one denial floor -> sync_all -> full same-handle readback.
 /// No transaction rollback is attempted after partial primary write.
-fn revoke_existing(
+pub(super) fn revoke_existing(
     path: &Path,
     anchor: [u8; 16],
     replica: [u8; 16],
