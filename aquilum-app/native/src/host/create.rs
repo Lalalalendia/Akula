@@ -3,7 +3,7 @@ use super::*;
 impl Host {
     pub(super) fn create_window(&mut self, event_loop: &dyn ActiveEventLoop) {
         let attributes = WindowAttributes::default()
-            .with_title(if cfg!(target_os = "windows") { "Akula" } else { "Aquilum" })
+            .with_title(if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" })
             .with_decorations(NATIVE_FRAME)
             .with_visible(false)
             .with_window_icon(window_icon());

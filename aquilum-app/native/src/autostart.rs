@@ -1,6 +1,6 @@
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 const NAME: &str = "Akula";
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 const NAME: &str = "Aquilum";
 
 pub fn available() -> bool {
@@ -144,6 +144,14 @@ pub fn enabled() -> bool {
 
 pub fn set(on: bool) -> bool {
     executable().is_some_and(|exe| platform::set(on, &exe))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod akula_linux_autostart_identity_tests {
+    #[test]
+    fn autostart_uses_akula_not_aquilum() {
+        assert_eq!(super::NAME, "Akula");
+    }
 }
 
 #[cfg(test)]
