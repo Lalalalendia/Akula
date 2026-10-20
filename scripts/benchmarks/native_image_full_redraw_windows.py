@@ -102,6 +102,25 @@ def document(n: int) -> str:
     return "".join(parts)
 
 
+def scan_anchors(note: str, n: int) -> list[int]:
+    """Byte offsets of distinct PNG paragraphs, not guessed scroll distances.
+
+    Visit up to 32 unique images twice in 6 seconds (forward then reverse).
+    Do not use all 100 at an 8ms wheel frequency: asynchronous decoding and
+    viewport composition would never display most sources.
+    """
+    offsets = []
+    for image_id in range(min(n, 32)):
+        marker = f"![200](photo_{image_id:03d}.png)"
+        char_offset = note.find(marker)
+        if char_offset < 0:
+            raise ValueError(f"fixture missing displayed image {image_id}")
+        offsets.append(len(note[:char_offset].encode("utf-8")))
+    if not offsets or len(set(offsets)) != len(offsets) or offsets != sorted(offsets):
+        raise ValueError("image scan offsets must be unique and strictly increasing")
+    return offsets
+
+
 def percentile(samples: list[float], fraction: float) -> float:
     if len(samples) < 80 or not all(isinstance(x, (int, float)) and not isinstance(x, bool)
                                    and isfinite(x) and x >= 0 for x in samples):
@@ -122,6 +141,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     for name in hashes:
         shutil.copyfile(source_dir / name, vault / name)
     note = document(images)
+    anchors = scan_anchors(note, images)
     (vault / "images.md").write_text(note, encoding="utf-8")
     metrics = folder / "metrics.json"
     replay = folder / "replay.json"
@@ -138,7 +158,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     env["AKULA_EXPERIMENTAL_IMAGE_MIP_LINGER"] = "1"
     env["AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF"] = "1"
     env["AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW"] = "1"
-    env["AKULA_EXPERIMENTAL_IMAGE_SCROLL_SCAN"] = "1"
+    env["AKULA_EXPERIMENTAL_IMAGE_SCAN_BYTES"] = ",".join(map(str, anchors))
+    env.pop("AKULA_EXPERIMENTAL_IMAGE_SCROLL_SCAN", None)
     env["AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF"] = "1"
     env["AKULA_EXPERIMENTAL_FRAME_SAMPLES"] = "1"
     env["AKULA_EXPERIMENTAL_FRAME_STAGES"] = "1"
@@ -178,8 +199,11 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: image mipmap was never used")
     if "AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED" not in log:
         raise ValueError(f"{sample}: full redraw was not enabled")
-    if "AKULA_IMAGE_SCROLL_SCAN_APPLIED logical_step=240" not in log:
-        raise ValueError(f"{sample}: native direct-pixel scroll scan was not applied")
+    witness = f"AKULA_IMAGE_ANCHOR_SCAN_APPLIED count={len(anchors)} schedule=forward-reverse"
+    if witness not in log:
+        raise ValueError(f"{sample}: native byte-anchor image scan did not occur")
+    if "AKULA_IMAGE_ANCHOR_SCAN_SEEK index=" not in log:
+        raise ValueError(f"{sample}: no actual editor image scroll anchor processed")
     lines = [line for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     if not lines:
         raise ValueError(f"{sample}: no source/eviction diagnostic line")
@@ -224,7 +248,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         ).hexdigest(),
         "note_sha256": hashlib.sha256(note.encode()).hexdigest(),
         "unique_image_sources_in_note": len(hashes),
-        "replay_scroll_scan_logical_pixels": 240,
+        "replay_image_anchor_count": len(anchors),
+        "replay_anchor_dwell_ms_each_pass": 3000 / len(anchors),
         "unique_mip_source_ids_requested": unique,
         "distinct_decoded_pixel_fingerprints": unique_pixels,
         "cpu_p95_ms": p95, "cpu_p99_ms": p99,
@@ -254,7 +279,8 @@ def report(rows: list[dict], binary_hash: str) -> str:
         "Eager uses scalar L1→L2; selective uses direct packed L2.",
         "No claim of pure policy-only timing: reducer and retention both change.",
         "All sources have distinct PNG SHA256; actual touched source IDs are reported.",
-        "Replay uses 6s native fling + developer-only full raster of every drawn frame.",
+        "Replay uses 6s timed forward-reverse real-editor image byte-anchor seeks",
+        "plus developer-only full raster of every drawn frame.",
         "Work times are CPU, not physical scanout/FPS. Image-quality comparison is separate.",
         "",
         "| Sources in note | Mode | Runtime IDs | Distinct pixel fingerprints | CPU p95 ms | CPU p99 ms | Replay mip build ms | Peak RSS MiB |",
