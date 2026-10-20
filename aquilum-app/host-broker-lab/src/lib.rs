@@ -66,6 +66,11 @@ pub mod windows_scm_service;
 #[cfg(windows)]
 mod windows_cancellable_pipe;
 
+// This P2P policy kernel is UNIT-TEST ONLY: no production enrollment or
+// channel-binding constructor exists, and no Allow variant can escape.
+#[cfg(test)]
+mod broker_policy_kernel;
+
 #[cfg(test)]
 mod tests {
     use super::*;
