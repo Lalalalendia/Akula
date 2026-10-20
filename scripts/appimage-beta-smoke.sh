@@ -17,7 +17,8 @@ chmod u+x "$image"
 
 # Inspect actual packaged contents, not just an external filename or YAML.
 extract="$(mktemp -d)"
-trap 'rm -rf "$extract"' EXIT
+container_log="$(mktemp)"
+trap 'rm -rf "$extract"; rm -f "$container_log"' EXIT
 (
   cd "$extract"
   "$image" --appimage-extract > /dev/null
@@ -44,7 +45,10 @@ echo 'AKULA_APPIMAGE_STRUCTURE_PASS apprun=1 own_bin=1 own_desktop=1 upstream_pa
 
 # The AppImage is executed in an isolated Docker root FS with isolated
 # HOME/XDG_DATA_HOME and only synthetic Aquilum witness data.
-docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:22.04 bash -s -- "/dist/$(basename "$image")" <<'UBUNTU'
+# -i is critical: without it, bash -s reads EOF and returns success without
+# executing the heredoc, yielding a dangerous false-positive GUI acceptance.
+# pipefail preserves container exit failures when output is captured by tee.
+docker run --rm -i -v "$PWD/dist:/dist:ro" ubuntu:22.04 bash -s -- "/dist/$(basename "$image")" <<'UBUNTU' | tee "$container_log"
 set -euo pipefail
 image="$1"
 export DEBIAN_FRONTEND=noninteractive
@@ -109,3 +113,9 @@ echo 'AKULA_APPIMAGE_GUI_PASS app=Akula isolated_xdg=1 original_note_intact=1'
 }
 echo 'AKULA_APPIMAGE_COEXIST_PASS upstream_executable=unchanged upstream_desktop=unchanged upstream_appdata=unchanged'
 UBUNTU
+
+# An exit code of zero alone does NOT prove the container executed its script.
+# Require both exact markers emitted only after the real OS-level checks.
+grep -Fxq 'AKULA_APPIMAGE_GUI_PASS app=Akula isolated_xdg=1 original_note_intact=1' "$container_log"
+grep -Fxq 'AKULA_APPIMAGE_COEXIST_PASS upstream_executable=unchanged upstream_desktop=unchanged upstream_appdata=unchanged' "$container_log"
+echo 'AKULA_APPIMAGE_HOST_GATE_PASS child_script_executed=1 gui_and_coexistence_confirmed=1'

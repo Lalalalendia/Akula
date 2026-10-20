@@ -49,7 +49,13 @@ test('OS-level AppImage acceptance preserves original Aquilum witnesses', () => 
   assert.match(s, /AKULA_APPIMAGE_COEXIST_PASS/);
   assert.match(s, /sha256sum/);
   assert.match(s, /RUNNER_ENVIRONMENT:-/);
-  assert.match(s, /docker run --rm/);
+  // Catch the false green from docker run without -i: the heredoc silently
+  // reads as EOF in the container. Marker checks on the *host* are required.
+  assert.match(s, /docker run --rm -i/);
+  assert.match(s, /\| tee "\$container_log"/);
+  assert.match(s, /grep -Fxq 'AKULA_APPIMAGE_GUI_PASS[^']*' "\$container_log"/);
+  assert.match(s, /grep -Fxq 'AKULA_APPIMAGE_COEXIST_PASS[^']*' "\$container_log"/);
+  assert.match(s, /AKULA_APPIMAGE_HOST_GATE_PASS/);
   assert.doesNotMatch(s, /rm -rf "\$HOME"|systemctl|sudo/);
   const pkg = file('aquilum-app/native/packaging/akula-linux-nfpm.yaml');
   assert.match(pkg, /^name: akula$/m);

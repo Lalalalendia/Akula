@@ -2,6 +2,15 @@
 
 Status: Draft CI-only candidate; NOT a signed or published release.
 
+**Important 2026-10-20 re-acceptance:** the first green AppImage CI extracted
+the AppRun and passed static packaging, but its Docker invocation omitted
+`-i`. `bash -s` inside Docker therefore read EOF and **never executed GUI
+or Aquilum-coexistence acceptance**, despite reporting exit code zero.
+The script now requires Docker stdin `-i`, propagates failures through
+`pipefail`/`tee`, and refuses to pass unless the host observes exact
+`AKULA_APPIMAGE_GUI_PASS` and `AKULA_APPIMAGE_COEXIST_PASS` lines from
+the real child process. This new exact-head CI must run before merge.
+
 Depends on accepted RELEASE-LINUX-ID-01 [PR #439](https://github.com/Lalalalendia/Akula/pull/439): Linux AppData ID io.github.lalalendia.akula and automatic Aquilum legacy import disabled.
 
 The existing Cargo.toml [package.metadata.packager] intentionally retains Aquilum fields for historical compatibility and must never be used for Akula packaging. The independent `native/packaging/akula-linux.json` explicitly declares Akula productName, binary akula-app, icon resources, identifier io.github.lalalendia.akula, and immutable-git-SHA gstreamer linuxdeploy plugin URL.
