@@ -75,6 +75,20 @@ Minimum valid source coverage **for both runtime IDs and pixel fingerprints**: s
 
 All sample files are pure-SHA deterministic and require no external Python packages. GUI startup and loading are not excluded from the whole-process stage array but **are excluded** from replay p95/p99. More trials are necessary if two pairs disagree.
 
+## Full 12-process native Win32 evidence — console-report failure only
+
+The exact-head [CI #39398605775](https://github.com/Lalalalendia/Akula/actions/runs/39398605775/artifacts/12256356630) at `88978ecd` **completed all 12 real Win32 samples**: all strict per-fixture viewport/decode/mip/pixel gates passed at 1/1, 10/10 and 32/32 visited sources (thresholds were 1/1, 8/10 and 24/32). The 100-PNG note deliberately scans only 32 unique anchors during the six-second timed window; other sources may decode as the viewport changes. The exact fixture content hashes and `matrix.json`, `summary.md`, replay/stage samples, and raw logs were uploaded despite the final job status being FAILED. This is **not** a full CI PASS: after writing the complete UTF-8 report, the Python runner tried `print(summary)` to Windows cp1252 stdout; the single Unicode `→` in the report caused `UnicodeEncodeError`. The driver now prints a plain ASCII `AKULA_IMAGE_FULL_REDRAW_MATRIX_ACCEPTED samples=12 report=summary.md` marker instead, retaining the real Markdown in `summary.md` for `GITHUB_STEP_SUMMARY`; the exception line is also ASCII-safe.
+
+Collected medians across the two independently launched process trials (native Win32 at 983×675, **forced-full-source**, CPU work not FPS):
+
+| Fixture PNGs | Eager CPU p95/p99 (ms) | Selective CPU p95/p99 (ms) | Eager peak RSS (MiB) | Selective peak RSS (MiB) | Eager cache evictions / trial | Selective evictions / trial |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 3.125 / 3.365 | 2.922 / 3.442 | 62.1 | 59.9 | 0 / 0 | 0 / 0 |
+| 10 | 4.716 / 10.724 | 3.662 / 5.309 | 108.4 | 98.0 | 0 / 0 | 0 / 0 |
+| 100 | 8.134 / 8.989 | 5.318 / 6.317 | 134.2 | 110.8 | 64 / 72 | 0 / 0 |
+
+Two 100-PNG paired p95 differences (Selective minus Eager) were **−3.147 ms** and **−2.485 ms**, and RSS savings were **25.18 MiB** and **21.69 MiB**. The 10-PNG p95 differences were **−1.539 ms** and **−0.570 ms**. The one-PNG p95 deltas disagreed in sign (+0.183 and −0.590 ms), so do not claim an advantage for a single image. This compares **two combined strategies** (scalar Eager L1+L2 versus packed Selective direct L2) and cannot attribute improvements to cache policy or reducer alone. It does not establish production value under the normal adaptive predecoder. No production renderer code was changed.
+
 ## Attribution caveat
 
 This compares **combined** Eager-scalar-pyramid vs Selective-packed-direct-L2-and-lazy-L1. Even with identical Medium sampling and rendered pixels, differences in cold latency cannot be attributed solely to caching policy: the reduction algorithm also differs. A pure policy-only comparison must hold the reducer constant (packed eager vs packed direct). Keep that for a separate factorial study. This PR neither changes the installed renderer nor proposes automatic mipmap rollout. Pixel-fidelity screenshots/pattern checks are still required before production approval.

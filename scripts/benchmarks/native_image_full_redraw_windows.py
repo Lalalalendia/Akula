@@ -512,7 +512,12 @@ def main() -> int:
     (out / "fixture_hashes.json").write_text(json.dumps(
         {str(count): assets(out, count)[1] for count in COUNTS}, indent=2
     ), encoding="utf-8")
-    print(summary, flush=True)
+    # summary.md and the Actions Step Summary remain UTF-8 Markdown.
+    # Do NOT echo Markdown to a legacy Windows cp1252 console: it includes
+    # a Unicode arrow in "L1→L2". On Win32 this used to fail *after*
+    # all 12 strict real-GUI trials had finished and artifacts were written.
+    # An ASCII-only completion witness is safe regardless of console locale.
+    print(f"AKULA_IMAGE_FULL_REDRAW_MATRIX_ACCEPTED samples={len(rows)} report=summary.md", flush=True)
     return 0
 
 
@@ -520,5 +525,7 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as exc:
-        print(f"AKULA_IMAGE_FULL_REDRAW_ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
+        # Failures must also survive arbitrary Windows console encodings.
+        detail = str(exc).encode("ascii", "backslashreplace").decode("ascii")
+        print(f"AKULA_IMAGE_FULL_REDRAW_ERROR {type(exc).__name__}: {detail}", file=sys.stderr)
         raise SystemExit(1)
