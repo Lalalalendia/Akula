@@ -229,7 +229,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     observed = {"pending": set(), "ready": set(),
                 "ready_no_pixels": set(), "missing": set()}
     for line in log.splitlines():
-        match = re.search(r"AKULA_IMAGE_RESOLVE_STATE index=(\\d+) state=(pending|ready|ready_no_pixels|missing)", line)
+        match = re.search(r"AKULA_IMAGE_RESOLVE_STATE index=(\d+) state=(pending|ready|ready_no_pixels|missing)", line)
         if match:
             index = int(match.group(1))
             if index >= images:
