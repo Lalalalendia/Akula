@@ -987,7 +987,7 @@ fn p0g3d09_oracle_reports_hold_and_history_tamper_deny_across_processes() {
         &root, &appdata, intent.operation_id,
         "DENY", "IMMUTABLE_HISTORY_REJECTED",
     );
-    assert_eq!(negative["reason_code"], "EVIDENCE_REJECTED");
+    assert_eq!(negative["reason_code"], "IMMUTABLE_HISTORY_REJECTED");
 
     // The report is not a proof of persistence, or a permission to ACK.
     let mut cold = SqliteSyncJournal::open(&appdata.join("journal.sqlite")).unwrap();
