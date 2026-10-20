@@ -239,6 +239,19 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: no native asynchronous image-resolver witness")
     if observed["missing"]:
         raise ValueError(f"{sample}: image resolver reported missing pixels for {sorted(observed['missing'])}")
+    # TextEditor::do_paint may classify an image paragraph as visible
+    # yet lack a materialized MediaView. Distinguish that from a MediaView
+    # actually reaching paint, then from Vello sampling its image bytes.
+    visible = {"true": set(), "false": set()}
+    for line in log.splitlines():
+        match = re.search(r"AKULA_IMAGE_EDITOR_VISIBLE index=(\d+) embedded=(true|false)", line)
+        if match:
+            index = int(match.group(1))
+            if index >= images:
+                raise ValueError(f"{sample}: editor saw unknown image index {index}")
+            visible[match.group(2)].add(index)
+    if not any(visible.values()):
+        raise ValueError(f"{sample}: no synthetic image paragraph reached editor paint window")
     # Painting is a *third* independent stage: resolver Ready is not proof
     # that a virtualized MediaView was ever passed to the Painter, and
     # MediaView paint is still not proof the Vello CPU selected its mip.
@@ -273,6 +286,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
             f"independently sampled decoded-pixel fingerprints for "
             f"{images} seeded PNG files; both must reach at least {minimum}; "
             f"resolver pending={len(observed['pending'])}, ready={len(observed['ready'])}, "
+            f"editor visible={len(visible['true']) + len(visible['false'])}, "
+            f"embedded={len(visible['true'])}, "
             f"embed paint ready={len(painted['true'])}, empty={len(painted['false'])}, "
             f"no-pixels={len(observed['ready_no_pixels'])}, missing={len(observed['missing'])}"
         )
@@ -296,6 +311,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "distinct_decoded_pixel_fingerprints": unique_pixels,
         "resolver_unique_pending_sources": len(observed["pending"]),
         "resolver_unique_ready_sources": len(observed["ready"]),
+        "editor_unique_image_paragraphs_visible": len(visible["true"] | visible["false"]),
+        "editor_unique_image_embeds_materialized": len(visible["true"]),
         "embed_unique_ready_painted_sources": len(painted["true"]),
         "embed_unique_placeholder_painted_sources": len(painted["false"]),
         "resolver_unique_ready_no_pixels": len(observed["ready_no_pixels"]),
