@@ -1,0 +1,76 @@
+name: Staya RN4E1b03b1a — standalone host broker deny-only IPC
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03b1a-host-broker-ipc-*"
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/**"
+      - ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml"
+      - "docs/sync/staya-rn4e1b03b1a-broker-ipc.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deny-only-ipc:
+    name: Real protocol / Windows token + named-pipe compile — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Assert completely separate disabled broker scope
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "79e0b22b94f268d130410ba7ccf9c20a04da35a2"
+          changed = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          allowed = {
+              "aquilum-app/host-broker-lab/Cargo.toml",
+              "aquilum-app/host-broker-lab/Cargo.lock",
+              "aquilum-app/host-broker-lab/src/lib.rs",
+              "aquilum-app/host-broker-lab/src/main.rs",
+              "aquilum-app/host-broker-lab/src/windows_server.rs",
+              "aquilum-app/host-broker-lab/README.md",
+              ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml",
+              "docs/sync/staya-rn4e1b03b1a-broker-ipc.md",
+          }
+          assert changed == allowed, f"unexpected files: {changed ^ allowed}"
+          assert not any(p.startswith("aquilum-app/core/") for p in changed)
+          assert not any(p.startswith("aquilum-app/native/") for p in changed)
+          PY
+          git diff --check
+      - name: Verify separate workspace, no generated lockfile changes
+        run: |
+          set -euo pipefail
+          grep -qx '\[workspace\]' aquilum-app/host-broker-lab/Cargo.toml
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          cargo check --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          git diff --exit-code -- aquilum-app/Cargo.lock aquilum-app/host-broker-lab/Cargo.lock
+      - name: Rustfmt fixed protocol and Win32 API code
+        run: |
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+      - name: Explicit non-release result
+        run: |
+          echo "A correctly framed local request ONLY returns HOLD; all other requests are rejected." >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows named pipe is code-compiled; CI has NOT launched a real SYSTEM service or verified an installed service SID, pipe client owner, broker signing/enrollment, or an authorized command." >> "$GITHUB_STEP_SUMMARY"
+          echo "No installed Akula, File Gate, S3, QUIC/Bao or P2P write path changed." >> "$GITHUB_STEP_SUMMARY"
