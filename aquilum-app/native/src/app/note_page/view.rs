@@ -40,6 +40,21 @@ impl App {
         true
     }
 
+    /// Visible-note-only developer stress driver. The actual scroll target
+    /// is resolved by the editor's own byte-to-layout geometry, not by a
+    /// guessed wheel offset. Return None unless the anchor can be laid out.
+    #[cfg(not(feature = "installed"))]
+    pub(crate) fn image_scan_reveal(&mut self, root: &mut RenderRoot, byte: usize) -> Option<(f64, f64)> {
+        let before = self.scroll_geometry(root)?.2;
+        let ids = self.note_ids.as_ref()?;
+        root.get_widget(ids.body.id())
+            .and_then(|w| w.downcast::<crate::ui::editor::TextEditor>())?
+            .inner().top_of(byte)?;
+        self.reveal(root, byte);
+        let after = self.scroll_geometry(root)?.2;
+        Some((before, after))
+    }
+
     pub(in crate::app) fn flush_view(&mut self) {
         self.view_due = None;
         let units = self.view.map(|(anchor, px)| (self.units_of(anchor), px));
