@@ -481,6 +481,50 @@ mod tests {
         (temp, database, vault, appdata, record)
     }
 
+    /// Negative trust falsifier for MCP and replica grants: a second
+    /// user-provisioned valid host ledger can contain exactly the same durable
+    /// enrollment as the alleged installer ledger. Even successful
+    /// inspect()/root/profile/lock matches are NOT an issuer proof.
+    #[test]
+    fn copied_valid_host_ledger_is_not_installer_authorization() {
+        let (temp, db, vault, appdata, record) = specimen();
+        let mut original = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        original.enroll(&record).unwrap();
+
+        let untrusted_host = temp.path().join("same-user-forged-host");
+        fs::create_dir(&untrusted_host).unwrap();
+        let untrusted_db = untrusted_host.join("approved.sqlite");
+        let mut counterfeit = SharedHostCustodyRegistry::provision_new(
+            &untrusted_db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        counterfeit.enroll(&record).unwrap();
+
+        // Both databases are well-formed and pass the same lookup, including
+        // the physical-root, remote VaultId, profile and OS lock identities.
+        let actual = original.inspect(
+            Path::new(&record.root_path), record.root_identity,
+        ).unwrap();
+        let forged = counterfeit.inspect(
+            Path::new(&record.root_path), record.root_identity,
+        ).unwrap();
+        assert_eq!(actual, Some(record.clone()));
+        assert_eq!(forged, actual);
+        drop(counterfeit);
+
+        // Cold-open is not external attestation: both identical records
+        // remain readable after reopening the forged same-user ledger.
+        let reopened = SharedHostCustodyRegistry::open_existing(&untrusted_db)
+            .unwrap();
+        assert_eq!(
+            reopened.inspect(Path::new(&record.root_path), record.root_identity)
+                .unwrap(),
+            Some(record),
+        );
+        // No MCP grant or privileged broker ticket is ever created here.
+    }
+
     #[test]
     fn missing_install_refuses_and_does_not_create_database() {
         let (_temp, db, _vault, _app, _) = specimen();
