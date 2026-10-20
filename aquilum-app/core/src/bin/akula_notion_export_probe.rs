@@ -1,12 +1,12 @@
 //! Explicit offline diagnostic. Stdout: JSON. Stderr: errors only.
-use aquilum_core::notion_export::{inspect_directory, ScanLimits};
+use aquilum_core::notion_export::{inspect_path, ScanLimits};
 use std::path::PathBuf;
 
 fn main() {
     let mut args = std::env::args_os();
     let _binary = args.next();
     let Some(root) = args.next() else {
-        eprintln!("usage: akula-notion-export-probe <already-extracted-notion-export-directory>");
+        eprintln!("usage: akula-notion-export-probe <notion-zip-or-extracted-directory>");
         std::process::exit(2);
     };
     if args.next().is_some() {
@@ -14,7 +14,7 @@ fn main() {
         std::process::exit(2);
     }
     let root = PathBuf::from(root);
-    match inspect_directory(&root, ScanLimits::default()) {
+    match inspect_path(&root, ScanLimits::default()) {
         Ok(report) => match serde_json::to_string_pretty(&report) {
             Ok(json) => println!("{json}"),
             Err(error) => {
