@@ -1,0 +1,71 @@
+name: Staya RN4E1b03c0 — non-authorizing broker policy kernel
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03c0-non-authorizing-policy-*"
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/src/broker_policy_kernel.rs"
+      - "aquilum-app/host-broker-lab/src/lib.rs"
+      - ".github/workflows/staya-rn4e1b03c0-policy-kernel.yml"
+      - "docs/sync/staya-rn4e1b03c0-policy-kernel.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  no-permits:
+    name: Monotonic revoked replica scope / NO broker authorization — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Check strict test-only scope, no installed Akula or Cargo.lock
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "ddd828e7f43b7c102fec3b145d46d49d507e971f"
+          actual = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          expected = {
+              "aquilum-app/host-broker-lab/src/broker_policy_kernel.rs",
+              "aquilum-app/host-broker-lab/src/lib.rs",
+              ".github/workflows/staya-rn4e1b03c0-policy-kernel.yml",
+              "docs/sync/staya-rn4e1b03c0-policy-kernel.md",
+          }
+          assert actual == expected, f"scope mismatch: {actual ^ expected}"
+          assert not any(p.startswith("aquilum-app/native/") for p in actual)
+          assert not any(p.startswith("aquilum-app/core/") for p in actual)
+          PY
+          git diff --check
+      - name: Test all 7 fail-closed local replica/epoch cases and existing broker denial IPC
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml \
+            --lib broker_policy_kernel -- --nocapture
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+          git diff --exit-code -- aquilum-app/Cargo.lock aquilum-app/host-broker-lab/Cargo.lock
+      - name: Deny release assertion
+        run: |
+          echo "An exact scope match is intentionally NOT a permit: caller-provided EndpointKey does not establish QUIC identity." >> "$GITHUB_STEP_SUMMARY"
+          echo "InstallerAuthority can only be constructed in unit tests. Memory state is not durable; after restart everything denies." >> "$GITHUB_STEP_SUMMARY"
+          echo "No real OS custody enrollment, broker DB/WAL, signed grant, File Gate write, network, APPLIED or ACK." >> "$GITHUB_STEP_SUMMARY"
