@@ -21,6 +21,7 @@ const ERROR_IO_PENDING: u32 = 997;
 const ERROR_PIPE_CONNECTED: u32 = 535;
 const ERROR_BROKEN_PIPE: u32 = 109;
 const ERROR_PIPE_NOT_CONNECTED: u32 = 233;
+const ERROR_MORE_DATA: u32 = 234;
 const WAIT_OBJECT_0: u32 = 0;
 const INFINITE: u32 = u32::MAX;
 
@@ -146,6 +147,7 @@ impl CancelablePipe {
         if unsafe { WaitForSingleObject(stop, 0) } == WAIT_OBJECT_0 {
             return Ok(Phase::Stopped);
         }
+        *ov = Overlapped::with_event(self.done.0);
         if unsafe { ResetEvent(self.done.0) } == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -160,6 +162,7 @@ impl CancelablePipe {
     }
 
     fn read_one_or_stop(&self, stop: Handle, ov: &mut Overlapped) -> io::Result<Phase> {
+        *ov = Overlapped::with_event(self.done.0);
         if unsafe { ResetEvent(self.done.0) } == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -179,7 +182,7 @@ impl CancelablePipe {
         }
         match unsafe { GetLastError() } {
             ERROR_IO_PENDING => self.pending(stop, ov),
-            ERROR_BROKEN_PIPE | ERROR_PIPE_NOT_CONNECTED => Ok(Phase::Retry),
+            ERROR_BROKEN_PIPE | ERROR_PIPE_NOT_CONNECTED | ERROR_MORE_DATA => Ok(Phase::Retry),
             _ => Err(io::Error::last_os_error()),
         }
     }
@@ -236,10 +239,12 @@ mod tests {
         // The test does not have a service-installed LocalSystem identity.
         // A future privileged runner should use a separate positive fixture,
         // rather than leaving an unconnected pipe alive in a unit test.
-        if CancelablePipe::new().is_ok() {
-            // An actual SYSTEM test runner is not evidence of a service SID
-            // or registered host policy. Do not infer any grant from success.
-            assert_eq!(super::windows_server::PIPE_ACCESS_DUPLEX, 3);
+        let result = CancelablePipe::new();
+        // An actual SYSTEM test runner is not evidence of an installed
+        // service or any grant. If this succeeded, the handle is dropped
+        // immediately without accepting any client.
+        if let Ok(handle) = result {
+            drop(handle);
         }
     }
 }
