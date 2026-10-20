@@ -32,6 +32,35 @@ fn mip_linger_enabled() -> bool {
     })
 }
 
+// Developer-only per-image prefilter decision provenance. Trace ephemeral
+// image IDs, never filenames/paths/pixel bytes. Once per (ID, reason).
+#[cfg(not(feature = "installed"))]
+fn trace_mip_decision(
+    id: u64, reason: &'static str, level: u8, source: &ImageSource,
+    geometry: Affine, brush: Affine,
+) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| {
+        std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF").ok().as_deref() == Some("1")
+    }) {
+        return;
+    }
+    static SEEN: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<(u64, &'static str)>>
+    > = std::sync::OnceLock::new();
+    if SEEN.get_or_init(Default::default)
+        .lock().unwrap_or_else(|e| e.into_inner())
+        .insert((id, reason))
+    {
+        let g = geometry.as_coeffs();
+        let b = brush.as_coeffs();
+        eprintln!(
+            "AKULA_IMAGE_MIP_DECISION image_id={id} reason={reason} level={level} pixmap={} geom={g:?} brush={b:?}",
+            matches!(source, ImageSource::Pixmap(_))
+        );
+    }
+}
+
 // Developer-only selective L2 experiment. This is never an installed feature.
 #[cfg(any(test, not(feature = "installed")))]
 fn mip_direct_l2_enabled() -> bool {
@@ -159,7 +188,16 @@ impl Images {
                         let offset = row * row_bytes;
                         fingerprint.update(&raw[offset..offset + row_bytes]);
                     }
-                    self.diag.distinct_sampled_pixel_fingerprints.insert(fingerprint.finalize());
+                    let digest = fingerprint.finalize();
+                    if std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF")
+                        .ok().as_deref() == Some("1")
+                    {
+                        // This proves requested pixel content for this blob
+                        // ID. A separate converter 'used' result proves that
+                        // a mip was successfully returned for rasterization.
+                        eprintln!("AKULA_IMAGE_MIP_CONTENT image_id={id} fingerprint={digest}");
+                    }
+                    self.diag.distinct_sampled_pixel_fingerprints.insert(digest);
                 }
             }
         }
@@ -409,15 +447,25 @@ fn brush_to_paint_candidate_tuned(
     }
     let Some(id) = original_id else { return (paint, brush_transform) };
     let Brush::Image(image) = &mut paint else { return (paint, brush_transform) };
-    if !matches!(image.sampler.quality, ImageQuality::Medium | ImageQuality::High)
-        || image.sampler.x_extend != Extend::Pad
-        || image.sampler.y_extend != Extend::Pad
-    {
+    if !matches!(image.sampler.quality, ImageQuality::Medium | ImageQuality::High) {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "quality", 0, &image.image, effective_geometry, brush_transform);
+        return (paint, brush_transform);
+    }
+    if image.sampler.x_extend != Extend::Pad || image.sampler.y_extend != Extend::Pad {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "extend", 0, &image.image, effective_geometry, brush_transform);
         return (paint, brush_transform);
     }
     let level = mipmap::level_for_transform(effective_geometry * brush_transform);
-    if level == 0 { return (paint, brush_transform); }
+    if level == 0 {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "transform", 0, &image.image, effective_geometry, brush_transform);
+        return (paint, brush_transform);
+    }
     if let Some(reduced) = images.mip_source(id, &image.image, level) {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "used", level, &image.image, effective_geometry, brush_transform);
         // A real GUI A/B is invalid without evidence that an image took this path.
         // Emit once only in explicit developer diagnostic mode.
         if !cfg!(feature = "installed")
@@ -437,6 +485,8 @@ fn brush_to_paint_candidate_tuned(
         // Geometry, clipping, draw alpha and alignment stay unchanged.
         return (paint, brush_transform * Affine::scale(f64::from(1_u16 << level)));
     }
+    #[cfg(not(feature = "installed"))]
+    trace_mip_decision(id, "unavailable", level, &image.image, effective_geometry, brush_transform);
     (paint, brush_transform)
 }
 

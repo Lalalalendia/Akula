@@ -61,14 +61,16 @@ impl MediaView {
                     .filter(|&n| n < 1000);
                 if let Some(number) = number {
                     let ready = self.image.is_some();
+                    let image_id = self.image.as_ref().map_or(0, |brush| brush.image.data.id());
+                    // A late async refresh may rebind the same fixture name
+                    // to a different brush. Preserve each observed real ID.
                     static SEEN: std::sync::OnceLock<
-                        std::sync::Mutex<std::collections::HashSet<(usize, bool)>>
+                        std::sync::Mutex<std::collections::HashSet<(usize, bool, u64)>>
                     > = std::sync::OnceLock::new();
                     if SEEN.get_or_init(Default::default)
                         .lock().unwrap_or_else(|e| e.into_inner())
-                        .insert((number, ready))
+                        .insert((number, ready, image_id))
                     {
-                        let image_id = self.image.as_ref().map_or(0, |brush| brush.image.data.id());
                         eprintln!(
                             "AKULA_IMAGE_EMBED_PAINT index={number} ready={ready} image_id={image_id} y={y:.1} frame_h={:.1}",
                             self.frame.height()

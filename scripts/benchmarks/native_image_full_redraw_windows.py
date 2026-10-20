@@ -285,7 +285,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
                 raise ValueError(f"{sample}: painted image not present in fixture: {index}")
             painted[match.group(2)].add(index)
             if match.group(2) == "true":
-                brush_ids[index] = int(match.group(3))
+                brush_ids.setdefault(index, set()).add(int(match.group(3)))
     if not any(painted.values()):
         raise ValueError(f"{sample}: no actual MediaView paint witness")
     # Compare actual editor ImageBrush identity with the same brush at the
@@ -298,12 +298,40 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         )
         if match:
             fill_ids[match.group(2)].add(int(match.group(1)))
-    brush_reached_sink = {idx for idx, ident in brush_ids.items()
-                          if ident in (fill_ids["true"] | fill_ids["false"])}
-    brush_not_culled = {idx for idx, ident in brush_ids.items()
-                        if ident in fill_ids["false"]}
+    brush_reached_sink = {idx for idx, ids in brush_ids.items()
+                          if ids & (fill_ids["true"] | fill_ids["false"])}
+    brush_not_culled = {idx for idx, ids in brush_ids.items()
+                        if ids & fill_ids["false"]}
     if not fill_ids["true"] and not fill_ids["false"]:
         raise ValueError(f"{sample}: no CPU painter FillRef image culling witness")
+    # Join the exact fixture brush IDs to successful mip conversions and
+    # independently hashed decoded pixels. Overall cache counters can
+    # include unrelated UI imagery or *unsuccessful* mip reservations.
+    mip_reasons = {}
+    mip_content = {}
+    for line in log.splitlines():
+        decision = re.search(
+            r"AKULA_IMAGE_MIP_DECISION image_id=(\d+) reason=(quality|extend|transform|unavailable|used)",
+            line
+        )
+        if decision:
+            mip_reasons.setdefault(decision.group(2), set()).add(int(decision.group(1)))
+        content = re.search(
+            r"AKULA_IMAGE_MIP_CONTENT image_id=(\d+) fingerprint=([0-9a-f]{64})",
+            line
+        )
+        if content:
+            ident, fingerprint = int(content.group(1)), content.group(2)
+            if ident in mip_content and mip_content[ident] != fingerprint:
+                raise ValueError(f"{sample}: changing decoded pixel content for ID {ident}")
+            mip_content[ident] = fingerprint
+    if not mip_reasons or not mip_content:
+        raise ValueError(f"{sample}: missing per-brush CPU mip decision/content witnesses")
+    used = mip_reasons.get("used", set())
+    mipped_fixture = {idx for idx, ids in brush_ids.items()
+                      if ids & used & mip_content.keys()}
+    fixture_fingerprints = {mip_content[ident] for ids in brush_ids.values()
+                            for ident in ids & used & mip_content.keys()}
     lines = [line for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     if not lines:
         raise ValueError(f"{sample}: no source/eviction diagnostic line")
@@ -319,16 +347,19 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     # budget. A 100-file note with only a handful of visible images
     # would not constitute cache-pressure evidence.
     minimum = {1: 1, 10: 8, 100: 24}[images]
-    if unique < minimum or unique_pixels < minimum:
+    if (unique < minimum or unique_pixels < minimum
+            or len(mipped_fixture) < minimum or len(fixture_fingerprints) < minimum):
         raise ValueError(
-            f"{sample}: only {unique} runtime IDs and {unique_pixels} "
-            f"independently sampled decoded-pixel fingerprints for "
-            f"{images} seeded PNG files; both must reach at least {minimum}; "
+            f"{sample}: only {unique} requested runtime IDs, {unique_pixels} "
+            f"requested decoded-pixel fingerprints, {len(mipped_fixture)} successfully "
+            f"mipped fixture sources and {len(fixture_fingerprints)} independent "
+            f"fixture fingerprints for {images} seeded PNGs; all need {minimum}; "
             f"resolver pending={len(observed['pending'])}, ready={len(observed['ready'])}, "
             f"editor visible={len(visible['true']) + len(visible['false'])}, "
             f"embedded={len(visible['true'])}, "
             f"embed paint ready={len(painted['true'])}, empty={len(painted['false'])}, "
             f"CPU sink seen={len(brush_reached_sink)}, not culled={len(brush_not_culled)}, "
+            f"mip decisions={dict((k, len(v)) for k, v in mip_reasons.items())}, "
             f"no-pixels={len(observed['ready_no_pixels'])}, missing={len(observed['missing'])}"
         )
     p95, p99 = percentile(work, .95), percentile(work, .99)
@@ -351,6 +382,9 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "replay_anchor_dwell_ms_each_pass": 3000 / len(anchors),
         "unique_mip_source_ids_requested": unique,
         "distinct_decoded_pixel_fingerprints": unique_pixels,
+        "fixture_successfully_mipped_sources": len(mipped_fixture),
+        "fixture_successfully_mipped_pixel_fingerprints": len(fixture_fingerprints),
+        "cpu_mip_decision_counts": {k: len(v) for k, v in mip_reasons.items()},
         "resolver_unique_pending_sources": len(observed["pending"]),
         "resolver_unique_ready_sources": len(observed["ready"]),
         "editor_unique_image_paragraphs_visible": len(visible["true"] | visible["false"]),
