@@ -349,12 +349,14 @@ mod tests {
     fn independent_root_and_policy_pins_cannot_be_supplied_by_other_vault() {
         let f = Fixture::new(false);
         let mut approval = f.approved();
-        approval.pinned_genesis_root_blake3 = &"0".repeat(64);
+        let foreign_root_pin = "0".repeat(64);
+        approval.pinned_genesis_root_blake3 = &foreign_root_pin;
         assert_eq!(f.review_with(&f.offer(), &[&f.owner],
             &approval, &f.root, &f.policy),
             Err(JoinGenesisError::WrongIndependentPin));
         let mut approval = f.approved();
-        approval.pinned_genesis_policy_blake3 = &"f".repeat(64);
+        let foreign_policy_pin = "f".repeat(64);
+        approval.pinned_genesis_policy_blake3 = &foreign_policy_pin;
         assert_eq!(f.review_with(&f.offer(), &[&f.owner],
             &approval, &f.root, &f.policy),
             Err(JoinGenesisError::WrongIndependentPin));
@@ -385,7 +387,8 @@ mod tests {
         let bytes = serde_json::to_vec(&json).unwrap();
         assert_eq!(f.review(&bytes, &[&f.owner]), Err(JoinGenesisError::WrongChallenge));
         let mut approval = f.approved();
-        approval.recipient_challenge_hex = &"0".repeat(64);
+        let zero_challenge = "0".repeat(64);
+        approval.recipient_challenge_hex = &zero_challenge;
         assert_eq!(f.review_with(&f.offer(), &[&f.owner],
             &approval, &f.root, &f.policy),
             Err(JoinGenesisError::InvalidExternalApproval));
