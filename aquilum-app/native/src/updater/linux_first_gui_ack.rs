@@ -118,13 +118,42 @@ fn peer_identity(fd: RawFd) -> Result<(i32, u32, u32), String> {
     Ok((cred.pid, cred.uid, cred.gid))
 }
 
+// AppImage's extract-and-run runtime may fork a payload and wait for it.
+// Therefore the GUI need not be the supervisor's *direct* child: require
+// a short, live OS parent chain back to the trusted socket creator instead.
+// A future accepting supervisor MUST separately pin the actual GUI PID with
+// pidfd and check membership in the explicitly launched AppImage process tree.
+fn supervisor_in_ancestry(supervisor: i32) -> bool {
+    let mut pid = unsafe { getppid() };
+    for _ in 0..12 {
+        if pid == supervisor {
+            return true;
+        }
+        if pid <= 1 || pid == unsafe { getpid() } {
+            return false;
+        }
+        let Ok(raw) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
+            return false;
+        };
+        // The PPid field comes from procfs, not from the child's environment.
+        let Some(next) = raw.lines()
+            .find_map(|line| line.strip_prefix("PPid:"))
+            .and_then(|value| value.trim().parse::<i32>().ok())
+        else {
+            return false;
+        };
+        if next == pid {
+            return false;
+        }
+        pid = next;
+    }
+    false
+}
+
 fn emit_after_presented_gui(challenge: &Challenge) -> Result<(), String> {
-    // The immediate parent of the GUI and the creator/owner of the inherited
-    // stream must coincide. The parent must also check the ACK child PID.
-    let parent = unsafe { getppid() };
     let (peer_pid, peer_uid, peer_gid) = peer_identity(challenge.fd)?;
-    if parent != challenge.parent_pid
-        || peer_pid != challenge.parent_pid
+    if peer_pid != challenge.parent_pid
+        || !supervisor_in_ancestry(challenge.parent_pid)
         || peer_uid != unsafe { getuid() }
         || peer_gid != unsafe { getgid() }
     {
