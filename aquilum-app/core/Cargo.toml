@@ -26,6 +26,8 @@ server-bootstrap-b1b1-floor-lab = ["server-bootstrap-b1b-custody-lab"]
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.
 server-bootstrap-b1b1c-witness-lab = ["server-bootstrap-b1b1b-approval-lab"]
+# Real Linux AF_UNIX peer creds and signed, strictly fixed PREVIEW wire protocol; no install.
+server-bootstrap-b1b3a-helper-ipc-lab = []
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
