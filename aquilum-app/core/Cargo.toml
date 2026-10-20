@@ -28,6 +28,9 @@ server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 server-bootstrap-b1b1c-witness-lab = ["server-bootstrap-b1b1b-approval-lab"]
 # Real Linux AF_UNIX peer creds and signed, strictly fixed PREVIEW wire protocol; no install.
 server-bootstrap-b1b3a-helper-ipc-lab = []
+# OS UID-0 Linux service test. Real kernel SO_PEERCRED, root-owned policy,
+# fixed Preview only; no install action in the protocol or executable.
+server-bootstrap-b1b3b-root-helper-lab = ["server-bootstrap-b1b3a-helper-ipc-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
@@ -46,6 +49,16 @@ sync-installed-host-witness = ["sync-installed-host"]
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness"]
 # Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
 sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
+
+[[example]]
+name = "akula_b1b3b_fixture"
+path = "examples/akula_b1b3b_fixture.rs"
+required-features = ["server-bootstrap-b1b3b-root-helper-lab"]
+
+[[bin]]
+name = "akula-helper-b1b3b-lab"
+path = "src/bin/akula_helper_b1b3b_lab.rs"
+required-features = ["server-bootstrap-b1b3b-root-helper-lab"]
 
 [[example]]
 name = "akula_b1b2b_release_fixture"
