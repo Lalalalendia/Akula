@@ -42,6 +42,7 @@ test('AppImage workflow is a pull-request-only disposable unsigned candidate', (
 test('OS-level AppImage acceptance preserves original Aquilum witnesses', () => {
   const s = file('scripts/appimage-beta-smoke.sh');
   assert.match(s, /--appimage-extract/);
+  assert.match(s, /\^akula-app_\[0-9\]/, 'strictly validate observed cargo-packager file name');
   assert.match(s, /APPIMAGE_EXTRACT_AND_RUN=1/);
   assert.match(s, /wmctrl -c Akula/);
   assert.match(s, /AKULA_APPIMAGE_GUI_PASS/);

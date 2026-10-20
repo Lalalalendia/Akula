@@ -9,7 +9,7 @@ shopt -s nullglob
 images=("$PWD"/dist/*.AppImage)
 [[ "${#images[@]}" == 1 ]] || { echo "Expected exactly one AppImage candidate" >&2; exit 1; }
 image="${images[0]}"
-[[ "$(basename "$image")" == Akula*.AppImage ]] || {
+[[ "$(basename "$image")" =~ ^akula-app_[0-9]+\.[0-9]+\.[0-9]+_x86_64\.AppImage$ ]] || {
   echo "Unexpected product name for AppImage candidate: $(basename "$image")" >&2; exit 1
 }
 test -s "$image"
