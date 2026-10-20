@@ -137,6 +137,7 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/akula-disposable-upgrade-helper" \
             dist/e2e-v2/transaction-helper
           test -x dist/e2e-v2/transaction-helper
+          sha256sum aquilum-app/Cargo.lock | awk '{print $1}' > dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt
           sha256sum dist/akula-app_0.3.9_x86_64.AppImage \
             dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage \
             > dist/e2e-v2/BOTH_REAL_APPIMAGE_SHA256.txt
@@ -145,6 +146,7 @@ jobs:
             echo "V1=Akula-0.3.9-unchanged"
             echo "V2=Akula-0.3.10-CI-only-metadata-variant"
             cat dist/e2e-v2/BOTH_REAL_APPIMAGE_SHA256.txt
+            printf 'CI_VARIANT_CARGO_LOCK_SHA256='; cat dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt
           } | tee dist/e2e-v2/CI_GENERATION_PROVENANCE.txt
           git restore -- aquilum-app/native/Cargo.toml aquilum-app/Cargo.lock aquilum-app/native/packaging/akula-linux.json
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
@@ -166,6 +168,7 @@ jobs:
             dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage
             dist/e2e-v2/BOTH_REAL_APPIMAGE_SHA256.txt
             dist/e2e-v2/CI_GENERATION_PROVENANCE.txt
+            dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt
           retention-days: 3
 
       - name: Record exact source and AppImage SHA-256
