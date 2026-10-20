@@ -52,6 +52,18 @@ jobs:
           if ($cargo -match '(?m)^default\s*=.*yandex-s3-connection-preview') {
             throw "unsafe opt-in feature default"
           }
+          # Lock the release boundary, not just Cargo feature naming.
+          $entry = Get-Content -Raw aquilum-app/native/src/main.rs
+          if ($entry -notmatch '(?s)#\[cfg\(all\(feature = "yandex-s3-connection-preview", not\(debug_assertions\)\)\)\]\s*compile_error!') {
+            throw "release feature must be blocked at compilation"
+          }
+          $beta = Get-Content -Raw .github/workflows/windows-beta.yml
+          if ($beta -match 'yandex-s3-connection-preview') {
+            throw "normal Windows installer must not enable experimental S3"
+          }
+          if ($beta -notmatch 'cargo build --release --locked -p aquilum-native --features installed') {
+            throw "normal Windows installer must remain local-only"
+          }
       - name: Compile normal installed native build with no AWS SDK feature
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-native --features installed
