@@ -524,20 +524,20 @@ mod tests {
             lease.rehash().expect("disk inode must still match signed candidate");
             let staged = lease.stage_path().join("candidate.AppImage");
             assert_eq!(fs::read(&staged).unwrap(), payload);
-            assert_eq!(fs::read(&active).unwrap(), old);
-            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+            assert_eq!(fs::read(&active).unwrap(), old.to_vec());
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
 
             let mut damaged = payload.clone();
             damaged[0] ^= 1;
             fs::write(&staged, &damaged).unwrap();
             assert!(lease.rehash().unwrap_err().contains("staged disk bytes"));
-            assert_eq!(fs::read(&active).unwrap(), old);
-            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+            assert_eq!(fs::read(&active).unwrap(), old.to_vec());
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
 
             fs::remove_file(&staged).unwrap();
             std::os::unix::fs::symlink(&unrelated, &staged).unwrap();
             assert!(lease.rehash().is_err(), "symlink must fail closed");
-            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
 
             // Repair the disposable stage and exercise actual rename-publish
             // followed by missing-GUI-ACK rollback under the SAME flock.
@@ -551,9 +551,9 @@ mod tests {
             lease.rehash().unwrap();
             lease.prove_missing_ack_rollback()
                 .expect("signed test candidate must preserve the previous version after missing ACK");
-            assert_eq!(fs::read(&active).unwrap(), old);
+            assert_eq!(fs::read(&active).unwrap(), old.to_vec());
             assert_eq!(fs::read(lease.stage_path().join("failed.AppImage")).unwrap(), payload);
-            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
             drop(lease);
             println!("AKULA_SIGNED_LINUX_STAGE_PASS real_minisign=1 fsync=1 disk_sha256=1 tamper_hold=1 aquilum_intact=1");
             println!("AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1");
