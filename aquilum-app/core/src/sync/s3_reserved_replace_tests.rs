@@ -1186,3 +1186,106 @@ fn p0g3d08c_real_writer_abort_matrix_has_no_automatic_replay() {
             blake3::hash(original).to_hex().to_string());
     }
 }
+
+
+/// P0g-3d-08d-1: selectively remove one independently persisted domain AFTER
+/// a complete V8 candidate. This models possible post-power-loss *images*,
+/// not a real VM hard-off or a proven storage durability barrier.
+///
+/// Each disposable case starts from a fully correlated, cold-reopenable V8
+/// candidate. After dropping ALL writer/Core handles, only one domain is
+/// changed; a second OS process must refuse the now-incomplete evidence.
+/// No production publisher, auto-retry, S3 ACK or baseline promotion.
+#[test]
+fn p0g3d08d_partial_persistence_domains_fail_closed_after_v8() {
+    for lost in ["v8_row", "history_name", "primary_rollback"] {
+        let f = fixture();
+        publish_strict_candidate_and_record_v8(&f);
+        assert_no_remote_ack(&f);
+
+        let version_id = f.journal.borrow()
+            .read_existing_replace_receipt_candidate(f.intent.operation_id)
+            .unwrap().unwrap().cold_history_fields().0.to_owned();
+        let historical = f.root.join(".aquilum").join("history")
+            .join(f.intent.path.as_str()).join(version_id);
+        let primary = f.root.join(f.intent.path.as_str());
+        assert!(historical.is_file(), "fresh strict history must exist");
+        assert_eq!(fs::read(&primary).unwrap(), f.new_text.as_bytes());
+
+        let Fixture {
+            _temp: keep_fixture, core, root, appdata, bindings, custody,
+            journal, cache, protected, intent, old_hash, ..
+        } = f;
+        drop(bindings);
+        drop(custody);
+        drop(journal);
+        drop(cache);
+        drop(protected);
+        drop(core);
+
+        // Read-only control from an independent OS process: all domains
+        // match before the laboratory mutates exactly one.
+        p0g3d08_run_child(&root, &appdata, intent.operation_id, "hold");
+
+        match lost {
+            "v8_row" => {
+                // V7 and the protected original remain, V8 disappears from
+                // its *own* WAL/FULL domain after a committed transaction.
+                let db = rusqlite::Connection::open(appdata.join("journal.sqlite"))
+                    .unwrap();
+                let rows = db.execute(
+                    "DELETE FROM sync_existing_replace_receipt_candidates WHERE operation_id=?1",
+                    [intent.operation_id.to_string()],
+                ).unwrap();
+                assert_eq!(rows, 1, "the completed candidate must exist");
+                drop(db);
+            }
+            "history_name" => {
+                // The published primary + V8 remain, but the immutable
+                // HistoryService directory entry is no longer visible.
+                fs::remove_file(&historical).unwrap();
+                assert!(!historical.exists());
+            }
+            "primary_rollback" => {
+                // Model a visible pre-publication name/content after V8:
+                // retain the published candidate separately in this fixture.
+                let parked = root.join(".p0g3d08d-parked-candidate");
+                fs::rename(&primary, &parked).unwrap();
+                fs::write(&primary, b"unchanged private original").unwrap();
+                assert_eq!(fs::read(&primary).unwrap(), b"unchanged private original");
+                assert!(parked.is_file());
+            }
+            _ => unreachable!(),
+        }
+
+        // A *new* Core/HistoryService + three SQLite read-only stores must
+        // reject the incomplete image, without attempting replay/repair.
+        p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+
+        // Independent failure domains must NOT silently rewrite the logical
+        // baseline or make StageDownload eligible for remote ACK.
+        let mut cold = SqliteSyncJournal::open(&appdata.join("journal.sqlite"))
+            .unwrap();
+        assert_eq!(cold.get(intent.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        let baseline = cold.baseline(intent.vault_id, intent.document_id)
+            .unwrap().unwrap();
+        assert_eq!(Some(baseline.revision_id), intent.expected_baseline);
+        assert_eq!(baseline.content_hash, old_hash);
+        assert!(cold.read_existing_replace_attempt(intent.operation_id)
+            .unwrap().is_some(), "V7 must not be replayed or cleared");
+        assert!(matches!(cold.mark_applied(intent.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)),
+            "partial durable image must never authorize StageDownload");
+        drop(cold);
+
+        let originals = SqliteProtectionStore::open_existing_read_only(
+            &appdata.join("originals.sqlite"),
+        ).unwrap();
+        assert_eq!(originals.read_bound_preimage(intent.operation_id)
+            .unwrap().unwrap().original.bytes, b"unchanged private original",
+            "independent original must remain recoverable");
+        drop(originals);
+        drop(keep_fixture);
+    }
+}
