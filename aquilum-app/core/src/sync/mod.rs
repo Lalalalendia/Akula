@@ -172,6 +172,11 @@ pub use s3_signed_root_paev1::{
     DecodedDsseEnvelope, DecodedSignature, SignedRootError,
     SignedRootObservation, ROOT_PAYLOAD_TYPE,
 };
+#[cfg(feature = "signed-vault-pairing-lab")]
+pub use s3_join_genesis_lab::{
+    review_offline_join_genesis, IndependentlyApprovedJoin, JoinGenesisError,
+    JoinGenesisReview, JOIN_GENESIS_TYPE,
+};
 #[cfg(feature = "signed-vault-policy-lab")]
 pub use s3_publisher_policy_lab::{
     verify_policy_transition, PolicyLabError, PolicyTransitionObservation,
