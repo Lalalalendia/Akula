@@ -74,9 +74,11 @@ struct ByHandleInformation {
     accessed: FileTime,
     written: FileTime,
     volume_serial: u32,
-    link_count: u32,
+    // Exact Win32 BY_HANDLE_FILE_INFORMATION ABI: filesize words precede
+    // nNumberOfLinks. Mixing this order reports size_high as link_count.
     size_high: u32,
     size_low: u32,
+    link_count: u32,
     file_index_high: u32,
     file_index_low: u32,
 }
@@ -397,6 +399,19 @@ impl CustodyWitness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn win32_by_handle_file_information_has_exact_field_offsets() {
+        // The SDK layout is 52 bytes, with DWORD volume serial at 28,
+        // file size high/low at 32/36 and hardlink count at 40.
+        assert_eq!(std::mem::size_of::<ByHandleInformation>(), 52);
+        assert_eq!(std::mem::offset_of!(ByHandleInformation, volume_serial), 28);
+        assert_eq!(std::mem::offset_of!(ByHandleInformation, size_high), 32);
+        assert_eq!(std::mem::offset_of!(ByHandleInformation, size_low), 36);
+        assert_eq!(std::mem::offset_of!(ByHandleInformation, link_count), 40);
+        assert_eq!(std::mem::offset_of!(ByHandleInformation, file_index_high), 44);
+        assert_eq!(std::mem::offset_of!(ByHandleInformation, file_index_low), 48);
+    }
 
     #[test]
     fn absent_installer_store_is_never_auto_created() {
