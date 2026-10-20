@@ -310,7 +310,7 @@ impl<T: NotionReadTransport> Scan<'_, T> {
         let first_page = Some(first);
         let items = self.collect_list(|cursor| ReadRequest::PageProperty {
             page: page.to_owned(), property: property.to_owned(), cursor,
-        }, first_page.take())?;
+        }, first_page)?;
         self.insert("property_item", format!("{page}:{property}"), serde_json::json!(items))?;
         Ok(items)
     }
