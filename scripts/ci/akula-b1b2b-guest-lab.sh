@@ -12,7 +12,7 @@ VERIFY="$UPLOAD/b1a-fixture"
 UNIT=/etc/systemd/system/akula-b1b2b-lab.service
 SERVICE=akula-b1b2b-lab.service
 FIXTURE=/srv/akula-b1b2b-test-vault
-CREDENTIAL=/run/akula-b1b2b-lab-token
+CREDENTIAL=/etc/akula-b1b2b-lab-token
 URL=http://127.0.0.1:23457
 test -s "$TRUST" && test -x "$VERIFY" && test -d "$UPLOAD"
 fail(){ echo "B1B2B_VM_REFUSED: $*" >&2; exit 1; }
@@ -77,7 +77,10 @@ case "$1" in
     install -m 0444 "$fixture_temp" "$FIXTURE/demo.md"
     chmod 0555 "$FIXTURE"
     rm -f -- "$fixture_temp"
+    # Test-only, root-readable credential must survive guest OS reboot.
+    # Remove the user-owned source copy after root custody is established.
     install -m 0600 "$UPLOAD/node-token" "$CREDENTIAL"
+    rm -f -- "$UPLOAD/node-token"
     ln -s releases/0001 "$PREFIX/active"
     cat > "$UNIT" <<'UNIT_FILE'
 [Unit]
@@ -101,7 +104,7 @@ IPAddressDeny=any
 IPAddressAllow=localhost
 ReadOnlyPaths=/srv/akula-b1b2b-test-vault
 UMask=0077
-LoadCredential=node-token:/run/akula-b1b2b-lab-token
+LoadCredential=node-token:/etc/akula-b1b2b-lab-token
 ExecStart=/opt/akula-b1b2b-lab/wrapper /opt/akula-b1b2b-lab/active/node /srv/akula-b1b2b-test-vault 23457
 Restart=no
 [Install]
@@ -157,6 +160,10 @@ UNIT_FILE
     test -f "$PREFIX/in-progress" || fail "no interrupted operation"
     test "$(readlink "$PREFIX/active")" = releases/0002 \
       || fail "unexpected active version while recovering"
+    # Re-authenticate the old signed executable AFTER OS reboot and BEFORE
+    # restoring it. A writable or unverified old binary must never run.
+    "$VERIFY" verify "$PREFIX/releases/0001/node" \
+      "$UPLOAD/v1.manifest" "$UPLOAD/v1.sig" "$TRUST"
     rollback
     test ! -e "$PREFIX/in-progress"
     echo "B1B2B_VM_RESTART_RECOVERY_PASS"
