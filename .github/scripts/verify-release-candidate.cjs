@@ -41,9 +41,6 @@ function inspect(manifest, directory, expected) {
   }
   return true;
 }
-function verify(args) {
-  demand(args.length === 6, 'usage: node verify-release-candidate.cjs MANIFEST SIGNATURE PINNED_PUBLIC_KEY DIR VERSION SOURCE_COMMIT CARGO_LOCK_SHA256');
-}
 function main(argv) {
   demand(argv.length === 7, 'usage: node verify-release-candidate.cjs manifest.json manifest.minisig trusted.pub artifacts-dir version source-commit cargo-lock-sha256');
   const [manifestFile, signatureFile, keyFile, dir, version, source_commit, cargo_lock_sha256] = argv;
