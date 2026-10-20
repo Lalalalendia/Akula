@@ -74,7 +74,7 @@ fn strict_marker(root: &File) -> Result<(), FixedNodeError> {
     if before.dev() != after.dev() || before.ino() != after.ino()
         || before.ctime() != after.ctime()
         || before.ctime_nsec() != after.ctime_nsec()
-        || actual != LAB_MARKER
+        || actual.as_slice() != LAB_MARKER
     {
         return Err(FixedNodeError::UnsafeMarker);
     }
