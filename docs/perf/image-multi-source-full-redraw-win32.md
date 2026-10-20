@@ -19,6 +19,17 @@ The new **developer-only byte-anchor scan** lists the UTF-8 start offsets of `![
 
 Eager and Selective use the exact same anchors, fixture hashes, timetable, Medium sampler, 32 MiB budget and 512-frame TTL. This is a deliberately artificial **coverage stress scan**, not a claim about ordinary human scrolling or physical FPS. Some images may never decode before the next seek; if the strict thresholds still fail, inspect editor lazy/decode timing and per-image visibility instead of lowering them. The restored default fling path is unchanged when the developer scan variable is absent.
 
+## Four-stage source reachability proof
+
+[The exact-head native Windows run #39351030514](https://github.com/Lalalalendia/Akula/actions/runs/39351030514) proved that *all ten* synthetic `photo_NNN.png` sources reached the asynchronous resolver in both `Pending` and `Ready` states. Despite this, the mipmap raster saw only **two distinct decoded pixel fingerprints**. The experiment now distinguishes four checkpoints, for **each** distinct source rather than merely counting PNG files:
+
+1. `AKULA_IMAGE_RESOLVE_STATE ... pending`: image paragraph asked for asynchronous media decode.
+2. `AKULA_IMAGE_RESOLVE_STATE ... ready`: usable decoded image pixels returned.
+3. `AKULA_IMAGE_EMBED_PAINT ... ready=true`: an actual `MediaView` with ready pixels was visited by the live editor painter. A ready-but-never-painted source must not be counted as an LOD cache load.
+4. `AKULA_MIP_CACHE ... distinct_sampled_pixel_fingerprints=N`: the actual Vello mip sampling path received different source pixels and built or hit an appropriate LOD.
+
+The paint checkpoint is developer-only, active only for artificial `photo_NNN.png` fixtures and an explicit opt-in flag. No user path/content is logged. If the resolver Ready count is high but MediaView paint coverage is low, investigate editor virtualization, layout invalidation, stale scroll transforms and visibility clipping. If the MediaView count is high but Vello mip coverage low, investigate clip/raster sampling and dimensions. The **unchanged** strict 1/8/24 final decoded-pixel fingerprints remain the real admission; none of these preliminary stages can substitute for actual paint work.
+
 ## Acceptance
 
 One native Windows release binary, visible uncloaked PID-owned Win32 HWND and monitored peak working set. For each of 1/10/100 source-count scenes, run two process-level Eager/Selective pairs (12 total) in alternating AB/BA order, each with a native six-second forward-reverse image-anchor replay. Record:
