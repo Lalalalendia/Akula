@@ -1,0 +1,37 @@
+name: Akula Bootstrap B1b1b0 durable floor journal lab
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/lib.rs"
+      - "aquilum-app/core/src/server_floor_journal_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b1b1b0.rs"
+      - ".github/workflows/core-server-bootstrap-b1b1b0-floor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  durable-floor-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format isolated Rust sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_floor_journal_lab.rs aquilum-app/core/tests/server_bootstrap_b1b1b0.rs
+      - name: Test inert owner-floor journal and refusal cases
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1b0-floor-lab --test server_bootstrap_b1b1b0 -- --nocapture
+          cargo check --locked -p aquilum-core --no-default-features
