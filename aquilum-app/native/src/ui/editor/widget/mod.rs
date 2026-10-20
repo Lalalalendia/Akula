@@ -13,7 +13,7 @@ pub(super) use super::markdown::{Block, Callout};
 pub(super) use super::history::Kind;
 pub(super) use crate::ui::tokens::size;
 use masonry::core::{
-    AccessCtx, ChildrenIds, ComposeCtx, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, PaintCtx,
+    AccessCtx, ActionCtx, ChildrenIds, ComposeCtx, CursorIcon, EventCtx, LayoutCtx, MeasureCtx, PaintCtx,
     PointerEvent, PropertiesMut, PropertiesRef, QueryCtx, RegisterCtx, StyleProperty, StyleSet, TextEvent, Update,
     UpdateCtx, Widget, WidgetMut,
 };
@@ -29,6 +29,7 @@ mod api;
 mod build;
 mod caret;
 mod code_copy;
+mod code_access;
 mod code_header;
 mod code_scroll;
 mod edit;

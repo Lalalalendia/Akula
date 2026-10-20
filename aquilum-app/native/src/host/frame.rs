@@ -84,16 +84,37 @@ impl Host {
                 probe.append_frame(&line);
             }
         }
+        // Capture whole-process frame stages (including the first paint) and
+        // replay-only stages from the same snapshot. Both paths use identical
+        // stage clocks in baseline and mip modes when explicitly enabled.
+        #[cfg(not(feature = "installed"))]
+        let diagnostic_stage = if crate::render::Renderer::diagnostic_stages_enabled() {
+            let mut stage = self.renderer.diagnostic_stages();
+            stage.scene_ms = scene.as_secs_f64() * 1000.0;
+            stage.renderer_draw_ms = raster.as_secs_f64() * 1000.0;
+            stage.output_present_ms = present.as_secs_f64() * 1000.0;
+            Some(stage)
+        } else {
+            None
+        };
         // Replay sample = a non-empty CPU frame handed to the output surface.
         // No-op redraws must not inflate the diagnostic "present" count.
         #[cfg(not(feature = "installed"))]
         if !drawn.is_empty() {
             if let Some(replay) = &mut self.replay {
-                replay.frame(Instant::now(), t0.elapsed());
+                if let Some(stage) = diagnostic_stage {
+                    replay.frame_with_stage(Instant::now(), t0.elapsed(), stage);
+                } else {
+                    replay.frame(Instant::now(), t0.elapsed());
+                }
             }
         }
         if self.metrics.frame(self.started, [scene, raster, present, t0.elapsed()]) {
             self.show_title();
+        }
+        #[cfg(not(feature = "installed"))]
+        if let Some(stage) = diagnostic_stage {
+            self.metrics.record_stage(stage);
         }
         if self.metrics.frames == 1 {
             self.metrics.write();

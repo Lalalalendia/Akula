@@ -7,7 +7,7 @@ use crate::ui::backlinks::{self, VersionView};
 use crate::ui::widgets::Slot;
 
 impl App {
-    pub(super) fn open_version(&mut self, root: &mut RenderRoot, version: Version) {
+    pub(in crate::app) fn open_version(&mut self, root: &mut RenderRoot, version: Version) {
         self.opened_versions.insert(self.tabs.active_id(), version);
         self.version_notice = None;
         self.show_version(root);
@@ -32,9 +32,22 @@ impl App {
         true
     }
 
-    pub(super) fn close_version(&mut self, root: &mut RenderRoot) {
+    /// Remove the hidden diff widget tree, not just the action button handles.
+    /// IndexedStack keeps inactive page children alive until the Slot is replaced.
+    pub(in crate::app) fn discard_version_view(&mut self, root: &mut RenderRoot) {
+        if self.version_view.take().is_some() {
+            if let Some(chrome) = &self.chrome {
+                chrome.version_page.edit(root, |mut slot| Slot::set_child(
+                    &mut slot,
+                    masonry::core::NewWidget::new(masonry::widgets::SizedBox::empty()).erased(),
+                ));
+            }
+        }
+    }
+
+    pub(in crate::app) fn close_version(&mut self, root: &mut RenderRoot) {
         self.opened_versions.remove(&self.tabs.active_id());
-        self.version_view = None;
+        self.discard_version_view(root);
         self.show_page(root, 0);
         self.render_history(root);
     }

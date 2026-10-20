@@ -74,6 +74,25 @@ Aquilum directory, uninstall and Run key untouched; GUI edit/save;
 graceful close and reopened note with byte-identical local document;
 uninstall leaving the modified document and Akula user state intact.
 
+## Hosted reopened-document GUI readback gate (proposed)
+
+After the installed app saves the synthetic edit, a second installed process
+opens that same Markdown note with `--open --focus`, verifies the native
+window title identifies the note and sends real foreground-bound Windows
+`Ctrl+A` and `Ctrl+C` using the same HWND/PID-checked `SendInput` boundary.
+The test poisons the runner clipboard with a distinct synthetic sentinel
+before launching the app. It accepts only if the installed editor replaces
+that sentinel with text exactly matching the on-disk Markdown after newline
+normalization, including the initial heading, original content and new edit.
+It never writes the note after fixture creation, and never uploads or prints
+clipboard contents. The existing file-hash and uninstall checks remain.
+
+**Do not claim this gate is passed until its own exact-commit Windows CI is
+successful.** A matching clipboard copy proves the editor's text model was
+restored and the native keyboard copy route worked. It does *not* prove
+pixel-perfect visible rendering, accessibility, crash durability or a public
+release.
+
 This deliberately does **not** prove native first-frame rendering of the
 reopened text, screen-reader usability, Windows 10 hardware behavior,
 immunity to hostile same-user writers, OS power-loss atomicity, trusted

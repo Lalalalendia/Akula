@@ -59,9 +59,10 @@ $original = (Get-FileHash -LiteralPath $note).Hash
 $syntheticEdit = 'AKULA_GUI_EDIT_' + [Guid]::NewGuid().ToString('N')
 
 function Start-And-Close {
-  param([switch]$EditNote)
+  param([switch]$EditNote, [switch]$VerifyRestoredContent)
+  if ($EditNote -and $VerifyRestoredContent) { throw 'Only one Windows GUI acceptance mode per launch' }
   $arguments = "--vault `"$vault`" --data-dir `"$akulaData`" --open `"$note`""
-  if ($EditNote) { $arguments += ' --focus' }
+  if ($EditNote -or $VerifyRestoredContent) { $arguments += ' --focus' }
   if ($EditNote) { $arguments += ' --trace' }
   # Diagnostics remain on the disposable runner only. Never upload raw GUI
   # event traces, which can contain typed text.
@@ -79,8 +80,8 @@ function Start-And-Close {
     if ($app.MainWindowHandle -ne 0) { $visible = $true; break }
   }
   if (!$visible) { throw 'Akula window did not appear' }
-  if ($EditNote) {
-    # Guard document identity before typing. A process/HWND-only check cannot
+  if ($EditNote -or $VerifyRestoredContent) {
+    # Guard document identity before typing or UI readback. A process/HWND-only check cannot
     # distinguish an editor from an Akula home page or an open-error pane.
     $noteWindowReady = $false
     for ($i = 0; $i -lt 15; $i++) {
@@ -95,6 +96,8 @@ function Start-And-Close {
     if (!$noteWindowReady) {
       throw 'Installed Akula did not show the requested note title before OS input'
     }
+  }
+  if ($EditNote) {
     # This must be genuine OS input into the installed foreground editor.
     # After initial fixture creation this script never writes to $note.
     $noteWindowTitle = $app.MainWindowTitle -like '*First note*'
@@ -107,6 +110,42 @@ function Start-And-Close {
       $onDisk = [System.IO.File]::ReadAllText($note)
       if ($onDisk.Contains($syntheticEdit)) { $published = $true; break }
     }
+  }
+  if ($VerifyRestoredContent) {
+    # This is an OS-level GUI readback, not a file read masquerading as UI.
+    # Poison the clipboard before launch; only an actual editor Copy command
+    # can replace it with the note's contents. Never print clipboard data.
+    Send-AkulaBetaShortcut -Process $app -Action SelectAll
+    Start-Sleep -Milliseconds 350
+    Send-AkulaBetaShortcut -Process $app -Action Copy
+    $copied = $null
+    for ($i = 0; $i -lt 20; $i++) {
+      Start-Sleep -Milliseconds 300
+      try {
+        $candidate = Get-Clipboard -Raw -ErrorAction Stop
+      } catch {
+        $candidate = $null
+      }
+      if (![string]::IsNullOrEmpty($candidate) -and $candidate -ne $clipboardSentinel) {
+        $copied = $candidate
+        break
+      }
+    }
+    if ($null -eq $copied) { throw 'Reopened editor did not place selected note into Windows clipboard' }
+    $normalizeText = {
+      param([string]$Value)
+      $Value.Replace("`r`n", "`n").Replace("`r", "`n").TrimEnd([char]10)
+    }
+    $actual = & $normalizeText $copied
+    $expected = & $normalizeText ([System.IO.File]::ReadAllText($note))
+    if (![string]::Equals($actual, $expected, [StringComparison]::Ordinal)) {
+      throw 'Reopened editor copy differs from the exact saved Markdown note'
+    }
+    if (!$actual.Contains($syntheticEdit) -or !$actual.Contains('# Akula Beta') -or
+        !$actual.Contains('Existing local document')) {
+      throw 'Reopened editor copy omitted either synthetic edit or original body'
+    }
+    Write-Host "AKULA_WINDOWS_BETA_REOPEN_GUI_READBACK_PASS: selected=True clipboard_replaced=True saved_note_match=True chars=$($actual.Length)"
   }
   # Even after a failed autosave, close normally to distinguish no-typing,
   # delayed-on-close saves, and rejected writes. Failure still remains red.
@@ -132,6 +171,15 @@ function Start-And-Close {
     }
   }
 }
+# Test the real Windows UI Automation adapter in a separate STA client before
+# the regular GUI edit/restart/uninstall checks. Never run on a workstation.
+$uiaScript = Join-Path $PSScriptRoot 'windows-accesskit-uia.ps1'
+$windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $uiaScript -ExePath $exe -VaultPath $vault -DataDir $akulaData
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula Windows UIA acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+
 Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
@@ -144,8 +192,11 @@ if ($savedText.IndexOf($syntheticEdit) -ne $savedText.LastIndexOf($syntheticEdit
 }
 $savedHash = (Get-FileHash -LiteralPath $note).Hash
 if ($savedHash -eq $original) { throw 'GUI input had no observable file effect' }
-# The second launch must not change bytes, even after reopening that same note.
-Start-And-Close
+# The second launch reads the *installed GUI editor model* back via OS
+# Ctrl+A/Ctrl+C, not just the file on disk. Only synthetic CI clipboard bytes.
+$clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
+Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
+Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
 Assert-LegacyUntouched
 

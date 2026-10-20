@@ -1,4 +1,7 @@
 pub mod active;
+mod agent_principals;
+mod agent_scoped_read;
+mod agent_vault_grants;
 pub mod bridge;
 mod http;
 mod protocol;

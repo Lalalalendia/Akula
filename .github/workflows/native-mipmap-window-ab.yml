@@ -1,0 +1,88 @@
+name: Native image mipmap real-window A/B (diagnostic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/render/paint/convert.rs'
+      - 'aquilum-app/native/src/render/paint/mipmap.rs'
+      - 'scripts/benchmarks/native_mipmap_window_ab.py'
+      - '.github/workflows/native-mipmap-window-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    name: Real Winit/softbuffer image note A/B and RSS (Linux Xvfb)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Install native GUI packages and Xvfb
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            xvfb openbox
+      - name: Build ONE uninstalled release binary for both modes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aquilum-app
+          cargo build --release --locked -p aquilum-native
+          test -x ../.artifacts/cargo-native/release/aquilum-native
+      - name: Validate benchmark code and record environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/benchmarks/native_mipmap_window_ab.py
+          python3 -m py_compile scripts/benchmarks/native_scroll_window_ab.py
+          {
+            git rev-parse HEAD
+            sha256sum .artifacts/cargo-native/release/aquilum-native
+            sha256sum aquilum-app/native/assets/city-cover.png
+            rustc --version
+            cargo --version
+            grep -m1 'model name' /proc/cpuinfo || true
+          } | tee mipmap-gui-environment.txt
+      - name: ABBA real image scroll with positive mip witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          export AKULA_BINARY="$PWD/.artifacts/cargo-native/release/aquilum-native"
+          export AKULA_OUT="$PWD/mipmap-gui-results"
+          xvfb-run -a -s "-screen 0 1920x1200x24" bash -c '
+            set -euo pipefail
+            openbox >/dev/null 2>&1 &
+            sleep 1
+            python3 scripts/benchmarks/native_mipmap_window_ab.py \
+              --binary "$AKULA_BINARY" --out "$AKULA_OUT" --timeout 40
+          '
+          cat mipmap-gui-results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive image-scroll A/B diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-image-mipmap-window-ab
+          path: |
+            mipmap-gui-environment.txt
+            mipmap-gui-results/summary.md
+            mipmap-gui-results/matrix.json
+            mipmap-gui-results/**/sample.json
+            mipmap-gui-results/**/replay.json
+            mipmap-gui-results/**/metrics.json
+            mipmap-gui-results/**/process.log
+          retention-days: 14
+          if-no-files-found: warn

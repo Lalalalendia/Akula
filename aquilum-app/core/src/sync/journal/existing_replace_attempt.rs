@@ -407,6 +407,7 @@ mod tests {
         let conn=rusqlite::Connection::open(&file).unwrap();
         conn.execute_batch(
             "BEGIN IMMEDIATE;
+             DROP TABLE sync_existing_replace_receipt_candidates;
              DROP TABLE sync_existing_replace_attempts;
              PRAGMA user_version = 6;
              COMMIT;",
@@ -426,6 +427,6 @@ mod tests {
         let v:i64=migrated.connection.query_row(
             "PRAGMA user_version",[],|row|row.get(0),
         ).unwrap();
-        assert_eq!(v,7);
+        assert_eq!(v,8);
     }
 }

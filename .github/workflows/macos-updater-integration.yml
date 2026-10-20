@@ -22,6 +22,7 @@ concurrency:
 
 jobs:
   native-macos-updater:
+    if: ${{ false }} # MAC-HOLD-01: frozen until explicit MAC-RESUME-01
     name: Native macOS updater compile
     runs-on: macos-latest
     timeout-minutes: 45

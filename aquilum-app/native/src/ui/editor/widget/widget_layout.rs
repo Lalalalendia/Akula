@@ -62,6 +62,7 @@ impl TextEditor {
         if self.single_line {
             ctx.set_clip_path(size.to_rect());
         }
+        self.layout_access_code_buttons(ctx);
     }
 
     pub(super) fn do_compose(&mut self, ctx: &mut ComposeCtx<'_>) {
@@ -88,6 +89,7 @@ impl TextEditor {
         if self.doc.growing() {
             crate::ui::timer::wake(ctx.widget_id(), std::time::Instant::now());
         }
+        self.refresh_access_code_buttons(ctx, top, bottom);
         self.doc.anchor_at(top.max(0.0));
         let (keep, margin) = (self.doc.keep, bottom - top);
         let cover = margin / 4.0;

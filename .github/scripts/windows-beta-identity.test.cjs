@@ -37,10 +37,12 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
 });
 
 test('Windows runtime data and global process identities do not alias Aquilum', () => {
-  assert.match(workspace, /#\[cfg\(target_os = "windows"\)\]\s*pub const APP_ID: &str = "io\.github\.lalalendia\.akula";/);
-  assert.match(workspace, /#\[cfg\(not\(target_os = "windows"\)\)\]\s*pub const APP_ID: &str = "com\.dmitriy\.aquilum-app";/);
-  assert.match(workspace, /#\[cfg\(not\(target_os = "windows"\)\)\]\s*if data_dir\.ends_with\(APP_ID\)/);
-  assert.match(autostart, /#\[cfg\(target_os = "windows"\)\]\s*const NAME: &str = "Akula";/);
+  // Akula Linux now intentionally shares Akula's independent identity,
+  // not Aquilum's AppData. Windows has not changed its product identity.
+  assert.match(workspace, /#\[cfg\(any\(target_os = "windows", target_os = "linux"\)\)\]\s*pub const APP_ID: &str = "io\.github\.lalalendia\.akula";/);
+  assert.match(workspace, /#\[cfg\(not\(any\(target_os = "windows", target_os = "linux"\)\)\)\]\s*pub const APP_ID: &str = "com\.dmitriy\.aquilum-app";/);
+  assert.match(workspace, /#\[cfg\(not\(any\(target_os = "windows", target_os = "linux"\)\)\)\]\s*if data_dir\.ends_with\(APP_ID\)/);
+  assert.match(autostart, /#\[cfg\(any\(target_os = "windows", target_os = "linux"\)\)\]\s*const NAME: &str = "Akula";/);
   assert.match(instance, /pub const WINDOW_CLASS: &str = "AkulaWindow";/);
 });
 
@@ -88,7 +90,7 @@ test('installed Windows beta GUI edit must use OS-level input into its own foreg
   }
   for (const value of [
     'Start-And-Close -EditNote',
-    "if ($EditNote) { $arguments += ' --focus' }",
+    "if ($EditNote -or $VerifyRestoredContent) { $arguments += ' --focus' }",
     'Send-AkulaBetaText -Process $app -Text $syntheticEdit',
     'AKULA_WINDOWS_BETA_GUI_EDIT_PASS',
     'Restart changed the previously edited note',
@@ -115,9 +117,39 @@ test('installed Windows beta GUI edit must use OS-level input into its own foreg
     'a launch-only smoke must not be mistaken for true GUI editing');
 });
 
+test('reopened note GUI readback uses foreground OS shortcuts and clipboard oracle', () => {
+  for (const token of [
+    'Start-And-Close -VerifyRestoredContent',
+    "Set-Clipboard -Value $clipboardSentinel",
+    'Send-AkulaBetaShortcut -Process $app -Action SelectAll',
+    'Send-AkulaBetaShortcut -Process $app -Action Copy',
+    'Get-Clipboard -Raw',
+    'Reopened editor copy differs from the exact saved Markdown note',
+    'AKULA_WINDOWS_BETA_REOPEN_GUI_READBACK_PASS',
+    'Restart changed the previously edited note',
+  ]) {
+    assert.ok(script.includes(token), 'missing real restored-document GUI assertion: ' + token);
+  }
+  for (const token of [
+    'PressCtrlShortcut(',
+    "ValidateSet('SelectAll', 'Copy')",
+    'GetWindowThreadProcessId',
+    'GetForegroundWindow',
+    'Refusing shortcut on nonforeground window',
+    'Only selection/copy shortcuts are authorized',
+    'VK_CONTROL',
+    'KEYEVENTF_KEYUP',
+  ]) {
+    assert.ok(guiInput.includes(token), 'missing bounded OS keyboard shortcut guard: ' + token);
+  }
+  const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
+  assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
+    'UI readback must never simulate success by writing to the note');
+});
+
 test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
   const provenance = read('scripts/windows-beta-candidate-manifest.ps1');
-  const smoke = workflow.indexOf('Install, type into GUI, save, restart and uninstall');
+  const smoke = workflow.indexOf('Install, verify UIA Copy, edit, restart and uninstall beside Aquilum sentinel');
   const manifest = workflow.indexOf('Verify candidate provenance and write manifest');
   const upload = workflow.indexOf('Upload candidate (not a release)');
   assert.ok(smoke >= 0 && manifest > smoke && upload > manifest,

@@ -1,0 +1,43 @@
+name: Akula Node D1 isolated loopback security lab
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/bin/akula_node_lab.rs'
+      - 'aquilum-app/core/tests/headless_node_d1.rs'
+      - '.github/workflows/core-node-d1-loopback.yml'
+      - 'docs/platforms/AKULA-DEPLOY-D1.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-d1-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-headless-d1-lab-v1
+          cache-workspace-crates: true
+      - name: Compile Linux-only opt-in Node without desktop UI
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+      - name: Run real separate-process negative and positive security tests
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-lab --test headless_node_d1 -- --nocapture
+      - name: Ensure the ordinary Core feature set is unchanged
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features

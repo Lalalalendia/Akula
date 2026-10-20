@@ -4,9 +4,29 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { validateRelease } = require('./release-source-contract.cjs');
+const { validateRelease, validateHeldRelease } = require('./release-source-contract.cjs');
 
-const original = fs.readFileSync(path.resolve(__dirname, '..', 'workflows', 'release.yml'), 'utf8');
+const original = fs.readFileSync(path.resolve(__dirname, '..', '..', 'docs', 'release', 'legacy-aquilum-release.yml'), 'utf8');
+const held = fs.readFileSync(path.resolve(__dirname, '..', 'workflows', 'release.yml'), 'utf8');
+
+test('active release is immutable HOLD, historical Aquilum code is archive-only', () => {
+  assert.deepEqual(validateHeldRelease(held, original), []);
+});
+
+for (const [reason, modified] of [
+  ['add a release job', held + '\n  publish:\n    runs-on: ubuntu-latest\n'],
+  ['enable write permissions', held.replace('contents: read', 'contents: write')],
+  ['remove explicit nonzero exit', held.replace('          exit 1', '          exit 0')],
+  ['enable push trigger', held.replace('  workflow_dispatch:', '  workflow_dispatch:\n  push:')],
+  ['remove release hold name', held.replace('name: Akula Release (HOLD)', 'name: Release')],
+]) {
+  test('fail closed when operator tries to ' + reason, () => {
+    assert.ok(validateHeldRelease(modified, original).length > 0);
+  });
+}
+test('archive byte tampering fails even if workflow remains held', () => {
+  assert.ok(validateHeldRelease(held, original + '\n').length > 0);
+});
 
 function mustReject(yaml, reason) {
   const errors = validateRelease(yaml);
@@ -16,6 +36,16 @@ function mustReject(yaml, reason) {
 
 test('pinned multi-platform local-only release contract is valid', () => {
   assert.deepEqual(validateRelease(original), []);
+});
+
+test('MAC-HOLD-01 refuses reenabling Apple release job', () => {
+  const bad = original.replace('if: ${{ false }} # MAC-HOLD-01: do not schedule Apple runners or packages', 'if: ${{ true }}');
+  mustReject(bad, 'macos release must remain disabled');
+});
+
+test('MAC-HOLD-01 refuses a new darwin artifact in active manifest', () => {
+  const bad = original.replace('"windows-x86_64":', '"darwin-aarch64": {"url":"unsafe"},\n                "windows-x86_64":');
+  mustReject(bad, 'frozen release cannot publish darwin manifest entries');
 });
 
 test('moving branch ref substituted in a platform checkout is rejected', () => {
@@ -44,8 +74,8 @@ test('releasing arbitrary optional features is rejected', () => {
 
 test('manifest must depend on same immutable source', () => {
   const bad = original.replace(
-    'needs: [source, windows, macos, linux]',
-    'needs: [windows, macos, linux]',
+    'needs: [source, windows, linux]',
+    'needs: [windows, linux]',
   );
   mustReject(bad, 'does not depend');
 });

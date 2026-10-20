@@ -1,0 +1,50 @@
+name: Akula Bootstrap B0b real pinned SSH signed KEX lab
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/lib.rs"
+      - "aquilum-app/core/src/server_bootstrap_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b0b.rs"
+      - "scripts/ci/akula-b0b-local-sshd.sh"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0B.md"
+      - ".github/workflows/core-server-bootstrap-b0b.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-b0b-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actual-openssh-kex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-server-bootstrap-b0b-v1
+          cache-workspace-crates: true
+      - name: Real signed KEX and forged-host rejection on disposable localhost SSH
+        shell: bash
+        run: bash scripts/ci/akula-b0b-local-sshd.sh
+      - name: B0a compatibility fake key ordering and dry-run checks
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b0-lab --test server_bootstrap_b0 -- --nocapture
+      - name: Default Akula Core without bootstrap feature remains unchanged
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features

@@ -1,0 +1,97 @@
+name: MCP Windows connection admission and agent authority inventory
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/mcp/server.rs'
+      - 'aquilum-app/core/src/mcp/http/**'
+      - 'aquilum-app/core/src/mcp/tools/authority_inventory.rs'
+      - 'aquilum-app/core/src/mcp/agent_principals.rs'
+      - 'aquilum-app/core/src/mcp/agent_vault_grants.rs'
+      - 'aquilum-app/core/src/mcp/agent_scoped_read.rs'
+      - 'aquilum-app/core/src/sync/pinned_read.rs'
+      - 'aquilum-app/core/src/mcp/mod.rs'
+      - '.github/workflows/mcp-http-windows.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-http-windows-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  socket-admission:
+    name: MCP Windows idle eviction, saturation and authority contracts
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: mcp-http-windows-v1
+          save-if: false
+      - name: Test real Windows TCP admission and stop
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::server::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-http-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test MCP authority inventory on native Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::tools::authority_inventory:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-authority-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test durable host-issued MCP credentials on native Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::agent_principals::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-principals-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify scoped JSON-RPC authority denial on native Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::protocol::tests::scoped_mode_hides_tool_names_and_denies_every_batched_tool_call -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-scoped-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test durable agent-to-vault grants on native Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::agent_vault_grants::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-vault-grants-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify pinned host-root and two-agent denial on Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::agent_scoped_read::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-scoped-pinned-read-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve native MCP test transcripts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mcp-http-windows-${{ github.event.pull_request.head.sha }}
+          path: |
+            mcp-http-windows.log
+            mcp-authority-windows.log
+            mcp-principals-windows.log
+            mcp-scoped-windows.log
+            mcp-vault-grants-windows.log
+            mcp-scoped-pinned-read-windows.log
+          retention-days: 30

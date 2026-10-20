@@ -32,6 +32,7 @@ function validateRelease(yaml) {
     errors.push('Source job does not publish a verified Git commit SHA');
   }
 
+  const frozenMac = yaml.includes('MAC-HOLD-01');
   const pinnedRef = /ref: \$\{\{\s*needs\.source\.outputs\.sha\s*\}\}/g;
   const builds = /^\s*run:\s*cargo build --release -p aquilum-native[^\n]*$/gm;
   for (const job of ['windows', 'macos', 'linux', 'manifest']) {
@@ -41,7 +42,7 @@ function validateRelease(yaml) {
       continue;
     }
     const needs = job === 'manifest'
-      ? 'needs: [source, windows, macos, linux]'
+      ? (frozenMac ? 'needs: [source, windows, linux]' : 'needs: [source, windows, macos, linux]')
       : 'needs: source';
     if (!body.includes(needs)) errors.push(job + ' does not depend on pinned source');
     if (count(body, pinnedRef) !== 1) {
@@ -55,6 +56,9 @@ function validateRelease(yaml) {
     }
 
     if (job === 'macos') {
+      if (frozenMac && !body.includes('if: ${{ false }} # MAC-HOLD-01')) {
+        errors.push('macos release must remain disabled under MAC-HOLD-01');
+      }
       const packageStep = body.indexOf('      - name: Package');
       const identityStep = body.indexOf('      - name: Verify pinned Akula publisher and notarized DMG');
       const uploadStep = body.indexOf('      - uses: actions/upload-artifact@v7');
@@ -95,6 +99,15 @@ function validateRelease(yaml) {
     }
   }
 
+  if (frozenMac) {
+    const manifest = section(yaml, 'manifest');
+    if (/\"darwin-[^\"]+\"/.test(manifest)) {
+      errors.push('frozen release cannot publish darwin manifest entries');
+    }
+    if (!manifest.includes('for f in "$setup" "$appimage" "$deb" "$rpm"; do')) {
+      errors.push('frozen manifest must require exactly Windows/Linux packages');
+    }
+  }
   if (count(yaml, builds) !== 3) {
     errors.push('Release should contain exactly three production build commands');
   }
@@ -115,15 +128,47 @@ function validateRelease(yaml) {
   return errors;
 }
 
+// RELEASE-LOCK-01: the active workflow is NOT the legacy release. Hash the
+// complete Git blob (including size and newline) to fail closed on all edits.
+// Future Akula publisher bootstrap must explicitly replace this hold contract.
+const LOCKED_HOLD_BLOB = 'a954113ac5dc892968b17f4fa4184e6c508a2f08';
+const ARCHIVED_LEGACY_BLOB = '6725750b784aa7e86bdb9621748b390a4ba05177';
+
+function gitBlobSha(text) {
+  const { createHash } = require('node:crypto');
+  const bytes = Buffer.byteLength(text, 'utf8');
+  return createHash('sha1').update('blob ' + bytes + '\0' + text, 'utf8').digest('hex');
+}
+
+function validateHeldRelease(active, archive) {
+  const errors = [];
+  if (gitBlobSha(active) !== LOCKED_HOLD_BLOB) {
+    errors.push('Active Akula release HOLD changed: executable release must remain blocked');
+  }
+  if (gitBlobSha(archive) !== ARCHIVED_LEGACY_BLOB) {
+    errors.push('Archived Aquilum release source changed: preserve exact historical evidence');
+  }
+  if (!active.includes('name: Akula Release (HOLD)')
+      || !active.includes('  release-hold:')
+      || !active.includes('          exit 1')) {
+    errors.push('Missing exact fail-closed release HOLD marker');
+  }
+  // Additional negative proof: archived code still passes the full historic
+  // source/pinning/custody validator but cannot be executed from workflows/.
+  errors.push(...validateRelease(archive).map(error => 'Legacy archive contract: ' + error));
+  return errors;
+}
+
 if (require.main === module) {
-  const input = path.resolve(__dirname, '..', 'workflows', 'release.yml');
-  const errors = validateRelease(fs.readFileSync(input, 'utf8'));
+  const live = fs.readFileSync(path.resolve(__dirname, '..', 'workflows', 'release.yml'), 'utf8');
+  const archived = fs.readFileSync(path.resolve(__dirname, '..', '..', 'docs', 'release', 'legacy-aquilum-release.yml'), 'utf8');
+  const errors = validateHeldRelease(live, archived);
   if (errors.length) {
-    for (const error of errors) process.stderr.write('RELEASE CONTRACT: ' + error + '\n');
+    for (const error of errors) process.stderr.write('RELEASE HOLD: ' + error + '\n');
     process.exitCode = 1;
   } else {
-    process.stdout.write('Release source and local-only custody policy verified\n');
+    process.stdout.write('Verified immutable release HOLD and archived original source; no Akula packages can publish from legacy workflow\n');
   }
 }
 
-module.exports = { validateRelease };
+module.exports = { validateRelease, validateHeldRelease };

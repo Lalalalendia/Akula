@@ -10,7 +10,7 @@ impl TextEditor {
     /// The opening fence remains the header's language label: no synthetic
     /// line, document edit, reflow, cursor displacement or Frame/Nest rewrite.
     /// Hide the control when a long info string occupies the right edge.
-    fn code_header_button(&self, index: usize) -> Option<Rect> {
+    pub(super) fn code_header_button(&self, index: usize) -> Option<Rect> {
         if self.single_line || !self.laid_out() || self.doc.markdown.is_none() {
             return None;
         }

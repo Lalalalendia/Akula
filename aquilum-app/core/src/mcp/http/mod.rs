@@ -10,6 +10,7 @@ use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const HEADER_POLL: Duration = Duration::from_millis(50);
 const HANG_UP_WAIT: Duration = Duration::from_secs(1);
 const MAX_FRAMING_BYTES: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
@@ -48,13 +49,51 @@ impl<'a> Connection<'a> {
         })
     }
 
-    pub fn read_head(&mut self) -> Result<Head, Failure> {
-        loop {
-            if let Some(head) = self.parse_head()? {
-                return Ok(head);
+    /// A pooled socket is reclaimable only after a complete response and
+    /// only if no pipelined request bytes are waiting in the local buffer.
+    pub fn has_buffered_data(&self) -> bool {
+        !self.received.is_empty()
+    }
+
+    pub fn read_head(&mut self, mut on_activity: impl FnMut(bool) -> bool) -> Result<Head, Failure> {
+        // SO_RCVTIMEO/close on a cloned socket cannot be relied on to wake a
+        // blocked recv on every supported OS. Poll the cooperative idle-evict
+        // flag with a short receive timeout instead, then restore the longer
+        // body read timeout for the next phase of this request.
+        self.stream.set_read_timeout(Some(HEADER_POLL))?;
+        let deadline = Instant::now() + IDLE_TIMEOUT;
+        let result = (|| {
+            loop {
+                if let Some(head) = self.parse_head()? {
+                    return Ok(head);
+                }
+                if self.received.len() >= MAX_FRAMING_BYTES {
+                    return Err(refused(431, FRAMING_TOO_LARGE));
+                }
+                match self.receive() {
+                    Ok(()) => {
+                        // A new request is active once its first byte arrives.
+                        // Clear the idle registration before dispatching tools.
+                        if !on_activity(true) {
+                            return Err(Failure::Gone);
+                        }
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                        ) =>
+                    {
+                        if !on_activity(false) || Instant::now() >= deadline {
+                            return Err(Failure::Gone);
+                        }
+                    }
+                    Err(_) => return Err(Failure::Gone),
+                }
             }
-            self.receive_framing()?;
-        }
+        })();
+        let _ = self.stream.set_read_timeout(Some(IDLE_TIMEOUT));
+        result
     }
 
     pub fn read_body(&mut self, head: &Head, limit: u64) -> Result<Vec<u8>, Failure> {

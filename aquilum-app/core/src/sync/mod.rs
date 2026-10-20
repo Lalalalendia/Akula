@@ -32,7 +32,7 @@ pub(crate) mod guarded_editor;
 mod cooperative_gate_tests;
 pub(crate) mod filegate_lock_probe;
 pub(crate) use host_admission::RegisteredReadAdmission;
-pub(crate) use pinned_read::PinnedFileIdentity;
+pub(crate) use pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
 #[cfg(test)]
 mod fault_matrix;
 mod identity;
@@ -83,6 +83,8 @@ mod s3_v2_trust_anchor;
 mod s3_head_probe;
 #[cfg(feature = "sync-s3")]
 mod s3_transport;
+#[cfg(feature = "sync-s3")]
+mod yandex_readonly_probe;
 mod upload;
 mod vault;
 
@@ -164,6 +166,8 @@ pub use s3_head_probe::{
     observe_s3_current_head, read_s3_digest_matched_manifest, S3DigestMatchedManifest,
     S3HeadReadError, S3ObservedHead,
 };
+#[cfg(feature = "sync-s3")]
+pub use yandex_readonly_probe::{probe_yandex_s3_read_only, YandexS3ProbeError};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
     AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,

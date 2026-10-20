@@ -34,6 +34,8 @@ fn forward(message: &str, app_identifier: &str) -> Option<String> {
     let response = ureq::post(&format!("http://127.0.0.1:{}/mcp", endpoint.port))
         .set("Authorization", &format!("Bearer {}", endpoint.token))
         .set("Content-Type", "application/json")
+        .set("Accept", "application/json, text/event-stream")
+        .set("MCP-Protocol-Version", super::protocol::PROTOCOL_VERSION)
         .send_string(message);
 
     match response {

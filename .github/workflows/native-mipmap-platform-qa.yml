@@ -1,0 +1,92 @@
+name: Native image mipmap pixel proof (Windows/macOS)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/render/paint/convert.rs'
+      - 'aquilum-app/native/src/render/paint/mipmap.rs'
+      - '.github/workflows/native-mipmap-platform-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-image-platform-qa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-quality:
+    name: Mipmap photo, alpha and fractional CPU raster / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest] # MAC-HOLD-01: macOS frozen
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-mipmap-image-platform-v1
+          save-if: false
+          cache-workspace-crates: true
+      - name: Exact CI source and compiler
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          rustc --version
+          cargo --version
+      - name: Strict mip reduction, cache budget and lifetime QA
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::mipmap::tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_integration_tests -- --nocapture --test-threads=1
+      - name: Compare byte-exact scalar and packed RGBA reduction (diagnostic only)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            packed_reduction_microbench_diagnostic -- --ignored --nocapture --test-threads=1
+      - name: Measure byte-exact direct L2 versus two-pass reduction (diagnostic only)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            direct_l2_microbench_diagnostic -- --ignored --nocapture --test-threads=1
+      - name: Verify selective L2, late zoom, strict budget and 1-10-100 images
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::adaptive_lod_tests -- --nocapture --test-threads=1
+      - name: Compare eager pyramid with selective L2 cache (diagnostic only)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            adaptive_lod_multi_image_microbench_diagnostic -- --ignored --nocapture --test-threads=1
+      - name: Real PNG, alpha-crop, fractional and odd-size QA
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::image_scene_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::fractional_odd_quality_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_crop_alpha_edge_tests -- --nocapture --test-threads=1
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            render::paint::convert::mipmap_rounded_coverage_tests -- --nocapture --test-threads=1

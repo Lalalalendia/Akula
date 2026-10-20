@@ -19,3 +19,21 @@ pub mod web_agent;
 pub mod wikixiv;
 
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
+
+#[cfg(feature = "server-bootstrap-b0-lab")]
+pub mod server_bootstrap_lab;
+
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b0-openssh-lab"))]
+pub mod server_bootstrap_ssh_lab;
+
+#[cfg(feature = "server-bootstrap-b1a-release-lab")]
+pub mod server_release_lab;
+
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b-custody-lab"))]
+pub mod server_staging_lab;
+
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1-floor-lab"))]
+pub mod server_release_floor_lab;
+
+#[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
+pub mod node_catalog_lab;

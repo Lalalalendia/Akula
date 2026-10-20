@@ -61,6 +61,28 @@ pub(crate) struct ReservedS3Replace<'a> {
 
 #[allow(dead_code)]
 impl ReservedS3Replace<'_> {
+    /// Only the real File Gate may invoke this under its mutation mutex AND
+    /// the registered external custody lock. Recheck the exact old inode
+    /// (not merely identical bytes) after the irreversible V7 claim and
+    /// immediately before the one canonical primary publication.
+    ///
+    /// On any failure the existing claim remains HOLD. This narrows a
+    /// cooperative race; AtomicWriteFile is still pathname-based and this
+    /// cannot exclude malicious same-user replacement after the check.
+    /// No OS durability or remote-baseline receipt is generated here.
+    #[allow(dead_code)]
+    pub(crate) fn inspect_before_write(
+        &self,
+        admission: &RegisteredReadAdmission<'_>,
+        bindings: &SqliteRegisteredS3Bindings,
+        journal: &SqliteSyncJournal,
+        protected: &SqliteProtectionStore,
+    ) -> Result<(), FileCommandError> {
+        self.check_evidence(admission, bindings, journal, protected)?;
+        self.check_original()?;
+        self.check_evidence(admission, bindings, journal, protected)
+    }
+
     /// Pinned readback and private evidence consistency ONLY. Does not fsync,
     /// attest the new inode as a native publication, or authorize journal apply.
     pub(crate) fn inspect_after_write(
@@ -237,3 +259,264 @@ pub(crate) fn prepare_reserved_s3_replace<'a>(
 #[cfg(test)]
 #[path = "s3_reserved_replace_tests.rs"]
 mod tests;
+
+
+/// Recovery classification from independently reopened, read-only evidence.
+/// Every variant remains HOLD; even a byte-exact candidate is not a durable
+/// File Gate/HistoryService receipt and can NEVER grant S3 apply or baseline.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InertColdS3FileState {
+    /// V7 claim was consumed but the pinned original is still visible.
+    OriginalStillVisible,
+    /// Target bytes are visible under a different file identity. No receipt.
+    CandidateVisibleWithoutReceipt,
+    /// Missing, modified or unsupported identity/bytes: human review required.
+    NeedsReview,
+}
+
+/// V8 metadata may correlate with the protected source and pinned primary,
+/// but the independent HistoryService version is not verified by this stage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InertColdV8State {
+    Missing,
+    LocalCorrelationOnly,
+}
+
+#[must_use = "recovery observation is forensic only and never authorizes S3 apply"]
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct InertColdS3Review {
+    pub(crate) operation_id: super::OperationId,
+    pub(crate) file_state: InertColdS3FileState,
+    /// V8 is forensic metadata, never an apply, ACK or receipt capability.
+    pub(crate) v8_state: InertColdV8State,
+}
+
+/// P0g-3d-02: read-only post-restart inspection of an *existing* V7 claim,
+/// protected original, registered S3 mapping and current pinned destination.
+/// Use a fresh RegisteredReadAdmission after restart, a CURRENT-SCHEMA
+/// SqliteSyncJournal::open_existing_read_only, and
+/// SqliteProtectionStore::open_existing_read_only. This function neither
+/// acquires write custody nor touches File Gate / HistoryService, and cannot
+/// manufacture durable native evidence or retry a consumed V7 claim.
+///
+/// Cross-store checks are deliberately re-read after the two pinned reads.
+/// This is NOT a globally atomic snapshot, an adversarial same-UID defense,
+/// or a callback that may be used to acknowledge remote S3 state.
+#[allow(dead_code)]
+pub(crate) fn inspect_cold_s3_replace_hold(
+    admission: &RegisteredReadAdmission<'_>,
+    bindings: &SqliteRegisteredS3Bindings,
+    journal: &SqliteSyncJournal,
+    protected: &SqliteProtectionStore,
+    operation: super::OperationId,
+) -> Result<InertColdS3Review, FileCommandError> {
+    let root = admission.registered_root_path();
+    admission.recheck_registered_root().map_err(refused)?;
+    journal.require_appdata_outside_vault(root).map_err(refused)?;
+    profile_binding::validate_appdata_location(admission, protected.database_path())
+        .map_err(refused)?;
+
+    let registered = bindings.load_for_registered(admission).map_err(refused)?
+        .ok_or_else(|| refused("cold review has no registered S3 binding"))?;
+    let record = journal.get(operation).map_err(refused)?
+        .ok_or_else(|| refused("cold review has no staged operation"))?;
+    let claim = journal.read_existing_replace_attempt(operation).map_err(refused)?
+        .ok_or_else(|| refused("cold review has no irreversible V7 claim"))?;
+    let original = protected.read_bound_preimage(operation).map_err(refused)?
+        .ok_or_else(|| refused("cold review has no independently protected original"))?;
+    let baseline = journal.baseline(claim.vault_id, claim.document_id).map_err(refused)?
+        .ok_or_else(|| refused("cold review has no previous baseline"))?;
+    if record.phase != JournalPhase::Staged
+        || record.intent.action != super::JournalAction::StageDownload
+        || record.intent.operation_id != operation
+        || record.intent.vault_id != registered.vault_id
+        || record.intent.profile_id != registered.profile_id
+        || record.intent.document_id != claim.document_id
+        || record.intent.path != claim.path
+        || record.intent.expected_baseline != Some(claim.baseline_revision)
+        || record.intent.expected_content_hash != claim.target_hash
+        || record.staged_hash.as_deref() != Some(claim.target_hash.as_str())
+        || baseline.revision_id != claim.baseline_revision
+        || baseline.operation_id != claim.baseline_operation
+        || baseline.content_hash != claim.preimage_hash
+        || original.original.operation_id != operation
+        || original.original.path != claim.path
+        || original.original.content_hash != claim.preimage_hash
+        || original.original.bytes.len() as u64 != claim.original_length
+        || original.root != claim.root
+        || original.file != claim.original_file
+        || registered.workspace_id != admission.registered_workspace_id()
+        || registered.local_root_device != claim.root.device
+        || registered.local_root_file != claim.root.file
+    {
+        return Err(refused("cold review evidence refers to another operation, Core root, or baseline"));
+    }
+
+    // A forensic read still refuses a dirty/open editor, but creates no writer
+    // capability. Lock is intentionally limited to this read-only inspection.
+    let checked = root.join(claim.path.as_str());
+    let _reservation = admission.registered_core().documents
+        .reserve_sync_closed_document(&checked).map_err(refused)?;
+    let pinned = PinnedReadOnlyRoot::open(root).map_err(refused)?;
+    if root_identity(&pinned)? != claim.root
+        || admission.registered_root_identity_for_profile().map_err(refused)?
+            != (claim.root.device, claim.root.file)
+    {
+        return Err(refused("cold review root physical identity changed"));
+    }
+
+    let first = pinned.read_identified_bounded(
+        &claim.path, MAX_PROTECTED_ORIGINAL_BYTES as u64,
+    ).map_err(refused)?;
+    let second = pinned.read_identified_bounded(
+        &claim.path, MAX_PROTECTED_ORIGINAL_BYTES as u64,
+    ).map_err(refused)?;
+    if first.identity.is_none()
+        || first.identity != second.identity
+        || first.snapshot.bytes != second.snapshot.bytes
+        || first.snapshot.content_hash != second.snapshot.content_hash
+    {
+        return Err(refused("cold review observations are unstable"));
+    }
+    let file_state = if first.identity == Some(claim.original_file)
+        && first.snapshot.content_hash == claim.preimage_hash
+        && first.snapshot.bytes == original.original.bytes
+    {
+        InertColdS3FileState::OriginalStillVisible
+    } else if first.identity != Some(claim.original_file)
+        && first.snapshot.content_hash == claim.target_hash
+    {
+        InertColdS3FileState::CandidateVisibleWithoutReceipt
+    } else {
+        InertColdS3FileState::NeedsReview
+    };
+
+    // A V8 candidate is optional: an old V7 claim must remain reviewable
+    // without manufacturing a new receipt. If V8 exists, require its exact
+    // persisted evidence to match the live OS-pinned read and protected BLOB.
+    // This does not prove the independent HistoryService bytes or power-loss
+    // durability, so even a positive result remains HOLD.
+    let v8 = journal.read_existing_replace_receipt_candidate(operation)
+        .map_err(refused)?;
+    let v8_state = match &v8 {
+        None => InertColdV8State::Missing,
+        Some(candidate) => {
+            if file_state != InertColdS3FileState::CandidateVisibleWithoutReceipt {
+                return Err(refused("V8 exists but primary is not the published candidate"));
+            }
+            candidate.validate_cold_local_evidence(&claim, &original, &first)
+                .map_err(refused)?;
+            InertColdV8State::LocalCorrelationOnly
+        }
+    };
+
+    admission.recheck_registered_root().map_err(refused)?;
+    if root_identity(&pinned)? != claim.root
+        || bindings.load_for_registered(admission).map_err(refused)?.as_ref()
+            != Some(&registered)
+        || journal.get(operation).map_err(refused)?.as_ref() != Some(&record)
+        || journal.baseline(claim.vault_id, claim.document_id).map_err(refused)?
+            .as_ref() != Some(&baseline)
+        || journal.read_existing_replace_attempt(operation).map_err(refused)?
+            .as_ref() != Some(&claim)
+        || protected.read_bound_preimage(operation).map_err(refused)?
+            .as_ref() != Some(&original)
+        || journal.read_existing_replace_receipt_candidate(operation)
+            .map_err(refused)?.as_ref() != v8.as_ref()
+    {
+        return Err(refused("cold review evidence changed during inspection"));
+    }
+    Ok(InertColdS3Review { operation_id: operation, file_state, v8_state })
+}
+
+
+/// P0g-3d-07: a positive diagnostic result is still a HOLD, not a native
+/// receipt, download apply permit, remote ACK or baseline transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InertColdUnifiedStatus {
+    LocallyConsistentHold,
+}
+
+#[must_use = "cold cross-store consistency is never an S3 write capability"]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct InertColdUnifiedReview {
+    pub(crate) operation_id: super::OperationId,
+    pub(crate) status: InertColdUnifiedStatus,
+}
+
+/// Join independently reopened, read-only V7/V8/original stores and an actual
+/// HistoryService on the CURRENT registered Core. This is strictly forensic.
+/// Call after fresh Core::open and RegisteredReadAdmission; all three SQLite
+/// stores must already be opened via their read-only existing-file methods.
+///
+/// Phase 1: correlate physical primary + bound protected original + V7/V8.
+/// Phase 2: read the exact external history version under the existing history
+/// mutex and the current registered root.
+/// Phase 3: redo the entire pinned primary/SQLite/profile correlation, and
+/// compare the saved V8 candidate. Never infer permission from success.
+///
+/// No shared filesystem/SQLite/HistoryService ACID transaction exists. This
+/// does NOT defend against an adversarial concurrent filesystem process or
+/// prove that every directory entry survives an actual power cut.
+#[allow(dead_code)]
+pub(crate) fn inspect_cold_s3_replace_with_history_hold(
+    admission: &RegisteredReadAdmission<'_>,
+    bindings: &SqliteRegisteredS3Bindings,
+    journal: &SqliteSyncJournal,
+    protected: &SqliteProtectionStore,
+    operation: super::OperationId,
+) -> Result<InertColdUnifiedReview, FileCommandError> {
+    // Before inspecting history, a V8 entry must correlate with a physically
+    // published candidate. A V7-only attempt is NOT a full receipt candidate.
+    let initial = inspect_cold_s3_replace_hold(
+        admission, bindings, journal, protected, operation,
+    )?;
+    if initial.file_state != InertColdS3FileState::CandidateVisibleWithoutReceipt
+        || initial.v8_state != InertColdV8State::LocalCorrelationOnly
+    {
+        return Err(refused("full cold review requires a published V8 candidate"));
+    }
+    let candidate = journal.read_existing_replace_receipt_candidate(operation)
+        .map_err(refused)?.ok_or_else(|| refused("V8 candidate missing"))?;
+    if candidate.operation_id() != operation {
+        return Err(refused("V8 candidate belongs to another operation"));
+    }
+    let claim = journal.read_existing_replace_attempt(operation)
+        .map_err(refused)?.ok_or_else(|| refused("V7 one-shot claim missing"))?;
+    let (version_id, history_hash, history_length) = candidate.cold_history_fields();
+    if history_hash != claim.target_hash {
+        return Err(refused("V8 history hash differs from claimed target"));
+    }
+
+    let root = admission.registered_root_path().to_path_buf();
+    let note = root.join(claim.path.as_str());
+    admission.recheck_registered_root().map_err(refused)?;
+    // The caller cannot supply arbitrary history roots or a foreign note.
+    // HistoryService independently rejects stale roots, non-external versions,
+    // aliased directories, and mutated/oversized version bytes.
+    let roots = || vec![root.clone()];
+    admission.registered_core().history.inspect_cold_external_version(
+        &roots, &note, version_id, history_hash, history_length,
+    ).map_err(refused)?;
+    admission.recheck_registered_root().map_err(refused)?;
+
+    // Bracket the independent history read with the same full cold V7/V8,
+    // protected original, profile and pinned-file checks. This is a two-pass
+    // consistency check, not a global transaction or a durable receipt.
+    let after = inspect_cold_s3_replace_hold(
+        admission, bindings, journal, protected, operation,
+    )?;
+    if initial != after
+        || journal.read_existing_replace_receipt_candidate(operation)
+            .map_err(refused)?.as_ref() != Some(&candidate)
+        || journal.read_existing_replace_attempt(operation)
+            .map_err(refused)?.as_ref() != Some(&claim)
+    {
+        return Err(refused("cold V8/primary/original evidence changed after history read"));
+    }
+
+    Ok(InertColdUnifiedReview {
+        operation_id: operation,
+        status: InertColdUnifiedStatus::LocallyConsistentHold,
+    })
+}

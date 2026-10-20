@@ -4,7 +4,8 @@
 
 use super::filegate_custody_identity::SqliteCustodyIdentityStore;
 use super::{filegate_lock_custody, resolve_no_symlinks, RegisteredReadAdmission, SyncRelativePath, VaultId};
-use crate::app_core::{CoreEvent};
+use crate::app_core::{Core, CoreEvent};
+use crate::history::service::HistoryService;
 use crate::files::error::FileCommandError;
 use crate::files::gate::{self, CheckedHistoryError, NoteHistoryChanged, NoteHistorySaveFailed};
 use crate::files::models::FileWriteResult;
@@ -15,10 +16,30 @@ use std::path::{Path, PathBuf};
 
 const MAX_NOTE_BYTES: usize = 32 * 1024 * 1024;
 
-/// The constructor is deliberately private to this module. This proof is
-/// borrowed only by the real File Gate checked history write, from within a
-/// previously verified pinned OS custody lock callback. It is NOT clonable.
-pub(crate) struct HeldCustodyHistoryPermit(());
+/// P0g-3c: a non-Clone lexical capability minted ONLY inside the held
+/// external OS-custody callback, for the exact registered Core and checked
+/// note pathname. It is not an OS lock handle or remote baseline authority.
+/// Borrowed Core/path references keep the capability scoped to that writer.
+pub(crate) struct HeldCustodyHistoryPermit<'a> {
+    core: &'a Core,
+    note: &'a Path,
+}
+
+impl HeldCustodyHistoryPermit<'_> {
+    /// Check before the File Gate primary mutation, not only after the write.
+    pub(crate) fn binds_core_and_note(&self, core: &Core, note: &Path) -> bool {
+        std::ptr::eq(self.core, core) && self.note == note
+    }
+
+    /// Check again inside HistoryService before any history-store mutation.
+    pub(crate) fn binds_history_and_note(
+        &self,
+        history: &HistoryService,
+        note: &Path,
+    ) -> bool {
+        std::ptr::eq(&self.core.history, history) && self.note == note
+    }
+}
 
 /// Denied means neither preparation nor the primary writer was entered.
 /// NeedsReview means durable preparation, bytes or history might have changed,
@@ -147,6 +168,32 @@ pub(crate) fn save_existing_note_with_checks_under_custody<T>(
     prepare: impl FnOnce() -> Result<T, FileCommandError>,
     postflight: impl FnOnce(&T, &FileWriteResult) -> Result<(), FileCommandError>,
 ) -> Result<FileWriteResult, GuardedNoteWriteError> {
+    save_existing_note_with_prewrite_under_custody(
+        admission, custody, vault_id, custody_scope, relative, content,
+        expected_hash, source, version_name, prepare, |_| Ok(()), postflight,
+    )
+}
+
+/// P0g-3a: optional same-inode prepublication check, invoked inside the
+/// existing File Gate mutex while the one external OS custody lifetime and
+/// any retained DocumentHub reservation are still held. A rejection after
+/// entering preparation is irreversibly NeedsReview, never retry/rollback.
+/// This is a cooperative check, NOT an OS-level compare-and-swap or receipt.
+#[allow(dead_code)]
+pub(crate) fn save_existing_note_with_prewrite_under_custody<T>(
+    admission: &RegisteredReadAdmission<'_>,
+    custody: &SqliteCustodyIdentityStore,
+    vault_id: VaultId,
+    custody_scope: &Path,
+    relative: &SyncRelativePath,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prepare: impl FnOnce() -> Result<T, FileCommandError>,
+    prewrite: impl FnOnce(&T) -> Result<(), FileCommandError>,
+    postflight: impl FnOnce(&T, &FileWriteResult) -> Result<(), FileCommandError>,
+) -> Result<FileWriteResult, GuardedNoteWriteError> {
     let core = admission.registered_core();
     let target = admission.registered_root_path().join(relative.as_str());
     let mut entered = false;
@@ -158,9 +205,13 @@ pub(crate) fn save_existing_note_with_checks_under_custody<T>(
             ).map_err(CheckedHistoryError::Primary)?;
             entered = true;
             let prepared = prepare().map_err(CheckedHistoryError::Primary)?;
-            let permit = HeldCustodyHistoryPermit(());
-            let (result, changed) = gate::write_checked_history(
+            let permit = HeldCustodyHistoryPermit {
+                core,
+                note: &checked,
+            };
+            let (result, changed) = gate::write_checked_history_with_prewrite(
                 &permit, core, &checked, content, expected_hash, source, version_name,
+                || prewrite(&prepared),
             )?;
             history_changed = changed;
             postflight(&prepared, &result).map_err(CheckedHistoryError::Primary)?;
@@ -180,6 +231,107 @@ pub(crate) fn save_existing_note_with_checks_under_custody<T>(
     }
     match outcome {
         Ok(Ok(result)) => Ok(result),
+        Ok(Err(error)) => {
+            if let CheckedHistoryError::History(failure) = &error {
+                core.emit(CoreEvent::NoteHistorySaveFailed(NoteHistorySaveFailed {
+                    path: target.to_string_lossy().into_owned(),
+                    action: failure.action.to_owned(),
+                    message: failure.message.clone(),
+                }));
+            }
+            let message = format!("{error:?}");
+            if entered {
+                Err(GuardedNoteWriteError::NeedsReview(message))
+            } else {
+                Err(GuardedNoteWriteError::Denied(message))
+            }
+        }
+        Err(error) if entered => Err(GuardedNoteWriteError::NeedsReview(format!("{error:?}"))),
+        Err(error) => Err(GuardedNoteWriteError::Denied(format!("{error:?}"))),
+    }
+}
+
+
+/// Point-in-time observation from the one File Gate primary writer and an
+/// immutable external HistoryService CreateNew. Does not attest primary inode,
+/// fsync of all history ancestors, process restart, native receipt or S3 apply.
+#[must_use = "strict history witness cannot be promoted into an S3 acknowledgement"]
+#[derive(Debug)]
+pub(crate) struct TransientStrictHistoryObservation {
+    pub(crate) primary: FileWriteResult,
+    pub(crate) history: crate::history::service::VerifiedHistoryVersion,
+}
+
+/// P0g-3d-03: opt-in bridge which preserves the existing lock lifetime,
+/// editor reservation, one primary publisher and postflight semantics, while
+/// demanding the typed strict HistoryService witness instead of a bool.
+///
+/// A genuine point-in-time immutable snapshot must be observed under the
+/// locked Core/HistoryService. Any failure after entering preparation is
+/// NeedsReview and never authorizes replay of a one-shot V7 attempt.
+/// This method is deliberately not connected to any production S3 executor.
+#[allow(dead_code)]
+pub(crate) fn save_existing_note_with_prewrite_strict_history_under_custody<T>(
+    admission: &RegisteredReadAdmission<'_>,
+    custody: &SqliteCustodyIdentityStore,
+    vault_id: VaultId,
+    custody_scope: &Path,
+    relative: &SyncRelativePath,
+    content: &str,
+    expected_hash: &str,
+    source: Source,
+    version_name: Option<&str>,
+    prepare: impl FnOnce() -> Result<T, FileCommandError>,
+    prewrite: impl FnOnce(&T) -> Result<(), FileCommandError>,
+    postflight: impl FnOnce(
+        &T, &FileWriteResult, &crate::history::service::VerifiedHistoryVersion,
+    ) -> Result<(), FileCommandError>,
+) -> Result<TransientStrictHistoryObservation, GuardedNoteWriteError> {
+    // Refuse an impossible strict history receipt before admission/claim
+    // preparation and before entering any mutating File Gate operation.
+    if source != Source::External || content.len() > MAX_NOTE_BYTES {
+        return Err(GuardedNoteWriteError::Denied(
+            "strict history witness requires bounded Source::External".into(),
+        ));
+    }
+    let core = admission.registered_core();
+    let target = admission.registered_root_path().join(relative.as_str());
+    let mut entered = false;
+    let mut history_changed = false;
+    let outcome = custody.with_cooperative_writer_lifetime(
+        admission, vault_id, custody_scope, || {
+            let checked = existing_note(
+                admission.registered_root_path(), relative, expected_hash, content,
+            ).map_err(CheckedHistoryError::Primary)?;
+            entered = true;
+            let prepared = prepare().map_err(CheckedHistoryError::Primary)?;
+            let permit = HeldCustodyHistoryPermit {
+                core,
+                note: &checked,
+            };
+            let (primary, history) = gate::write_checked_history_with_prewrite_verified(
+                &permit, core, &checked, content, expected_hash, source, version_name,
+                || prewrite(&prepared),
+            )?;
+            history_changed = true;
+            // Strict version metadata must be visible to postflight under the
+            // original pinned OS custody. Not a durability or remote apply gate.
+            postflight(&prepared, &primary, &history)
+                .map_err(CheckedHistoryError::Primary)?;
+            Ok(TransientStrictHistoryObservation { primary, history })
+        },
+    );
+    // Never notify UI or search while holding external OS custody.
+    if entered {
+        core.search.notify_content_path(target.clone());
+    }
+    if history_changed {
+        core.emit(CoreEvent::NoteHistoryChanged(NoteHistoryChanged {
+            path: target.to_string_lossy().into_owned(),
+        }));
+    }
+    match outcome {
+        Ok(Ok(observation)) => Ok(observation),
         Ok(Err(error)) => {
             if let CheckedHistoryError::History(failure) = &error {
                 core.emit(CoreEvent::NoteHistorySaveFailed(NoteHistorySaveFailed {
@@ -392,6 +544,117 @@ mod tests {
         }
         assert_eq!(fs::read(&outside).unwrap(), b"original");
     }
+
+    #[test]
+    fn p0g3c_rejects_foreign_core_and_note_before_primary_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let data_a = temp.path().join("appdata-a");
+        let data_b = temp.path().join("appdata-b");
+        for path in [&root, &data_a, &data_b] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let core_a = Core::open(&data_a, Arc::new(|_: CoreEvent| {}));
+        let core_b = Core::open(&data_b, Arc::new(|_: CoreEvent| {}));
+        let note = root.join("Bound.md");
+        let foreign_note = root.join("Foreign.md");
+        fs::write(&note, b"protected original").unwrap();
+        fs::write(&foreign_note, b"protected original").unwrap();
+        let hash = blake3::hash(b"protected original").to_hex().to_string();
+        let permit = HeldCustodyHistoryPermit {
+            core: &core_a,
+            note: &note,
+        };
+        assert!(permit.binds_core_and_note(&core_a, &note));
+        assert!(permit.binds_history_and_note(&core_a.history, &note));
+
+        // White-box test for a future accidental cross-Core call: a forged
+        // misplaced permit must never enter the primary writer or prewrite.
+        let mut called = false;
+        let wrong_core = gate::write_checked_history_with_prewrite(
+            &permit, &core_b, &note, "forbidden", &hash,
+            Source::External, None,
+            || { called = true; Ok(()) },
+        );
+        assert!(matches!(
+            wrong_core,
+            Err(CheckedHistoryError::Primary(FileCommandError::Task { message }))
+                if message == "held custody permit belongs to a different Core or note"
+        ));
+        assert!(!called, "wrong Core invoked primary prewrite");
+        assert_eq!(fs::read(&note).unwrap(), b"protected original");
+
+        let mut called = false;
+        let wrong_note = gate::write_checked_history_with_prewrite(
+            &permit, &core_a, &foreign_note, "forbidden", &hash,
+            Source::External, None,
+            || { called = true; Ok(()) },
+        );
+        assert!(matches!(
+            wrong_note,
+            Err(CheckedHistoryError::Primary(FileCommandError::Task { message }))
+                if message == "held custody permit belongs to a different Core or note"
+        ));
+        assert!(!called, "wrong note invoked primary prewrite");
+        assert_eq!(fs::read(&foreign_note).unwrap(), b"protected original");
+    }
+
+    #[test]
+    fn p0g3c_history_rejects_foreign_instance_and_path_before_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let data_a = temp.path().join("appdata-a");
+        let data_b = temp.path().join("appdata-b");
+        for path in [&root, &data_a, &data_b] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let core_a = Core::open(&data_a, Arc::new(|_: CoreEvent| {}));
+        let core_b = Core::open(&data_b, Arc::new(|_: CoreEvent| {}));
+        let note = root.join("Bound.md");
+        let other_note = root.join("Other.md");
+        fs::write(&note, b"protected original").unwrap();
+        fs::write(&other_note, b"protected original").unwrap();
+        let hash = blake3::hash(b"forbidden history snapshot").to_hex().to_string();
+        let permit = HeldCustodyHistoryPermit {
+            core: &core_a,
+            note: &note,
+        };
+        fn note_write(hash: &str) -> crate::history::NoteWrite<'_> {
+            crate::history::NoteWrite {
+                disk_before: None,
+                text: "forbidden history snapshot",
+                hash,
+                source: Source::External,
+                name: None,
+            }
+        }
+        let roots = || vec![root.clone()];
+        let wrong_core = core_b.history.try_saved_with_custody(
+            &permit, &roots, &note, note_write(&hash),
+        );
+        assert_eq!(wrong_core.unwrap_err().action, "custody history owner",
+            "legacy custody must fail because of mismatched owner");
+        let wrong_strict = core_b.history.try_saved_with_custody_verified_version(
+            &permit, &roots, &note, note_write(&hash),
+        );
+        assert_eq!(wrong_strict.unwrap_err().action, "custody history owner",
+            "strict proof must fail because of mismatched owner");
+        let wrong_note = core_a.history.try_saved_with_custody(
+            &permit, &roots, &other_note, note_write(&hash),
+        );
+        assert_eq!(wrong_note.unwrap_err().action, "custody history owner",
+            "legacy custody must fail because of mismatched note");
+        let strict_wrong_note = core_a.history.try_saved_with_custody_verified_version(
+            &permit, &roots, &other_note, note_write(&hash),
+        );
+        assert_eq!(strict_wrong_note.unwrap_err().action, "custody history owner",
+            "strict proof must fail because of mismatched note");
+        assert_eq!(fs::read(&note).unwrap(), b"protected original");
+        assert_eq!(fs::read(&other_note).unwrap(), b"protected original");
+    }
+
+    #[path = "guarded_strict_history_tests.rs"]
+    mod strict_history;
 
     #[path = "guarded_note_transaction_tests.rs"]
     mod transaction;

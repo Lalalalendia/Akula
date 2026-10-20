@@ -132,6 +132,35 @@ impl SqliteRegisteredS3Bindings {
         Ok(Self { connection, database_path: database_path.to_path_buf() })
     }
 
+    /// Cold recovery must never create a fresh profile DB or silently migrate
+    /// an older schema. No network request, binding mutation, or S3 authority.
+    #[allow(dead_code)]
+    pub(crate) fn open_existing_read_only(
+        admission: &RegisteredReadAdmission<'_>,
+        database_path: &Path,
+    ) -> Result<Self, S3BindingError> {
+        admission.recheck_registered_root()?;
+        validate_appdata_location(admission, database_path)?;
+        let connection = Connection::open_with_flags(
+            database_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 250;",
+        )?;
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |row| row.get(0),
+        )?;
+        if version != SCHEMA_VERSION {
+            return Err(S3BindingError::UnsupportedSchema(version));
+        }
+        admission.recheck_registered_root()?;
+        Ok(Self { connection, database_path: database_path.to_path_buf() })
+    }
+
     /// A trusted host calls this only after separately checking the existing
     /// S3 head and obtaining user approval to join that exact remote namespace.
     /// Re-binding an established workspace or stealing another local
@@ -822,6 +851,59 @@ mod tests {
             &guard, "remote", &profile, &ns, &head,
         ), Err(S3BindingError::UnverifiedHead)));
         assert!(store.load_for_registered(&guard).unwrap().is_none());
+    }
+
+    #[test]
+    fn cold_binding_requires_preexisting_schema_without_migration() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let appdata = temp.path().join("appdata");
+        let core = core(&root, &appdata);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let absent = appdata.join("missing-profile.sqlite");
+        assert!(SqliteRegisteredS3Bindings::open_existing_read_only(
+            &admission, &absent,
+        ).is_err());
+        assert!(!absent.exists(), "read-only recovery created S3 profile database");
+
+        let legacy = appdata.join("unknown-schema.sqlite");
+        let connection = Connection::open(&legacy).unwrap();
+        connection.execute_batch("PRAGMA user_version = 2;").unwrap();
+        drop(connection);
+        assert!(matches!(
+            SqliteRegisteredS3Bindings::open_existing_read_only(&admission, &legacy),
+            Err(S3BindingError::UnsupportedSchema(2))
+        ));
+        let connection = Connection::open(&legacy).unwrap();
+        let version: i64 = connection.query_row(
+            "PRAGMA user_version", [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(version, 2);
+    }
+
+    #[test]
+    fn cold_binding_loads_exact_registered_root_but_cannot_mutate() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let appdata = temp.path().join("appdata");
+        let core = core(&root, &appdata);
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let db = appdata.join("registered-s3.sqlite");
+        let (profile, namespace, head) = s3();
+        {
+            let mut writer = SqliteRegisteredS3Bindings::open(&admission, &db).unwrap();
+            writer.bind_existing_verified_s3(
+                &admission, "test-cold", &profile, &namespace, &head,
+            ).unwrap();
+        }
+        let mut cold = SqliteRegisteredS3Bindings::open_existing_read_only(
+            &admission, &db,
+        ).unwrap();
+        let saved = cold.load_for_registered(&admission).unwrap().unwrap();
+        assert_eq!(saved.vault_id, namespace.vault_id());
+        assert!(cold.bind_existing_verified_s3(
+            &admission, "test-cold", &profile, &namespace, &head,
+        ).is_err(), "read-only recovery may not mutate S3 binding");
     }
 
     #[test]
