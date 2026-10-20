@@ -109,6 +109,58 @@ fn receipt_digest(
     hasher.finalize().to_hex().to_string()
 }
 
+// The base V2 journal must understand the *presence* of E2b policy state
+// even in binaries compiled without any experimental signing features.
+// Otherwise switching to a normal binary would silently revive the legacy
+// unsigned-root advancement API against a previously signed Vault.
+fn enrolled_policy_present(
+    db: &Connection,
+    scope: &S3RemoteAnchorScope,
+) -> Result<bool, S3V2TrustAnchorError> {
+    let mut statement = db.prepare("PRAGMA table_info(s3_v2_trusted_roots)")?;
+    let names: Vec<String> = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    let found = ["policy_json", "policy_blake3", "policy_receipt"]
+        .iter()
+        .filter(|required| names.iter().any(|name| name == **required))
+        .count();
+    match found {
+        0 => return Ok(false), // Unextended legacy V2 root-only journal.
+        3 => {},
+        _ => return Err(S3V2TrustAnchorError::CorruptedAnchor),
+    }
+
+    let row = db.query_row(
+        "SELECT policy_json,policy_blake3,policy_receipt
+           FROM s3_v2_trusted_roots WHERE profile_id=?1",
+        params![scope.profile_id()],
+        |row| Ok((
+            row.get::<_, Option<Vec<u8>>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        )),
+    ).optional()?;
+    match row {
+        None | Some((None, None, None)) => Ok(false),
+        Some((Some(_), Some(_), Some(_))) => {
+            #[cfg(feature = "signed-vault-policy-receipt-lab")]
+            {
+                // Only the signing-aware build can parse and verify receipts.
+                policy_receipt_lab::validate_policy_columns(db, scope)?;
+                Ok(true)
+            }
+            #[cfg(not(feature = "signed-vault-policy-receipt-lab"))]
+            {
+                // Do not treat signed/policy-bearing roots as unsigned anchors
+                // when the verifier was omitted from the current build.
+                Err(S3V2TrustAnchorError::UnsupportedSchema)
+            }
+        }
+        Some(_) => Err(S3V2TrustAnchorError::CorruptedAnchor),
+    }
+}
+
 impl S3V2TrustedAnchorJournal {
     pub fn open(
         admission: &RegisteredReadAdmission<'_>,
@@ -202,11 +254,10 @@ impl S3V2TrustedAnchorJournal {
         {
             return Err(S3V2TrustAnchorError::CorruptedAnchor);
         }
-        // In the opt-in E2b lab, even callers using the OLD root-only API
-        // must fail closed if the associated publisher-policy receipt is
-        // partially written or corrupted. This is NOT a second trust journal.
-        #[cfg(feature = "signed-vault-policy-receipt-lab")]
-        policy_receipt_lab::validate_policy_columns(db, scope)?;
+        // Always inspect the optional policy extension, regardless of which
+        // Cargo features are currently enabled. A standard build must HOLD
+        // rather than interpreting a signed policy row as root-only state.
+        enrolled_policy_present(db, scope)?;
         Ok(Some(S3V2TrustedAnchor {
             root, root_etag: etag, previous_root: previous,
         }))
@@ -292,24 +343,11 @@ impl S3V2TrustedAnchorJournal {
             tx.commit()?;
             return Ok(S3V2TrustAnchorOutcome::Unchanged);
         }
-        // A Vault with an enrolled owner/publisher policy must NEVER be
-        // advanced via the legacy "pinned bytes only" API: signed publisher
-        // successor authorization has not been implemented yet. Without this
-        // gate an untrusted S3 server could offer a complete but UNSIGNED
-        // direct successor and trick an old caller into advancing the
-        // locally trusted root. Existing un-enrolled research roots retain
-        // their original standalone pinned-read behavior.
-        #[cfg(feature = "signed-vault-atomic-join-lab")]
-        {
-            let policy_present: i64 = tx.query_row(
-                "SELECT CASE WHEN policy_json IS NULL THEN 0 ELSE 1 END
-                   FROM s3_v2_trusted_roots WHERE profile_id=?1",
-                params![scope.profile_id()],
-                |row| row.get(0),
-            )?;
-            if policy_present != 0 {
-                return Err(S3V2TrustAnchorError::UnverifiedRead);
-            }
+        // A policy-bearing Vault may only advance through an explicitly
+        // authenticated signed-successor API. E2b alone must already HOLD.
+        // The guard is not conditional on the E3c feature flag.
+        if enrolled_policy_present(&tx, scope)? {
+            return Err(S3V2TrustAnchorError::UnverifiedRead);
         }
         if root.generation() <= old.root.generation() {
             return Err(S3V2TrustAnchorError::RollbackOrFork);
