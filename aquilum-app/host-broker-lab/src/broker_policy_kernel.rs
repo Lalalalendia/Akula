@@ -134,7 +134,14 @@ impl BrokerPolicyKernel {
                 record.epoch.checked_add(1).ok_or(Refusal::EpochOverflow)?
             }
         };
-        self.entries.insert(scope.replica, Entry { scope, epoch, revoked: false });
+        self.entries.insert(
+            scope.replica,
+            Entry {
+                scope,
+                epoch,
+                revoked: false,
+            },
+        );
         Ok(epoch)
     }
 
@@ -145,7 +152,10 @@ impl BrokerPolicyKernel {
         replica: ReplicaId,
         compare_epoch: u64,
     ) -> Result<u64, Refusal> {
-        let record = self.entries.get_mut(&replica).ok_or(Refusal::UnknownReplica)?;
+        let record = self
+            .entries
+            .get_mut(&replica)
+            .ok_or(Refusal::UnknownReplica)?;
         if record.epoch != compare_epoch {
             return Err(Refusal::StaleEpoch);
         }
@@ -192,7 +202,10 @@ mod tests {
             device: DeviceId([3; 16]),
             approved_endpoint: EndpointKey([4; 32]),
             issuer_key: [5; 32],
-            object: Object { blake3: [object; 32], length: 128 },
+            object: Object {
+                blake3: [object; 32],
+                length: 128,
+            },
             expires_at: 1_000,
         }
     }
@@ -202,7 +215,10 @@ mod tests {
         let authority = InstalledAuthority::fixture();
         let mut k = BrokerPolicyKernel::new();
         let a = scope(6, 7, 8);
-        assert_eq!(k.inspect_claim(a, 1, 100), Observation::Hold(Refusal::UnknownReplica));
+        assert_eq!(
+            k.inspect_claim(a, 1, 100),
+            Observation::Hold(Refusal::UnknownReplica)
+        );
         assert_eq!(k.enroll(&authority, a, None), Ok(1));
         assert_eq!(
             k.inspect_claim(a, 1, 100),
@@ -286,13 +302,28 @@ mod tests {
         let mut k = BrokerPolicyKernel::new();
         let a = scope(6, 7, 8);
         assert_eq!(k.enroll(&authority, a, None), Ok(1));
-        assert_eq!(k.enroll(&authority, a, None), Err(Refusal::WrongOrAbsentCasEpoch));
+        assert_eq!(
+            k.enroll(&authority, a, None),
+            Err(Refusal::WrongOrAbsentCasEpoch)
+        );
         assert_eq!(k.revoke(&authority, a.replica, 1), Ok(2));
-        assert_eq!(k.inspect_claim(a, 1, 100), Observation::Hold(Refusal::StaleEpoch));
-        assert_eq!(k.inspect_claim(a, 2, 100), Observation::Hold(Refusal::Revoked));
-        assert_eq!(k.enroll(&authority, a, Some(1)), Err(Refusal::WrongOrAbsentCasEpoch));
+        assert_eq!(
+            k.inspect_claim(a, 1, 100),
+            Observation::Hold(Refusal::StaleEpoch)
+        );
+        assert_eq!(
+            k.inspect_claim(a, 2, 100),
+            Observation::Hold(Refusal::Revoked)
+        );
+        assert_eq!(
+            k.enroll(&authority, a, Some(1)),
+            Err(Refusal::WrongOrAbsentCasEpoch)
+        );
         assert_eq!(k.enroll(&authority, a, Some(2)), Ok(3));
-        assert_eq!(k.inspect_claim(a, 2, 100), Observation::Hold(Refusal::StaleEpoch));
+        assert_eq!(
+            k.inspect_claim(a, 2, 100),
+            Observation::Hold(Refusal::StaleEpoch)
+        );
         assert_eq!(
             k.inspect_claim(a, 3, 100),
             Observation::ConsistentOnlyNoAuthenticatedConnection
@@ -305,13 +336,25 @@ mod tests {
         let mut k = BrokerPolicyKernel::new();
         let a = scope(6, 7, 8);
         assert_eq!(k.enroll(&authority, a, None), Ok(1));
-        assert_eq!(k.inspect_claim(a, 1, 1_000), Observation::Hold(Refusal::Expired));
+        assert_eq!(
+            k.inspect_claim(a, 1, 1_000),
+            Observation::Hold(Refusal::Expired)
+        );
         let entry = k.entries.get_mut(&a.replica).unwrap();
         entry.epoch = u64::MAX;
         entry.revoked = true;
-        assert_eq!(k.revoke(&authority, a.replica, u64::MAX), Err(Refusal::EpochOverflow));
-        assert_eq!(k.enroll(&authority, a, Some(u64::MAX)), Err(Refusal::EpochOverflow));
-        assert_eq!(k.inspect_claim(a, u64::MAX, 100), Observation::Hold(Refusal::Revoked));
+        assert_eq!(
+            k.revoke(&authority, a.replica, u64::MAX),
+            Err(Refusal::EpochOverflow)
+        );
+        assert_eq!(
+            k.enroll(&authority, a, Some(u64::MAX)),
+            Err(Refusal::EpochOverflow)
+        );
+        assert_eq!(
+            k.inspect_claim(a, u64::MAX, 100),
+            Observation::Hold(Refusal::Revoked)
+        );
     }
 
     #[test]
@@ -322,7 +365,13 @@ mod tests {
         let mut empty = a;
         empty.approved_endpoint = EndpointKey([0; 32]);
         assert_eq!(k.enroll(&authority, empty, None), Err(Refusal::BadScope));
-        assert_eq!(k.enroll(&authority, a, Some(0)), Err(Refusal::WrongOrAbsentCasEpoch));
-        assert_eq!(k.inspect_claim(a, 0, 100), Observation::Hold(Refusal::UnknownReplica));
+        assert_eq!(
+            k.enroll(&authority, a, Some(0)),
+            Err(Refusal::WrongOrAbsentCasEpoch)
+        );
+        assert_eq!(
+            k.inspect_claim(a, 0, 100),
+            Observation::Hold(Refusal::UnknownReplica)
+        );
     }
 }
