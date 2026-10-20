@@ -56,6 +56,17 @@ jobs:
           grep -Fq 'test result: ok. 5 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
           echo 'AKULA_LINUX_FIRST_GUI_ACK_IPC_PASS peer_credentials=1 exact_child=1 negative_parent=1'
 
+      - name: Preflight CI-only two-AppImage recovery scripts and Rust harness
+        if: startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/appimage-beta-smoke.sh
+          python3 -m py_compile scripts/appimage-real-upgrade-accept.py
+          rustc --edition=2024 -D warnings scripts/appimage-real-upgrade-helper.rs \
+            -o "$RUNNER_TEMP/akula-disposable-upgrade-helper"
+          test -x "$RUNNER_TEMP/akula-disposable-upgrade-helper"
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
@@ -113,6 +124,8 @@ jobs:
           PY
           (
             cd aquilum-app
+            cargo metadata --locked --no-deps --format-version 1 |
+              python3 -c 'import json,sys; x=json.load(sys.stdin); assert any(p["name"]=="aquilum-native" and p["version"]=="0.3.10" for p in x["packages"]), "CI-only version metadata mismatch"'
             cargo build --release --locked -p aquilum-native --features installed
             install -m 0755 ../.artifacts/cargo-native/release/aquilum-native ../.artifacts/cargo-native/release/akula-app
             cargo packager -p aquilum-native --release --formats appimage \
@@ -121,8 +134,8 @@ jobs:
           )
           test -s dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage
           chmod u+x dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage
-          rustc --edition=2024 -D warnings scripts/appimage-real-upgrade-helper.rs \
-            -o dist/e2e-v2/transaction-helper
+          install -m 0755 "$RUNNER_TEMP/akula-disposable-upgrade-helper" \
+            dist/e2e-v2/transaction-helper
           test -x dist/e2e-v2/transaction-helper
           sha256sum dist/akula-app_0.3.9_x86_64.AppImage \
             dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage \
