@@ -24,6 +24,8 @@ server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 server-bootstrap-b1b1-floor-lab = ["server-bootstrap-b1b-custody-lab"]
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
+# Linux-only inert local cooperating-writer CAS witness laboratory.
+server-bootstrap-b1b1c-witness-lab = ["server-bootstrap-b1b1b-approval-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
