@@ -21,7 +21,7 @@ test('release.yml is a manually-triggered, read-only HOLD with one failing job',
   assert.deepEqual(names, ['release-hold'], 'no executable packaging/publishing jobs');
   assert.match(jobs[1], /echo "::error title=Akula release HOLD::/);
   assert.match(jobs[1], /^\s+exit 1\s*$/m, 'manual invocation must always fail');
-  assert.doesNotMatch(text, /Freaction\/Aquilum|cargo packager|gh release|TAURI_SIGNING|upload-artifact|secrets\./);
+  assert.doesNotMatch(text, /Aquilum_0\.2\.6|cargo packager|gh release|TAURI_SIGNING|upload-artifact|secrets\./);
 });
 
 test('inherited workflow is preserved only as documentation', () => {
