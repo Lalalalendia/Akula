@@ -39,7 +39,12 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
-    let temp = tempfile::tempdir().unwrap();
+    fixture_with_temp(tempfile::tempdir().unwrap())
+}
+
+/// Reuse the ordinary integration fixture inside an OS child whose enclosing
+/// disposable directory is retained by the parent after std::process::abort.
+fn fixture_with_temp(temp: tempfile::TempDir) -> Fixture {
     let root = temp.path().join("vault");
     let appdata = temp.path().join("appdata");
     fs::create_dir(&root).unwrap();
