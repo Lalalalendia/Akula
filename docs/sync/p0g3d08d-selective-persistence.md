@@ -1,9 +1,9 @@
 # SYNC-P0g-3d-08d-1 — independently lost persistence domains (test-only)
 
-**Status:** isolated laboratory matrix, **not** hard-off acceptance and **not** a native durable receipt.  
-**Dependency:** [#444](https://github.com/Lalalalendia/Akula/pull/444), merged as `596bfdb`.  
-**Source:** `aquilum-app/core/src/sync/s3_reserved_replace_tests.rs`, test `p0g3d08d_partial_persistence_domains_fail_closed_after_v8`.  
-**Platforms:** Windows/NTFS and Linux CI (macOS remains Frozen/P2).  
+**Status:** isolated laboratory matrix, **not** hard-off acceptance and **not** a native durable receipt.
+**Dependency:** [#444](https://github.com/Lalalalendia/Akula/pull/444), merged as `596bfdb`.
+**Source:** `aquilum-app/core/src/sync/s3_reserved_replace_tests.rs`, test `p0g3d08d_partial_persistence_domains_fail_closed_after_v8`.
+**Platforms:** Windows/NTFS and Linux CI (macOS remains Frozen/P2).
 **Activation:** `cargo test --locked -p aquilum-core --features sync-s3 p0g3d08d_partial_persistence_domains_fail_closed_after_v8 -- --nocapture --test-threads=1`.
 
 ## Why this test is needed
