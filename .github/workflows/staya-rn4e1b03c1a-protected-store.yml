@@ -1,0 +1,93 @@
+name: Staya RN4E1b03c1a — protected Broker storage identity
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03c1a-protected-store-*"
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/**"
+      - ".github/workflows/staya-rn4e1b03c1a-protected-store.yml"
+      - ".github/scripts/staya-broker-store-positive.ps1"
+      - "docs/sync/staya-rn4e1b03c1a-protected-store.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-tests:
+    name: Research-only Rust/Windows ACL compile — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Assert narrow research scope
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "80cc77664381615b106e5c62b1a7d6f684957503"
+          expected = {
+              "aquilum-app/host-broker-lab/src/windows_store_custody.rs",
+              "aquilum-app/host-broker-lab/src/windows_scm_service.rs",
+              "aquilum-app/host-broker-lab/src/windows_server.rs",
+              "aquilum-app/host-broker-lab/src/lib.rs",
+              "aquilum-app/host-broker-lab/src/main.rs",
+              ".github/workflows/staya-rn4e1b03c1a-protected-store.yml",
+              ".github/scripts/staya-broker-store-positive.ps1",
+              "docs/sync/staya-rn4e1b03c1a-protected-store.md",
+          }
+          changed = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          assert changed == expected, f"outside research scope: {changed ^ expected}"
+          PY
+          git diff --check
+      - name: All no-authority tests, Windows API and formatting
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+          git diff --exit-code -- aquilum-app/Cargo.lock aquilum-app/host-broker-lab/Cargo.lock
+  real-scm-custody:
+    name: Ephemeral LocalSystem SCM protected owner/DACL and tamper refusal
+    runs-on: windows-2022
+    timeout-minutes: 45
+    needs: contract-tests
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+      - name: Build isolated service
+        run: |
+          cargo build --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --bin akula-host-broker-lab
+          if ($LASTEXITCODE -ne 0) { throw "standalone binary did not compile" }
+      - name: Real LocalSystem SID protected directory and tampered ACL
+        run: |
+          & ./.github/scripts/staya-broker-store-positive.ps1
+      - name: Security limits
+        run: |
+          "Fixture uses an unsigned disposable SCM binary and installer-LIKE ACL, not production install." >> $env:GITHUB_STEP_SUMMARY
+          "No signed installer, immutable ancestors, durable policy CAS, protected DB/WAL/SHM, QUIC or user file access." >> $env:GITHUB_STEP_SUMMARY
