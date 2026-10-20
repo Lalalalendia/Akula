@@ -73,7 +73,8 @@ fn exact_verified_package_and_plan_are_idempotent_without_execution() {
 
 #[test]
 fn a_different_approval_digest_refuses_same_install_id() {
-    let (_, stage) = lab();
+    // Keep the TempDir alive until the stage is dropped.
+    let (_tmp, stage) = lab();
     let verified = authenticated(PACKAGE);
     stage.stage(id(), approval(), &verified, &mut Cursor::new(PACKAGE)).unwrap();
     let err = stage.stage(id(), ApprovedPlanDigest([0x23; 32]),
