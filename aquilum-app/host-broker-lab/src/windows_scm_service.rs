@@ -11,7 +11,8 @@ use std::io::{self, ErrorKind};
 #[cfg(test)]
 use std::mem::size_of;
 use std::ptr;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use super::windows_cancellable_pipe::CancelablePipe;
 
 type Handle = *mut c_void;
 type StatusHandle = *mut c_void;
@@ -30,6 +31,7 @@ const WAIT_OBJECT_0: u32 = 0;
 const INFINITE: u32 = u32::MAX;
 const SCM_NAME: &str = "AkulaHostBrokerResearch";
 static STOP_SIGNAL: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
+static IPC_TEST_MODE: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 struct ServiceTableEntryW {
@@ -151,7 +153,19 @@ fn run_service() -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     report(handler, SERVICE_START_PENDING, 0, 0, 1, 5000)?;
-    // No pipe or filesystem: status RUNNING only proves the SCM lifecycle.
+    // The named pipe must be created and secured BEFORE SCM reports RUNNING.
+    // A service that cannot bind its exact first-instance pipe fails closed.
+    let pipe = if IPC_TEST_MODE.load(Ordering::SeqCst) {
+        match CancelablePipe::new() {
+            Ok(p) => Some(p),
+            Err(error) => {
+                let _ = report(handler, SERVICE_STOPPED, 0, 1, 0, 0);
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     report(
         handler,
         SERVICE_RUNNING,
@@ -160,10 +174,20 @@ fn run_service() -> io::Result<()> {
         0,
         0,
     )?;
-    let state = unsafe { WaitForSingleObject(event.0, INFINITE) };
-    if state != WAIT_OBJECT_0 {
+    let outcome = if let Some(pipe) = pipe {
+        // Stop and blocked/idle client are both serviced by overlapped I/O.
+        pipe.run_until_stop(event.0)
+    } else {
+        let state = unsafe { WaitForSingleObject(event.0, INFINITE) };
+        if state == WAIT_OBJECT_0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    };
+    if let Err(error) = outcome {
         let _ = report(handler, SERVICE_STOPPED, 0, 1, 0, 0);
-        return Err(io::Error::last_os_error());
+        return Err(error);
     }
     report(handler, SERVICE_STOP_PENDING, 0, 0, 1, 5000)?;
     report(handler, SERVICE_STOPPED, 0, 0, 0, 0)?;
@@ -181,6 +205,17 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
 /// Entry point exclusively for processes actually launched by SCM.
 /// Interactive invocation returns ERROR_FAILED_SERVICE_CONTROLLER_CONNECT.
 pub fn dispatch_scm_service() -> io::Result<()> {
+    dispatch_scm(false)
+}
+
+/// Testing a cancellable pipe under actual SCM. This remains a separate
+/// temporary Windows service mode: no request can grant P2P authority.
+pub fn dispatch_scm_pipe_service() -> io::Result<()> {
+    dispatch_scm(true)
+}
+
+fn dispatch_scm(pipe_mode: bool) -> io::Result<()> {
+    IPC_TEST_MODE.store(pipe_mode, Ordering::SeqCst);
     let mut name = wide(SCM_NAME);
     let entries = [
         ServiceTableEntryW {
