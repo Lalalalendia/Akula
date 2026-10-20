@@ -44,7 +44,10 @@ writer releases both locks. Revoke-before-lock denies without calling writer.
 A custom output sink accepts the first four bytes then errors. The test
 must classify this as `PartialDisclosureHold`; it is **never safe to retry
 the complete payload**, treat it as unobserved, or send a generic denial
-that falsely implies zero disclosure.
+that falsely implies zero disclosure. Even a write returning an error with
+**zero reported bytes** may have emitted unacknowledged bytes, so it is HOLD.
+The writer also performs `flush()` **inside** the two DB transactions;
+a flush error after an apparently successful write is also HOLD.
 
 ## Boundaries and attack-model limitations
 
@@ -83,6 +86,8 @@ Test cases:
 - revocation of the credential *before* fence denies with no writes;
 - revocation of the grant *before* fence denies with no writes;
 - partial output fails with `PartialDisclosureHold`, no implicit retry.
+- error with zero reported write bytes still classifies as HOLD;
+- buffered writer flush fails inside the epoch and classifies as HOLD.
 
 Full Rust workspace, MCP Windows, Main PR gate and existing File Gate
 regression tests must also pass. Passing only validates a **candidate** for
