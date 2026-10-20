@@ -25,7 +25,12 @@ pub fn index_document(
     body: &str,
 ) -> Result<(), SearchError> {
     remove_document(transaction, path)?;
+    #[cfg(feature = "index-stage-probe")]
+    let found = crate::search::perf_probe::time(crate::search::perf_probe::Stage::TasksParse, || note_tasks(body));
+    #[cfg(not(feature = "index-stage-probe"))]
     let found = note_tasks(body);
+    #[cfg(feature = "index-stage-probe")]
+    crate::search::perf_probe::record_rows(crate::search::perf_probe::Stage::Tasks, found.len());
     if found.is_empty() {
         return Ok(());
     }
