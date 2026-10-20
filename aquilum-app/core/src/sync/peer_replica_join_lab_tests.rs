@@ -139,8 +139,8 @@ fn fixture() -> Fixture {
     Fixture { temp, core_a, core_b, root_a, root_b, app_a, app_b,
               host_db, host, record_a, record_b, vault, peer }
 }
-fn grant(core: &Core, root: &Path, db: &Path, vault: VaultId,
-         device: DeviceId, marker: u8) -> (RegisteredPullGrantLedger<'_>, StoredPull) {
+fn grant<'a>(core: &'a Core, root: &Path, db: &Path, vault: VaultId,
+             device: DeviceId, marker: u8) -> (RegisteredPullGrantLedger<'a>, StoredPull) {
     let mut grants = RegisteredPullGrantLedger::provision_new(core, root, db).unwrap();
     grants.bind_vault_once(vault).unwrap();
     let current = grants.issue(ApprovedPull {
