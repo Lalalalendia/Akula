@@ -49,25 +49,49 @@ impl Host {
         let state = self.pointer_state();
         match step {
             crate::replay::Step::Wheel(lines) => {
-                // Developer-only full-redraw image scan: smooth wheel glides
-                // reached only three distinct PNGs in a 10-file test note.
-                // Bypass easing for this controlled stress workload while
-                // preserving native pointer-scroll dispatch and replay timing.
-                // Same exact 240 logical-pixel step in both cache policies.
-                static SCAN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-                let scan = *SCAN.get_or_init(|| {
-                    std::env::var("AKULA_EXPERIMENTAL_IMAGE_SCROLL_SCAN").ok().as_deref() == Some("1")
+                // Developer-only image workload: a high-frequency smooth wheel
+                // (and even a fixed PixelDelta) traversed only 3 distinct PNG
+                // contents in a 10-source note. Seek to byte anchors of real
+                // image paragraphs through the existing note layout instead.
+                // The same deterministic dwell schedule is used for Eager and
+                // Selective, with no installed feature path.
+                static ANCHORS: std::sync::OnceLock<Option<Vec<usize>>> = std::sync::OnceLock::new();
+                let anchors = ANCHORS.get_or_init(|| {
+                    let raw = std::env::var("AKULA_EXPERIMENTAL_IMAGE_SCAN_BYTES").ok()?;
+                    let values = raw.split(',').map(str::parse::<usize>)
+                        .collect::<Result<Vec<_>, _>>().ok()?;
+                    if values.is_empty() || values.len() > 64
+                        || values.windows(2).any(|pair| pair[0] >= pair[1]) {
+                        return None;
+                    }
+                    Some(values)
                 });
-                let delta = if scan {
-                    static FIRST: std::sync::Once = std::sync::Once::new();
-                    FIRST.call_once(|| eprintln!("AKULA_IMAGE_SCROLL_SCAN_APPLIED logical_step=240"));
-                    ScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(
-                        0.0, 240.0 * f64::from(lines.signum()) * scale,
-                    ))
+                if let Some(anchors) = anchors {
+                    if let Some(index) = self.replay.as_mut()
+                        .and_then(|replay| replay.image_scan_target(now, anchors.len()))
+                    {
+                        if let Some(root) = self.root.as_mut() {
+                            if let Some((from, to)) = self.app.image_scan_reveal(root, anchors[index]) {
+                                static FIRST: std::sync::Once = std::sync::Once::new();
+                                FIRST.call_once(|| eprintln!(
+                                    "AKULA_IMAGE_ANCHOR_SCAN_APPLIED count={} schedule=forward-reverse",
+                                    anchors.len()
+                                ));
+                                if index % 4 == 0 || index + 1 == anchors.len() {
+                                    eprintln!(
+                                        "AKULA_IMAGE_ANCHOR_SCAN_SEEK index={} byte={} from={:.0} to={:.0}",
+                                        index, anchors[index], from, to
+                                    );
+                                }
+                                self.request_redraw();
+                            }
+                        }
+                    }
                 } else {
-                    ScrollDelta::LineDelta(0.0, lines)
-                };
-                self.pointer_event(PointerEvent::Scroll(PointerScrollEvent { pointer: PRIMARY_MOUSE, delta, state }));
+                    self.pointer_event(PointerEvent::Scroll(PointerScrollEvent {
+                        pointer: PRIMARY_MOUSE, delta: ScrollDelta::LineDelta(0.0, lines), state
+                    }));
+                }
             }
             crate::replay::Step::Pinch(delta) => self.pinch(f64::from(delta)),
             crate::replay::Step::Focus => {
