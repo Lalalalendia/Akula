@@ -56,7 +56,7 @@ struct Artifact {
 /// This type has private fields and no public unchecked constructor.
 /// Do not replace it with Vec<u8> at the filesystem transaction boundary.
 #[derive(Debug)]
-pub(super) struct SignedCandidate {
+pub(crate) struct SignedCandidate {
     bytes: Vec<u8>,
     version: String,
     source_commit: String,
@@ -64,20 +64,81 @@ pub(super) struct SignedCandidate {
 }
 
 impl SignedCandidate {
-    pub(super) fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 
-    pub(super) fn version(&self) -> &str {
+    pub(crate) fn version(&self) -> &str {
         &self.version
     }
 
-    pub(super) fn source_commit(&self) -> &str {
+    pub(crate) fn source_commit(&self) -> &str {
         &self.source_commit
     }
 
-    pub(super) fn sha256(&self) -> &str {
+    pub(crate) fn sha256(&self) -> &str {
         &self.sha256
+    }
+
+    /// Rehash the exact staged Linux inode under the updater's OS lock.
+    /// Checking a previously downloaded Vec is not enough: the on-disk copy
+    /// itself must match the signed byte digest before any rename.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn verify_staged_file(&self, path: &std::path::Path) -> Result<(), String> {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        // Linux O_NOFOLLOW; refuse the final path being replaced with a link.
+        const LINUX_O_NOFOLLOW: i32 = 0o400000;
+        let mut handle = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(LINUX_O_NOFOLLOW)
+            .open(path)
+            .map_err(|e| format!("{}: {e}", hold("cannot open nonlinked staged image")))?;
+        let before = handle.metadata().map_err(|e| e.to_string())?;
+        let entry = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if !before.is_file()
+            || !entry.file_type().is_file()
+            || before.nlink() != 1
+            || before.ino() != entry.ino()
+            || before.dev() != entry.dev()
+            || before.len() != self.bytes.len() as u64
+        {
+            return Err(hold("staged file authority/type/size mismatch"));
+        }
+        let mut digest = Sha256::new();
+        let mut total = 0u64;
+        let mut block = [0u8; 65536];
+        loop {
+            let read = handle.read(&mut block).map_err(|e| e.to_string())?;
+            if read == 0 {
+                break;
+            }
+            total = total.checked_add(read as u64)
+                .ok_or_else(|| hold("staged image length overflow"))?;
+            if total > self.bytes.len() as u64 {
+                return Err(hold("staged image grew while hashing"));
+            }
+            digest.update(&block[..read]);
+        }
+        let after = handle.metadata().map_err(|e| e.to_string())?;
+        let still_named = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if total != self.bytes.len() as u64
+            || after.len() != total
+            || after.ino() != before.ino()
+            || after.dev() != before.dev()
+            || still_named.ino() != before.ino()
+            || still_named.dev() != before.dev()
+            || !still_named.file_type().is_file()
+        {
+            return Err(hold("staged inode changed or was replaced during hashing"));
+        }
+        let actual: String = digest.finalize().iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        if actual != self.sha256 {
+            return Err(hold("staged disk bytes differ from signed publisher hash"));
+        }
+        Ok(())
     }
 }
 
