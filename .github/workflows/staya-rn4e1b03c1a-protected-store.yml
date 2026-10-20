@@ -68,7 +68,6 @@ jobs:
     name: Ephemeral LocalSystem SCM protected owner/DACL and tamper refusal
     runs-on: windows-2022
     timeout-minutes: 45
-    needs: contract-tests
     defaults:
       run:
         shell: pwsh
