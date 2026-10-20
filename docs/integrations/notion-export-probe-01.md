@@ -27,3 +27,8 @@ No ZIP extraction, HTML block parsing, Notion rich-text mentions, source permiss
 ## Gates
 Rust unit tests: UUID-linked pages with duplicate titles, unresolved and ambiguous IDs, CSV escaping/newline, size rejection, symlink rejection and nested ZIP classification.
 CI must confirm feature-gated compilation and execution; until then, do not mark tests passed. The next milestone is production-grade ZIP scanning, verified raw-object graph, then File Gate publication; each requires separate review.
+
+## ZIP input experiment (unverified until CI)
+The opt-in CLI now accepts either an extracted folder or a **top-level .zip** file. The ZIP reader keeps all content in memory under strict bounds and writes nothing; only STORE and DEFLATE with consistent local/central metadata and CRC are permitted. Strictly rejects ZIP64, extra fields, data descriptors, encryption, symlinks, multi-disk and path traversal. Unknown nested ZIPs are inventory entries and are not recursively extracted. Per-entry memory bound is 16 MiB, intentionally restrictive even for large attachments. This early parser is **experimental and not security-audited**; real Notion ZIP compatibility, error recovery and attack-resistance must be independently validated, preferably replacing bespoke ZIP parsing with a reviewed library after dependency and lockfile review.
+
+New tests attempt stored archive, deflate archive, CRC damage, path traversal and size denial. **They are not considered passed until the ZIP revision has a green CI run.**
