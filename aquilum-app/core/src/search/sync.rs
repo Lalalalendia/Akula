@@ -309,8 +309,22 @@ fn commit(
     let Some(writer) = writer.as_mut() else {
         return Ok(());
     };
-    writer.commit()?;
-    progress.committed(index.reload()?);
+    #[cfg(feature = "index-stage-probe")]
+    {
+        use super::perf_probe::{self, Stage};
+        // Same public Tantivy commit lifecycle, split only under diagnostic
+        // feature: prepare -> finalise -> publish updated reader.
+        let prepared = perf_probe::time(Stage::TantivyPrepare, || writer.prepare_commit())?;
+        perf_probe::time(Stage::TantivyFinalize, || prepared.commit())?;
+        let count = perf_probe::time(Stage::ReaderReload, || index.reload())?;
+        progress.committed(count);
+        perf_probe::committed();
+    }
+    #[cfg(not(feature = "index-stage-probe"))]
+    {
+        writer.commit()?;
+        progress.committed(index.reload()?);
+    }
     Ok(())
 }
 
