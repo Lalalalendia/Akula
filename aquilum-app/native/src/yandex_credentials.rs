@@ -409,6 +409,40 @@ mod tests {
         assert_eq!(remove("not.valid"), Err(VaultError::InvalidBucket));
     }
 
+    // This is the ACTUAL Microsoft CredUI dialog called by Akula, not a
+    // credential store API substitute. A separate ephemeral Windows CI
+    // process must first observe its masked password field and send Escape
+    // through the OS. Never run on a developer's Windows account.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires real Windows desktop and scripts/test-yandex-credui-cancel.ps1"]
+    fn windows_credui_cancel_real_os_dialog_does_not_persist() {
+        assert_eq!(std::env::var("RUNNER_ENVIRONMENT").as_deref(), Ok("github-hosted"));
+        assert_eq!(std::env::var("RUNNER_OS").as_deref(), Ok("Windows"));
+        assert_eq!(std::env::var("AKULA_CREDUI_CANCEL_CI").as_deref(), Ok("1"));
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)
+            .expect("system clock before Unix epoch").as_nanos();
+        let bucket = format!("akula-credui-cancel-{}-{nonce}", std::process::id());
+        struct Cleanup(String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = super::remove(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(bucket.clone());
+        assert_eq!(present(&bucket), Ok(false), "synthetic target must not exist");
+        let outcome = prompt_and_save(
+            &bucket,
+            "Akula CredUI Cancel QA",
+            "This is an isolated test. Do not enter any real credentials. Cancel.",
+        );
+        assert_eq!(outcome, Ok(SaveOutcome::Cancelled),
+            "Escape must cancel native Windows CredUI without storing keys");
+        assert_eq!(present(&bucket), Ok(false),
+            "Cancelling native Windows CredUI must not write any credentials");
+    }
+
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn unsupported_platform_never_prompts_or_writes_credentials() {
