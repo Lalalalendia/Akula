@@ -33,6 +33,9 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
+# Non-shipping Windows host installer OWNER/DACL negative preflight only.
+# Does not enable a broker, grant authorization, P2P transport or File Gate.
+sync-installed-host-windows-owner-probe = ["host-custody"]
 # Separately selected packaged build: force every default Core::open through
 # the compiler-pinned local host registry. No AWS SDK or S3 engine implied.
 sync-installed-host = ["host-custody"]
