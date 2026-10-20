@@ -108,6 +108,26 @@ pub struct InventoryReport {
     pub limitations: Vec<&'static str>,
 }
 
+#[path = "notion_export_zip.rs"]
+mod zip_archive;
+
+/// Inspect a Notion export in an extracted directory OR a bounded top-level ZIP.
+/// This operation never extracts, writes into a vault, or uses network credentials.
+pub fn inspect_path(input: &Path, limits: ScanLimits) -> Result<InventoryReport, String> {
+    let metadata = fs::symlink_metadata(input)
+        .map_err(|e| format!("cannot inspect input: {e}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("input path must not be a symbolic link".into());
+    }
+    if metadata.is_dir() {
+        return inspect_directory(input, limits);
+    }
+    if metadata.is_file() && input.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+        return zip_archive::inspect_zip(input, limits);
+    }
+    Err("input must be an extracted directory or a regular .zip file".into())
+}
+
 pub fn inspect_directory(root: &Path, limits: ScanLimits) -> Result<InventoryReport, String> {
     let root_meta = fs::symlink_metadata(root)
         .map_err(|e| format!("cannot inspect input directory: {e}"))?;
@@ -204,6 +224,10 @@ pub fn inspect_directory(root: &Path, limits: ScanLimits) -> Result<InventoryRep
             path, kind, source_id, bytes: metadata.len(), blake3: hash, csv,
         });
     }
+    Ok(finalize_report(entries, references, "notion_extracted_directory_inventory_v1"))
+}
+
+fn finalize_report(mut entries: Vec<InventoryEntry>, mut references: Vec<Reference>, format: &'static str) -> InventoryReport {
     entries.sort_by(|a, b| a.path.cmp(&b.path));
 
     // Pass 1: keep source identities independent of titles and local paths.
@@ -249,8 +273,8 @@ pub fn inspect_directory(root: &Path, limits: ScanLimits) -> Result<InventoryRep
     references.sort_by(|a, b| (&a.source_path, &a.href).cmp(&(&b.source_path, &b.href)));
     backlinks.sort_by(|a, b| (&a.target_path, &a.source_path).cmp(&(&b.target_path, &b.source_path)));
 
-    Ok(InventoryReport {
-        format: "notion_extracted_directory_inventory_v1",
+    InventoryReport {
+        format,
         scanned_all_entries_under_limits: true,
         notion_workspace_completeness_verified: false,
         entries,
@@ -258,7 +282,7 @@ pub fn inspect_directory(root: &Path, limits: ScanLimits) -> Result<InventoryRep
         backlinks,
         duplicate_source_ids,
         limitations: vec![
-            "Only an already extracted export directory is accepted; ZIP parsing is not implemented.",
+            "Supports directory and top-level ZIP inputs. Nested ZIP data remains unparsed.",
             "HTML content, nested ZIP archives and attachment links are not interpreted.",
             "CSV is a typed-unknown snapshot; relations, formulas, rollups and database views cannot be reconstructed from it.",
             "Only Markdown link/image syntax is scanned, not plain text URLs, rich Notion block IDs or HTML embedded in Markdown.",
