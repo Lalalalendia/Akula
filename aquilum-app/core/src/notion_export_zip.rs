@@ -139,9 +139,10 @@ pub(super) fn inspect_zip(path: &Path, limits: ScanLimits) -> Result<InventoryRe
         total = total.checked_add(unpacked as u64).ok_or("unpacked size overflow")?;
         if total > limits.max_total_bytes { return Err("unpacked ZIP exceeds total byte budget".into()); }
         let kind = kind_for(&safe);
-        if matches!(kind, EntryKind::MarkdownPage | EntryKind::CsvDatabaseSnapshot)
-            && unpacked as u64 > limits.max_text_bytes {
-            return Err("ZIP text entry exceeds limit".into());
+        // A diagnostic need not allocate multi-GB attachments in memory.
+        // Large inputs fail closed until a streaming ZIP reader is reviewed.
+        if unpacked as u64 > limits.max_text_bytes {
+            return Err("ZIP entry exceeds per-entry memory limit".into());
         }
         let payload = bytes.get(data_at..data_end).ok_or("ZIP truncated payload")?;
         let mut content = Vec::new();
