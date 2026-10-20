@@ -288,7 +288,7 @@ fn finalize_report(mut entries: Vec<InventoryEntry>, mut references: Vec<Referen
             "Only Markdown link/image syntax is scanned, not plain text URLs, rich Notion block IDs or HTML embedded in Markdown.",
             "This is a local graph diagnostic, not an importer, a Notion API reader or a claim of complete source permissions.",
         ],
-    })
+    }
 }
 
 fn checked_relative(path: &Path) -> Result<String, String> {
