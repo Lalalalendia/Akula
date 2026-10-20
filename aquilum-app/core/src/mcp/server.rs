@@ -910,6 +910,162 @@ mod tests {
     }
 
     #[test]
+    fn scoped_http_does_not_promote_user_minted_vault_grants_into_read_access() {
+        use super::super::agent_vault_grants::{AgentVaultGrantStore, HostVaultRegistration};
+        use crate::plugins::{Capability, GrantScope, VaultId};
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let x = dir.path().join("vault-x");
+        let y = dir.path().join("vault-y");
+        fs::create_dir(&x).unwrap();
+        fs::create_dir(&y).unwrap();
+        fs::write(x.join("secret.md"), "BROKERLESS_SECRET_X").unwrap();
+        fs::write(y.join("secret.md"), "BROKERLESS_SECRET_Y").unwrap();
+
+        let mut credentials =
+            AgentCredentialStore::open(&dir.path().join("agents.sqlite3")).unwrap();
+        let mut agent_a = credentials.issue_principal("A", None).unwrap();
+        let mut agent_b = credentials.issue_principal("B", None).unwrap();
+        let bearer_a = agent_a.take_bearer_once().unwrap();
+        let bearer_b = agent_b.take_bearer_once().unwrap();
+
+        // Both receipts are SELF-ISSUED test claims. They must never be
+        // interpreted as evidence of a protected installer-owned broker.
+        let claim_x =
+            HostVaultRegistration::from_host_custody(VaultId::new_for_host(), [31; 32])
+                .unwrap();
+        let claim_y =
+            HostVaultRegistration::from_host_custody(VaultId::new_for_host(), [47; 32])
+                .unwrap();
+        let grants_path = dir.path().join("grants.sqlite3");
+        let mut grants = AgentVaultGrantStore::provision_new(&grants_path).unwrap();
+        grants.register_host_vault(claim_x).unwrap();
+        grants.register_host_vault(claim_y).unwrap();
+        grants
+            .grant_notes_read(
+                agent_a.principal,
+                claim_x,
+                Capability::NotesRead,
+                GrantScope::WholeVault,
+                0,
+                None,
+            )
+            .unwrap();
+        grants
+            .grant_notes_read(
+                agent_b.principal,
+                claim_y,
+                Capability::NotesRead,
+                GrantScope::WholeVault,
+                0,
+                None,
+            )
+            .unwrap();
+        assert!(grants
+            .authorize_notes_read(
+                credentials.authenticate(bearer_a.as_str()).unwrap(),
+                claim_x,
+            )
+            .is_ok());
+        assert!(grants
+            .authorize_notes_read(
+                credentials.authenticate(bearer_b.as_str()).unwrap(),
+                claim_y,
+            )
+            .is_ok());
+        drop(grants);
+        let persisted = AgentVaultGrantStore::open_existing(&grants_path).unwrap();
+        assert!(persisted
+            .authorize_notes_read(
+                credentials.authenticate(bearer_a.as_str()).unwrap(),
+                claim_x,
+            )
+            .is_ok());
+        drop(persisted);
+
+        // Real HTTP admission, not an in-memory protocol mock. Valid agent
+        // bearers and persisted grants alone confer NO tool authority.
+        let store = Arc::new(Mutex::new(credentials));
+        let server = RunningServer::start_scoped_deny_all(0, store).unwrap();
+        let url = format!("http://127.0.0.1:{}/mcp", server.port());
+        for bearer in [bearer_a.as_str(), bearer_b.as_str()] {
+            let header = format!("Bearer {bearer}");
+            let listing: Value = serde_json::from_str(
+                &ureq::post(&url)
+                    .set("Authorization", &header)
+                    .send_string(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+                    .unwrap()
+                    .into_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(listing["result"]["tools"], json!([]));
+
+            for claim in [claim_x, claim_y] {
+                let request = json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "read_note",
+                        "arguments": {
+                            "vaultId": claim.vault_id().as_uuid().to_string(),
+                            "path": "secret.md"
+                        }
+                    }
+                });
+                let reply: Value = serde_json::from_str(
+                    &ureq::post(&url)
+                        .set("Authorization", &header)
+                        .send_string(&request.to_string())
+                        .unwrap()
+                        .into_string()
+                        .unwrap(),
+                )
+                .unwrap();
+                assert_eq!(reply["result"]["isError"], true);
+                assert_eq!(
+                    reply["result"]["content"][0]["text"],
+                    "MCP_AGENT_SCOPE_DENIED"
+                );
+                let text = reply.to_string();
+                assert!(!text.contains("BROKERLESS_SECRET_X"));
+                assert!(!text.contains("BROKERLESS_SECRET_Y"));
+                assert!(!text.contains("vault-x"));
+                assert!(!text.contains("vault-y"));
+            }
+
+            // Mixed JSON-RPC batches must not bypass denial either.
+            let batch = json!([
+                {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {"name": "read_note", "arguments": {"path": "secret.md"}}
+                }
+            ]);
+            let reply: Value = serde_json::from_str(
+                &ureq::post(&url)
+                    .set("Authorization", &header)
+                    .send_string(&batch.to_string())
+                    .unwrap()
+                    .into_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(reply[0]["result"]["tools"], json!([]));
+            assert_eq!(reply[1]["result"]["isError"], true);
+            assert_eq!(
+                reply[1]["result"]["content"][0]["text"],
+                "MCP_AGENT_SCOPE_DENIED"
+            );
+        }
+        server.stop();
+    }
+
+    #[test]
     fn host_allowlist_rejects_dns_rebinding_and_port_spoofing() {
         let port = 8787;
         for allowed in [

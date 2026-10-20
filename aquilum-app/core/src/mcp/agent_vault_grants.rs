@@ -53,7 +53,11 @@ pub(crate) struct HostVaultRegistration {
 }
 
 impl HostVaultRegistration {
-    /// TRUSTED HOST ONLY. Does not verify the registration's provenance.
+    /// TEST-ONLY self-issued receipt used by the isolated unit fixtures.
+    /// A valid-looking binding digest is NOT a trusted installer/Host Broker
+    /// attestation. Production has intentionally no receipt constructor until
+    /// an independently authenticated, OS-protected issuer is integrated.
+    #[cfg(test)]
     pub(crate) fn from_host_custody(
         vault: VaultId,
         binding_digest: [u8; BINDING_SIZE],
