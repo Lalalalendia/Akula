@@ -292,6 +292,25 @@ impl S3V2TrustedAnchorJournal {
             tx.commit()?;
             return Ok(S3V2TrustAnchorOutcome::Unchanged);
         }
+        // A Vault with an enrolled owner/publisher policy must NEVER be
+        // advanced via the legacy "pinned bytes only" API: signed publisher
+        // successor authorization has not been implemented yet. Without this
+        // gate an untrusted S3 server could offer a complete but UNSIGNED
+        // direct successor and trick an old caller into advancing the
+        // locally trusted root. Existing un-enrolled research roots retain
+        // their original standalone pinned-read behavior.
+        #[cfg(feature = "signed-vault-atomic-join-lab")]
+        {
+            let policy_present: i64 = tx.query_row(
+                "SELECT CASE WHEN policy_json IS NULL THEN 0 ELSE 1 END
+                   FROM s3_v2_trusted_roots WHERE profile_id=?1",
+                params![scope.profile_id()],
+                |row| row.get(0),
+            )?;
+            if policy_present != 0 {
+                return Err(S3V2TrustAnchorError::UnverifiedRead);
+            }
+        }
         if root.generation() <= old.root.generation() {
             return Err(S3V2TrustAnchorError::RollbackOrFork);
         }
