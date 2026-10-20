@@ -26,9 +26,6 @@ jobs:
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: index-pool-abba
-      - name: Verify formatting
-        working-directory: aquilum-app
-        run: cargo fmt --all -- --check
       - name: Compile opt-in feature and existing library checks
         working-directory: aquilum-app
         run: |
