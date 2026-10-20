@@ -40,6 +40,20 @@ jobs:
             libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             pkg-config curl ca-certificates patchelf file
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify Linux ACK IPC in real independent OS subprocesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition=2024 --test -D warnings \
+            aquilum-app/native/src/updater/linux_first_gui_ack.rs \
+            -o "$RUNNER_TEMP/akula-linux-first-gui-ack-tests"
+          "$RUNNER_TEMP/akula-linux-first-gui-ack-tests" --nocapture --test-threads=2 \
+            2>&1 | tee "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          grep -Fq 'test tests::real_inherited_stream_ack_has_child_pid_nonce_and_generation_digest ... ok' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          grep -Fq 'test tests::wrong_parent_cannot_emit_even_with_provided_nonce_and_fd ... ok' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          grep -Fq 'test result: ok. 5 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
+          echo 'AKULA_LINUX_FIRST_GUI_ACK_IPC_PASS peer_credentials=1 exact_child=1 negative_parent=1'
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
