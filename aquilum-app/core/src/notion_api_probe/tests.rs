@@ -75,5 +75,6 @@ fn unrecognized_partial_markdown_is_reported() {
     c.replies.get_mut(1).unwrap().1=json!({"markdown":"partial","truncated":true,"unknown_block_ids":[B]});
     let report=inspect_root(&mut c,A,ProbeLimits::default()).unwrap();
     assert_eq!(report.warnings.len(),2);
+    assert!(!report.root_traversal_complete);
     assert!(!report.workspace_complete);
 }
