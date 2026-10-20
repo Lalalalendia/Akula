@@ -49,9 +49,16 @@ const INHERIT_ONLY_ACE: u8 = 0x08;
 const WIN_LOCAL_SYSTEM_SID: u32 = 22;
 const WIN_BUILTIN_ADMIN_SID: u32 = 26;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
-const NAMESPACE_WRITE: u32 = 0x0000_0002 | 0x0000_0004 | 0x0000_0010
-    | 0x0000_0040 | 0x0000_0100 | 0x0001_0000 | 0x0004_0000
-    | 0x0008_0000 | 0x1000_0000 | 0x4000_0000;
+const NAMESPACE_WRITE: u32 = 0x0000_0002
+    | 0x0000_0004
+    | 0x0000_0010
+    | 0x0000_0040
+    | 0x0000_0100
+    | 0x0001_0000
+    | 0x0004_0000
+    | 0x0008_0000
+    | 0x1000_0000
+    | 0x4000_0000;
 
 #[repr(C)]
 #[derive(Default)]
@@ -107,12 +114,19 @@ extern "system" {
 #[link(name = "advapi32")]
 extern "system" {
     fn GetSecurityInfo(
-        handle: Handle, kind: u32, requested: u32,
-        owner: *mut Handle, group: *mut Handle, dacl: *mut Handle,
-        sacl: *mut Handle, descriptor: *mut Handle,
+        handle: Handle,
+        kind: u32,
+        requested: u32,
+        owner: *mut Handle,
+        group: *mut Handle,
+        dacl: *mut Handle,
+        sacl: *mut Handle,
+        descriptor: *mut Handle,
     ) -> u32;
     fn GetSecurityDescriptorControl(
-        descriptor: Handle, control: *mut u16, revision: *mut u32,
+        descriptor: Handle,
+        control: *mut u16,
+        revision: *mut u32,
     ) -> i32;
     fn GetAclInformation(acl: Handle, info: Handle, len: u32, class: u32) -> i32;
     fn GetAce(acl: Handle, index: u32, entry: *mut Handle) -> i32;
@@ -121,9 +135,13 @@ extern "system" {
     fn GetLengthSid(sid: Handle) -> u32;
     fn CreateWellKnownSid(kind: u32, domain: Handle, out: Handle, length: *mut u32) -> i32;
     fn LookupAccountNameW(
-        machine: *const u16, account: *const u16,
-        sid: Handle, sid_len: *mut u32,
-        domain: *mut u16, domain_len: *mut u32, kind: *mut u32,
+        machine: *const u16,
+        account: *const u16,
+        sid: Handle,
+        sid_len: *mut u32,
+        domain: *mut u16,
+        domain_len: *mut u32,
+        kind: *mut u32,
     ) -> i32;
 }
 
@@ -131,7 +149,10 @@ fn refuse(msg: &'static str) -> io::Error {
     io::Error::new(ErrorKind::PermissionDenied, msg)
 }
 fn wide(s: &str) -> Vec<u16> {
-    std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    std::ffi::OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 fn sid_equal(a: Handle, b: Handle) -> bool {
     (unsafe { EqualSid(a, b) }) != 0
@@ -139,13 +160,17 @@ fn sid_equal(a: Handle, b: Handle) -> bool {
 struct OwnedHandle(Handle);
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
-        unsafe { CloseHandle(self.0); }
+        unsafe {
+            CloseHandle(self.0);
+        }
     }
 }
 struct OwnedDescriptor(Handle);
 impl Drop for OwnedDescriptor {
     fn drop(&mut self) {
-        unsafe { LocalFree(self.0); }
+        unsafe {
+            LocalFree(self.0);
+        }
     }
 }
 
@@ -166,12 +191,19 @@ fn broker_service_sid() -> io::Result<Vec<usize>> {
     let (mut sid_size, mut domain_size, mut sid_kind) = (0, 0, 0);
     unsafe {
         LookupAccountNameW(
-            ptr::null(), name.as_ptr(), ptr::null_mut(),
-            &mut sid_size, ptr::null_mut(), &mut domain_size, &mut sid_kind,
+            ptr::null(),
+            name.as_ptr(),
+            ptr::null_mut(),
+            &mut sid_size,
+            ptr::null_mut(),
+            &mut domain_size,
+            &mut sid_kind,
         );
     }
     if unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER
-        || sid_size < 8 || sid_size > 1024 || domain_size > 1024
+        || sid_size < 8
+        || sid_size > 1024
+        || domain_size > 1024
     {
         return Err(refuse("uninstalled service SID is not an authority"));
     }
@@ -179,11 +211,16 @@ fn broker_service_sid() -> io::Result<Vec<usize>> {
     let mut domain = vec![0u16; (domain_size as usize).max(1)];
     if unsafe {
         LookupAccountNameW(
-            ptr::null(), name.as_ptr(), sid.as_mut_ptr().cast(),
-            &mut sid_size, domain.as_mut_ptr(),
-            &mut domain_size, &mut sid_kind,
+            ptr::null(),
+            name.as_ptr(),
+            sid.as_mut_ptr().cast(),
+            &mut sid_size,
+            domain.as_mut_ptr(),
+            &mut domain_size,
+            &mut sid_kind,
         )
-    } == 0 || unsafe { IsValidSid(sid.as_mut_ptr().cast()) } == 0
+    } == 0
+        || unsafe { IsValidSid(sid.as_mut_ptr().cast()) } == 0
     {
         return Err(refuse("the expected service SID was not resolved"));
     }
@@ -192,13 +229,20 @@ fn broker_service_sid() -> io::Result<Vec<usize>> {
 
 fn opened_non_reparse(path: &str, directory: bool) -> io::Result<OwnedHandle> {
     let flags = FILE_FLAG_OPEN_REPARSE_POINT
-        | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 };
+        | if directory {
+            FILE_FLAG_BACKUP_SEMANTICS
+        } else {
+            0
+        };
     let raw = unsafe {
         CreateFileW(
             wide(path).as_ptr(),
             FILE_READ_ATTRIBUTES | READ_CONTROL,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
-            ptr::null_mut(), OPEN_EXISTING, flags, ptr::null_mut(),
+            ptr::null_mut(),
+            OPEN_EXISTING,
+            flags,
+            ptr::null_mut(),
         )
     };
     if raw.is_null() || raw == INVALID_HANDLE {
@@ -215,7 +259,9 @@ fn opened_non_reparse(path: &str, directory: bool) -> io::Result<OwnedHandle> {
         || info.volume_serial == 0
         || (!directory && info.link_count != 1)
     {
-        return Err(refuse("unexpected reparse link, object type or file identity"));
+        return Err(refuse(
+            "unexpected reparse link, object type or file identity",
+        ));
     }
     Ok(file)
 }
@@ -226,20 +272,24 @@ fn strict_protected_acl(
     admins: Handle,
     broker: Handle,
 ) -> io::Result<()> {
-    let (mut owner, mut dacl, mut desc) =
-        (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+    let (mut owner, mut dacl, mut desc) = (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
     let status = unsafe {
         GetSecurityInfo(
-            handle.0, SE_FILE_OBJECT, OWNER_DACL,
-            &mut owner, ptr::null_mut(), &mut dacl, ptr::null_mut(), &mut desc,
+            handle.0,
+            SE_FILE_OBJECT,
+            OWNER_DACL,
+            &mut owner,
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut desc,
         )
     };
     let _allocation = OwnedDescriptor(desc);
     if status != 0 || desc.is_null() || owner.is_null() || dacl.is_null() {
         return Err(refuse("missing protected owner/DACL"));
     }
-    if unsafe { IsValidSid(owner) } == 0
-        || !(sid_equal(owner, system) || sid_equal(owner, admins))
+    if unsafe { IsValidSid(owner) } == 0 || !(sid_equal(owner, system) || sid_equal(owner, admins))
     {
         return Err(refuse("host policy owner must be SYSTEM or Administrators"));
     }
@@ -252,10 +302,13 @@ fn strict_protected_acl(
     let mut info = AclSizeInfo::default();
     if unsafe {
         GetAclInformation(
-            dacl, (&mut info as *mut AclSizeInfo).cast(),
-            size_of::<AclSizeInfo>() as u32, ACL_SIZE_INFORMATION,
+            dacl,
+            (&mut info as *mut AclSizeInfo).cast(),
+            size_of::<AclSizeInfo>() as u32,
+            ACL_SIZE_INFORMATION,
         )
-    } == 0 || info.ace_count > 128
+    } == 0
+        || info.ace_count > 128
     {
         return Err(refuse("invalid host policy access control list"));
     }
@@ -285,8 +338,12 @@ fn strict_protected_acl(
             // An INHERIT_ONLY ACE is not effective for this handle.
             // Untrusted inherited write ACEs still cause refusal.
             if header.flags & INHERIT_ONLY_ACE == 0 {
-                if sid_equal(who, broker) { broker_write = true; }
-                if sid_equal(who, system) { system_write = true; }
+                if sid_equal(who, broker) {
+                    broker_write = true;
+                }
+                if sid_equal(who, system) {
+                    system_write = true;
+                }
             }
             if !sid_equal(who, broker) && !sid_equal(who, system) && !sid_equal(who, admins) {
                 return Err(refuse("ordinary user can modify broker-owned authority"));
@@ -294,7 +351,9 @@ fn strict_protected_acl(
         }
     }
     if !broker_write || !system_write {
-        return Err(refuse("missing SYSTEM or distinct Broker service-SID access"));
+        return Err(refuse(
+            "missing SYSTEM or distinct Broker service-SID access",
+        ));
     }
     Ok(())
 }
@@ -328,7 +387,10 @@ impl CustodyWitness {
         strict_protected_acl(&dir, s, a, b)?;
         let file = opened_non_reparse(marker, false)?;
         strict_protected_acl(&file, s, a, b)?;
-        Ok(Self { _directory: dir, _marker: file })
+        Ok(Self {
+            _directory: dir,
+            _marker: file,
+        })
     }
 }
 
@@ -338,14 +400,14 @@ mod tests {
 
     #[test]
     fn absent_installer_store_is_never_auto_created() {
-        let target = std::env::temp_dir().join(format!(
-            "akula-broker-uninstalled-{}", std::process::id()
-        ));
+        let target =
+            std::env::temp_dir().join(format!("akula-broker-uninstalled-{}", std::process::id()));
         let before = target.exists();
         assert!(CustodyWitness::inspect_at(
             &target.to_string_lossy(),
             &target.join("authority.marker").to_string_lossy(),
-        ).is_err());
+        )
+        .is_err());
         assert_eq!(target.exists(), before);
     }
 
@@ -354,7 +416,8 @@ mod tests {
         assert!(CustodyWitness::inspect_at(
             r"C:\Users\ordinary\AppData",
             r"C:\Users\ordinary\AppData\authority.marker",
-        ).is_err());
+        )
+        .is_err());
         assert!(CustodyWitness::inspect_at("", "").is_err());
     }
 }
