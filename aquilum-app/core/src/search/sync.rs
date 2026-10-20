@@ -111,6 +111,8 @@ impl IndexSynchronizer {
                     &transaction,
                     &mut prepare_batch,
                     &mut pending,
+                    #[cfg(feature = "index-pool-lab")]
+                    &mut pool,
                 )?;
                 if pending > 0 {
                     commit(&mut self.writer, &self.index, &self.progress)?;
