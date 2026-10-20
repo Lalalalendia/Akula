@@ -37,6 +37,7 @@ Under `--features signed-vault-atomic-join-lab`:
 - Wrong independently approved policy digest cannot create any row.
 - Existing root-only admission cannot silently become a signed join.
 - Two concurrent handles serialize through SQLite; second matching offer observes `Unchanged`, conflicting root+policy cannot overwrite the first one.
+- Once owner/publisher policy is enrolled, the **legacy root-only** `record_verified_successor` refuses any distinct V2 generation even with a complete pinned read: `UnverifiedRead`. A signed publisher-authorized successor path is not yet implemented and must remain HOLD. Root-only research journals without approved publisher policy retain their previous behavior.
 - E2b original 12 tests and E3b/E3a/E2a regression run in same feature matrix on Windows and Linux.
 
 The tests use **synthetic Ed25519 seeds, a test-only minted pinned V2 receipt and disposable app-data**. They do not contact real Yandex Object Storage. Exact-head CI must pass before any claim of automated acceptance.
