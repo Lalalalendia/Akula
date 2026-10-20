@@ -405,7 +405,7 @@ pub fn inspect_installed_scm_process_without_pipe() -> io::Result<()> {
     let pid = service_process_id()?;
     let pinned = system_process_by_pid(pid)?;
     let sid = service_sid()?;
-    if !token_has_enabled_service_sid(pinned.token.0, sid.as_ptr().cast())? {
+    if !token_has_enabled_service_sid(pinned.token.0, sid.as_ptr() as Handle)? {
         return Err(deny("SCM process lacks enabled dedicated broker SID"));
     }
     if service_process_id()? != pid {
