@@ -32,3 +32,32 @@ The first tests and new witness tests run from aquilum-app with:
     cargo test --locked -p aquilum-core --test scope_publication_policy_lab -- --nocapture
 
 **Remaining gaps:** no durable trust-root management for an installed machine, no TTL or policy refresh, no actual networking/File Gate integration, no OS-level power loss, no key rotation or ACL delegation, and no verified two-store crash transaction. Passing a test is not proof of those capabilities.
+
+
+## Same-sequence equivocation: durable quarantine
+
+Two different Ed25519-valid decisions from the **same trusted role** for the
+**same scope and target** at the **same sequence** cannot be resolved by an
+arbitrary arrival order. This third-stage lab no longer treats "reject the second
+message while continuing to serve on the first allow" as safe.
+
+- In-memory policy quarantines precisely the affected (scope, role, target).
+  The affected publication is Pending (no new serving); independent scope B
+  and unrelated targets are unaffected.
+- The SQLite witness stores the original signed proof and the conflicting
+  signed proof in different tables, bound into the externally pinned checkpoint.
+  The conflict must survive reopen and tampering of either proof must fail closed.
+- A new signed seq+1 **alone** cannot clear equivocation because this lab
+  does not yet have independent administrator/owner epoch rotation. Recovery
+  needs a separately authorized root-of-trust/key-epoch protocol.
+- Forged contradictions signed by other peers never trigger quarantine.
+- A missing or stale external checkpoint MUST NOT be manufactured from the
+  same database. This is still a controlled lab, not a machine-protected witness.
+
+Three additional synthetic tests cover conflict persistence, corrupted
+contradiction evidence, and a forged-conflict rejection. All 18 tests remain
+under the single explicit Core integration test command.
+
+The proof tables are intentionally experimental and have no compatible
+migration guarantee to prior test-only snapshots. No system/user files are read
+or deleted, and no actual network packets are accepted.

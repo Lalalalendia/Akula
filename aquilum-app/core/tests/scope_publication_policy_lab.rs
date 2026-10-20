@@ -4,7 +4,7 @@
 
 use aquilum_core::sync::{DeviceId, DocumentId, RevisionId};
 use ring::signature::{self, KeyPair};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -111,11 +111,12 @@ enum Publication { Allowed, Pending, Blocked, NeedsReview }
 struct PolicyLab {
     anchors: Anchors,
     latest: BTreeMap<(Scope, Role, Target), SignedDecision>,
+    quarantined: BTreeSet<(Scope, Role, Target)>,
 }
 
 impl PolicyLab {
     fn new(anchors: Anchors) -> Self {
-        Self { anchors, latest: BTreeMap::new() }
+        Self { anchors, latest: BTreeMap::new(), quarantined: BTreeSet::new() }
     }
 
     fn ingest(&mut self, event: SignedDecision) -> Result<Ingest, PolicyError> {
@@ -135,6 +136,10 @@ impl PolicyLab {
             .map_err(|_| PolicyError::BadSignature)?;
 
         let key = (event.scope, event.role, event.target);
+        if self.quarantined.contains(&key) {
+            // Equivocation needs explicit root-authorized recovery, not seq+1.
+            return Err(PolicyError::Equivocation);
+        }
         if let Some(previous) = self.latest.get(&key) {
             if event.sequence < previous.sequence {
                 return Ok(Ingest::Stale(previous.clone()));
@@ -143,6 +148,7 @@ impl PolicyLab {
                 return if *previous == event {
                     Ok(Ingest::Duplicate)
                 } else {
+                    self.quarantined.insert(key);
                     Err(PolicyError::Equivocation)
                 };
             }
@@ -163,6 +169,18 @@ impl PolicyLab {
         let admin = self.action(scope, Role::Admin, Target::Object(object));
         let revision = Target::Revision(object, revision);
         let exact = Target::ExactContent(*blake3::hash(plaintext).as_bytes());
+        // A valid conflicting owner/admin signature makes this subject unsafe.
+        // No publication can use an arbitrary first-seen decision.
+        let relevant = [
+            (scope, Role::Owner, Target::Object(object)),
+            (scope, Role::Admin, Target::Object(object)),
+            (scope, Role::Owner, revision),
+            (scope, Role::Admin, revision),
+            (scope, Role::Admin, exact),
+        ];
+        if relevant.iter().any(|key| self.quarantined.contains(key)) {
+            return Publication::Pending;
+        }
         if [owner, admin,
             self.action(scope, Role::Owner, revision),
             self.action(scope, Role::Admin, revision),
@@ -396,20 +414,31 @@ fn old_allow_returns_origin_signed_anti_to_the_stale_source() {
 }
 
 #[test]
-fn sequence_equivocation_rejected_but_newer_allow_can_restore_own_role_only() {
+fn same_sequence_equivocation_quarantines_the_object_not_the_other_scope() {
     let f = Fixture::new();
     let mut p = PolicyLab::new(f.anchors.clone());
     f.allow(&mut p, f.a, f.file);
+    f.allow(&mut p, f.b, f.file);
     let deny = f.event(f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2);
     assert_eq!(p.ingest(deny.clone()), Ok(Ingest::Applied));
     let clash = f.event(f.a, Role::Admin, Target::Object(f.file), Action::Allow, 2);
     assert_eq!(p.ingest(clash), Err(PolicyError::Equivocation));
-    assert_eq!(p.ingest(deny), Ok(Ingest::Duplicate));
-    assert_eq!(p.state(f.a, f.file, f.v1, CONTENT_V1, false), Publication::Blocked);
-    p.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Allow, 3)).unwrap();
-    assert_eq!(p.state(f.a, f.file, f.v1, CONTENT_V1, false), Publication::Allowed);
-    p.ingest(f.event(f.a, Role::Owner, Target::Object(f.file), Action::Deny, 2)).unwrap();
-    assert_eq!(p.state(f.a, f.file, f.v1, CONTENT_V1, false), Publication::Blocked);
+    assert_eq!(p.state(f.a, f.file, f.v1, CONTENT_V1, false), Publication::Pending);
+    assert_eq!(p.state(f.b, f.file, f.v1, CONTENT_V1, false), Publication::Allowed);
+    // A later valid signature does not silently resolve an owner's equivocation:
+    // this lab has no trusted admin key-epoch recovery procedure yet.
+    assert_eq!(
+        p.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Allow, 3)),
+        Err(PolicyError::Equivocation)
+    );
+    assert_eq!(p.state(f.a, f.file, f.v1, CONTENT_V1, false), Publication::Pending);
+    // In an independently clean lineage the admin CAN still issue seq+1.
+    let mut clean = PolicyLab::new(f.anchors.clone());
+    f.allow(&mut clean, f.a, f.file);
+    clean.ingest(f.event(f.a, Role::Admin, Target::Object(f.file), Action::Allow, 2)).unwrap();
+    assert_eq!(clean.state(f.a, f.file, f.v1, CONTENT_V1, false), Publication::Allowed);
+    clean.ingest(f.event(f.a, Role::Owner, Target::Object(f.file), Action::Deny, 2)).unwrap();
+    assert_eq!(clean.state(f.a, f.file, f.v1, CONTENT_V1, false), Publication::Blocked);
 }
 
 #[test]
@@ -531,6 +560,8 @@ impl SignedDecision {
 struct DurablePolicyLab {
     conn: Connection,
     policy: PolicyLab,
+    // The actual signed conflicting proof must survive reboot, not just a flag.
+    conflict_proofs: BTreeMap<(Scope, Role, Target), SignedDecision>,
     poisoned: bool,
 }
 
@@ -547,6 +578,10 @@ impl DurablePolicyLab {
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=FULL;
              CREATE TABLE IF NOT EXISTS witnessed_decisions (
+                 record_key BLOB PRIMARY KEY NOT NULL,
+                 signed_proof BLOB NOT NULL
+             ) WITHOUT ROWID;
+             CREATE TABLE IF NOT EXISTS witnessed_conflicts (
                  record_key BLOB PRIMARY KEY NOT NULL,
                  signed_proof BLOB NOT NULL
              ) WITHOUT ROWID;",
@@ -573,7 +608,34 @@ impl DurablePolicyLab {
             }
         }
 
-        let store = Self { conn, policy, poisoned: false };
+        let mut conflict_proofs = BTreeMap::new();
+        {
+            let mut query = conn.prepare(
+                "SELECT record_key, signed_proof FROM witnessed_conflicts ORDER BY record_key",
+            ).map_err(WitnessError::Sql)?;
+            let rows = query.query_map([], |row| {
+                Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+            }).map_err(WitnessError::Sql)?;
+            for row in rows {
+                let (key, proof) = row.map_err(WitnessError::Sql)?;
+                let event = SignedDecision::decode_durable_proof(&proof)
+                    .ok_or(WitnessError::CorruptProof)?;
+                let identity = (event.scope, event.role, event.target);
+                if event.witness_row_key() != key || conflict_proofs.contains_key(&identity) {
+                    return Err(WitnessError::CorruptProof);
+                }
+                let original = policy.latest.get(&identity)
+                    .ok_or(WitnessError::CorruptProof)?;
+                if original.sequence != event.sequence || *original == event {
+                    return Err(WitnessError::CorruptProof);
+                }
+                if policy.ingest(event.clone()) != Err(PolicyError::Equivocation) {
+                    return Err(WitnessError::CorruptProof);
+                }
+                conflict_proofs.insert(identity, event);
+            }
+        }
+        let store = Self { conn, policy, conflict_proofs, poisoned: false };
         if let WitnessPin::Exact(expected) = pin {
             if store.checkpoint() != expected {
                 return Err(WitnessError::RollbackOrTamper);
@@ -586,12 +648,25 @@ impl DurablePolicyLab {
     // A production caller must keep the expected hash outside this SQLite DB.
     fn checkpoint(&self) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(b"AKULA:SCOPE:WITNESS-CHECKPOINT-V0\0");
+        hasher.update(b"AKULA:SCOPE:WITNESS-CHECKPOINT-V1\0");
         hasher.update(&(self.policy.latest.len() as u64).to_be_bytes());
         for ((scope, role, subject), event) in &self.policy.latest {
             // Include key and exact signed proof, in deterministic BTree order.
             let key = event.witness_row_key();
             assert_eq!((*scope, *role, *subject), (event.scope, event.role, event.target));
+            hasher.update(&(key.len() as u32).to_be_bytes());
+            hasher.update(&key);
+            let proof = event.durable_proof();
+            hasher.update(&(proof.len() as u32).to_be_bytes());
+            hasher.update(&proof);
+        }
+        // The external pin commits to BOTH valid decisions and conflicting
+        // original-signed evidence; a disk snapshot lacking a known conflict
+        // is an unauthorized rollback even if the older allow is valid.
+        hasher.update(&(self.conflict_proofs.len() as u64).to_be_bytes());
+        for (identity, event) in &self.conflict_proofs {
+            let key = event.witness_row_key();
+            assert_eq!(*identity, (event.scope, event.role, event.target));
             hasher.update(&(key.len() as u32).to_be_bytes());
             hasher.update(&key);
             let proof = event.durable_proof();
@@ -609,8 +684,46 @@ impl DurablePolicyLab {
         let mut next = PolicyLab {
             anchors: self.policy.anchors.clone(),
             latest: self.policy.latest.clone(),
+            quarantined: self.policy.quarantined.clone(),
         };
-        let outcome = next.ingest(event.clone()).map_err(WitnessError::Policy)?;
+        let outcome = match next.ingest(event.clone()) {
+            Ok(outcome) => outcome,
+            Err(PolicyError::Equivocation) => {
+                let identity = (event.scope, event.role, event.target);
+                if self.conflict_proofs.contains_key(&identity) {
+                    return Err(WitnessError::Policy(PolicyError::Equivocation));
+                }
+                // Invariant: first conflicting, signature-valid claim at
+                // the same sequence of the same scope / role / target.
+                let Some(previous) = self.policy.latest.get(&identity) else {
+                    self.poisoned = true;
+                    return Err(WitnessError::CorruptProof);
+                };
+                if previous.sequence != event.sequence || *previous == event {
+                    self.poisoned = true;
+                    return Err(WitnessError::CorruptProof);
+                }
+                let key = event.witness_row_key();
+                let proof = event.durable_proof();
+                let result = (|| -> rusqlite::Result<()> {
+                    let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                    tx.execute(
+                        "INSERT INTO witnessed_conflicts(record_key, signed_proof)
+                         VALUES (?1, ?2)", params![key, proof],
+                    )?;
+                    tx.commit()
+                })();
+                if let Err(error) = result {
+                    self.poisoned = true;
+                    return Err(WitnessError::Sql(error));
+                }
+                self.policy = next;
+                self.conflict_proofs.insert(identity, event);
+                // A committed conflict must be surfaced and must NOT publish.
+                return Err(WitnessError::Policy(PolicyError::Equivocation));
+            }
+            Err(error) => return Err(WitnessError::Policy(error)),
+        };
         if outcome != Ingest::Applied {
             return Ok(outcome);
         }
@@ -762,4 +875,92 @@ fn removed_witness_cannot_silently_recreate_genesis_from_old_disk() {
         DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Exact(phantom)),
         Err(WitnessError::AbsentWitness)
     ));
+}
+
+
+#[test]
+fn conflicting_real_admin_signatures_remain_quarantined_after_reboot() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("witness.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for scope in [f.a, f.b] {
+        for role in [Role::Owner, Role::Admin] {
+            store.ingest(f.event(scope, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+        }
+    }
+    store.ingest(f.event(
+        f.a, Role::Admin, Target::Object(f.file), Action::Deny, 2,
+    )).unwrap();
+    let contradiction = f.event(
+        f.a, Role::Admin, Target::Object(f.file), Action::Allow, 2,
+    );
+    assert!(matches!(
+        store.ingest(contradiction.clone()),
+        Err(WitnessError::Policy(PolicyError::Equivocation))
+    ));
+    assert_eq!(store.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Pending);
+    assert_eq!(store.state(f.b, f.file, f.v1, CONTENT_V1), Publication::Allowed);
+    let trusted_conflict_pin = store.checkpoint();
+    drop(store);
+    let mut restarted = DurablePolicyLab::open(
+        &db, f.anchors.clone(), WitnessPin::Exact(trusted_conflict_pin),
+    ).unwrap();
+    assert_eq!(restarted.state(f.a, f.file, f.v2, CONTENT_V2), Publication::Pending);
+    assert_eq!(restarted.state(f.b, f.file, f.v1, CONTENT_V1), Publication::Allowed);
+    assert!(matches!(
+        restarted.ingest(f.event(
+            f.a, Role::Admin, Target::Object(f.file), Action::Allow, 3,
+        )),
+        Err(WitnessError::Policy(PolicyError::Equivocation))
+    ));
+}
+
+#[test]
+fn corrupt_conflict_proof_is_rejected_even_with_valid_previous_allow() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("witness.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    let contradiction = f.event(
+        f.a, Role::Admin, Target::Object(f.file), Action::Deny, 1,
+    );
+    assert!(matches!(
+        store.ingest(contradiction),
+        Err(WitnessError::Policy(PolicyError::Equivocation))
+    ));
+    assert_eq!(store.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Pending);
+    let checkpoint = store.checkpoint();
+    store.conn.execute(
+        "UPDATE witnessed_conflicts SET signed_proof = x'00'", [],
+    ).unwrap();
+    drop(store);
+    assert!(matches!(
+        DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Exact(checkpoint)),
+        Err(WitnessError::CorruptProof)
+    ));
+}
+
+#[test]
+fn forged_contradiction_does_not_create_quarantine_or_modify_checkpoint() {
+    let f = Fixture::new();
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("witness.sqlite");
+    let mut store = DurablePolicyLab::open(&db, f.anchors.clone(), WitnessPin::Genesis).unwrap();
+    for role in [Role::Owner, Role::Admin] {
+        store.ingest(f.event(f.a, role, Target::Object(f.file), Action::Allow, 1)).unwrap();
+    }
+    let trusted_pin = store.checkpoint();
+    assert!(matches!(
+        store.ingest(sign(
+            f.a, Role::Admin, Target::Object(f.file), Action::Deny, 1,
+            &f.outsider,
+        )),
+        Err(WitnessError::Policy(PolicyError::WrongSigner))
+    ));
+    assert_eq!(store.checkpoint(), trusted_pin);
+    assert_eq!(store.state(f.a, f.file, f.v1, CONTENT_V1), Publication::Allowed);
 }
