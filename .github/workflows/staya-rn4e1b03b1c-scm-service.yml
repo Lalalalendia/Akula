@@ -46,6 +46,7 @@ jobs:
               "aquilum-app/host-broker-lab/src/main.rs",
               "aquilum-app/host-broker-lab/src/windows_client_attestation.rs",
               "aquilum-app/host-broker-lab/src/windows_scm_service.rs",
+              "aquilum-app/host-broker-lab/src/windows_server.rs",
               ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml",
               ".github/workflows/staya-rn4e1b03b1c-scm-service.yml",
               "docs/sync/staya-rn4e1b03b1c-scm-lifecycle.md",
