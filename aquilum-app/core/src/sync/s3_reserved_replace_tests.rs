@@ -8,7 +8,10 @@ use crate::sync::filegate_custody_identity::SqliteCustodyIdentityStore;
 use crate::sync::filegate_lock_custody::scoped_leaf;
 use crate::sync::filegate_lock_probe::{PinnedProbeRoot, LOCK_NAME};
 use crate::sync::guarded_note_write::{save_existing_note_with_checks_under_custody,
-    save_existing_note_with_prewrite_under_custody, GuardedNoteWriteError};
+    save_existing_note_with_prewrite_under_custody,
+    save_existing_note_with_prewrite_strict_history_under_custody,
+    GuardedNoteWriteError};
+use crate::sync::journal::InertExistingReplaceReceiptCandidate;
 use crate::sync::s3_preimage_capture::capture_registered_s3_update_preimage;
 use crate::sync::{DocumentId, JournalAction, JournalError, OperationId, RemoteGuard,
     RevisionId, S3HeadPointerV1, S3ManifestV1, S3VerifiedHead, SyncRelativePath, VaultId};
@@ -346,6 +349,49 @@ fn claim_cold_attempt_without_publication(
     ).unwrap();
 }
 
+/// Strict HistoryService is created under the real File Gate/custody callback.
+/// V8 is then written once to the same SQLite journal as V7; none of these
+/// observations can authorize a StageDownload apply or remote ACK.
+fn publish_strict_candidate_and_record_v8(f: &Fixture) {
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let outcome = save_existing_note_with_prewrite_strict_history_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope,
+        &f.intent.path, &f.new_text, &f.old_hash,
+        Source::External, Some("inert-v8-cold-fixture"),
+        || prepare(f, &admission),
+        |prepared| prepared.inspect_before_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected,
+        ),
+        |prepared, primary, history| {
+            prepared.inspect_after_write(
+                &admission, &f.bindings, &f.journal.borrow(),
+                &f.protected, primary,
+            )?;
+            let claim=f.journal.borrow()
+                .read_existing_replace_attempt(f.intent.operation_id)
+                .map_err(refused)?
+                .ok_or_else(|| refused("V7 claim absent after strict File Gate"))?;
+            let original=f.protected.read_bound_preimage(f.intent.operation_id)
+                .map_err(refused)?
+                .ok_or_else(|| refused("protected original absent after strict File Gate"))?;
+            let pinned=PinnedReadOnlyRoot::open(&f.root).map_err(refused)?;
+            let observed=pinned.read_identified_bounded(
+                &f.intent.path, MAX_PROTECTED_ORIGINAL_BYTES as u64,
+            ).map_err(refused)?;
+            let candidate=InertExistingReplaceReceiptCandidate::from_strict_history(
+                &claim, &original, history, &observed,
+            ).map_err(refused)?;
+            f.journal.borrow_mut()
+                .record_existing_replace_receipt_candidate_once(&candidate)
+                .map_err(refused)?;
+            Ok(())
+        },
+    );
+    assert!(outcome.is_ok(), "strict V8 fixture did not publish: {outcome:?}");
+    drop(admission);
+    assert_no_remote_ack(f);
+}
+
 // P0g-3d-02 tests exercise a fresh, strictly read-only SQLite recovery-open.
 // They intentionally do NOT assert crash durability or issue S3 apply authority.
 fn inert_cold_review(f: &Fixture) -> Result<InertColdS3Review, FileCommandError> {
@@ -374,6 +420,7 @@ fn p0g3d02_cold_review_original_still_visible_remains_hold() {
     let review = inert_cold_review(&f).unwrap();
     assert_eq!(review.operation_id, f.intent.operation_id);
     assert_eq!(review.file_state, InertColdS3FileState::OriginalStillVisible);
+    assert_eq!(review.v8_state, InertColdV8State::Missing);
     assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
         b"unchanged private original");
     assert_no_remote_ack(&f);
@@ -397,6 +444,7 @@ fn p0g3d02_cold_review_after_real_filegate_publication_remains_hold() {
     let review = inert_cold_review(&f).unwrap();
     assert_eq!(review.file_state,
         InertColdS3FileState::CandidateVisibleWithoutReceipt);
+    assert_eq!(review.v8_state, InertColdV8State::Missing);
     assert_no_remote_ack(&f);
 }
 
@@ -538,6 +586,7 @@ fn p0g3d02_separate_core_after_all_connections_close_is_forensic_only() {
         &admission, &profiles, &journal, &originals, intent.operation_id,
     ).unwrap();
     assert_eq!(review.file_state, InertColdS3FileState::OriginalStillVisible);
+    assert_eq!(review.v8_state, InertColdV8State::Missing);
     assert_eq!(originals.read_bound_preimage(intent.operation_id)
         .unwrap().unwrap().original.content_hash, old_hash);
     assert_eq!(journal.get(intent.operation_id).unwrap().unwrap().phase,
@@ -550,4 +599,49 @@ fn p0g3d02_separate_core_after_all_connections_close_is_forensic_only() {
         b"unchanged private original");
     // A new Core, and matching original bytes, grant no remote ACK and no
     // permission to replay an already consumed V7 existing-replace claim.
+}
+
+
+#[test]
+fn p0g3d06_strict_v8_candidate_cold_join_is_still_hold() {
+    let f=fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    let review=inert_cold_review(&f).unwrap();
+    assert_eq!(review.operation_id,f.intent.operation_id);
+    assert_eq!(review.file_state,
+        InertColdS3FileState::CandidateVisibleWithoutReceipt);
+    assert_eq!(review.v8_state,InertColdV8State::LocalCorrelationOnly);
+    assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
+        f.new_text.as_bytes());
+    assert_no_remote_ack(&f);
+}
+
+#[test]
+fn p0g3d06_reopened_v8_refuses_changed_inode_and_tampered_sqlite_digest() {
+    let f=fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    let target=f.root.join(f.intent.path.as_str());
+    let parked=f.root.join("preserved-published-candidate.md");
+    fs::rename(&target,&parked).unwrap();
+    fs::write(&target,f.new_text.as_bytes()).unwrap();
+    assert!(inert_cold_review(&f).is_err(),
+        "same bytes at another inode cannot inherit a saved V8 receipt");
+    assert_eq!(fs::read(&parked).unwrap(),f.new_text.as_bytes());
+    assert_no_remote_ack(&f);
+    // After restoring the correct physical identity, any tampered candidate
+    // digest must reject, rather than making a missing V8 look like a clean
+    // V7-only attempt or silently replaying the consumed one-shot fence.
+    fs::remove_file(&target).unwrap();
+    fs::rename(&parked,&target).unwrap();
+    let database=f.appdata.join("journal.sqlite");
+    let connection=rusqlite::Connection::open(&database).unwrap();
+    connection.execute(
+        "UPDATE sync_existing_replace_receipt_candidates
+            SET candidate_digest='tampered' WHERE operation_id=?1",
+        [f.intent.operation_id.to_string()],
+    ).unwrap();
+    drop(connection);
+    assert!(inert_cold_review(&f).is_err(),
+        "corrupt V8 digest must fail closed");
+    assert_no_remote_ack(&f);
 }
