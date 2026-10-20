@@ -35,6 +35,14 @@ jobs:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: mcp-http-windows-v1
           save-if: false
+      - name: Test two-database MCP disclosure epoch and partial send on Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::agent_disclosure_epoch_lab::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-disclosure-epoch-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test real Windows TCP admission and stop
         shell: pwsh
         working-directory: aquilum-app
@@ -82,14 +90,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cargo test --locked -p aquilum-core --lib mcp::agent_scoped_read::tests:: -- --nocapture --test-threads=1 2>&1 |
             Tee-Object -FilePath ../mcp-scoped-pinned-read-windows.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Test two-database MCP disclosure epoch and partial send on Windows
-        shell: pwsh
-        working-directory: aquilum-app
-        run: |
-          $ErrorActionPreference = 'Stop'
-          cargo test --locked -p aquilum-core --lib mcp::agent_disclosure_epoch_lab::tests:: -- --nocapture --test-threads=1 2>&1 |
-            Tee-Object -FilePath ../mcp-disclosure-epoch-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve native MCP test transcripts
         if: always()
