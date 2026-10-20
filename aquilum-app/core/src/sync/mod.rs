@@ -165,6 +165,11 @@ pub use s3_signed_root_paev1::{
     DecodedDsseEnvelope, DecodedSignature, SignedRootError,
     SignedRootObservation, ROOT_PAYLOAD_TYPE,
 };
+#[cfg(feature = "signed-vault-policy-lab")]
+pub use s3_publisher_policy_lab::{
+    verify_policy_transition, PolicyLabError, PolicyTransitionObservation,
+    PublisherPolicyV1, POLICY_PAYLOAD_TYPE,
+};
 pub use s3_pack_index::{
     S3PackedHeadV2, S3PackIndexRootV2, S3PackIndexShardV2,
     S3PackDescriptorV2, S3PackMemberV2, S3PackShardRefV2,
