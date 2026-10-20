@@ -83,7 +83,9 @@ try {
         $button = $buttons.Item($i)
         $label = [string]$button.Current.Name
         $automationId = [string]$button.Current.AutomationId
-        if ($label -in @('Cancel', 'Отмена') -or $automationId -eq '2') {
+        # PowerShell 5.1 reads UTF-8 source without BOM using the local ANSI code page.
+        # Use ASCII-only literals; AutomationId 2 identifies native IDCANCEL.
+        if ($label -eq 'Cancel' -or $automationId -eq '2') {
             if (-not $button.Current.IsEnabled) {
                 throw 'The genuine Windows CredUI Cancel button is disabled'
             }
