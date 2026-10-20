@@ -3,6 +3,8 @@ use base64::Engine;
 // RELEASE-SIGNED-ADMISSION-01: compiled, but no publisher key and no live apply.
 #[allow(dead_code)]
 mod signed_candidate;
+#[cfg(target_os = "linux")]
+pub(crate) use signed_candidate::SignedCandidate;
 use std::io::Read;
 
 pub(super) const ENDPOINT: &str = "https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json";
