@@ -4,6 +4,9 @@ mod release;
 #[cfg(target_os = "linux")]
 #[allow(dead_code)] // Transaction engine compiled; publisher approval remains HOLD.
 mod linux_transaction;
+#[cfg(target_os = "linux")]
+#[allow(dead_code)] // Private stage verification does not enable updater publication.
+mod linux_signed_stage;
 #[cfg(target_os = "macos")]
 mod tar;
 #[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
