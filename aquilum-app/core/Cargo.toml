@@ -12,6 +12,8 @@ default = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
+# Offline extracted Notion directory inventory; opt-in, no vault writes.
+notion-export-probe = []
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = []
 # Pure offline release-signature gate; never executes or installs a package.
@@ -34,6 +36,11 @@ sync-installed-host-witness = ["sync-installed-host"]
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness"]
 # Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
 sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
+
+[[bin]]
+name = "akula-notion-export-probe"
+path = "src/bin/akula_notion_export_probe.rs"
+required-features = ["notion-export-probe"]
 
 [[bin]]
 name = "akula-node-lab"
