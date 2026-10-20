@@ -156,6 +156,22 @@ UNIT_FILE
     kill -9 "$$"
     fail "SIGKILL failed"
     ;;
+  forceoff-hold)
+    test ! -e "$PREFIX/in-progress" || fail "prior pending state"
+    test "$(readlink "$PREFIX/active")" = releases/0001 || fail "previous signed release absent"
+    # The v2 candidate must have passed B1a verification even though it is
+    # intentionally not a healthy service. Unverified bytes never activate.
+    "$VERIFY" verify "$PREFIX/releases/0002/node" \
+      "$UPLOAD/v2.manifest" "$UPLOAD/v2.sig" "$TRUST"
+    printf 'previous=0001 candidate=0002\n' > "$PREFIX/in-progress"
+    sync "$PREFIX"
+    systemctl stop "$SERVICE"
+    atomic_link 0002
+    test "$(readlink "$PREFIX/active")" = releases/0002
+    echo "B1B2B_VM_FORCEOFF_BARRIER_AT_V2"
+    # Prove QEMU death rather than returning from a successful guest command.
+    while :; do sleep 1; done
+    ;;
   recover)
     test -f "$PREFIX/in-progress" || fail "no interrupted operation"
     test "$(readlink "$PREFIX/active")" = releases/0002 \

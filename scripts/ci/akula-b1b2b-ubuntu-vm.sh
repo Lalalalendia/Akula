@@ -22,6 +22,7 @@ test -x .artifacts/cargo-native/debug/examples/akula_b1b2b_release_fixture
 lab="$(mktemp -d /tmp/akula-b1b2b-ubuntu.XXXXXXXX)"
 chmod 0700 "$lab"
 guest_pid=""
+active_ssh_pid=""
 cleanup(){
   result=$?
   trap - EXIT
@@ -29,6 +30,10 @@ cleanup(){
     echo "B1B2B_VM_FAILURE_WITNESS" >&2
     test ! -f "$lab/console.log" || tail -n 80 "$lab/console.log" >&2
     test ! -f "$lab/qemu.log" || tail -n 30 "$lab/qemu.log" >&2
+  fi
+  if [[ -n "$active_ssh_pid" ]]; then
+    kill "$active_ssh_pid" 2>/dev/null || true
+    wait "$active_ssh_pid" 2>/dev/null || true
   fi
   if [[ -n "$guest_pid" ]]; then
     kill "$guest_pid" 2>/dev/null || true
@@ -136,13 +141,19 @@ PY
 accelerator=tcg
 if [[ -r /dev/kvm && -w /dev/kvm ]]; then accelerator=kvm; fi
 echo "B1B2B_QEMU_ACCELERATOR=$accelerator"
-qemu-system-x86_64 -machine "accel=$accelerator" -m 2048 -smp 2 \
-  -display none -monitor none -serial "file:$lab/console.log" \
-  -drive "if=virtio,file=$lab/guest.qcow2,format=qcow2,snapshot=on" \
-  -drive "if=virtio,file=$lab/seed.iso,format=raw" \
-  -netdev "user,id=labnet,restrict=on,hostfwd=tcp:127.0.0.1:$ssh_port-:22" \
-  -device virtio-net-pci,netdev=labnet > "$lab/qemu.log" 2>&1 &
-guest_pid="$!"
+# A disposable, signature-verified image COPY is the ONLY writable guest disk.
+# snapshot=off is essential: forced QEMU death must not discard the entire
+# guest disk and accidentally test a fresh machine instead of persisted state.
+start_qemu(){
+  qemu-system-x86_64 -machine "accel=$accelerator" -m 2048 -smp 2 \
+    -display none -monitor none -serial "file:$lab/console.log" \
+    -drive "if=virtio,file=$lab/guest.qcow2,format=qcow2,snapshot=off" \
+    -drive "if=virtio,file=$lab/seed.iso,format=raw" \
+    -netdev "user,id=labnet,restrict=on,hostfwd=tcp:127.0.0.1:$ssh_port-:22" \
+    -device virtio-net-pci,netdev=labnet > "$lab/qemu.log" 2>&1 &
+  guest_pid="$!"
+}
+start_qemu
 printf 'akula-b1b2b %s\n' "$host_pub" > "$lab/known_hosts"
 chmod 0600 "$lab/known_hosts"
 ssh_lab(){
@@ -237,5 +248,85 @@ ssh_lab "sudo test -f /opt/akula-b1b2b-lab/in-progress &&
   test \"\$(sudo readlink /opt/akula-b1b2b-lab/active)\" = releases/0002"
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh recover"
 echo "B1B2B_VM_OS_REBOOT_RECOVERY_PASS"
+
+# Separate failure mode: kill the WHOLE virtual machine while the guest
+# installer process is still alive after changing the durable active pointer.
+# No systemctl reboot, guest cleanup, or graceful guest shutdown is allowed.
+boot_before_poweroff="$(ssh_lab cat /proc/sys/kernel/random/boot_id)"
+[[ "$boot_before_poweroff" =~ ^[0-9a-f-]{36}$ ]]
+ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh forceoff-hold" \
+  >"$lab/forceoff-witness.log" 2>&1 &
+active_ssh_pid="$!"
+barrier_seen=false
+for i in $(seq 1 150); do
+  if grep -Fq "B1B2B_VM_FORCEOFF_BARRIER_AT_V2" "$lab/forceoff-witness.log"; then
+    barrier_seen=true
+    break
+  fi
+  if ! kill -0 "$guest_pid" 2>/dev/null ||
+     ! kill -0 "$active_ssh_pid" 2>/dev/null; then
+    echo "B1B2B_REFUSED: QEMU or installer exited before forceoff barrier" >&2
+    exit 1
+  fi
+  sleep 0.2
+done
+if [[ "$barrier_seen" != true ]]; then
+  echo "B1B2B_REFUSED: no guest evidence of in-progress candidate at forceoff" >&2
+  exit 1
+fi
+echo "B1B2B_VM_FORCEOFF_BARRIER_AT_V2"
+# A SIGKILL to the host QEMU process drops the *entire* Linux guest
+# immediately, without an in-guest systemctl stop or reboot.
+kill -KILL "$guest_pid"
+set +e
+wait "$guest_pid"
+qemu_exit=$?
+set -e
+guest_pid=""
+if (( qemu_exit != 137 )); then
+  echo "B1B2B_REFUSED: QEMU did not terminate from SIGKILL ($qemu_exit)" >&2
+  exit 1
+fi
+echo "B1B2B_VM_QEMU_FORCEOFF_CONFIRMED"
+kill "$active_ssh_pid" 2>/dev/null || true
+wait "$active_ssh_pid" 2>/dev/null || true
+active_ssh_pid=""
+cp "$lab/console.log" "$lab/console.pre-forceoff.log"
+# Restart the same disposable qcow2 from scratch. The image is not pristine:
+# systemd unit, trusted key, signed artifacts and journal must survive.
+start_qemu
+ready_after_forceoff=false
+for i in $(seq 1 260); do
+  if ! kill -0 "$guest_pid" 2>/dev/null; then
+    echo "B1B2B_REFUSED: QEMU died while restarting existing guest disk" >&2
+    exit 1
+  fi
+  reboot_id="$(ssh_lab cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+  if [[ "$reboot_id" =~ ^[0-9a-f-]{36}$ &&
+        "$reboot_id" != "$boot_before_poweroff" ]]; then
+    ready_after_forceoff=true
+    break
+  fi
+  sleep 2
+done
+if [[ "$ready_after_forceoff" != true ]]; then
+  echo "B1B2B_REFUSED: no new kernel boot on same qcow2 after hardoff" >&2
+  exit 1
+fi
+echo "B1B2B_VM_HARDOFF_BOOT_ID_CHANGED"
+# ssh_lab always performs strict host-key pinning. Check the *release*
+# trust root was also preserved and did not silently fall back to a new key.
+ssh_lab "sudo cloud-init status --wait && sudo cloud-init schema --system --annotate"
+ssh_lab "sudo test -f /etc/akula-b1b2b-lab.marker &&
+  test \"\$(sudo sha256sum /etc/akula-b1b2b-lab-public.ed25519 | cut -d ' ' -f1)\" = '$expected_key_sha'"
+if ssh_lab "sudo systemctl is-active --quiet akula-b1b2b-lab.service"; then
+  echo "B1B2B_REFUSED: unconfirmed signed candidate started during hardoff restart" >&2
+  exit 1
+fi
+ssh_lab "sudo test -f /opt/akula-b1b2b-lab/in-progress &&
+  test \"\$(sudo readlink /opt/akula-b1b2b-lab/active)\" = releases/0002"
+echo "B1B2B_VM_HARDOFF_PERSISTENCE_PASS"
+ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh recover"
+echo "B1B2B_VM_HARDOFF_SIGNED_RECOVERY_PASS"
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh cleanup"
-echo "B1B2B_PASS: schema-valid Ubuntu VM, B1a signed Node, systemd, rejected bad upgrade, SIGKILL plus guest reboot recovery"
+echo "B1B2B_PASS: schema-valid Ubuntu VM, signed Node, SIGKILL installer, OS reboot, QEMU SIGKILL and signed recovery"
