@@ -5,7 +5,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${BENCH_OUTPUT_DIR:-$HERE/results/corpus}"
 TIER="${CORPUS_TIER:-smoke}"
 REPEATS="${REPEATS:-3}"
-case "$TIER" in smoke|extended) ;; *) echo "invalid tier" >&2; exit 2;; esac
+case "$TIER" in smoke|extended|stress) ;; *) echo "invalid corpus tier: $TIER (expected smoke, extended or stress)" >&2; exit 2;; esac
 case "$REPEATS" in 1|2|3|4|5|6|7|8|9|10) ;; *) echo "repeats 1..10 required" >&2; exit 2;; esac
 mkdir -p "$OUT" "$OUT/inputs" "$OUT/reference"
 : > "$OUT/decode.log"; : > "$OUT/quality.txt"
