@@ -1,0 +1,45 @@
+# RELEASE-LINUX-ROLLBACK-01: crash-only filesystem experiment.
+# This is not the production updater and never publishes packages.
+name: Akula Linux AppImage rollback lab
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/linux-appimage-transaction-lab.rs'
+      - '.github/workflows/linux-appimage-rollback-lab.yml'
+      - 'docs/release/AKULA-LINUX-ROLLBACK-LAB-01.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-rollback-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile minimal std-only Rust transaction harness with denied warnings
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition=2024 --test -D warnings scripts/linux-appimage-transaction-lab.rs \
+            -o "$RUNNER_TEMP/akula-linux-rollback-lab"
+      - name: Real two-process SIGKILL, OS flock, rename and cold recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/akula-linux-rollback-lab" --nocapture --test-threads=4 \
+            | tee "$RUNNER_TEMP/akula-linux-rollback-lab.log"
+          grep -Fq 'test tests::actual_sigkill_after_old_backup_then_independent_cold_recovery ... ok' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
+          grep -Fq 'test tests::actual_sigkill_after_new_publish_preserves_both_generations ... ok' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
+          grep -Fq 'test tests::actual_sigkill_halfway_through_rollback_restores_previous ... ok' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
+          grep -Fq 'test result: ok. 10 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-rollback-lab.log"
+          echo 'AKULA_LINUX_APPIMAGE_ROLLBACK_LAB_PASS actual_sigkill=3 old_and_new_preserved=1'
+      - name: Old Aquilum release and installed updater remain disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/release-isolation-policy.test.cjs
+          grep -Fq 'pub(super) const PUBLIC_KEY: &str = "";' aquilum-app/native/src/updater/release.rs
+          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'false'
+          echo 'AKULA_RELEASE_HOLD_PASS signing=disabled updater=disabled'
