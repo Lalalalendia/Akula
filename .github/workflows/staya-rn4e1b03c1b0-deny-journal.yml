@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import subprocess
-          base = "e49c923c664fc732d2ca196c23400c7881109975"
+          base = "687bcd2c7fb787c07764d34846bdf31ee1a9e590"
           changed = set(subprocess.check_output(
               ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
           ).splitlines())
