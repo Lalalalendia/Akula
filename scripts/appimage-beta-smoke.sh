@@ -146,15 +146,36 @@ env.update({
 with open("/tmp/akula-appimage-ack-child.log", "wb") as output:
     proc = subprocess.Popen(
         [image, "--vault", "/tmp/vault", "--open", "/tmp/vault/First.md"],
-        env=env, pass_fds=(child.fileno(),), stdout=output, stderr=subprocess.STDOUT,
+        env=env, pass_fds=(child.fileno(),), stdout=output,
+        stderr=subprocess.STDOUT, start_new_session=True,
     )
     child.close()
     try:
         with parent.makefile("rb") as peer:
             line = peer.readline(260)
-        expected = f"AKULA-LINUX-FIRST-GUI-V1\t{nonce}\t{proc.pid}\t{digest}\n".encode()
-        if line != expected:
-            raise RuntimeError("ACK mismatch / wrong child / wrong nonce / no visible frame: " + repr(line))
+        # APPIMAGE_EXTRACT_AND_RUN may fork a payload while the runtime
+        # waits to clean up extracted files. The GUI is an OS descendant of
+        # our launch process, not necessarily identical to the wrapper PID.
+        def in_launch_tree(pid, root):
+            for _ in range(12):
+                if pid == root:
+                    return True
+                if pid <= 1:
+                    return False
+                status = Path(f"/proc/{pid}/status").read_text()
+                parents = [part.split(":", 1)[1].strip()
+                           for part in status.splitlines() if part.startswith("PPid:")]
+                if len(parents) != 1:
+                    return False
+                pid = int(parents[0])
+            return False
+        parts = line.decode("ascii", "strict").rstrip("\n").split("\t")
+        if len(parts) != 4 or parts[0] != "AKULA-LINUX-FIRST-GUI-V1" \
+           or parts[1] != nonce or parts[3] != digest:
+            raise RuntimeError("ACK protocol/nonce/package digest mismatch: " + repr(line))
+        gui_pid = int(parts[2])
+        if not in_launch_tree(gui_pid, proc.pid) or os.getpgid(gui_pid) != proc.pid:
+            raise RuntimeError(f"ACK sender {gui_pid} is not in AppImage process tree/session {proc.pid}")
         print("AKULA_LINUX_FIRST_GUI_ACK_RECEIVED", flush=True)
         result = proc.wait(timeout=45)
         if result:
