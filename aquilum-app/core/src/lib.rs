@@ -10,6 +10,8 @@ pub mod markdown;
 pub mod mcp;
 pub mod plugins;
 pub mod migration;
+#[cfg(feature = "notion-api-probe")]
+pub mod notion_api_probe;
 pub mod search;
 pub mod settings;
 pub mod sync;
