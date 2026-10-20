@@ -3,6 +3,12 @@
  //! Read/hash CPU time comes from prepared files produced on worker threads.
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static PREPARED: AtomicU64 = AtomicU64::new(0);
+static BYTES: AtomicU64 = AtomicU64::new(0);
+static READ_NS: AtomicU64 = AtomicU64::new(0);
+static HASH_NS: AtomicU64 = AtomicU64::new(0);
 
 #[repr(usize)]
 #[derive(Clone, Copy)]
@@ -12,8 +18,6 @@ pub(crate) enum Stage {
     Probe,
     Writer,
     PrepareWall,
-    ReadCpu,
-    HashCpu,
     Created,
     TantivyAdd,
     Wiki,
@@ -27,14 +31,12 @@ pub(crate) enum Stage {
     Maintenance,
 }
 
-const LABELS: [&str; 18] = [
+const LABELS: [&str; 16] = [
     "metadata_load",
     "directory_next",
     "probe",
     "writer",
     "prepare_wall",
-    "read_cpu_sum",
-    "hash_cpu_sum",
     "created",
     "tantivy_add",
     "wiki",
@@ -50,16 +52,12 @@ const LABELS: [&str; 18] = [
 
 struct Metrics {
     ns: [u128; LABELS.len()],
-    prepared: u64,
-    bytes: u64,
 }
 
 impl Default for Metrics {
     fn default() -> Self {
         Self {
             ns: [0; LABELS.len()],
-            prepared: 0,
-            bytes: 0,
         }
     }
 }
@@ -70,6 +68,10 @@ thread_local! {
 
 pub(crate) fn reset() {
     METRICS.with(|cell| *cell.borrow_mut() = Metrics::default());
+    PREPARED.store(0, Ordering::Relaxed);
+    BYTES.store(0, Ordering::Relaxed);
+    READ_NS.store(0, Ordering::Relaxed);
+    HASH_NS.store(0, Ordering::Relaxed);
 }
 
 pub(crate) fn add_ns(stage: Stage, nanoseconds: u128) {
@@ -87,13 +89,10 @@ pub(crate) fn time<T>(stage: Stage, operation: impl FnOnce() -> T) -> T {
 }
 
 pub(crate) fn prepared(bytes: usize, read_ns: u128, hash_ns: u128) {
-    METRICS.with(|cell| {
-        let mut data = cell.borrow_mut();
-        data.prepared += 1;
-        data.bytes = data.bytes.saturating_add(bytes as u64);
-    });
-    add_ns(Stage::ReadCpu, read_ns);
-    add_ns(Stage::HashCpu, hash_ns);
+    PREPARED.fetch_add(1, Ordering::Relaxed);
+    BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    READ_NS.fetch_add(read_ns.min(u64::MAX as u128) as u64, Ordering::Relaxed);
+    HASH_NS.fetch_add(hash_ns.min(u64::MAX as u128) as u64, Ordering::Relaxed);
 }
 
 /// Times the actual recursive filesystem iterator's next(), including the
@@ -123,13 +122,17 @@ pub(crate) fn print_scan(documents: u64, wall: Duration) {
         let data = cell.borrow();
         print!(
             "INDEX-STAGE documents={documents} prepared={} input_bytes={} wall_ms={:.3}",
-            data.prepared,
-            data.bytes,
+            PREPARED.load(Ordering::Relaxed),
+            BYTES.load(Ordering::Relaxed),
             wall.as_secs_f64() * 1000.0,
         );
         for (label, nanoseconds) in LABELS.iter().zip(data.ns.iter()) {
             print!(" {label}_ms={:.3}", *nanoseconds as f64 / 1_000_000.0);
         }
-        println!();
+        println!(
+            " read_cpu_sum_ms={:.3} hash_cpu_sum_ms={:.3}",
+            READ_NS.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+            HASH_NS.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+        );
     });
 }
