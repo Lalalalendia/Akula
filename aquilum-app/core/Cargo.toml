@@ -30,6 +30,9 @@ signed-vault-policy-lab = ["signed-vault-root-lab"]
 signed-vault-policy-receipt-lab = ["signed-vault-policy-lab", "sync-s3"]
 # E3a: offline owner-signed join-genesis review; no transport or File Gate.
 signed-vault-pairing-lab = ["signed-vault-policy-lab"]
+# E3b: explicit owner approval + full pinned V2 read-only S3 join preview.
+# Depends on existing root/policy trust journal, never on any S3 writer.
+signed-vault-pinned-join-lab = ["signed-vault-pairing-lab", "signed-vault-policy-receipt-lab"]
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.

@@ -1,0 +1,67 @@
+name: YC-S3 E3b owner-signed pinned V2 join
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3a-outofband-pairing-20261020
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/s3_join_pinned_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_join_genesis_lab.rs'
+      - '.github/workflows/yc-s3-e3b-pinned-join.yml'
+      - 'docs/sync/YC-S3-T01d-E3b-pinned-join-lab.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-join:
+    name: Owner identity and bounded V2 read gate (no cloud writes)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: E3b signed invite + fully pinned read-only receipt negative matrix
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-pinned-join-lab s3_join_pinned_lab::tests -- --test-threads=1
+      - name: Regression E3a join E2a publisher and E2b guarded receipt
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-pinned-join-lab s3_join_genesis_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-pinned-join-lab s3_publisher_policy_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-pinned-join-lab s3_v2_trust_anchor::policy_receipt_lab::tests -- --test-threads=1
+      - name: Installed Akula Core never enables E3b
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          if grep -Eq 'signed-vault-(root|policy|pairing|pinned-join)-lab' native/Cargo.toml; then
+            echo 'Experimental owner trust and pinned S3 join must remain disabled by default'
+            exit 1
+          fi
