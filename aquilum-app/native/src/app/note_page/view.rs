@@ -45,13 +45,30 @@ impl App {
     /// guessed wheel offset. Return None unless the anchor can be laid out.
     #[cfg(not(feature = "installed"))]
     pub(crate) fn image_scan_reveal(&mut self, root: &mut RenderRoot, byte: usize) -> Option<(f64, f64)> {
-        let before = self.scroll_geometry(root)?.2;
+        // A single programmatic reveal is NOT sufficient for a document
+        // whose images decode asynchronously: their real 138px layout
+        // heights replace estimates after the initial anchor seek. The
+        // first Win32 proof painted 10 images but 8 lay *outside* the
+        // current viewport. Re-measure the target on every dwell tick
+        // and only re-center when geometry actually drifts.
+        let (viewport_y, editor_y, before) = self.scroll_geometry(root)?;
         let ids = self.note_ids.as_ref()?;
         let scroll = ids.scroll;
         let body = ids.body;
-        root.get_widget(ids.body.id())
+        let top = root.get_widget(body.id())
             .and_then(|w| w.downcast::<crate::ui::editor::TextEditor>())?
             .inner().top_of(byte)?;
+        let height = root.get_widget(scroll.id())?.ctx().bounding_box().height();
+        if !top.is_finite() || !height.is_finite() || height <= 0.0 {
+            return None;
+        }
+        let error = editor_y + top - viewport_y - height * 0.5;
+        if error.abs() <= 8.0 {
+            // The actual paragraph position is already centered. Don't
+            // request an extra layout or rebuild the retained scene just
+            // to generate artificial CPU work.
+            return Some((before, before));
+        }
         self.reveal(root, byte);
         // The normal real-wheel ScrollArea path explicitly requests Compose
         // and PostPaint when its offset changes; set_offset() used by
@@ -73,6 +90,9 @@ impl App {
         static FIRST_REPAINT: std::sync::Once = std::sync::Once::new();
         FIRST_REPAINT.call_once(|| eprintln!("AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED"));
         let after = self.scroll_geometry(root)?.2;
+        eprintln!(
+            "AKULA_IMAGE_ANCHOR_RECENTER byte={byte} pre_error={error:.1} from={before:.1} to={after:.1}"
+        );
         Some((before, after))
     }
 
