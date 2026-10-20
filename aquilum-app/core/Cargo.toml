@@ -33,6 +33,8 @@ server-bootstrap-b1b3a-helper-ipc-lab = []
 server-bootstrap-b1b3b-root-helper-lab = ["server-bootstrap-b1b3a-helper-ipc-lab"]
 # Root-owned helper additionally verifies a real B1a signed ELF by pinned FD.
 server-bootstrap-b1b3c-pinned-fd-lab = ["server-bootstrap-b1b3b-root-helper-lab", "server-bootstrap-b1a-release-lab"]
+# Inert signed owner + external witness CAS correspondence. No installation.
+server-bootstrap-b1b4a-cas-fence-lab = ["server-bootstrap-b1b3c-pinned-fd-lab", "server-bootstrap-b1b1c-witness-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []

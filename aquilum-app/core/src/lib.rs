@@ -46,5 +46,8 @@ pub mod server_installer_ipc_lab;
 #[cfg(all(target_os = "linux",feature = "server-bootstrap-b1b3c-pinned-fd-lab"))]
 pub mod server_installer_pinned_release_lab;
 
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b4a-cas-fence-lab"))]
+pub mod server_installer_cas_fence_lab;
+
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
