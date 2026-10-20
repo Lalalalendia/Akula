@@ -25,13 +25,12 @@ enum Hold {
     NoExternalWitness,
     WrongInstallerBinding,
     Journal(JournalHold),
-    // A valid old snapshot replaced a newer journal.
-    JournalRolledBack,
+    // A valid old snapshot OR an interrupted commit can leave the file
+    // behind the external witness. We cannot distinguish without recovery.
+    JournalBehindWitness,
     // Journal fsync may have succeeded, but independent trust never sealed
     // it. The new record is not permission and cannot self-promote.
     JournalAheadOfWitness,
-    // Trusted seal may have advanced before a write/crash, or journal lost.
-    JournalBehindWitness,
     DivergentFloorMap,
 }
 
@@ -77,7 +76,7 @@ fn inspect_against_external_witness(
         Err(error) => return Outcome::Hold(Hold::Journal(error)),
     };
     if actual.sequence < expected.expected_sequence {
-        return Outcome::Hold(Hold::JournalRolledBack);
+        return Outcome::Hold(Hold::JournalBehindWitness);
     }
     if actual.sequence > expected.expected_sequence {
         return Outcome::Hold(Hold::JournalAheadOfWitness);
@@ -181,7 +180,7 @@ mod tests {
         // The adversary can replace the whole on-disk file while no reader
         // has it open; its CRC/sequence/header remain perfectly valid.
         fs::write(&j.path, valid_old).unwrap();
-        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::Hold(Hold::JournalRolledBack));
+        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::Hold(Hold::JournalBehindWitness));
     }
 
     #[test]
@@ -189,7 +188,7 @@ mod tests {
         let j = JournalFixture::new("two-stage");
         let w0 = witness(0, &[]);
         let w1 = witness(1, &[(DEVICE_A, 1)]);
-        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::Hold(Hold::JournalRolledBack));
+        assert_eq!(inspect(&j.path, Some(&w1)), Outcome::Hold(Hold::JournalBehindWitness));
         assert_eq!(revoke_existing(&j.path, BINDING, DEVICE_A, 0), Ok(1));
         assert_eq!(inspect(&j.path, Some(&w0)), Outcome::Hold(Hold::JournalAheadOfWitness));
         assert_eq!(inspect(&j.path, Some(&w1)), Outcome::ConsistentDenialSnapshotOnly);
@@ -237,7 +236,7 @@ mod tests {
     fn any_unknown_earlier_or_later_sequence_stays_hold_not_auto_sync() {
         let j = JournalFixture::new("unknown-sequence");
         let high = witness(u64::MAX, &[]);
-        assert_eq!(inspect(&j.path, Some(&high)), Outcome::Hold(Hold::JournalRolledBack));
+        assert_eq!(inspect(&j.path, Some(&high)), Outcome::Hold(Hold::JournalBehindWitness));
         assert_eq!(revoke_existing(&j.path, BINDING, DEVICE_A, 0), Ok(1));
         let empty = witness(0, &[]);
         assert_eq!(inspect(&j.path, Some(&empty)), Outcome::Hold(Hold::JournalAheadOfWitness));
