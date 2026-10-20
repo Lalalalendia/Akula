@@ -7,18 +7,26 @@ fn version_with_large_diff(h: &mut Harness, path: &std::path::Path) -> crate::hi
 
     let replacement = "Версия с большой историей.\n".repeat(1_000);
     let hash = read_file_snapshot_impl(path).unwrap().hash;
+    // Seed a real large disk-backed history entry *before* opening the note.
+    // Writing externally while the editor is open could instead exercise
+    // stale-document conflict handling rather than the view's memory lifetime.
     gate::write(&h.app.workspace.core, path, &replacement, Some(&hash), Source::Me, None).unwrap();
-    h.app.load_history(&mut h.root);
-    h.app.history.as_ref().unwrap().versions.iter().find(|v| !v.is_current)
-        .cloned().expect("history contains a previous version")
+    crate::history::page(&h.app.workspace.core, path, crate::history::PAGE_SIZE)
+        .versions
+        .into_iter()
+        .find(|version| {
+            crate::history::texts(&h.app.workspace.core, path, &version.id)
+                .is_some_and(|texts| texts.text == replacement)
+        })
+        .expect("history contains the 1,000-line diff, not the short old version")
 }
 
 #[test]
 fn closing_version_discards_hidden_widget_tree_but_not_disk_history() {
     let mut h = Harness::new();
     let path = h.write_note("large-history.md", "Первоначальный текст.\n");
-    assert!(h.app.open(&mut h.root, path.clone()));
     let version = version_with_large_diff(&mut h, &path);
+    assert!(h.app.open(&mut h.root, path.clone()));
     h.app.open_version(&mut h.root, version.clone());
     let widget = h.app.version_view.as_ref().expect("version open").back;
     assert!(h.root.get_widget(widget).is_some());
@@ -36,8 +44,8 @@ fn tab_switch_evicts_inactive_diff_and_restores_history_on_return() {
     let mut h = Harness::new();
     let first = h.write_note("versioned.md", "Первоначальный текст.\n");
     let second = h.write_note("other.md", "Другая заметка.\n");
-    assert!(h.app.open(&mut h.root, first.clone()));
     let version = version_with_large_diff(&mut h, &first);
+    assert!(h.app.open(&mut h.root, first.clone()));
     h.app.open_version(&mut h.root, version);
     let old = h.app.version_view.as_ref().expect("diff mounted").back;
     let first_tab = h.app.tabs.active_id();
