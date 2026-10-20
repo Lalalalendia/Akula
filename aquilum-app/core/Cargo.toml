@@ -19,6 +19,8 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
+# Disabled P2P policy journal research. Never enabled by native Akula.
+staya-core-grant-lab = []
 # Separately selected packaged build: force every default Core::open through
 # the compiler-pinned local host registry. No AWS SDK or S3 engine implied.
 sync-installed-host = ["host-custody"]

@@ -19,6 +19,10 @@ mod filegate_custody_identity;
 mod host_ledger_identity;
 #[cfg(feature = "host-custody")]
 pub(crate) mod host_custody_registry;
+#[cfg(feature = "staya-core-grant-lab")]
+pub mod peer_grant_lab;
+#[cfg(all(test, feature = "host-custody", feature = "staya-core-grant-lab"))]
+mod peer_replica_join_lab_tests;
 #[cfg(feature = "sync-installed-host-witness")]
 pub(crate) mod host_install_witness;
 #[cfg(feature = "sync-installed-host-unix-root-witness")]
