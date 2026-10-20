@@ -199,6 +199,28 @@ enum CheckedHistoryEvidence {
     Verified(crate::history::service::VerifiedHistoryVersion),
 }
 
+/// Test-only process-abort probe after the *existing* File Gate publisher.
+/// It is absent from all production Core builds. The exact note must live
+/// under the disposable parent workdir of a dedicated libtest OS child.
+/// Never expose a crash trigger in an installed application or network API.
+#[cfg(test)]
+fn p0g3d08c_abort_only_after_primary_published(path: &Path) {
+    if !matches!(
+        std::env::var("AKULA_P0G3D08C_STAGE").as_deref(),
+        Ok("after-primary")
+    ) {
+        return;
+    }
+    let workdir = std::env::var_os("AKULA_P0G3D08C_WORKDIR")
+        .expect("crash test requires a disposable workdir");
+    let workdir = Path::new(&workdir);
+    assert!(path.starts_with(workdir), "never abort an unrelated workspace");
+    assert_eq!(path.file_name(), Some(std::ffi::OsStr::new("Reserved.md")));
+    std::fs::write(workdir.join("p0g3d08c-crash-marker"), b"after-primary")
+        .expect("persist test-only crash marker before abort");
+    std::process::abort();
+}
+
 /// The *only* common File Gate primary publisher for both historical and
 /// opt-in strict history paths. Do not add another rename/swap authority.
 fn write_checked_history_under_gate(
@@ -239,6 +261,8 @@ fn write_checked_history_under_gate(
         let before = core.history.disk_before(path, Some(expected_hash));
         let result = write_file_atomic_impl(path, content, Some(expected_hash))
             .map_err(CheckedHistoryError::Primary)?;
+        #[cfg(test)]
+        p0g3d08c_abort_only_after_primary_published(path);
         (before, result)
     };
     let write = NoteWrite {
