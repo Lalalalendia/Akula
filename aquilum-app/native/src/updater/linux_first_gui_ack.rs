@@ -33,6 +33,7 @@ unsafe extern "C" {
     fn getpid() -> i32;
     fn getppid() -> i32;
     fn getuid() -> u32;
+    fn getgid() -> u32;
     fn getsockopt(
         fd: i32,
         level: i32,
@@ -91,7 +92,7 @@ impl Challenge {
     }
 }
 
-fn peer_identity(fd: RawFd) -> Result<(i32, u32), String> {
+fn peer_identity(fd: RawFd) -> Result<(i32, u32, u32), String> {
     // Linux SOL_SOCKET=1, SO_TYPE=3, SOCK_STREAM=1, SO_PEERCRED=17.
     // SO_PEERCRED on a socketpair describes its creator. A future supervising
     // process must still bind the ACK to its own Child PID, signed candidate,
@@ -114,17 +115,18 @@ fn peer_identity(fd: RawFd) -> Result<(i32, u32), String> {
     if rc != 0 || len as usize != core::mem::size_of::<PeerCred>() {
         return Err(refusal("could not establish inherited socket peer credentials"));
     }
-    Ok((cred.pid, cred.uid))
+    Ok((cred.pid, cred.uid, cred.gid))
 }
 
 fn emit_after_presented_gui(challenge: &Challenge) -> Result<(), String> {
     // The immediate parent of the GUI and the creator/owner of the inherited
     // stream must coincide. The parent must also check the ACK child PID.
     let parent = unsafe { getppid() };
-    let (peer_pid, peer_uid) = peer_identity(challenge.fd)?;
+    let (peer_pid, peer_uid, peer_gid) = peer_identity(challenge.fd)?;
     if parent != challenge.parent_pid
         || peer_pid != challenge.parent_pid
         || peer_uid != unsafe { getuid() }
+        || peer_gid != unsafe { getgid() }
     {
         return Err(refusal("wrong OS supervisor process or socket identity"));
     }
