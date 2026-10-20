@@ -61,6 +61,16 @@ impl App {
             area.ctx.request_compose();
             area.ctx.request_post_paint();
         });
+        // A forced BGRA redraw in the native host does not necessarily
+        // rebuild retained Masonry paint commands when only the parent
+        // scroll translation changes. For this *developer-only* LOD stress
+        // driver, invalidate the editor paint record at every new image
+        // anchor. Otherwise all 10 images reach MediaView::paint during
+        // some scene builds yet only the two initially raster-visible
+        // brushes are requested by the Vello mip sampler.
+        ids.body.edit(root, |mut editor| editor.ctx.request_render());
+        static FIRST_REPAINT: std::sync::Once = std::sync::Once::new();
+        FIRST_REPAINT.call_once(|| eprintln!("AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED"));
         let after = self.scroll_geometry(root)?.2;
         Some((before, after))
     }
