@@ -276,7 +276,7 @@ impl Gate {
  * Its refusal occurs before shutdown, lock acquisition, staging or renames.
  * The transaction engine below is compiled but has no live admission path.
  */
-pub(super) fn guarded_runtime_apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
+pub(crate) fn guarded_runtime_apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
     let _ = (payload, before_exit);
     Err(bad("signed Akula candidate admission and first-render ACK are not approved"))
 }
