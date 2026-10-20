@@ -256,9 +256,15 @@ fn corrupt_sqlite_policy_receipt_is_not_trusted_after_restart() {
     external.execute("UPDATE s3_v2_trusted_roots SET policy_json=?1 WHERE profile_id=?2",
         params![b"{}".as_slice(), f.scope.profile_id()]).unwrap();
     let reopened = f.open();
+    // An ordinary caller that only loads the V2 root must NOT bypass the
+    // damaged policy: both APIs now fail closed on the same guarded row.
+    assert!(matches!(
+        reopened.load(&f.scope),
+        Err(S3V2TrustAnchorError::CorruptedAnchor),
+    ));
     assert!(matches!(
         reopened.load_publisher_policy(&f.scope),
-        Err(V2PolicyReceiptError::CorruptedReceipt),
+        Err(V2PolicyReceiptError::Root(S3V2TrustAnchorError::CorruptedAnchor)),
     ));
 }
 
@@ -404,5 +410,110 @@ fn revoked_publisher_cannot_verify_pinned_root_after_restart() {
     assert!(matches!(
         publisher_root_signature(&mut reopened, &f, &fabricated, 2, &new_publisher),
         Err(V2PolicyReceiptError::NotCurrentlyAnchoredRoot)
+    ));
+}
+
+
+/// Reconstruct the ORIGINAL V2 journal schema with an already trusted root.
+/// Merely opening a new E2b-format database does not test migration.
+fn plant_legacy_v2_root(f: &Fixture) {
+    let db = Connection::open(f.path()).unwrap();
+    db.execute_batch(
+        "CREATE TABLE s3_v2_trusted_roots (
+            profile_id TEXT PRIMARY KEY NOT NULL,
+            vault_id TEXT NOT NULL,
+            scope_fingerprint TEXT NOT NULL,
+            head_key TEXT NOT NULL,
+            head_json BLOB NOT NULL,
+            head_etag TEXT NOT NULL,
+            previous_head_json BLOB,
+            receipt_digest TEXT NOT NULL,
+            record_schema INTEGER NOT NULL CHECK(record_schema=1)
+        );",
+    ).unwrap();
+    let root = f.root();
+    let bytes = root.encode(&f.ns).unwrap();
+    let etag = "legacy-v2-etag";
+    let digest = super::super::receipt_digest(&f.scope, &bytes, etag, None);
+    db.execute(
+        "INSERT INTO s3_v2_trusted_roots (
+            profile_id,vault_id,scope_fingerprint,head_key,head_json,
+            head_etag,previous_head_json,receipt_digest,record_schema
+         ) VALUES (?1,?2,?3,?4,?5,?6,NULL,?7,1)",
+        params![
+            f.scope.profile_id(),
+            f.ns.vault_id().to_string(),
+            f.scope.binding_fingerprint(),
+            f.ns.current_head_key(),
+            bytes, etag, digest,
+        ],
+    ).unwrap();
+}
+
+#[test]
+fn actual_legacy_root_database_migrates_in_place_without_changing_anchor() {
+    let f = Fixture::new();
+    plant_legacy_v2_root(&f);
+    let mut upgraded = f.open();
+    let anchored = upgraded.load(&f.scope).unwrap().unwrap();
+    let expected = f.root();
+    assert_eq!(anchored.root().generation(), 1);
+    assert_eq!(anchored.root().digest(&f.ns).unwrap(), expected.digest(&f.ns).unwrap());
+    assert_eq!(anchored.etag(), "legacy-v2-etag");
+    assert!(upgraded.load_publisher_policy(&f.scope).unwrap().is_none());
+    let (policy, bytes) = first_policy(&f, &signer(1));
+    let pinned = policy.canonical_digest().unwrap();
+    assert_eq!(upgraded.enroll_externally_approved_genesis_policy(
+        &f.scope, &pinned, &bytes,
+    ).unwrap(), PolicyReceiptOutcome::Inserted);
+    drop(upgraded);
+    let after_restart = f.open();
+    assert_eq!(after_restart.load_publisher_policy(&f.scope)
+        .unwrap().unwrap().digest(), pinned);
+    assert_eq!(after_restart.load(&f.scope).unwrap().unwrap().etag(), "legacy-v2-etag");
+    assert_eq!(after_restart.db.query_row(
+        "SELECT count(*) FROM s3_v2_trusted_roots", [], |row| row.get::<_, i64>(0),
+    ).unwrap(), 1);
+}
+
+#[test]
+fn partially_migrated_policy_columns_refuse_database_open() {
+    let f = Fixture::new();
+    plant_legacy_v2_root(&f);
+    let db = Connection::open(f.path()).unwrap();
+    db.execute_batch(
+        "ALTER TABLE s3_v2_trusted_roots ADD COLUMN policy_json BLOB;",
+    ).unwrap();
+    drop(db);
+    let admission = RegisteredReadAdmission::open(&f.core, &f.vault).unwrap();
+    assert!(matches!(
+        S3V2TrustedAnchorJournal::open(&admission, &f.path()),
+        Err(S3V2TrustAnchorError::CorruptedAnchor),
+    ));
+}
+
+#[test]
+fn incomplete_publisher_policy_row_blocks_regular_v2_root_load() {
+    let f = Fixture::new();
+    let mut store = f.with_pinned_root();
+    let (policy, bytes) = first_policy(&f, &signer(1));
+    store.enroll_externally_approved_genesis_policy(
+        &f.scope, &policy.canonical_digest().unwrap(), &bytes,
+    ).unwrap();
+    drop(store);
+    let db = Connection::open(f.path()).unwrap();
+    db.execute(
+        "UPDATE s3_v2_trusted_roots SET policy_receipt=NULL WHERE profile_id=?1",
+        params![f.scope.profile_id()],
+    ).unwrap();
+    drop(db);
+    let reopened = f.open();
+    assert!(matches!(
+        reopened.load(&f.scope),
+        Err(S3V2TrustAnchorError::CorruptedAnchor),
+    ));
+    assert!(matches!(
+        reopened.load_publisher_policy(&f.scope),
+        Err(V2PolicyReceiptError::Root(S3V2TrustAnchorError::CorruptedAnchor)),
     ));
 }
