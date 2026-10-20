@@ -320,3 +320,89 @@ fn existing_anchor_schema_migration_is_idempotent_and_guarded() {
         Err(S3V2TrustAnchorError::InvalidStoreLocation),
     ));
 }
+
+fn publisher_root_signature(
+    journal: &mut S3V2TrustedAnchorJournal,
+    f: &Fixture,
+    root: &S3PackedHeadV2,
+    epoch: u64,
+    publisher: &Ed25519KeyPair,
+) -> Result<crate::sync::SignedRootObservation, V2PolicyReceiptError> {
+    // Synthetic *in-memory* attestation; no S3 fetch, signing key storage,
+    // remote writer, user note modification or SQLite trust enrollment.
+    let payload = serde_json::to_vec(&json!({
+        "schema": 1,
+        "provider": "yandex-object-storage",
+        "endpoint": "https://storage.yandexcloud.net",
+        "region": "ru-central1",
+        "force_path_style": true,
+        "bucket": f.profile.bucket,
+        "current_head_key": f.ns.current_head_key(),
+        "vault_id": f.ns.vault_id(),
+        "generation": root.generation(),
+        "root_blake3": root.digest(&f.ns).unwrap(),
+        "previous_root_blake3": null,
+        "policy_epoch": epoch,
+    })).unwrap();
+    let signed = super::super::super::s3_signed_root_paev1::pae(
+        crate::sync::ROOT_PAYLOAD_TYPE.as_bytes(), &payload,
+    );
+    let sig = publisher.sign(&signed).as_ref().to_vec();
+    let signatures = [DecodedSignature {
+        sig: &sig,
+        keyid: Some("forged-keyid-not-authority"),
+    }];
+    journal.inspect_current_root_publisher_signature(
+        &f.scope, root, &DecodedDsseEnvelope {
+            payload_type: crate::sync::ROOT_PAYLOAD_TYPE,
+            payload: &payload,
+            signatures: &signatures,
+        },
+    )
+}
+
+#[test]
+fn revoked_publisher_cannot_verify_pinned_root_after_restart() {
+    let f = Fixture::new();
+    let (owner, new_owner, old_publisher, new_publisher) =
+        (signer(1), signer(2), signer(99), signer(98));
+    let mut journal = f.with_pinned_root();
+    let root = journal.load(&f.scope).unwrap().unwrap().root().clone();
+    let (old, bytes) = first_policy(&f, &owner);
+    journal.enroll_externally_approved_genesis_policy(
+        &f.scope, &old.canonical_digest().unwrap(), &bytes,
+    ).unwrap();
+    assert!(publisher_root_signature(&mut journal, &f, &root, 1, &old_publisher).is_ok());
+
+    // The owner transition preserves the SAME pinned V2 root but revokes
+    // publisher-99 and delegates root attestations to publisher-98.
+    let next = next_policy(&old, &[pk(&new_owner)], 1, &[pk(&new_publisher)]);
+    assert_eq!(
+        record(&mut journal, &f.scope, &next, &[&owner, &new_owner]).unwrap(),
+        PolicyReceiptOutcome::Advanced,
+    );
+    assert!(matches!(
+        publisher_root_signature(&mut journal, &f, &root, 1, &old_publisher),
+        Err(V2PolicyReceiptError::InvalidPublisherSignature(
+            crate::sync::SignedRootError::MissingQuorum))
+    ));
+    assert!(publisher_root_signature(&mut journal, &f, &root, 2, &new_publisher).is_ok());
+    drop(journal);
+
+    // Reopen must use the LATEST persisted publisher quorum, never cached
+    // or remote-supplied old keys; stale valid signature cannot be reused.
+    let mut reopened = f.open();
+    assert!(matches!(
+        publisher_root_signature(&mut reopened, &f, &root, 1, &old_publisher),
+        Err(V2PolicyReceiptError::InvalidPublisherSignature(
+            crate::sync::SignedRootError::MissingQuorum))
+    ));
+    assert!(publisher_root_signature(&mut reopened, &f, &root, 2, &new_publisher).is_ok());
+
+    // Signed but non-anchored root must not be implicitly enrolled.
+    let fabricated = f.root();
+    assert!(matches!(
+        publisher_root_signature(&mut reopened, &f, &fabricated, 2, &new_publisher),
+        Err(V2PolicyReceiptError::NotCurrentlyAnchoredRoot)
+    ));
+}
