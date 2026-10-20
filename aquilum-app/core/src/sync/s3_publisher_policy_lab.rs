@@ -62,6 +62,12 @@ impl PublisherPolicyV1 {
         Ok(blake3::hash(&b).to_hex().to_string())
     }
     pub fn epoch(&self) -> u64 { self.epoch }
+    // Out-of-band E3a must compare the entire independently approved
+    // owner keyset and quorum, rather than trusting a keyid from S3.
+    #[cfg(feature = "signed-vault-pairing-lab")]
+    pub(crate) fn trusted_owners(&self) -> (&[[u8; 32]], usize) {
+        (&self.owner_keys, self.owner_quorum)
+    }
 
     // E2b must source read-only publisher authority from the CURRENT
     // durable policy, never a cached policy from the remote S3 server.

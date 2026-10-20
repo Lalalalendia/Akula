@@ -73,6 +73,9 @@ mod s3_signed_root_paev1;
 // Never part of the installed application or an S3 permission grant.
 #[cfg(feature = "signed-vault-policy-lab")]
 mod s3_publisher_policy_lab;
+// E3a never reads the cloud or enrolls a Vault; read-only join preview only.
+#[cfg(feature = "signed-vault-pairing-lab")]
+mod s3_join_genesis_lab;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
@@ -168,6 +171,11 @@ pub use s3_signed_root_paev1::{
     verify_signed_root, ApprovedPublisherKeys, ApprovedV2RootScope,
     DecodedDsseEnvelope, DecodedSignature, SignedRootError,
     SignedRootObservation, ROOT_PAYLOAD_TYPE,
+};
+#[cfg(feature = "signed-vault-pairing-lab")]
+pub use s3_join_genesis_lab::{
+    review_offline_join_genesis, IndependentlyApprovedJoin, JoinGenesisError,
+    JoinGenesisReview, JOIN_GENESIS_TYPE,
 };
 #[cfg(feature = "signed-vault-policy-lab")]
 pub use s3_publisher_policy_lab::{

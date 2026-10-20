@@ -28,6 +28,8 @@ signed-vault-root-lab = []
 signed-vault-policy-lab = ["signed-vault-root-lab"]
 # Research-only receipt extension of existing guarded V2 root journal.
 signed-vault-policy-receipt-lab = ["signed-vault-policy-lab", "sync-s3"]
+# E3a: offline owner-signed join-genesis review; no transport or File Gate.
+signed-vault-pairing-lab = ["signed-vault-policy-lab"]
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.
