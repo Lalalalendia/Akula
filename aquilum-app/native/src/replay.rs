@@ -114,6 +114,21 @@ impl Replay {
         Some(if slot < count { slot } else { slots - 1 - slot })
     }
 
+    /// The active artificial image anchor persists across all replay ticks
+    /// in its dwell slot. The caller may re-center it after asynchronous
+    /// image decoding changes Markdown paragraph heights. This does not
+    /// advance the slot, replay clock, or alter ordinary scrolling.
+    pub fn image_scan_active(&self, count: usize) -> Option<usize> {
+        if self.kind != Kind::Fling || count == 0 || count > 64 {
+            return None;
+        }
+        let slot = self.image_scan_slot?;
+        if slot >= count * 2 {
+            return None;
+        }
+        Some(if slot < count { slot } else { count * 2 - 1 - slot })
+    }
+
     pub fn wake(&self) -> Option<Instant> {
         self.next
     }
@@ -228,9 +243,11 @@ mod tests {
         assert!(matches!(replay.step(start), Some(Step::Wheel(_))));
         assert_eq!(replay.image_scan_target(start, 32), Some(0));
         assert_eq!(replay.image_scan_target(start + Duration::from_millis(50), 32), None);
+        assert_eq!(replay.image_scan_active(32), Some(0));
         assert_eq!(replay.image_scan_target(start + Duration::from_millis(100), 32), Some(1));
         assert_eq!(replay.image_scan_target(start + Duration::from_millis(3000), 32), Some(31));
         assert_eq!(replay.image_scan_target(start + Duration::from_millis(3100), 32), Some(30));
+        assert_eq!(replay.image_scan_active(32), Some(30));
         assert_eq!(replay.image_scan_target(start + Duration::from_millis(5990), 32), Some(0));
         assert_eq!(replay.image_scan_target(start + Duration::from_millis(6000), 32), None);
         assert_eq!(replay.image_scan_target(start, 0), None);
