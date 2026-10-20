@@ -428,3 +428,95 @@ pub(crate) fn inspect_cold_s3_replace_hold(
     }
     Ok(InertColdS3Review { operation_id: operation, file_state, v8_state })
 }
+
+
+/// P0g-3d-07: a positive diagnostic result is still a HOLD, not a native
+/// receipt, download apply permit, remote ACK or baseline transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InertColdUnifiedStatus {
+    LocallyConsistentHold,
+}
+
+#[must_use = "cold cross-store consistency is never an S3 write capability"]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct InertColdUnifiedReview {
+    pub(crate) operation_id: super::OperationId,
+    pub(crate) status: InertColdUnifiedStatus,
+}
+
+/// Join independently reopened, read-only V7/V8/original stores and an actual
+/// HistoryService on the CURRENT registered Core. This is strictly forensic.
+/// Call after fresh Core::open and RegisteredReadAdmission; all three SQLite
+/// stores must already be opened via their read-only existing-file methods.
+///
+/// Phase 1: correlate physical primary + bound protected original + V7/V8.
+/// Phase 2: read the exact external history version under the existing history
+/// mutex and the current registered root.
+/// Phase 3: redo the entire pinned primary/SQLite/profile correlation, and
+/// compare the saved V8 candidate. Never infer permission from success.
+///
+/// No shared filesystem/SQLite/HistoryService ACID transaction exists. This
+/// does NOT defend against an adversarial concurrent filesystem process or
+/// prove that every directory entry survives an actual power cut.
+#[allow(dead_code)]
+pub(crate) fn inspect_cold_s3_replace_with_history_hold(
+    admission: &RegisteredReadAdmission<'_>,
+    bindings: &SqliteRegisteredS3Bindings,
+    journal: &SqliteSyncJournal,
+    protected: &SqliteProtectionStore,
+    operation: super::OperationId,
+) -> Result<InertColdUnifiedReview, FileCommandError> {
+    // Before inspecting history, a V8 entry must correlate with a physically
+    // published candidate. A V7-only attempt is NOT a full receipt candidate.
+    let initial = inspect_cold_s3_replace_hold(
+        admission, bindings, journal, protected, operation,
+    )?;
+    if initial.file_state != InertColdS3FileState::CandidateVisibleWithoutReceipt
+        || initial.v8_state != InertColdV8State::LocalCorrelationOnly
+    {
+        return Err(refused("full cold review requires a published V8 candidate"));
+    }
+    let candidate = journal.read_existing_replace_receipt_candidate(operation)
+        .map_err(refused)?.ok_or_else(|| refused("V8 candidate missing"))?;
+    if candidate.operation_id() != operation {
+        return Err(refused("V8 candidate belongs to another operation"));
+    }
+    let claim = journal.read_existing_replace_attempt(operation)
+        .map_err(refused)?.ok_or_else(|| refused("V7 one-shot claim missing"))?;
+    let (version_id, history_hash, history_length) = candidate.cold_history_fields();
+    if history_hash != claim.target_hash {
+        return Err(refused("V8 history hash differs from claimed target"));
+    }
+
+    let root = admission.registered_root_path().to_path_buf();
+    let note = root.join(claim.path.as_str());
+    admission.recheck_registered_root().map_err(refused)?;
+    // The caller cannot supply arbitrary history roots or a foreign note.
+    // HistoryService independently rejects stale roots, non-external versions,
+    // aliased directories, and mutated/oversized version bytes.
+    let roots = || vec![root.clone()];
+    admission.registered_core().history.inspect_cold_external_version(
+        &roots, &note, version_id, history_hash, history_length,
+    ).map_err(refused)?;
+    admission.recheck_registered_root().map_err(refused)?;
+
+    // Bracket the independent history read with the same full cold V7/V8,
+    // protected original, profile and pinned-file checks. This is a two-pass
+    // consistency check, not a global transaction or a durable receipt.
+    let after = inspect_cold_s3_replace_hold(
+        admission, bindings, journal, protected, operation,
+    )?;
+    if initial != after
+        || journal.read_existing_replace_receipt_candidate(operation)
+            .map_err(refused)?.as_ref() != Some(&candidate)
+        || journal.read_existing_replace_attempt(operation)
+            .map_err(refused)?.as_ref() != Some(&claim)
+    {
+        return Err(refused("cold V8/primary/original evidence changed after history read"));
+    }
+
+    Ok(InertColdUnifiedReview {
+        operation_id: operation,
+        status: InertColdUnifiedStatus::LocallyConsistentHold,
+    })
+}
