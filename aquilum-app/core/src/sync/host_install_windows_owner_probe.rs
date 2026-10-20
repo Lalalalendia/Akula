@@ -72,6 +72,7 @@ pub(crate) fn preflight_installer_owned_host_namespace(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::host_custody_registry::SharedHostCustodyRegistry;
     use std::fs;
 
     #[test]
@@ -83,13 +84,17 @@ mod tests {
         fs::create_dir_all(&witness_dir).unwrap();
         let db = db_dir.join("approved.sqlite3");
         let witness = witness_dir.join("receipt.json");
-        fs::write(&db, b"well formed looking SQLite placeholder").unwrap();
+        // A genuinely valid, cold-reopenable host registry is still not
+        // installed-host trust when the current user can provision it.
+        drop(SharedHostCustodyRegistry::provision_new(&db, &[]).unwrap());
+        assert!(SharedHostCustodyRegistry::open_existing(&db).is_ok());
+        let db_bytes = fs::read(&db).unwrap();
         fs::write(&witness, b"well formed looking receipt").unwrap();
         // This OS principal can create and modify both inputs. Structurally
         // valid files do not become installer-owned simply by naming them.
         assert!(preflight_installer_owned_host_namespace(&db, &witness).is_err());
-        assert_eq!(fs::read(&db).unwrap(),
-                   b"well formed looking SQLite placeholder");
+        assert_eq!(fs::read(&db).unwrap(), db_bytes);
+        assert!(SharedHostCustodyRegistry::open_existing(&db).is_ok());
         assert_eq!(fs::read(&witness).unwrap(),
                    b"well formed looking receipt");
     }
