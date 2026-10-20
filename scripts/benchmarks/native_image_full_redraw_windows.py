@@ -208,6 +208,18 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: no actual editor image scroll anchor processed")
     if "AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED" not in log:
         raise ValueError(f"{sample}: editor retained scene was not invalidated after image seek")
+    aligned = {
+        int(match.group(1))
+        for match in re.finditer(r"AKULA_IMAGE_ANCHOR_ALIGNED byte=(\d+)", log)
+    }
+    recenter_events = log.count("AKULA_IMAGE_ANCHOR_RECENTER byte=")
+    required_alignment = {1: 1, 10: 8, 100: 24}[images]
+    if len(aligned & set(anchors)) < required_alignment:
+        raise ValueError(
+            f"{sample}: only {len(aligned & set(anchors))}/{len(anchors)} "
+            f"actual source-byte anchors centered after async layout, "
+            f"needs {required_alignment}; recenter events={recenter_events}"
+        )
     parsed_replay = json.loads(replay.read_text(encoding="utf-8"))
     parsed_metrics = json.loads(metrics.read_text(encoding="utf-8"))
     work = parsed_replay.get("workSamplesMs")
@@ -330,6 +342,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "note_sha256": hashlib.sha256(note.encode()).hexdigest(),
         "unique_image_sources_in_note": len(hashes),
         "replay_image_anchor_count": len(anchors),
+        "replay_visible_aligned_anchor_count": len(aligned & set(anchors)),
+        "replay_recenter_events": recenter_events,
         "replay_anchor_dwell_ms_each_pass": 3000 / len(anchors),
         "unique_mip_source_ids_requested": unique,
         "distinct_decoded_pixel_fingerprints": unique_pixels,
