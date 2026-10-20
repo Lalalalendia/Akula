@@ -42,11 +42,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run -d --name akula-e3f-minio \
+          # Quay's former upstream image requires authentication. Match
+          # the working S3/MinIO capability workflow's public image and
+          # writable non-root tmpfs, avoiding a new, unverified registry.
+          docker run -d --rm --name akula-e3f-minio \
             -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
             -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
             -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
-            quay.io/minio/minio:latest server /data --address ':9000'
+            cgr.dev/chainguard/minio:latest server /data
           for i in $(seq 1 60); do
             if curl --max-time 2 -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
