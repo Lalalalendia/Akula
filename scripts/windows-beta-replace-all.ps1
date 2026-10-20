@@ -23,7 +23,7 @@ function Test-AkulaBetaReplaceAll {
   [System.IO.File]::WriteAllText($note, $original, [System.Text.UTF8Encoding]::new($false))
   $originalHash = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
   $replacement = 'AKULA_REAL_REPLACE_' + [Guid]::NewGuid().ToString('N')
-  $args = "--vault `"$Vault`" --data-dir `"$DataDir`" --open `"$note`" --focus"
+  $arguments = "--vault `"$Vault`" --data-dir `"$DataDir`" --open `"$note`" --focus"
   $app = $null
 
   function Await-AkulaLargeNote {
@@ -63,14 +63,14 @@ function Test-AkulaBetaReplaceAll {
   }
 
   try {
-    $app = Start-Process -FilePath $Executable -ArgumentList $args -PassThru
+    $app = Start-Process -FilePath $Executable -ArgumentList $arguments -PassThru
     Await-AkulaLargeNote -Process $app
 
     # Ctrl+A moves the global caret to EOF while the loaded editor window
     # starts after byte zero. Ctrl+V used to underflow Document::before(0).
     Set-Clipboard -Value $replacement -ErrorAction Stop
     $clipboard = Get-Clipboard -Raw -ErrorAction Stop
-    if ($clipboard.TrimEnd([char]13, [char]10) -cne $replacement) {
+    if ($clipboard.TrimEnd([char[]]@([char]13, [char]10)) -cne $replacement) {
       throw 'Synthetic clipboard contents differ before paste'
     }
     Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'
@@ -93,7 +93,7 @@ function Test-AkulaBetaReplaceAll {
     $app = $null
 
     # The restored document must survive a fresh installed-app launch too.
-    $app = Start-Process -FilePath $Executable -ArgumentList $args -PassThru
+    $app = Start-Process -FilePath $Executable -ArgumentList $arguments -PassThru
     Await-AkulaLargeNote -Process $app
     $poison = 'AKULA_LONG_READBACK_POISON_' + [Guid]::NewGuid().ToString('N')
     Set-Clipboard -Value $poison -ErrorAction Stop
