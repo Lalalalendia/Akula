@@ -67,6 +67,26 @@ fn corrupt_oversized_and_unsupported_files_do_not_open_or_modify_the_note() {
     click_file(&mut h, &large);
     assert!(h.app.popup.is_none(), "превышен лимит 32 МиБ");
 
+    // A valid PNG header can claim billions of decoded pixels while the
+    // compressed source still fits in a few dozen bytes. Reject by dimensions
+    // before invoking a fallback decoder with potentially huge allocations.
+    let bomb = vault.join("небольшой-файл-огромное-изображение.png");
+    let mut header = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut header, 65_000, 65_000);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let _writer = encoder.write_header().unwrap();
+    }
+    assert!(header.len() < 1024, "test must remain a tiny compressed input");
+    let dimensions = image::ImageReader::new(std::io::Cursor::new(&header))
+        .with_guessed_format().unwrap().into_dimensions().unwrap();
+    assert_eq!(dimensions, (65_000, 65_000));
+    std::fs::write(&bomb, &header).unwrap();
+    click_file(&mut h, &bomb);
+    assert!(h.app.popup.is_none(), "huge native dimensions must be rejected");
+    assert_eq!(std::fs::read(&bomb).unwrap(), header, "rejected source must not change");
+
     let unsupported = vault.join("вектор.svg");
     std::fs::write(&unsupported, b"<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
     click_file(&mut h, &unsupported);
