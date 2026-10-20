@@ -1,0 +1,38 @@
+name: Akula Bootstrap B1b0 private artifact staging lab
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/lib.rs"
+      - "aquilum-app/core/src/server_release_lab.rs"
+      - "aquilum-app/core/src/server_staging_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b1b0.rs"
+      - ".github/workflows/core-server-bootstrap-b1b0-staging.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inert-custody-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format isolated Rust lab sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_staging_lab.rs aquilum-app/core/tests/server_bootstrap_b1b0.rs
+      - name: Test inert sealed-artifact staging and crash refusals
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab --test server_bootstrap_b1b0 -- --nocapture
+          cargo check --locked -p aquilum-core --no-default-features
