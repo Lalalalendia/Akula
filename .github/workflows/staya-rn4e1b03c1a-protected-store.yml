@@ -51,6 +51,10 @@ jobs:
               ".github/workflows/staya-rn4e1b03c1a-protected-store.yml",
               ".github/scripts/staya-broker-store-positive.ps1",
               "docs/sync/staya-rn4e1b03c1a-protected-store.md",
+              ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml",
+              ".github/workflows/staya-rn4e1b03b1c-scm-service.yml",
+              ".github/workflows/staya-rn4e1b03b1d-cancellable-scm-pipe.yml",
+              ".github/workflows/staya-rn4e1b03c0-policy-kernel.yml",
           }
           # GitHub also runs this parent workflow on stacked child PRs.
           # Permit only the precise, independently reviewed research layers;
