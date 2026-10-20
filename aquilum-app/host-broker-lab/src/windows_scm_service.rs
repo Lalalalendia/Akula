@@ -99,7 +99,11 @@ fn report(
         service_type: SERVICE_WIN32_OWN_PROCESS,
         current_state: state,
         accepted_controls: controls,
-        win32_exit_code: if error == 0 { 0 } else { ERROR_SERVICE_SPECIFIC_ERROR },
+        win32_exit_code: if error == 0 {
+            0
+        } else {
+            ERROR_SERVICE_SPECIFIC_ERROR
+        },
         service_specific_exit_code: error,
         checkpoint,
         wait_hint,
@@ -131,15 +135,13 @@ unsafe extern "system" fn control_handler(
 fn run_service() -> io::Result<()> {
     let event = OwnedEvent::create()?;
     if STOP_SIGNAL
-        .compare_exchange(
-            ptr::null_mut(),
-            event.0,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        )
+        .compare_exchange(ptr::null_mut(), event.0, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        return Err(io::Error::new(ErrorKind::AlreadyExists, "already dispatched"));
+        return Err(io::Error::new(
+            ErrorKind::AlreadyExists,
+            "already dispatched",
+        ));
     }
     let name = wide(SCM_NAME);
     let handler = unsafe {
