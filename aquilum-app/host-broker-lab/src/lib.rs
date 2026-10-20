@@ -80,6 +80,11 @@ mod broker_policy_kernel;
 #[cfg(all(test, windows))]
 mod windows_revocation_journal;
 
+// Anti-rollback WITNESS CONTRACT ONLY. Still all(test, windows): no
+// installer-backed witness, runtime service grant or File Gate consumer.
+#[cfg(all(test, windows))]
+mod windows_revocation_witness;
+
 #[cfg(test)]
 mod tests {
     use super::*;
