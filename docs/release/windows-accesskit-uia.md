@@ -29,6 +29,19 @@ Fail-closed requirements:
 - Logs contain only bounded synthetic-fixture diagnostics, no raw UIA dump
   or actual user clipboard contents.
 
+## OS keyboard acceptance (separate from UIA Invoke)
+
+The Windows UIA script also uses AccessKit Focus on the first Copy button
+and **real foreground-bound x64 Win32 SendInput** for Enter, Tab, Space and
+Shift+Tab. The helper accepts only whitelisted keys, verifies the installed
+process HWND/PID and foreground window, then asserts UIA focus traversal,
+exact clipboard contents and unchanged Markdown bytes. A separate
+`AKULA_WINDOWS_ACCESSKIT_KEYS_PASS` line is mandatory; a successful
+InvokePattern test alone no longer suffices.
+
+This still does not prove Narrator speech, a real user's cursor experience
+or screen-reader behavior during document replacement and live scrolling.
+
 ## Nonclaims and release HOLD
 
 This does not establish audible Narrator navigation/speech, physical Windows

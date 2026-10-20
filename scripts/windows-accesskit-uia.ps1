@@ -22,6 +22,9 @@ if ([System.IO.Path]::GetFullPath($ExePath) -ne [System.IO.Path]::GetFullPath($i
 }
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms -ErrorAction Stop
+# Use the same vetted, HWND/PID/foreground-bound x64 SendInput helper as the
+# existing installed Windows beta GUI smoke, in this separate STA process.
+. (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
 
 $labels = @()
 foreach ($lang in @('en', 'ru')) {
@@ -167,6 +170,66 @@ try {
         }
     }
     Write-Host 'AKULA_WINDOWS_ACCESSKIT_UIA_PASS buttons=2 patterns=2 exact_clipboard=2 source_unchanged=True'
+    # Real OS keyboard path, distinct from UIA InvokePattern:
+    # UIA Focus -> queued AccessKit Action::Focus -> Windows SendInput
+    # Enter, Tab, Space, and Shift+Tab, against the installed foreground app.
+    $hwnd = [IntPtr]$proc.MainWindowHandle
+    [AkulaBetaGuiInput]::ShowWindow($hwnd, 9) | Out-Null
+    $foreground = $false
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        [AkulaBetaGuiInput]::SetForegroundWindow($hwnd) | Out-Null
+        Start-Sleep -Milliseconds 150
+        if ([AkulaBetaGuiInput]::GetForegroundWindow() -eq $hwnd) {
+            $foreground = $true
+            break
+        }
+    }
+    if (!$foreground) { throw 'Cannot focus verified Akula window for real keyboard events' }
+
+    function Wait-ButtonFocus {
+        param(
+            [System.Windows.Automation.AutomationElement]$Target,
+            [string]$Phase
+        )
+        for ($poll = 0; $poll -lt 60; $poll++) {
+            Start-Sleep -Milliseconds 100
+            if ($Target.Current.HasKeyboardFocus) { return }
+        }
+        throw "Actual Windows UIA focus did not reach $Phase"
+    }
+
+    function Wait-KeyboardClipboard {
+        param([string]$Expected, [string]$Phase)
+        for ($poll = 0; $poll -lt 60; $poll++) {
+            Start-Sleep -Milliseconds 100
+            try {
+                if ([System.Windows.Forms.Clipboard]::GetText() -ceq $Expected) { return }
+            } catch [System.Runtime.InteropServices.ExternalException] {
+                # Clipboard is temporarily locked. The test does not accept it as a pass.
+            }
+        }
+        throw "Actual Windows keyboard $Phase did not copy the expected code body"
+    }
+
+    $buttons[0].SetFocus()
+    Wait-ButtonFocus -Target $buttons[0] -Phase 'first Copy button'
+    [System.Windows.Forms.Clipboard]::SetText('AKULA_WINDOWS_KEYBOARD_ENTER_PENDING')
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x0d, $false)
+    Wait-KeyboardClipboard -Expected $expectedBodies[0] -Phase 'Enter'
+
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x09, $false)
+    Wait-ButtonFocus -Target $buttons[1] -Phase 'second Copy button after Tab'
+    [System.Windows.Forms.Clipboard]::SetText('AKULA_WINDOWS_KEYBOARD_SPACE_PENDING')
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x20, $false)
+    Wait-KeyboardClipboard -Expected $expectedBodies[1] -Phase 'Space'
+
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x09, $true)
+    Wait-ButtonFocus -Target $buttons[0] -Phase 'first Copy button after Shift+Tab'
+    if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $initialHash) {
+        throw 'Real Windows keyboard navigation/activation edited the Markdown source'
+    }
+    Write-Host 'AKULA_WINDOWS_ACCESSKIT_KEYS_PASS enter=1 space=1 tab_forward=1 shift_tab_reverse=1 source_unchanged=True'
+
 } finally {
     if ($null -ne $proc) {
         $proc.Refresh()
