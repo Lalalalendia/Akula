@@ -337,6 +337,40 @@ mod tests {
     }
 
     #[test]
+    fn signed_yandex_join_cannot_be_substituted_with_other_https_s3_endpoint() {
+        let f = Fixture::new();
+        let (body, signature) = signed_fixture(&f);
+        let mutations = [
+            S3ConnectionProfile {
+                endpoint: Some("https://foreign-s3.example".into()),
+                ..f.profile.clone()
+            },
+            S3ConnectionProfile {
+                region: "us-east-1".into(),
+                ..f.profile.clone()
+            },
+            S3ConnectionProfile {
+                force_path_style: false,
+                ..f.profile.clone()
+            },
+        ];
+        for wrong_profile in mutations {
+            let foreign = S3RemoteAnchorScope::new(
+                f.scope.profile_id(), "out-of-band-account-binding-required",
+                &wrong_profile, &f.ns,
+            ).unwrap();
+            // Even if a trusted-looking full read receipt is supplied, a
+            // different actual transport is not the Yandex in the signed
+            // invitation, and must fail BEFORE considering the receipt.
+            assert!(matches!(
+                f.inspect(&body, &signature, &f.verified(&f.root, "etag"),
+                    "etag", &foreign, &f.root),
+                Err(PinnedJoinError::WrongScope)
+            ));
+        }
+    }
+
+    #[test]
     fn complete_read_for_another_genesis_is_not_transferable() {
         let f = Fixture::new();
         let (body, signature) = signed_fixture(&f);
