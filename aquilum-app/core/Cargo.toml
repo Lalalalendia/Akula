@@ -22,6 +22,8 @@ server-bootstrap-b1a-release-lab = []
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only signed operator consent binding; no install, no floor persistence.
 server-bootstrap-b1b1-approval-lab = ["server-bootstrap-b1b-custody-lab"]
+# Persistent host/owner-scoped monotonic floor experiment only; no installation.
+server-bootstrap-b1b1b0-floor-lab = ["server-bootstrap-b1b1-approval-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
