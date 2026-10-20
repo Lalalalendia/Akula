@@ -288,7 +288,7 @@ if ! grep -Fq 'test sync::s3_reserved_replace::tests::p0g3d08_os_process_probe_e
   echo "Cold verifier did not execute the exact named Rust test" >&2
   exit 1
 fi
-if ! grep -Eq '^test result: ok\\. 1 passed; 0 failed;' "$lab/recovery.log"; then
+if ! grep -Fq 'test result: ok. 1 passed; 0 failed;' "$lab/recovery.log"; then
   echo "Cold verifier lacked an explicit successful one-test libtest summary" >&2
   exit 1
 fi
