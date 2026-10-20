@@ -414,6 +414,53 @@ fn revoked_publisher_cannot_verify_pinned_root_after_restart() {
 }
 
 
+#[test]
+fn valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build() {
+    let f = Fixture::new();
+    let owner = signer(1);
+    let mut journal = f.with_pinned_root();
+    let original = journal.load(&f.scope).unwrap().unwrap().root().clone();
+    let (policy, bytes) = first_policy(&f, &owner);
+    let policy_pin = policy.canonical_digest().unwrap();
+    journal.enroll_externally_approved_genesis_policy(
+        &f.scope, &policy_pin, &bytes,
+    ).unwrap();
+    // A legitimate, fully validated owner-policy receipt is readable.
+    assert_eq!(
+        journal.load_publisher_policy(&f.scope).unwrap().unwrap().digest(),
+        policy_pin,
+    );
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &original);
+
+    let successor = S3PackedHeadV2::new(
+        &f.ns, 2, OperationId::new(),
+        &blake3::hash(b"valid-policy-unsigned-gen2-manifest").to_hex().to_string(),
+        OperationId::new(),
+        &blake3::hash(b"valid-policy-unsigned-gen2-index").to_hex().to_string(),
+        Some(original.digest(&f.ns).unwrap()),
+    ).unwrap();
+    let preview = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &successor, "etag-untrusted-successor",
+    );
+    // A complete pinned read does not grant publisher authorization.
+    assert!(matches!(
+        journal.record_verified_successor(
+            &f.scope, &successor, "etag-untrusted-successor", &preview,
+        ), Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    drop(journal);
+    let mut reopened = f.open();
+    assert!(matches!(
+        reopened.record_verified_successor(
+            &f.scope, &successor, "etag-untrusted-successor", &preview,
+        ), Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    let anchored = reopened.load(&f.scope).unwrap().unwrap();
+    assert_eq!(anchored.root(), &original);
+    assert_eq!(anchored.etag(), "etag-e2b-genesis");
+}
+
+
 /// Reconstruct the ORIGINAL V2 journal schema with an already trusted root.
 /// Merely opening a new E2b-format database does not test migration.
 fn plant_legacy_v2_root(f: &Fixture) -> S3PackedHeadV2 {
