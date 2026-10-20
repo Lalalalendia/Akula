@@ -113,7 +113,8 @@ pub(super) fn exclusive_existing(path: &Path) -> Result<File, Hold> {
 pub(super) fn read_log(file: &mut File, expected_anchor: [u8; 16]) -> Result<State, Hold> {
     file.seek(SeekFrom::Start(0)).map_err(invalid_io)?;
     let mut bytes = Vec::new();
-    (&mut *file).take((MAX_BYTES + 1) as u64)
+    (&mut *file)
+        .take((MAX_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(invalid_io)?;
     if bytes.len() < HEADER || bytes.len() > MAX_BYTES {
@@ -219,8 +220,10 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let dir = std::env::temp_dir()
-                .join(format!("akula-revoke-{test_name}-{}-{tick}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!(
+                "akula-revoke-{test_name}-{}-{tick}",
+                std::process::id()
+            ));
             std::fs::create_dir(&dir).unwrap();
             let file = dir.join("preinstalled-revocation.journal");
             // ONLY the unit-test fixture can provision. The real journal
@@ -257,7 +260,10 @@ mod tests {
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(0));
         assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Ok(1));
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(1));
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Err(Hold::WrongEpoch));
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, REPLICA, 0),
+            Err(Hold::WrongEpoch)
+        );
         assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 1), Ok(2));
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(2));
     }
@@ -290,13 +296,22 @@ mod tests {
             file.write_all(&[0xfa, 0xfb, 0xfc]).unwrap();
             file.sync_all().unwrap();
         }
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 1), Err(Hold::CorruptOrTorn));
-        assert_eq!(current_floor(&journal.file, REPLICA), Err(Hold::CorruptOrTorn));
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, REPLICA, 1),
+            Err(Hold::CorruptOrTorn)
+        );
+        assert_eq!(
+            current_floor(&journal.file, REPLICA),
+            Err(Hold::CorruptOrTorn)
+        );
         let mut damaged = std::fs::read(&journal.file).unwrap();
         damaged.truncate(HEADER + RECORD);
         damaged[HEADER + 10] ^= 0x40;
         std::fs::write(&journal.file, damaged).unwrap();
-        assert_eq!(current_floor(&journal.file, REPLICA), Err(Hold::CorruptOrTorn));
+        assert_eq!(
+            current_floor(&journal.file, REPLICA),
+            Err(Hold::CorruptOrTorn)
+        );
     }
 
     #[test]
@@ -308,21 +323,45 @@ mod tests {
         assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 1), Ok(2));
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(2));
         assert_eq!(current_floor(&journal.file, second), Ok(1));
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, second, 0), Err(Hold::WrongEpoch));
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, second, 0),
+            Err(Hold::WrongEpoch)
+        );
     }
 
-    /// Invoked only by the standard Rust libtest binary in a SECOND OS process.
+    /// Started as a separate OS process. Two children publish READY before
+    /// a shared GO signal and report distinct stable process exit codes:
+    /// winner=0, stale CAS loser=77, anything else=78. No fake panic.
     #[test]
     fn child_process_revoke() {
-        let Ok(path) = std::env::var("AKULA_TEST_REVOKE_JOURNAL") else { return };
-        assert_eq!(revoke_existing(Path::new(&path), ANCHOR, REPLICA, 0), Ok(1));
+        let Ok(path) = std::env::var("AKULA_TEST_REVOKE_JOURNAL") else {
+            return;
+        };
+        let ready = PathBuf::from(std::env::var_os("AKULA_TEST_CAS_READY").unwrap());
+        let go = PathBuf::from(std::env::var_os("AKULA_TEST_CAS_GO").unwrap());
+        File::create(&ready).unwrap();
+        let started = std::time::Instant::now();
+        while !go.exists() {
+            if started.elapsed() > Duration::from_secs(10) {
+                std::process::exit(78);
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        let status = match revoke_existing(Path::new(&path), ANCHOR, REPLICA, 0) {
+            Ok(1) => 0,
+            Err(Hold::WrongEpoch) => 77,
+            _ => 78,
+        };
+        std::process::exit(status);
     }
 
     /// Real separate process exits without Rust destructors after a short
     /// durable write, as a crash-like negative fixture (not a power cut).
     #[test]
     fn child_incomplete_record_exit() {
-        let Ok(path) = std::env::var("AKULA_TEST_TORN_JOURNAL") else { return };
+        let Ok(path) = std::env::var("AKULA_TEST_TORN_JOURNAL") else {
+            return;
+        };
         let mut f = OpenOptions::new().append(true).open(path).unwrap();
         f.write_all(&[0xaa, 0xbb, 0xcc, 0xdd, 0xee]).unwrap();
         f.sync_all().unwrap();
@@ -339,8 +378,14 @@ mod tests {
             .status()
             .unwrap();
         assert_eq!(child.code(), Some(79));
-        assert_eq!(current_floor(&journal.file, REPLICA), Err(Hold::CorruptOrTorn));
-        assert_eq!(revoke_existing(&journal.file, ANCHOR, REPLICA, 0), Err(Hold::CorruptOrTorn));
+        assert_eq!(
+            current_floor(&journal.file, REPLICA),
+            Err(Hold::CorruptOrTorn)
+        );
+        assert_eq!(
+            revoke_existing(&journal.file, ANCHOR, REPLICA, 0),
+            Err(Hold::CorruptOrTorn)
+        );
     }
 
     #[test]
@@ -362,20 +407,40 @@ mod tests {
     fn two_real_os_processes_cannot_both_commit_one_cas_epoch() {
         let journal = TempJournal::create("race");
         let binary = std::env::current_exe().unwrap();
-        let spawn_child = || {
+        let go = journal.dir.join("go");
+        let ready_a = journal.dir.join("ready-a");
+        let ready_b = journal.dir.join("ready-b");
+        let spawn_child = |ready: &Path| {
             Command::new(&binary)
                 .arg("--exact")
                 .arg("windows_revocation_journal::tests::child_process_revoke")
-                .arg("--nocapture")
                 .env("AKULA_TEST_REVOKE_JOURNAL", &journal.file)
+                .env("AKULA_TEST_CAS_READY", ready)
+                .env("AKULA_TEST_CAS_GO", &go)
                 .spawn()
                 .unwrap()
         };
-        let mut first = spawn_child();
-        let mut second = spawn_child();
-        let one = first.wait().unwrap().success();
-        let two = second.wait().unwrap().success();
-        assert_ne!(one, two, "exactly one OS process may win the revoke CAS");
+        let mut first = spawn_child(&ready_a);
+        let mut second = spawn_child(&ready_b);
+        let started = std::time::Instant::now();
+        while !ready_a.exists() || !ready_b.exists() {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "both separate processes must reach the OS race barrier"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        File::create(&go).unwrap();
+        let mut exits = [
+            first.wait().unwrap().code(),
+            second.wait().unwrap().code(),
+        ];
+        exits.sort_unstable();
+        assert_eq!(
+            exits,
+            [Some(0), Some(77)],
+            "exactly one OS process may win; loser must refuse stale CAS"
+        );
         assert_eq!(current_floor(&journal.file, REPLICA), Ok(1));
     }
 }
