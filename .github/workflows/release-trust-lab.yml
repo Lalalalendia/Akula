@@ -1,0 +1,30 @@
+# RELEASE-TRUST-LAB-01: disposable keys, offline tests only; not a signing service.
+name: Akula offline release trust lab
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/verify-release-candidate.cjs'
+      - '.github/scripts/verify-release-candidate.test.cjs'
+      - '.github/workflows/release-trust-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trust-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install test-only minisign verifier
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - name: Test signed candidate and fail-closed boundaries
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/verify-release-candidate.test.cjs
+      - name: Assert production publisher remains disabled
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/release-isolation-policy.test.cjs
