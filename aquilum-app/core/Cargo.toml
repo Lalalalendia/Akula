@@ -35,6 +35,8 @@ server-bootstrap-b1b3b-root-helper-lab = ["server-bootstrap-b1b3a-helper-ipc-lab
 server-bootstrap-b1b3c-pinned-fd-lab = ["server-bootstrap-b1b3b-root-helper-lab", "server-bootstrap-b1a-release-lab"]
 # Inert signed owner + external witness CAS correspondence. No installation.
 server-bootstrap-b1b4a-cas-fence-lab = ["server-bootstrap-b1b3c-pinned-fd-lab", "server-bootstrap-b1b1c-witness-lab"]
+# Linux UID0 OS-owned sealed test signer and signed CAS journal readback; NO install.
+server-bootstrap-b1b4b-os-witness-lab = ["server-bootstrap-b1b4a-cas-fence-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
