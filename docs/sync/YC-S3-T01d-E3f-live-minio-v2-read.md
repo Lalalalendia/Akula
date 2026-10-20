@@ -17,7 +17,7 @@ A **disposable, loopback-only** MinIO container receives six explicitly construc
 
 Fixture upload happens **before** measurement. Then the production-compiled pinned reader must:
 
-1. Perform real S3 GETs for the root (initial and final), manifest, index, shards and pack.
+1. Perform real guarded S3 HEAD / conditional GET / HEAD for the root (initial and final), manifest, index, shards and pack, checking object size and ETag before and after each GET.
 2. Reject swapped bucket/Vault connection scope, wrong root/ETag, or changed immutable pack bytes. A caller-provided account binding is not itself independent account authentication.
 3. Return exactly one verified revision and pack with a valid V2 proof bound to the scope and root/ETag.
 4. Reject a replaced current-head object rather than treating it as a new trusted root or empty vault.
