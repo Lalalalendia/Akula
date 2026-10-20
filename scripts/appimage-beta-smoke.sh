@@ -129,8 +129,11 @@ from pathlib import Path
 
 image = sys.argv[1]
 nonce = secrets.token_hex(16)
+digest_state = hashlib.sha256()
 with open(image, 'rb') as pkg:
-    digest = hashlib.file_digest(pkg, 'sha256').hexdigest()
+    for block in iter(lambda: pkg.read(1024 * 1024), b''):
+        digest_state.update(block)
+digest = digest_state.hexdigest()
 parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
 parent.settimeout(40)
 env = dict(os.environ)
