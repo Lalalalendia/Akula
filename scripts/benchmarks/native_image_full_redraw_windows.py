@@ -206,13 +206,17 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: native byte-anchor image scan did not occur")
     if "AKULA_IMAGE_ANCHOR_SCAN_SEEK index=" not in log:
         raise ValueError(f"{sample}: no actual editor image scroll anchor processed")
-    if "AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED" not in log:
-        raise ValueError(f"{sample}: editor retained scene was not invalidated after image seek")
+    # Repainting is necessary only when the driver actually moved the
+    # viewport. A top-of-document image may already be visible at offset 0;
+    # forcing an impossible centering/repaint would invalidate the 1-image
+    # control and contaminate measured CPU cost.
+    recenter_events = log.count("AKULA_IMAGE_ANCHOR_RECENTER byte=")
+    if recenter_events and "AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED" not in log:
+        raise ValueError(f"{sample}: seek corrected viewport without editor repaint")
     aligned = {
         int(match.group(1))
         for match in re.finditer(r"AKULA_IMAGE_ANCHOR_ALIGNED byte=(\d+)", log)
     }
-    recenter_events = log.count("AKULA_IMAGE_ANCHOR_RECENTER byte=")
     required_alignment = {1: 1, 10: 8, 100: 24}[images]
     if len(aligned & set(anchors)) < required_alignment:
         raise ValueError(
