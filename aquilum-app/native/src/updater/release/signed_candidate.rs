@@ -538,8 +538,25 @@ mod tests {
             std::os::unix::fs::symlink(&unrelated, &staged).unwrap();
             assert!(lease.rehash().is_err(), "symlink must fail closed");
             assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
+
+            // Repair the disposable stage and exercise actual rename-publish
+            // followed by missing-GUI-ACK rollback under the SAME flock.
+            // No production feature or publisher trust setting is modified.
+            fs::remove_file(&staged).unwrap();
+            fs::write(&staged, &payload).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::File::open(&staged).unwrap().sync_all().unwrap();
+            fs::File::open(lease.stage_path()).unwrap().sync_all().unwrap();
+            lease.rehash().unwrap();
+            lease.prove_missing_ack_rollback()
+                .expect("signed test candidate must preserve the previous version after missing ACK");
+            assert_eq!(fs::read(&active).unwrap(), old);
+            assert_eq!(fs::read(lease.stage_path().join("failed.AppImage")).unwrap(), payload);
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel);
             drop(lease);
             println!("AKULA_SIGNED_LINUX_STAGE_PASS real_minisign=1 fsync=1 disk_sha256=1 tamper_hold=1 aquilum_intact=1");
+            println!("AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1");
         }
     }
 
