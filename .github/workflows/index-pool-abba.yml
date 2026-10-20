@@ -1,0 +1,76 @@
+name: Index preparation worker reuse A-B-B-A
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/sync.rs"
+      - "aquilum-app/core/src/search/prepare_pool_lab.rs"
+      - "aquilum-app/core/Cargo.toml"
+      - ".github/workflows/index-pool-abba.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: index-pool-abba-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: index-pool-abba
+      - name: Verify formatting
+        working-directory: aquilum-app
+        run: cargo fmt --all -- --check
+      - name: Compile opt-in feature and existing library checks
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --features index-pool-lab --no-run
+          cargo test --locked --release -p aquilum-core --features index-pool-lab benchmark_indexing --no-run
+      - name: Compare A-B-B-A, one runner and identical Rust code
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQUILUM_BENCH_SIZES: "1000,5000,10000"
+        run: |
+          set -euo pipefail
+          echo "HEAD=$GITHUB_SHA" | tee ../pool-env.txt
+          echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)" | tee -a ../pool-env.txt
+          rustc --version | tee -a ../pool-env.txt
+          for mode in baseline pool pool baseline; do
+            round="${round:-0}"
+            round=$((round + 1))
+            if [ "$mode" = pool ]; then
+              export AKULA_INDEX_POOL_LAB=1
+            else
+              unset AKULA_INDEX_POOL_LAB || true
+            fi
+            /usr/bin/time -v -o "../pool-resource-$round.txt" cargo test --locked --release -p aquilum-core --features index-pool-lab benchmark_indexing -- --ignored --nocapture --test-threads=1 > "../pool-$round-$mode.log" 2>&1
+            grep 'BENCH-INDEX ' "../pool-$round-$mode.log" | tee -a ../pool-summary.txt
+          done
+          {
+            echo '## Same-runner A-B-B-A: baseline / pool / pool / baseline'
+            echo 'One production scan path; only opt-in per-scan worker persistence differs. Fresh synthetic vault per sample.'
+            echo 'No speedup claims until CI logs and tests are inspected.'
+            echo '\`\`\`text'
+            cat ../pool-summary.txt
+            echo '\`\`\`'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-pool-abba-${{ github.sha }}
+          path: |
+            pool-env.txt
+            pool-summary.txt
+            pool-*.log
+            pool-resource-*.txt
+          retention-days: 30
