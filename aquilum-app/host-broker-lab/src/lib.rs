@@ -58,6 +58,10 @@ pub mod windows_server;
 #[cfg(windows)]
 pub mod windows_client_attestation;
 
+// SCM lifecycle is only a standalone experimental service, not native Akula.
+#[cfg(windows)]
+pub mod windows_scm_service;
+
 #[cfg(test)]
 mod tests {
     use super::*;
