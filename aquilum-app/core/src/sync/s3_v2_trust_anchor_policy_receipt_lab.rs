@@ -124,15 +124,14 @@ fn canonical_policy(
     Ok((policy, canonical, digest))
 }
 
-fn load_from(
+// Validate the policy columns WITHOUT calling S3V2TrustedAnchorJournal.
+// The parent root journal calls this directly on all ordinary load() paths,
+// including callers that never invoke load_publisher_policy(). Keeping these
+// helpers separate prevents circular validation and authorization bypass.
+fn checked_policy_row(
     db: &Connection,
     scope: &S3RemoteAnchorScope,
 ) -> Result<Option<V2TrustedPublisherPolicy>, V2PolicyReceiptError> {
-    // This check is essential: a policy row must never outlive a malformed
-    // root anchor or bypass the host's protected profile/scope binding.
-    if S3V2TrustedAnchorJournal::load_from(db, scope)?.is_none() {
-        return Err(V2PolicyReceiptError::NoAnchoredRoot);
-    }
     let row = db.query_row(
         "SELECT policy_json, policy_blake3, policy_receipt
            FROM s3_v2_trusted_roots WHERE profile_id=?1",
@@ -160,6 +159,33 @@ fn load_from(
         }
         _ => Err(V2PolicyReceiptError::CorruptedReceipt),
     }
+}
+
+/// Make ALL ordinary V2 root loads fail closed if a persisted publisher policy
+/// is partial/corrupt. A missing policy is allowed only for explicit genesis
+/// approval, not a grant of publisher authority.
+pub(super) fn validate_policy_columns(
+    db: &Connection,
+    scope: &S3RemoteAnchorScope,
+) -> Result<(), S3V2TrustAnchorError> {
+    checked_policy_row(db, scope)
+        .map_err(|e| match e {
+            V2PolicyReceiptError::Db(err) => S3V2TrustAnchorError::Sqlite(err),
+            _ => S3V2TrustAnchorError::CorruptedAnchor,
+        })?;
+    Ok(())
+}
+
+fn load_from(
+    db: &Connection,
+    scope: &S3RemoteAnchorScope,
+) -> Result<Option<V2TrustedPublisherPolicy>, V2PolicyReceiptError> {
+    // Require the SAME independently pinned, guarded root row before any
+    // publisher policy may be observed or mutated.
+    if S3V2TrustedAnchorJournal::load_from(db, scope)?.is_none() {
+        return Err(V2PolicyReceiptError::NoAnchoredRoot);
+    }
+    checked_policy_row(db, scope)
 }
 
 impl S3V2TrustedAnchorJournal {
