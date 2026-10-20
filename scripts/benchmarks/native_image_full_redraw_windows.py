@@ -258,15 +258,36 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     # that a virtualized MediaView was ever passed to the Painter, and
     # MediaView paint is still not proof the Vello CPU selected its mip.
     painted = {"true": set(), "false": set()}
+    brush_ids = {}
     for line in log.splitlines():
-        match = re.search(r"AKULA_IMAGE_EMBED_PAINT index=(\d+) ready=(true|false)", line)
+        match = re.search(
+            r"AKULA_IMAGE_EMBED_PAINT index=(\d+) ready=(true|false) image_id=(\d+)", line
+        )
         if match:
             index = int(match.group(1))
             if index >= images:
                 raise ValueError(f"{sample}: painted image not present in fixture: {index}")
             painted[match.group(2)].add(index)
+            if match.group(2) == "true":
+                brush_ids[index] = int(match.group(3))
     if not any(painted.values()):
         raise ValueError(f"{sample}: no actual MediaView paint witness")
+    # Compare actual editor ImageBrush identity with the same brush at the
+    # Akula CPU sink's transformed FillRef culling boundary. This is distinct
+    # from Vello's eventual mipmap-source conversions.
+    fill_ids = {"true": set(), "false": set()}
+    for line in log.splitlines():
+        match = re.search(
+            r"AKULA_IMAGE_RASTER_FILL image_id=(\d+) offscreen=(true|false)", line
+        )
+        if match:
+            fill_ids[match.group(2)].add(int(match.group(1)))
+    brush_reached_sink = {idx for idx, ident in brush_ids.items()
+                          if ident in (fill_ids["true"] | fill_ids["false"])}
+    brush_not_culled = {idx for idx, ident in brush_ids.items()
+                        if ident in fill_ids["false"]}
+    if not fill_ids["true"] and not fill_ids["false"]:
+        raise ValueError(f"{sample}: no CPU painter FillRef image culling witness")
     lines = [line for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     if not lines:
         raise ValueError(f"{sample}: no source/eviction diagnostic line")
@@ -291,6 +312,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
             f"editor visible={len(visible['true']) + len(visible['false'])}, "
             f"embedded={len(visible['true'])}, "
             f"embed paint ready={len(painted['true'])}, empty={len(painted['false'])}, "
+            f"CPU sink seen={len(brush_reached_sink)}, not culled={len(brush_not_culled)}, "
             f"no-pixels={len(observed['ready_no_pixels'])}, missing={len(observed['missing'])}"
         )
     p95, p99 = percentile(work, .95), percentile(work, .99)
@@ -316,6 +338,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "editor_unique_image_paragraphs_visible": len(visible["true"] | visible["false"]),
         "editor_unique_image_embeds_materialized": len(visible["true"]),
         "embed_unique_ready_painted_sources": len(painted["true"]),
+        "cpu_sink_brush_source_count": len(brush_reached_sink),
+        "cpu_sink_unculled_source_count": len(brush_not_culled),
         "embed_unique_placeholder_painted_sources": len(painted["false"]),
         "resolver_unique_ready_no_pixels": len(observed["ready_no_pixels"]),
         "cpu_p95_ms": p95, "cpu_p99_ms": p99,
