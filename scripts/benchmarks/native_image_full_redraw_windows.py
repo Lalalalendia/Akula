@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -161,6 +162,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     env["AKULA_EXPERIMENTAL_IMAGE_SCAN_BYTES"] = ",".join(map(str, anchors))
     env.pop("AKULA_EXPERIMENTAL_IMAGE_SCROLL_SCAN", None)
     env["AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF"] = "1"
+    env["AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF"] = "1"
     env["AKULA_EXPERIMENTAL_FRAME_SAMPLES"] = "1"
     env["AKULA_EXPERIMENTAL_FRAME_STAGES"] = "1"
     if mode == "selective_l2":
@@ -221,6 +223,22 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
             f"{sample}: only {len(work)} rendered replay frames in six seconds; "
             "developer image dwell must request full redraw every replay tick"
         )
+    # Source diagnostics are independent of the mip resident-cache IDs:
+    # pending means an embed requested an async decode; ready means the
+    # actual photo's pixels became available. Neither alone proves painting.
+    observed = {"pending": set(), "ready": set(),
+                "ready_no_pixels": set(), "missing": set()}
+    for line in log.splitlines():
+        match = re.search(r"AKULA_IMAGE_RESOLVE_STATE index=(\\d+) state=(pending|ready|ready_no_pixels|missing)", line)
+        if match:
+            index = int(match.group(1))
+            if index >= images:
+                raise ValueError(f"{sample}: resolver returned unexpected image index {index}")
+            observed[match.group(2)].add(index)
+    if not any(observed.values()):
+        raise ValueError(f"{sample}: no native asynchronous image-resolver witness")
+    if observed["missing"]:
+        raise ValueError(f"{sample}: image resolver reported missing pixels for {sorted(observed['missing'])}")
     lines = [line for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     if not lines:
         raise ValueError(f"{sample}: no source/eviction diagnostic line")
@@ -240,7 +258,9 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(
             f"{sample}: only {unique} runtime IDs and {unique_pixels} "
             f"independently sampled decoded-pixel fingerprints for "
-            f"{images} seeded PNG files; both must reach at least {minimum}"
+            f"{images} seeded PNG files; both must reach at least {minimum}; "
+            f"resolver pending={len(observed['pending'])}, ready={len(observed['ready'])}, "
+            f"no-pixels={len(observed['ready_no_pixels'])}, missing={len(observed['missing'])}"
         )
     p95, p99 = percentile(work, .95), percentile(work, .99)
     raster = [float(x["rasterPixels"]) for x in stage]
@@ -260,6 +280,9 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "replay_anchor_dwell_ms_each_pass": 3000 / len(anchors),
         "unique_mip_source_ids_requested": unique,
         "distinct_decoded_pixel_fingerprints": unique_pixels,
+        "resolver_unique_pending_sources": len(observed["pending"]),
+        "resolver_unique_ready_sources": len(observed["ready"]),
+        "resolver_unique_ready_no_pixels": len(observed["ready_no_pixels"]),
         "cpu_p95_ms": p95, "cpu_p99_ms": p99,
         "cpu_mean_ms": sum(work) / len(work),
         "full_damage_pixels_median": median(raster),
@@ -291,8 +314,8 @@ def report(rows: list[dict], binary_hash: str) -> str:
         "plus developer-only full raster of every drawn frame.",
         "Work times are CPU, not physical scanout/FPS. Image-quality comparison is separate.",
         "",
-        "| Sources in note | Mode | Runtime IDs | Distinct pixel fingerprints | CPU p95 ms | CPU p99 ms | Replay mip build ms | Peak RSS MiB |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|",
+        "| Sources in note | Mode | Resolver ready | Runtime IDs | Distinct pixel fingerprints | CPU p95 ms | CPU p99 ms | Replay mip build ms | Peak RSS MiB |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for count in COUNTS:
         parts = [row for row in rows if row["count"] == count]
@@ -304,13 +327,15 @@ def report(rows: list[dict], binary_hash: str) -> str:
             group = [row for row in parts if row["mode"] == mode]
             if sorted(x["trial"] for x in group) != list(TRIALS):
                 raise ValueError(f"{count}/{mode}: paired trial missing")
-            keys = ("unique_mip_source_ids_requested", "distinct_decoded_pixel_fingerprints",
+            keys = ("resolver_unique_ready_sources",
+                    "unique_mip_source_ids_requested", "distinct_decoded_pixel_fingerprints",
                     "cpu_p95_ms", "cpu_p99_ms",
                     "mip_build_replay_ms", "peak_rss_mib")
             averages = {key: median(float(row[key]) for row in group) for key in keys}
             mode_aggregates[mode] = averages
             lines.append(
-                f"| {count} | {mode} | {averages['unique_mip_source_ids_requested']:.0f} | "
+                f"| {count} | {mode} | {averages['resolver_unique_ready_sources']:.0f} | "
+                f"{averages['unique_mip_source_ids_requested']:.0f} | "
                 f"{averages['distinct_decoded_pixel_fingerprints']:.0f} | "
                 f"{averages['cpu_p95_ms']:.3f} | {averages['cpu_p99_ms']:.3f} | "
                 f"{averages['mip_build_replay_ms']:.3f} | {averages['peak_rss_mib']:.1f} |"
