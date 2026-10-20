@@ -444,20 +444,6 @@ pub(crate) struct InertColdUnifiedReview {
     pub(crate) status: InertColdUnifiedStatus,
 }
 
-/// Join independently reopened, read-only V7/V8/original stores and an actual
-/// HistoryService on the CURRENT registered Core. This is strictly forensic.
-/// Call after fresh Core::open and RegisteredReadAdmission; all three SQLite
-/// stores must already be opened via their read-only existing-file methods.
-///
-/// Phase 1: correlate physical primary + bound protected original + V7/V8.
-/// Phase 2: read the exact external history version under the existing history
-/// mutex and the current registered root.
-/// Phase 3: redo the entire pinned primary/SQLite/profile correlation, and
-/// compare the saved V8 candidate. Never infer permission from success.
-///
-/// No shared filesystem/SQLite/HistoryService ACID transaction exists. This
-/// does NOT defend against an adversarial concurrent filesystem process or
-/// prove that every directory entry survives an actual power cut.
 /// The original read-only inspector is still the SINGLE decision engine.
 /// These typed phase failures describe which mandatory proof did not hold.
 /// They are diagnostic labels only: no failure can mint a receipt or ACK.
@@ -513,6 +499,20 @@ impl ColdReviewFailure {
     }
 }
 
+/// Join independently reopened, read-only V7/V8/original stores and an actual
+/// HistoryService on the CURRENT registered Core. This is strictly forensic.
+/// Call after fresh Core::open and RegisteredReadAdmission; all three SQLite
+/// stores must already be opened via their read-only existing-file methods.
+///
+/// Phase 1: correlate physical primary + bound protected original + V7/V8.
+/// Phase 2: read the exact external history version under the existing history
+/// mutex and the current registered root.
+/// Phase 3: redo the entire pinned primary/SQLite/profile correlation, and
+/// compare the saved V8 candidate. Never infer permission from success.
+///
+/// No shared filesystem/SQLite/HistoryService ACID transaction exists. This
+/// does NOT defend against an adversarial concurrent filesystem process or
+/// prove that every directory entry survives an actual power cut.
 #[allow(dead_code)]
 pub(crate) fn inspect_cold_s3_replace_with_history_hold(
     admission: &RegisteredReadAdmission<'_>,
