@@ -244,11 +244,45 @@ async fn live_minio_full_pinned_v2_get_and_corruption_hold() {
     assert!(counts.get >= 7, "must fetch root twice and all immutable objects");
     assert_eq!(counts.head, 0, "pinned V2 read must not LIST or HEAD by default");
 
+    // Reject a different bucket or Vault BEFORE any SDK request. The
+    // account-binding string alone is a host provenance obligation, not a
+    // remote principal proof from this S3 reader.
+    let other_bucket = S3ConnectionProfile {
+        bucket: "akula-e3f-other-bucket".to_owned(),
+        ..profile.clone()
+    };
+    let wrong_scope = S3RemoteAnchorScope::new(
+        "e3f-ephemeral-profile", "local-test-only-minio-account",
+        &other_bucket, &ns,
+    ).unwrap();
+    let before_wrong_scope = client.test_io_snapshot();
+    assert!(matches!(
+        client.inspect_explicitly_pinned_v2_read_only(
+            &wrong_scope, &root, &initial.etag, None,
+        ).await,
+        Err(S3PinnedV2ReadError::ScopeMismatch)
+    ));
+    let foreign_ns = S3Keyspace::new("akula/e3f-other-vault", VaultId::new()).unwrap();
+    let foreign_scope = S3RemoteAnchorScope::new(
+        "e3f-ephemeral-profile", "local-test-only-minio-account",
+        &profile, &foreign_ns,
+    ).unwrap();
+    assert!(matches!(
+        client.inspect_explicitly_pinned_v2_read_only(
+            &foreign_scope, &root, &initial.etag, None,
+        ).await,
+        Err(S3PinnedV2ReadError::ScopeMismatch)
+    ));
+    assert_eq!(
+        client.test_io_snapshot().since(before_wrong_scope).get, 0,
+        "wrong bucket / Vault must fail before network",
+    );
+
     // Wrong ETag fails even when a cloud server returns the exact same bytes.
     let before_wrong = client.test_io_snapshot();
     assert!(matches!(
         client.inspect_explicitly_pinned_v2_read_only(
-            &scope, &root, "\"\"wrong-etag\"\"", None,
+            &scope, &root, "\"wrong-etag\"", None,
         ).await,
         Err(S3PinnedV2ReadError::RootChanged)
     ));
