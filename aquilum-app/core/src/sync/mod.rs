@@ -53,6 +53,8 @@ mod protection_store;
 mod s3_preimage_capture;
 #[cfg(feature = "sync-s3")]
 mod s3_reserved_replace;
+#[cfg(all(test, feature = "sync-s3"))]
+mod cold_oracle_report;
 #[cfg(feature = "sync-s3")]
 mod profile_binding;
 mod path;
