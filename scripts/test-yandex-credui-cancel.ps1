@@ -12,7 +12,7 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-internal static class AkulaCredUiQaWindow {
+public static class AkulaCredUiQaWindow {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr FindWindow(string className, string windowTitle);
     [DllImport("user32.dll", SetLastError = true)]
