@@ -74,7 +74,22 @@ impl ReadCatalog {
             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::empty(),
         ).map_err(|_| CatalogError::InvalidConfiguration)?;
-        let root = File::from(owned);
+        Self::from_pinned_root(File::from(owned), vault_id, allowed)
+    }
+
+    /// Admit from an OS directory handle that the host has ALREADY pinned
+    /// and verified. D2 calls this with a duplicate of the D1 root fd: there
+    /// is no second pathname resolution between the host's root preflight
+    /// and catalog admission. The caller must separately verify that this
+    /// fd belongs to an authorized VaultId; a typed UUID is not custody proof.
+    pub fn from_pinned_root(
+        root: File,
+        vault_id: VaultId,
+        allowed: &[&str],
+    ) -> Result<Self, CatalogError> {
+        if allowed.is_empty() || allowed.len() > MAX_DOCUMENTS {
+            return Err(CatalogError::InvalidConfiguration);
+        }
         if !root.metadata().map_err(|_| CatalogError::Io)?.is_dir() {
             return Err(CatalogError::InvalidConfiguration);
         }
