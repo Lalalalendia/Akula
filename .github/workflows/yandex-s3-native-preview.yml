@@ -17,6 +17,7 @@ on:
       - 'aquilum-app/native/assets/locales/*.json'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
+      - 'scripts/test-yandex-credui-cancel.ps1'
   workflow_dispatch:
 
 permissions:
@@ -134,6 +135,13 @@ jobs:
               $app.WaitForExit(5000) | Out-Null
             }
           }
+      - name: Real Microsoft CredUI masked field and Cancel via Windows UI Automation
+        shell: pwsh
+        run: |
+          # The Rust test is ignored by default and limited to ephemeral CI.
+          # PowerShell 5.1 STA is required by Microsoft Windows UIA.
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\scripts\test-yandex-credui-cancel.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Real Windows CredUI Cancel/UIA QA failed" }
       - name: Package isolated QA executable and safety instructions
         shell: pwsh
         working-directory: aquilum-app
