@@ -298,6 +298,65 @@ mod tests {
         assert!(inspect_authenticated(&serde_json::to_vec(&doc).unwrap(), bytes, TARGET_LINUX_APPIMAGE, "0.3.9").is_err());
     }
 
+    // Run through the dedicated signed-candidate step in Application CI.
+    // It generates two disposable Minisign keypairs and signs the exact JSON
+    // fixture with the standalone CLI; this test exercises the real Rust
+    // minisign_verify wrapper, not a stub or a mocked signature validator.
+    #[test]
+    #[ignore = "CI supplies a real ephemeral Minisign-signed manifest"]
+    fn ephemeral_minisign_fixture_accepts_exact_bytes() {
+        use base64::Engine;
+        use std::{env, fs, path::PathBuf};
+        let root = PathBuf::from(
+            env::var("AKULA_SIGNED_CANDIDATE_TEST_ROOT")
+                .expect("real Minisign fixture directory required by CI"),
+        );
+        let manifest = fs::read(root.join("manifest.json")).unwrap();
+        let signature = base64::engine::general_purpose::STANDARD
+            .encode(fs::read(root.join("manifest.minisig")).unwrap());
+        let key = base64::engine::general_purpose::STANDARD
+            .encode(fs::read(root.join("publisher.pub")).unwrap());
+        let wrong_key = base64::engine::general_purpose::STANDARD
+            .encode(fs::read(root.join("other.pub")).unwrap());
+        let payload = fs::read(root.join("payload.AppImage")).unwrap();
+
+        let candidate = admit_with_trusted_key(
+            &manifest, &signature, payload.clone(), &key,
+            TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).expect("the actual CLI-generated Minisign signature must verify");
+        assert_eq!(candidate.bytes(), payload.as_slice());
+        assert_eq!(candidate.version(), "0.3.10");
+        assert_eq!(candidate.source_commit(), "a".repeat(40));
+        assert_eq!(candidate.sha256(), digest_hex(&payload));
+
+        let mut changed = payload.clone();
+        changed[0] ^= 0x01;
+        let error = admit_with_trusted_key(
+            &manifest, &signature, changed, &key, TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).unwrap_err();
+        assert!(error.contains("downloaded bytes"), "{error}");
+
+        let error = admit_with_trusted_key(
+            &manifest, &signature, payload.clone(), &wrong_key,
+            TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).unwrap_err();
+        assert!(error.contains("authentication failed"), "{error}");
+
+        let mut altered_manifest = manifest.clone();
+        altered_manifest.push(b' ');
+        let error = admit_with_trusted_key(
+            &altered_manifest, &signature, payload.clone(), &key,
+            TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).unwrap_err();
+        assert!(error.contains("authentication failed"), "{error}");
+
+        let error = admit_with_trusted_key(
+            &manifest, &signature, payload, &key,
+            TARGET_LINUX_APPIMAGE, "0.3.10",
+        ).unwrap_err();
+        assert!(error.contains("not strictly newer"), "{error}");
+    }
+
     #[test]
     fn production_admission_refuses_before_parse_without_publisher_root() {
         let result = admit(b"{}", "", b"any bytes".to_vec());
