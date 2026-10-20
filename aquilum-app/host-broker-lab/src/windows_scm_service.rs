@@ -1,0 +1,215 @@
+//! RN-4E1b-03b1c: real Windows SCM lifecycle, ZERO policy/IPC.
+//! This experimental service owns no user data, SQLite, File Gate writer,
+//! QUIC connection or permission. It enters the actual SCM dispatcher,
+//! registers a stop/shutdown handler and reports correct service states.
+//! It is NOT installed by Akula and deliberately DOES NOT start a pipe.
+
+#![cfg(windows)]
+
+use std::ffi::c_void;
+use std::io::{self, ErrorKind};
+use std::mem::size_of;
+use std::ptr;
+use std::sync::atomic::{AtomicPtr, Ordering};
+
+type Handle = *mut c_void;
+type StatusHandle = *mut c_void;
+const SERVICE_WIN32_OWN_PROCESS: u32 = 0x10;
+const SERVICE_STOPPED: u32 = 1;
+const SERVICE_START_PENDING: u32 = 2;
+const SERVICE_STOP_PENDING: u32 = 3;
+const SERVICE_RUNNING: u32 = 4;
+const SERVICE_ACCEPT_STOP: u32 = 1;
+const SERVICE_ACCEPT_SHUTDOWN: u32 = 4;
+const SERVICE_CONTROL_STOP: u32 = 1;
+const SERVICE_CONTROL_SHUTDOWN: u32 = 5;
+const ERROR_CALL_NOT_IMPLEMENTED: u32 = 120;
+const ERROR_SERVICE_SPECIFIC_ERROR: u32 = 1066;
+const WAIT_OBJECT_0: u32 = 0;
+const INFINITE: u32 = u32::MAX;
+const SCM_NAME: &str = "AkulaHostBrokerResearch";
+static STOP_SIGNAL: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
+
+#[repr(C)]
+struct ServiceTableEntryW {
+    name: *mut u16,
+    main: Option<unsafe extern "system" fn(u32, *mut *mut u16)>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ServiceStatus {
+    service_type: u32,
+    current_state: u32,
+    accepted_controls: u32,
+    win32_exit_code: u32,
+    service_specific_exit_code: u32,
+    checkpoint: u32,
+    wait_hint: u32,
+}
+
+#[link(name = "advapi32")]
+extern "system" {
+    fn StartServiceCtrlDispatcherW(table: *const ServiceTableEntryW) -> i32;
+    fn RegisterServiceCtrlHandlerExW(
+        name: *const u16,
+        handler: Option<unsafe extern "system" fn(u32, u32, Handle, Handle) -> u32>,
+        context: Handle,
+    ) -> StatusHandle;
+    fn SetServiceStatus(handle: StatusHandle, status: *const ServiceStatus) -> i32;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateEventW(attrs: Handle, manual: i32, initial: i32, name: *const u16) -> Handle;
+    fn SetEvent(event: Handle) -> i32;
+    fn WaitForSingleObject(handle: Handle, timeout: u32) -> u32;
+    fn CloseHandle(handle: Handle) -> i32;
+}
+
+struct OwnedEvent(Handle);
+impl OwnedEvent {
+    fn create() -> io::Result<Self> {
+        let raw = unsafe { CreateEventW(ptr::null_mut(), 1, 0, ptr::null()) };
+        if raw.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(raw))
+    }
+}
+impl Drop for OwnedEvent {
+    fn drop(&mut self) {
+        STOP_SIGNAL.store(ptr::null_mut(), Ordering::SeqCst);
+        unsafe { CloseHandle(self.0) };
+    }
+}
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+fn report(
+    handle: StatusHandle,
+    state: u32,
+    controls: u32,
+    error: u32,
+    checkpoint: u32,
+    wait_hint: u32,
+) -> io::Result<()> {
+    let status = ServiceStatus {
+        service_type: SERVICE_WIN32_OWN_PROCESS,
+        current_state: state,
+        accepted_controls: controls,
+        win32_exit_code: if error == 0 { 0 } else { ERROR_SERVICE_SPECIFIC_ERROR },
+        service_specific_exit_code: error,
+        checkpoint,
+        wait_hint,
+    };
+    if unsafe { SetServiceStatus(handle, &status) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// The SCM invokes this handler on a dispatcher thread. It performs no IO
+/// except SetEvent. It NEVER authorizes a peer or touches a host registry.
+unsafe extern "system" fn control_handler(
+    control: u32,
+    _event_type: u32,
+    _event_data: Handle,
+    _context: Handle,
+) -> u32 {
+    if control != SERVICE_CONTROL_STOP && control != SERVICE_CONTROL_SHUTDOWN {
+        return ERROR_CALL_NOT_IMPLEMENTED;
+    }
+    let event = STOP_SIGNAL.load(Ordering::SeqCst);
+    if event.is_null() || unsafe { SetEvent(event) } == 0 {
+        return ERROR_CALL_NOT_IMPLEMENTED;
+    }
+    0
+}
+
+fn run_service() -> io::Result<()> {
+    let event = OwnedEvent::create()?;
+    if STOP_SIGNAL
+        .compare_exchange(
+            ptr::null_mut(),
+            event.0,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        return Err(io::Error::new(ErrorKind::AlreadyExists, "already dispatched"));
+    }
+    let name = wide(SCM_NAME);
+    let handler = unsafe {
+        RegisterServiceCtrlHandlerExW(name.as_ptr(), Some(control_handler), ptr::null_mut())
+    };
+    if handler.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    report(handler, SERVICE_START_PENDING, 0, 0, 1, 5000)?;
+    // No pipe or filesystem: status RUNNING only proves the SCM lifecycle.
+    report(
+        handler,
+        SERVICE_RUNNING,
+        SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN,
+        0,
+        0,
+        0,
+    )?;
+    let state = unsafe { WaitForSingleObject(event.0, INFINITE) };
+    if state != WAIT_OBJECT_0 {
+        let _ = report(handler, SERVICE_STOPPED, 0, 1, 0, 0);
+        return Err(io::Error::last_os_error());
+    }
+    report(handler, SERVICE_STOP_PENDING, 0, 0, 1, 5000)?;
+    report(handler, SERVICE_STOPPED, 0, 0, 0, 0)?;
+    Ok(())
+}
+
+unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
+    // Never unwind across the Win32 service FFI boundary.
+    let result = std::panic::catch_unwind(run_service);
+    if !matches!(result, Ok(Ok(()))) {
+        eprintln!("Akula research SCM service stopped after initialization failure");
+    }
+}
+
+/// Entry point exclusively for processes actually launched by SCM.
+/// Interactive invocation returns ERROR_FAILED_SERVICE_CONTROLLER_CONNECT.
+pub fn dispatch_scm_service() -> io::Result<()> {
+    let mut name = wide(SCM_NAME);
+    let entries = [
+        ServiceTableEntryW {
+            name: name.as_mut_ptr(),
+            main: Some(service_main),
+        },
+        ServiceTableEntryW {
+            name: ptr::null_mut(),
+            main: None,
+        },
+    ];
+    if unsafe { StartServiceCtrlDispatcherW(entries.as_ptr()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_exact_win32_abi_size() {
+        assert_eq!(size_of::<ServiceStatus>(), 28);
+        assert_eq!(size_of::<ServiceTableEntryW>(), 2 * size_of::<usize>());
+        assert!(STOP_SIGNAL.load(Ordering::SeqCst).is_null());
+    }
+
+    #[test]
+    fn interactive_test_process_cannot_fake_scm_dispatcher() {
+        // This process is not started by the Service Control Manager.
+        assert!(dispatch_scm_service().is_err());
+        assert!(STOP_SIGNAL.load(Ordering::SeqCst).is_null());
+    }
+}
