@@ -354,3 +354,8 @@ mod tests {
         assert!(CustodyWitness::inspect_at("", "").is_err());
     }
 }
+
+/// Read-only diagnostic; no handle, token or permit escapes to the caller.
+pub fn inspect_fixed_without_authorization() -> io::Result<()> {
+    CustodyWitness::inspect_fixed().map(|_| ())
+}

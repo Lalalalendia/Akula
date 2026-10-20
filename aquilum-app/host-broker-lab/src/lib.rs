@@ -66,6 +66,10 @@ pub mod windows_scm_service;
 #[cfg(windows)]
 mod windows_cancellable_pipe;
 
+// Read-only installer-owned namespace diagnostics. Never grants a peer.
+#[cfg(windows)]
+pub mod windows_store_custody;
+
 // This P2P policy kernel is UNIT-TEST ONLY: no production enrollment or
 // channel-binding constructor exists, and no Allow variant can escape.
 #[cfg(test)]
