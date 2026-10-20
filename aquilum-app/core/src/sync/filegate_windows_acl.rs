@@ -143,6 +143,20 @@ fn well_known_sid(kind: u32) -> Result<Vec<u64>, VaultPortError> {
 /// A negative gate on the opened file or directory HANDLE, not its name.
 /// No file/ACL is changed. A successful result still cannot grant a write.
 pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
+    audit_owner_dacl_policy(file, false)
+}
+
+/// Strict installer-owned audit is opt-in for a non-shipping P2P trust probe.
+/// Unlike ordinary per-user File Gate diagnostics, the logged-in user MUST
+/// NOT be permitted to own or modify the host registry / witness namespace.
+/// This only audits known allow ACEs; no claim of effective-access, elevation,
+/// impersonation or full immutable host custody is made.
+#[cfg(feature = "sync-installed-host-windows-owner-probe")]
+pub(super) fn audit_installer_owner_dacl(file: &File) -> Result<(), VaultPortError> {
+    audit_owner_dacl_policy(file, true)
+}
+
+fn audit_owner_dacl_policy(file: &File, installer_only: bool) -> Result<(), VaultPortError> {
     let mut token_raw = ptr::null_mut();
     // SAFETY: process pseudo-handle is live and token_raw is an out-pointer.
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_raw) } == 0
@@ -234,12 +248,24 @@ pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
     if status != 0 {
         return Err(VaultPortError::Io(format!("GetSecurityInfo error {status}")));
     }
-    // NULL DACL grants unrestricted access; a missing owner cannot be bound.
+    let system_sid = well_known_sid(SYSTEM_SID)?;
+    let admins_sid = well_known_sid(ADMINISTRATORS_SID)?;
+    let system = system_sid.as_ptr() as *mut c_void;
+    let admins = admins_sid.as_ptr() as *mut c_void;
+    // NULL DACL grants unrestricted access. An installer ledger cannot be
+    // owned by the ordinary desktop token; even a restrictive DACL leaves
+    // its owner able to rewrite the security descriptor.
     if descriptor.is_null() || owner.is_null() || dacl.is_null()
         || unsafe { IsValidSid(owner) } == 0
-        || (unsafe { EqualSid(owner, user_sid) } == 0
-            && unsafe { EqualSid(owner, default_owner) } == 0)
     {
+        return Err(refuse());
+    }
+    let trusted_owner = if installer_only {
+        unsafe { EqualSid(owner, system) != 0 || EqualSid(owner, admins) != 0 }
+    } else {
+        unsafe { EqualSid(owner, user_sid) != 0 || EqualSid(owner, default_owner) != 0 }
+    };
+    if !trusted_owner {
         return Err(refuse());
     }
     let mut info = AclSizeInfo::default();
@@ -256,11 +282,6 @@ pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
     if info.ace_count > 4096 || info.bytes_in_use < 8 {
         return Err(refuse());
     }
-    let system_sid = well_known_sid(SYSTEM_SID)?;
-    let admins_sid = well_known_sid(ADMINISTRATORS_SID)?;
-    let system = system_sid.as_ptr() as *mut c_void;
-    let admins = admins_sid.as_ptr() as *mut c_void;
-
     for index in 0..info.ace_count {
         let mut ace = ptr::null_mut();
         // SAFETY: GetAce returns a pointer within the live DACL, or fails.
@@ -304,10 +325,19 @@ pub(super) fn audit_owner_dacl(file: &File) -> Result<(), VaultPortError> {
         }
         // SYSTEM/Administrators are *not* a defense against elevated or
         // hostile same-user actors. This is only a restrictive ACL signal.
-        if unsafe { EqualSid(granted_sid, user_sid) } == 0
-            && unsafe { EqualSid(granted_sid, system) } == 0
-            && unsafe { EqualSid(granted_sid, admins) } == 0
-        {
+        let trusted_writer = if installer_only {
+            unsafe {
+                EqualSid(granted_sid, system) != 0
+                    || EqualSid(granted_sid, admins) != 0
+            }
+        } else {
+            unsafe {
+                EqualSid(granted_sid, user_sid) != 0
+                    || EqualSid(granted_sid, system) != 0
+                    || EqualSid(granted_sid, admins) != 0
+            }
+        };
+        if !trusted_writer {
             return Err(refuse());
         }
     }

@@ -23,6 +23,8 @@ pub(crate) mod host_custody_registry;
 pub(crate) mod host_install_witness;
 #[cfg(feature = "sync-installed-host-unix-root-witness")]
 mod host_install_unix_root;
+#[cfg(all(windows, feature = "sync-installed-host-windows-owner-probe"))]
+mod host_install_windows_owner_probe;
 #[cfg(all(test, feature = "host-custody"))]
 mod host_core_epoch_tests;
 pub(crate) mod guarded_note_write;

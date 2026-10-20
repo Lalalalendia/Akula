@@ -1,0 +1,76 @@
+name: Staya RN4E1b03b0 — Windows OS installer-owner negative preflight
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03b0-windows-owner-probe-*"
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/sync/filegate_windows_acl.rs"
+      - "aquilum-app/core/src/sync/filegate_lock_probe.rs"
+      - "aquilum-app/core/src/sync/host_install_windows_owner_probe.rs"
+      - "aquilum-app/core/src/sync/mod.rs"
+      - "aquilum-app/core/Cargo.toml"
+      - ".github/workflows/staya-rn4e1b03b0-windows-owner-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owner-preflight:
+    name: Windows privileged OWNER+DACL read-only probe
+    runs-on: windows-2022
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTFLAGS: "-Zcrate-attr=feature(if_let_guard)"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Strict opt-in scope and no product activation
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "0a824949c1fcd0cabe6c9f7b1685dca4d8b85a64"
+          observed = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          allowed = {
+              "aquilum-app/core/Cargo.toml",
+              "aquilum-app/core/src/sync/mod.rs",
+              "aquilum-app/core/src/sync/filegate_windows_acl.rs",
+              "aquilum-app/core/src/sync/filegate_lock_probe.rs",
+              "aquilum-app/core/src/sync/host_install_windows_owner_probe.rs",
+              ".github/workflows/staya-rn4e1b03b0-windows-owner-probe.yml",
+              "docs/sync/staya-rn4e1b03b0-windows-owner-probe.md",
+          }
+          assert observed == allowed, f"scope differs: {observed ^ allowed}"
+          PY
+          grep -q 'sync-installed-host-windows-owner-probe = \["host-custody"\]' aquilum-app/core/Cargo.toml
+          if grep -q "sync-installed-host-windows-owner-probe" aquilum-app/native/Cargo.toml; then
+            echo "No product activation permitted" >&2
+            exit 1
+          fi
+      - name: Negative tests on real Windows runner with native OWNER+DACL API
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features sync-installed-host-windows-owner-probe \
+            --lib sync::host_install_windows_owner_probe::tests \
+            -- --nocapture --test-threads=1
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Record known unresolved OS Broker boundary
+        run: |
+          echo "This is an independent NEGATIVE preflight, not trusted Windows installer/Broker attestation." >> "$GITHUB_STEP_SUMMARY"
+          echo "No trusted successful installer fixture or authenticated IPC. Elevated same-user processes, ancestor races, admin privileges and P2P write grants remain HOLD." >> "$GITHUB_STEP_SUMMARY"

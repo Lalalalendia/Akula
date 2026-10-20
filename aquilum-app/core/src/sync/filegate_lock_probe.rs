@@ -189,6 +189,14 @@ impl PinnedProbeRoot {
         super::filegate_windows_acl::audit_owner_dacl(&self.handle).map_err(converted)
     }
 
+    /// Installer-only OWNER/DACL negative preflight on this pinned root.
+    /// Ordinary user-owned roots fail; this cannot grant File Gate writes.
+    #[cfg(all(windows, feature = "sync-installed-host-windows-owner-probe"))]
+    pub(crate) fn audit_windows_installer_acl(&self) -> io::Result<()> {
+        super::filegate_windows_acl::audit_installer_owner_dacl(&self.handle)
+            .map_err(converted)
+    }
+
     pub(crate) fn recheck_root(&self) -> io::Result<()> {
         #[cfg(unix)]
         {
