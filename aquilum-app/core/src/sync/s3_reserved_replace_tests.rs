@@ -1048,12 +1048,13 @@ fn p0g3d08c_writer_abort_entrypoint() {
         let _ignored = f.custody.with_cooperative_writer_lifetime(
             &admission, f.keyspace.vault_id(), &f.scope,
             || -> Result<(), FileCommandError> {
-                let prepared = prepare(&f, &admission)?;
+                let _held = prepare(&f, &admission)?;
                 assert_editor_reserved(&f);
                 assert!(f.journal.borrow()
-                    .read_existing_replace_attempt(f.intent.operation_id)?
+                    .read_existing_replace_attempt(f.intent.operation_id)
+                    .map_err(refused)?
                     .is_some());
-                drop(prepared);
+                // Retain editor reservation and OS custody until process abort.
                 p0g3d08c_abort_at(&workdir, "after-v7");
             },
         );
