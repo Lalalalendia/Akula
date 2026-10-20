@@ -6,13 +6,13 @@
 
 #![cfg(windows)]
 
+use super::windows_cancellable_pipe::CancelablePipe;
 use std::ffi::c_void;
 use std::io::{self, ErrorKind};
 #[cfg(test)]
 use std::mem::size_of;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use super::windows_cancellable_pipe::CancelablePipe;
 
 type Handle = *mut c_void;
 type StatusHandle = *mut c_void;
