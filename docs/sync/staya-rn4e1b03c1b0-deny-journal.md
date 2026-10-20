@@ -1,0 +1,19 @@
+# RN-4E1b-03c1b0 — test-only OS-process durable revocation floor
+
+**LAB ONLY, no installed Akula impact and no peer grants.** Stacked on [RN-4E1b-03c1a PR #460](https://github.com/Lalalalendia/Akula/pull/460), the separate Windows protected-namespace research whose full real-SCM CI is still being accepted. Child deliberately stays isolated to four files; all new executable logic is under `#[cfg(all(test, windows))]` in `aquilum-app/host-broker-lab`, never available to the standard Broker binary.
+
+## Concrete Windows kernel experiment
+
+- Installer-like TEST fixture creates a pre-existing fixed-header journal. Runtime code opens it with `OPEN_EXISTING`, `FILE_FLAG_OPEN_REPARSE_POINT` and Win32 `share_mode(0)` for the entire read/compare/append/sync/readback epoch. No normal API can create or repair a missing/empty file.
+- The append-only file is capped at 4096 fixed-size records. Each record contains global sequence, local `ReplicaId`, expected revocation floor, next floor, previous checksum, DENY_ONLY opcode and CRC32. It rejects missing/replaced instance binding, nonzero reserved bytes, broken sequence, epoch gaps, unknown opcodes, truncated tails and altered checksums. CRC32 is only for accidental corruption, not authentication.
+- Every mutation checks its expected floor, increments with checked arithmetic, appends exactly ONE denial-only record, calls `File::sync_all()` and rereads the whole journal using the still-pinned exclusive handle. Windows kernel share denial prevents two OS processes from concurrently committing with the same floor. A losing writer must reopen, replay full state and refuse stale CAS rather than resetting a journal.
+- A real Windows Rust test spawns TWO independent libtest OS processes on the same file and verifies exactly one can commit the `0 → 1` denial floor. Additional tests cover cold reopen, a second replica, missing/wrong installer binding, invalid empty file, bit-flip CRC and process-exit mid-record: all torn/damaged states go HOLD with no auto-truncation. The process-exit test is NOT a power-cut or storage-controller durability demonstration.
+- **Important falsifier:** replacing the journal with an older *valid* snapshot is NOT detected by CRC32, sequence validation or an in-file anchor. A dedicated passing test demonstrates that an external monotonic, installer/TPM-protected witness is necessary before such a journal can be trusted for actual revocation. This is explicitly a RELEASE BLOCKER, not a passed security gate.
+
+## Absent production authority and next gates
+
+Only the Windows **test binary** can construct, read or append journal records. `#[cfg(all(test, windows))]` excludes the entire module from real executable and installed Akula. No `Enroll`, `Allow`, issuer, policy key, authenticated QUIC connection, P2P File Gate, APPLIED/receipt/ACK exists. The protected marker in #460 is not silently reinterpreted as an enrollment database.
+
+The next step **RN-4E1b-03c1b1** must integrate one canonical Broker-owned journal/SQLite DB under the verified service-owned physical root and pinned sidecars, with signed installer protection, external rollback witness and test of same-user namespace swaps. Never accept user-selected appdata as authority. Only thereafter **RN-4E1b-03c2** can attach real QUIC channel identity, followed by crash-safe File Gate no-replace and STY-G2-06. Until then write remains HOLD.
+
+CI acceptance: Linux should prove isolation and old tests, Windows should additionally prove the real separate-process race, crash-like exit, corruption/rollback falsifier and locked Cargo/rustfmt at one exact SHA. A passed test is only validation of deny-floor algorithm, not durability against power failure or malicious rollback.

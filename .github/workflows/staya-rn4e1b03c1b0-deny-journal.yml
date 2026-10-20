@@ -1,0 +1,82 @@
+name: Staya RN4E1b03c1b0 — Windows durable deny floor OS-process lab
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03c1b0-durable-revoke-lab-*"
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/src/windows_revocation_journal.rs"
+      - "aquilum-app/host-broker-lab/src/lib.rs"
+      - ".github/workflows/staya-rn4e1b03c1b0-deny-journal.yml"
+      - "docs/sync/staya-rn4e1b03c1b0-deny-journal.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  revoke-lab:
+    name: Separate Windows OS-process epoch CAS / torn record / rollback HOLD — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Force research-only scope, outside all product file writers
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "687bcd2c7fb787c07764d34846bdf31ee1a9e590"
+          changed = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          expected = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_journal.rs",
+              "aquilum-app/host-broker-lab/src/lib.rs",
+              ".github/workflows/staya-rn4e1b03c1b0-deny-journal.yml",
+              "docs/sync/staya-rn4e1b03c1b0-deny-journal.md",
+          }
+          # This job runs on the stacked external-witness PR as well. Its
+          # only permissible extra paths are the three files unique to that
+          # research layer; lib.rs and the journal are already in 'expected'.
+          witness_layer = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_witness.rs",
+              ".github/workflows/staya-rn4e1b03c1b1a-external-witness.yml",
+              "docs/sync/staya-rn4e1b03c1b1a-external-witness.md",
+          }
+          assert changed in (expected, expected | witness_layer), (
+              f"unauthorized files or incomplete research layer: {changed}"
+          )
+          assert not any(p.startswith("aquilum-app/core/") for p in changed)
+          assert not any(p.startswith("aquilum-app/native/") for p in changed)
+          PY
+          git diff --check
+      - name: Windows-only real separate Rust OS process tests, existing broker tests
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml \
+            --lib windows_revocation_journal -- --nocapture
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          cargo check --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+          git diff --exit-code -- aquilum-app/Cargo.lock aquilum-app/host-broker-lab/Cargo.lock
+      - name: Security acceptance limited to denial algorithm only
+        run: |
+          echo "ALL journal code is compiled under cfg(all(test, windows)) ONLY." >> "$GITHUB_STEP_SUMMARY"
+          echo "At-most-one cross-process revoke CAS, fsync/readback, torn journal HOLD, cold open and explicit valid-old-snapshot rollback vulnerability are tested on Windows." >> "$GITHUB_STEP_SUMMARY"
+          echo "A prior valid file can be replayed: no external installer-owned monotonic witness. NO P2P permission, stored enrollment, signed installer, OS custody or File Gate." >> "$GITHUB_STEP_SUMMARY"
