@@ -111,3 +111,40 @@ fn mentions_in_page_properties_are_detected() {
     let report=inspect_root(&mut c,A,ProbeLimits::default()).unwrap();
     assert!(report.links.iter().any(|e|e.kind=="mention"&&e.from==A&&e.to==B));
 }
+
+
+#[test]
+fn relation_26_targets_cross_page_preserves_identity_without_claiming_completion() {
+    const PROPERTY: &str = "Stable%3Aref";
+    let targets: Vec<String> = (1..=26)
+        .map(|n| format!("00000000-0000-0000-0000-{n:012}"))
+        .collect();
+    let first: Vec<Value> = targets[..25].iter()
+        .map(|id| json!({"object":"property_item","type":"relation","relation":{"id":id}}))
+        .collect();
+    let second: Vec<Value> = targets[25..].iter()
+        .map(|id| json!({"object":"property_item","type":"relation","relation":{"id":id}}))
+        .collect();
+    let mut client = Fake { replies: VecDeque::from([
+        (ReadRequest::Page(A.into()),
+            json!({"object":"page","id":A,"properties":{
+                "Linked":{"type":"relation","id":PROPERTY}}})),
+        (ReadRequest::PageProperty {page:A.into(),property:PROPERTY.into(),cursor:None},
+            list(first,true,Some("page-2"))),
+        (ReadRequest::PageProperty {page:A.into(),property:PROPERTY.into(),cursor:Some("page-2".into())},
+            list(second,false,None)),
+        (ReadRequest::Markdown(A.into()),
+            json!({"markdown":"fixture","truncated":false,"unknown_block_ids":[]})),
+        (ReadRequest::BlockChildren {id:A.into(),cursor:None},list(vec![],false,None)),
+    ]) };
+    let report = inspect_root(&mut client,A,ProbeLimits::default()).unwrap();
+    let relations: Vec<&Link> = report.links.iter().filter(|e| e.kind == "relation").collect();
+    assert_eq!(relations.len(),26);
+    assert_eq!(report.requests,5);
+    assert_eq!(report.unresolved_target_ids.len(),26);
+    assert!(!report.root_traversal_complete);
+    assert!(!report.workspace_complete);
+    assert!(relations.iter().all(|e| e.from == A && e.property_id.as_deref() == Some(PROPERTY)));
+    assert!(targets.iter().all(|id| relations.iter().any(|e| &e.to == id)));
+    assert!(client.replies.is_empty());
+}
