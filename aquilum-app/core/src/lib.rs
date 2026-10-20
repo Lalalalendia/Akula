@@ -38,5 +38,8 @@ pub mod server_release_floor_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1b-approval-lab"))]
 pub mod server_owner_approval_lab;
 
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1c-witness-lab"))]
+pub mod server_witness_lab;
+
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;

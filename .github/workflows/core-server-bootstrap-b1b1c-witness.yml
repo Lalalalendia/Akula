@@ -1,0 +1,46 @@
+name: Akula Bootstrap B1b1c inert signed witness ledger
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/lib.rs"
+      - "aquilum-app/core/src/server_witness_lab.rs"
+      - "aquilum-app/core/src/server_owner_approval_lab.rs"
+      - "aquilum-app/core/src/server_release_floor_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b1b1c.rs"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B1C0.md"
+      - ".github/workflows/core-server-bootstrap-b1b1c-witness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-bootstrap-b1b1c-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inert-witness-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Normalize isolated lab sources on ephemeral CI checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_witness_lab.rs aquilum-app/core/tests/server_bootstrap_b1b1c.rs
+      - name: Signed witness CAS, nonce replay and partial-transaction regression
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1c-witness-lab --test server_bootstrap_b1b1c -- --nocapture
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1c-witness-lab --test server_bootstrap_b1b1b -- --nocapture
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1c-witness-lab --test server_bootstrap_b1b1a -- --nocapture
+          cargo check --locked -p aquilum-core --no-default-features
