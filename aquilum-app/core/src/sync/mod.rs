@@ -70,6 +70,9 @@ mod s3_pack_index;
 // Gated pure verifier: no S3 transport, key custody, file changes, or Sync.
 #[cfg(feature = "signed-vault-root-lab")]
 mod s3_signed_root_paev1;
+// Never part of the installed application or an S3 permission grant.
+#[cfg(feature = "signed-vault-policy-lab")]
+mod s3_publisher_policy_lab;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
