@@ -53,10 +53,13 @@ fn select_all_and_paste_replaces_long_windowed_note_without_crash_or_data_loss()
 }
 
 #[test]
-fn select_all_and_type_space_does_not_read_unloaded_window() {
+fn select_all_and_ime_commit_replaces_long_windowed_note() {
     let original = "разделы документа\n".repeat(12_000);
     let mut root = focused(TextEditor::windowed(crop::Rope::from(original.as_str())).markdown(), 600, 400);
     command_key(&mut root, "a");
-    super::support::typing(&mut root, " ");
+    // Real text-entry on platforms using IME arrives as a commit, not
+    // necessarily a Key::Character(" ") keyboard event.
+    root.handle_text_event(TextEvent::Ime(Ime::Commit(" ".into())));
+    let _ = root.redraw();
     assert_eq!(text(&root), " ");
 }
