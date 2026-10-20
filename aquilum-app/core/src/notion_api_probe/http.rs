@@ -121,7 +121,11 @@ impl NotionReadTransport for HttpReadClient {
                 .set("Notion-Version", API_VERSION)
                 .set("Content-Type", "application/json");
             let response = match &json {
-                Some(payload) => builder.send_json(payload),
+                Some(payload) => {
+                    let serialized = serde_json::to_string(payload)
+                        .map_err(|_| "cannot serialize Notion read query")?;
+                    builder.send_string(&serialized)
+                },
                 None => builder.call(),
             };
             match response {
