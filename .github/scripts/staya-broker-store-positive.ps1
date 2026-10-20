@@ -23,9 +23,9 @@ function Expect-Success([string] $arg) {
     & $exe $arg
     if ($LASTEXITCODE -ne 0) { throw "'$arg' refused protected source" }
 }
-function Must-Icacls([string[]] $args) {
-    & icacls.exe @args | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "icacls failure: $($args -join ' ')" }
+function Must-Icacls([string[]] $aclArguments) {
+    & icacls.exe @aclArguments | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls failure: $($aclArguments -join ' ')" }
 }
 function Expect-Stop() {
     $service = Get-Service -Name $name -ErrorAction Stop
@@ -58,12 +58,12 @@ try {
     $system = "*S-1-5-18"
     $admin = "*S-1-5-32-544"
 
-    Must-Icacls -args @($root, "/inheritance:r")
-    Must-Icacls -args @($root, "/grant:r", "$($system):(OI)(CI)F", "$($admin):(OI)(CI)F", "$($identity):(OI)(CI)F")
-    Must-Icacls -args @($root, "/setowner", $admin)
-    Must-Icacls -args @($marker, "/inheritance:r")
-    Must-Icacls -args @($marker, "/grant:r", "$($system):F", "$($admin):F", "$($identity):F")
-    Must-Icacls -args @($marker, "/setowner", $admin)
+    Must-Icacls -aclArguments @($root, "/inheritance:r")
+    Must-Icacls -aclArguments @($root, "/grant:r", "$($system):(OI)(CI)F", "$($admin):(OI)(CI)F", "$($identity):(OI)(CI)F")
+    Must-Icacls -aclArguments @($root, "/setowner", $admin)
+    Must-Icacls -aclArguments @($marker, "/inheritance:r")
+    Must-Icacls -aclArguments @($marker, "/grant:r", "$($system):F", "$($admin):F", "$($identity):F")
+    Must-Icacls -aclArguments @($marker, "/setowner", $admin)
 
     Expect-Success "--verify-custody"
     Start-Service -Name $name -ErrorAction Stop
@@ -77,7 +77,7 @@ try {
     Expect-Refusal "--verify-pipe"
 
     # Even an otherwise valid marker must fail if ordinary Users gain write.
-    Must-Icacls -args @($marker, "/grant:r", "*S-1-5-32-545:W")
+    Must-Icacls -aclArguments @($marker, "/grant:r", "*S-1-5-32-545:W")
     Expect-Refusal "--verify-custody"
     Expect-Stop
     $tamperedRefused = $false
@@ -86,7 +86,7 @@ try {
     if (-not $tamperedRefused) { throw "SCM accepted user-write policy marker" }
     (Get-Service -Name $name).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(12))
 
-    Must-Icacls -args @($marker, "/remove:g", "*S-1-5-32-545")
+    Must-Icacls -aclArguments @($marker, "/remove:g", "*S-1-5-32-545")
     Expect-Success "--verify-custody"
     Start-Service -Name $name -ErrorAction Stop
     (Get-Service -Name $name).WaitForStatus("Running", [TimeSpan]::FromSeconds(15))
