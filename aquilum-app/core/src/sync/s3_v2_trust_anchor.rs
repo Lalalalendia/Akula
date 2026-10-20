@@ -354,6 +354,8 @@ mod policy_receipt_lab;
 pub use policy_receipt_lab::{
     PolicyReceiptOutcome, V2PolicyReceiptError, V2TrustedPublisherPolicy,
 };
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+pub use policy_receipt_lab::{AtomicJoinError, AtomicJoinOutcome};
 
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_tests.rs"]
