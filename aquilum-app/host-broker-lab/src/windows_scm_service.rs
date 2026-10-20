@@ -8,6 +8,7 @@
 
 use std::ffi::c_void;
 use std::io::{self, ErrorKind};
+#[cfg(test)]
 use std::mem::size_of;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
