@@ -37,10 +37,12 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
 });
 
 test('Windows runtime data and global process identities do not alias Aquilum', () => {
-  assert.match(workspace, /#\[cfg\(target_os = "windows"\)\]\s*pub const APP_ID: &str = "io\.github\.lalalendia\.akula";/);
-  assert.match(workspace, /#\[cfg\(not\(target_os = "windows"\)\)\]\s*pub const APP_ID: &str = "com\.dmitriy\.aquilum-app";/);
-  assert.match(workspace, /#\[cfg\(not\(target_os = "windows"\)\)\]\s*if data_dir\.ends_with\(APP_ID\)/);
-  assert.match(autostart, /#\[cfg\(target_os = "windows"\)\]\s*const NAME: &str = "Akula";/);
+  // Akula Linux now intentionally shares Akula's independent identity,
+  // not Aquilum's AppData. Windows has not changed its product identity.
+  assert.match(workspace, /#\[cfg\(any\(target_os = "windows", target_os = "linux"\)\)\]\s*pub const APP_ID: &str = "io\.github\.lalalendia\.akula";/);
+  assert.match(workspace, /#\[cfg\(not\(any\(target_os = "windows", target_os = "linux"\)\)\)\]\s*pub const APP_ID: &str = "com\.dmitriy\.aquilum-app";/);
+  assert.match(workspace, /#\[cfg\(not\(any\(target_os = "windows", target_os = "linux"\)\)\)\]\s*if data_dir\.ends_with\(APP_ID\)/);
+  assert.match(autostart, /#\[cfg\(any\(target_os = "windows", target_os = "linux"\)\)\]\s*const NAME: &str = "Akula";/);
   assert.match(instance, /pub const WINDOW_CLASS: &str = "AkulaWindow";/);
 });
 
