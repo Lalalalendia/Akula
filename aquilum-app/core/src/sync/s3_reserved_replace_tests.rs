@@ -841,6 +841,20 @@ fn p0g3d08_os_process_probe_entrypoint() {
             assert!(journal.read_existing_replace_attempt(operation)
                 .unwrap().is_some(), "post-V8 VM force-off lost consumed V7 fence");
         }
+        "oracle-hold" | "oracle-deny" => {
+            use crate::sync::cold_oracle_report::{ColdOracleReport, ColdOracleVerdict};
+            let report = ColdOracleReport::from_existing_inspector(operation, &result);
+            let expected = if mode == "oracle-hold" {
+                ColdOracleVerdict::LocallyConsistentHold
+            } else {
+                ColdOracleVerdict::Deny
+            };
+            assert_eq!(report.verdict, expected,
+                "the native cold inspector must select the expected fail-closed result");
+            // Out-of-band diagnostics only; report contains no paths, bytes
+            // or capability to authorize an S3 apply, ACK or baseline advance.
+            println!("AKULA_G1_COLD_ORACLE={}", report.to_json());
+        }
         other => panic!("unknown P0g-3d-08 child mode: {other}"),
     }
 
@@ -879,6 +893,109 @@ fn p0g3d08_run_child(
         .contains("p0g3d08_os_process_probe_entrypoint ... ok"),
         "child must actually run the named Rust test, not pass an empty filter: {}",
         String::from_utf8_lossy(&result.stdout));
+}
+
+/// G1: reuse the existing native cold inspector in a *different* OS process
+/// and require exactly one schema-versioned, non-authorizing JSON verdict.
+fn p0g3d09_run_oracle_child(
+    root: &std::path::Path,
+    appdata: &std::path::Path,
+    operation: OperationId,
+    expected_verdict: &str,
+) -> serde_json::Value {
+    assert!(matches!(expected_verdict, "LOCALLY_CONSISTENT_HOLD" | "DENY"));
+    let mode = if expected_verdict == "LOCALLY_CONSISTENT_HOLD" {
+        "oracle-hold"
+    } else {
+        "oracle-deny"
+    };
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact").arg(P0G3D08_CHILD).arg("--nocapture")
+        .env("AKULA_P0G3D08_CHILD_MODE", mode)
+        .env("AKULA_P0G3D08_ROOT", root)
+        .env("AKULA_P0G3D08_APPDATA", appdata)
+        .env("AKULA_P0G3D08_OPERATION", operation.to_string())
+        .output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(),
+        "the independent native verifier failed: stdout={stdout}, stderr={stderr}");
+    // The report is inserted into the libtest output by --nocapture; the
+    // test name and the final result are separate anchors, not adjacent text.
+    assert!(stdout.contains(&format!("test {P0G3D08_CHILD} ...")),
+        "libtest did not execute the exact named cold verifier: {stdout}");
+    assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"),
+        "libtest result was missing or not successful: {stdout}");
+    let json_line = stdout.lines().find_map(|line| {
+        line.split_once("AKULA_G1_COLD_ORACLE=").map(|(_, json)| json)
+    }).expect("independent OS process did not emit a versioned oracle report");
+    let report: serde_json::Value = serde_json::from_str(json_line)
+        .expect("native oracle report must be parseable as a single JSON object");
+    assert_eq!(report["schema"], "akula.sync.cold-oracle.v1");
+    assert_eq!(report["operation_id"], operation.to_string());
+    assert_eq!(report["verdict"], expected_verdict);
+    assert_eq!(report["authority"], "none");
+    for key in ["receipt_issued", "automatic_apply_allowed",
+                "remote_ack_allowed", "baseline_promotion_allowed"] {
+        assert_eq!(report[key], false, "{key} must remain denied");
+    }
+    report
+}
+
+#[test]
+fn p0g3d09_oracle_reports_hold_and_history_tamper_deny_across_processes() {
+    let f = fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    assert_no_remote_ack(&f);
+    let version = f.journal.borrow()
+        .read_existing_replace_receipt_candidate(f.intent.operation_id)
+        .unwrap().unwrap();
+    let history = f.root.join(".aquilum").join("history")
+        .join(f.intent.path.as_str())
+        .join(version.cold_history_fields().0);
+    assert!(history.is_file());
+    let Fixture {
+        _temp: keep_fixture, core, root, appdata, bindings, custody,
+        journal, cache, protected, intent, old_hash, new_text, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+
+    let positive = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id, "LOCALLY_CONSISTENT_HOLD",
+    );
+    assert_eq!(positive["reason_code"], "CORRELATED_NOT_DURABLE");
+
+    fs::write(&history, vec![b'X'; new_text.len()]).unwrap();
+    let negative = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id, "DENY",
+    );
+    assert_eq!(negative["reason_code"], "EVIDENCE_REJECTED");
+
+    // The report is not a proof of persistence, or a permission to ACK.
+    let mut cold = SqliteSyncJournal::open(&appdata.join("journal.sqlite")).unwrap();
+    assert_eq!(cold.get(intent.operation_id).unwrap().unwrap().phase,
+        JournalPhase::Staged);
+    let baseline = cold.baseline(intent.vault_id, intent.document_id)
+        .unwrap().unwrap();
+    assert_eq!(Some(baseline.revision_id), intent.expected_baseline);
+    assert_eq!(baseline.content_hash, old_hash);
+    assert!(cold.read_existing_replace_attempt(intent.operation_id)
+        .unwrap().is_some(), "the V7 one-shot fence must survive");
+    assert!(matches!(cold.mark_applied(intent.operation_id),
+        Err(JournalError::LocalDownloadNeedsNativeReceipt)));
+    drop(cold);
+    let originals = SqliteProtectionStore::open_existing_read_only(
+        &appdata.join("originals.sqlite"),
+    ).unwrap();
+    assert_eq!(originals.read_bound_preimage(intent.operation_id)
+        .unwrap().unwrap().original.bytes, b"unchanged private original");
+    drop(originals);
+    drop(keep_fixture);
 }
 
 #[test]
