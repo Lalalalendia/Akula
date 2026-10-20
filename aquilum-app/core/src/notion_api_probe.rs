@@ -59,6 +59,9 @@ pub struct Link {
     pub from: String,
     pub to: String,
     pub kind: String,
+    /// Notion property ID; stable across renames (can be URL-encoded, not necessarily UUID).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub property_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -209,10 +212,17 @@ impl<T: NotionReadTransport> Scan<'_, T> {
         Ok(())
     }
     fn edge(&mut self, from: &str, to: &str, kind: &str) -> Result<(), String> {
+        self.edge_with_property(from, to, kind, None)
+    }
+    fn edge_with_property(&mut self, from: &str, to: &str, kind: &str,
+        property_id: Option<&str>) -> Result<(), String> {
         if self.links.len() >= self.limits.max_objects * 16 {
             return Err("Notion edge budget exceeded".into());
         }
-        self.links.insert(Link { from: from.to_owned(), to: canonical_id(to)?, kind: kind.to_owned() });
+        self.links.insert(Link {
+            from: from.to_owned(), to: canonical_id(to)?, kind: kind.to_owned(),
+            property_id: property_id.map(str::to_owned),
+        });
         Ok(())
     }
     fn queue(&mut self, kind: TaskKind, id: &str, depth: usize) -> Result<(), String> {
@@ -268,19 +278,20 @@ impl<T: NotionReadTransport> Scan<'_, T> {
     fn page(&mut self, id: &str, depth: usize) -> Result<(), String> {
         let obj = self.request(ReadRequest::Page(id.to_owned()))?;
         if required_id(&obj, "page")? != id { return Err("Notion page ID mismatch".into()); }
-        let relations: Vec<(String, String)> = obj.get("properties").and_then(Value::as_object)
+        let relations: Vec<String> = obj.get("properties").and_then(Value::as_object)
             .map(|m| m.values().filter_map(|prop| {
                 if prop.get("type").and_then(Value::as_str) == Some("relation") {
                     let pid = prop.get("id")?.as_str()?;
-                    Some((pid.to_owned(), "relation".to_owned()))
+                    Some(pid.to_owned())
                 } else { None }
             }).collect()).unwrap_or_default();
+        scan_mentions(&obj, id, &mut self.links, self.limits.max_objects * 16)?;
         self.insert("page", id.to_owned(), obj)?;
-        for (property, _) in relations {
+        for property in relations {
             let items = self.property_items(id, &property)?;
             for item in items {
                 let target = item.get("relation").and_then(|o| o.get("id")).and_then(Value::as_str);
-                if let Some(target) = target { self.edge(id, target, "relation")?; }
+                if let Some(target) = target { self.edge_with_property(id, target, "relation", Some(&property))?; }
             }
         }
 
@@ -322,6 +333,12 @@ impl<T: NotionReadTransport> Scan<'_, T> {
             let typ = block.get("type").and_then(Value::as_str).unwrap_or("");
             self.insert("block", block_id.clone(), block.clone())?;
             scan_mentions(&block, &block_id, &mut self.links, self.limits.max_objects * 16)?;
+            if typ == "synced_block" {
+                if let Some(original_id) = block.pointer("/synced_block/synced_from/block_id")
+                    .and_then(Value::as_str) {
+                    self.edge(&block_id, original_id, "synced_from")?;
+                }
+            }
             match typ {
                 "child_page" => self.queue(TaskKind::Page, &block_id, depth + 1)?,
                 "child_database" => self.queue(TaskKind::Database, &block_id, depth + 1)?,
@@ -391,7 +408,8 @@ fn scan_mentions(value: &Value, source: &str, edges: &mut BTreeSet<Link>, limit:
                         } else { None }
                     }) {
                         if edges.len() >= budget { return Err("Notion mention edge budget exceeded".into()); }
-                        edges.insert(Link { from: source.to_owned(), to: canonical_id(target)?, kind: "mention".into() });
+                        edges.insert(Link { from: source.to_owned(), to: canonical_id(target)?,
+                            kind: "mention".into(), property_id: None });
                     }
                 }
                 for value in map.values() { walk(value, source, edges, budget, depth + 1)?; }
