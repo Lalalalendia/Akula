@@ -173,7 +173,7 @@ pub fn inspect_root<T: NotionReadTransport>(
         api_version: API_VERSION,
         root,
         workspace_complete: false,
-        root_traversal_complete: true,
+        root_traversal_complete: scan.warnings.is_empty() && unresolved_target_ids.is_empty(),
         requests: scan.requests,
         objects: scan.objects.into_iter().map(|((kind, id), json)| RawObject {kind, id, json}).collect(),
         links: scan.links.into_iter().collect(),
