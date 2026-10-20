@@ -409,8 +409,14 @@ mod tests {
         assert_eq!(std::mem::offset_of!(ByHandleInformation, size_high), 32);
         assert_eq!(std::mem::offset_of!(ByHandleInformation, size_low), 36);
         assert_eq!(std::mem::offset_of!(ByHandleInformation, link_count), 40);
-        assert_eq!(std::mem::offset_of!(ByHandleInformation, file_index_high), 44);
-        assert_eq!(std::mem::offset_of!(ByHandleInformation, file_index_low), 48);
+        assert_eq!(
+            std::mem::offset_of!(ByHandleInformation, file_index_high),
+            44
+        );
+        assert_eq!(
+            std::mem::offset_of!(ByHandleInformation, file_index_low),
+            48
+        );
     }
 
     #[test]
