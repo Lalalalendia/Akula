@@ -202,6 +202,11 @@ impl S3V2TrustedAnchorJournal {
         {
             return Err(S3V2TrustAnchorError::CorruptedAnchor);
         }
+        // In the opt-in E2b lab, even callers using the OLD root-only API
+        // must fail closed if the associated publisher-policy receipt is
+        // partially written or corrupted. This is NOT a second trust journal.
+        #[cfg(feature = "signed-vault-policy-receipt-lab")]
+        policy_receipt_lab::validate_policy_columns(db, scope)?;
         Ok(Some(S3V2TrustedAnchor {
             root, root_etag: etag, previous_root: previous,
         }))
