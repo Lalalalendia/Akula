@@ -86,7 +86,7 @@ impl S3V2TrustedAnchorJournal {
                 .map_err(|_| AtomicJoinError::ConflictingBinding)?;
             if old.root() == root && old.etag() == root_etag
                 && old.previous_root().is_none()
-                && old_policy.as_ref().is_some_and(|p| p.digest() == policy_digest)
+                && old_policy.as_ref().is_some_and(|p| p.digest() == policy_digest.as_str())
             {
                 tx.commit()?;
                 return Ok(AtomicJoinOutcome::Unchanged);
