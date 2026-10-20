@@ -502,6 +502,19 @@ mod tests {
             fs::write(&active, old).unwrap();
             fs::write(&unrelated, sentinel).unwrap();
 
+            // Even a structurally and cryptographically valid TEST candidate
+            // cannot activate production staging with the shipped empty key.
+            let denied = admit_with_trusted_key(
+                &manifest, &signature, payload.clone(), &key,
+                TARGET_LINUX_APPIMAGE, "0.3.9",
+            ).unwrap();
+            let denied_path = installation.join("never-installed-akula.AppImage");
+            let refused = crate::updater::linux_signed_stage::stage_signed_candidate(
+                &denied_path, "fedcba9876543210fedcba9876543210", denied,
+            ).err().expect("production staging must refuse even a valid test key");
+            assert!(refused.contains("HOLD"));
+            assert!(!denied_path.exists());
+
             let lease = crate::updater::linux_signed_stage::stage_verified_for_test(
                 &active, "0123456789abcdef0123456789abcdef", candidate,
             ).expect("exact signed bytes must be admitted to a locked stage");
