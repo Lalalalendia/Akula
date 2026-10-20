@@ -62,3 +62,25 @@ fn tab_switch_evicts_inactive_diff_and_restores_history_on_return() {
     assert!(h.root.get_widget(restored).is_some());
     assert_eq!(std::fs::read_to_string(&first).unwrap(), "Версия с большой историей.\n".repeat(1_000));
 }
+
+#[test]
+fn closing_version_keeps_unsaved_editor_changes_until_file_gate_commit() {
+    let mut h = Harness::new();
+    let path = h.write_note("draft-and-history.md", "Начальный текст.\n");
+    let version = version_with_large_diff(&mut h, &path);
+    assert!(h.app.open(&mut h.root, path.clone()));
+
+    // Closing an inactive history tree must not touch the live editor buffer,
+    // its dirty state or the File Gate path through which it is persisted.
+    let draft = "Несохранённое содержимое редактора с кириллицей.\n";
+    h.app.commit_text(&mut h.root, crop::Rope::from(draft));
+    assert_eq!(h.app.text.to_string(), draft);
+    h.app.open_version(&mut h.root, version);
+    let old = h.app.version_view.as_ref().expect("version view").back;
+    h.app.close_version(&mut h.root);
+    let _ = h.root.redraw();
+    assert!(h.root.get_widget(old).is_none(), "closed diff must be unmounted");
+    assert_eq!(h.app.text.to_string(), draft, "closing the diff must not erase local edits");
+    h.save_now();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), draft, "edits must persist via the usual File Gate");
+}
