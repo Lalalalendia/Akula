@@ -20,5 +20,8 @@ pub mod wikixiv;
 
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
 
+#[cfg(feature = "server-bootstrap-b0-lab")]
+pub mod server_bootstrap_lab;
+
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
