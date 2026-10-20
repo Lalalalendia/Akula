@@ -6,6 +6,8 @@ on:
     paths:
       - 'aquilum-app/native/src/host/frame.rs'
       - 'aquilum-app/native/src/host/replay.rs'
+      - 'aquilum-app/native/src/replay.rs'
+      - 'aquilum-app/native/src/app/note_page/view.rs'
       - 'aquilum-app/native/src/render/paint/convert.rs'
       - 'scripts/benchmarks/native_image_full_redraw_windows.py'
       - '.github/workflows/native-image-full-redraw-windows.yml'
@@ -43,7 +45,7 @@ jobs:
           git rev-parse HEAD
           python -m py_compile scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_mipmap_windows_ab.py scripts/benchmarks/native_image_full_redraw_windows.py
           if ($LASTEXITCODE -ne 0) { throw 'Python benchmark syntax error' }
-          python -c "import sys;sys.path.insert(0,'scripts/benchmarks');from native_image_full_redraw_windows import make_image;from native_mipmap_windows_ab import windows_scenes;import hashlib;a=make_image(1);b=make_image(2);assert a[:8]==bytes.fromhex('89504e470d0a1a0a') and hashlib.sha256(a).digest()!=hashlib.sha256(b).digest();windows_scenes()"
+          python -c "import sys;sys.path.insert(0,'scripts/benchmarks');from native_image_full_redraw_windows import make_image,document,scan_anchors;from native_mipmap_windows_ab import windows_scenes;import hashlib;a=make_image(1);b=make_image(2);assert a[:8]==bytes.fromhex('89504e470d0a1a0a') and hashlib.sha256(a).digest()!=hashlib.sha256(b).digest();assert all(len(scan_anchors(document(n),n))==min(32,n) for n in (1,10,100));windows_scenes()"
           if ($LASTEXITCODE -ne 0) { throw 'No Win32 viewport or non-unique PNGs' }
       - name: Compile single developer release binary
         working-directory: aquilum-app
