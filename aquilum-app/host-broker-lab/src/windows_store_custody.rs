@@ -45,6 +45,7 @@ const SE_DACL_PROTECTED: u16 = 0x1000;
 const ACL_SIZE_INFORMATION: u32 = 2;
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+const INHERIT_ONLY_ACE: u8 = 0x08;
 const WIN_LOCAL_SYSTEM_SID: u32 = 22;
 const WIN_BUILTIN_ADMIN_SID: u32 = 26;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
@@ -281,8 +282,12 @@ fn strict_protected_acl(
             return Err(refuse("malformed host policy access SID"));
         }
         if header.kind == ACCESS_ALLOWED_ACE_TYPE && mask & NAMESPACE_WRITE != 0 {
-            if sid_equal(who, broker) { broker_write = true; }
-            if sid_equal(who, system) { system_write = true; }
+            // An INHERIT_ONLY ACE is not effective for this handle.
+            // Untrusted inherited write ACEs still cause refusal.
+            if header.flags & INHERIT_ONLY_ACE == 0 {
+                if sid_equal(who, broker) { broker_write = true; }
+                if sid_equal(who, system) { system_write = true; }
+            }
             if !sid_equal(who, broker) && !sid_equal(who, system) && !sid_equal(who, admins) {
                 return Err(refuse("ordinary user can modify broker-owned authority"));
             }
@@ -308,8 +313,7 @@ impl CustodyWitness {
     }
     fn inspect_at(directory: &str, marker: &str) -> io::Result<Self> {
         if !directory.starts_with(r"C:\")
-            || !marker.starts_with(directory)
-            || !marker.ends_with(r"\authority.marker")
+            || marker != format!(r"{}\authority.marker", directory)
             || directory.len() <= 3
         {
             return Err(refuse("unexpected host installer policy namespace"));
