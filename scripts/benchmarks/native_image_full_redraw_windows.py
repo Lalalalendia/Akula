@@ -239,6 +239,19 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: no native asynchronous image-resolver witness")
     if observed["missing"]:
         raise ValueError(f"{sample}: image resolver reported missing pixels for {sorted(observed['missing'])}")
+    # Painting is a *third* independent stage: resolver Ready is not proof
+    # that a virtualized MediaView was ever passed to the Painter, and
+    # MediaView paint is still not proof the Vello CPU selected its mip.
+    painted = {"true": set(), "false": set()}
+    for line in log.splitlines():
+        match = re.search(r"AKULA_IMAGE_EMBED_PAINT index=(\d+) ready=(true|false)", line)
+        if match:
+            index = int(match.group(1))
+            if index >= images:
+                raise ValueError(f"{sample}: painted image not present in fixture: {index}")
+            painted[match.group(2)].add(index)
+    if not any(painted.values()):
+        raise ValueError(f"{sample}: no actual MediaView paint witness")
     lines = [line for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     if not lines:
         raise ValueError(f"{sample}: no source/eviction diagnostic line")
@@ -260,6 +273,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
             f"independently sampled decoded-pixel fingerprints for "
             f"{images} seeded PNG files; both must reach at least {minimum}; "
             f"resolver pending={len(observed['pending'])}, ready={len(observed['ready'])}, "
+            f"embed paint ready={len(painted['true'])}, empty={len(painted['false'])}, "
             f"no-pixels={len(observed['ready_no_pixels'])}, missing={len(observed['missing'])}"
         )
     p95, p99 = percentile(work, .95), percentile(work, .99)
@@ -282,6 +296,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         "distinct_decoded_pixel_fingerprints": unique_pixels,
         "resolver_unique_pending_sources": len(observed["pending"]),
         "resolver_unique_ready_sources": len(observed["ready"]),
+        "embed_unique_ready_painted_sources": len(painted["true"]),
+        "embed_unique_placeholder_painted_sources": len(painted["false"]),
         "resolver_unique_ready_no_pixels": len(observed["ready_no_pixels"]),
         "cpu_p95_ms": p95, "cpu_p99_ms": p99,
         "cpu_mean_ms": sum(work) / len(work),
@@ -314,8 +330,8 @@ def report(rows: list[dict], binary_hash: str) -> str:
         "plus developer-only full raster of every drawn frame.",
         "Work times are CPU, not physical scanout/FPS. Image-quality comparison is separate.",
         "",
-        "| Sources in note | Mode | Resolver ready | Runtime IDs | Distinct pixel fingerprints | CPU p95 ms | CPU p99 ms | Replay mip build ms | Peak RSS MiB |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| Sources in note | Mode | Resolver ready | Embed ready painted | Runtime IDs | Distinct pixel fingerprints | CPU p95 ms | CPU p99 ms | Replay mip build ms | Peak RSS MiB |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for count in COUNTS:
         parts = [row for row in rows if row["count"] == count]
@@ -328,6 +344,7 @@ def report(rows: list[dict], binary_hash: str) -> str:
             if sorted(x["trial"] for x in group) != list(TRIALS):
                 raise ValueError(f"{count}/{mode}: paired trial missing")
             keys = ("resolver_unique_ready_sources",
+                    "embed_unique_ready_painted_sources",
                     "unique_mip_source_ids_requested", "distinct_decoded_pixel_fingerprints",
                     "cpu_p95_ms", "cpu_p99_ms",
                     "mip_build_replay_ms", "peak_rss_mib")
@@ -335,6 +352,7 @@ def report(rows: list[dict], binary_hash: str) -> str:
             mode_aggregates[mode] = averages
             lines.append(
                 f"| {count} | {mode} | {averages['resolver_unique_ready_sources']:.0f} | "
+                f"{averages['embed_unique_ready_painted_sources']:.0f} | "
                 f"{averages['unique_mip_source_ids_requested']:.0f} | "
                 f"{averages['distinct_decoded_pixel_fingerprints']:.0f} | "
                 f"{averages['cpu_p95_ms']:.3f} | {averages['cpu_p99_ms']:.3f} | "
