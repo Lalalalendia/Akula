@@ -34,7 +34,7 @@ const PIPE_READMODE_MESSAGE: u32 = 0x0000_0002;
 const PIPE_REJECT_REMOTE_CLIENTS: u32 = 0x0000_0008;
 
 #[repr(C)]
-struct SecurityAttributes {
+pub(crate) struct SecurityAttributes {
     length: u32,
     descriptor: *mut c_void,
     inherit_handle: i32,

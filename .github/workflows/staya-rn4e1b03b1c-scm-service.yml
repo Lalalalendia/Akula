@@ -1,0 +1,128 @@
+name: Staya RN4E1b03b1c — real disposable Windows SCM lifecycle
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03b1c-scm-lifecycle-*"
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/**"
+      - ".github/workflows/staya-rn4e1b03b1c-scm-service.yml"
+      - "docs/sync/staya-rn4e1b03b1c-scm-lifecycle.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scm-life-cycle:
+    name: LocalSystem SCM dedicated SID / stop cleanup — windows-2022
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Assert independent fixture scope / no native activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "f66aa553c2dbd3e6cc9ade571b5461f51f358bea"
+          changed = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          allowed = {
+              "aquilum-app/host-broker-lab/src/lib.rs",
+              "aquilum-app/host-broker-lab/src/main.rs",
+              "aquilum-app/host-broker-lab/src/windows_client_attestation.rs",
+              "aquilum-app/host-broker-lab/src/windows_scm_service.rs",
+              "aquilum-app/host-broker-lab/src/windows_server.rs",
+              ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml",
+              ".github/workflows/staya-rn4e1b03b1c-scm-service.yml",
+              "docs/sync/staya-rn4e1b03b1c-scm-lifecycle.md",
+          }
+          assert changed == allowed, f"out-of-scope files: {changed ^ allowed}"
+          assert not any(p.startswith("aquilum-app/native/") for p in changed)
+          assert not any(p.startswith("aquilum-app/core/") for p in changed)
+          PY
+          git diff --check
+      - name: Standalone Rust test and real executable build
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw "standalone Cargo tests failed" }
+          cargo build --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --bin akula-host-broker-lab
+          if ($LASTEXITCODE -ne 0) { throw "standalone SCM executable build failed" }
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw "research crate rustfmt failed" }
+      - name: Real SCM install (ephemeral runner only), positive token, negative full IPC
+        run: |
+          $ErrorActionPreference = "Stop"
+          $name = "AkulaHostBrokerResearch"
+          $exe = (Resolve-Path "aquilum-app/host-broker-lab/target/debug/akula-host-broker-lab.exe").Path
+          if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
+            throw "unexpected pre-existing service: refusing to replace any installed service"
+          }
+          & $exe --verify-scm *> $null
+          if ($LASTEXITCODE -eq 0) { throw "missing SCM service unexpectedly authenticated" }
+          $created = $false
+          try {
+            # Explicit quoted executable path, no arbitrary user arguments or
+            # permanent autostart. Default New-Service account is LocalSystem.
+            $command = '"' + $exe + '" --service'
+            New-Service -Name $name -BinaryPathName $command -StartupType Manual -DisplayName "Akula Host Broker Lab (ephemeral CI)" -ErrorAction Stop | Out-Null
+            $created = $true
+            & sc.exe sidtype $name unrestricted | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "failed to configure independent service SID" }
+            Start-Service -Name $name -ErrorAction Stop
+            $running = $false
+            for ($i = 0; $i -lt 25; $i++) {
+              $svc = Get-Service -Name $name -ErrorAction Stop
+              if ($svc.Status -eq "Running") { $running = $true; break }
+              Start-Sleep -Milliseconds 400
+            }
+            if (-not $running) { throw "SCM process did not reach RUNNING" }
+            $registered = Get-CimInstance Win32_Service -Filter "Name='$name'"
+            if (-not $registered -or $registered.StartName -ne "LocalSystem" -or $registered.ProcessId -eq 0) {
+              throw "unexpected SCM service account or missing dedicated PID"
+            }
+            & $exe --verify-scm
+            if ($LASTEXITCODE -ne 0) { throw "pinned SYSTEM/service-SID SCM attestation refused real fixture" }
+            # SCM process proof is NOT proof of pipe; the service deliberately
+            # never creates a network channel or accepts permissions.
+            & $exe --verify-pipe *> $null
+            if ($LASTEXITCODE -eq 0) { throw "nonexistent SCM pipe unexpectedly authenticated" }
+          }
+          finally {
+            if ($created) {
+              $current = Get-Service -Name $name -ErrorAction SilentlyContinue
+              if ($current -and $current.Status -ne "Stopped") {
+                try {
+                  Stop-Service -Name $name -ErrorAction Stop
+                  (Get-Service -Name $name).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(20))
+                } catch { Write-Warning "service stop was not clean: $_" }
+              }
+              & sc.exe delete $name | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "CI research service cleanup failed" }
+            }
+          }
+      - name: Verify unchanged main workspace Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- aquilum-app/Cargo.lock aquilum-app/host-broker-lab/Cargo.lock
+      - name: Explicitly state missing production gates
+        run: |
+          "Positive SCM token and Service SID test passed only on an EPHEMERAL Windows runner." >> $env:GITHUB_STEP_SUMMARY
+          "No signed installer, trusted executable pinning, protected host DB/WAL/SHM, connected named pipe or peer grant has been implemented." >> $env:GITHUB_STEP_SUMMARY
+          "The full pipe attestation MUST still reject; installed Akula and P2P File Gate remain unchanged." >> $env:GITHUB_STEP_SUMMARY

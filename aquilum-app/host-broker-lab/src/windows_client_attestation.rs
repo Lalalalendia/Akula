@@ -145,7 +145,7 @@ extern "system" {
         output_buffer: u32,
         input_buffer: u32,
         default_timeout: u32,
-        attributes: Handle,
+        attributes: *const super::windows_server::SecurityAttributes,
     ) -> Handle;
 }
 
@@ -373,12 +373,7 @@ fn token_has_enabled_service_sid(token: Handle, expected: Handle) -> io::Result<
     Ok(false)
 }
 
-fn verified_process_for_pipe(pipe: Handle, expected_pid: u32) -> io::Result<PinnedProcess> {
-    if pipe_server_pid(pipe)? != expected_pid {
-        return Err(deny(
-            "pipe server PID does not equal registered SCM service PID",
-        ));
-    }
+fn system_process_by_pid(expected_pid: u32) -> io::Result<PinnedProcess> {
     let process = OwnedHandle::new(unsafe {
         OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, expected_pid)
     })?;
@@ -389,12 +384,34 @@ fn verified_process_for_pipe(pipe: Handle, expected_pid: u32) -> io::Result<Pinn
     let token = OwnedHandle::new(raw_token)?;
     let sid = local_system_sid()?;
     if !token_matches_sid(token.0, sid.as_ptr() as Handle)? {
-        return Err(deny("named-pipe server is not LocalSystem"));
+        return Err(deny("SCM process is not LocalSystem"));
     }
     Ok(PinnedProcess {
         _process: process,
         token,
     })
+}
+
+fn verified_process_for_pipe(pipe: Handle, expected_pid: u32) -> io::Result<PinnedProcess> {
+    if pipe_server_pid(pipe)? != expected_pid {
+        return Err(deny("pipe server PID does not match SCM service PID"));
+    }
+    system_process_by_pid(expected_pid)
+}
+
+/// Positive observation of the installed SCM process only. There is no
+/// pipe, grant, installer signature proof or file writer in this method.
+pub fn inspect_installed_scm_process_without_pipe() -> io::Result<()> {
+    let pid = service_process_id()?;
+    let pinned = system_process_by_pid(pid)?;
+    let sid = service_sid()?;
+    if !token_has_enabled_service_sid(pinned.token.0, sid.as_ptr() as Handle)? {
+        return Err(deny("SCM process lacks enabled dedicated broker SID"));
+    }
+    if service_process_id()? != pid {
+        return Err(deny("SCM process changed during read-only observation"));
+    }
+    Ok(())
 }
 
 /// Observe only; never send any payload. A successful return here DOES NOT
