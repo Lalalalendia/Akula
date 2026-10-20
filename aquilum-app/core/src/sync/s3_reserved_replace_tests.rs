@@ -1004,3 +1004,174 @@ fn p0g3d08_real_os_child_rejects_published_primary_and_history_without_v8() {
         new_text.as_bytes());
     drop(keep_fixture);
 }
+
+
+/// P0g-3d-08c: an actual writer aborts at a precise stage in a disposable
+/// fixture. The parent has never held this child's Core or SQLite handles.
+/// This is still NOT a physical power-cut durability test.
+const P0G3D08C_WRITER_CHILD: &str =
+    "sync::s3_reserved_replace::tests::p0g3d08c_writer_abort_entrypoint";
+
+fn p0g3d08c_abort_at(workdir: &std::path::Path, stage: &str) -> ! {
+    fs::write(workdir.join("p0g3d08c-crash-marker"), stage)
+        .expect("write independent test-only crash marker");
+    std::process::abort();
+}
+
+#[test]
+fn p0g3d08c_writer_abort_entrypoint() {
+    let Some(stage) = std::env::var_os("AKULA_P0G3D08C_STAGE") else {
+        return;
+    };
+    let stage = stage.to_string_lossy();
+    let workdir = PathBuf::from(
+        std::env::var_os("AKULA_P0G3D08C_WORKDIR").unwrap(),
+    );
+    assert!(matches!(stage.as_ref(),
+        "after-v7" | "after-primary" | "after-history" | "after-v8"));
+    let temp = tempfile::Builder::new()
+        .prefix("writer-crash-fixture-")
+        .tempdir_in(&workdir).unwrap();
+    let f = fixture_with_temp(temp);
+    // Serialized before any crash seam; the independent parent can locate
+    // the existing vault, databases and immutable one-shot operation.
+    let identity = serde_json::json!({
+        "root": f.root.to_str().unwrap(),
+        "appdata": f.appdata.to_str().unwrap(),
+        "operation": f.intent.operation_id.to_string(),
+    });
+    fs::write(workdir.join("p0g3d08c-fixture.json"),
+        serde_json::to_vec(&identity).unwrap()).unwrap();
+
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    if stage == "after-v7" {
+        let _ignored = f.custody.with_cooperative_writer_lifetime(
+            &admission, f.keyspace.vault_id(), &f.scope,
+            || -> Result<(), FileCommandError> {
+                let prepared = prepare(&f, &admission)?;
+                assert_editor_reserved(&f);
+                assert!(f.journal.borrow()
+                    .read_existing_replace_attempt(f.intent.operation_id)?
+                    .is_some());
+                drop(prepared);
+                p0g3d08c_abort_at(&workdir, "after-v7");
+            },
+        );
+        panic!("writer failed to abort immediately after V7 claim");
+    }
+
+    // The existing File Gate is still the ONLY primary publisher.
+    // The after-primary seam is cfg(test) only and guarded by the disposable
+    // workdir plus exact target note path in write_checked_history_under_gate.
+    let outcome = save_existing_note_with_prewrite_strict_history_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope,
+        &f.intent.path, &f.new_text, &f.old_hash,
+        Source::External, Some("p0g3d08c-abort-writer"),
+        || prepare(&f, &admission),
+        |prepared| prepared.inspect_before_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected,
+        ),
+        |prepared, primary, history| {
+            prepared.inspect_after_write(
+                &admission, &f.bindings, &f.journal.borrow(),
+                &f.protected, primary,
+            )?;
+            if stage == "after-history" {
+                p0g3d08c_abort_at(&workdir, "after-history");
+            }
+            let claim = f.journal.borrow()
+                .read_existing_replace_attempt(f.intent.operation_id)
+                .map_err(refused)?
+                .ok_or_else(|| refused("V7 claim missing in child writer"))?;
+            let original = f.protected.read_bound_preimage(f.intent.operation_id)
+                .map_err(refused)?
+                .ok_or_else(|| refused("protected BLOB missing in child writer"))?;
+            let pinned = PinnedReadOnlyRoot::open(&f.root).map_err(refused)?;
+            let observed = pinned.read_identified_bounded(
+                &f.intent.path, MAX_PROTECTED_ORIGINAL_BYTES as u64,
+            ).map_err(refused)?;
+            let candidate = InertExistingReplaceReceiptCandidate::from_strict_history(
+                &claim, &original, history, &observed,
+            ).map_err(refused)?;
+            f.journal.borrow_mut()
+                .record_existing_replace_receipt_candidate_once(&candidate)
+                .map_err(refused)?;
+            if stage == "after-v8" {
+                p0g3d08c_abort_at(&workdir, "after-v8");
+            }
+            Ok(())
+        },
+    );
+    panic!("writer unexpectedly returned instead of aborting at {stage}: {outcome:?}");
+}
+
+#[test]
+fn p0g3d08c_real_writer_abort_matrix_has_no_automatic_replay() {
+    for stage in ["after-v7", "after-primary", "after-history", "after-v8"] {
+        let workdir = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact").arg(P0G3D08C_WRITER_CHILD).arg("--nocapture")
+            .env("AKULA_P0G3D08C_STAGE", stage)
+            .env("AKULA_P0G3D08C_WORKDIR", workdir.path())
+            .output().unwrap();
+        assert!(!output.status.success(),
+            "writer must abort at {stage} rather than complete: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr));
+        let marker = fs::read_to_string(
+            workdir.path().join("p0g3d08c-crash-marker"),
+        ).unwrap_or_else(|_| panic!(
+            "writer crashed before reaching {stage}; stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+        assert_eq!(marker, stage, "writer must reach the exact crash seam");
+
+        let record: serde_json::Value = serde_json::from_slice(&fs::read(
+            workdir.path().join("p0g3d08c-fixture.json"),
+        ).unwrap()).unwrap();
+        let root = PathBuf::from(record["root"].as_str().unwrap());
+        let appdata = PathBuf::from(record["appdata"].as_str().unwrap());
+        let operation: OperationId = record["operation"].as_str().unwrap()
+            .parse().unwrap();
+        assert!(root.starts_with(crate::search::paths::canonical_path(workdir.path())),
+            "writer may only use its disposable test vault");
+        let primary = root.join("Reserved.md");
+        let original = b"unchanged private original";
+        let target = "remote candidate using the real local history service "
+            .repeat(100);
+        let visible = fs::read(&primary).unwrap();
+        if stage == "after-v7" {
+            assert_eq!(visible, original);
+        } else {
+            assert_eq!(visible, target.as_bytes());
+        }
+
+        // A NEW process cannot reuse any previous in-memory history witness.
+        // Before V8 commit it must fail closed; after V8 only forensic HOLD.
+        let classification = if stage == "after-v8" { "hold" } else { "deny" };
+        p0g3d08_run_child(&root, &appdata, operation, classification);
+
+        let journal = SqliteSyncJournal::open_existing_read_only(
+            &appdata.join("journal.sqlite"),
+        ).unwrap();
+        assert_eq!(journal.get(operation).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(journal.read_existing_replace_attempt(operation)
+            .unwrap().is_some());
+        let v8 = journal.read_existing_replace_receipt_candidate(operation)
+            .unwrap();
+        assert_eq!(v8.is_some(), stage == "after-v8");
+        let protected = SqliteProtectionStore::open_existing_read_only(
+            &appdata.join("originals.sqlite"),
+        ).unwrap();
+        assert_eq!(protected.read_bound_preimage(operation)
+            .unwrap().unwrap().original.bytes, original);
+        let intent = journal.get(operation).unwrap().unwrap().intent;
+        let committed = journal.baseline(intent.vault_id, intent.document_id)
+            .unwrap().unwrap();
+        assert_eq!(Some(committed.revision_id), intent.expected_baseline);
+        assert_eq!(committed.content_hash,
+            blake3::hash(original).to_hex().to_string());
+    }
+}
