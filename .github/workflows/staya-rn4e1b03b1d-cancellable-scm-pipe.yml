@@ -1,0 +1,171 @@
+name: Staya RN4E1b03b1d — cancellable LocalSystem SCM pipe
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03b1d-cancellable-scm-pipe-*"
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/**"
+      - ".github/workflows/staya-rn4e1b03b1d-cancellable-scm-pipe.yml"
+      - "docs/sync/staya-rn4e1b03b1d-cancellable-scm-pipe.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cancellable-real-scm:
+    name: Windows real SCM cancellation across accept, silent client, restart
+    runs-on: windows-2022
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Strict isolated source and test scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "afc25826b30afa56b484344ec2f86d9600629ca6"
+          changed = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          allowed = {
+              "aquilum-app/host-broker-lab/src/windows_cancellable_pipe.rs",
+              "aquilum-app/host-broker-lab/src/windows_scm_service.rs",
+              "aquilum-app/host-broker-lab/src/windows_server.rs",
+              "aquilum-app/host-broker-lab/src/main.rs",
+              "aquilum-app/host-broker-lab/src/lib.rs",
+              ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml",
+              ".github/workflows/staya-rn4e1b03b1c-scm-service.yml",
+              ".github/workflows/staya-rn4e1b03b1d-cancellable-scm-pipe.yml",
+              "docs/sync/staya-rn4e1b03b1d-cancellable-scm-pipe.md",
+          }
+          assert changed == allowed, f"unexpected changes: {changed ^ allowed}"
+          assert not any(p.startswith("aquilum-app/native/") for p in changed)
+          assert not any(p.startswith("aquilum-app/core/") for p in changed)
+          PY
+          git diff --check
+      - name: Build standalone Windows service and all 12 Rust tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw "failed standalone tests" }
+          cargo build --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --bin akula-host-broker-lab
+          if ($LASTEXITCODE -ne 0) { throw "failed build" }
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw "format check failed" }
+      - name: Positive pinned pipe proof, bounded stop while idle and while client silent
+        run: |
+          $ErrorActionPreference = "Stop"
+          $name = "AkulaHostBrokerResearch"
+          $exe = (Resolve-Path "aquilum-app/host-broker-lab/target/debug/akula-host-broker-lab.exe").Path
+          if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
+            throw "unsafe pre-existing service: do not modify"
+          }
+          $created = $false
+          $held = $null
+          try {
+            # No permanent app install, autostart, owner DB or grants. The
+            # executable only exists on this ephemeral Windows CI runner.
+            $cmd = '"' + $exe + '" --service-pipe'
+            New-Service -Name $name -BinaryPathName $cmd -StartupType Manual -DisplayName "Akula Broker Test Pipe (ephemeral CI)" -ErrorAction Stop | Out-Null
+            $created = $true
+            & sc.exe sidtype $name unrestricted | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "failed to configure service SID" }
+            for ($round = 1; $round -le 2; $round++) {
+              Start-Service -Name $name -ErrorAction Stop
+              $svc = Get-Service -Name $name -ErrorAction Stop
+              $svc.WaitForStatus("Running", [TimeSpan]::FromSeconds(15))
+              $meta = Get-CimInstance Win32_Service -Filter "Name='$name'"
+              if ($meta.StartName -ne "LocalSystem" -or $meta.ProcessId -eq 0) {
+                throw "service not LocalSystem or missing unique PID"
+              }
+              & $exe --verify-scm
+              if ($LASTEXITCODE -ne 0) { throw "SCM token/SID verification failed" }
+              # Service must own the named pipe itself, not a user process.
+              & $exe --verify-pipe
+              if ($LASTEXITCODE -ne 0) { throw "pinned pipe not owned by service" }
+              if ($round -eq 2) {
+                # Do NOT use NamedPipeClientStream(InOut): it can request
+                # GENERIC_WRITE, which implies FILE_CREATE_PIPE_INSTANCE.
+                # A real desktop principal must only get DATA read/write,
+                # never pipe instance creation. Match the production DACL.
+                Add-Type -TypeDefinition @'
+          using System;
+          using System.ComponentModel;
+          using System.Runtime.InteropServices;
+          using System.Threading;
+          using Microsoft.Win32.SafeHandles;
+          public static class AkulaMinimumPipeClient {
+              [DllImport("kernel32.dll", EntryPoint="CreateFileW", CharSet=CharSet.Unicode,
+                         ExactSpelling=true, SetLastError=true)]
+              private static extern SafeFileHandle Open(
+                  string name, uint access, uint share, IntPtr attrs,
+                  uint disposition, uint flags, IntPtr template);
+              public static SafeFileHandle Connect() {
+                  var until = DateTime.UtcNow.AddSeconds(5);
+                  for (;;) {
+                      // FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE.
+                      var pipe = Open(@"\\.\pipe\AkulaHostBrokerResearch.v1",
+                                      0x00100003u, 0, IntPtr.Zero, 3,
+                                      0x00110000u, IntPtr.Zero);
+                      if (!pipe.IsInvalid) return pipe;
+                      int error = Marshal.GetLastWin32Error();
+                      pipe.Dispose();
+                      if ((error != 231 && error != 2) || DateTime.UtcNow >= until)
+                          throw new Win32Exception(error);
+                      Thread.Sleep(50);
+                  }
+              }
+          }
+          '@
+                $held = [AkulaMinimumPipeClient]::Connect()
+                if ($held.IsInvalid) { throw "minimal-rights silent client could not connect" }
+                # No data is sent; server must cancel its overlapped read.
+              }
+              # Round 1 stops with an unconnected pending accept; round 2
+              # cancels a pending ReadFile against an open silent client.
+              Stop-Service -Name $name -ErrorAction Stop
+              (Get-Service -Name $name).WaitForStatus(
+                "Stopped", [TimeSpan]::FromSeconds(15)
+              )
+              if ($null -ne $held) { $held.Dispose(); $held = $null }
+              & $exe --verify-pipe *> $null
+              if ($LASTEXITCODE -eq 0) { throw "stopped service retained trusted pipe" }
+            }
+          }
+          finally {
+            if ($null -ne $held) { $held.Dispose() }
+            if ($created) {
+              $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+              if ($svc -and $svc.Status -ne "Stopped") {
+                try {
+                  Stop-Service -Name $name -ErrorAction Stop
+                  $svc.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(10))
+                } catch { Write-Warning "forced cleanup after test failure: $_" }
+              }
+              & sc.exe delete $name | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "SCM ephemeral cleanup failed" }
+            }
+          }
+      - name: Enforce no Akula production lockfile or File Gate change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- aquilum-app/Cargo.lock aquilum-app/host-broker-lab/Cargo.lock
+      - name: Persist limitations
+        run: |
+          "SCM pipe startup, pinned SYSTEM/service SID and stop during blocked accept/silent read exercised in temporary Windows runner." >> $env:GITHUB_STEP_SUMMARY
+          "No accepted protocol frames, grants, installed service, signed installer, policy ledger, QUIC, file writes or APPLIED." >> $env:GITHUB_STEP_SUMMARY

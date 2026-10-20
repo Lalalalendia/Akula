@@ -7,6 +7,7 @@ fn main() {
         let arg = std::env::args().nth(1);
         let outcome = match arg.as_deref() {
             Some("--service") => akula_host_broker_lab::windows_scm_service::dispatch_scm_service(),
+            Some("--service-pipe") => akula_host_broker_lab::windows_scm_service::dispatch_scm_pipe_service(),
             // SCM-only SYSTEM + Service SID diagnostic, no pipe or IPC.
             Some("--verify-scm") => akula_host_broker_lab::windows_client_attestation::
                 inspect_installed_scm_process_without_pipe(),

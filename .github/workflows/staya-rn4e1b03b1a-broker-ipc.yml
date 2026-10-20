@@ -5,6 +5,7 @@ on:
     branches:
       - "experiment/staya-rn4e1b03b1a-host-broker-ipc-*"
       - "experiment/staya-rn4e1b03b1b-client-service-attest-*"
+      - "experiment/staya-rn4e1b03b1d-cancellable-scm-pipe-*"
   pull_request:
     paths:
       - "aquilum-app/host-broker-lab/**"
@@ -54,12 +55,15 @@ jobs:
               "aquilum-app/host-broker-lab/src/windows_server.rs",
               "aquilum-app/host-broker-lab/src/windows_client_attestation.rs",
               "aquilum-app/host-broker-lab/src/windows_scm_service.rs",
+              "aquilum-app/host-broker-lab/src/windows_cancellable_pipe.rs",
               "aquilum-app/host-broker-lab/README.md",
               ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml",
               ".github/workflows/staya-rn4e1b03b1c-scm-service.yml",
+              ".github/workflows/staya-rn4e1b03b1d-cancellable-scm-pipe.yml",
               "docs/sync/staya-rn4e1b03b1a-broker-ipc.md",
               "docs/sync/staya-rn4e1b03b1b-client-service-attest.md",
               "docs/sync/staya-rn4e1b03b1c-scm-lifecycle.md",
+              "docs/sync/staya-rn4e1b03b1d-cancellable-scm-pipe.md",
           }
           assert changed == allowed, f"unexpected files: {changed ^ allowed}"
           assert not any(p.startswith("aquilum-app/core/") for p in changed)

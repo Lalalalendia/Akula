@@ -62,6 +62,10 @@ pub mod windows_client_attestation;
 #[cfg(windows)]
 pub mod windows_scm_service;
 
+// Read-only, cancelable SCM pipe transport. No application activates this.
+#[cfg(windows)]
+mod windows_cancellable_pipe;
+
 #[cfg(test)]
 mod tests {
     use super::*;
