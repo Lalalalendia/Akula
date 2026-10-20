@@ -6,6 +6,33 @@ use super::super::App;
 
 pub const VIEW_SAVE_DELAY: Duration = Duration::from_millis(500);
 
+// A synthetic image near the start of a note cannot be centered: the native
+// scroll offset clamps at zero. Its actual paragraph top merely needs enough
+// screen area below it to allow the 138px fixture image to rasterize.
+#[cfg(not(feature = "installed"))]
+fn image_scan_anchor_has_visible_band(top_in_view: f64, viewport_height: f64) -> bool {
+    const MIN_BAND: f64 = 64.0;
+    top_in_view.is_finite() && viewport_height.is_finite()
+        && viewport_height >= MIN_BAND
+        && top_in_view >= 0.0
+        && top_in_view <= viewport_height - MIN_BAND
+}
+
+#[cfg(all(test, not(feature = "installed")))]
+mod image_scan_visibility_tests {
+    use super::image_scan_anchor_has_visible_band;
+
+    #[test]
+    fn first_image_near_document_start_is_visible_without_centering() {
+        assert!(image_scan_anchor_has_visible_band(48.0, 675.0));
+        assert!(image_scan_anchor_has_visible_band(337.0, 675.0));
+        assert!(!image_scan_anchor_has_visible_band(-1.0, 675.0));
+        assert!(!image_scan_anchor_has_visible_band(675.0 - 32.0, 675.0));
+        assert!(!image_scan_anchor_has_visible_band(983.0, 675.0));
+        assert!(!image_scan_anchor_has_visible_band(f64::NAN, 675.0));
+    }
+}
+
 impl App {
     pub(in crate::app) fn scroll_geometry(&self, root: &RenderRoot) -> Option<(f64, f64, f64)> {
         let ids = self.note_ids.as_ref()?;
@@ -45,12 +72,10 @@ impl App {
     /// guessed wheel offset. Return None unless the anchor can be laid out.
     #[cfg(not(feature = "installed"))]
     pub(crate) fn image_scan_reveal(&mut self, root: &mut RenderRoot, byte: usize) -> Option<(f64, f64)> {
-        // A single programmatic reveal is NOT sufficient for a document
-        // whose images decode asynchronously: their real 138px layout
-        // heights replace estimates after the initial anchor seek. The
-        // first Win32 proof painted 10 images but 8 lay *outside* the
-        // current viewport. Re-measure the target on every dwell tick
-        // and only re-center when geometry actually drifts.
+        // Async decoded images change native paragraph heights after a seek.
+        // Check the real viewport at every dwell tick. A first image near the
+        // document start cannot be centered because scroll clamps at zero,
+        // so count a genuinely visible image rather than insisting on centering.
         let (viewport_y, editor_y, before) = self.scroll_geometry(root)?;
         let ids = self.note_ids.as_ref()?;
         let scroll = ids.scroll;
@@ -62,12 +87,13 @@ impl App {
         if !top.is_finite() || !height.is_finite() || height <= 0.0 {
             return None;
         }
-        let error = editor_y + top - viewport_y - height * 0.5;
-        if error.abs() <= 64.0 {
-            // The actual paragraph position is already centered. Don't
-            // request an extra layout or rebuild the retained scene just
-            // to generate artificial CPU work. Record affirmative per-byte
-            // alignment only after reading the latest native layout.
+        let top_in_view = editor_y + top - viewport_y;
+        let error = top_in_view - height * 0.5;
+        if image_scan_anchor_has_visible_band(top_in_view, height) {
+            // The paragraph is inside the current native viewport with
+            // >=64px below its top. Do not force a pointless layout/repaint
+            // on each 8ms tick (especially at a clamped scroll boundary).
+            // The separate mip-source pixel gate still proves actual raster.
             static ALIGNED: std::sync::OnceLock<
                 std::sync::Mutex<std::collections::HashSet<usize>>
             > = std::sync::OnceLock::new();
@@ -76,7 +102,7 @@ impl App {
                 .insert(byte)
             {
                 eprintln!(
-                    "AKULA_IMAGE_ANCHOR_ALIGNED byte={byte} center_error={error:.1} offset={before:.1}"
+                    "AKULA_IMAGE_ANCHOR_ALIGNED byte={byte} center_error={error:.1} top_in_view={top_in_view:.1} min_band=64 offset={before:.1}"
                 );
             }
             return Some((before, before));

@@ -71,8 +71,10 @@ impl Host {
                     // photo decode changed image paragraph heights. On every
                     // actual 8ms native replay tick, recheck the *active*
                     // anchor; App::image_scan_reveal is a cheap no-op when
-                    // the latest layout already places it within 8px of
-                    // viewport center. Never advance the 6s sweep clock.
+                    // the latest layout places its top visibly inside the
+                    // viewport with a 64px raster band. This handles anchors
+                    // that cannot center at the start of a document. Never
+                    // advance the 6s sweep clock.
                     let transition = self.replay.as_mut()
                         .and_then(|replay| replay.image_scan_target(now, anchors.len()));
                     let active = self.replay.as_ref()

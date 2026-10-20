@@ -217,7 +217,7 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
     if len(aligned & set(anchors)) < required_alignment:
         raise ValueError(
             f"{sample}: only {len(aligned & set(anchors))}/{len(anchors)} "
-            f"actual source-byte anchors centered after async layout, "
+            f"actual source-byte anchors visible after async layout (64px band), "
             f"needs {required_alignment}; recenter events={recenter_events}"
         )
     parsed_replay = json.loads(replay.read_text(encoding="utf-8"))
