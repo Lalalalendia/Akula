@@ -109,7 +109,7 @@ qemu-img resize "$lab/guest.qcow2" 8G >/dev/null
 
 # This is the ONLY persistence device under test. Host never mounts it.
 qemu-img create -q -f raw "$lab/volume.raw" 4G
-mkfs.ext4 -F -q -L AKULA_SYNC_VM "$lab/volume.raw"
+mkfs.ext4 -F -q -E lazy_itable_init=0,lazy_journal_init=0 -L AKULA_SYNC_VM "$lab/volume.raw"
 echo "AKULA_VM_IMAGE_SIGNED_SHA256=$checksum"
 echo "AKULA_VM_DISK_FORMAT=ext4 QEMU_CACHE_MODE=none HOST_STORAGE=ephemeral"
 
@@ -137,8 +137,9 @@ print(found[0])
 PY
 )"
 test -x "$test_bin"
-"$test_bin" --list | grep -Fq "p0g3d08c_writer_abort_entrypoint: test"
-"$test_bin" --list | grep -Fq "p0g3d08_os_process_probe_entrypoint: test"
+"$test_bin" --list > "$lab/test-list.txt"
+grep -Fq "p0g3d08c_writer_abort_entrypoint: test" "$lab/test-list.txt"
+grep -Fq "p0g3d08_os_process_probe_entrypoint: test" "$lab/test-list.txt"
 
 port="$(python3 - <<'PY'
 import socket
