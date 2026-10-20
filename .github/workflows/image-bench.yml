@@ -62,7 +62,8 @@ jobs:
   high-resolution-research:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    continue-on-error: true
+    # A failed experiment must not make the benchmark workflow green.
+    # This remains research-only and does not gate installed Akula.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
