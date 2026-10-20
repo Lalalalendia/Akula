@@ -451,10 +451,16 @@ mod tests {
         let list = Command::new(&exe).arg("--list").output().unwrap();
         assert!(list.status.success());
         let listing = String::from_utf8_lossy(&list.stdout);
+        // Select only the helper from THIS module. The macOS transaction
+        // harness registers another helper with the same short name.
+        let suite = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest);
+        let exact = format!("{suite}::child_crash_at_transaction_boundary");
         let helper = listing.lines()
             .filter_map(|line| line.strip_suffix(": test"))
-            .find(|name| name.ends_with("::child_crash_at_transaction_boundary"))
-            .unwrap();
+            .find(|name| *name == exact.as_str())
+            .expect("this Linux crash subprocess helper was not registered");
         let mut child = Command::new(exe)
             .arg("--exact").arg(helper).arg("--nocapture")
             .env("AKULA_LINUX_CRASH_PHASE", phase)
