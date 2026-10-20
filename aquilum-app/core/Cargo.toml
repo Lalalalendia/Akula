@@ -52,6 +52,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"
 blake3 = "1.8.5"
+# Already locked transitively; strict read-only ZIP diagnostic, no extraction.
+flate2 = "1.1.9"
+crc32fast = "1.5.0"
 # M1d-f1: inert OS-key-provided AEAD archive envelope; no SQLite activation.
 ring = "0.17.14"
 zeroize = "1.9.0"
