@@ -244,7 +244,8 @@ mod tests {
             .unwrap(), original);
 
         let mut changed = original.clone();
-        changed[changed.len() / 2] ^= 1;
+        let middle = changed.len() / 2;
+        changed[middle] ^= 1;
         let changed_intent = intent(&changed);
         remote.put(
             &changed_intent.remote_object_id,
