@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -86,7 +86,12 @@ fn exclusive_existing(path: &Path) -> Result<File, Hold> {
         {
             Ok(file) => {
                 let meta = file.metadata().map_err(invalid_io)?;
-                if !meta.is_file() || meta.len() > MAX_BYTES as u64 {
+                if !meta.is_file()
+                    || meta.file_attributes() & 0x0000_0400 != 0
+                    || meta.len() > MAX_BYTES as u64
+                {
+                    // OS aliases and oversized journals never initialize
+                    // a new empty epoch/permission universe.
                     return Err(Hold::SizeLimit);
                 }
                 return Ok(file);
