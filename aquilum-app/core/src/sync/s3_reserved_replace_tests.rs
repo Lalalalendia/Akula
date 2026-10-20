@@ -645,3 +645,132 @@ fn p0g3d06_reopened_v8_refuses_changed_inode_and_tampered_sqlite_digest() {
         "corrupt V8 digest must fail closed");
     assert_no_remote_ack(&f);
 }
+
+
+/// Diagnostic-only combined check against three independent read-only DBs.
+fn inert_cold_full_history_review(
+    f: &Fixture,
+) -> Result<InertColdUnifiedReview, FileCommandError> {
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root)
+        .map_err(refused)?;
+    let bindings = SqliteRegisteredS3Bindings::open_existing_read_only(
+        &admission, &f.appdata.join("profile.sqlite"),
+    ).map_err(refused)?;
+    let journal = SqliteSyncJournal::open_existing_read_only(
+        &f.appdata.join("journal.sqlite"),
+    ).map_err(refused)?;
+    let originals = SqliteProtectionStore::open_existing_read_only(
+        &f.appdata.join("originals.sqlite"),
+    ).map_err(refused)?;
+    inspect_cold_s3_replace_with_history_hold(
+        &admission, &bindings, &journal, &originals, f.intent.operation_id,
+    )
+}
+
+#[test]
+fn p0g3d07_fresh_core_all_stores_and_history_remain_hold() {
+    let f = fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    let first = inert_cold_full_history_review(&f).unwrap();
+    assert_eq!(first.status, InertColdUnifiedStatus::LocallyConsistentHold);
+    assert_eq!(first.operation_id, f.intent.operation_id);
+    assert_no_remote_ack(&f);
+
+    // Destroy old Core + all write-capable SQLite handles. A new Core cannot
+    // rely on previous HistoryService state, a writer permit or old admission.
+    let Fixture {
+        _temp: _keep_temp_dir,
+        core, root, appdata, bindings, custody, journal,
+        cache, protected, intent, old_hash, new_text, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+    let fresh = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    let admission = RegisteredReadAdmission::open(&fresh, &root).unwrap();
+    let bindings = SqliteRegisteredS3Bindings::open_existing_read_only(
+        &admission, &appdata.join("profile.sqlite"),
+    ).unwrap();
+    let journal = SqliteSyncJournal::open_existing_read_only(
+        &appdata.join("journal.sqlite"),
+    ).unwrap();
+    let originals = SqliteProtectionStore::open_existing_read_only(
+        &appdata.join("originals.sqlite"),
+    ).unwrap();
+
+    let result = inspect_cold_s3_replace_with_history_hold(
+        &admission, &bindings, &journal, &originals, intent.operation_id,
+    ).unwrap();
+    assert_eq!(result.status, InertColdUnifiedStatus::LocallyConsistentHold);
+    assert_eq!(result.operation_id, intent.operation_id);
+    assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
+        new_text.as_bytes());
+    assert_eq!(originals.read_bound_preimage(intent.operation_id)
+        .unwrap().unwrap().original.content_hash, old_hash);
+    assert_eq!(journal.get(intent.operation_id).unwrap().unwrap().phase,
+        JournalPhase::Staged);
+    let baseline = journal.baseline(intent.vault_id, intent.document_id)
+        .unwrap().unwrap();
+    assert_eq!(Some(baseline.revision_id), intent.expected_baseline);
+    assert_eq!(baseline.content_hash, old_hash);
+    let mut writable_check = SqliteSyncJournal::open(
+        &appdata.join("journal.sqlite"),
+    ).unwrap();
+    assert!(matches!(writable_check.mark_applied(intent.operation_id),
+        Err(JournalError::LocalDownloadNeedsNativeReceipt)),
+        "forensic cold agreement must never grant StageDownload apply");
+}
+
+#[test]
+fn p0g3d07_missing_v8_or_visible_original_cannot_produce_unified_hold() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    claim_cold_attempt_without_publication(&f, &admission);
+    drop(admission);
+    assert!(inert_cold_full_history_review(&f).is_err());
+    assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
+        b"unchanged private original");
+    assert_no_remote_ack(&f);
+}
+
+#[test]
+fn p0g3d07_same_length_history_tampering_fails_closed() {
+    let f = fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    assert!(inert_cold_full_history_review(&f).is_ok());
+    let candidate = f.journal.borrow()
+        .read_existing_replace_receipt_candidate(f.intent.operation_id)
+        .unwrap().unwrap();
+    let (id, _, _) = candidate.cold_history_fields();
+    let history = f.root.join(".aquilum").join("history")
+        .join(f.intent.path.as_str()).join(id);
+    assert!(history.is_file(), "strict external version file must be present");
+    fs::write(&history, "X".repeat(f.new_text.len())).unwrap();
+    assert!(inert_cold_full_history_review(&f).is_err(),
+        "matching V8 and primary bytes cannot conceal a changed history file");
+    assert_eq!(fs::read(f.root.join(f.intent.path.as_str())).unwrap(),
+        f.new_text.as_bytes(), "cold inspector must not rewrite the primary");
+    assert_no_remote_ack(&f);
+}
+
+#[test]
+fn p0g3d07_foreign_note_history_relocation_fails_closed() {
+    let f = fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    let candidate = f.journal.borrow()
+        .read_existing_replace_receipt_candidate(f.intent.operation_id)
+        .unwrap().unwrap();
+    let (id, _, _) = candidate.cold_history_fields();
+    let original = f.root.join(".aquilum").join("history")
+        .join(f.intent.path.as_str()).join(id);
+    let foreign = f.root.join(".aquilum").join("history")
+        .join("Unrelated.md");
+    fs::create_dir_all(&foreign).unwrap();
+    fs::rename(&original, foreign.join(id)).unwrap();
+    assert!(inert_cold_full_history_review(&f).is_err(),
+        "version ID at a different note cannot replace exact registered history");
+    assert_no_remote_ack(&f);
+}
