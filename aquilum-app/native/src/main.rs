@@ -1,5 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Do not accidentally package an experimental live network control. QA may
+// compile it only in non-release builds; production release requires separate
+// acceptance, code change and review.
+#[cfg(all(feature = "yandex-s3-connection-preview", not(debug_assertions)))]
+compile_error!("Yandex S3 connection preview must not ship in release builds");
+
 macro_rules! report {
     ($($arg:tt)*) => {
         $crate::host::report(&format!($($arg)*))
@@ -75,6 +81,12 @@ mod vsync;
 mod ui;
 mod updater;
 mod window_state;
+mod yandex_credentials;
+// Inert coordinator in default builds; no network, auth or Sync on startup.
+#[allow(dead_code)]
+mod yandex_probe_session;
+#[cfg(all(target_os = "windows", feature = "yandex-s3-connection-preview"))]
+mod yandex_probe_worker;
 mod workspace;
 
 pub use args::Args;

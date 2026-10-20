@@ -30,12 +30,16 @@ installed = []
 memory-probe = []
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
+# Manual QA preview only. Standard Akula builds NEVER include S3 UI or AWS.
+yandex-s3-connection-preview = ["aquilum-core/sync-s3", "dep:tokio"]
 # Separate non-published installer-witness integration acceptance.
 sync-installed-host-witness = ["sync-installed-host", "aquilum-core/sync-installed-host-witness"]
 # Installer trust experiment only, not enabled by signed local release.
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum-core/sync-installed-host-unix-root-witness"]
 
 [dependencies]
+# Opt-in only: create a bounded single-thread SDK runtime in a background worker.
+tokio = { version = "1", features = ["rt", "time"], optional = true }
 aquilum-core = { path = "../core", features = ["host-custody"] }
 # Основная ветка xilem: Masonry без релиза больше года, бэкенды под vello_cpu только там.
 # Ревизия зафиксирована, обновлять пачками.
@@ -90,7 +94,8 @@ accesskit_unix = "=0.22.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-core = "0.62"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectManipulation", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Imaging", "Win32_Media_Audio", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+zeroize = "1.9.0"
+windows = { version = "0.62", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectManipulation", "Win32_Graphics_Dwm", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Imaging", "Win32_Media_Audio", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 # Под accesskit 0.24 из Masonry: та же версия, что у accesskit_winit 0.32.
 accesskit_windows = "=0.32.1"
 

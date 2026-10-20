@@ -42,6 +42,8 @@ pub(super) enum Effect {
 
 impl App {
     pub(super) fn open_settings(&mut self, root: &mut RenderRoot) {
+        // A reopened dialog must never inherit a previous bucket/auth success.
+        self.yandex_probe.settings_closed();
         let section = self.interface.settings_section().and_then(Section::from_key).unwrap_or(Section::Ui);
         self.show_settings(root, section);
     }
@@ -67,9 +69,20 @@ impl App {
         } else {
             None
         };
+        let yandex_keys = if section == Section::Sync {
+            let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
+            crate::yandex_credentials::present(&bucket).ok()
+        } else {
+            None
+        };
+        let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
         Context {
             workspace,
             sync_recovery,
+            yandex_keys,
+            yandex_probe: self.yandex_probe.view_for(&bucket),
+            yandex_probe_busy: self.yandex_probe.busy(),
+            yandex_notice: None,
             sync_selected: None,
             sync_notice: None,
             scale: self.interface.scale(),

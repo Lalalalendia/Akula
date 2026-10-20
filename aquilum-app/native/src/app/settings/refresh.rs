@@ -21,11 +21,13 @@ impl App {
         let mut ctx = self.settings_context(dialog.section, dialog.copied, dialog.trash_page);
         ctx.sync_selected = dialog.sync_selected.clone();
         ctx.sync_notice = dialog.sync_notice.clone();
+        ctx.yandex_notice = dialog.yandex_notice.clone();
         let (card, finish) = settings::card(&config, &ctx, dialog.section);
         root.edit_widget(dialog.layer, |mut w| Modal::set_card(&mut w.downcast(), card, &crate::i18n::t("settings.title")));
         let mut fresh = finish(dialog.layer);
         fresh.sync_selected = dialog.sync_selected;
         fresh.sync_notice = dialog.sync_notice;
+        fresh.yandex_notice = dialog.yandex_notice;
         root.focus_on(Some(fresh.layer));
         if let Some(offset) = offset {
             fresh.content.edit(root, |mut area| ScrollArea::set_offset(&mut area, offset));
@@ -57,6 +59,9 @@ impl App {
         if dialog.section == section {
             return;
         }
+        if dialog.section == Section::Sync {
+            self.yandex_probe.settings_closed();
+        }
         for &(nav, item) in &dialog.nav {
             root.edit_widget(nav, |mut w| ItemButton::set_active(&mut w.downcast(), item == section));
         }
@@ -65,6 +70,7 @@ impl App {
         dialog.trash_page = 0;
         dialog.sync_selected = None;
         dialog.sync_notice = None;
+        dialog.yandex_notice = None;
         self.interface.set_settings_section(section.key());
         let config = self.workspace.core.settings.get_config();
         let ctx = self.settings_context(section, None, 0);
@@ -83,6 +89,7 @@ impl App {
         let mut ctx = self.settings_context(section, copied, page);
         ctx.sync_selected = dialog.sync_selected.clone();
         ctx.sync_notice = dialog.sync_notice.clone();
+        ctx.yandex_notice = dialog.yandex_notice.clone();
         let (content, bindings) = settings::content(&config, &ctx, section);
         let Some(Popup::Settings { dialog, .. }) = &mut self.popup else { return };
         let switches = switch_travel(root, &dialog.bindings);
