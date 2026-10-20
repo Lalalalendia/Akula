@@ -1135,8 +1135,18 @@ fn p0g3d08c_real_writer_abort_matrix_has_no_automatic_replay() {
         let appdata = PathBuf::from(record["appdata"].as_str().unwrap());
         let operation: OperationId = record["operation"].as_str().unwrap()
             .parse().unwrap();
-        assert!(root.starts_with(crate::search::paths::canonical_path(workdir.path())),
-            "writer may only use its disposable test vault");
+        // Compare resolved components, not raw Windows path spellings.
+        // Require the precise disposable fixture/vault hierarchy as well.
+        let canonical_workdir = crate::search::paths::canonical_path(workdir.path());
+        let canonical_root = crate::search::paths::canonical_path(&root);
+        let relative = crate::search::paths::strip_root(&canonical_workdir, &canonical_root)
+            .expect("writer may only use its disposable test vault");
+        let components: Vec<_> = relative.components().collect();
+        assert_eq!(components.len(), 2, "writer root must be fixture/vault");
+        assert!(components[0].as_os_str().to_string_lossy()
+            .starts_with("writer-crash-fixture-"),
+            "writer root must use a disposable crash fixture");
+        assert_eq!(components[1].as_os_str(), std::ffi::OsStr::new("vault"));
         let primary = root.join("Reserved.md");
         let original = b"unchanged private original";
         let target = "remote candidate using the real local history service "
