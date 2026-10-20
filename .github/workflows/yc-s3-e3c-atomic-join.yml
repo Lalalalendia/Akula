@@ -66,6 +66,7 @@ jobs:
           cargo test --locked -p aquilum-core --no-default-features --features sync-s3 s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes -- --exact
           cargo test --locked -p aquilum-core --no-default-features --features sync-s3 s3_v2_trust_anchor::tests::partial_policy_schema_is_never_ignored_by_old_v2_reader -- --exact
           cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-receipt-lab s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes -- --exact
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-receipt-lab s3_v2_trust_anchor::policy_receipt_lab::tests::valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build -- --exact
       - name: Compile standard Core without experimental trust features
         shell: bash
         working-directory: aquilum-app
