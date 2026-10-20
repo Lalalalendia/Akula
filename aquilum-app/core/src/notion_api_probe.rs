@@ -227,13 +227,13 @@ impl<T: NotionReadTransport> Scan<'_, T> {
 
     /// Fail closed on malformed/looping cursors, partial result windows or missing
     /// status. No partial batch is ever announced as complete.
-    fn collect_list<F>(&mut self, mut build: F) -> Result<Vec<Value>, String>
+    fn collect_list<F>(&mut self, mut build: F, mut initial: Option<Value>) -> Result<Vec<Value>, String>
     where F: FnMut(Option<String>) -> ReadRequest {
         let mut records = Vec::new();
         let mut seen_cursors = BTreeSet::new();
         let mut cursor = None;
         for _ in 0..self.limits.max_pages_per_collection {
-            let response = self.request(build(cursor.clone()))?;
+            let response = if let Some(first) = initial.take() { first } else { self.request(build(cursor.clone()))? };
             if response.get("object").and_then(Value::as_str) != Some("list") {
                 return Err("Notion list response has unexpected object type".into());
             }
@@ -307,15 +307,15 @@ impl<T: NotionReadTransport> Scan<'_, T> {
             return Ok(vec![first]);
         }
         // The first list page is reused rather than fetching it a second time.
-        let mut first_page = Some(first);
+        let first_page = Some(first);
         let items = self.collect_list(|cursor| ReadRequest::PageProperty {
             page: page.to_owned(), property: property.to_owned(), cursor,
-        }.with_first(&mut first_page))?;
+        }, first_page.take())?;
         self.insert("property_item", format!("{page}:{property}"), serde_json::json!(items))?;
         Ok(items)
     }
     fn blocks(&mut self, id: &str, depth: usize) -> Result<(), String> {
-        let blocks = self.collect_list(|cursor| ReadRequest::BlockChildren { id: id.to_owned(), cursor })?;
+        let blocks = self.collect_list(|cursor| ReadRequest::BlockChildren { id: id.to_owned(), cursor }, None)?;
         for block in blocks {
             let block_id = required_id(&block, "block")?;
             self.edge(id, &block_id, "contains")?;
@@ -344,7 +344,7 @@ impl<T: NotionReadTransport> Scan<'_, T> {
             self.edge(id, &source_id, "data_source")?;
             self.queue(TaskKind::DataSource, &source_id, depth + 1)?;
         }
-        let views = self.collect_list(|cursor| ReadRequest::Views { id: id.to_owned(), cursor })?;
+        let views = self.collect_list(|cursor| ReadRequest::Views { id: id.to_owned(), cursor }, None)?;
         for view in views {
             let view_id = required_id(&view, "view")?;
             let full = self.request(ReadRequest::View(view_id.clone()))?;
@@ -362,7 +362,7 @@ impl<T: NotionReadTransport> Scan<'_, T> {
             return Err("Notion data source ID mismatch".into());
         }
         self.insert("data_source", id.to_owned(), source)?;
-        let rows = self.collect_list(|cursor| ReadRequest::DataSourceRows { id: id.to_owned(), cursor })?;
+        let rows = self.collect_list(|cursor| ReadRequest::DataSourceRows { id: id.to_owned(), cursor }, None)?;
         if rows.len() >= 10_000 {
             return Err("Notion data source hit 10,000-row query boundary; partitioning not implemented".into());
         }
@@ -373,16 +373,6 @@ impl<T: NotionReadTransport> Scan<'_, T> {
             self.queue(TaskKind::Page, &page_id, depth + 1)?;
         }
         Ok(())
-    }
-}
-
-impl ReadRequest {
-    // Helpers to avoid needing a second HTTP call for the first property page.
-    fn with_first(self, first: &mut Option<Value>) -> Self {
-        // This method is an implementation marker; consumed by collect_list's
-        // optional first-page seam in the next refactor.
-        let _ = first;
-        self
     }
 }
 
