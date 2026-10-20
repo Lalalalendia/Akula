@@ -10,7 +10,7 @@ An Ed25519 owner signature alone does not prove that the actual Yandex bucket co
 
 1. Receive **independently authenticated**, human-reviewed E3a expectations: expected Yandex bucket, full VaultId/keyspace/current-head key, owner public keys+quorum, **separate approved genesis root BLAKE3 and policy BLAKE3**, and a fresh recipient challenge. These must **NOT** originate solely from S3. E3b does not implement human pairing/approval or generate the challenge.
 2. Verify a DSSE/Ed25519 **owner-quorum signed genesis invitation** using *only* those independent expected keys and pins; E3a refuses foreign scope/keys, changed challenge, generation >1 and policy epoch >1. E3b calls E3a *before network*.
-3. Require S3 profile and keyspace to match an **explicitly selected bound client and S3RemoteAnchorScope**. No default bucket scan or cross-profile fallback.
+3. Require the **actual selected S3 profile** to match the *signed Yandex identity*: exact `https://storage.yandexcloud.net` endpoint, `ru-central1` region, path-style mode, approved bucket, and keyspace/VaultId. The authenticated SDK client must match that same scope. Another HTTPS S3 provider or region is **not** acceptable just because it has the same bucket and object names. No default bucket scan or cross-profile fallback.
 4. Explicit call to `preview_yandex_join_genesis_read_only` (never automatically scheduled) performs a **bounded GET of exactly the approved current-head key**. The bytes must equal the independently approved canonical V2 root. The returned ETag is an **untrusted concurrency token**, never proof of publisher identity or content integrity.
 5. Reuse existing `AwsS3ProbeClient::inspect_explicitly_pinned_v2_read_only` with that exact genesis and ETag. This reads exact root, immutable manifest/shards, index, pack bytes and verifies BLAKE3/complete DAG; it **re-fetches the same root at the end**, refusing ETag/content changes and malformed/foreign/incomplete pack history.
 6. `inspect_pinned_join_receipt` checks the **full pinned reader's internal evidence** (scope fingerprint, exact canonical root digest and ETag, `requires_explicit_file_gate_review`) against the *same* owner-reviewed root; result is a typed, **read-only** `PinnedJoinReadOnlyObservation`, not any write permit or saved trust.
@@ -21,11 +21,11 @@ No second SQLite source of truth, no trust journal mutation, no File Gate write,
 
 `cargo test --locked -p aquilum-core --no-default-features --features signed-vault-pinned-join-lab s3_join_pinned_lab::tests`
 
-8 offline tests using synthetic owner keys and the **test-only** pinned-read receipt factory validate:
+9 offline tests using synthetic owner keys and the **test-only** pinned-read receipt factory validate:
 
 - Signed externally approved genesis + corresponding fully pinned exact V2 evidence → read-only observation.
 - Missing/changed/invalid ETag and mismatched complete-read evidence → HOLD.
-- Wrong bucket/profile/VaultId/keyspace → HOLD.
+- Wrong bucket/profile/VaultId/keyspace, foreign HTTPS endpoint, region or addressing mode → HOLD.
 - Another root, even with a valid reading receipt, cannot reuse a signed invitation.
 - Complete root/pack evidence does not substitute a trusted owner signature.
 - Correct owner signature does not substitute complete pinned read.
