@@ -24,6 +24,7 @@ done
 tmp="$(mktemp -d /tmp/akula-b1b3b-lab.XXXXXXXX)"
 chmod 0700 "$tmp"
 owned=false
+launched_units=()
 cleanup() {
   result=$?
   trap - EXIT
@@ -31,8 +32,12 @@ cleanup() {
     if (( result != 0 )); then
       sudo journalctl -u "$unit" -o cat -n 80 --no-pager >&2 || true
     fi
-    sudo systemctl stop "$unit" >/dev/null 2>&1 || true
-    sudo systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+    # Every negative test uses a distinct actual transient unit. Stop and
+    # reset ALL started test services before deleting their root-owned files.
+    for deployed_unit in "${launched_units[@]}"; do
+      sudo systemctl stop "$deployed_unit" >/dev/null 2>&1 || true
+      sudo systemctl reset-failed "$deployed_unit" >/dev/null 2>&1 || true
+    done
     sudo rm -rf -- "$root_dir" "$opt_dir"
   fi
   rm -rf -- "$tmp"
@@ -88,20 +93,27 @@ if (printf x >> "$root_dir/policy.bin") 2>/dev/null; then
 fi
 echo "B1B3B_ROOT_POLICY_UNWRITABLE_BY_PEER"
 
-# Real systemd-managed root process. Restrict network and filesystem writes.
-sudo systemd-run --unit="$unit" --service-type=simple \
-  --property=User=root \
-  --property=NoNewPrivileges=yes \
-  --property=ProtectSystem=strict \
-  --property=ReadWritePaths="$root_dir" \
-  --property=ProtectHome=yes \
-  --property=PrivateTmp=yes \
-  --property=PrivateDevices=yes \
-  --property=RestrictAddressFamilies=AF_UNIX \
-  --property=IPAddressDeny=any \
-  --property=MemoryMax=128M \
-  --property=TimeoutStopSec=5s \
-  "$opt_dir/helper"
+# A stopped systemd-run transient unit may disappear. Each independent
+# negative test MUST launch a NEW, uniquely named UID0 systemd service.
+# Never use systemctl start on a discarded transient unit: that can turn
+# missing test execution into a false-positive "denied" result.
+launch_helper() {
+  sudo systemd-run --unit="$unit" --service-type=simple \
+    --property=User=root \
+    --property=NoNewPrivileges=yes \
+    --property=ProtectSystem=strict \
+    --property=ReadWritePaths="$root_dir" \
+    --property=ProtectHome=yes \
+    --property=PrivateTmp=yes \
+    --property=PrivateDevices=yes \
+    --property=RestrictAddressFamilies=AF_UNIX \
+    --property=IPAddressDeny=any \
+    --property=MemoryMax=128M \
+    --property=TimeoutStopSec=5s \
+    "$opt_dir/helper"
+  launched_units+=("$unit")
+}
+launch_helper
 
 found=false
 for i in $(seq 1 100); do
@@ -173,20 +185,38 @@ grep -Fq "B1B3B_REFUSED" "$tmp/journal.log"
 grep -Fq "B1B3C_ROOT_B1A_SIGNED_FD_PINNED" "$tmp/journal.log"
 echo "B1B3C_ROOT_SERVICE_B1A_VERIFIED_FD_AND_IPC_PASS"
 
-# A bad root-staged package MUST prevent the helper from binding its socket.
-# Destroy only our private root-owned lab path, never outside this namespace.
+# An invalid root-staged package MUST cause a real systemd process to
+# exit with code 2 and a specific B1a refusal in its own journal.
+# Absence of a socket is NOT sufficient: a service that never ran fails CI.
 stop_helper() {
   sudo systemctl stop "$unit" >/dev/null 2>&1 || true
   sudo rm -f -- "$sock"
 }
 expect_refused() {
-  sudo systemctl reset-failed "$unit" >/dev/null 2>&1 || true
-  sudo systemctl start "$unit" >/dev/null 2>&1 || true
-  sleep 0.4
-  if sudo systemctl is-active --quiet "$unit" || [[ -S "$sock" ]]; then
-    echo "B1B3C_REFUSED: helper accepted unsafe signed package state" >&2
-    exit 1
+  local case_name="$1" confirmed=false result="" status=""
+  unit="akula-b1b3b-lab-$case_name"
+  launch_helper
+  for i in $(seq 1 100); do
+    if [[ -S "$sock" ]]; then
+      echo "B1B3C_REFUSED: unsafe candidate bound a socket ($case_name)" >&2
+      return 1
+    fi
+    result="$(sudo systemctl show "$unit" -p Result --value 2>/dev/null || true)"
+    status="$(sudo systemctl show "$unit" -p ExecMainStatus --value 2>/dev/null || true)"
+    sudo journalctl -u "$unit" -o cat --no-pager > "$tmp/$case_name.log" 2>/dev/null || true
+    if [[ "$result" == exit-code && "$status" == 2 ]] &&
+       grep -Fq 'B1B3B_REFUSED: B1a root pinned candidate rejected:' "$tmp/$case_name.log"; then
+      confirmed=true
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$confirmed" != true ]]; then
+    echo "B1B3C_REFUSED: did not prove actual signed-package rejection ($case_name)" >&2
+    sudo journalctl -u "$unit" -o cat -n 60 --no-pager >&2 || true
+    return 1
   fi
+  echo "B1B3C_SYSTEMD_ACTUAL_PACKAGE_REFUSAL_$case_name"
 }
 restore_node() {
   sudo install -o root -g root -m 0400 "$tmp/node" "$root_dir/release/node"
@@ -195,38 +225,44 @@ stop_helper
 sudo chmod 0600 "$root_dir/release/node"
 sudo sh -c 'printf X >> /run/akula-b1b3b-lab/release/node'
 sudo chmod 0400 "$root_dir/release/node"
-expect_refused
+expect_refused tampered
 restore_node
 echo "B1B3C_ROOT_TAMPERED_PACKAGE_DENIED"
 
 stop_helper
 sudo rm -f -- "$root_dir/release/node"
 sudo ln -s manifest "$root_dir/release/node"
-expect_refused
+expect_refused symlink
 sudo rm -f -- "$root_dir/release/node"
 restore_node
 echo "B1B3C_ROOT_SYMLINK_DENIED"
 
 stop_helper
 sudo ln "$root_dir/release/node" "$root_dir/release/hardlink"
-expect_refused
+expect_refused hardlink
 sudo rm -f -- "$root_dir/release/hardlink"
 echo "B1B3C_ROOT_HARDLINK_DENIED"
 
 stop_helper
 sudo install -o root -g root -m 0600 "$tmp/release-seed" "$root_dir/release.pub"
-expect_refused
+expect_refused signer
 sudo install -o root -g root -m 0600 "$tmp/release.pub" "$root_dir/release.pub"
 echo "B1B3C_WRONG_ROOT_SIGNER_DENIED"
 
 stop_helper
-sudo systemctl reset-failed "$unit" >/dev/null 2>&1 || true
-sudo systemctl start "$unit"
+unit=akula-b1b3b-lab-restored
+launch_helper
 for i in $(seq 1 100); do
   [[ -S "$sock" ]] && break
+  if ! sudo systemctl is-active --quiet "$unit"; then
+    echo "B1B3C_REFUSED: restored signed helper did not start" >&2
+    exit 1
+  fi
   sleep 0.1
 done
 [[ -S "$sock" ]]
 send 1 "$tmp/valid.frame"
+sudo journalctl -u "$unit" -o cat --no-pager > "$tmp/restored.log"
+grep -Fq 'B1B3C_ROOT_B1A_SIGNED_FD_PINNED' "$tmp/restored.log"
 echo "B1B3C_ROOT_SIGNED_FD_RECOVERY_PASS"
-echo "B1B3C_PASS: signed real Node inode pinned in root helper, policy-bound B1a, rejected tamper/symlink/hardlink/untrusted signer, only inert Preview"
+echo "B1B3C_PASS: real systemd denial witnesses + signed Node FD proof; no install authority"

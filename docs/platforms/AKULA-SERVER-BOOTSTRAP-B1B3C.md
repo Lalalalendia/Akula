@@ -15,7 +15,7 @@ The helper verifies canonical manifest bytes, Ed25519 signature, validity interv
 
 CI signs the actual existing opt-in read-only Node ELF with a fresh TEST signer, strips debug symbols before signing and provisions the exact signed bytes. A different temporary Ed25519 operator signer signs the fixed Preview plan, with its manifest identity and package hash derived from B1a verified metadata.
 
-Dedicated ephemeral Ubuntu CI invokes the real UID0 systemd helper and tests positive signed FD plus OS-verified peer UID, signed wrong host, tampered frame, truncation and trailing data. It must then refuse to start and refuse socket binding when the root-owned binary is tampered, substituted by symlink or hardlink, or the separately rooted B1a signer key is replaced. Thirteen root-owned descriptor tests additionally probe inode swap, mutation, bad mode, expiry and rollback.
+Dedicated ephemeral Ubuntu CI invokes the real UID0 systemd helper and tests positive signed FD plus OS-verified peer UID, signed wrong host, tampered frame, truncation and trailing data. For each tampered, symlink, hardlink, or wrong-release-key candidate, the CI must launch a fresh uniquely named real transient UID0 systemd unit; require process exit code 2, a specific B1a signed-package refusal in that unit's journal, and the absence of socket binding. A missing transient unit or an absent socket alone is NOT evidence of a valid refusal. Thirteen root-owned descriptor tests additionally probe inode swap, mutation, bad mode, expiry and rollback.
 
 ## Claims expressly NOT made
 
@@ -26,3 +26,7 @@ Keeping an FD open and comparing metadata is not an immutable inode seal against
 The next implementation gate is a narrowly privileged OS-owned install transaction that checks a true owner-approved plan, independent monotonic CAS and verified package custody at the exact commit point, then performs ONLY a fixed signed Node install and recoverable systemd activation.
 
 All CI files are disposable and cannot modify a customer's VPS, actual Windows Akula, File Gate, or user vaults.
+
+## CI evidence correction, 20 October 2026
+
+The first profile CI had 12/13 Rust tests pass; one test wrongly assumed Linux rename never changes inode ctime and was corrected to expect a fail-closed ChangedInode. In the subsequent profile run, all 13 root tests passed and the live service admitted the verified signed FD; however, `systemctl start` on a stopped, unloaded `systemd-run` transient unit failed with `Unit not found`. Earlier negative cases in the same run were **false positives** because no fresh service was started at all. The fixed harness uses a distinct transient unit for EVERY negative case, verifies a real failed process and its specific B1a refusal from journald, then finally launches a restored positive unit. This is a correction of missing test coverage, not a relaxation of the signer or inode checks.
