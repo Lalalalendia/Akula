@@ -35,7 +35,7 @@ const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const ERROR_SHARING_VIOLATION: i32 = 32;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum Hold {
+pub(super) enum Hold {
     MissingOrUnreadable,
     Busy,
     CorruptOrTorn,
@@ -45,9 +45,9 @@ enum Hold {
 }
 
 #[derive(Default)]
-struct State {
-    floors: BTreeMap<[u8; 16], u64>,
-    sequence: u64,
+pub(super) struct State {
+    pub(super) floors: BTreeMap<[u8; 16], u64>,
+    pub(super) sequence: u64,
     previous_crc: u32,
 }
 
@@ -75,7 +75,7 @@ fn invalid_io(_: io::Error) -> Hold {
 /// Open an EXISTING installer-provisioned file, never CREATE. On Windows
 /// share_mode(0) is a real kernel-enforced lifetime/identity fence, not a
 /// process-local Mutex. Retries are bounded and preserve the expected epoch.
-fn exclusive_existing(path: &Path) -> Result<File, Hold> {
+pub(super) fn exclusive_existing(path: &Path) -> Result<File, Hold> {
     for attempt in 0..50 {
         match OpenOptions::new()
             .read(true)
@@ -110,7 +110,7 @@ fn exclusive_existing(path: &Path) -> Result<File, Hold> {
 
 /// Verify a full pre-existing log; no tail is skipped even if a valid old
 /// prefix exists. Never convert a damaged tail into an empty/fresh registry.
-fn read_log(file: &mut File, expected_anchor: [u8; 16]) -> Result<State, Hold> {
+pub(super) fn read_log(file: &mut File, expected_anchor: [u8; 16]) -> Result<State, Hold> {
     file.seek(SeekFrom::Start(0)).map_err(invalid_io)?;
     let mut bytes = Vec::new();
     (&mut *file)
@@ -159,7 +159,7 @@ fn read_log(file: &mut File, expected_anchor: [u8; 16]) -> Result<State, Hold> {
 /// Full lifetime: OS-exclusive open -> whole-log verification -> exact CAS
 /// -> append one denial floor -> sync_all -> full same-handle readback.
 /// No transaction rollback is attempted after partial primary write.
-fn revoke_existing(
+pub(super) fn revoke_existing(
     path: &Path,
     anchor: [u8; 16],
     replica: [u8; 16],

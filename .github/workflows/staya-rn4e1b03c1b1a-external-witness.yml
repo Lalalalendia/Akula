@@ -1,0 +1,73 @@
+name: Staya RN4E1b03c1b1a — external antirollback witness contract
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1b03c1b1a-external-epoch-contract-*"
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/src/windows_revocation_witness.rs"
+      - "aquilum-app/host-broker-lab/src/windows_revocation_journal.rs"
+      - "aquilum-app/host-broker-lab/src/lib.rs"
+      - ".github/workflows/staya-rn4e1b03c1b1a-external-witness.yml"
+      - "docs/sync/staya-rn4e1b03c1b1a-external-witness.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: OS-process deny floor vs external monotonic witness — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Strict no-authority scope
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          base = "d569a6f08239ed110966a188ff5f6103040ae47a"
+          actual = set(subprocess.check_output(
+              ["git", "diff", "--name-only", f"{base}..HEAD"], text=True
+          ).splitlines())
+          expected = {
+              "aquilum-app/host-broker-lab/src/windows_revocation_witness.rs",
+              "aquilum-app/host-broker-lab/src/windows_revocation_journal.rs",
+              "aquilum-app/host-broker-lab/src/lib.rs",
+              ".github/workflows/staya-rn4e1b03c1b1a-external-witness.yml",
+              "docs/sync/staya-rn4e1b03c1b1a-external-witness.md",
+          }
+          assert actual == expected, f"unexpected scope: {actual ^ expected}"
+          assert not any(p.startswith("aquilum-app/core/") for p in actual)
+          assert not any(p.startswith("aquilum-app/native/") for p in actual)
+          PY
+          git diff --check
+      - name: Test external witness HOLD and all existing denial experiments
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml \
+            --lib windows_revocation_witness -- --nocapture
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+          git diff --exit-code -- aquilum-app/Cargo.lock aquilum-app/host-broker-lab/Cargo.lock
+      - name: Explicitly retain production security HOLD
+        run: |
+          echo "The external witness is only a Rust unit test fixture. It is NOT actually signed, TPM-backed or persisted." >> "$GITHUB_STEP_SUMMARY"
+          echo "A valid old disk journal is rejected only when a separate trusted newer witness is GIVEN to the test." >> "$GITHUB_STEP_SUMMARY"
+          echo "No entitlement, stored grant, signed installer, QUIC proof, File Gate write or APPLIED exists." >> "$GITHUB_STEP_SUMMARY"
