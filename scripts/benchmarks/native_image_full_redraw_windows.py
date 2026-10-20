@@ -206,6 +206,8 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: native byte-anchor image scan did not occur")
     if "AKULA_IMAGE_ANCHOR_SCAN_SEEK index=" not in log:
         raise ValueError(f"{sample}: no actual editor image scroll anchor processed")
+    if "AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED" not in log:
+        raise ValueError(f"{sample}: editor retained scene was not invalidated after image seek")
     parsed_replay = json.loads(replay.read_text(encoding="utf-8"))
     parsed_metrics = json.loads(metrics.read_text(encoding="utf-8"))
     work = parsed_replay.get("workSamplesMs")
