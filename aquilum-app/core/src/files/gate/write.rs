@@ -214,7 +214,9 @@ fn p0g3d08c_abort_only_after_primary_published(path: &Path) {
     let workdir = std::env::var_os("AKULA_P0G3D08C_WORKDIR")
         .expect("crash test requires a disposable workdir");
     let workdir = Path::new(&workdir);
-    assert!(path.starts_with(workdir), "never abort an unrelated workspace");
+    let canonical_workdir = crate::search::paths::canonical_path(workdir);
+    assert!(path.starts_with(&canonical_workdir),
+        "never abort an unrelated workspace");
     assert_eq!(path.file_name(), Some(std::ffi::OsStr::new("Reserved.md")));
     std::fs::write(workdir.join("p0g3d08c-crash-marker"), b"after-primary")
         .expect("persist test-only crash marker before abort");
