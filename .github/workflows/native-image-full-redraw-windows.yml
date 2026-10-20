@@ -9,6 +9,7 @@ on:
       - 'aquilum-app/native/src/replay.rs'
       - 'aquilum-app/native/src/app/note_page/view.rs'
       - 'aquilum-app/native/src/app/embeds/resolver.rs'
+      - 'aquilum-app/native/src/ui/editor/embed/media/paint.rs'
       - 'aquilum-app/native/src/render/paint/convert.rs'
       - 'scripts/benchmarks/native_image_full_redraw_windows.py'
       - '.github/workflows/native-image-full-redraw-windows.yml'
