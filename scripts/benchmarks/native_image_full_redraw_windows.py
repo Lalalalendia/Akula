@@ -199,11 +199,28 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
         raise ValueError(f"{sample}: image mipmap was never used")
     if "AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED" not in log:
         raise ValueError(f"{sample}: full redraw was not enabled")
-    witness = f"AKULA_IMAGE_ANCHOR_SCAN_APPLIED count={len(anchors)} schedule=forward-reverse"
-    if witness not in log:
+    scan_witness = f"AKULA_IMAGE_ANCHOR_SCAN_APPLIED count={len(anchors)} schedule=forward-reverse"
+    if scan_witness not in log:
         raise ValueError(f"{sample}: native byte-anchor image scan did not occur")
     if "AKULA_IMAGE_ANCHOR_SCAN_SEEK index=" not in log:
         raise ValueError(f"{sample}: no actual editor image scroll anchor processed")
+    parsed_replay = json.loads(replay.read_text(encoding="utf-8"))
+    parsed_metrics = json.loads(metrics.read_text(encoding="utf-8"))
+    work = parsed_replay.get("workSamplesMs")
+    stage = parsed_replay.get("stageSamples")
+    whole_stage = parsed_metrics.get("frameStages")
+    if not isinstance(work, list) or not isinstance(stage, list) or len(stage) != len(work):
+        raise ValueError(f"{sample}: missing aligned replay CPU/stage samples")
+    if not isinstance(whole_stage, list) or len(whole_stage) != parsed_metrics.get("frames"):
+        raise ValueError(f"{sample}: missing whole-process stages")
+    # A valid six-second image scan must keep painting between anchor
+    # transitions. In the previous run there were only two CPU replay
+    # frames; that invalidated the cache frame-count diagnostic entirely.
+    if len(work) < 80:
+        raise ValueError(
+            f"{sample}: only {len(work)} rendered replay frames in six seconds; "
+            "developer image dwell must request full redraw every replay tick"
+        )
     lines = [line for line in log.splitlines() if line.startswith("AKULA_MIP_CACHE ")]
     if not lines:
         raise ValueError(f"{sample}: no source/eviction diagnostic line")
@@ -225,15 +242,6 @@ def run_one(binary: Path, root: Path, sample: tuple[int, int, str],
             f"independently sampled decoded-pixel fingerprints for "
             f"{images} seeded PNG files; both must reach at least {minimum}"
         )
-    parsed_replay = json.loads(replay.read_text(encoding="utf-8"))
-    parsed_metrics = json.loads(metrics.read_text(encoding="utf-8"))
-    work = parsed_replay.get("workSamplesMs")
-    stage = parsed_replay.get("stageSamples")
-    whole_stage = parsed_metrics.get("frameStages")
-    if not isinstance(work, list) or not isinstance(stage, list) or len(stage) != len(work):
-        raise ValueError(f"{sample}: missing aligned replay CPU/stage samples")
-    if not isinstance(whole_stage, list) or len(whole_stage) != parsed_metrics.get("frames"):
-        raise ValueError(f"{sample}: missing whole-process stages")
     p95, p99 = percentile(work, .95), percentile(work, .99)
     raster = [float(x["rasterPixels"]) for x in stage]
     if min(raster, default=0) <= 0 or median(raster) < 0.45 * int(viewport.split("x")[0]) * int(viewport.split("x")[1]):
