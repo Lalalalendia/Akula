@@ -128,14 +128,25 @@ def check_unsigned_gui_crash(image, root):
     child.close()
     try:
         wait_visible(proc)
-        # Kill the entire isolated AppImage runtime + GUI process group.
-        # No valid ACK was possible because the supervisor PID was wrong.
+        # The GUI sends its refusal asynchronously after first presentation.
+        # Require a real rejection witness BEFORE sending SIGKILL.
+        proof = root / "v2-no-ack.log"
+        for _ in range(60):
+            if "wrong OS supervisor" in proof.read_text(errors="replace"):
+                break
+            require(proc.poll() is None, "v2 exited before supervisor rejection")
+            time.sleep(0.25)
+        require("wrong OS supervisor" in proof.read_text(errors="replace"),
+                "visible v2 did not exercise the wrong-supervisor refusal")
         os.killpg(proc.pid, signal.SIGKILL)
         require(proc.wait(timeout=12) != 0, "SIGKILL did not terminate v2")
         with parent:
             require(parent.recv(256) == b"", "forged supervisor produced a GUI ACK")
-        require("wrong OS supervisor" in (root / "v2-no-ack.log").read_text(
-            errors="replace"), "Linux GUI did not record rejected supervisor"
+        for _ in range(40):
+            if not visible():
+                break
+            time.sleep(0.25)
+        require(not visible(), "killed AppImage left an unexpected GUI window")
         print("AKULA_REAL_APPIMAGE_NO_ACK_CRASH_PASS real_v2_gui=1 real_sigkill=1 forged_supervisor_refused=1", flush=True)
     finally:
         if proc.poll() is None:
