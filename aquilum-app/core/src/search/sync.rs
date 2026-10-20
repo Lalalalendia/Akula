@@ -16,6 +16,17 @@ use std::thread;
 use tantivy::{IndexWriter, Term};
 use walkdir::WalkDir;
 
+#[cfg(feature = "index-stage-probe")]
+macro_rules! stage_time {
+    ($stage:ident, $expression:expr) => {
+        super::perf_probe::time(super::perf_probe::Stage::$stage, || $expression)
+    };
+}
+#[cfg(not(feature = "index-stage-probe"))]
+macro_rules! stage_time {
+    ($stage:ident, $expression:expr) => { $expression };
+}
+
 pub const INDEX_MEMORY_BUDGET: usize = 40_000_000;
 pub(crate) const INDEX_THREADS: usize = 2;
 const COMMIT_BATCH_SIZE: usize = 10_000;
@@ -52,20 +63,26 @@ impl IndexSynchronizer {
     }
 
     pub fn full_scan(&mut self, cancelled: &AtomicBool) -> Result<(), SearchError> {
+        #[cfg(feature = "index-stage-probe")]
+        let scan_started = std::time::Instant::now();
+        #[cfg(feature = "index-stage-probe")]
+        super::perf_probe::reset();
         self.progress.begin_scan();
-        let mut known = metadata::load(&self.connection)?;
+        let mut known = stage_time!(MetadataLoad, metadata::load(&self.connection))?;
         let force_reindex = known.len() as u64 != self.index.document_count();
         let mut transaction = self.connection.transaction()?;
         let mut pending = 0;
         let mut processed = 0;
         let mut prepare_batch = Vec::<PendingPrepare>::with_capacity(PREPARE_BATCH_SIZE);
 
-        for entry in WalkDir::new(&self.root)
+        let entries = WalkDir::new(&self.root)
             .follow_links(false)
             .into_iter()
             .filter_entry(is_visible_entry)
-            .filter_map(Result::ok)
-        {
+            .filter_map(Result::ok);
+        #[cfg(feature = "index-stage-probe")]
+        let entries = super::perf_probe::TimedIterator::new(entries);
+        for entry in entries {
             if cancelled.load(Ordering::Relaxed) {
                 return Ok(());
             }
@@ -74,7 +91,7 @@ impl IndexSynchronizer {
             }
             self.progress.scanned_one();
             processed += 1;
-            if let Some((key, file_probe)) = probe(entry.path(), &mut known, force_reindex) {
+            if let Some((key, file_probe)) = stage_time!(Probe, probe(entry.path(), &mut known, force_reindex)) {
                 prepare_batch.push(PendingPrepare {
                     key,
                     probe: file_probe,
@@ -101,9 +118,9 @@ impl IndexSynchronizer {
                     &mut pending,
                 )?;
                 if pending > 0 {
-                    commit(&mut self.writer, &self.index, &self.progress)?;
+                    stage_time!(TantivyCommit, commit(&mut self.writer, &self.index, &self.progress))?;
                 }
-                transaction.commit()?;
+                stage_time!(SqliteCommit, transaction.commit())?;
                 transaction = self.connection.transaction()?;
                 pending = 0;
                 processed = 0;
@@ -118,18 +135,20 @@ impl IndexSynchronizer {
             &mut pending,
         )?;
         if pending > 0 {
-            commit(&mut self.writer, &self.index, &self.progress)?;
+            stage_time!(TantivyCommit, commit(&mut self.writer, &self.index, &self.progress))?;
         }
-        remove_stale(
+        stage_time!(Prune, remove_stale(
             &self.index,
             &mut self.writer,
             &transaction,
             &known,
             &self.progress,
-        )?;
-        transaction.commit()?;
-        metadata::maintain(&self.connection)?;
+        ))?;
+        stage_time!(SqliteCommit, transaction.commit())?;
+        stage_time!(Maintenance, metadata::maintain(&self.connection))?;
         self.progress.completed(self.index.document_count());
+        #[cfg(feature = "index-stage-probe")]
+        super::perf_probe::print_scan(self.index.document_count(), scan_started.elapsed());
         Ok(())
     }
 
@@ -193,8 +212,9 @@ fn flush_prepare_batch(
     if batch.is_empty() {
         return Ok(());
     }
-    let writer = ensure_writer(writer, index)?;
-    for (key, probe, file) in prepare_parallel(std::mem::take(batch))? {
+    let writer = stage_time!(Writer, ensure_writer(writer, index))?;
+    let prepared = stage_time!(PrepareWall, prepare_parallel(std::mem::take(batch)))?;
+    for (key, probe, file) in prepared {
         let Some(file) = file else {
             continue;
         };
