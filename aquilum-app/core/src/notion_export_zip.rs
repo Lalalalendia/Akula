@@ -181,3 +181,134 @@ pub(super) fn inspect_zip(path: &Path, limits: ScanLimits) -> Result<InventoryRe
     if cursor != sum(directory_at, directory_size)? { return Err("unaccounted ZIP central records".into()); }
     Ok(finalize_report(entries, references, "notion_zip_inventory_v1"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn put_u16(v: &mut Vec<u8>, n: u16) { v.extend_from_slice(&n.to_le_bytes()); }
+    fn put_u32(v: &mut Vec<u8>, n: u32) { v.extend_from_slice(&n.to_le_bytes()); }
+
+    // Small deliberately transparent stored ZIP generator for control fixtures.
+    fn stored_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut central = Vec::new();
+        for &(name, data) in files {
+            let offset = bytes.len() as u32;
+            let crc = crc32fast::hash(data);
+            bytes.extend_from_slice(b"PK\x03\x04");
+            put_u16(&mut bytes, 20);
+            put_u16(&mut bytes, 0);
+            put_u16(&mut bytes, 0);
+            put_u16(&mut bytes, 0);
+            put_u16(&mut bytes, 0);
+            put_u32(&mut bytes, crc);
+            put_u32(&mut bytes, data.len() as u32);
+            put_u32(&mut bytes, data.len() as u32);
+            put_u16(&mut bytes, name.len() as u16);
+            put_u16(&mut bytes, 0);
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.extend_from_slice(data);
+
+            central.extend_from_slice(b"PK\x01\x02");
+            put_u16(&mut central, 20);
+            put_u16(&mut central, 20);
+            put_u16(&mut central, 0);
+            put_u16(&mut central, 0);
+            put_u16(&mut central, 0);
+            put_u16(&mut central, 0);
+            put_u32(&mut central, crc);
+            put_u32(&mut central, data.len() as u32);
+            put_u32(&mut central, data.len() as u32);
+            put_u16(&mut central, name.len() as u16);
+            put_u16(&mut central, 0);
+            put_u16(&mut central, 0);
+            put_u16(&mut central, 0);
+            put_u16(&mut central, 0);
+            put_u32(&mut central, 0);
+            put_u32(&mut central, offset);
+            central.extend_from_slice(name.as_bytes());
+        }
+        let cd_offset = bytes.len() as u32;
+        bytes.extend_from_slice(&central);
+        bytes.extend_from_slice(b"PK\x05\x06");
+        put_u16(&mut bytes, 0);
+        put_u16(&mut bytes, 0);
+        put_u16(&mut bytes, files.len() as u16);
+        put_u16(&mut bytes, files.len() as u16);
+        put_u32(&mut bytes, central.len() as u32);
+        put_u32(&mut bytes, cd_offset);
+        put_u16(&mut bytes, 0);
+        bytes
+    }
+
+    #[test]
+    fn zip_uuid_backlinks_without_extraction() {
+        let temp = tempfile::tempdir().unwrap();
+        let zip_file = temp.path().join("notion.zip");
+        let bytes = stored_zip(&[
+            ("Note 11111111111111111111111111111111.md",
+                b"[B](Note%2022222222222222222222222222222.md)"),
+            ("Note 22222222222222222222222222222222.md", b"ok"),
+            ("Data 33333333333333333333333333333333.csv",
+                b"Title,Notes\r\nA,\"hello,\nworld\"\r\n"),
+        ]);
+        fs::write(&zip_file, bytes).unwrap();
+        let report = inspect_zip(&zip_file, ScanLimits::default()).unwrap();
+        assert_eq!(report.entries.len(), 3);
+        assert_eq!(report.backlinks.len(), 1);
+        assert_eq!(report.entries.iter().filter(|e| e.csv.is_some()).count(), 1);
+        assert_eq!(report.notion_workspace_completeness_verified, false);
+    }
+
+    #[test]
+    fn zip_rejects_traversal_and_corrupt_crc() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("bad.zip");
+        fs::write(&path, stored_zip(&[("../secret.md", b"x")])).unwrap();
+        assert!(inspect_zip(&path, ScanLimits::default()).is_err());
+        let mut bytes = stored_zip(&[("safe.md", b"x")]);
+        let pos = bytes.windows(1).position(|x| x == b"x").unwrap();
+        bytes[pos] ^= 0x20;
+        fs::write(&path, bytes).unwrap();
+        assert!(inspect_zip(&path, ScanLimits::default()).is_err());
+    }
+
+    #[test]
+    fn zip_rejects_too_large_aggregate_and_invalid_eocd() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("bad.zip");
+        fs::write(&path, stored_zip(&[("abc.md", b"123456")])).unwrap();
+        assert!(inspect_zip(&path, ScanLimits { max_total_bytes: 5, ..ScanLimits::default() }).is_err());
+        fs::write(&path, b"not a zip").unwrap();
+        assert!(inspect_zip(&path, ScanLimits::default()).is_err());
+    }
+
+    #[test]
+    fn deflated_zip_is_verified_without_extraction() {
+        let mut compressed = Vec::new();
+        {
+            let mut encoder = flate2::write::DeflateEncoder::new(&mut compressed, flate2::Compression::default());
+            encoder.write_all(b"hello").unwrap();
+            encoder.finish().unwrap();
+        }
+        let mut archive = stored_zip(&[("file.md", b"hello")]);
+        // Replace the single local payload and central record fields consistently.
+        let local_len = 30 + "file.md".len();
+        let old_cd_at = local_len + 5;
+        archive.splice(local_len..old_cd_at, compressed.iter().copied());
+        let cd_at = local_len + compressed.len();
+        archive[8..10].copy_from_slice(&8_u16.to_le_bytes());
+        archive[18..22].copy_from_slice(&(compressed.len() as u32).to_le_bytes());
+        archive[cd_at + 10..cd_at + 12].copy_from_slice(&8_u16.to_le_bytes());
+        archive[cd_at + 20..cd_at + 24].copy_from_slice(&(compressed.len() as u32).to_le_bytes());
+        let eocd = cd_at + 46 + "file.md".len();
+        archive[eocd + 16..eocd + 20].copy_from_slice(&(cd_at as u32).to_le_bytes());
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("deflate.zip");
+        fs::write(&path, archive).unwrap();
+        let report = inspect_zip(&path, ScanLimits::default()).unwrap();
+        assert_eq!(report.entries.len(), 1);
+    }
+}
