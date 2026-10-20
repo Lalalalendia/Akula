@@ -25,7 +25,6 @@ use std::io::{self, Write};
 enum DisclosureOutcome {
     Sent,
     Denied,
-    TransportFailedNoBytes,
     PartialDisclosureHold,
 }
 
@@ -89,15 +88,15 @@ fn disclose_cooperative<W: Write>(
     }
 
     let mut counted = CountingWriter { inner: out, accepted: 0 };
-    let result = emit(&mut counted);
-    // We classify uncertain partial writes as HOLD, not safe-to-retry.
-    // A flush failure can be ambiguous even after write() returned Ok.
+    let result = emit(&mut counted).and_then(|()| counted.flush());
+    // Even an I/O error with zero *reported* bytes might have reached the
+    // socket before an interrupted write returned Err. Buffered flush failures
+    // are ambiguous too. Do NOT interpret either as provably zero disclosure.
     match result {
         Ok(()) => DisclosureOutcome::Sent,
-        Err(_) if counted.accepted > 0 => DisclosureOutcome::PartialDisclosureHold,
-        Err(_) => DisclosureOutcome::TransportFailedNoBytes,
+        Err(_) => DisclosureOutcome::PartialDisclosureHold,
     }
-    // Both transactions roll back on scope exit AFTER emit returned.
+    // Both transactions roll back only after emit AND flush returned.
 }
 
 #[cfg(test)]
@@ -297,4 +296,51 @@ mod tests {
         // The four bytes cannot be withdrawn. An installed implementation
         // must close this HTTP connection, not retry or silently claim deny.
     }
+    struct AmbiguousZeroReport;
+    impl Write for AmbiguousZeroReport {
+        fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::Interrupted, "report uncertain"))
+        }
+        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    }
+
+    #[test]
+    fn zero_reported_bytes_do_not_prove_zero_disclosure() {
+        let f = fixture();
+        let (mut cred, mut grant) = fence_connections(&f);
+        let mut sink = AmbiguousZeroReport;
+        let disposition = disclose_cooperative(
+            &mut cred, &mut grant, &f.credentials, &f.grants,
+            f.token.as_str(), f.agent, f.lease, f.registration, &mut sink,
+            |out| out.write_all(b"private"),
+        );
+        assert_eq!(disposition, DisclosureOutcome::PartialDisclosureHold);
+    }
+
+    #[derive(Default)]
+    struct FlushFailure(Vec<u8>);
+    impl Write for FlushFailure {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush failed"))
+        }
+    }
+
+    #[test]
+    fn buffered_flush_failure_is_ambiguous_hold() {
+        let f = fixture();
+        let (mut cred, mut grant) = fence_connections(&f);
+        let mut sink = FlushFailure::default();
+        let disposition = disclose_cooperative(
+            &mut cred, &mut grant, &f.credentials, &f.grants,
+            f.token.as_str(), f.agent, f.lease, f.registration, &mut sink,
+            |out| out.write_all(b"private"),
+        );
+        assert_eq!(disposition, DisclosureOutcome::PartialDisclosureHold);
+        assert_eq!(sink.0, b"private");
+    }
+
 }
