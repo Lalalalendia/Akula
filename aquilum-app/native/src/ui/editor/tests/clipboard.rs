@@ -35,3 +35,28 @@ fn pasted_url_becomes_titled_link() {
     paste(&mut root, "https://x.org/p.png");
     assert!(text(&root).ends_with(")https://x.org/p.png"));
 }
+
+#[test]
+fn select_all_and_paste_replaces_long_windowed_note_without_crash_or_data_loss() {
+    let original: String = (0..30_000).map(|n| format!("строка {n} — исходный текст\n")).collect();
+    let mut root = focused(TextEditor::windowed(crop::Rope::from(original.as_str())).markdown(), 600, 400);
+
+    // The native keyboard path leaves a global selection 0..len, while the
+    // ClipboardPaste path moves the bounded text window to the caret at EOF.
+    command_key(&mut root, "a");
+    paste(&mut root, "Новый текст\nВторая строка");
+    assert_eq!(text(&root), "Новый текст\nВторая строка");
+
+    // Undo must restore the complete original Rope, not only the old window.
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original);
+}
+
+#[test]
+fn select_all_and_type_space_does_not_read_unloaded_window() {
+    let original = "разделы документа\n".repeat(12_000);
+    let mut root = focused(TextEditor::windowed(crop::Rope::from(original.as_str())).markdown(), 600, 400);
+    command_key(&mut root, "a");
+    super::support::typing(&mut root, " ");
+    assert_eq!(text(&root), " ");
+}

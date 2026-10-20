@@ -55,9 +55,16 @@ impl TextEditor {
     }
 
     pub(super) fn smart_dash(&mut self, text: &str) -> bool {
+        // A select-all replacement may begin before the currently loaded text
+        // window. Do not inspect the window until we know this is a candidate.
+        if !self.smart.dashes || self.doc.markdown.is_none() || text != " " || self.anchor != self.focus {
+            return false;
+        }
         let at = self.focus;
-        let before = self.doc.before(at);
-        if !self.smart.dashes || self.doc.markdown.is_none() || text != " " || self.anchor != at || !before.ends_with("--") || before.ends_with("---") {
+        // Read the three-byte context from the persistent Rope, not the
+        // possibly unrelated window starting at Document::base.
+        let before = self.doc.copy(self.doc.floor(at.saturating_sub(3))..at);
+        if !before.ends_with("--") || before.ends_with("---") {
             return false;
         }
         self.replace(at - 2..at, "— ", Kind::Typing);
@@ -66,11 +73,19 @@ impl TextEditor {
 
     pub(super) fn paste_link(&mut self, id: masonry::core::WidgetId, text: &str) -> bool {
         let url = text.trim();
+        // Every clipboard paste comes through here, even plain text replacing
+        // a whole large note. Reject non-URLs before inspecting link context.
+        if !self.smart.links || self.doc.markdown.is_none() || !is_bare_url(url) || crate::images::kind(url) == Some(crate::images::MediaKind::Image) {
+            return false;
+        }
         let range = self.selection();
-        let before = self.doc.before(range.start);
-        let before = &before[before.floor_char_boundary(before.len().saturating_sub(64))..];
+        // Selection.start is a global Rope byte offset, but Document::before
+        // is only valid inside the loaded window. Ctrl+A may select byte 0
+        // while the viewport/window is near the end of the document.
+        let from = self.doc.floor(range.start.saturating_sub(64));
+        let before = self.doc.copy(from..range.start);
         let in_link = before.rfind("](").is_some_and(|i| !before[i..].contains([')', ' ']));
-        if !self.smart.links || self.doc.markdown.is_none() || !is_bare_url(url) || crate::images::kind(url) == Some(crate::images::MediaKind::Image) || in_link {
+        if in_link {
             return false;
         }
         let selected = self.doc.copy(range).trim().to_owned();
@@ -98,7 +113,18 @@ impl TextEditor {
 
 #[cfg(test)]
 mod tests {
-    use super::separate_pasted_frontmatter;
+    use super::{TextEditor, separate_pasted_frontmatter};
+
+    #[test]
+    fn smart_dash_does_not_access_unloaded_prefix_of_select_all() {
+        let original = "строка с кириллицей\n".repeat(12_000);
+        let mut editor = TextEditor::windowed(crop::Rope::from(original.as_str())).markdown();
+        editor.doc.include(original.len());
+        assert!(editor.doc.loaded().0 > 0, "must reproduce nonzero window base");
+        editor.anchor = 0;
+        editor.focus = original.len();
+        assert!(!editor.smart_dash(" "), "selected text is not a smart-dash context");
+    }
 
     #[test]
     fn pasted_frontmatter_gets_a_blank_line_after_the_closing_fence() {
