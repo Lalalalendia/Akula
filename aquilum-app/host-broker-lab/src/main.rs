@@ -9,6 +9,9 @@ fn main() {
             Some("--service") => akula_host_broker_lab::windows_scm_service::dispatch_scm_service(),
             Some("--service-pipe") => akula_host_broker_lab::windows_scm_service::dispatch_scm_pipe_service(),
             Some("--service-custody") => akula_host_broker_lab::windows_scm_service::dispatch_scm_custody_service(),
+            Some("--service-custody-pipe") => {
+                akula_host_broker_lab::windows_scm_service::dispatch_scm_custody_pipe_service()
+            },
             // Read-only origin/ACL diagnostic, never authorization.
             Some("--verify-custody") => akula_host_broker_lab::windows_store_custody::
                 inspect_fixed_without_authorization(),

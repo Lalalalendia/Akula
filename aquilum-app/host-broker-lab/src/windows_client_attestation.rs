@@ -40,6 +40,10 @@ const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 const FILE_READ_DATA: u32 = 0x0001;
+const ERROR_PIPE_BUSY: u32 = 231;
+// One instance; SCM may say RUNNING immediately before it next accepts.
+// Bound the availability wait, then re-authenticate the exact service PID.
+const PIPE_AVAILABLE_WAIT_MS: u32 = 2_000;
 const OPEN_EXISTING: u32 = 3;
 const SECURITY_SQOS_PRESENT: u32 = 0x0010_0000;
 const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
@@ -133,6 +137,7 @@ extern "system" {
         template: Handle,
     ) -> Handle;
     fn GetNamedPipeServerProcessId(pipe: Handle, server_id: *mut u32) -> i32;
+    fn WaitNamedPipeW(path: *const u16, milliseconds: u32) -> i32;
     fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
     #[cfg(test)]
     fn GetCurrentProcessId() -> u32;
@@ -425,7 +430,7 @@ pub fn inspect_installed_service_pipe_without_sending() -> io::Result<()> {
     let pipe_name = wide(PIPE_PATH);
     // Request FILE_READ_DATA only, NEVER GENERIC_WRITE or pipe-instance
     // creation rights. SQOS identification prevents full impersonation.
-    let pipe = OwnedHandle::new(unsafe {
+    let open_pipe = || unsafe {
         CreateFileW(
             pipe_name.as_ptr(),
             FILE_READ_DATA,
@@ -435,7 +440,23 @@ pub fn inspect_installed_service_pipe_without_sending() -> io::Result<()> {
             SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
             ptr::null_mut(),
         )
-    })?;
+    };
+    let mut raw = open_pipe();
+    if raw.is_null() || raw == INVALID_HANDLE {
+        if unsafe { GetLastError() } != ERROR_PIPE_BUSY {
+            return Err(io::Error::last_os_error());
+        }
+        // A single instance is temporarily occupied by another diagnostic
+        // connection. Never downgrade to an unverified path or wait forever.
+        if unsafe { WaitNamedPipeW(pipe_name.as_ptr(), PIPE_AVAILABLE_WAIT_MS) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if service_process_id()? != service_pid {
+            return Err(deny("SCM service PID changed while waiting for the pipe"));
+        }
+        raw = open_pipe();
+    }
+    let pipe = OwnedHandle::new(raw)?;
     let pinned = verified_process_for_pipe(pipe.0, service_pid)?;
     let exact_service_sid = service_sid()?;
     if !token_has_enabled_service_sid(pinned.token.0, exact_service_sid.as_ptr() as Handle)? {

@@ -1,0 +1,55 @@
+name: AKAI Host Broker foundation 02 — joined SCM custody and pipe
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/host-broker-lab/src/windows_scm_service.rs"
+      - "aquilum-app/host-broker-lab/src/main.rs"
+      - ".github/scripts/staya-broker-store-positive.ps1"
+      - ".github/workflows/akai-hostbroker-joined-scm.yml"
+      - "docs/agents/akai-host-foundation-02.md"
+  push:
+    branches:
+      - "agent/akai-host-foundation02-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-joined-service:
+    name: Real LocalSystem SCM custody and named pipe in one service
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Exact Rustfmt and standalone tests
+        run: |
+          cargo fmt --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw "Broker Rustfmt failed" }
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw "Broker Rust tests failed" }
+      - name: Build disposable service
+        run: |
+          cargo build --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --bin akula-host-broker-lab
+          if ($LASTEXITCODE -ne 0) { throw "Broker build failed" }
+      - name: Real joined protected marker and authenticated pipe
+        run: |
+          & ./.github/scripts/staya-broker-store-positive.ps1 -JoinedPipe
+      # The inherited Foundation workflow validates the custody-only mode
+      # on a separate Windows runner. Do not immediately recreate an SCM
+      # service with the same name on this host before deletion completes.
+      - name: Explicit authority boundaries
+        run: |
+          "OS-backed fixture only, unsigned disposable SCM and no signed enrollment." >> $env:GITHUB_STEP_SUMMARY
+          "No vault/replica binding, grant, ReadNote, QUIC or File Gate activation." >> $env:GITHUB_STEP_SUMMARY
