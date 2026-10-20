@@ -46,9 +46,12 @@ jobs:
               "aquilum-app/host-broker-lab/src/main.rs",
               "aquilum-app/host-broker-lab/src/windows_client_attestation.rs",
               "aquilum-app/host-broker-lab/src/windows_scm_service.rs",
+              "aquilum-app/host-broker-lab/src/windows_cancellable_pipe.rs",
               ".github/workflows/staya-rn4e1b03b1a-broker-ipc.yml",
               ".github/workflows/staya-rn4e1b03b1c-scm-service.yml",
+              ".github/workflows/staya-rn4e1b03b1d-cancellable-scm-pipe.yml",
               "docs/sync/staya-rn4e1b03b1c-scm-lifecycle.md",
+              "docs/sync/staya-rn4e1b03b1d-cancellable-scm-pipe.md",
           }
           assert changed == allowed, f"out-of-scope files: {changed ^ allowed}"
           assert not any(p.startswith("aquilum-app/native/") for p in changed)
