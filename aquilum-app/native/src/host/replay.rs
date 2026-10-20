@@ -83,10 +83,17 @@ impl Host {
                                         index, anchors[index], from, to
                                     );
                                 }
-                                self.request_redraw();
                             }
                         }
                     }
+                    // Each scheduled 8ms fling tick must request another
+                    // native frame even while the same image anchor is held.
+                    // Otherwise only the two anchor transitions render in
+                    // the one-image case, and neither replay CPU metrics nor
+                    // 32-frame cache diagnostics are meaningful. Keep source
+                    // decoders and painting asynchronous, but render during
+                    // the entire per-image dwell interval.
+                    self.request_redraw();
                 } else {
                     self.pointer_event(PointerEvent::Scroll(PointerScrollEvent {
                         pointer: PRIMARY_MOUSE, delta: ScrollDelta::LineDelta(0.0, lines), state
