@@ -12,10 +12,11 @@
 use super::{
     review_offline_join_genesis, AwsS3ProbeClient, DecodedDsseEnvelope,
     IndependentlyApprovedJoin, JoinGenesisError, JoinGenesisReview,
-    PublisherPolicyV1, S3PackedHeadV2,
+    PublisherPolicyV1, S3PackedHeadV2, S3ConnectionProfile,
     S3PinnedV2ReadError, S3PinnedV2ReadPreview, S3RemoteAnchorScope,
     S3TransportError, S3Keyspace, MAX_PACK_V2_ROOT_BYTES,
 };
+use super::s3_signed_root_paev1::{YANDEX_ENDPOINT, YANDEX_REGION};
 
 #[derive(Debug)]
 pub enum PinnedJoinError {
@@ -42,8 +43,18 @@ fn checked_scope(
     scope: &S3RemoteAnchorScope,
     approved: &IndependentlyApprovedJoin<'_>,
 ) -> Result<(), PinnedJoinError> {
+    // The E3a signed invitation explicitly promises Yandex. Checking only
+    // the bucket/keyspace would permit caller-supplied MinIO/foreign HTTPS
+    // endpoint credentials to masquerade as the approved Yandex provider.
+    let expected_profile = S3ConnectionProfile {
+        bucket: approved.bucket.to_owned(),
+        region: YANDEX_REGION.to_owned(),
+        endpoint: Some(YANDEX_ENDPOINT.to_owned()),
+        force_path_style: true,
+    };
     if scope.keyspace() != approved.keyspace
         || scope.policy_bucket() != approved.bucket
+        || !scope.matches_connection(&expected_profile, approved.keyspace)
     {
         return Err(PinnedJoinError::WrongScope);
     }
@@ -138,7 +149,7 @@ pub async fn preview_yandex_join_genesis_read_only(
 mod tests {
     use super::*;
     use super::super::{
-        DecodedSignature, OperationId, S3ConnectionProfile, VaultId,
+        DecodedSignature, OperationId, VaultId,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use serde_json::{json, Value};
