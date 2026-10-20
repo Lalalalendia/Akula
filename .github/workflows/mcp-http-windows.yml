@@ -10,6 +10,7 @@ on:
       - 'aquilum-app/core/src/mcp/agent_principals.rs'
       - 'aquilum-app/core/src/mcp/agent_vault_grants.rs'
       - 'aquilum-app/core/src/mcp/agent_scoped_read.rs'
+      - 'aquilum-app/core/src/mcp/agent_disclosure_epoch_lab.rs'
       - 'aquilum-app/core/src/sync/pinned_read.rs'
       - 'aquilum-app/core/src/mcp/mod.rs'
       - '.github/workflows/mcp-http-windows.yml'
@@ -34,6 +35,14 @@ jobs:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           key: mcp-http-windows-v1
           save-if: false
+      - name: Test two-database MCP disclosure epoch and partial send on Windows
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --locked -p aquilum-core --lib mcp::agent_disclosure_epoch_lab::tests:: -- --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath ../mcp-disclosure-epoch-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test real Windows TCP admission and stop
         shell: pwsh
         working-directory: aquilum-app
@@ -94,4 +103,5 @@ jobs:
             mcp-scoped-windows.log
             mcp-vault-grants-windows.log
             mcp-scoped-pinned-read-windows.log
+            mcp-disclosure-epoch-windows.log
           retention-days: 30
