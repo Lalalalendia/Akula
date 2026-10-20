@@ -21,6 +21,43 @@ impl TextEditor {
             let (fcx, lcx) = ctx.text_contexts();
             self.doc.ensure(first..=last, fcx, lcx, &self.styles, self.focused.then_some(self.focus));
         }
+        // IMG-PERF-08: prove which synthetic image paragraphs the real
+        // editor considers visible, and whether an actual MediaView exists.
+        // Resolver Ready alone does not imply visibility or materialization.
+        #[cfg(not(feature = "installed"))]
+        {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *ENABLED.get_or_init(|| {
+                std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF")
+                    .ok().as_deref() == Some("1")
+            }) {
+                static SEEN: std::sync::OnceLock<
+                    std::sync::Mutex<std::collections::HashSet<(usize, bool, Fold)>>
+                > = std::sync::OnceLock::new();
+                let seen = SEEN.get_or_init(Default::default);
+                for i in first..=last {
+                    let paragraph = self.doc.paragraph(i);
+                    if !matches!(paragraph.block, markdown::Block::Image) {
+                        continue;
+                    }
+                    let source = self.doc.slice(paragraph.range());
+                    let number = source.find("photo_").and_then(|at| {
+                        source[at + 6..].get(..3).and_then(|v| v.parse::<usize>().ok())
+                    }).filter(|&n| n < 1000);
+                    if let Some(number) = number {
+                        let embedded = paragraph.embed.is_some();
+                        if seen.lock().unwrap_or_else(|e| e.into_inner())
+                            .insert((number, embedded, paragraph.fold))
+                        {
+                            eprintln!(
+                                "AKULA_IMAGE_EDITOR_VISIBLE index={number} embedded={embedded} fold={:?} top={:.1} window_top={top:.1} window_bottom={bottom:.1}",
+                                paragraph.fold, self.doc.top(i)
+                            );
+                        }
+                    }
+                }
+            }
+        }
         self.prepare_code_paint_offsets(first, last);
         let shown = first..=last;
         let texts: Vec<usize> = shown.clone().filter(|&i| {
