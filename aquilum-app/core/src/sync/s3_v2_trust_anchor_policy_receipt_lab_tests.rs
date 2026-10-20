@@ -416,7 +416,7 @@ fn revoked_publisher_cannot_verify_pinned_root_after_restart() {
 
 /// Reconstruct the ORIGINAL V2 journal schema with an already trusted root.
 /// Merely opening a new E2b-format database does not test migration.
-fn plant_legacy_v2_root(f: &Fixture) {
+fn plant_legacy_v2_root(f: &Fixture) -> S3PackedHeadV2 {
     let db = Connection::open(f.path()).unwrap();
     db.execute_batch(
         "CREATE TABLE s3_v2_trusted_roots (
@@ -448,15 +448,15 @@ fn plant_legacy_v2_root(f: &Fixture) {
             bytes, etag, digest,
         ],
     ).unwrap();
+    root
 }
 
 #[test]
 fn actual_legacy_root_database_migrates_in_place_without_changing_anchor() {
     let f = Fixture::new();
-    plant_legacy_v2_root(&f);
+    let expected = plant_legacy_v2_root(&f);
     let mut upgraded = f.open();
     let anchored = upgraded.load(&f.scope).unwrap().unwrap();
-    let expected = f.root();
     assert_eq!(anchored.root().generation(), 1);
     assert_eq!(anchored.root().digest(&f.ns).unwrap(), expected.digest(&f.ns).unwrap());
     assert_eq!(anchored.etag(), "legacy-v2-etag");
