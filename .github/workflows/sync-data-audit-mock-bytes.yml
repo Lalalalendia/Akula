@@ -1,0 +1,41 @@
+name: Sync data audit mock payload bytes
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/src/sync/fake.rs'
+      - 'aquilum-app/core/src/sync/download.rs'
+      - 'aquilum-app/core/src/sync/upload.rs'
+      - '.github/workflows/sync-data-audit-mock-bytes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-data-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mock-payload-accounting:
+    name: Mock provider bytes, readback and restart
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: sync-data-audit-mock-v1
+          cache-workspace-crates: true
+      - name: Measure fake-provider payload byte counts
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-engine payload_meter -- --nocapture
