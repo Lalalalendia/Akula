@@ -121,6 +121,48 @@ impl RootVerifiedFd{
         }
         Ok(())
     }
+
+    /// B1c0 isolated test-only bridge: stream bytes from the SAME previously
+    /// authenticated inode without trusting any path re-open or client data.
+    /// Rehash the exact byte length before the caller may commit a fixed file.
+    /// The caller must hold its own protected transaction lock and cleanly
+    /// handle a partial destination after any failure.
+    #[cfg(feature = "server-bootstrap-b1c0-fixed-node-lab")]
+    pub(crate) fn copy_rechecked_bytes(
+        &self, destination: &mut File, now_unix: u64,
+    ) -> Result<(), PinError> {
+        use ring::{constant_time, digest};
+        use std::io::Write;
+        use std::os::unix::fs::FileExt;
+        self.valid_at(now_unix)?;
+        let mut hash = digest::Context::new(&digest::SHA256);
+        let mut offset = 0u64;
+        let mut buf = [0u8; 32 * 1024];
+        while offset < self.receipt.byte_length {
+            let remain = self.receipt.byte_length - offset;
+            let want = usize::try_from(remain.min(buf.len() as u64))
+                .map_err(|_| PinError::Release(ReleaseError::SizeMismatch))?;
+            let n = self.file.read_at(&mut buf[..want], offset)?;
+            if n == 0 {
+                return Err(PinError::Release(ReleaseError::SizeMismatch));
+            }
+            destination.write_all(&buf[..n])?;
+            hash.update(&buf[..n]);
+            offset = offset.checked_add(n as u64)
+                .ok_or(PinError::Release(ReleaseError::SizeMismatch))?;
+        }
+        let mut extra = [0u8; 1];
+        if self.file.read_at(&mut extra, offset)? != 0 {
+            return Err(PinError::Release(ReleaseError::SizeMismatch));
+        }
+        if constant_time::verify_slices_are_equal(
+            hash.finish().as_ref(), &self.receipt.package_sha256,
+        ).is_err() {
+            return Err(PinError::Release(ReleaseError::PackageDigestMismatch));
+        }
+        self.valid_at(now_unix)?;
+        Ok(())
+    }
     pub fn inode_identity(&self)->(u64,u64){
         (self.meta.dev(),self.meta.ino())
     }
