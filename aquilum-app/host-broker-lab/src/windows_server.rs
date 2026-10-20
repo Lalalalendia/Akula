@@ -29,6 +29,7 @@ const WIN_LOCAL_SYSTEM_SID: u32 = 22;
 const ERROR_PIPE_CONNECTED: u32 = 535;
 const PIPE_ACCESS_DUPLEX: u32 = 0x0000_0003;
 const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x0008_0000;
+const FILE_FLAG_OVERLAPPED: u32 = 0x4000_0000;
 const PIPE_TYPE_MESSAGE: u32 = 0x0000_0004;
 const PIPE_READMODE_MESSAGE: u32 = 0x0000_0002;
 const PIPE_REJECT_REMOTE_CLIENTS: u32 = 0x0000_0008;
@@ -110,9 +111,9 @@ extern "system" {
     fn RevertToSelf() -> i32;
 }
 
-struct OwnedHandle(Handle);
+pub(crate) struct OwnedHandle(pub(crate) Handle);
 impl OwnedHandle {
-    fn new(value: Handle) -> io::Result<Self> {
+    pub(crate) fn new(value: Handle) -> io::Result<Self> {
         if value.is_null() || value == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
         }
@@ -236,11 +237,11 @@ fn observe_client_token_after_message(pipe: Handle) -> io::Result<()> {
 
 /// Single-request, non-shipping real Windows pipe server. It cannot provision,
 /// load or change any authority state; no variant ever allows file mutation.
-pub fn run_one_denied_connection() -> io::Result<()> {
-    // Check the real process token BEFORE creating the pipe name. Calling
-    // this binary as an ordinary user must not create a fake "broker" server.
+/// Single fixed broker pipe endpoint with the same least-privilege SDDL
+/// for both the original one-shot and the experimental cancelable SCM mode.
+/// Callers MUST be the LocalSystem token; no installer fallback.
+pub(crate) fn create_secure_pipe(overlapped: bool) -> io::Result<OwnedHandle> {
     require_system_service_identity()?;
-
     // Named-pipe FILE_CREATE_PIPE_INSTANCE shares the FILE_APPEND_DATA bit.
     // Do not grant GENERIC_WRITE to Interactive Users: that could allow them
     // to create another server instance. Grant only READ_DATA, WRITE_DATA and
@@ -265,10 +266,11 @@ pub fn run_one_denied_connection() -> io::Result<()> {
         inherit_handle: 0,
     };
     let name = wide(r"\\.\pipe\AkulaHostBrokerResearch.v1");
+    let extra = if overlapped { FILE_FLAG_OVERLAPPED } else { 0 };
     let pipe = OwnedHandle::new(unsafe {
         CreateNamedPipeW(
             name.as_ptr(),
-            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | extra,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_REJECT_REMOTE_CLIENTS,
             1,
             512,
@@ -277,6 +279,12 @@ pub fn run_one_denied_connection() -> io::Result<()> {
             &attributes,
         )
     })?;
+
+    Ok(pipe)
+}
+
+pub fn run_one_denied_connection() -> io::Result<()> {
+    let pipe = create_secure_pipe(false)?;
 
     let connected = unsafe { ConnectNamedPipe(pipe.0, ptr::null_mut()) };
     if connected == 0 && unsafe { GetLastError() } != ERROR_PIPE_CONNECTED {
