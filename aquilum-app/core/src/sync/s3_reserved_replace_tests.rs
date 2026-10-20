@@ -774,3 +774,228 @@ fn p0g3d07_foreign_note_history_relocation_fails_closed() {
         "version ID at a different note cannot replace exact registered history");
     assert_no_remote_ack(&f);
 }
+
+
+/// The child process is the very same Rust test executable, invoked with an
+/// exact libtest filter. Unlike another Core in the same process, it has no
+/// inherited HistoryService mutex, Core, SQLite connections or admission.
+/// Never use this as a power-loss-durability test.
+const P0G3D08_CHILD: &str =
+    "sync::s3_reserved_replace::tests::p0g3d08_os_process_probe_entrypoint";
+
+#[test]
+fn p0g3d08_os_process_probe_entrypoint() {
+    let Some(mode) = std::env::var_os("AKULA_P0G3D08_CHILD_MODE") else {
+        return;
+    };
+    let mode = mode.to_string_lossy();
+    let root = PathBuf::from(std::env::var_os("AKULA_P0G3D08_ROOT").unwrap());
+    let appdata = PathBuf::from(std::env::var_os("AKULA_P0G3D08_APPDATA").unwrap());
+    let operation: OperationId = std::env::var("AKULA_P0G3D08_OPERATION")
+        .unwrap().parse().unwrap();
+
+    let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+    let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+    let bindings = SqliteRegisteredS3Bindings::open_existing_read_only(
+        &admission, &appdata.join("profile.sqlite"),
+    ).unwrap();
+    let journal = SqliteSyncJournal::open_existing_read_only(
+        &appdata.join("journal.sqlite"),
+    ).unwrap();
+    let originals = SqliteProtectionStore::open_existing_read_only(
+        &appdata.join("originals.sqlite"),
+    ).unwrap();
+
+    // No child writes are permitted, even on the successful HOLD path.
+    let result = inspect_cold_s3_replace_with_history_hold(
+        &admission, &bindings, &journal, &originals, operation,
+    );
+    match mode.as_ref() {
+        "hold" => {
+            let review = result.expect("cross-process cold evidence must match");
+            assert_eq!(review.status, InertColdUnifiedStatus::LocallyConsistentHold);
+            assert_eq!(review.operation_id, operation);
+        }
+        "deny" => {
+            assert!(result.is_err(),
+                "damaged or incomplete cross-process evidence must fail closed");
+        }
+        other => panic!("unknown P0g-3d-08 child mode: {other}"),
+    }
+
+    let recorded = journal.get(operation).unwrap().unwrap();
+    assert_eq!(recorded.phase, JournalPhase::Staged);
+    let baseline = journal.baseline(
+        recorded.intent.vault_id, recorded.intent.document_id,
+    ).unwrap().unwrap();
+    assert_eq!(Some(baseline.revision_id), recorded.intent.expected_baseline);
+    assert_eq!(baseline.content_hash,
+        blake3::hash(b"unchanged private original").to_hex().to_string());
+    assert_eq!(originals.read_bound_preimage(operation)
+        .unwrap().unwrap().original.bytes, b"unchanged private original");
+}
+
+// Deliberately isolate environment variables to an OS child. The parent
+// never alters global process env (safe with parallel Rust test threads).
+fn p0g3d08_run_child(
+    root: &std::path::Path,
+    appdata: &std::path::Path,
+    operation: OperationId,
+    mode: &str,
+) {
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact").arg(P0G3D08_CHILD).arg("--nocapture")
+        .env("AKULA_P0G3D08_CHILD_MODE", mode)
+        .env("AKULA_P0G3D08_ROOT", root)
+        .env("AKULA_P0G3D08_APPDATA", appdata)
+        .env("AKULA_P0G3D08_OPERATION", operation.to_string())
+        .output().unwrap();
+    assert!(result.status.success(),
+        "real OS child rejected expected {mode}: stdout={}, stderr={}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr));
+    assert!(String::from_utf8_lossy(&result.stdout)
+        .contains("p0g3d08_os_process_probe_entrypoint ... ok"),
+        "child must actually run the named Rust test, not pass an empty filter: {}",
+        String::from_utf8_lossy(&result.stdout));
+}
+
+#[test]
+fn p0g3d08_real_os_child_reopens_full_v8_and_refuses_history_inode_corruption() {
+    let f = fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    let version = f.journal.borrow()
+        .read_existing_replace_receipt_candidate(f.intent.operation_id)
+        .unwrap().unwrap();
+    let (version_id, _, _) = version.cold_history_fields();
+    let historical = f.root.join(".aquilum").join("history")
+        .join(f.intent.path.as_str()).join(version_id);
+    assert!(historical.is_file());
+
+    let Fixture {
+        _temp: keep_fixture, core, root, appdata, bindings, custody,
+        journal, cache, protected, intent, old_hash, new_text, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "hold");
+
+    // Destroy the exact same-length external version in the original history
+    // path, without changing the primary or either SQLite baseline.
+    fs::write(&historical, vec![b'X'; new_text.len()]).unwrap();
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+
+    // Restoring the actual history bytes allows a NEW independent child to
+    // observe a forensic HOLD again; no process may reuse an earlier witness.
+    fs::write(&historical, new_text.as_bytes()).unwrap();
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "hold");
+
+    // Identical content does not excuse an independently replaced physical
+    // file identity, even though the user-visible note bytes are unchanged.
+    let primary = root.join(intent.path.as_str());
+    let parked = root.join("p0g3d08-retained-published-inode.md");
+    fs::rename(&primary, &parked).unwrap();
+    fs::write(&primary, new_text.as_bytes()).unwrap();
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    fs::remove_file(&primary).unwrap();
+    fs::rename(&parked, &primary).unwrap();
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "hold");
+
+    // A tampered V8 digest must never be interpreted as simply absent.
+    let connection = rusqlite::Connection::open(appdata.join("journal.sqlite"))
+        .unwrap();
+    connection.execute(
+        "UPDATE sync_existing_replace_receipt_candidates
+            SET candidate_digest='not-a-valid-digest' WHERE operation_id=?1",
+        [intent.operation_id.to_string()],
+    ).unwrap();
+    drop(connection);
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+
+    let cold = SqliteSyncJournal::open_existing_read_only(
+        &appdata.join("journal.sqlite"),
+    ).unwrap();
+    assert_eq!(cold.get(intent.operation_id).unwrap().unwrap().phase,
+        JournalPhase::Staged);
+    let baseline = cold.baseline(intent.vault_id, intent.document_id)
+        .unwrap().unwrap();
+    assert_eq!(baseline.content_hash, old_hash);
+    assert_eq!(Some(baseline.revision_id), intent.expected_baseline);
+    assert_eq!(fs::read(&primary).unwrap(), new_text.as_bytes());
+    let originals = SqliteProtectionStore::open_existing_read_only(
+        &appdata.join("originals.sqlite"),
+    ).unwrap();
+    assert_eq!(originals.read_bound_preimage(intent.operation_id)
+        .unwrap().unwrap().original.bytes, b"unchanged private original");
+    drop(keep_fixture);
+}
+
+#[test]
+fn p0g3d08_real_os_child_rejects_v7_claim_without_v8_or_publication() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    claim_cold_attempt_without_publication(&f, &admission);
+    drop(admission);
+    assert_no_remote_ack(&f);
+    let Fixture {
+        _temp: keep_fixture, core, root, appdata, bindings, custody,
+        journal, cache, protected, intent, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
+        b"unchanged private original");
+    drop(keep_fixture);
+}
+
+
+#[test]
+fn p0g3d08_real_os_child_rejects_published_primary_and_history_without_v8() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let result = save_existing_note_with_prewrite_strict_history_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope,
+        &f.intent.path, &f.new_text, &f.old_hash,
+        Source::External, Some("p0g3d08-stop-before-v8"),
+        || prepare(&f, &admission),
+        |held| held.inspect_before_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected,
+        ),
+        |held, primary, _history| held.inspect_after_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected, primary,
+        ),
+    );
+    assert!(result.is_ok(), "File Gate and history setup failed: {result:?}");
+    assert!(f.journal.borrow()
+        .read_existing_replace_receipt_candidate(f.intent.operation_id)
+        .unwrap().is_none());
+    assert_no_remote_ack(&f);
+    drop(admission);
+
+    // A real process boundary after the primary+history publication but before
+    // the V8 insert must NEVER infer that a complete receipt exists.
+    let Fixture {
+        _temp: keep_fixture, core, root, appdata, bindings, custody,
+        journal, cache, protected, intent, new_text, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
+        new_text.as_bytes());
+    drop(keep_fixture);
+}
