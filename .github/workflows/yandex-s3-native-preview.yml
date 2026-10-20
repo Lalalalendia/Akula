@@ -87,6 +87,53 @@ jobs:
       - name: Build Windows debug-only S3 verification QA executable
         working-directory: aquilum-app
         run: cargo build --locked -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview
+      - name: Smoke launch non-release S3 UI in isolated ephemeral Windows vault
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
+            throw "S3 QA GUI smoke is restricted to clean GitHub-hosted Windows runners"
+          }
+          $meta = (cargo metadata --locked --format-version 1 --no-deps | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $exe = Join-Path $meta.target_directory 'debug\aquilum-native.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "missing S3 preview debug binary" }
+          $vault = Join-Path $env:RUNNER_TEMP 'akula-s3-preview-smoke-vault'
+          $data = Join-Path $env:RUNNER_TEMP 'akula-s3-preview-smoke-state'
+          New-Item -ItemType Directory -Path $vault, $data -Force | Out-Null
+          $note = Join-Path $vault 'S3 QA smoke.md'
+          Set-Content -LiteralPath $note -Value '# Read-only S3 QA smoke fixture'
+          $before = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+          $arguments = "--vault `"$vault`" --data-dir `"$data`" --open `"$note`""
+          $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 45; $i++) {
+              Start-Sleep -Seconds 1
+              $app.Refresh()
+              if ($app.HasExited) { throw "QA preview exited before GUI became ready" }
+              if ($app.MainWindowHandle -ne 0 -and
+                  $app.MainWindowTitle -like '*S3 QA smoke*' -and
+                  $app.MainWindowTitle -like '*Akula*') {
+                $ready = $true
+                break
+              }
+            }
+            if (-not $ready) { throw "No actual Akula note window visible in isolated QA run" }
+            if (-not $app.CloseMainWindow()) { throw "QA preview refused normal window close" }
+            if (-not $app.WaitForExit(20000)) { throw "QA preview did not close cleanly" }
+            if ($app.ExitCode -ne 0) { throw "QA preview GUI exited with failure" }
+            $after = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+            if ($before -ne $after) { throw "QA preview altered the read-only smoke fixture" }
+            Write-Host 'YANDEX_S3_DEBUG_QA_GUI_SMOKE_PASS: isolated_window_opened=True note_untouched=True no_cloud_action_triggered=True'
+          } finally {
+            $app.Refresh()
+            if (-not $app.HasExited) {
+              $app.Kill()
+              $app.WaitForExit(5000) | Out-Null
+            }
+          }
       - name: Package isolated QA executable and safety instructions
         shell: pwsh
         working-directory: aquilum-app
