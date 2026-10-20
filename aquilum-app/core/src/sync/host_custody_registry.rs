@@ -340,6 +340,37 @@ impl SharedHostCustodyRegistry {
         Ok(outcome)
     }
 
+    /// RN-4E1b-02: read-only exact LOCAL REPLICA observation, not write
+    /// admission. Multiple physical roots may legitimately mirror one shared
+    /// VaultId; only the exact registered root + profile + external lock
+    /// identity may be used for a particular LOCAL replica.
+    ///
+    /// This does not authenticate caller supplied expected values, device
+    /// grants, QUIC remote_id, OS installer ownership or a P2P File Gate
+    /// publication. Callers MUST take those from independent trusted custody.
+    #[allow(dead_code)]
+    pub(crate) fn inspect_exact_replica_scope(
+        &self,
+        root_path: &Path,
+        root_identity: PhysicalObjectId,
+        vault_id: VaultId,
+        profile_id: &str,
+        lock_identity: PhysicalObjectId,
+    ) -> Result<HostCustodyRecord, HostCustodyError> {
+        if !lock_identity.valid() || profile_id.is_empty() {
+            return Err(HostCustodyError::InvalidRecord);
+        }
+        let observed = self.inspect(root_path, root_identity)?
+            .ok_or(HostCustodyError::ConflictingEnrollment)?;
+        if observed.vault_id != vault_id
+            || observed.profile_id != profile_id
+            || observed.lock_identity != lock_identity
+        {
+            return Err(HostCustodyError::ConflictingEnrollment);
+        }
+        Ok(observed)
+    }
+
     /// A checked read only. A missing record is never write authorization.
     pub(crate) fn inspect(
         &self, root_path: &Path, root_identity: PhysicalObjectId,
@@ -479,6 +510,74 @@ mod tests {
             lock_identity: PhysicalObjectId { device: 1001, file: 2209 },
         };
         (temp, database, vault, appdata, record)
+    }
+
+    /// Real S3 and multi-device replication require one shared VaultId to
+    /// coexist on distinct registered physical roots. Their local replica
+    /// scopes (physical root, profile and external OS lock) MUST remain
+    /// independent even with equal VaultIds.
+    #[test]
+    fn same_shared_vault_on_two_replicas_never_crosses_root_or_lock_scope() {
+        let (temp, db, vault, appdata, replica_a) = specimen();
+        let second_root = temp.path().join("second-valid-replica");
+        fs::create_dir(&second_root).unwrap();
+        let mut replica_b = replica_a.clone();
+        replica_b.root_path =
+            fs::canonicalize(&second_root).unwrap().to_string_lossy().into_owned();
+        replica_b.root_identity.file += 111;
+        replica_b.lock_identity.file += 17;
+        replica_b.profile_id = "second-independent-profile".into();
+        assert_eq!(replica_b.vault_id, replica_a.vault_id);
+        assert_ne!(replica_b.root_identity, replica_a.root_identity);
+        assert_ne!(replica_b.lock_identity, replica_a.lock_identity);
+
+        let mut first = SharedHostCustodyRegistry::provision_new(
+            &db, &[vault.as_path(), appdata.as_path()],
+        ).unwrap();
+        first.enroll(&replica_a).unwrap();
+        // A different appdata/Core can reopen the SAME trusted host ledger;
+        // the second root is a distinct replica of the same remote vault.
+        let mut second = SharedHostCustodyRegistry::open_existing(&db).unwrap();
+        second.enroll(&replica_b).unwrap();
+        assert_eq!(first.inspect_exact_replica_scope(
+            Path::new(&replica_a.root_path), replica_a.root_identity,
+            replica_a.vault_id, &replica_a.profile_id, replica_a.lock_identity,
+        ).unwrap(), replica_a);
+        assert_eq!(second.inspect_exact_replica_scope(
+            Path::new(&replica_b.root_path), replica_b.root_identity,
+            replica_b.vault_id, &replica_b.profile_id, replica_b.lock_identity,
+        ).unwrap(), replica_b);
+
+        // VaultId equality cannot substitute for local root, profile or lock.
+        // The indexed root_key points to B while root_path points to A.
+        // Existing lookup correctly reports two conflicting matches as an
+        // ambiguous/damaged query, never a positive local scope witness.
+        assert!(matches!(first.inspect_exact_replica_scope(
+            Path::new(&replica_a.root_path), replica_b.root_identity,
+            replica_a.vault_id, &replica_a.profile_id, replica_a.lock_identity,
+        ), Err(HostCustodyError::DamagedRegistry)));
+        assert!(matches!(first.inspect_exact_replica_scope(
+            Path::new(&replica_a.root_path), replica_a.root_identity,
+            replica_b.vault_id, &replica_b.profile_id, replica_a.lock_identity,
+        ), Err(HostCustodyError::ConflictingEnrollment)));
+        assert!(matches!(first.inspect_exact_replica_scope(
+            Path::new(&replica_a.root_path), replica_a.root_identity,
+            replica_a.vault_id, &replica_a.profile_id, replica_b.lock_identity,
+        ), Err(HostCustodyError::ConflictingEnrollment)));
+
+        // Restart cannot collapse two legitimate replicas into one local
+        // identity merely because their shared remote VaultId is equal.
+        drop(first);
+        drop(second);
+        let cold = SharedHostCustodyRegistry::open_existing(&db).unwrap();
+        assert_eq!(cold.inspect_exact_replica_scope(
+            Path::new(&replica_a.root_path), replica_a.root_identity,
+            replica_a.vault_id, &replica_a.profile_id, replica_a.lock_identity,
+        ).unwrap(), replica_a);
+        assert_eq!(cold.inspect_exact_replica_scope(
+            Path::new(&replica_b.root_path), replica_b.root_identity,
+            replica_b.vault_id, &replica_b.profile_id, replica_b.lock_identity,
+        ).unwrap(), replica_b);
     }
 
     #[test]
