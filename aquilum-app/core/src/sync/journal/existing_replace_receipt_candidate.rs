@@ -147,6 +147,13 @@ impl InertExistingReplaceReceiptCandidate {
         self.operation_id
     }
 
+    /// Fields for exact cold HistoryService revalidation. These strings are
+    /// only persisted claims: no caller may treat them as a history witness
+    /// until a registered Core actually reads the matching external version.
+    pub(crate) fn cold_history_fields(&self) -> (&str, &str, u64) {
+        (&self.history_version_id, &self.history_hash, self.history_length)
+    }
+
     /// Check every field, not only the outer SQLite payload digest.
     fn check_fields(&self) -> JournalResult<()> {
         let good_hash = |v: &str| v.len() == 64
