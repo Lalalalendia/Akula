@@ -47,10 +47,20 @@ impl App {
     pub(crate) fn image_scan_reveal(&mut self, root: &mut RenderRoot, byte: usize) -> Option<(f64, f64)> {
         let before = self.scroll_geometry(root)?.2;
         let ids = self.note_ids.as_ref()?;
+        let scroll = ids.scroll;
         root.get_widget(ids.body.id())
             .and_then(|w| w.downcast::<crate::ui::editor::TextEditor>())?
             .inner().top_of(byte)?;
         self.reveal(root, byte);
+        // The normal real-wheel ScrollArea path explicitly requests Compose
+        // and PostPaint when its offset changes; set_offset() used by
+        // programmatic reveal requests only Layout. Mirror native wheel
+        // invalidation for this developer stress driver, without modifying
+        // any installed or ordinary navigation behavior.
+        scroll.edit(root, |mut area| {
+            area.ctx.request_compose();
+            area.ctx.request_post_paint();
+        });
         let after = self.scroll_geometry(root)?.2;
         Some((before, after))
     }
