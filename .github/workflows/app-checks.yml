@@ -159,6 +159,48 @@ jobs:
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
 
+      # RELEASE-SIGNED-CANDIDATE-01: real CLI Minisign -> native Rust interop.
+      # Reuse the existing required Rust runner rather than queuing another job.
+      # The test-only publisher key is ephemeral and never leaves RUNNER_TEMP.
+      - name: Real ephemeral Minisign signature admitted by native Rust
+        if: needs.classify.outputs.mode == 'workspace' && startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-')
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y minisign
+          export AKULA_SIGNED_CANDIDATE_TEST_ROOT="$RUNNER_TEMP/akula-signed-candidate-native"
+          mkdir -m 700 -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT"
+          trap 'rm -rf "$AKULA_SIGNED_CANDIDATE_TEST_ROOT"' EXIT
+          node <<'NODE'
+          const fs=require('node:fs');
+          const crypto=require('node:crypto');
+          const path=require('node:path');
+          const root=process.env.AKULA_SIGNED_CANDIDATE_TEST_ROOT;
+          if(!root) throw Error('missing isolated test root');
+          const payload=Buffer.from('AKULA-SYNTHETIC-APPIMAGE-FOR-REAL-SIGNATURE-TEST-v1');
+          const hash=crypto.createHash('sha256').update(payload).digest('hex');
+          const manifest={
+            schema:1,product:'Akula',version:'0.3.10',
+            source_commit:'a'.repeat(40),cargo_lock_sha256:'b'.repeat(64),
+            artifacts:{
+              'windows-x86_64':{filename:'Akula_0.3.10_x64-setup.exe',sha256:'c'.repeat(64),size:12},
+              'linux-x86_64-appimage':{filename:'akula-app_0.3.10_x86_64.AppImage',sha256:hash,size:payload.length},
+              'linux-x86_64-deb':{filename:'Akula_0.3.10_amd64.deb',sha256:'c'.repeat(64),size:12},
+              'linux-x86_64-rpm':{filename:'Akula-0.3.10-1.x86_64.rpm',sha256:'c'.repeat(64),size:12}
+            }
+          };
+          fs.writeFileSync(path.join(root,'payload.AppImage'),payload);
+          fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify(manifest));
+          NODE
+          minisign -G -W -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.pub"
+          minisign -G -W -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/other.key" -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/other.pub"
+          minisign -S -q -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -m "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest.json" -x "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest.minisig"
+          cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-minisign.log"
+          grep -Fq 'test updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes ... ok' "$RUNNER_TEMP/akula-native-minisign.log"
+          grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-minisign.log"
+          echo 'AKULA_SIGNED_CANDIDATE_RUST_MINISIGN_PASS real_sign=1 wrong_key_refused=1' >> "$GITHUB_STEP_SUMMARY"
+
       # AGENT-PERF: reuse the already compiled Core tests and the current
       # required-tests runner rather than introducing another queued job.
       # The output is observational only: no machine-dependent timing gate.
