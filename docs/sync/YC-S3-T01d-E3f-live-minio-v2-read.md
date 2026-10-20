@@ -18,7 +18,7 @@ A **disposable, loopback-only** MinIO container receives six explicitly construc
 Fixture upload happens **before** measurement. Then the production-compiled pinned reader must:
 
 1. Perform real S3 GETs for the root (initial and final), manifest, index, shards and pack.
-2. Reject swapped profile/account scope, wrong root/ETag, or changed immutable pack bytes.
+2. Reject swapped bucket/Vault connection scope, wrong root/ETag, or changed immutable pack bytes. A caller-provided account binding is not itself independent account authentication.
 3. Return exactly one verified revision and pack with a valid V2 proof bound to the scope and root/ETag.
 4. Reject a replaced current-head object rather than treating it as a new trusted root or empty vault.
 5. Call **no PUT, DELETE, File Gate, synchronization or note-writer operation** during the read phase. Test fixture writes are restricted to disposable MinIO.
