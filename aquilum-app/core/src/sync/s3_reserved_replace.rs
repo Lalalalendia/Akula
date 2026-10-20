@@ -444,6 +444,61 @@ pub(crate) struct InertColdUnifiedReview {
     pub(crate) status: InertColdUnifiedStatus,
 }
 
+/// The original read-only inspector is still the SINGLE decision engine.
+/// These typed phase failures describe which mandatory proof did not hold.
+/// They are diagnostic labels only: no failure can mint a receipt or ACK.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+pub(crate) enum ColdReviewFailureReason {
+    CrossStoreEvidenceRejected,
+    PrimaryNotPublished,
+    V8Missing,
+    V8Unavailable,
+    V8OperationMismatch,
+    V7Unavailable,
+    HistoryTargetMismatch,
+    RegisteredRootChanged,
+    ImmutableHistoryRejected,
+    PostHistoryEvidenceRejected,
+    PostHistoryEvidenceChanged,
+}
+
+impl ColdReviewFailureReason {
+    #[allow(dead_code)]
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::CrossStoreEvidenceRejected => "CROSS_STORE_EVIDENCE_REJECTED",
+            Self::PrimaryNotPublished => "PRIMARY_NOT_PUBLISHED",
+            Self::V8Missing => "V8_MISSING",
+            Self::V8Unavailable => "V8_UNAVAILABLE",
+            Self::V8OperationMismatch => "V8_OPERATION_MISMATCH",
+            Self::V7Unavailable => "V7_UNAVAILABLE",
+            Self::HistoryTargetMismatch => "HISTORY_TARGET_MISMATCH",
+            Self::RegisteredRootChanged => "REGISTERED_ROOT_CHANGED",
+            Self::ImmutableHistoryRejected => "IMMUTABLE_HISTORY_REJECTED",
+            Self::PostHistoryEvidenceRejected => "POST_HISTORY_EVIDENCE_REJECTED",
+            Self::PostHistoryEvidenceChanged => "POST_HISTORY_EVIDENCE_CHANGED",
+        }
+    }
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub(crate) struct ColdReviewFailure {
+    pub(crate) reason: ColdReviewFailureReason,
+    original_error: FileCommandError,
+}
+
+impl ColdReviewFailure {
+    fn new(reason: ColdReviewFailureReason, original_error: FileCommandError) -> Self {
+        Self { reason, original_error }
+    }
+
+    fn into_original_error(self) -> FileCommandError {
+        self.original_error
+    }
+}
+
 /// Join independently reopened, read-only V7/V8/original stores and an actual
 /// HistoryService on the CURRENT registered Core. This is strictly forensic.
 /// Call after fresh Core::open and RegisteredReadAdmission; all three SQLite
@@ -466,53 +521,108 @@ pub(crate) fn inspect_cold_s3_replace_with_history_hold(
     protected: &SqliteProtectionStore,
     operation: super::OperationId,
 ) -> Result<InertColdUnifiedReview, FileCommandError> {
+    inspect_cold_s3_replace_with_history_classified(
+        admission, bindings, journal, protected, operation,
+    ).map_err(ColdReviewFailure::into_original_error)
+}
+
+/// G1-02a: the SAME read-only verification path with stage-specific typed
+/// failures for disposable recovery laboratories. The existing API above
+/// preserves its legacy FileCommandError behavior. A reason never permits
+/// local publishing, S3 apply, ACK or baseline advancement.
+#[allow(dead_code)]
+pub(crate) fn inspect_cold_s3_replace_with_history_classified(
+    admission: &RegisteredReadAdmission<'_>,
+    bindings: &SqliteRegisteredS3Bindings,
+    journal: &SqliteSyncJournal,
+    protected: &SqliteProtectionStore,
+    operation: super::OperationId,
+) -> Result<InertColdUnifiedReview, ColdReviewFailure> {
     // Before inspecting history, a V8 entry must correlate with a physically
     // published candidate. A V7-only attempt is NOT a full receipt candidate.
     let initial = inspect_cold_s3_replace_hold(
         admission, bindings, journal, protected, operation,
-    )?;
-    if initial.file_state != InertColdS3FileState::CandidateVisibleWithoutReceipt
-        || initial.v8_state != InertColdV8State::LocalCorrelationOnly
-    {
-        return Err(refused("full cold review requires a published V8 candidate"));
+    ).map_err(|error| ColdReviewFailure::new(
+        ColdReviewFailureReason::CrossStoreEvidenceRejected, error,
+    ))?;
+    if initial.file_state != InertColdS3FileState::CandidateVisibleWithoutReceipt {
+        return Err(ColdReviewFailure::new(
+            ColdReviewFailureReason::PrimaryNotPublished,
+            refused("full cold review requires a published V8 candidate"),
+        ));
+    }
+    if initial.v8_state != InertColdV8State::LocalCorrelationOnly {
+        return Err(ColdReviewFailure::new(
+            ColdReviewFailureReason::V8Missing,
+            refused("full cold review requires a published V8 candidate"),
+        ));
     }
     let candidate = journal.read_existing_replace_receipt_candidate(operation)
-        .map_err(refused)?.ok_or_else(|| refused("V8 candidate missing"))?;
+        .map_err(|error| ColdReviewFailure::new(
+            ColdReviewFailureReason::V8Unavailable, refused(error),
+        ))?.ok_or_else(|| ColdReviewFailure::new(
+            ColdReviewFailureReason::V8Missing, refused("V8 candidate missing"),
+        ))?;
     if candidate.operation_id() != operation {
-        return Err(refused("V8 candidate belongs to another operation"));
+        return Err(ColdReviewFailure::new(
+            ColdReviewFailureReason::V8OperationMismatch,
+            refused("V8 candidate belongs to another operation"),
+        ));
     }
     let claim = journal.read_existing_replace_attempt(operation)
-        .map_err(refused)?.ok_or_else(|| refused("V7 one-shot claim missing"))?;
+        .map_err(|error| ColdReviewFailure::new(
+            ColdReviewFailureReason::V7Unavailable, refused(error),
+        ))?.ok_or_else(|| ColdReviewFailure::new(
+            ColdReviewFailureReason::V7Unavailable, refused("V7 one-shot claim missing"),
+        ))?;
     let (version_id, history_hash, history_length) = candidate.cold_history_fields();
     if history_hash != claim.target_hash {
-        return Err(refused("V8 history hash differs from claimed target"));
+        return Err(ColdReviewFailure::new(
+            ColdReviewFailureReason::HistoryTargetMismatch,
+            refused("V8 history hash differs from claimed target"),
+        ));
     }
 
     let root = admission.registered_root_path().to_path_buf();
     let note = root.join(claim.path.as_str());
-    admission.recheck_registered_root().map_err(refused)?;
+    admission.recheck_registered_root().map_err(|error| ColdReviewFailure::new(
+        ColdReviewFailureReason::RegisteredRootChanged, refused(error),
+    ))?;
     // The caller cannot supply arbitrary history roots or a foreign note.
     // HistoryService independently rejects stale roots, non-external versions,
     // aliased directories, and mutated/oversized version bytes.
     let roots = || vec![root.clone()];
     admission.registered_core().history.inspect_cold_external_version(
         &roots, &note, version_id, history_hash, history_length,
-    ).map_err(refused)?;
-    admission.recheck_registered_root().map_err(refused)?;
+    ).map_err(|error| ColdReviewFailure::new(
+        ColdReviewFailureReason::ImmutableHistoryRejected, refused(error),
+    ))?;
+    admission.recheck_registered_root().map_err(|error| ColdReviewFailure::new(
+        ColdReviewFailureReason::RegisteredRootChanged, refused(error),
+    ))?;
 
     // Bracket the independent history read with the same full cold V7/V8,
     // protected original, profile and pinned-file checks. This is a two-pass
     // consistency check, not a global transaction or a durable receipt.
     let after = inspect_cold_s3_replace_hold(
         admission, bindings, journal, protected, operation,
-    )?;
+    ).map_err(|error| ColdReviewFailure::new(
+        ColdReviewFailureReason::PostHistoryEvidenceRejected, error,
+    ))?;
     if initial != after
         || journal.read_existing_replace_receipt_candidate(operation)
-            .map_err(refused)?.as_ref() != Some(&candidate)
+            .map_err(|error| ColdReviewFailure::new(
+                ColdReviewFailureReason::PostHistoryEvidenceRejected, refused(error),
+            ))?.as_ref() != Some(&candidate)
         || journal.read_existing_replace_attempt(operation)
-            .map_err(refused)?.as_ref() != Some(&claim)
+            .map_err(|error| ColdReviewFailure::new(
+                ColdReviewFailureReason::PostHistoryEvidenceRejected, refused(error),
+            ))?.as_ref() != Some(&claim)
     {
-        return Err(refused("cold V8/primary/original evidence changed after history read"));
+        return Err(ColdReviewFailure::new(
+            ColdReviewFailureReason::PostHistoryEvidenceChanged,
+            refused("cold V8/primary/original evidence changed after history read"),
+        ));
     }
 
     Ok(InertColdUnifiedReview {

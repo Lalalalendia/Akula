@@ -812,20 +812,26 @@ fn p0g3d08_os_process_probe_entrypoint() {
     ).unwrap();
 
     // No child writes are permitted, even on the successful HOLD path.
-    let result = inspect_cold_s3_replace_with_history_hold(
-        &admission, &bindings, &journal, &originals, operation,
-    );
     match mode.as_ref() {
         "hold" => {
+            let result = inspect_cold_s3_replace_with_history_hold(
+                &admission, &bindings, &journal, &originals, operation,
+            );
             let review = result.expect("cross-process cold evidence must match");
             assert_eq!(review.status, InertColdUnifiedStatus::LocallyConsistentHold);
             assert_eq!(review.operation_id, operation);
         }
         "deny" => {
+            let result = inspect_cold_s3_replace_with_history_hold(
+                &admission, &bindings, &journal, &originals, operation,
+            );
             assert!(result.is_err(),
                 "damaged or incomplete cross-process evidence must fail closed");
         }
         "vm-classify" => {
+            let result = inspect_cold_s3_replace_with_history_hold(
+                &admission, &bindings, &journal, &originals, operation,
+            );
             // A real VM force-off may preserve all domains or only a subset.
             // HOLD is diagnostic; a partial image MUST be denied, never applied.
             match result {
@@ -843,7 +849,10 @@ fn p0g3d08_os_process_probe_entrypoint() {
         }
         "oracle-hold" | "oracle-deny" => {
             use crate::sync::cold_oracle_report::{ColdOracleReport, ColdOracleVerdict};
-            let report = ColdOracleReport::from_existing_inspector(operation, &result);
+            let inspected = inspect_cold_s3_replace_with_history_classified(
+                &admission, &bindings, &journal, &originals, operation,
+            );
+            let report = ColdOracleReport::from_classified_inspector(operation, &inspected);
             let expected = if mode == "oracle-hold" {
                 ColdOracleVerdict::LocallyConsistentHold
             } else {
@@ -902,6 +911,7 @@ fn p0g3d09_run_oracle_child(
     appdata: &std::path::Path,
     operation: OperationId,
     expected_verdict: &str,
+    expected_reason: &str,
 ) -> serde_json::Value {
     assert!(matches!(expected_verdict, "LOCALLY_CONSISTENT_HOLD" | "DENY"));
     let mode = if expected_verdict == "LOCALLY_CONSISTENT_HOLD" {
@@ -934,6 +944,7 @@ fn p0g3d09_run_oracle_child(
     assert_eq!(report["schema"], "akula.sync.cold-oracle.v1");
     assert_eq!(report["operation_id"], operation.to_string());
     assert_eq!(report["verdict"], expected_verdict);
+    assert_eq!(report["reason_code"], expected_reason);
     assert_eq!(report["authority"], "none");
     for key in ["receipt_issued", "automatic_apply_allowed",
                 "remote_ack_allowed", "baseline_promotion_allowed"] {
@@ -966,15 +977,17 @@ fn p0g3d09_oracle_reports_hold_and_history_tamper_deny_across_processes() {
     drop(core);
 
     let positive = p0g3d09_run_oracle_child(
-        &root, &appdata, intent.operation_id, "LOCALLY_CONSISTENT_HOLD",
+        &root, &appdata, intent.operation_id,
+        "LOCALLY_CONSISTENT_HOLD", "CORRELATED_NOT_DURABLE",
     );
     assert_eq!(positive["reason_code"], "CORRELATED_NOT_DURABLE");
 
     fs::write(&history, vec![b'X'; new_text.len()]).unwrap();
     let negative = p0g3d09_run_oracle_child(
-        &root, &appdata, intent.operation_id, "DENY",
+        &root, &appdata, intent.operation_id,
+        "DENY", "IMMUTABLE_HISTORY_REJECTED",
     );
-    assert_eq!(negative["reason_code"], "EVIDENCE_REJECTED");
+    assert_eq!(negative["reason_code"], "IMMUTABLE_HISTORY_REJECTED");
 
     // The report is not a proof of persistence, or a permission to ACK.
     let mut cold = SqliteSyncJournal::open(&appdata.join("journal.sqlite")).unwrap();
@@ -1091,6 +1104,11 @@ fn p0g3d08_real_os_child_rejects_v7_claim_without_v8_or_publication() {
     drop(protected);
     drop(core);
     p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    let early = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id,
+        "DENY", "PRIMARY_NOT_PUBLISHED",
+    );
+    assert_eq!(early["authority"], "none");
     assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
         b"unchanged private original");
     drop(keep_fixture);
@@ -1133,6 +1151,11 @@ fn p0g3d08_real_os_child_rejects_published_primary_and_history_without_v8() {
     drop(protected);
     drop(core);
     p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    let incomplete = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id,
+        "DENY", "V8_MISSING",
+    );
+    assert_eq!(incomplete["automatic_apply_allowed"], false);
     assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
         new_text.as_bytes());
     drop(keep_fixture);

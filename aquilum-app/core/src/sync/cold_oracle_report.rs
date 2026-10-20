@@ -2,7 +2,9 @@
 //! inspector. It is NOT another cold verifier and never carries write authority.
 //! This report is consumed by disposable fault-injection/VM laboratories.
 
-use super::s3_reserved_replace::{InertColdUnifiedReview, InertColdUnifiedStatus};
+use super::s3_reserved_replace::{
+    ColdReviewFailure, ColdReviewFailureReason, InertColdUnifiedReview, InertColdUnifiedStatus,
+};
 use super::OperationId;
 use crate::files::error::FileCommandError;
 
@@ -18,6 +20,7 @@ pub(crate) enum ColdOracleReason {
     EvidenceRejected,
     WrongOperation,
     UnknownReviewStatus,
+    Classified(ColdReviewFailureReason),
 }
 
 impl ColdOracleReason {
@@ -27,6 +30,7 @@ impl ColdOracleReason {
             Self::EvidenceRejected => "EVIDENCE_REJECTED",
             Self::WrongOperation => "WRONG_OPERATION",
             Self::UnknownReviewStatus => "UNKNOWN_REVIEW_STATUS",
+            Self::Classified(domain) => domain.code(),
         }
     }
 }
@@ -62,6 +66,26 @@ impl ColdOracleReport {
             verdict,
             reason,
         }
+    }
+
+    /// G1-02a: typed phase classification is carried by the same native
+    /// history/cross-store inspector. No human-readable error parsing,
+    /// post-failure secondary scanner or independent admission decision.
+    pub(crate) fn from_classified_inspector(
+        operation_id: OperationId,
+        inspection: &Result<InertColdUnifiedReview, ColdReviewFailure>,
+    ) -> Self {
+        let (verdict, reason) = match inspection {
+            Ok(review) if review.operation_id != operation_id =>
+                (ColdOracleVerdict::Deny, ColdOracleReason::WrongOperation),
+            Ok(review) if review.status == InertColdUnifiedStatus::LocallyConsistentHold =>
+                (ColdOracleVerdict::LocallyConsistentHold,
+                 ColdOracleReason::CorrelatedButNotDurable),
+            Ok(_) => (ColdOracleVerdict::Deny, ColdOracleReason::UnknownReviewStatus),
+            Err(failure) => (ColdOracleVerdict::Deny,
+                             ColdOracleReason::Classified(failure.reason)),
+        };
+        Self { operation_id: operation_id.to_string(), verdict, reason }
     }
 
     pub(crate) fn to_json(&self) -> String {
@@ -128,5 +152,28 @@ mod tests {
         assert_eq!(negative.reason, ColdOracleReason::EvidenceRejected);
         assert!(!negative.to_json().contains("corrupted V8"),
             "filesystem and database errors must not leak into public reports");
+        // Typed phases remain non-authorizing even when callers can identify
+        // the exact rejected stage. No error paths or secret bytes are emitted.
+        for reason in [
+            ColdReviewFailureReason::CrossStoreEvidenceRejected,
+            ColdReviewFailureReason::V8Missing,
+            ColdReviewFailureReason::PrimaryNotPublished,
+            ColdReviewFailureReason::ImmutableHistoryRejected,
+            ColdReviewFailureReason::PostHistoryEvidenceChanged,
+        ] {
+            let report = ColdOracleReport {
+                operation_id: operation.to_string(),
+                verdict: ColdOracleVerdict::Deny,
+                reason: ColdOracleReason::Classified(reason),
+            };
+            let json: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+            assert_eq!(json["reason_code"], reason.code());
+            assert_eq!(json["verdict"], "DENY");
+            assert_eq!(json["authority"], "none");
+            for key in ["receipt_issued", "automatic_apply_allowed",
+                        "remote_ack_allowed", "baseline_promotion_allowed"] {
+                assert_eq!(json[key], false);
+            }
+        }
     }
 }
