@@ -48,6 +48,7 @@ impl App {
         let before = self.scroll_geometry(root)?.2;
         let ids = self.note_ids.as_ref()?;
         let scroll = ids.scroll;
+        let body = ids.body;
         root.get_widget(ids.body.id())
             .and_then(|w| w.downcast::<crate::ui::editor::TextEditor>())?
             .inner().top_of(byte)?;
@@ -68,7 +69,7 @@ impl App {
         // anchor. Otherwise all 10 images reach MediaView::paint during
         // some scene builds yet only the two initially raster-visible
         // brushes are requested by the Vello mip sampler.
-        ids.body.edit(root, |mut editor| editor.ctx.request_render());
+        body.edit(root, |mut editor| editor.ctx.request_render());
         static FIRST_REPAINT: std::sync::Once = std::sync::Once::new();
         FIRST_REPAINT.call_once(|| eprintln!("AKULA_IMAGE_SCAN_EDITOR_REPAINT_REQUESTED"));
         let after = self.scroll_geometry(root)?.2;
