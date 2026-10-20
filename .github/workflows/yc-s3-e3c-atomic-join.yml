@@ -63,10 +63,18 @@ jobs:
         working-directory: aquilum-app
         run: |
           set -euo pipefail
-          cargo test --locked -p aquilum-core --no-default-features --features sync-s3 s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes -- --exact
-          cargo test --locked -p aquilum-core --no-default-features --features sync-s3 s3_v2_trust_anchor::tests::partial_policy_schema_is_never_ignored_by_old_v2_reader -- --exact
-          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-receipt-lab s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes -- --exact
-          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-receipt-lab s3_v2_trust_anchor::policy_receipt_lab::tests::valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build -- --exact
+          # An unmatched cargo --exact filter exits 0 after executing ZERO
+          # tests. Verify the fully qualified test exists before each run.
+          run_exact_test() {
+            local feature="$1" name="$2"
+            cargo test --locked -p aquilum-core --no-default-features --features "$feature" -- --list |
+              grep -F -- "${name}: test" >/dev/null
+            cargo test --locked -p aquilum-core --no-default-features --features "$feature" "$name" -- --exact
+          }
+          run_exact_test sync-s3 sync::s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes
+          run_exact_test sync-s3 sync::s3_v2_trust_anchor::tests::partial_policy_schema_is_never_ignored_by_old_v2_reader
+          run_exact_test signed-vault-policy-receipt-lab sync::s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes
+          run_exact_test signed-vault-policy-receipt-lab sync::s3_v2_trust_anchor::policy_receipt_lab::tests::valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build
       - name: Compile standard Core without experimental trust features
         shell: bash
         working-directory: aquilum-app
