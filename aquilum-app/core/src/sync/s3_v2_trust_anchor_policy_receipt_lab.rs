@@ -10,7 +10,9 @@
 
 use super::*;
 use super::super::{
-    verify_policy_transition, DecodedDsseEnvelope, PolicyLabError, PublisherPolicyV1,
+    verify_policy_transition, verify_signed_root, ApprovedPublisherKeys,
+    ApprovedV2RootScope, DecodedDsseEnvelope, PolicyLabError,
+    PublisherPolicyV1, SignedRootError, SignedRootObservation,
 };
 use super::super::s3_publisher_policy_lab::valid_for_scope;
 
@@ -27,7 +29,9 @@ pub enum V2PolicyReceiptError {
     InvalidPolicy,
     CorruptedReceipt,
     ConflictingEpochOrFork,
+    NotCurrentlyAnchoredRoot,
     InvalidTransition(PolicyLabError),
+    InvalidPublisherSignature(SignedRootError),
 }
 
 impl From<S3V2TrustAnchorError> for V2PolicyReceiptError {
@@ -248,6 +252,41 @@ impl S3V2TrustedAnchorJournal {
         if changed != 1 { return Err(V2PolicyReceiptError::ConflictingEpochOrFork); }
         tx.commit()?;
         Ok(PolicyReceiptOutcome::Advanced)
+    }
+
+    /// Verify a signature on the EXACT root currently trusted by this
+    /// existing V2 journal, using ONLY the latest durably stored publisher
+    /// keyset. A revoked key can never be rescued from a stale UI cache.
+    ///
+    /// Snapshot is held in one BEGIN IMMEDIATE transaction so concurrent
+    /// policy rotation and this read cannot select different policy epochs.
+    /// This does NOT fetch or re-pin S3 bytes; it is a local preview only.
+    pub fn inspect_current_root_publisher_signature(
+        &mut self,
+        scope: &S3RemoteAnchorScope,
+        root: &S3PackedHeadV2,
+        attestation: &DecodedDsseEnvelope<'_>,
+    ) -> Result<SignedRootObservation, V2PolicyReceiptError> {
+        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let anchored = Self::load_from(&tx, scope)?
+            .ok_or(V2PolicyReceiptError::NoAnchoredRoot)?;
+        if anchored.root() != root {
+            return Err(V2PolicyReceiptError::NotCurrentlyAnchoredRoot);
+        }
+        let trusted = load_from(&tx, scope)?.ok_or(V2PolicyReceiptError::MissingPolicy)?;
+        let (keys, quorum) = trusted.policy().trusted_publishers();
+        let result = verify_signed_root(
+            attestation, root,
+            &ApprovedV2RootScope {
+                bucket: scope.policy_bucket(),
+                keyspace: scope.keyspace(),
+                policy_epoch: trusted.policy().epoch(),
+                previous_trusted_root: anchored.previous_root(),
+            },
+            &ApprovedPublisherKeys { public_keys: keys, quorum },
+        ).map_err(V2PolicyReceiptError::InvalidPublisherSignature)?;
+        tx.commit()?;
+        Ok(result)
     }
 }
 
