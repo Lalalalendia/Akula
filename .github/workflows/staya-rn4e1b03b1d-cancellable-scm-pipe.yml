@@ -98,13 +98,42 @@ jobs:
               & $exe --verify-pipe
               if ($LASTEXITCODE -ne 0) { throw "pinned pipe not owned by service" }
               if ($round -eq 2) {
-                $held = [System.IO.Pipes.NamedPipeClientStream]::new(
-                  ".", "AkulaHostBrokerResearch.v1",
-                  [System.IO.Pipes.PipeDirection]::InOut,
-                  [System.IO.Pipes.PipeOptions]::None
-                )
-                # The named pipe READ is deliberately silent and pending.
-                $held.Connect(5000)
+                # Do NOT use NamedPipeClientStream(InOut): it can request
+                # GENERIC_WRITE, which implies FILE_CREATE_PIPE_INSTANCE.
+                # A real desktop principal must only get DATA read/write,
+                # never pipe instance creation. Match the production DACL.
+                Add-Type -TypeDefinition @'
+          using System;
+          using System.ComponentModel;
+          using System.Runtime.InteropServices;
+          using System.Threading;
+          using Microsoft.Win32.SafeHandles;
+          public static class AkulaMinimumPipeClient {
+              [DllImport("kernel32.dll", EntryPoint="CreateFileW", CharSet=CharSet.Unicode,
+                         ExactSpelling=true, SetLastError=true)]
+              private static extern SafeFileHandle Open(
+                  string name, uint access, uint share, IntPtr attrs,
+                  uint disposition, uint flags, IntPtr template);
+              public static SafeFileHandle Connect() {
+                  var until = DateTime.UtcNow.AddSeconds(5);
+                  for (;;) {
+                      // FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE.
+                      var pipe = Open(@"\\.\pipe\AkulaHostBrokerResearch.v1",
+                                      0x00100003u, 0, IntPtr.Zero, 3,
+                                      0x00110000u, IntPtr.Zero);
+                      if (!pipe.IsInvalid) return pipe;
+                      int error = Marshal.GetLastWin32Error();
+                      pipe.Dispose();
+                      if ((error != 231 && error != 2) || DateTime.UtcNow >= until)
+                          throw new Win32Exception(error);
+                      Thread.Sleep(50);
+                  }
+              }
+          }
+          '@
+                $held = [AkulaMinimumPipeClient]::Connect()
+                if ($held.IsInvalid) { throw "minimal-rights silent client could not connect" }
+                # No data is sent; server must cancel its overlapped read.
               }
               # Round 1 stops with an unconnected pending accept; round 2
               # cancels a pending ReadFile against an open silent client.
@@ -112,13 +141,13 @@ jobs:
               (Get-Service -Name $name).WaitForStatus(
                 "Stopped", [TimeSpan]::FromSeconds(15)
               )
-              if ($held) { $held.Dispose(); $held = $null }
+              if ($null -ne $held) { $held.Dispose(); $held = $null }
               & $exe --verify-pipe *> $null
               if ($LASTEXITCODE -eq 0) { throw "stopped service retained trusted pipe" }
             }
           }
           finally {
-            if ($held) { $held.Dispose() }
+            if ($null -ne $held) { $held.Dispose() }
             if ($created) {
               $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
               if ($svc -and $svc.Status -ne "Stopped") {
