@@ -83,7 +83,7 @@ struct AttestationV1 {
 }
 
 /// Standard DSSE v1 pre-authentication encoding, using BYTE lengths.
-fn pae(kind: &[u8], payload: &[u8]) -> Vec<u8> {
+pub(super) fn pae(kind: &[u8], payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(32 + kind.len() + payload.len());
     out.extend_from_slice(b"DSSEv1 ");
     out.extend_from_slice(kind.len().to_string().as_bytes());

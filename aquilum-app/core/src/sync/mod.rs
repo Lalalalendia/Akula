@@ -70,6 +70,9 @@ mod s3_pack_index;
 // Gated pure verifier: no S3 transport, key custody, file changes, or Sync.
 #[cfg(feature = "signed-vault-root-lab")]
 mod s3_signed_root_paev1;
+// Never part of the installed application or an S3 permission grant.
+#[cfg(feature = "signed-vault-policy-lab")]
+mod s3_publisher_policy_lab;
 mod s3_manifest_delta;
 mod s3_coord_v2;
 #[cfg(feature = "sync-s3")]
@@ -161,6 +164,11 @@ pub use s3_signed_root_paev1::{
     verify_signed_root, ApprovedPublisherKeys, ApprovedV2RootScope,
     DecodedDsseEnvelope, DecodedSignature, SignedRootError,
     SignedRootObservation, ROOT_PAYLOAD_TYPE,
+};
+#[cfg(feature = "signed-vault-policy-lab")]
+pub use s3_publisher_policy_lab::{
+    verify_policy_transition, PolicyLabError, PolicyTransitionObservation,
+    PublisherPolicyV1, POLICY_PAYLOAD_TYPE,
 };
 pub use s3_pack_index::{
     S3PackedHeadV2, S3PackIndexRootV2, S3PackIndexShardV2,

@@ -1,0 +1,64 @@
+name: YC-S3 E2a offline owner-policy transition
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-signed-root-dsse-offline-20261020
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/s3_signed_root_paev1.rs'
+      - 'aquilum-app/core/src/sync/s3_publisher_policy_lab.rs'
+      - '.github/workflows/yc-s3-publisher-policy-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: Signed publisher policy / no cloud or writer
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Owner rotation / revocation / fork negative tests
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-lab s3_publisher_policy_lab::tests -- --test-threads=1
+      - name: Regression of E1 signed-root verification
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-lab s3_signed_root_paev1::tests -- --test-threads=1
+      - name: Prove normal default Core remains standalone
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          if grep -Eq 'signed-vault-(root|policy)-lab' native/Cargo.toml; then
+            echo 'Normal Akula native must not enable these policy labs'
+            exit 1
+          fi
