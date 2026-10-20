@@ -13,6 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+
+#[cfg(feature = "index-pool-lab")]
+#[path = "prepare_pool_lab.rs"]
+mod prepare_pool_lab;
 use tantivy::{IndexWriter, Term};
 use walkdir::WalkDir;
 
@@ -59,6 +63,12 @@ impl IndexSynchronizer {
         let mut pending = 0;
         let mut processed = 0;
         let mut prepare_batch = Vec::<PendingPrepare>::with_capacity(PREPARE_BATCH_SIZE);
+        #[cfg(feature = "index-pool-lab")]
+        let mut pool = if std::env::var_os("AKULA_INDEX_POOL_LAB").is_some() {
+            Some(prepare_pool_lab::PreparePool::spawn()?)
+        } else {
+            None
+        };
 
         for entry in WalkDir::new(&self.root)
             .follow_links(false)
@@ -88,6 +98,8 @@ impl IndexSynchronizer {
                         &transaction,
                         &mut prepare_batch,
                         &mut pending,
+                        #[cfg(feature = "index-pool-lab")]
+                        &mut pool,
                     )?;
                 }
             }
@@ -116,6 +128,8 @@ impl IndexSynchronizer {
             &transaction,
             &mut prepare_batch,
             &mut pending,
+            #[cfg(feature = "index-pool-lab")]
+            &mut pool,
         )?;
         if pending > 0 {
             commit(&mut self.writer, &self.index, &self.progress)?;
@@ -189,12 +203,18 @@ fn flush_prepare_batch(
     transaction: &Transaction<'_>,
     batch: &mut Vec<PendingPrepare>,
     pending: &mut usize,
+    #[cfg(feature = "index-pool-lab")] pool: &mut Option<prepare_pool_lab::PreparePool>,
 ) -> Result<(), SearchError> {
     if batch.is_empty() {
         return Ok(());
     }
     let writer = ensure_writer(writer, index)?;
-    for (key, probe, file) in prepare_parallel(std::mem::take(batch))? {
+    let input = std::mem::take(batch);
+    #[cfg(feature = "index-pool-lab")]
+    let prepared = if let Some(pool) = pool.as_mut() { pool.prepare(input)? } else { prepare_parallel(input)? };
+    #[cfg(not(feature = "index-pool-lab"))]
+    let prepared = prepare_parallel(input)?;
+    for (key, probe, file) in prepared {
         let Some(file) = file else {
             continue;
         };
