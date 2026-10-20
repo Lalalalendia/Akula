@@ -957,3 +957,45 @@ fn p0g3d08_real_os_child_rejects_v7_claim_without_v8_or_publication() {
         b"unchanged private original");
     drop(keep_fixture);
 }
+
+
+#[test]
+fn p0g3d08_real_os_child_rejects_published_primary_and_history_without_v8() {
+    let f = fixture();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let result = save_existing_note_with_prewrite_strict_history_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope,
+        &f.intent.path, &f.new_text, &f.old_hash,
+        Source::External, Some("p0g3d08-stop-before-v8"),
+        || prepare(&f, &admission),
+        |held| held.inspect_before_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected,
+        ),
+        |held, primary, _history| held.inspect_after_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected, primary,
+        ),
+    );
+    assert!(result.is_ok(), "File Gate and history setup failed: {result:?}");
+    assert!(f.journal.borrow()
+        .read_existing_replace_receipt_candidate(f.intent.operation_id)
+        .unwrap().is_none());
+    assert_no_remote_ack(&f);
+    drop(admission);
+
+    // A real process boundary after the primary+history publication but before
+    // the V8 insert must NEVER infer that a complete receipt exists.
+    let Fixture {
+        _temp: keep_fixture, core, root, appdata, bindings, custody,
+        journal, cache, protected, intent, new_text, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+    p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
+        new_text.as_bytes());
+    drop(keep_fixture);
+}
