@@ -67,9 +67,17 @@ impl Host {
                     Some(values)
                 });
                 if let Some(anchors) = anchors {
-                    if let Some(index) = self.replay.as_mut()
-                        .and_then(|replay| replay.image_scan_target(now, anchors.len()))
-                    {
+                    // A transition-only seek was stale after asynchronous
+                    // photo decode changed image paragraph heights. On every
+                    // actual 8ms native replay tick, recheck the *active*
+                    // anchor; App::image_scan_reveal is a cheap no-op when
+                    // the latest layout already places it within 8px of
+                    // viewport center. Never advance the 6s sweep clock.
+                    let transition = self.replay.as_mut()
+                        .and_then(|replay| replay.image_scan_target(now, anchors.len()));
+                    let active = self.replay.as_ref()
+                        .and_then(|replay| replay.image_scan_active(anchors.len()));
+                    if let Some(index) = active {
                         if let Some(root) = self.root.as_mut() {
                             if let Some((from, to)) = self.app.image_scan_reveal(root, anchors[index]) {
                                 static FIRST: std::sync::Once = std::sync::Once::new();
@@ -77,7 +85,7 @@ impl Host {
                                     "AKULA_IMAGE_ANCHOR_SCAN_APPLIED count={} schedule=forward-reverse",
                                     anchors.len()
                                 ));
-                                if index % 4 == 0 || index + 1 == anchors.len() {
+                                if transition.is_some() && (index % 4 == 0 || index + 1 == anchors.len()) {
                                     eprintln!(
                                         "AKULA_IMAGE_ANCHOR_SCAN_SEEK index={} byte={} from={:.0} to={:.0}",
                                         index, anchors[index], from, to
