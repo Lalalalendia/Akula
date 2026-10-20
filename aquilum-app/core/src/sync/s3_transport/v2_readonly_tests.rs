@@ -242,7 +242,10 @@ async fn live_minio_full_pinned_v2_get_and_corruption_hold() {
     assert_eq!(inspected.document_head_count, 1);
     assert!(inspected.attests_exact_root(&scope, &root, &initial.etag));
     assert!(counts.get >= 7, "must fetch root twice and all immutable objects");
-    assert_eq!(counts.head, 0, "pinned V2 read must not LIST or HEAD by default");
+    // The bounded-read transport deliberately performs HEAD / conditional
+    // GET / HEAD for EACH object. Distinguish this from an S3 LIST or writer.
+    assert_eq!(counts.head, counts.get * 2,
+        "every V2 GET must retain both pre/post HEAD checks");
 
     // Reject a different bucket or Vault BEFORE any SDK request. The
     // account-binding string alone is a host provenance obligation, not a
