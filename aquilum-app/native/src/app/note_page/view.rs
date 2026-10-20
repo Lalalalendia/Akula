@@ -66,7 +66,19 @@ impl App {
         if error.abs() <= 8.0 {
             // The actual paragraph position is already centered. Don't
             // request an extra layout or rebuild the retained scene just
-            // to generate artificial CPU work.
+            // to generate artificial CPU work. Record affirmative per-byte
+            // alignment only after reading the latest native layout.
+            static ALIGNED: std::sync::OnceLock<
+                std::sync::Mutex<std::collections::HashSet<usize>>
+            > = std::sync::OnceLock::new();
+            if ALIGNED.get_or_init(Default::default)
+                .lock().unwrap_or_else(|e| e.into_inner())
+                .insert(byte)
+            {
+                eprintln!(
+                    "AKULA_IMAGE_ANCHOR_ALIGNED byte={byte} center_error={error:.1} offset={before:.1}"
+                );
+            }
             return Some((before, before));
         }
         self.reveal(root, byte);
