@@ -1,0 +1,21 @@
+# AKULA B1d0 — first direct-to-/opt signed Node file commit with persistent local HOLD
+
+**Scope:** one *reusable installer transaction primitive* plus root-owned tests on a disposable Ubuntu runner, not a new CAS protocol. It factors the already accepted B1c0 verified-FD/owner-signature/CAS/rename transaction instead of duplicating it.
+
+## Functional improvement over B1c0 and B1c1
+
+1. A new feature-gated Linux-only Core module opens **only** the fixed preprovisioned root-owned `/opt/akula-node` directory (owner UID0, mode 0755) by first pinning root-owned `/opt`. A separately provisioned root-owned 0600 enrollment marker is mandatory; symlinks, hardlinks, foreign files, wrong modes and unexpected existing data refuse before any CAS. The production function remains `pub(crate)` and has **no caller-visible SSH/IPC route**. It cannot silently self-enroll a VPS.
+2. With the caller-held exclusive destination lock, B1c0's exact root-pinned signed package FD, detached owner signature, host/plan binding, OS-owned B1b1c CAS and signed witness are reverified. A new CAS revision consumes the one-use owner nonce. The file is copied **directly into /opt**, not via a runnable /run staging inode: O_EXCL `node.pending`, SHA-256 comparison, 0555 mode, file fsync, NOREPLACE rename to `node`, directory fsync and readback.
+3. The commit then creates one fixed 0600 `node.receipt.pending` with bounded, checksummed revision, record tip, release fingerprint, host/plan digest, InstallId, owner signature digest and original package SHA-256. After fsync, NOREPLACE rename to `node.receipt` and directory fsync, it independently reads the receipt and exact installed Node bytes.
+4. On another process opening the root-owned CAS journal, `inspect_ci_hold()` confirms SHA-256, receipt checksum and the CAS revision/record tip/floor. It returns **`LocallyConsistentHold`, never `ReadyToExecute`**. A pending file, interrupted two-object commit, mismatch, corrupt receipt, changed inode or consumed approval without published bytes is `NeedsRepair`, not silent retry.
+5. The same fixed transaction core supports deterministic fault injection (only in opt-in code) at the boundaries *after signed CAS, pending-file fsync, final Node rename+directory fsync, and pending-receipt fsync*. Reboot recovery still requires an independent live machine test. An authentic file after restart is **not** authority to activate systemd.
+
+## Proof
+A separate CI feature `server-bootstrap-b1d0-durable-node` and actual root UID0 tests run **only** under a CI-guarded, otherwise inaccessible root path `/opt/akula-b1d0-ci-node`. The test creates its own enrollment, tests a real fsynced signed owner/CAS and byte-accurate installed Node, actor/process reopen, replay refusal, four crash points, foreign file, symlink, corrupt receipt, modified Node and wrong enrollment/owner. It never creates `/opt/akula-node` or touches installed Akula. The fixture remains synthetic bytes, with B1c1 QEMU providing the independent real-ELF execution proof.
+
+## Production gates still missing
+- No fixed **production release-key/owner-key loader** exists in the root service yet. The crate-private function must remain unreachable from an untrusted socket or GUI until independent trusted OS key provisioning, one-use challenge and revocation policy are implemented.
+- This is a first-install *file* transaction and local HOLD, **not an atomic file+service activation** or unattended crash repair. The CAS ledger supplied by the host must be durable separately (future root-owned `/var/lib/akula` provisioning); this module cannot accept an ephemeral journal for real deployment.
+- No real Windows SSH ProvisionCoordinator, installer progress UI, signed package distribution, real owner authorization UI or VPS operation is connected. No automatic boot service, WAN bind, user vault mutation, arbitrary path/command or port is provided. Root on the user's own VPS is trusted; hostile UID0/complete snapshot rollback remain out of scope.
+
+**Next shared B1 gate:** prove B1d0 with the *real* signed ELF inside existing B1c1 QEMU, persistent witness journal and crash reboots; only then connect a platform-neutral typed install coordinator, Windows OpenSSH pinned transport and a native confirmation wizard. No new standalone CAS laboratory is needed.
