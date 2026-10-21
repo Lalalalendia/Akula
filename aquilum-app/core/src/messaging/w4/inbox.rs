@@ -87,7 +87,7 @@ impl W4Inbox {
         keys: &impl TrustedRecipientKeys,
         now_ms: u64,
     ) -> Result<InboundResult, Error> {
-        if input.message == [0;16]
+        if input.message == [0; 16]
             || input.epoch == 0
             || input.epoch > i64::MAX as u64
             || input.expires_at_ms > i64::MAX as u64
@@ -101,22 +101,36 @@ impl W4Inbox {
         if blake3::hash(input.packet).as_bytes() != &input.digest {
             return Err(Error::Mismatch);
         }
-        let pinned = keys.key_for(input.recipient, input.epoch).ok_or(Error::Unauthorized)?;
+        let pinned = keys
+            .key_for(input.recipient, input.epoch)
+            .ok_or(Error::Unauthorized)?;
         if signer.public_key().as_ref() != pinned.as_slice() {
             return Err(Error::Unauthorized);
         }
 
         let sender = input.sender.as_uuid().into_bytes();
         let recipient = input.recipient.as_uuid().into_bytes();
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing: Option<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64)> =
-            tx.query_row(
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64)> = tx
+            .query_row(
                 "SELECT digest,ciphertext,receipt,recipient,epoch,expiry_ms
                  FROM messaging_w4_inbox WHERE sender=?1 AND message=?2",
-                params![sender.as_slice(),input.message.as_slice()],
-                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
-            ).optional()?;
-        if let Some((digest,body,receipt,saved_recipient,epoch,expiry)) = existing {
+                params![sender.as_slice(), input.message.as_slice()],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((digest, body, receipt, saved_recipient, epoch, expiry)) = existing {
             if digest.as_slice() != input.digest.as_slice()
                 || body.as_slice() != input.packet
                 || saved_recipient.as_slice() != recipient.as_slice()
@@ -126,17 +140,20 @@ impl W4Inbox {
                 return Err(Error::Conflict);
             }
             tx.commit()?;
-            return Ok(InboundResult { status:InboundStatus::Duplicate, signed_receipt:receipt });
+            return Ok(InboundResult {
+                status: InboundStatus::Duplicate,
+                signed_receipt: receipt,
+            });
         }
 
         // Bound total disk use and one sender's share before making a new
         // record; an existing duplicate remains readable when fully occupied.
-        let total: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM messaging_w4_inbox", [], |r| r.get(0)
-        )?;
+        let total: i64 =
+            tx.query_row("SELECT COUNT(*) FROM messaging_w4_inbox", [], |r| r.get(0))?;
         let sender_count: i64 = tx.query_row(
             "SELECT COUNT(*) FROM messaging_w4_inbox WHERE sender=?1",
-            params![sender.as_slice()], |r| r.get(0)
+            params![sender.as_slice()],
+            |r| r.get(0),
         )?;
         if total >= MAX_INBOX_ROWS || sender_count >= MAX_INBOX_PER_SENDER {
             return Err(Error::MailboxFull);
@@ -150,29 +167,41 @@ impl W4Inbox {
         receipt.extend_from_slice(&input.message);
         receipt.extend_from_slice(&input.digest);
         receipt.extend_from_slice(&input.epoch.to_be_bytes());
-        let mut tbs=Vec::with_capacity(DOMAIN.len()+receipt.len());
+        let mut tbs = Vec::with_capacity(DOMAIN.len() + receipt.len());
         tbs.extend_from_slice(DOMAIN);
         tbs.extend_from_slice(&receipt);
         receipt.extend_from_slice(signer.sign(&tbs).as_ref());
-        if receipt.len() != RECEIPT_LEN { return Err(Error::InvalidReceipt); }
+        if receipt.len() != RECEIPT_LEN {
+            return Err(Error::InvalidReceipt);
+        }
 
         tx.execute(
             "INSERT INTO messaging_w4_inbox(
                 sender,recipient,message,digest,ciphertext,epoch,expiry_ms,receipt
              ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
             params![
-                sender.as_slice(), recipient.as_slice(), input.message.as_slice(),
-                input.digest.as_slice(), input.packet, input.epoch as i64,
-                input.expires_at_ms as i64, &receipt,
+                sender.as_slice(),
+                recipient.as_slice(),
+                input.message.as_slice(),
+                input.digest.as_slice(),
+                input.packet,
+                input.epoch as i64,
+                input.expires_at_ms as i64,
+                &receipt,
             ],
         )?;
         tx.commit()?;
-        Ok(InboundResult { status:InboundStatus::Stored, signed_receipt:receipt })
+        Ok(InboundResult {
+            status: InboundStatus::Stored,
+            signed_receipt: receipt,
+        })
     }
 
     #[cfg(test)]
     fn row_count(&self) -> Result<i64, Error> {
-        Ok(self.db.query_row("SELECT COUNT(*) FROM messaging_w4_inbox",[],|r|r.get(0))?)
+        Ok(self
+            .db
+            .query_row("SELECT COUNT(*) FROM messaging_w4_inbox", [], |r| r.get(0))?)
     }
 }
 
