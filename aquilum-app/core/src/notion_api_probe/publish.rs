@@ -252,6 +252,62 @@ mod tests {
         assert!(!workspace.join(IMPORT_DIR).exists());
     }
 
+
+    #[test]
+    fn four_records_two_relations_projection_to_file_gate_and_second_import() {
+        use crate::notion_api_probe::{projection::prepare_import, Link, RawObject, SourcePreview, API_VERSION};
+        use serde_json::json;
+        const C: &str = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        const D: &str = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let ids = [A, B, C, D];
+        let mut objects = Vec::new();
+        for (index, id) in ids.iter().enumerate() {
+            objects.push(RawObject { kind: "page".into(), id: (*id).into(),
+                json: json!({"properties":{"Name":{"type":"title",
+                    "title":[{"plain_text":format!("Record {}",index+1)}]}}}) });
+            objects.push(RawObject { kind: "markdown".into(), id: (*id).into(),
+                json: json!({"markdown":format!("Content {}",index+1)}) });
+        }
+        let preview = prepare_import(&SourcePreview {
+            format: "test", api_version: API_VERSION, root: A.into(),
+            workspace_complete: false, root_traversal_complete: true,
+            requests: 2, objects,
+            links: vec![
+                Link { from: A.into(), to: B.into(), kind: "relation".into(),
+                    property_id: Some("property-a".into()) },
+                Link { from: C.into(), to: D.into(), kind: "relation".into(),
+                    property_id: Some("property-c".into()) },
+            ],
+            unresolved_target_ids: vec![], warnings: vec![],
+        }).unwrap();
+        assert!(preview.publish_allowed);
+        assert_eq!(preview.candidates.len(),4);
+
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let app = temp.path().join("app");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&app).unwrap();
+        let core = Core::open(&app, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(workspace.to_str().unwrap(),1).unwrap();
+
+        let first = publish_approved(&core,&workspace,&preview,true).unwrap();
+        assert!(first.completed);
+        assert_eq!(first.created.len(),4);
+        for id in ids {
+            assert!(workspace.join(format!("Notion-import/{id}.md")).is_file());
+        }
+        let a_text = fs::read_to_string(workspace.join(format!("Notion-import/{A}.md"))).unwrap();
+        let c_text = fs::read_to_string(workspace.join(format!("Notion-import/{C}.md"))).unwrap();
+        assert!(a_text.contains(&format!("<{B}.md>")));
+        assert!(c_text.contains(&format!("<{D}.md>")));
+
+        let second = publish_approved(&core,&workspace,&preview,true).unwrap();
+        assert!(second.completed);
+        assert_eq!(second.existing_untouched.len(),4);
+        assert!(second.created.is_empty());
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlinked_import_directory_is_rejected() {
