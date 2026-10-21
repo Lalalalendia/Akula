@@ -119,7 +119,7 @@ fn unhex(value: &str) -> Vec<u8> {
     assert!(!value.is_empty() && value.len() <= 8192 && value.len().is_multiple_of(2));
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|pair| {
             let text = std::str::from_utf8(pair).expect("hex utf8");
             u8::from_str_radix(text, 16).expect("hex byte")
