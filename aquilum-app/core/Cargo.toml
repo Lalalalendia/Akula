@@ -80,3 +80,8 @@ tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=0.38.44", features = ["fs", "process"] }
+
+[[bin]]
+name = "akula-notion-api-probe"
+path = "src/bin/akula_notion_api_probe.rs"
+required-features = ["notion-api-probe"]
