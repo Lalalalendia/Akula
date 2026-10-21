@@ -64,15 +64,15 @@ impl Scenario {
             movement,
             outages,
             seed: 0x4134_4b55_4c41_3031,
-            ticks: 72,
-            ttl_ticks: 56,
+            ticks: 84,
+            ttl_ticks: 40,
             messages: 60,
         }
     }
 
     fn validate(self) {
         assert!(self.ticks > 2 && self.ticks < 10_000);
-        assert!(self.ttl_ticks > 0 && self.ttl_ticks <= self.ticks);
+        assert!(self.ttl_ticks > 0 && self.ttl_ticks < self.ticks);
         assert!(self.messages > 0 && self.messages <= DEVICE_COUNT);
     }
 }
@@ -420,6 +420,7 @@ struct SimMessage {
     id: usize,
     source: usize,
     target: usize,
+    created_tick: u16,
     target_start: Position,
     holders: Vec<usize>,
     state: OutboundMessage,
@@ -439,6 +440,10 @@ impl SimMessage {
             _ => 911,
         };
         let target = (source + offset) % devices.len();
+        // Stagger sends throughout the day, including offline windows.
+        // Otherwise the one-time outage would be irrelevant on shared Wi-Fi.
+        let send_window = (cfg.ticks - cfg.ttl_ticks).min(40);
+        let created_tick = ((id * 7) % usize::from(send_window)) as u16;
         let message_id = (id as u128 + 1).to_be_bytes();
         let desc = Descriptor {
             id: message_id,
@@ -446,14 +451,15 @@ impl SimMessage {
             // Synthetic opaque-envelope digest; no encryption is performed.
             ciphertext_digest: *blake3::hash(&message_id).as_bytes(),
             policy_epoch: 1,
-            expires_at_ms: u64::from(cfg.ttl_ticks) * MINUTE,
+            expires_at_ms: u64::from(created_tick + cfg.ttl_ticks) * MINUTE,
         };
-        let state = OutboundMessage::after_durable_enqueue(desc, 0)
+        let state = OutboundMessage::after_durable_enqueue(desc, u64::from(created_tick) * MINUTE)
             .expect("valid synthetic message metadata");
         Self {
             id,
             source,
             target,
+            created_tick,
             target_start: devices[target].position,
             holders: vec![source],
             state,
@@ -477,6 +483,8 @@ pub(super) struct Summary {
     pub late_deliveries: usize,
     pub max_copies_observed: usize,
     pub total_delivery_ticks: u64,
+    pub p50_delivery_ticks: Option<u16>,
+    pub p95_delivery_ticks: Option<u16>,
 }
 
 pub(super) fn run(cfg: Scenario) -> Summary {
@@ -504,6 +512,9 @@ pub(super) fn run(cfg: Scenario) -> Summary {
         let cells = buckets(&devices);
         let now_ms = u64::from(tick) * MINUTE;
         for message in &mut messages {
+            if tick < message.created_tick {
+                continue;
+            }
             message.state.step(now_ms, Event::Tick).expect("monotonic time");
             if message.state.phase() == Phase::Expired
                 || message.state.phase() == Phase::Revoked
@@ -511,7 +522,7 @@ pub(super) fn run(cfg: Scenario) -> Summary {
             {
                 continue;
             }
-            if tick == 18 && message.id % 17 == 0 {
+            if tick == message.created_tick + 15 && message.id % 17 == 0 {
                 message
                     .state
                     .step(now_ms, Event::TrustRevoked { new_epoch: 2 })
@@ -591,6 +602,7 @@ pub(super) fn run(cfg: Scenario) -> Summary {
         }
     }
     let end_ms = u64::from(cfg.ticks) * MINUTE;
+    let mut delivery_times = Vec::new();
     for message in &mut messages {
         message.state.step(end_ms, Event::Tick).expect("monotonic expiry");
         summary.max_copies_observed = summary.max_copies_observed.max(message.holders.len());
@@ -598,8 +610,10 @@ pub(super) fn run(cfg: Scenario) -> Summary {
             Phase::RecipientAccepted => {
                 summary.recipient_accepted += 1;
                 let delivered = message.delivery_tick.expect("recipient time");
-                summary.total_delivery_ticks += u64::from(delivered);
-                if delivered >= 29 {
+                let delay = delivered - message.created_tick;
+                summary.total_delivery_ticks += u64::from(delay);
+                delivery_times.push(delay);
+                if delay >= 15 {
                     summary.late_deliveries += 1;
                 }
             }
@@ -624,6 +638,12 @@ pub(super) fn run(cfg: Scenario) -> Summary {
         summary.recipient_accepted + summary.revoked + summary.expired,
         summary.messages
     );
+    delivery_times.sort_unstable();
+    if !delivery_times.is_empty() {
+        let n = delivery_times.len();
+        summary.p50_delivery_ticks = Some(delivery_times[(n - 1) / 2]);
+        summary.p95_delivery_ticks = Some(delivery_times[(n * 95).div_ceil(100) - 1]);
+    }
     summary
 }
 
@@ -710,6 +730,16 @@ mod tests {
     }
 
     #[test]
+    fn messages_created_during_a_wifi_outage_are_retried_after_return() {
+        let normal = run(Scenario::baseline(Links::SharedWifi, Movement::Stationary, Outages::None));
+        let outage = run(Scenario::baseline(Links::SharedWifi, Movement::Stationary, Outages::SingleWindow));
+        assert_eq!(normal.recipient_accepted, normal.messages);
+        assert_eq!(outage.recipient_accepted, outage.messages);
+        assert!(outage.total_delivery_ticks > normal.total_delivery_ticks,
+            "offline window must delay newly created messages");
+    }
+
+    #[test]
     fn entire_four_by_three_by_three_matrix_uses_real_akula_state_machine() {
         let links = [
             Links::SharedWifi,
@@ -729,11 +759,12 @@ mod tests {
                     println!(
                         "AK-MSG-SIM-2000 mode={link:?} move={movement:?} offline={outage:?} \
                          recipients={} expired={} revoked={} copies={} assumed_bytes={} \
-                         forbidden_pairs={} late={} total_delivery_ticks={}",
+                         forbidden_pairs={} late={} total_delivery_ticks={} p50_ticks={:?} p95_ticks={:?}",
                         result.recipient_accepted, result.expired, result.revoked,
                         result.copied_to_relays, result.assumed_bytes_transferred,
                         result.forbidden_cross_technology_pairs,
                         result.late_deliveries, result.total_delivery_ticks,
+                        result.p50_delivery_ticks, result.p95_delivery_ticks,
                     );
                     assert!(result.max_copies_observed <= MAX_COPIES);
                     totals[mode] += result.recipient_accepted;

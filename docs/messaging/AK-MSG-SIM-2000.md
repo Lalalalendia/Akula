@@ -8,7 +8,8 @@ This fixture compiles **only for tests** with opt-in
 ## Scope
 
 The test models a single five-floor building with 70 two-sided rooms per floor,
-five stairwell shafts, 2,000 logical Akula devices and 60 messages per scenario.
+five stairwell shafts, 2,000 logical Akula devices and 60 time-staggered
+messages per scenario.
 It invokes the *same* \`OutboundMessage\` state transitions introduced in
 [PR #530](https://github.com/Lalalalendia/Akula/pull/530).
 
@@ -19,6 +20,11 @@ Four communication profiles:
 - BLE-only devices with synthetic short-range physical contacts.
 - Exclusive one-of Wi-Fi/cellular IP/BLE per device: **BLE cannot cross to IP**
   without an explicit dual-radio gateway (none exists in this profile).
+
+Each message is created during a reproducible 40-slot send window and has a
+40-minute synthetic TTL. This ensures the simulated disconnection interval can
+affect *new* messages; starting every message at time zero would wrongly make
+some outage scenarios indistinguishable from no outage.
 
 For each profile: 0%, 25% or 100% mobility, and none / one offline
 window / periodic outages. This is **4 × 3 × 3 = 36 distinct families**.
@@ -59,7 +65,9 @@ cargo check --locked -p aquilum-core --no-default-features
 
 The tests report per-family final recipient acceptances, expiry, authority
 revocations, limited relay copies, assumed transferred bytes, disallowed
-cross-technology pairs and delivery slots. Repeating the same inputs must
+cross-technology pairs, relative delivery slots, and p50/p95 delay **among
+accepted test messages**. Expired and revoked messages remain in the denominator
+of the separate overall acceptance fraction. Repeating the same inputs must
 return the identical report. Do **not** interpret these assumed-link numbers
 as measured reliability. The 36/36 test is a proof of **scenario execution**,
 not proof of real-world performance or Akula messaging release-readiness.
