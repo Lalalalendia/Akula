@@ -80,6 +80,10 @@ impl Host {
         if !drawn.is_empty() {
             output.present(&drawn);
         }
+        // Release the mutable output borrow before calling methods on Host.
+        // The native timing snapshot belongs to the frame just submitted.
+        #[cfg(all(target_os = "windows", not(feature = "installed")))]
+        let native_output_stages = output.take_output_stages();
         self.layers = Some(layers);
         self.schedule_live();
         self.reveal();
@@ -113,7 +117,7 @@ impl Host {
             stage.output_present_ms = present.as_secs_f64() * 1000.0;
             #[cfg(target_os = "windows")]
             {
-                let native = output.take_output_stages();
+                let native = native_output_stages;
                 stage.output_map_ms = native.map_ms;
                 stage.output_unmap_ms = native.unmap_ms;
                 stage.output_copy_submit_ms = native.copy_submit_ms;
