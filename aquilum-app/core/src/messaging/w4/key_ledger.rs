@@ -82,18 +82,18 @@ impl W4TrustLedger {
 
     /// Only trusted host code holding a sealed ApprovedEnrollment may call.
     /// Higher epochs require NEW independently authenticated approval.
-    pub fn enroll(
-        &mut self,
-        approved: &ApprovedEnrollment,
-    ) -> Result<LedgerOutcome, LedgerError> {
-        if approved.epoch == 0 || approved.epoch > i64::MAX as u64
+    pub fn enroll(&mut self, approved: &ApprovedEnrollment) -> Result<LedgerOutcome, LedgerError> {
+        if approved.epoch == 0
+            || approved.epoch > i64::MAX as u64
             || approved.ed25519 == [0; 32]
             || approved.evidence_digest == [0; 32]
         {
             return Err(LedgerError::Invalid);
         }
         let device = approved.device.as_uuid().into_bytes();
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let old: Option<(i64, Vec<u8>, Vec<u8>, i64)> = tx
             .query_row(
                 "SELECT epoch,ed25519,evidence,revoked
@@ -109,19 +109,25 @@ impl W4TrustLedger {
                         (device,epoch,ed25519,evidence,revoked)
                      VALUES(?1,?2,?3,?4,0)",
                     params![
-                        device.as_slice(), approved.epoch as i64,
-                        approved.ed25519.as_slice(),approved.evidence_digest.as_slice()
+                        device.as_slice(),
+                        approved.epoch as i64,
+                        approved.ed25519.as_slice(),
+                        approved.evidence_digest.as_slice()
                     ],
                 )?;
                 LedgerOutcome::Enrolled
             }
-            Some((epoch,old_key,old_evidence,revoked)) => {
-                if epoch <= 0 { return Err(LedgerError::Conflict); }
+            Some((epoch, old_key, old_evidence, revoked)) => {
+                if epoch <= 0 {
+                    return Err(LedgerError::Conflict);
+                }
                 if approved.epoch < epoch as u64 {
                     return Err(LedgerError::StaleEpoch);
                 }
                 if approved.epoch == epoch as u64 {
-                    if revoked != 0 { return Err(LedgerError::Revoked); }
+                    if revoked != 0 {
+                        return Err(LedgerError::Revoked);
+                    }
                     if old_key.as_slice() != approved.ed25519.as_slice()
                         || old_evidence.as_slice() != approved.evidence_digest.as_slice()
                     {
@@ -134,8 +140,10 @@ impl W4TrustLedger {
                          SET epoch=?2,ed25519=?3,evidence=?4,revoked=0
                          WHERE device=?1",
                         params![
-                            device.as_slice(),approved.epoch as i64,
-                            approved.ed25519.as_slice(),approved.evidence_digest.as_slice()
+                            device.as_slice(),
+                            approved.epoch as i64,
+                            approved.ed25519.as_slice(),
+                            approved.evidence_digest.as_slice()
                         ],
                     )?;
                     LedgerOutcome::Rotated
@@ -148,25 +156,25 @@ impl W4TrustLedger {
 
     /// Revocation is sticky for its current epoch; re-enrollment requires
     /// a higher epoch AND independently confirmed new host approval.
-    pub fn revoke(
-        &mut self,
-        approved: &ApprovedRevocation,
-    ) -> Result<LedgerOutcome, LedgerError> {
-        if approved.epoch == 0 || approved.epoch > i64::MAX as u64
-            || approved.evidence_digest == [0;32]
+    pub fn revoke(&mut self, approved: &ApprovedRevocation) -> Result<LedgerOutcome, LedgerError> {
+        if approved.epoch == 0
+            || approved.epoch > i64::MAX as u64
+            || approved.evidence_digest == [0; 32]
         {
             return Err(LedgerError::Invalid);
         }
         let device = approved.device.as_uuid().into_bytes();
-        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let old: Option<(i64,i64)> = tx
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let old: Option<(i64, i64)> = tx
             .query_row(
                 "SELECT epoch,revoked FROM messaging_w4_trusted_devices WHERE device=?1",
                 params![device.as_slice()],
-                |r| Ok((r.get(0)?,r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let (epoch,revoked) = old.ok_or(LedgerError::Missing)?;
+        let (epoch, revoked) = old.ok_or(LedgerError::Missing)?;
         if epoch <= 0 || approved.epoch != epoch as u64 {
             return Err(LedgerError::StaleEpoch);
         }
@@ -194,17 +202,18 @@ impl TrustedRecipientKeys for W4TrustLedger {
             return None;
         }
         let device = recipient.as_uuid().into_bytes();
-        let row: Option<(i64,Vec<u8>,i64)> = self.db
+        let row: Option<(i64, Vec<u8>, i64)> = self
+            .db
             .query_row(
                 "SELECT epoch,ed25519,revoked
                  FROM messaging_w4_trusted_devices WHERE device=?1",
                 params![device.as_slice()],
-                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()
             .ok()
             .flatten();
-        let (found_epoch,key,revoked) = row?;
+        let (found_epoch, key, revoked) = row?;
         if found_epoch != epoch as i64 || revoked != 0 {
             return None;
         }
