@@ -18,8 +18,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ak-p2p-os-identity
-  cancel-in-progress: false
+  group: ak-p2p-os-identity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows-os-credential:
