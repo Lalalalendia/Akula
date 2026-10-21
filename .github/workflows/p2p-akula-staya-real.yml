@@ -41,17 +41,20 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C .external/staya-transfer rev-parse HEAD)" = "fadb38a792126f6098df086fc56ce0dcae3ca3f1"
-      - name: Build actual pinned Staya direct batch preview
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo build --manifest-path .external/staya-transfer/interop/release/Cargo.toml --locked --bin staya-direct-preview
       - name: Rust formatting for standalone bridge crate
         shell: bash
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
+      - name: Lint actual integration crate
+        shell: bash
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --all-targets -- -D warnings
+      - name: Build actual pinned Staya direct batch preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path .external/staya-transfer/interop/release/Cargo.toml --locked --bin staya-direct-preview
       - name: Live two-process direct QUIC plus independent physical Bao output
         shell: bash
         run: |
@@ -61,6 +64,3 @@ jobs:
           test -f "$BIN"
           export STAYA_PREVIEW_BIN="$BIN"
           cargo test --manifest-path interop/akula-staya/Cargo.toml --test real_quic -- --nocapture
-      - name: Lint actual integration crate
-        shell: bash
-        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --all-targets -- -D warnings
