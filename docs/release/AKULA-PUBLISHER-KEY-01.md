@@ -35,6 +35,20 @@ The workflow:
 
 It writes **no GitHub Release** and grants `contents: read` only. If the environment or secrets are absent, the run fails rather than treating an unsigned package as approved.
 
+## Build and verify a real Windows release candidate (without public publication)
+
+After the key proof passes, manually trigger [Actions → Akula Windows signed candidate (review only)](https://github.com/Lalalalendia/Akula/actions/workflows/akula-windows-signed-candidate.yml) on `main`.
+
+- The **main-only, environment-protected** Windows runner compiles the real native Akula package and builds the actual NSIS installer at pinned `github.sha`.
+- It runs the existing real Windows install/GUI/edit/reopen/uninstall smoke before touching the key secret.
+- It signs the exact tested `Akula_{version}_x64-setup.exe` bytes with the owner private key.
+- It creates `latest.json` binding product, version, source commit, Cargo.lock SHA-256, installer URL, signature, file size and SHA-256, and signs that exact metadata file.
+- An **independent Ubuntu verifier without any private key** downloads the candidate, rechecks source/platform/package metadata, verifies both detached signatures against the pinned public key, and proves tampered metadata cannot verify.
+- Output is a temporary GitHub Actions artifact named `akula-windows-signed-stage-NOT-RELEASE`; there is no automatic release, uploader token or write permission. The approval gate is `AKULA_WINDOWS_SIGNED_CANDIDATE_PASS real_installer=1 signed_manifest=1 independent_verify=1 tamper_refused=1 no_release=1`.
+
+**Important:** This creates a verified, signed candidate for owner review. It does not make the updater accessible to installed Windows clients. That still requires actual release publication, the signed-manifest-aware client, and a verified in-app update/rollback scenario.
+
+
 ## Next prerequisites for *working Windows auto-update*
 
 1. Accept [Windows real NSIS upgrade/recovery PR #522](https://github.com/Lalalalendia/Akula/pull/522) on its exact CI HEAD. It must pass the real 0.3.9→0.3.10→0.3.9 GUI and file-preservation tests, not just compile.
