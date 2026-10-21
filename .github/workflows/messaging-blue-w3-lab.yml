@@ -1,0 +1,50 @@
+name: Akula Blue W3 same-DB ingress laboratory
+
+on:
+  push:
+    branches:
+      - 'feature/akula-blue-w3-inbox-gate-20261022'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-blue-w3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  blue-w3-inbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Resolve pinned Blue dependency and emit reproducible lock
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 > /dev/null
+          echo AKULA_BLUE_LOCK_BEGIN
+          cat Cargo.lock
+          echo AKULA_BLUE_LOCK_END
+      - name: Format W3 adapter, inbox and focused tests
+        run: |
+          rustfmt --edition 2021 --check aquilum-app/core/src/messaging/w4/inbox.rs
+          rustfmt --edition 2021 --check aquilum-app/core/src/messaging/w4/inbox/blue.rs
+      - name: Blue W3 and W4 SQLite acceptance tests
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features messaging-blue-w3-lab 'messaging::' -- --nocapture
+      - name: Default non-messaging core still compiles
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --no-default-features
+      - name: Blue W3 Clippy
+        working-directory: aquilum-app
+        run: cargo clippy --locked -p aquilum-core --features messaging-blue-w3-lab -- -D warnings
