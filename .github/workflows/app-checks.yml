@@ -192,13 +192,21 @@ jobs:
           };
           fs.writeFileSync(path.join(root,'payload.AppImage'),payload);
           fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify(manifest));
-          // Independently signed Windows NSIS fixture, same exact Akula
-          // manifest schema and one disposable publisher trust root.
+          // The protected Windows-only publisher must never sign
+          // fabricated Linux artifact hashes just to fill a matrix.
           const windowsBytes=Buffer.from('MZ-AKULA-CI-ONLY-WINDOWS-NSIS-PAYLOAD-v1');
           const windowsHash=crypto.createHash('sha256').update(windowsBytes).digest('hex');
-          const winManifest=JSON.parse(JSON.stringify(manifest));
-          winManifest.artifacts['windows-x86_64'].sha256=windowsHash;
-          winManifest.artifacts['windows-x86_64'].size=windowsBytes.length;
+          const winManifest={
+            schema:1, product:'Akula', version:'0.3.10',
+            source_commit:'a'.repeat(40), cargo_lock_sha256:'b'.repeat(64),
+            artifacts:{
+              'windows-x86_64':{
+                filename:'Akula_0.3.10_x64-setup.exe',
+                sha256:windowsHash,
+                size:windowsBytes.length
+              }
+            }
+          };
           fs.writeFileSync(path.join(root,'payload.NSIS'),windowsBytes);
           fs.writeFileSync(path.join(root,'manifest-windows.json'),JSON.stringify(winManifest));
           NODE
@@ -213,7 +221,7 @@ jobs:
           grep -Fq 'AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1' "$RUNNER_TEMP/akula-native-minisign.log"
           echo 'AKULA_SIGNED_CANDIDATE_RUST_MINISIGN_PASS real_sign=1 wrong_key_refused=1' >> "$GITHUB_STEP_SUMMARY"
           echo 'AKULA_SIGNED_LINUX_STAGE_PASS signed_to_disk=1 native_inode_rehash=1' >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$GITHUB_HEAD_REF" == release/windows-nsis-self-update-01 ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && ( "$GITHUB_HEAD_REF" == release/windows-nsis-self-update-01 || "$GITHUB_HEAD_REF" == feature/windows-signed-manifest-v1-matrix-20261021 ) ]]; then
             cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_windows_fixture_accepts_signed_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-windows-minisign.log"
             grep -Fq 'AKULA_WINDOWS_REAL_MINISIGN_ADMISSION_PASS correct_key=1 exact_nsis=1 wrong_key=0 downgrade=0' "$RUNNER_TEMP/akula-native-windows-minisign.log"
             grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-windows-minisign.log"
