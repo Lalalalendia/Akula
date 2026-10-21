@@ -278,20 +278,31 @@ impl<T: NotionReadTransport> Scan<'_, T> {
     fn page(&mut self, id: &str, depth: usize) -> Result<(), String> {
         let obj = self.request(ReadRequest::Page(id.to_owned()))?;
         if required_id(&obj, "page")? != id { return Err("Notion page ID mismatch".into()); }
-        let relations: Vec<String> = obj.get("properties").and_then(Value::as_object)
-            .map(|m| m.values().filter_map(|prop| {
-                if prop.get("type").and_then(Value::as_str) == Some("relation") {
-                    let pid = prop.get("id")?.as_str()?;
-                    Some(pid.to_owned())
-                } else { None }
-            }).collect()).unwrap_or_default();
+        // Relations are primary source data. Missing IDs must fail closed:
+        // silently skipping a relation would falsely certify a complete graph.
+        let properties = obj.get("properties").and_then(Value::as_object)
+            .ok_or("Notion page missing properties object")?;
+        let mut relations = Vec::new();
+        for prop in properties.values() {
+            if prop.get("type").and_then(Value::as_str) == Some("relation") {
+                let pid = prop.get("id").and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .ok_or("Notion relation property missing stable ID")?;
+                relations.push(pid.to_owned());
+            }
+        }
         scan_mentions(&obj, id, &mut self.links, self.limits.max_objects * 16)?;
         self.insert("page", id.to_owned(), obj)?;
         for property in relations {
             let items = self.property_items(id, &property)?;
             for item in items {
-                let target = item.get("relation").and_then(|o| o.get("id")).and_then(Value::as_str);
-                if let Some(target) = target { self.edge_with_property(id, target, "relation", Some(&property))?; }
+                if item.get("type").and_then(Value::as_str) != Some("relation") {
+                    return Err("Notion relation property item has unexpected type".into());
+                }
+                let target = item.get("relation").and_then(|o| o.get("id"))
+                    .and_then(Value::as_str).filter(|id| !id.is_empty())
+                    .ok_or("Notion relation item missing target ID")?;
+                self.edge_with_property(id, target, "relation", Some(&property))?;
             }
         }
 
