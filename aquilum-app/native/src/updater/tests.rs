@@ -38,3 +38,15 @@ fn installed_linux_apply_refuses_unauthorized_bytes_without_shutdown() {
     assert!(error.contains("HOLD"), "Linux apply must refuse absent publisher and GUI ACK");
     assert!(!shutdown_called, "Linux apply cannot stop Akula before trusted admission");
 }
+
+#[cfg(target_os = "windows")]
+#[test]
+fn installed_windows_apply_refuses_unstaged_bytes_without_shutdown() {
+    let mut shutdown_called = false;
+    let result = super::apply(b"synthetic unsigned NSIS bytes", || {
+        shutdown_called = true;
+    });
+    let error = result.unwrap_err();
+    assert!(error.contains("HOLD"), "Windows install must refuse nontransactional apply");
+    assert!(!shutdown_called, "Windows must never exit before trusted staging and rollback");
+}
