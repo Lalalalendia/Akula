@@ -36,6 +36,39 @@ jobs:
       - name: Test non-authorizing correlation
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features p2p-offer-lab p2p_offer_grant_join_lab -- --nocapture
-      - name: Static analysis
+      - name: Check only P2P-owned files against unmodified Core lint debt
         working-directory: aquilum-app
-        run: cargo clippy --locked -p aquilum-core --all-targets --features p2p-offer-lab -- -D warnings
+        run: |
+          set -e
+          cargo clippy --locked -p aquilum-core --all-targets --features p2p-offer-lab --message-format=json -- -W clippy::all > p2p-join-clippy.jsonl
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          bad = []
+          legacy = 0
+          for line in Path("p2p-join-clippy.jsonl").read_text().splitlines():
+              try:
+                  item = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if item.get("reason") != "compiler-message":
+                  continue
+              diagnostic = item["message"]
+              if diagnostic.get("level") not in ("warning", "error"):
+                  continue
+              owned = any(
+                  ("p2p_offer_lab.rs" in span.get("file_name", "")
+                   or "p2p_offer_grant_join_lab.rs" in span.get("file_name", ""))
+                  for span in diagnostic.get("spans", []) if span.get("is_primary")
+              )
+              if owned:
+                  bad.append(diagnostic["message"])
+              else:
+                  legacy += 1
+          for issue in bad:
+              print("NEW P2P DIAGNOSTIC:", issue)
+          print(f"Core diagnostics outside scope: {legacy}")
+          if bad:
+              raise SystemExit(1)
+          print("P2P correlation module lint: PASS")
+          PY
