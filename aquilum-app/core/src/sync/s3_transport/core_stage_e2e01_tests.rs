@@ -1,5 +1,5 @@
-//! S3-E2E-01: process-isolated MinIO receiver, never production activation.
-//! Included only from the core_stage test module.
+// S3-E2E-01: process-isolated MinIO receiver, never production activation.
+// Included only from the core_stage test module.
 
     /// Separate, real OS process: re-open only the receiver's Core, registered
     /// workspace, SQLite state, pinned S3 snapshot and host-bound File Gate.
