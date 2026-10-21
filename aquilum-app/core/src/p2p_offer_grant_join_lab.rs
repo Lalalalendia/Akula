@@ -369,7 +369,6 @@ fn self_asserted_issuer_and_epoch_match_but_cannot_prove_policy() {
     );
 }
 
-
 // Preview-only shape mirroring Staya's current restricted ASCII queue labels.
 // The actual Staya QueueSelection is NOT linked in this opt-in Core test.
 #[derive(Clone, Debug, Eq, PartialEq)]
