@@ -12,6 +12,8 @@
 
 use super::*;
 use super::super::super::{IndependentlyApprovedJoin, PublisherPolicyV1};
+#[cfg(feature = "signed-vault-join-successor-integration-lab")]
+use super::super::super::{AwsS3ProbeClient, PinnedJoinError};
 use ring::rand::{SecureRandom, SystemRandom};
 use std::time::{Duration, Instant};
 
@@ -28,6 +30,8 @@ pub enum ReceiverJoinSessionError {
     WrongLocalScope,
     WrongChallenge,
     Join(AtomicJoinError),
+    #[cfg(feature = "signed-vault-join-successor-integration-lab")]
+    LiveYandexRead(PinnedJoinError),
 }
 
 #[derive(Debug)]
@@ -98,6 +102,22 @@ impl ReceiverJoinSession {
         signed_offer: &DecodedDsseEnvelope<'_>,
         approved: &IndependentlyApprovedJoin<'_>,
     ) -> Result<AtomicJoinOutcome, ReceiverJoinSessionError> {
+        self.consume_for_approved_scope(scope, approved)?;
+        journal.enroll_signed_pinned_genesis_atomically(
+            scope, root, root_etag, completed_read, policy, signed_offer,
+            approved,
+        ).map_err(ReceiverJoinSessionError::Join)
+    }
+
+
+    // Shared gate for both synthetic laboratory admission and the network
+    // entrypoint. Never let the remote call happen before this spends the
+    // challenge and checks the receiver's independent local scope.
+    fn consume_for_approved_scope(
+        &mut self,
+        scope: &S3RemoteAnchorScope,
+        approved: &IndependentlyApprovedJoin<'_>,
+    ) -> Result<(), ReceiverJoinSessionError> {
         if std::mem::replace(&mut self.consumed, true) {
             return Err(ReceiverJoinSessionError::AlreadyConsumed);
         }
@@ -113,9 +133,35 @@ impl ReceiverJoinSession {
         if approved.recipient_challenge_hex != self.challenge_hex {
             return Err(ReceiverJoinSessionError::WrongChallenge);
         }
+        Ok(())
+    }
+
+    /// E3g: perform the *actual* bounded Yandex V2 GET chain after a fresh
+    /// receiver challenge and independent owner/root/policy approval.
+    /// The private pinned receipt comes only from the inspected transport,
+    /// then E3c atomically records the exact root and publisher policy.
+    ///
+    /// This method does not infer account identity from an S3 response:
+    /// the caller must independently authenticate the account binding and
+    /// owner's key set. No File Gate, user note write, S3 writer or Sync.
+    #[cfg(feature = "signed-vault-join-successor-integration-lab")]
+    pub async fn enroll_from_yandex_read_once(
+        &mut self,
+        client: &AwsS3ProbeClient,
+        journal: &mut S3V2TrustedAnchorJournal,
+        scope: &S3RemoteAnchorScope,
+        root: &S3PackedHeadV2,
+        policy: &PublisherPolicyV1,
+        signed_offer: &DecodedDsseEnvelope<'_>,
+        approved: &IndependentlyApprovedJoin<'_>,
+    ) -> Result<AtomicJoinOutcome, ReceiverJoinSessionError> {
+        self.consume_for_approved_scope(scope, approved)?;
+        let (etag, pinned_read) =
+            super::super::super::s3_join_pinned_lab::verify_yandex_join_for_atomic_session(
+                client, scope, root, policy, approved, signed_offer,
+            ).await.map_err(ReceiverJoinSessionError::LiveYandexRead)?;
         journal.enroll_signed_pinned_genesis_atomically(
-            scope, root, root_etag, completed_read, policy, signed_offer,
-            approved,
+            scope, root, &etag, &pinned_read, policy, signed_offer, approved,
         ).map_err(ReceiverJoinSessionError::Join)
     }
 
