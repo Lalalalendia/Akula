@@ -44,11 +44,14 @@ hosted Windows NSIS GUI tests remain a distinct mandatory acceptance gate.
 - Production `signed_candidate::admit()` remains limited to a disabled Linux
   x86_64 AppImage path. A caller cannot enable Windows update admission through
   this testing change.
-- `Updater::find()`, `Updater::download()`, `apply::apply()` and the
-  `release.yml` HOLD workflow are unchanged. The existing unsupervised Windows
-  installer launch must **not** receive an authenticated candidate until
-  transactional staging, a protected prior-generation backup, a first-GUI
-  acknowledgement and a crash-tested automatic rollback exist.
+- `Updater::find()`, `Updater::download()` and the `release.yml`
+  HOLD workflow are unchanged. The **old Windows `apply()` path now returns
+  HOLD unconditionally**, instead of launching the downloaded NSIS installer
+  from a process-specific temp directory. This prevents an accidental channel
+  toggle from bypassing a signed staging and rollback authority. Any future
+  Windows `apply()` implementation must be a separate reviewed transaction
+  with a protected prior-generation backup, a first-GUI acknowledgement
+  and crash-tested automatic rollback.
 - No Akula publisher private key, release, manifest publication, permanent
   trust root, Authenticode certificate or migration from Aquilum is introduced.
 
