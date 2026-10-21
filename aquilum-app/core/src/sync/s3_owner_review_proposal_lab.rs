@@ -6,7 +6,7 @@
 //! compare with a SEPARATELY received owner fingerprint. The displayed
 //! candidate must NEVER be presented as independently approved.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use super::{IndependentlyApprovedJoin, S3Keyspace, VaultId};
 use super::s3_owner_manual_fingerprint_lab::{
     IndependentOwnerFingerprintError, verify_independently_entered_owner_fingerprint,
@@ -16,7 +16,6 @@ use std::collections::BTreeSet;
 
 pub const MAX_OWNER_REVIEW_PROPOSAL_BYTES: usize = 4096;
 const OWNER_KEY_BYTES: usize = 32;
-const HEX: &[u8; 16] = b"0123456789abcdef";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OwnerReviewProposalError {
@@ -29,7 +28,7 @@ pub enum OwnerReviewProposalError {
     Comparison(IndependentOwnerFingerprintError),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WireProposal {
     schema: u16,
