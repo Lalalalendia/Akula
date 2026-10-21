@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Opt-in pure message state-machine experiment; no network, storage, UI or workers.
+messaging-core-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
