@@ -73,6 +73,13 @@ impl SignedCandidate {
         &self.bytes
     }
 
+    /// Bytes leave the sealed candidate only for the legacy UI handoff,
+    /// whose Windows apply entrypoint still refuses installation. The final
+    /// transaction boundary must receive SignedCandidate, never this Vec.
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
     pub(crate) fn version(&self) -> &str {
         &self.version
     }
