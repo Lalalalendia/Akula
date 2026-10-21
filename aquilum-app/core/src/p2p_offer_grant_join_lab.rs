@@ -337,3 +337,34 @@ fn mutated_offer_after_accept_cannot_reuse_selection() {
         Err(Hold::InvalidConsent),
     );
 }
+
+#[test]
+fn forged_selection_with_matching_public_fields_is_not_consent_proof() {
+    let (offer, mut selected, grant, local) = fixture();
+    // SelectionDraft is a public-data snapshot, not signed recipient consent.
+    // A caller can reconstruct it without running OfferSession::resolve.
+    selected = SelectionDraft {
+        offer_id: offer.offer_id,
+        commitment: offer.commitment(),
+        files: vec![offer.files[0].clone()],
+    };
+    assert_eq!(
+        correlate(&offer, &selected, grant, local, NOW + 2),
+        Ok(Observation::ConsistentOnlyNoAuthorization),
+    );
+}
+
+#[test]
+fn self_asserted_issuer_and_epoch_match_but_cannot_prove_policy() {
+    let (offer, selected, mut grant, mut local) = fixture();
+    // Both the purported authority and the observation are controlled by
+    // synthetic caller input. Matching values alone cannot authenticate either.
+    grant.trusted_issuer = [77; 32];
+    local.trusted_issuer = [77; 32];
+    grant.epoch = 999;
+    local.expected_epoch = 999;
+    assert_eq!(
+        correlate(&offer, &selected, grant, local, NOW + 2),
+        Ok(Observation::ConsistentOnlyNoAuthorization),
+    );
+}
