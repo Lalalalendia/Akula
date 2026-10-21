@@ -6,7 +6,7 @@ use std::io::Read;
 // installation; the Windows transaction/Bridge/ACK remain separate gates.
 #[allow(dead_code)]
 mod signed_candidate;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use signed_candidate::SignedCandidate;
 
 pub(super) const ENDPOINT: &str =
@@ -63,11 +63,13 @@ fn canonical_asset_url(offer: &signed_candidate::VerifiedOffer) -> String {
 // Key ID (human-readable Minisign comment): D7A66B6D4046F6C5.
 pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3QTY2QjZENDA0NkY2QzUKUldURjlrWkFiV3VtMXh2SFFsdEljaUw0T0pUakVmd1krZG4wVmJ1REVmaEx1eWcrMFIzTjQzMi8K";
 
-/// Signature-first discovery alone cannot approve replacing a binary.
-/// The signed publisher proof, Windows Bridge/transaction/recovery and first
-/// working GUI ACK require independent acceptance before this may change.
+/// Minimal signed-NSIS beta: Windows installed builds use the already
+/// pinned Akula publisher key. No Linux/macOS release is authorized here.
+/// Every Windows payload still requires independently valid Minisign signatures
+/// on the exact manifest and installer, plus signed size/SHA-256 admission.
+/// This grants NO automatic NSIS crash rollback (manual repair for beta).
 pub(super) const fn channel_ready() -> bool {
-    false
+    cfg!(all(target_os = "windows", feature = "installed"))
 }
 
 #[derive(Clone, Debug)]
@@ -168,7 +170,11 @@ mod input_tests {
         assert_eq!(formatted.lines().count(), 2, "expected exactly one Minisign key record");
         minisign_verify::PublicKey::decode(&formatted)
             .expect("owner-provided key must be a valid Minisign public key");
-        assert!(!channel_ready(), "public key alone must not authorize publication");
+        assert_eq!(
+            channel_ready(),
+            cfg!(all(target_os = "windows", feature = "installed")),
+            "only signed installed Windows beta may use Akula-owned releases",
+        );
     }
 
     #[test]

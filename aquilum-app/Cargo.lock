@@ -123,6 +123,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "akula-server-release-b1a"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "ring",
+ "serde",
+]
+
+[[package]]
 name = "akula-server-bootstrap-b0"
 version = "0.1.0"
 dependencies = [
@@ -200,6 +209,7 @@ name = "aquilum-core"
 version = "0.3.10"
 dependencies = [
  "akula-server-bootstrap-b0",
+ "akula-server-release-b1a",
  "atomic-write-file",
  "aws-config",
  "aws-sdk-s3",

@@ -49,5 +49,5 @@ test('CI is not a release and updater stays fail closed', () => {
   const pinned = updater.match(/pub\(super\) const PUBLIC_KEY: &str = "([^"]+)";/);
   assert.ok(pinned, 'Akula public release root must be explicitly pinned');
   assert.equal(pinned[1], 'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3QTY2QjZENDA0NkY2QzUKUldURjlrWkFiV3VtMXh2SFFsdEljaUw0T0pUakVmd1krZG4wVmJ1REVmaEx1eWcrMFIzTjQzMi8K', 'unexpected Akula publisher key');
-  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*false\s*\}/);
+  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
 });
