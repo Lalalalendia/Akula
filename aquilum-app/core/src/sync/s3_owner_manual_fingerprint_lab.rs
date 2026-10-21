@@ -156,7 +156,7 @@ mod tests {
         }).unwrap(), fp);
         assert!(matches!(
             verify_independently_entered_owner_fingerprint(&approval, &"0".repeat(64)),
-            Err(IndependentOwnerFingerprintError::Mismatch),
+            Err(IndependentOwnerFingerprintError::InvalidIndependentEntry),
         ));
         assert!(matches!(
             verify_independently_entered_owner_fingerprint(&approval, &fp.to_uppercase()),
