@@ -19,3 +19,11 @@ A separate CI feature `server-bootstrap-b1d0-durable-node` and actual root UID0 
 - No real Windows SSH ProvisionCoordinator, installer progress UI, signed package distribution, real owner authorization UI or VPS operation is connected. No automatic boot service, WAN bind, user vault mutation, arbitrary path/command or port is provided. Root on the user's own VPS is trusted; hostile UID0/complete snapshot rollback remain out of scope.
 
 **Next shared B1 gate:** prove B1d0 with the *real* signed ELF inside existing B1c1 QEMU, persistent witness journal and crash reboots; only then connect a platform-neutral typed install coordinator, Windows OpenSSH pinned transport and a native confirmation wizard. No new standalone CAS laboratory is needed.
+
+## Windows setup draft (same PR; no SSH action yet)
+
+The installed Native application's Settings now includes a **Your server / Свой сервер** section with public-only, persisted fields: server host, SSH port, SSH account name, canonical `ssh-ed25519` host public key and the **independently obtained** OpenSSH `SHA256:` fingerprint. Core validates a strict 51-byte SSH public-wire encoding and SHA-256 consistency entirely offline. No private SSH key, passphrase, sudo password, provider token or secret appears in `AppConfig`. A legacy configuration without this section loads with empty fields and port 22.
+
+The interface explicitly says **Not connected / Install locked** and keeps both SSH-probe and Node-install buttons disabled. Matching manually entered public fields is **not** a successful SSH key exchange or trusted server, and cannot grant execution authority. The Windows profile CI tests serialization, hostile/secret inputs, offline host-pin mismatch, presence of disabled actions and native widget compilation.
+
+This is an actual native UI entry and a reusable public setup state, not an end-to-end install wizard yet. The next missing implementation is a Windows OpenSSH subprocess transport with independent host key pin, ACL-protected temporary known_hosts, non-secret error handling, bounded I/O and a root-owned fixed install RPC after real operator approval. Do **not** enable the buttons by merely toggling a feature.
