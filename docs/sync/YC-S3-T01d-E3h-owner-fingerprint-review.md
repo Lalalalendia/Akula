@@ -46,3 +46,29 @@ This is **not a shipping trust UI**. The app has no independently authenticated 
 Also unresolved: real user-authorized private Yandex `storage.viewer` test, Windows CredUI masked field + Cancel, provider principal provenance, protection from a malicious complete SQLite rollback and S3 freeze/split view. Nothing enables File Gate, object PUT/CAS/DELETE, user note changes or automatic Sync.
 
 Source [Notion YC-S3-T01d RFC](https://app.notion.com/p/3ff32a84beec813ebfdff9b96bf103d1). Dependency [E3g #507](https://github.com/Lalalalendia/Akula/pull/507).
+
+
+## Offline proposal import for the Native review wizard
+
+A new bounded `OwnerReviewProposal::parse_untrusted_json` accepts **at most 4096 bytes** of proposal metadata; the schema is strict `deny_unknown_fields` and version 1. It contains only public candidate information:
+
+```json
+{
+  "schema": 1,
+  "provider": "yandex-object-storage",
+  "endpoint": "https://storage.yandexcloud.net",
+  "region": "ru-central1",
+  "force_path_style": true,
+  "bucket": "example-private-bucket",
+  "prefix": "akula/vault",
+  "vault_id": "00000000-0000-4000-8000-000000000001",
+  "genesis_root_blake3": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "genesis_policy_blake3": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "owner_keys_hex": ["1111111111111111111111111111111111111111111111111111111111111111"],
+  "owner_quorum": 1
+}
+```
+
+Those values illustrate the wire format, **not an authentic owner certificate**; a valid JSON file must not ever be called trusted. The parser rejects oversized or malformed packets, unknown schema/fields, incorrect Yandex endpoint, invalid namespace, malformed/noncanonical pins, duplicate public keys, zero keys, and quorum outside the permitted keyset. Its typed `approval_for_challenge` uses an E3e receiver-issued challenge and can be fed to E3h's `verify_independently_entered_owner_fingerprint`. The proposal itself MUST NOT supply the "independently entered" fingerprint used for authorization; user must obtain that value from the authenticated owner, separate from S3 or the proposal file.
+
+This is the first import boundary for the future Native settings wizard. It provides **neither a visible file picker nor an active enrollment UI yet**, and no signed invitation, root contents or key custody. The native controller must import the candidate, create the scope-specific challenge, wait for the owner-controlled separate 256-bit code, then verify DSSE signatures and the real pinned V2 read before E3c admission. Both Linux and Windows test the codec and its rejection cases under the existing E3h CI.
