@@ -17,6 +17,10 @@ const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_LINUX_IMAGE_BYTES: usize = 512 * 1024 * 1024;
 const TARGET_LINUX_APPIMAGE: &str = "linux-x86_64-appimage";
 const TARGET_WINDOWS_X64: &str = "windows-x86_64";
+// Windows candidates must not exceed the same bound enforced by the network
+// payload reader; otherwise a signed candidate could be accepted by the
+// schema but could never be downloaded by the installed updater.
+const MAX_WINDOWS_SETUP_BYTES: u64 = super::super::download_guard::MAX_UPDATE_BYTES;
 
 fn hold(why: &str) -> String {
     format!("AKULA_SIGNED_CANDIDATE_HOLD: {why}")
@@ -201,7 +205,7 @@ fn validate_windows_asset(item: &Artifact, version: &str) -> Result<(), String> 
     if item.filename != format!("Akula_{version}_x64-setup.exe")
         || !valid_hex(&item.sha256, 64)
         || item.size == 0
-        || item.size > MAX_RELEASE_ARTIFACT_BYTES
+        || item.size > MAX_WINDOWS_SETUP_BYTES
     {
         return Err(hold("invalid signed Windows artifact identity"));
     }
@@ -253,7 +257,7 @@ fn inspect_authenticated(
         "RPM",
     )?;
     let (asset, max_bytes) = match expected_platform {
-        TARGET_WINDOWS_X64 => (&manifest.artifacts.windows, MAX_RELEASE_ARTIFACT_BYTES),
+        TARGET_WINDOWS_X64 => (&manifest.artifacts.windows, MAX_WINDOWS_SETUP_BYTES),
         TARGET_LINUX_APPIMAGE => (&manifest.artifacts.appimage, MAX_LINUX_IMAGE_BYTES as u64),
         _ => return Err(hold("unsupported platform")),
     };
@@ -285,6 +289,11 @@ fn admit_with_trusted_key(
 ) -> Result<SignedCandidate, String> {
     if key.is_empty() {
         return Err(hold("Akula publisher key is not installed"));
+    }
+    // Bound untrusted bytes before the cryptographic verifier processes
+    // them, and reject an empty manifest even with a caller-provided key.
+    if manifest.is_empty() || manifest.len() > MAX_MANIFEST_BYTES {
+        return Err(hold("signed manifest size limit"));
     }
     // Verify the exact downloaded manifest bytes BEFORE trusting even its
     // version or URLs. A signature on package bytes alone cannot authenticate
@@ -393,7 +402,7 @@ mod tests {
                 TARGET_WINDOWS_X64, "0.3.9",
             ).is_err(), "wrong Windows identity admitted: {name}");
         }
-        for size in [0, setup.len() as u64 - 1, MAX_RELEASE_ARTIFACT_BYTES + 1] {
+        for size in [0, setup.len() as u64 - 1, MAX_WINDOWS_SETUP_BYTES + 1] {
             let mut altered = doc.clone();
             altered["artifacts"]["windows-x86_64"]["size"] = json!(size);
             assert!(inspect_authenticated(
@@ -401,6 +410,21 @@ mod tests {
                 TARGET_WINDOWS_X64, "0.3.9",
             ).is_err(), "wrong Windows byte budget admitted: {size}");
         }
+    }
+
+    #[test]
+    fn manifest_limit_is_enforced_before_signature_verification() {
+        let huge = vec![b'a'; MAX_MANIFEST_BYTES + 1];
+        let error = admit_with_trusted_key(
+            &huge, "", Vec::new(), "not-even-a-valid-key",
+            TARGET_WINDOWS_X64, "0.3.9",
+        ).unwrap_err();
+        assert!(error.contains("signed manifest size limit"));
+        let error = admit_with_trusted_key(
+            b"", "", Vec::new(), "not-even-a-valid-key",
+            TARGET_WINDOWS_X64, "0.3.9",
+        ).unwrap_err();
+        assert!(error.contains("signed manifest size limit"));
     }
 
     #[test]
