@@ -6,7 +6,7 @@ This directory contains a **real compiled adapter** between Akula Core
 `OfferV1 / DecisionV1 / OfferSession` and the separately maintained
 `staya-transfer::queue::QueueSelection`. It intentionally does not mirror or
 duplicate Staya's queue implementation. The dependency is pinned to Staya's
-immutable commit `fadb38a792126f6098df086fc56ce0dcae3ca3f1`.
+immutable commit `adf4356f3a218bd7fce976ef813a019c3aac471d`.
 
 The CI workflow checks out this exact Staya revision, builds its existing
 `staya-direct-preview` executable with its locked release compatibility
@@ -63,3 +63,20 @@ conditions can be inferred from this end-to-end test.
 - For a local run, build the exact Staya pinned
   `interop/release/Cargo.toml` binary and set `STAYA_PREVIEW_BIN`.
   The workflow is the primary supported Linux/Windows reproduction.
+
+## Provider-side Akula consent gate (STY-G1n)
+
+The interop test now runs real Staya `serve-batch-gated`, not an already
+permitted `serve-batch`. The original receiver EndpointId must first fail a
+real QUIC connection/GET. The test controller validates Akula OfferSession
+consent and the actual Staya ticket/selected-root commitment, then submits a
+sender-local `AUTHORIZE <queue-commitment> <receiver-EndpointId>` command.
+Only after Staya confirms `PROVIDER_ARMED` may the same receiver complete
+Bao staging. An unrelated real peer is denied **after** arming. Provider
+permission expires after 180 seconds and closes on sender EOF.
+
+This is a **synthetic two-process integration test**, with a trusted local
+controller and ephemeral device identities. It is not a real Akula installed
+UI, trusted device enrollment, remote-signed user decision, authenticated
+host IPC, File Gate publish permission, or durable application receipt.
+Do not enable shipping P2P from this result.
