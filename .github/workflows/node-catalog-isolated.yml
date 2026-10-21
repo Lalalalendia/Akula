@@ -1,0 +1,27 @@
+name: Node Catalog D1.5 standalone parity
+
+on:
+  pull_request:
+    paths:
+      - 'modules/node-catalog/**'
+      - '.github/workflows/node-catalog-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-catalog-isolated-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  node-catalog-standalone:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify unchanged catalog implementation
+        run: cmp -s aquilum-app/core/src/node_catalog_lab.rs modules/node-catalog/src/catalog.rs
+      - name: Run original D1.5 filesystem and security tests
+        run: cargo test --manifest-path modules/node-catalog/Cargo.toml -- --nocapture
