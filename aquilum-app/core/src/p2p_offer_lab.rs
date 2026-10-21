@@ -122,6 +122,8 @@ impl OfferV1 {
             || ttl > MAX_TTL_SECS
             || self.offer_id.is_nil()
             || self.nonce.iter().all(|&b| b == 0)
+            || self.sender.device_id.as_uuid().is_nil()
+            || self.receiver.device_id.as_uuid().is_nil()
             || self.sender.device_id == self.receiver.device_id
             || self.sender.endpoint_id == self.receiver.endpoint_id
             || self.sender.endpoint_id.iter().all(|&b| b == 0)
@@ -516,6 +518,17 @@ mod tests {
             s.resolve(&decision(&x, vec![0]), x.receiver, NOW + 2),
             Err(OfferError::AlreadyResolved)
         );
+    }
+
+    #[test]
+    fn nil_application_device_identity_is_rejected() {
+        let mut bad = offer();
+        bad.sender.device_id = DeviceId::from_uuid(Uuid::nil());
+        assert_eq!(bad.validate(NOW), Err(OfferError::InvalidMetadata));
+
+        bad = offer();
+        bad.receiver.device_id = DeviceId::from_uuid(Uuid::nil());
+        assert_eq!(bad.validate(NOW), Err(OfferError::InvalidMetadata));
     }
 
     #[test]
