@@ -17,7 +17,7 @@ server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
 server-bootstrap-b0-openssh-lab = ["server-bootstrap-b0-lab"]
 # Pure offline release-signature gate; never executes or installs a package.
-server-bootstrap-b1a-release-lab = []
+server-bootstrap-b1a-release-lab = ["dep:akula-server-release-b1a"]
 # Linux-only inert staging laboratory; requires B1a verifier, no executable install.
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.
@@ -99,6 +99,7 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
 akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -34,11 +34,11 @@ jobs:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           shared-key: akula-b1a-release-proof-v1
           cache-workspace-crates: true
-      - name: Check shared B1a is exactly the original signed-release verifier
+      - name: Verify Core exposes the shared signed-release API
         shell: bash
         run: |
           set -euo pipefail
-          cmp aquilum-app/core/src/server_release_lab.rs modules/bootstrap-b1a/src/lib.rs
+          grep -Fx 'pub use akula_server_release_b1a::*;' aquilum-app/core/src/server_release_lab.rs
       - name: Run shared B1a eight original security contracts
         shell: bash
         run: |
