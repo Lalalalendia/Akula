@@ -120,7 +120,7 @@ impl TransferState {
         }).collect()
     }
 
-    fn rows(&self) -> Vec<transfer_ui::QueueRow> {
+    pub(super) fn rows(&self) -> Vec<transfer_ui::QueueRow> {
         self.drafts.iter().enumerate().map(|(index, item)| {
             let raw = item.path.file_name().unwrap_or_default().to_string_lossy();
             let mut name: String = raw.chars().filter(|c| !c.is_control()).take(96).collect();
