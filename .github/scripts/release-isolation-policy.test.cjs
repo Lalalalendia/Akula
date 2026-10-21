@@ -48,7 +48,7 @@ test('safe standalone Windows beta remains separate; updater remains off', () =>
   assert.equal(decoded.split('\n')[0], 'untrusted comment: minisign public key: D7A66B6D4046F6C5');
   assert.match(decoded.split('\n')[1], /^RW[A-Za-z0-9+/]+$/);
   assert.equal(decoded.split('\n').filter(Boolean).length, 2);
-  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*false\s*\}/);
+  assert.match(updater, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
 });
 
 test('this policy runs when the release workflow is edited', () => {
