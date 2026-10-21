@@ -18,6 +18,8 @@ pub enum Setter {
     Scale,
     HomePage,
     Autostart,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    OwnerReviewCode,
 }
 
 pub struct Context {
@@ -32,12 +34,16 @@ pub struct Context {
     pub trash_page: usize,
     pub autostart: Option<bool>,
     pub update: Option<crate::updater::Status>,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    pub owner_review: Option<crate::ui::settings::owner_review::OwnerReviewView>,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    pub owner_review_notice: Option<&'static str>,
 }
 
 impl Context {
     #[cfg(test)]
     pub fn new(scale: f64) -> Self {
-        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
+        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None, #[cfg(feature = "yandex-owner-review-ui-preview")] owner_review: None, #[cfg(feature = "yandex-owner-review-ui-preview")] owner_review_notice: None }
     }
 }
 
@@ -52,6 +58,12 @@ pub enum Action {
     NewToken,
     Copy(usize, String),
     OpenUrl(&'static str),
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    ImportOwnerProposal,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    CompareOwnerCode,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    ClearOwnerProposal,
     CheckUpdates,
     InstallUpdate,
 }

@@ -203,6 +203,10 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
                             || *url == "https://console.yandex.cloud/",
                             "Only pinned HTTPS Yandex documentation destinations are allowed");
                     }
+                    #[cfg(feature = "yandex-owner-review-ui-preview")]
+                    Action::ImportOwnerProposal | Action::ClearOwnerProposal => {
+                        assert!(!button.enabled, "empty bucket/review must keep preview inert");
+                    }
                     other => panic!("An S3 setup button must not grant write/sync capability: {other:?}"),
                 }
             }
@@ -232,4 +236,49 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     let english = blocks(Section::Sync, &config, &ctx);
     assert_eq!(english[0].title, t("settings.yandex.title"));
     assert!(english[0].rows.iter().any(|row| row.label == t("settings.yandex.credentialSafety")));
+}
+
+
+#[cfg(feature = "yandex-owner-review-ui-preview")]
+#[test]
+fn owner_review_preview_has_no_config_setter_or_remote_authority_action() {
+    use crate::ui::settings::owner_review::{OwnerReviewView, ReviewState};
+    let mut config = AppConfig::default();
+    config.s3_onboarding.bucket = "private-review-bucket".into();
+    let mut ctx = Context::new(1.0);
+    let basic = blocks(Section::Sync, &config, &ctx);
+    let actions = basic[0].rows.iter().filter_map(|row| match &row.control {
+        Control::Buttons(items) => Some(items),
+        _ => None,
+    }).flatten().collect::<Vec<_>>();
+    assert!(actions.iter().any(|b| b.action == Action::ImportOwnerProposal && b.enabled));
+    assert!(!actions.iter().any(|b| b.action == Action::CompareOwnerCode));
+    ctx.owner_review = Some(OwnerReviewView {
+        untrusted_bucket: "private-review-bucket".into(),
+        challenge_hex: Some("a".repeat(64)),
+        state: ReviewState::AwaitingIndependentOwner,
+    });
+    let filled = blocks(Section::Sync, &config, &ctx);
+    let approval = filled[0].rows.iter().find(|row|
+        row.label == t("settings.yandex.reviewEnterCode")).unwrap();
+    assert!(matches!(approval.setter, Some(Setter::OwnerReviewCode)));
+    assert!(matches!(&approval.control, Control::Text { commit: false, value } if value.is_empty()));
+    let buttons = filled[0].rows.iter().filter_map(|row| match &row.control {
+        Control::Buttons(items) => Some(items),
+        _ => None,
+    }).flatten().collect::<Vec<_>>();
+    assert!(buttons.iter().any(|b| b.action == Action::CompareOwnerCode && b.enabled));
+    assert!(!buttons.iter().any(|b| matches!(&b.action, Action::Restore(_) | Action::RequestRecoveryReview(_))));
+    assert_eq!(config.s3_onboarding.bucket, "private-review-bucket");
+
+    ctx.owner_review = Some(OwnerReviewView {
+        untrusted_bucket: "private-review-bucket".into(),
+        challenge_hex: None,
+        state: ReviewState::MatchedOfflineOnly,
+    });
+    let consumed = blocks(Section::Sync, &config, &ctx);
+    assert!(!consumed[0].rows.iter().any(|row| row.label == t("settings.yandex.reviewEnterCode")));
+    assert!(consumed[0].rows.iter().any(|row|
+        matches!(&row.control, Control::Status { text, .. }
+            if text == &t("settings.yandex.reviewMatchedOffline"))));
 }

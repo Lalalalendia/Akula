@@ -1,5 +1,7 @@
 pub mod controls;
 pub mod schema;
+#[cfg(feature = "yandex-owner-review-ui-preview")]
+pub mod owner_review;
 
 mod control;
 mod layout;
@@ -50,6 +52,10 @@ pub struct SettingsDialog {
     pub sync_selected: Option<aquilum_core::sync::NativeRecoveryCasePreview>,
     pub sync_notice: Option<String>,
     pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    pub owner_review: Option<owner_review::OwnerReview>,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    pub owner_review_notice: Option<&'static str>,
 }
 
 fn card_size(room: Size) -> Size {
@@ -98,7 +104,12 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
         .with_fixed(Rule::new(Axis::Horizontal, || theme::current().border_default))
         .with(NewWidget::new(body), 1.0);
     let (copied, trash_page) = (ctx.copied, ctx.trash_page);
-    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None };
+    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None,
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        owner_review: None,
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        owner_review_notice: None,
+    };
     (NewWidget::new(card), finish)
 }
 

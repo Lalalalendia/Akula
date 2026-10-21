@@ -82,7 +82,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo check --locked -p aquilum-core --no-default-features
-          if grep -Eq 'signed-vault-(manual-owner-review|join-successor-integration|signed-successor|receiver-session|atomic-join|pinned-join|pairing|policy-receipt)-lab' native/Cargo.toml; then
-            echo 'Trust experiments are not installed native capabilities'
+          # E3i may add an EXPLICIT opt-in Native owner-review UI feature.
+          # Only activation through default, installed, or a shipping Sync
+          # feature is prohibited. Lab features must never enter release.
+          if sed -n '/^\[features\]/,/^\[dependencies\]/p' native/Cargo.toml \
+            | grep -E '^(default|installed|sync-installed-host|yandex-s3-connection-preview) *=' \
+            | grep -Eq 'signed-vault-|yandex-owner-review-ui-preview'; then
+            echo 'Trust review experiments cannot be installed/native defaults'
             exit 1
           fi

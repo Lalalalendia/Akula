@@ -9,6 +9,8 @@ use crate::ui::settings::Binding;
 use crate::ui::settings::controls::{Changed, DropdownButton, Picked};
 use crate::ui::settings::schema::{Action, Value};
 use crate::ui::widgets::Pressed;
+#[cfg(feature = "yandex-owner-review-ui-preview")]
+use crate::ui::editor::TextAction;
 
 impl App {
     pub(in crate::app) fn on_settings_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
@@ -113,7 +115,39 @@ impl App {
             return Outcome::default();
         }
 
+        // This editor is VOLATILE and not a Config setter. Capture only the
+        // separate owner-supplied 64-byte hex in SettingsDialog memory.
+        // Never route its contents through self.apply() or a settings write.
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        if dialog.section == super::Section::Sync
+            && matches!(dialog.bindings.get(&id), Some(
+                Binding::Text { setter: crate::ui::settings::schema::Setter::OwnerReviewCode, .. }
+            ))
+            && let Some(TextAction::Changed(value) | TextAction::Entered(value)) =
+                action.downcast_ref::<TextAction>()
+        {
+            if let Some(review) = dialog.owner_review.as_mut() {
+                review.typed = if value.len() <= 64 { value.clone() } else { String::new() };
+            }
+            return self.keep(dialog, None, Effect::None, root);
+        }
+
         let (mut effect, menu) = self.on_binding(root, &mut dialog.bindings, id, action);
+        // An already displayed owner code must never be attributed to a
+        // different local bucket or AWS profile after the user edits setup.
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        if dialog.section == super::Section::Sync
+            && let Some(review) = dialog.owner_review.as_ref()
+        {
+            let selected = self.workspace.core.settings.get_config().s3_onboarding;
+            if !review.still_matches_local_draft(
+                &selected.bucket, &selected.aws_profile_name,
+            ) {
+                dialog.owner_review = None;
+                dialog.owner_review_notice = Some("settings.yandex.reviewDraftChanged");
+                effect = Effect::Content;
+            }
+        }
         if action.downcast_ref::<Pressed>().is_some()
             && let Some(Binding::Button(button)) = dialog.bindings.get(&id)
         {
@@ -124,6 +158,15 @@ impl App {
                 Action::RequestRecoveryReview(decision) if dialog.section == super::Section::Sync =>
                     self.request_sync_review(root, &mut dialog, decision),
                 Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
+                #[cfg(feature = "yandex-owner-review-ui-preview")]
+                Action::ImportOwnerProposal if dialog.section == super::Section::Sync =>
+                    self.import_owner_proposal_preview(&mut dialog),
+                #[cfg(feature = "yandex-owner-review-ui-preview")]
+                Action::CompareOwnerCode if dialog.section == super::Section::Sync =>
+                    self.compare_owner_fingerprint_preview(&mut dialog),
+                #[cfg(feature = "yandex-owner-review-ui-preview")]
+                Action::ClearOwnerProposal if dialog.section == super::Section::Sync =>
+                    self.clear_owner_fingerprint_preview(&mut dialog),
                 other => self.press(&mut dialog, other),
             };
         }

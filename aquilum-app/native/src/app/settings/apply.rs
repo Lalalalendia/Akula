@@ -49,6 +49,8 @@ impl App {
                 }
                 Effect::Content
             }
+            #[cfg(feature = "yandex-owner-review-ui-preview")]
+            Action::ImportOwnerProposal | Action::CompareOwnerCode | Action::ClearOwnerProposal => Effect::None,
             Action::OpenUrl(url) => {
                 system::open_url(url);
                 Effect::None
@@ -62,6 +64,8 @@ impl App {
                 let Value::Number(percent) = value else { return Effect::None };
                 if self.interface.set_scale(percent / 100.0) { Effect::Rescale } else { Effect::None }
             }
+            #[cfg(feature = "yandex-owner-review-ui-preview")]
+            Setter::OwnerReviewCode => Effect::None, // handled only within volatile SettingsDialog
             Setter::Autostart => {
                 let Value::Bool(on) = value else { return Effect::None };
                 if !crate::autostart::set(on) {

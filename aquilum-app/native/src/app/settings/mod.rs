@@ -16,6 +16,8 @@ mod apply;
 mod bindings;
 mod refresh;
 mod recovery;
+#[cfg(feature = "yandex-owner-review-ui-preview")]
+mod owner_review;
 
 use crate::system;
 use crate::ui::menu::Menu;
@@ -79,6 +81,10 @@ impl App {
             trash_page,
             autostart: crate::autostart::available().then(crate::autostart::enabled),
             update: crate::updater::available().then(|| self.updater.status()),
+            #[cfg(feature = "yandex-owner-review-ui-preview")]
+            owner_review: None,
+            #[cfg(feature = "yandex-owner-review-ui-preview")]
+            owner_review_notice: None,
         }
     }
 

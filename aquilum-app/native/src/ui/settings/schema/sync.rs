@@ -13,9 +13,10 @@ pub(super) const YANDEX_AWS_PROFILE_DOCS: &str = "https://yandex.cloud/ru/docs/s
 /// YC-S3-T01, UI stage only. A validated draft is NOT authorization, remote
 /// account identity proof, a live S3 HEAD, or permission to start syncing.
 /// Explicitly no field accepts a secret: native TextEditor fields are plaintext.
-pub(super) fn yandex_setup(config: &AppConfig) -> Block {
+pub(super) fn yandex_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.s3_onboarding;
-    let rows = vec![
+    #[allow(unused_mut)]
+    let mut rows = vec![
         info(t("settings.yandex.explanation"), Some(t("settings.yandex.explanationHint")),
             Control::Status { text: t("settings.yandex.inactive"), tone: Tone::Danger }),
         info(t("settings.yandex.stepAccount"), Some(t("settings.yandex.stepAccountHint")),
@@ -70,6 +71,58 @@ pub(super) fn yandex_setup(config: &AppConfig) -> Block {
                 Button::new(t("settings.yandex.checkConnection"), Action::OpenUrl(YANDEX_KEY_DOCS)).enabled(false),
             ])),
     ];
+    // Separate E3i preview ONLY. All fields here are PUBLIC candidate metadata
+    // or ephemeral out-of-band input; none writes to AppConfig or starts S3.
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    {
+        use crate::ui::settings::owner_review::ReviewState;
+        let allowed = !draft.bucket.is_empty() && YandexS3Onboarding::valid_bucket(&draft.bucket);
+        rows.push(info(t("settings.yandex.reviewTitle"),
+            Some(t("settings.yandex.reviewHint")),
+            Control::Buttons(vec![
+                Button::new(t("settings.yandex.reviewImport"), Action::ImportOwnerProposal)
+                    .enabled(allowed),
+                Button::new(t("settings.yandex.reviewClear"), Action::ClearOwnerProposal)
+                    .enabled(ctx.owner_review.is_some()),
+            ])));
+        if let Some(preview) = ctx.owner_review.as_ref() {
+            rows.push(info(t("settings.yandex.reviewCandidate"),
+                Some(t("settings.yandex.reviewCandidateHint")),
+                Control::Status {
+                    text: preview.untrusted_bucket.clone(), tone: Tone::Danger,
+                }));
+            if let Some(challenge) = &preview.challenge_hex {
+                rows.push(info(t("settings.yandex.reviewChallenge"),
+                    Some(t("settings.yandex.reviewChallengeHint")),
+                    Control::Status { text: challenge.clone(), tone: Tone::Secondary }));
+                // Not a persisted Setter::Config. App/settings/action.rs captures
+                // this editor only in the open dialog's volatile review state.
+                rows.push(Row {
+                    label: t("settings.yandex.reviewEnterCode"),
+                    description: Some(t("settings.yandex.reviewEnterCodeHint")),
+                    control: Control::Text { value: String::new(), commit: false },
+                    setter: Some(Setter::OwnerReviewCode),
+                    code: None,
+                });
+                rows.push(info(t("settings.yandex.reviewCompare"),
+                    Some(t("settings.yandex.reviewCompareHint")),
+                    Control::Buttons(vec![
+                        Button::new(t("settings.yandex.reviewCompare"), Action::CompareOwnerCode),
+                    ])));
+            }
+            let status_key = match preview.state {
+                ReviewState::AwaitingIndependentOwner => "settings.yandex.reviewAwaiting",
+                ReviewState::MatchedOfflineOnly => "settings.yandex.reviewMatchedOffline",
+                ReviewState::Rejected => "settings.yandex.reviewRejected",
+            };
+            rows.push(info(t("settings.yandex.reviewOutcome"), None,
+                Control::Status { text: t(status_key), tone: Tone::Danger }));
+        }
+        if let Some(notice) = ctx.owner_review_notice {
+            rows.push(info(t("settings.yandex.reviewOutcome"), None,
+                Control::Status { text: t(notice), tone: Tone::Danger }));
+        }
+    }
     Block { title: t("settings.yandex.title"), rows }
 }
 

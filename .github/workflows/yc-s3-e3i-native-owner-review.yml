@@ -1,0 +1,109 @@
+name: YC-S3 E3i native owner review UI preview
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3h-independent-owner-fingerprint-20261021
+    paths:
+      - 'aquilum-app/core/src/sync/s3_owner_review_proposal_lab.rs'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/src/ui/settings/**'
+      - 'aquilum-app/native/src/app/settings/**'
+      - 'aquilum-app/native/assets/locales/en.json'
+      - 'aquilum-app/native/assets/locales/ru.json'
+      - '.github/workflows/yc-s3-e3i-native-owner-review.yml'
+      - 'docs/sync/YC-S3-T01d-E3i-native-owner-review.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded PR attempts rather than consuming Linux/Windows runners
+# on every intermediate implementation commit.
+concurrency:
+  group: yc-s3-e3i-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  owner-review-ui:
+    name: Offline-only owner review UI, no trusted admission
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Linux native UI build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libglib2.0-dev libgtk-3-dev libpango1.0-dev \
+            libatk1.0-dev libcairo2-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libxkbcommon-dev libxkbcommon-x11-0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Require exact Core and Native tests, never empty filter PASS
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-manual-owner-review-lab -- --list > owner-core-cases.txt
+          for test_name in \
+            sync::s3_owner_review_proposal_lab::tests::preview_attempt_matches_once_without_creating_an_enrollment_receipt \
+            sync::s3_owner_review_proposal_lab::tests::preview_attempt_rejects_bad_import_and_oversize_without_any_network_or_disk; do
+            grep -F -- "${test_name}: test" owner-core-cases.txt
+          done
+          cargo test --locked -p aquilum-native --no-default-features \
+            --features yandex-owner-review-ui-preview -- --list > owner-native-cases.txt
+          for test_name in \
+            ui::settings::owner_review::tests::ephemeral_state_starts_without_any_stored_owner_code \
+            ui::settings::schema::tests::owner_review_preview_has_no_config_setter_or_remote_authority_action; do
+            grep -F -- "${test_name}: test" owner-native-cases.txt
+          done
+      - name: Exercise Core and Native preview acceptance
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-manual-owner-review-lab \
+            s3_owner_review_proposal_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-native --no-default-features \
+            --features yandex-owner-review-ui-preview \
+            ui::settings::owner_review::tests -- --test-threads=1
+          cargo test --locked -p aquilum-native --no-default-features \
+            --features yandex-owner-review-ui-preview \
+            ui::settings::schema::tests::owner_review_preview_has_no_config_setter_or_remote_authority_action \
+            -- --exact --test-threads=1
+      - name: Check native installed flavor remains isolated
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-native --features installed
+          if sed -n '/^\[features\]/,/^\[dependencies\]/p' native/Cargo.toml \
+            | grep -E '^(default|installed|sync-installed-host|yandex-s3-connection-preview) *=' \
+            | grep -Eq 'yandex-owner-review-ui-preview|signed-vault-'; then
+            echo 'Native owner review must not ship in default or installed features'
+            exit 1
+          fi

@@ -28,6 +28,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 [features]
 installed = []
 memory-probe = []
+# E3i: isolated OFFLINE owner-proposal comparison UI. No S3 write/Sync.
+yandex-owner-review-ui-preview = ["aquilum-core/signed-vault-manual-owner-review-lab"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.
