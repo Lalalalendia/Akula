@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Only PR revisions supersede earlier PR revisions; manual labs stay independent.
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   node-d1-linux:
     runs-on: ubuntu-latest
