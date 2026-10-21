@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use windows::Win32::Foundation::{HWND, POINT};
-use windows::Win32::Graphics::Direct3D11::{D3D11_MAP_WRITE, D3D11_MAPPED_SUBRESOURCE, ID3D11Texture2D};
+use windows::Win32::Graphics::Direct3D11::{D3D11_MAP_READ_WRITE, D3D11_MAP_WRITE, D3D11_MAPPED_SUBRESOURCE, ID3D11Texture2D};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_UNKNOWN;
 use windows::Win32::Graphics::Dxgi::{DXGI_PRESENT, DXGI_PRESENT_PARAMETERS, DXGI_SWAP_CHAIN_FLAG};
 use winit::event_loop::OwnedDisplayHandle;
@@ -56,7 +56,7 @@ impl Output {
         }
         let _zone = aq_trace::zone("размер цепочки");
         unsafe { gpu.chain.ResizeBuffers(0, capacity.0, capacity.1, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(0)) }.map_err(|e| format!("размер цепочки: {e}"))?;
-        gpu.canvas = texture(&gpu.device, capacity.0, capacity.1).map_err(|e| format!("холст: {e}"))?;
+        gpu.canvas = texture(&gpu.device, capacity.0, capacity.1, gpu.map_read_write).map_err(|e| format!("холст: {e}"))?;
         gpu.back = 0;
         self.capacity = capacity;
         self.clear();
@@ -133,7 +133,7 @@ impl Canvas for Output {
     fn with_target(&mut self, paint: &mut dyn FnMut(Target<'_>)) {
         let Some(gpu) = &self.gpu else { return };
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        if let Err(err) = unsafe { gpu.context.Map(&gpu.canvas, 0, D3D11_MAP_WRITE, 0, Some(&mut mapped)) } {
+        if let Err(err) = unsafe { gpu.context.Map(&gpu.canvas, 0, if gpu.map_read_write { D3D11_MAP_READ_WRITE } else { D3D11_MAP_WRITE }, 0, Some(&mut mapped)) } {
             self.lost(err);
             return;
         }
