@@ -1433,3 +1433,61 @@ fn one_shot_receiver_join_then_signed_direct_successor_preserves_same_sqlite_pol
         Err(S3V2TrustAnchorError::UnverifiedRead),
     ));
 }
+
+
+/// E3g's real Yandex read-only handoff is available only after the receiver
+/// spends its one-shot session. Invalid owner evidence must fail locally
+/// BEFORE any network access or SQLite root/policy enrollment. This test does
+/// not use credentials, a cloud account, or any production user objects.
+#[cfg(feature = "signed-vault-join-successor-integration-lab")]
+#[tokio::test]
+async fn receiver_live_yandex_path_denies_invalid_owner_before_network() {
+    use crate::sync::{
+        AwsS3ProbeClient, IndependentlyApprovedJoin, PinnedJoinError,
+        ReceiverJoinSession, ReceiverJoinSessionError, JOIN_GENESIS_TYPE,
+    };
+    let f = Fixture::new();
+    let owner = signer(1);
+    let owner_keys = [pk(&owner)];
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    // Construct the SDK client, but never issue a request: the remote
+    // endpoint is the genuine Yandex URL and no credentials are supplied.
+    let client = AwsS3ProbeClient::connect(f.profile.clone(), f.ns.clone())
+        .await.unwrap();
+    let mut journal = f.open();
+    let mut session = ReceiverJoinSession::issue(&f.scope).unwrap();
+    let challenge = session.challenge_hex();
+    let approved = IndependentlyApprovedJoin {
+        bucket: &f.profile.bucket,
+        keyspace: &f.ns,
+        pinned_genesis_root_blake3: &root_pin,
+        pinned_genesis_policy_blake3: &policy_pin,
+        trusted_owner_keys: &owner_keys,
+        owner_quorum: 1,
+        recipient_challenge_hex: &challenge,
+    };
+    let forged = DecodedDsseEnvelope {
+        payload_type: JOIN_GENESIS_TYPE,
+        payload: b"not-an-approved-owner-invitation",
+        signatures: &[],
+    };
+    assert!(matches!(
+        session.enroll_from_yandex_read_once(
+            &client, &mut journal, &f.scope,
+            &root, &policy, &forged, &approved,
+        ).await,
+        Err(ReceiverJoinSessionError::LiveYandexRead(PinnedJoinError::Join(_)))
+    ));
+    assert!(matches!(
+        session.enroll_from_yandex_read_once(
+            &client, &mut journal, &f.scope,
+            &root, &policy, &forged, &approved,
+        ).await,
+        Err(ReceiverJoinSessionError::AlreadyConsumed),
+    ));
+    assert!(journal.load(&f.scope).unwrap().is_none());
+    assert!(journal.load_publisher_policy(&f.scope).is_err());
+}
