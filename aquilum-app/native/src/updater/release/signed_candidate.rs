@@ -56,7 +56,7 @@ struct Artifact {
 /// This type has private fields and no public unchecked constructor.
 /// Do not replace it with Vec<u8> at the filesystem transaction boundary.
 #[derive(Debug)]
-pub(super) struct SignedCandidate {
+pub(crate) struct SignedCandidate {
     bytes: Vec<u8>,
     version: String,
     source_commit: String,
@@ -64,20 +64,81 @@ pub(super) struct SignedCandidate {
 }
 
 impl SignedCandidate {
-    pub(super) fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 
-    pub(super) fn version(&self) -> &str {
+    pub(crate) fn version(&self) -> &str {
         &self.version
     }
 
-    pub(super) fn source_commit(&self) -> &str {
+    pub(crate) fn source_commit(&self) -> &str {
         &self.source_commit
     }
 
-    pub(super) fn sha256(&self) -> &str {
+    pub(crate) fn sha256(&self) -> &str {
         &self.sha256
+    }
+
+    /// Rehash the exact staged Linux inode under the updater's OS lock.
+    /// Checking a previously downloaded Vec is not enough: the on-disk copy
+    /// itself must match the signed byte digest before any rename.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn verify_staged_file(&self, path: &std::path::Path) -> Result<(), String> {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        // Linux O_NOFOLLOW; refuse the final path being replaced with a link.
+        const LINUX_O_NOFOLLOW: i32 = 0o400000;
+        let mut handle = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(LINUX_O_NOFOLLOW)
+            .open(path)
+            .map_err(|e| format!("{}: {e}", hold("cannot open nonlinked staged image")))?;
+        let before = handle.metadata().map_err(|e| e.to_string())?;
+        let entry = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if !before.is_file()
+            || !entry.file_type().is_file()
+            || before.nlink() != 1
+            || before.ino() != entry.ino()
+            || before.dev() != entry.dev()
+            || before.len() != self.bytes.len() as u64
+        {
+            return Err(hold("staged file authority/type/size mismatch"));
+        }
+        let mut digest = Sha256::new();
+        let mut total = 0u64;
+        let mut block = [0u8; 65536];
+        loop {
+            let read = handle.read(&mut block).map_err(|e| e.to_string())?;
+            if read == 0 {
+                break;
+            }
+            total = total.checked_add(read as u64)
+                .ok_or_else(|| hold("staged image length overflow"))?;
+            if total > self.bytes.len() as u64 {
+                return Err(hold("staged image grew while hashing"));
+            }
+            digest.update(&block[..read]);
+        }
+        let after = handle.metadata().map_err(|e| e.to_string())?;
+        let still_named = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if total != self.bytes.len() as u64
+            || after.len() != total
+            || after.ino() != before.ino()
+            || after.dev() != before.dev()
+            || still_named.ino() != before.ino()
+            || still_named.dev() != before.dev()
+            || !still_named.file_type().is_file()
+        {
+            return Err(hold("staged inode changed or was replaced during hashing"));
+        }
+        let actual: String = digest.finalize().iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        if actual != self.sha256 {
+            return Err(hold("staged disk bytes differ from signed publisher hash"));
+        }
+        Ok(())
     }
 }
 
@@ -422,10 +483,81 @@ mod tests {
         assert!(error.contains("authentication failed"), "{error}");
 
         let error = admit_with_trusted_key(
-            &manifest, &signature, payload, &key,
+            &manifest, &signature, payload.clone(), &key,
             TARGET_LINUX_APPIMAGE, "0.3.10",
         ).unwrap_err();
         assert!(error.contains("not strictly newer"), "{error}");
+
+        #[cfg(target_os = "linux")]
+        {
+            // A real ephemeral Minisign signature is the *only* positive
+            // source for this sealed candidate; stage its exact bytes on
+            // Linux under a genuine flock and rehash the written inode.
+            let installation = root.join("signed-stage-fixture");
+            fs::create_dir(&installation).unwrap();
+            let active = installation.join("akula-app_0.3.9_x86_64.AppImage");
+            let unrelated = installation.join("Aquilum.AppImage");
+            let old = b"old installed Akula, never overwritten during staging";
+            let sentinel = b"pre-existing Aquilum bytes: do not mutate";
+            fs::write(&active, old).unwrap();
+            fs::write(&unrelated, sentinel).unwrap();
+
+            // Even a structurally and cryptographically valid TEST candidate
+            // cannot activate production staging with the shipped empty key.
+            let denied = admit_with_trusted_key(
+                &manifest, &signature, payload.clone(), &key,
+                TARGET_LINUX_APPIMAGE, "0.3.9",
+            ).unwrap();
+            let denied_path = installation.join("never-installed-akula.AppImage");
+            let refused = crate::updater::linux_signed_stage::stage_signed_candidate(
+                &denied_path, "fedcba9876543210fedcba9876543210", denied,
+            ).err().expect("production staging must refuse even a valid test key");
+            assert!(refused.contains("HOLD"));
+            assert!(!denied_path.exists());
+
+            let lease = crate::updater::linux_signed_stage::stage_verified_for_test(
+                &active, "0123456789abcdef0123456789abcdef", candidate,
+            ).expect("exact signed bytes must be admitted to a locked stage");
+            assert_eq!(lease.version(), "0.3.10");
+            assert_eq!(lease.source_commit(), "a".repeat(40));
+            assert_eq!(lease.digest(), digest_hex(&payload));
+            lease.rehash().expect("disk inode must still match signed candidate");
+            let staged = lease.stage_path().join("candidate.AppImage");
+            assert_eq!(fs::read(&staged).unwrap(), payload);
+            assert_eq!(fs::read(&active).unwrap(), old.to_vec());
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
+
+            let mut damaged = payload.clone();
+            damaged[0] ^= 1;
+            fs::write(&staged, &damaged).unwrap();
+            assert!(lease.rehash().unwrap_err().contains("staged disk bytes"));
+            assert_eq!(fs::read(&active).unwrap(), old.to_vec());
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
+
+            fs::remove_file(&staged).unwrap();
+            std::os::unix::fs::symlink(&unrelated, &staged).unwrap();
+            assert!(lease.rehash().is_err(), "symlink must fail closed");
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
+
+            // Repair the disposable stage and exercise actual rename-publish
+            // followed by missing-GUI-ACK rollback under the SAME flock.
+            // No production feature or publisher trust setting is modified.
+            fs::remove_file(&staged).unwrap();
+            fs::write(&staged, &payload).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::File::open(&staged).unwrap().sync_all().unwrap();
+            fs::File::open(lease.stage_path()).unwrap().sync_all().unwrap();
+            lease.rehash().unwrap();
+            lease.prove_missing_ack_rollback()
+                .expect("signed test candidate must preserve the previous version after missing ACK");
+            assert_eq!(fs::read(&active).unwrap(), old.to_vec());
+            assert_eq!(fs::read(lease.stage_path().join("failed.AppImage")).unwrap(), payload);
+            assert_eq!(fs::read(&unrelated).unwrap(), sentinel.to_vec());
+            drop(lease);
+            println!("AKULA_SIGNED_LINUX_STAGE_PASS real_minisign=1 fsync=1 disk_sha256=1 tamper_hold=1 aquilum_intact=1");
+            println!("AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1");
+        }
     }
 
     #[test]

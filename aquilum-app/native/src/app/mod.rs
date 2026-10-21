@@ -22,6 +22,7 @@ mod search;
 mod settings;
 mod tabs;
 mod templates;
+mod transfer;
 mod widths;
 mod workspaces;
 #[cfg(test)]
@@ -77,6 +78,7 @@ enum Popup {
     Search(search::SearchState),
     Templates(templates::TemplatesState),
     Workspaces(workspaces::WorkspacesState),
+    Transfers(crate::ui::transfer::TransferDialog),
 }
 
 #[derive(Default)]
@@ -110,6 +112,7 @@ pub struct App {
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
     graph: graph_page::GraphState,
+    transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,
     find: Option<crate::ui::find::FindBar>,
     note: Option<Note>,
@@ -158,6 +161,8 @@ pub struct App {
     picked_tx: Sender<book::Picked>,
     failed_renames: (Sender<(PathBuf, PathBuf)>, Receiver<(PathBuf, PathBuf)>),
     picked_rx: Receiver<book::Picked>,
+    transfer_tx: Sender<Vec<PathBuf>>,
+    transfer_rx: Receiver<Vec<PathBuf>>,
     home: Option<PathBuf>,
     home_tx: Sender<(u64, Option<PathBuf>)>,
     home_rx: Receiver<(u64, Option<PathBuf>)>,
