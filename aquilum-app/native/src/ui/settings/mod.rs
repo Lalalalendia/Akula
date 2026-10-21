@@ -1,5 +1,7 @@
 pub mod controls;
 pub mod schema;
+#[cfg(feature = "yandex-owner-review-ui-preview")]
+pub mod owner_review;
 
 mod control;
 mod layout;
