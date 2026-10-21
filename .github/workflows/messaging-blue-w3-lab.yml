@@ -1,15 +1,25 @@
 name: Akula Blue W3 same-DB ingress laboratory
 
 on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/messaging/**'
+      - 'aquilum-app/Cargo.lock'
+      - '.github/workflows/messaging-blue-w3-lab.yml'
   push:
-    branches:
-      - 'feature/akula-blue-w3-inbox-gate-20261022'
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/messaging/**'
+      - 'aquilum-app/Cargo.lock'
+      - '.github/workflows/messaging-blue-w3-lab.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: akula-blue-w3-${{ github.ref }}
+  group: akula-blue-w3-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -17,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
