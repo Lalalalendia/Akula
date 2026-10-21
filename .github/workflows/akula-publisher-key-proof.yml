@@ -57,14 +57,14 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-            test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" || {
-              echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY in the protected akula-release environment"
-              exit 1
-            }
-            test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD:-}" || {
-              echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD in the protected akula-release environment"
-              exit 1
-            }
+          test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" || {
+            echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY in the protected akula-release environment"
+            exit 1
+          }
+          test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD:-}" || {
+            echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD in the protected akula-release environment"
+            exit 1
+          }
           printf 'AKULA-PUBLISHER-OWNER-KEY-V1\n%s\n%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/challenge.txt"
           cargo packager signer sign "$RUNNER_TEMP/challenge.txt"
           test -s "$RUNNER_TEMP/challenge.txt.sig"
