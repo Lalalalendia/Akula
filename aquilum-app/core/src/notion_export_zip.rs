@@ -248,10 +248,14 @@ mod tests {
     fn zip_uuid_backlinks_without_extraction() {
         let temp = tempfile::tempdir().unwrap();
         let zip_file = temp.path().join("notion.zip");
+        // Derive the encoded link and ZIP entry from the same source UUID.
+        // An earlier fixture accidentally omitted two digits from its href.
+        let target_id = "22222222222222222222222222222222";
+        let target_path = format!("Note {target_id}.md");
+        let source_text = format!("[B](Note%20{target_id}.md)");
         let bytes = stored_zip(&[
-            ("Note 11111111111111111111111111111111.md",
-                b"[B](Note%20222222222222222222222222222222.md)"),
-            ("Note 22222222222222222222222222222222.md", b"ok"),
+            ("Note 11111111111111111111111111111111.md", source_text.as_bytes()),
+            (target_path.as_str(), b"ok"),
             ("Data 33333333333333333333333333333333.csv",
                 b"Title,Notes\r\nA,\"hello,\nworld\"\r\n"),
         ]);
@@ -259,6 +263,10 @@ mod tests {
         let report = inspect_zip(&zip_file, ScanLimits::default()).unwrap();
         assert_eq!(report.entries.len(), 3);
         assert_eq!(report.backlinks.len(), 1, "unresolved ZIP references: {:?}", report.references);
+        assert_eq!(report.backlinks[0].target_id, target_id);
+        assert_eq!(report.backlinks[0].target_path, target_path);
+        assert_eq!(report.references[0].target_id.as_deref(), Some(target_id));
+        assert_eq!(report.references[0].resolution, Resolution::Resolved);
         assert_eq!(report.entries.iter().filter(|e| e.csv.is_some()).count(), 1);
         assert_eq!(report.notion_workspace_completeness_verified, false);
     }
