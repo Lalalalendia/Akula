@@ -6,7 +6,7 @@ use super::*;
 use crate::messaging::w4::{verify_receipt, key_ledger::W4TrustLedger};
 use akula_blue_w3::{new_recipient, seal_v2, SignedHeader};
 use ed25519_dalek::SigningKey;
-use ring::signature::Ed25519KeyPair;
+use ring::signature::{Ed25519KeyPair, KeyPair};
 use tempfile::TempDir;
 
 const SENDER_EPOCH: u64 = 7;
