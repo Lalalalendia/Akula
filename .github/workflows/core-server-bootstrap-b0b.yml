@@ -12,6 +12,8 @@ on:
       - "scripts/ci/akula-b0b-local-sshd.sh"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0B.md"
       - ".github/workflows/core-server-bootstrap-b0b.yml"
+      - '.github/scripts/ci-lab-scope.cjs'
+      - '.github/scripts/ci-lab-scope.test.cjs'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +24,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  classify-isolated-feature:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      skip: ${{ steps.scope.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check isolated additive Rust feature (fail closed)
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/ci-lab-scope.test.cjs
+          node .github/scripts/ci-lab-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
   actual-openssh-kex:
+    needs: classify-isolated-feature
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.classify-isolated-feature.result != 'success' || needs.classify-isolated-feature.outputs.skip != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
