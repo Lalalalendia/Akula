@@ -10,6 +10,7 @@ pub enum Section {
     Analysis,
     Mcp,
     Sync,
+    Server,
     History,
     Trash,
     System,
@@ -17,7 +18,7 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Section; 11] = [
+    pub const ALL: [Section; 12] = [
         Section::Ui,
         Section::Editor,
         Section::Reader,
@@ -25,6 +26,7 @@ impl Section {
         Section::Analysis,
         Section::Mcp,
         Section::Sync,
+        Section::Server,
         Section::History,
         Section::Trash,
         Section::System,
@@ -40,6 +42,7 @@ impl Section {
             Section::Analysis => "analysis",
             Section::Mcp => "mcp",
             Section::Sync => "sync",
+            Section::Server => "server",
             Section::History => "history",
             Section::Trash => "trash",
             Section::System => "system",
@@ -69,6 +72,7 @@ impl Section {
             Section::Analysis => icons::GRAPH_ANALYSIS,
             Section::Mcp => icons::PLUG,
             Section::Sync => icons::HISTORY,
+            Section::Server => icons::PLUG,
             Section::History => icons::HISTORY,
             Section::Trash => icons::TRASH,
             Section::System => icons::POWER,
