@@ -24,7 +24,7 @@ The existing private `SignedCandidate` admission layer now understands
   `Akula_<version>_x64-setup.exe`. Reject an Aquilum or wrong-architecture
   setup, traversal path or stale package filename.
 - Check the exact Windows payload's size and SHA-256 against that authenticated
-  entry, with a strict 1-GiB ceiling. Continue validating every other signed
+  entry, with a strict 512-MiB ceiling shared with the network download reader. Continue validating every other signed
   platform entry, so malformed cross-platform metadata fails closed.
 - Carry the authenticated bytes, version, source revision and digest inside a
   privately constructible `SignedCandidate`; do not reduce the result to
