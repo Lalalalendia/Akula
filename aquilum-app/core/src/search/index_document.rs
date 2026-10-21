@@ -15,6 +15,17 @@ use tantivy::collector::Count;
 use tantivy::query::TermQuery;
 use tantivy::schema::IndexRecordOption;
 
+#[cfg(feature = "index-stage-probe")]
+macro_rules! timed_stage {
+    ($stage:ident, $expression:expr) => {
+        super::perf_probe::time(super::perf_probe::Stage::$stage, || $expression)
+    };
+}
+#[cfg(not(feature = "index-stage-probe"))]
+macro_rules! timed_stage {
+    ($stage:ident, $expression:expr) => { $expression };
+}
+
 pub struct PreparedFile {
     pub path: PathBuf,
     pub fingerprint: Fingerprint,
@@ -50,8 +61,16 @@ pub fn probe(
 }
 
 pub fn prepare_file(path: PathBuf, fingerprint: Fingerprint) -> Option<PreparedFile> {
+    #[cfg(feature = "index-stage-probe")]
+    let start_read = std::time::Instant::now();
     let body = crate::files::document::read_text(&path).ok()?;
+    #[cfg(feature = "index-stage-probe")]
+    let read_ns = start_read.elapsed().as_nanos();
+    #[cfg(feature = "index-stage-probe")]
+    let start_hash = std::time::Instant::now();
     let content_hash = *blake3::hash(body.as_bytes()).as_bytes();
+    #[cfg(feature = "index-stage-probe")]
+    super::perf_probe::prepared(body.len(), read_ns, start_hash.elapsed().as_nanos());
     Some(PreparedFile {
         path,
         fingerprint,
@@ -69,20 +88,26 @@ pub fn apply_prepared(
     probe: Probe,
     prepared: PreparedFile,
 ) -> Result<bool, SearchError> {
+    #[cfg(feature = "index-stage-probe")]
+    let created = super::perf_probe::time(super::perf_probe::Stage::Created, || created::declared(&prepared.body).unwrap_or(probe.created));
+    #[cfg(not(feature = "index-stage-probe"))]
     let created = created::declared(&prepared.body).unwrap_or(probe.created);
     if probe.up_to_date
         && probe
             .previous_hash
             .is_some_and(|hash| hash == prepared.content_hash)
     {
+        #[cfg(feature = "index-stage-probe")]
+        super::perf_probe::time(super::perf_probe::Stage::MetadataUpsert, || upsert(transaction, key, &prepared, created))?;
+        #[cfg(not(feature = "index-stage-probe"))]
         upsert(transaction, key, &prepared, created)?;
         return Ok(false);
     }
-    update_document(root, index, writer, &prepared.path, &prepared.body)?;
-    wiki::index_document(transaction, root, &prepared.path, &prepared.body)?;
-    fields::index_document(transaction, &prepared.path, &prepared.body)?;
-    tasks::index_document(transaction, &prepared.path, &prepared.body)?;
-    upsert(transaction, key, &prepared, created)?;
+    timed_stage!(TantivyAdd, update_document(root, index, writer, &prepared.path, &prepared.body))?;
+    timed_stage!(Wiki, wiki::index_document(transaction, root, &prepared.path, &prepared.body))?;
+    timed_stage!(Fields, fields::index_document(transaction, &prepared.path, &prepared.body))?;
+    timed_stage!(Tasks, tasks::index_document(transaction, &prepared.path, &prepared.body))?;
+    timed_stage!(MetadataUpsert, upsert(transaction, key, &prepared, created))?;
     Ok(true)
 }
 

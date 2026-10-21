@@ -1,0 +1,73 @@
+name: Index full-scan stage diagnostic
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/**"
+      - "aquilum-app/core/Cargo.toml"
+      - ".github/workflows/index-stage-diagnostic.yml"
+permissions:
+  contents: read
+concurrency:
+  group: index-stage-diagnostic-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  profile:
+    if: startsWith(github.head_ref, 'research/index-stage-breakdown-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: index-stage-diagnostic
+      - name: Check baseline compilation first
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --no-run
+      - name: Format diagnostic-only checkout and validate Rust
+        working-directory: aquilum-app
+        run: |
+          cargo fmt --all
+          cargo test --locked -p aquilum-core --features index-stage-probe --no-run
+          cargo test --locked -p aquilum-core --features index-stage-probe search::sync -- --test-threads=1
+      - name: Measure production full-scan stages in three fresh vaults per corpus
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          echo "HEAD=$GITHUB_SHA" | tee ../index-stage-env.txt
+          rustc --version | tee -a ../index-stage-env.txt
+          echo "CPU=$(grep -m1 'model name' /proc/cpuinfo || true)" | tee -a ../index-stage-env.txt
+          export AQUILUM_BENCH_SIZES=1000,5000,10000,50000
+          for variant in base rich; do
+            if [ "$variant" = rich ]; then export AQUILUM_BENCH_RICH=1; else unset AQUILUM_BENCH_RICH || true; fi
+            for round in 1 2 3; do
+              log="../index-stage-$variant-$round.log"
+              /usr/bin/time -v -o "../index-stage-$variant-$round.resources" cargo test --locked --release -p aquilum-core --features index-stage-probe benchmark_indexing -- --ignored --nocapture --test-threads=1 > "$log" 2>&1
+              grep -E 'INDEX-STAGE|BENCH-INDEX' "$log" >> ../index-stage-data.txt
+            done
+          done
+          {
+            echo '## Full-scan stages (coordinator wall timers; read/hash parallel worker sums overlap)'
+            echo '### Synthetic baseline and metadata-rich notes, 3 fresh vaults per size'
+            echo 'Use INDEX-STAGE lines in saved artifact. BENCH-INDEX durations remain independent.'
+            echo '\`\`\`text'
+            cat ../index-stage-data.txt
+            echo '\`\`\`'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'INDEX-STAGE raw measurements (stdout copy):'
+          cat ../index-stage-data.txt
+      - name: Archive complete output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-stage-diagnostics-${{ github.sha }}
+          path: |
+            index-stage-env.txt
+            index-stage-data.txt
+            index-stage-*.log
+            index-stage-*.resources
+          retention-days: 30

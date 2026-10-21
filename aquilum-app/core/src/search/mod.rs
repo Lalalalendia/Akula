@@ -19,6 +19,8 @@ pub mod models;
 pub mod note_date;
 pub mod paths;
 pub mod progress;
+#[cfg(feature = "index-stage-probe")]
+pub(crate) mod perf_probe;
 pub mod query;
 pub mod schema;
 pub mod service;

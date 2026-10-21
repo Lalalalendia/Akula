@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Experimental timing only; never enabled by installed Akula builds.
+index-stage-probe = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]

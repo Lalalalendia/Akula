@@ -47,7 +47,13 @@ pub fn index_document(
         "INSERT INTO wiki_links(source_path, target_key, target_kind, byte_offset, offset_utf16)
          VALUES(?1, ?2, ?3, ?4, ?5)",
     )?;
-    for link in extract(body) {
+    #[cfg(feature = "index-stage-probe")]
+    let links = crate::search::perf_probe::time(crate::search::perf_probe::Stage::WikiParse, || extract(body));
+    #[cfg(not(feature = "index-stage-probe"))]
+    let links = extract(body);
+    #[cfg(feature = "index-stage-probe")]
+    crate::search::perf_probe::record_rows(crate::search::perf_probe::Stage::Wiki, links.len());
+    for link in links {
         let (target_key, target_kind) = target_key(&link.target);
         statement.execute(params![
             path_text,
