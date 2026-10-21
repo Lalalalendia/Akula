@@ -32,6 +32,7 @@ pub enum Error {
     Mismatch,
     Conflict,
     Expired,
+    MailboxFull,
     Missing,
 }
 impl From<rusqlite::Error> for Error {

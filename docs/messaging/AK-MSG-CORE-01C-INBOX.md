@@ -15,6 +15,8 @@ authenticate+authorize adapter may build it. Tests manufacture it under
 **cannot receive an untrusted network packet** yet. It cannot claim the bytes
 are genuine W3 ciphertext, and it is not a real end-to-end chat.
 
+Laboratory limits: 4,096 stored messages total and 128 per sender. No deletion, expiry garbage collection or user-facing quota policy is provided yet.
+
 The receiver's signing key is supplied externally, but checked against a
 previously authorized, epoch-pinned Akula device signing key before signing.
 The ciphertext, immutable digest, signed receipt and sender-bound MessageId
@@ -31,7 +33,7 @@ blocker until a shared atomic authority fence exists.
 Before enabling this lab in the actual Akula app:
 - integrate the genuine WOW W3 authenticated envelope;
 - implement host-approved durable device enrollment and revocation;
-- enforce storage location custody/permissions and queue quotas;
+- enforce storage location custody/permissions, queue expiration and retention policies;
 - implement network sending, return receipt path and UI;
 - test installed-client delivery with independent devices, then mobility.
 

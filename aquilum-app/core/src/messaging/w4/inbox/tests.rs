@@ -120,3 +120,24 @@ fn immutable_sender_scoped_inbox_rejects_changed_content_and_late_replay() {
     assert!(matches!(inbox.accept_verified(&wrong_digest,&signer,&keys,4),Err(Error::Mismatch)));
     assert_eq!(inbox.row_count().unwrap(),1);
 }
+
+#[test]
+fn single_sender_is_bounded_by_explicit_receiver_quota() {
+    let tmp=tempdir().unwrap();
+    let (desc,sender,bytes,signer,keys)=fixture();
+    let mut inbox=W4Inbox::open(&tmp.path().join("quota.sqlite")).unwrap();
+    for seq in 0..(MAX_INBOX_PER_SENDER as u8) {
+        let mut d=desc;
+        d.id[0]=seq;
+        let input=authenticated(d,sender,&bytes);
+        assert_eq!(inbox.accept_verified(&input,&signer,&keys,1).unwrap().status,
+                   InboundStatus::Stored);
+    }
+    assert_eq!(inbox.row_count().unwrap(),MAX_INBOX_PER_SENDER);
+    let mut too_many=desc;
+    too_many.id[0]=MAX_INBOX_PER_SENDER as u8;
+    let input=authenticated(too_many,sender,&bytes);
+    assert!(matches!(inbox.accept_verified(&input,&signer,&keys,2),
+                     Err(Error::MailboxFull)));
+    assert_eq!(inbox.row_count().unwrap(),MAX_INBOX_PER_SENDER);
+}

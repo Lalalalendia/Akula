@@ -19,6 +19,9 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use super::{Error, TrustedRecipientKeys, DOMAIN, MAX_ENVELOPE, RECEIPT_LEN};
 use crate::sync::DeviceId;
 
+const MAX_INBOX_ROWS: i64 = 4096;
+const MAX_INBOX_PER_SENDER: i64 = 128;
+
 /// Not constructible by regular callers. W3 verification MUST be implemented
 /// before receiving any real message; no bypass/fake production constructor.
 #[derive(Clone)]
@@ -124,6 +127,19 @@ impl W4Inbox {
             }
             tx.commit()?;
             return Ok(InboundResult { status:InboundStatus::Duplicate, signed_receipt:receipt });
+        }
+
+        // Bound total disk use and one sender's share before making a new
+        // record; an existing duplicate remains readable when fully occupied.
+        let total: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM messaging_w4_inbox", [], |r| r.get(0)
+        )?;
+        let sender_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM messaging_w4_inbox WHERE sender=?1",
+            params![sender.as_slice()], |r| r.get(0)
+        )?;
+        if total >= MAX_INBOX_ROWS || sender_count >= MAX_INBOX_PER_SENDER {
+            return Err(Error::MailboxFull);
         }
 
         // WOW W4's exact domain and 73-byte signed header. The proof only
