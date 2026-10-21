@@ -419,6 +419,9 @@ pub use policy_receipt_lab::{
 #[cfg(feature = "signed-vault-atomic-join-lab")]
 pub use policy_receipt_lab::{AtomicJoinError, AtomicJoinOutcome};
 
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+pub use policy_receipt_lab::{SignedSuccessorError, SignedSuccessorOutcome};
+
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_tests.rs"]
 mod tests;
