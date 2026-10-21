@@ -34,6 +34,8 @@ pub struct Context {
     pub trash_page: usize,
     pub autostart: Option<bool>,
     pub update: Option<crate::updater::Status>,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    pub owner_review: Option<crate::ui::settings::owner_review::OwnerReviewView>,
 }
 
 impl Context {
