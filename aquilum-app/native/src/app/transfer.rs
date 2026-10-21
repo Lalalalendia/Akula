@@ -11,7 +11,7 @@ use masonry::kurbo::Point;
 use super::{App, Outcome, Popup};
 use crate::i18n::t;
 use crate::ui::dialog::{self, DialogAnswer};
-use crate::ui::transfer::{self as transfer_ui, QueueAction, TransferDialog};
+use crate::ui::transfer::{self as transfer_ui, QueueAction};
 use crate::ui::widgets::Pressed;
 
 const MAX_DRAFTS: usize = 32;

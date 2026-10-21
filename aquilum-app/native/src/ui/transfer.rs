@@ -42,7 +42,7 @@ fn card_size(room: Size) -> Size {
     Size::new(room.width.min(740.0), room.height.min(600.0))
 }
 
-fn rule() -> Rule {
+fn rule() -> NewWidget<Rule> {
     Rule::new(Axis::Horizontal, || theme::current().border_default)
 }
 
