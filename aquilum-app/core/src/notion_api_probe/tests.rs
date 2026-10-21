@@ -258,7 +258,7 @@ fn markdown_warnings_block_complete_root_claim() {
         json!([{"code":"unsupported_block","message":"content not represented"}]);
     let report = inspect_root(&mut client,A,ProbeLimits::default()).unwrap();
     assert!(!report.root_traversal_complete);
-    assert!(report.warnings.iter().any(|x| x.contains("markdown warnings")));
+    assert!(report.warnings.iter().any(|x| x.contains("markdown parser warnings")));
 }
 
 #[test]
