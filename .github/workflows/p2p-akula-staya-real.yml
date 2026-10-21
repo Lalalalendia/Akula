@@ -51,6 +51,9 @@ jobs:
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
+      - name: Rust formatting for exact opt-in inbox Core
+        shell: bash
+        run: cargo fmt --manifest-path aquilum-app/Cargo.toml -p aquilum-core -- --check
       - name: Check Akula real create-new inbox, corruption, and no-overwrite
         shell: bash
         run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
