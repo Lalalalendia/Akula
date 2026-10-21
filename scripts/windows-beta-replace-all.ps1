@@ -81,6 +81,37 @@ function Test-AkulaBetaReplaceAll {
       throw 'GUI paste did not change the synthetic long note'
     }
 
+    # A successful on-disk paste alone cannot prove the main GUI loop is
+    # responsive. Probe the actual editor *before* Ctrl+Z. No direct note
+    # writes and no user content in logs; Ctrl+A/C do not change undo history.
+    $beforeUndoPoison = 'AKULA_BEFORE_UNDO_POISON_' + [Guid]::NewGuid().ToString('N')
+    Set-Clipboard -Value $beforeUndoPoison -ErrorAction Stop
+    Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'
+    Start-Sleep -Milliseconds 300
+    Send-AkulaBetaShortcut -Process $app -Action Copy -ExpectedNoteTitle 'Large paste proof'
+    $pasteStillResponsive = $false
+    for ($probe = 0; $probe -lt 25; $probe++) {
+      Start-Sleep -Milliseconds 200
+      $app.Refresh()
+      if ($app.HasExited) { throw 'Installed Akula exited after saving paste but before Ctrl+Z' }
+      try {
+        $beforeUndoCopied = Get-Clipboard -Raw -ErrorAction Stop
+        if ($beforeUndoCopied -ceq $beforeUndoPoison) { continue }
+        $pasteStillResponsive = [string]::Equals(
+          $beforeUndoCopied.Replace("`r`n", "`n").TrimEnd([char]10),
+          $replacement, [System.StringComparison]::Ordinal)
+        break
+      } catch [System.Runtime.InteropServices.ExternalException] {
+        # OS clipboard can be transiently locked.
+      }
+    }
+    $app.Refresh()
+    $responsive = $app.Responding
+    Write-Host "AKULA_WINDOWS_PASTE_GUI_PROBE responsive=$responsive clipboard_exact=$pasteStillResponsive process_alive=$(!$app.HasExited)"
+    if (!$pasteStillResponsive) {
+      throw 'Installed GUI did not serve exact Ctrl+A/C clipboard readback after paste, before Ctrl+Z'
+    }
+
     Send-AkulaBetaShortcut -Process $app -Action Undo -ExpectedNoteTitle 'Large paste proof'
     try {
       Await-AkulaDiskContent -Process $app -Expected $original -Phase 'Ctrl+Z restore'
