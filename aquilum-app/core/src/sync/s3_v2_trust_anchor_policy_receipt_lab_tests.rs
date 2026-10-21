@@ -461,6 +461,47 @@ fn valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build
 }
 
 
+#[test]
+fn signed_policy_blocks_legacy_same_root_genesis_and_successor_noop() {
+    let f = Fixture::new();
+    let owner = signer(1);
+    let mut journal = f.with_pinned_root();
+    let saved = journal.load(&f.scope).unwrap().unwrap();
+    let root = saved.root().clone();
+    let etag = saved.etag().to_string();
+    let (policy, policy_bytes) = first_policy(&f, &owner);
+    let pin = policy.canonical_digest().unwrap();
+    journal.enroll_externally_approved_genesis_policy(
+        &f.scope, &pin, &policy_bytes,
+    ).unwrap();
+
+    // Neither a successful read nor the fact that the exact root already
+    // exists may be interpreted as signed owner/publisher authorization.
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &root, &etag,
+    );
+    assert!(matches!(
+        journal.record_verified_successor(&f.scope, &root, &etag, &pinned),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    assert!(matches!(
+        journal.enroll_verified_genesis(
+            &f.scope, &root.digest(&f.ns).unwrap(), &root, &etag, &pinned,
+        ),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    drop(journal);
+
+    let mut reopened = f.open();
+    assert!(matches!(
+        reopened.record_verified_successor(&f.scope, &root, &etag, &pinned),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &root);
+    assert_eq!(reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(), pin);
+}
+
+
 /// Reconstruct the ORIGINAL V2 journal schema with an already trusted root.
 /// Merely opening a new E2b-format database does not test migration.
 fn plant_legacy_v2_root(f: &Fixture) -> S3PackedHeadV2 {
