@@ -107,8 +107,9 @@ jobs:
           AKULA_WINDOWS_DISPOSABLE_UPGRADE_LAB: '1'
         run: |
           $ErrorActionPreference = 'Stop'
+          # Internal cargo/git return codes are checked in the PowerShell
+          # script itself; the script throws if any build/package step fails.
           ./scripts/build-windows-update-fixture.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Independent 0.3.10 build failed' }
 
       - name: Install v1, upgrade NSIS to v2, recover v1 and reopen real GUI
         if: startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-')
@@ -118,8 +119,11 @@ jobs:
           AKULA_WINDOWS_DISPOSABLE_UPGRADE_LAB: '1'
         run: |
           $ErrorActionPreference = 'Stop'
+          # PowerShell scripts throw terminating errors on failure. Unlike
+          # native .exe tools, running a .ps1 does NOT reliably set
+          # LASTEXITCODE. Treating $null -ne 0 as failure rejected a fully
+          # passing real NSIS v1->v2->v1 run at 39596723084.
           ./scripts/test-windows-beta-upgrade.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Native Windows Akula v1-v2-v1 E2E failed' }
 
       - name: Retain unsigned v2 upgrade proof (not a public release)
         if: startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-')
