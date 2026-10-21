@@ -43,18 +43,56 @@ done
 }
 echo 'AKULA_APPIMAGE_STRUCTURE_PASS apprun=1 own_bin=1 own_desktop=1 upstream_paths=0'
 
+# Optional second real version is created only by the isolated signed-staging
+# PR job. Its absence in normal beta builds is not an E2E success.
+e2e_args=()
+container_image=ubuntu:22.04
+e2e_lock_digest=""
+if [[ -d "$PWD/dist/e2e-v2" ]]; then
+  v2="$PWD/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage"
+  helper="$PWD/dist/e2e-v2/transaction-helper"
+  [[ -s "$v2" && -x "$helper" ]] || {
+    echo 'CI-only 0.3.10 AppImage or real transaction harness missing' >&2
+    exit 1
+  }
+  e2e_args=("/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage" "/dist/e2e-v2/transaction-helper")
+  # Jammy 22.04 has no minisign CLI package. Run this additional
+  # signed, two-version GUI experiment on Noble 24.04; regular AppImage
+  # smoke still uses Jammy 22.04 unchanged.
+  container_image=ubuntu:24.04
+  [[ -s "$PWD/dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt" ]] || {
+    echo 'CI-only v2 lockfile provenance missing' >&2
+    exit 1
+  }
+  e2e_lock_digest="$(cat "$PWD/dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt")"
+  [[ "$e2e_lock_digest" =~ ^[a-f0-9]{64}$ ]] || {
+    echo 'CI-only lockfile digest malformed' >&2
+    exit 1
+  }
+fi
+
 # The AppImage is executed in an isolated Docker root FS with isolated
 # HOME/XDG_DATA_HOME and only synthetic Aquilum witness data.
 # -i is critical: without it, bash -s reads EOF and returns success without
 # executing the heredoc, yielding a dangerous false-positive GUI acceptance.
 # pipefail preserves container exit failures when output is captured by tee.
-docker run --rm -i -v "$PWD/dist:/dist:ro" ubuntu:22.04 bash -s -- "/dist/$(basename "$image")" <<'UBUNTU' | tee "$container_log"
+docker run --rm -i \
+  -e GITHUB_ACTIONS=true -e AKULA_DISPOSABLE_UPDATE_LAB=1 \
+  -e AKULA_E2E_SOURCE_COMMIT="${GITHUB_SHA:-}" -e AKULA_E2E_LOCK_SHA256="$e2e_lock_digest" \
+  -v "$PWD/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" \
+  "$container_image" bash -s -- "/dist/$(basename "$image")" "${e2e_args[@]}" <<'UBUNTU' | tee "$container_log"
 set -euo pipefail
 image="$1"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+extra_packages=()
+if [[ "$#" == 3 ]]; then
+  # minisign is packaged in Noble, not Jammy. Require it only for the
+  # additional real two-version signed E2E acceptance.
+  extra_packages=(minisign)
+fi
 apt-get install -y -qq --no-install-recommends \
-  ca-certificates xvfb openbox wmctrl python3-minimal file libglib2.0-0 libfontconfig1 libfreetype6 \
+  ca-certificates xvfb openbox wmctrl python3-minimal "${extra_packages[@]}" file libglib2.0-0 libfontconfig1 libfreetype6 \
   libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
   libxkbcommon0 libxkbcommon-x11-0 libx11-6 libx11-xcb1 \
   libxcursor1 libxrandr2 libxi6 libxcb1 libwayland-client0
@@ -225,6 +263,12 @@ grep -Fxq 'AKULA_LINUX_FIRST_GUI_ACK_PASS real_appimage=1 bound_pid=1 nonce=1 di
   exit 1
 }
 echo 'AKULA_LINUX_FIRST_GUI_ACK_PASS real_appimage=1 bound_pid=1 nonce=1 digest=1'
+if [[ "$#" == 3 ]]; then
+  python3 -u /scripts/appimage-real-upgrade-accept.py "$1" "$2" "$3"
+elif [[ "$#" != 1 ]]; then
+  echo 'Unexpected AppImage acceptance argument count' >&2
+  exit 1
+fi
 UBUNTU
 
 # An exit code of zero alone does NOT prove the container executed its script.
@@ -232,4 +276,7 @@ UBUNTU
 grep -Fxq 'AKULA_APPIMAGE_GUI_PASS app=Akula isolated_xdg=1 original_note_intact=1' "$container_log"
 grep -Fxq 'AKULA_APPIMAGE_COEXIST_PASS upstream_executable=unchanged upstream_desktop=unchanged upstream_appdata=unchanged' "$container_log"
 grep -Fxq 'AKULA_LINUX_FIRST_GUI_ACK_PASS real_appimage=1 bound_pid=1 nonce=1 digest=1' "$container_log"
+if [[ "${#e2e_args[@]}" -eq 2 ]]; then
+  grep -Fxq 'AKULA_REAL_APPIMAGE_V1_V2_E2E_PASS real_packages=2 visible_gui=3 restored_v1=1 ack_v2=1 aquilum_unchanged=1' "$container_log"
+fi
 echo 'AKULA_APPIMAGE_HOST_GATE_PASS child_script_executed=1 gui_and_coexistence_confirmed=1'
