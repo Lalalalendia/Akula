@@ -1224,7 +1224,7 @@ mod tests {
             AgentVaultGrantStore::provision_new(&dir.path().join("grants.sqlite3")).unwrap();
         grants.register_host_vault(receipt_x).unwrap();
         grants.register_host_vault(receipt_y).unwrap();
-        grants
+        let epoch_a = grants
             .grant_notes_read(
                 agent_a.principal,
                 receipt_x,
@@ -1318,7 +1318,7 @@ mod tests {
         let epoch = grant_store
             .lock()
             .unwrap()
-            .revoke_notes_read(agent_a.principal, receipt_x);
+            .revoke_notes_read(agent_a.principal, receipt_x, epoch_a);
         assert!(epoch.is_ok());
         assert_eq!(
             rpc(&url, key_a.as_str(), list)["result"]["tools"],
