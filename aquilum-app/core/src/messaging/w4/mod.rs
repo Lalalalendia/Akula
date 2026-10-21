@@ -307,5 +307,8 @@ impl W4Outbox {
     }
 }
 
+#[cfg(feature = "messaging-key-ledger-lab")]
+pub mod key_ledger;
+
 #[cfg(test)]
 mod tests;
