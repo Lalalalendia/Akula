@@ -247,23 +247,35 @@ test('real git comment-only Cargo+lock change enters focused Core mode; risky ch
   const mode=base=>cp.execFileSync(process.execPath,
     [path.join(__dirname,'ci-rust-scope.cjs'),'--base='+base,'--head=HEAD'],
     {cwd:dir,encoding:'utf8'}).trim();
+  const nl=String.fromCharCode(10);
   try{
     git('init','-q');git('config','user.name','CI');git('config','user.email','ci@example.invalid');
     const core=path.join(dir,'aquilum-app/core/Cargo.toml');
     const lock=path.join(dir,'aquilum-app/Cargo.lock');
     fs.mkdirSync(path.dirname(core),{recursive:true});
-    fs.writeFileSync(core,'[package]\\nname = "aquilum-core"\\nversion = "0.3.10"\\n[features]\\ndefault = []\\n');
-    const before='# Cargo lock\\nversion = 4\\n\\n[[package]]\\nname = "aquilum-core"\\nversion = "0.3.10"\\ndependencies = [\\n "serde",\\n]\\n\\n[[package]]\\nname = "serde"\\nversion = "1.0.0"\\nsource = "registry+https://example.invalid/index"\\nchecksum = "fixture"\\n';
-    fs.writeFileSync(lock,before.replaceAll('\\n','\n'));
-    git('add','.');git('commit','-qm','baseline');const base=git('rev-parse','HEAD');
-    fs.appendFileSync(core,'# CI comment\\n');
-    fs.writeFileSync(lock,before.replaceAll('\\n','\n').replace('# Cargo lock\n','# Cargo lock\n# CI header comment\n'));
+    fs.writeFileSync(core,[
+      '[package]','name = "aquilum-core"','version = "0.3.10"',
+      '[features]','default = []',''
+    ].join(nl));
+    const before=[
+      '# Cargo lock','version = 4','',
+      '[[package]]','name = "aquilum-core"','version = "0.3.10"',
+      'dependencies = [',' "serde",',']','',
+      '[[package]]','name = "serde"','version = "1.0.0"',
+      'source = "registry+https://example.invalid/index"',
+      'checksum = "fixture"',''
+    ].join(nl);
+    fs.writeFileSync(lock,before);
+    git('add','.');git('commit','-qm','baseline');
+    const base=git('rev-parse','HEAD');
+    fs.appendFileSync(core,['# CI comment',''].join(nl));
+    fs.writeFileSync(lock,before.replace('# Cargo lock'+nl,
+      '# Cargo lock'+nl+'# CI header comment'+nl));
     git('add','.');git('commit','-qm','safe-comment');
     assert.equal(mode(base),'mode=manifest');
-    // Existing locked source/checksum change must re-enable full workspace test.
-    const safe=git('rev-parse','HEAD');
+    // The original baseline comparison must see the changed existing checksum.
     fs.writeFileSync(lock,fs.readFileSync(lock,'utf8').replace('checksum = "fixture"','checksum = "changed"'));
     git('add','.');git('commit','-qm','unsafe-dependency-change');
-    assert.equal(mode(safe),'mode=workspace');
+    assert.equal(mode(base),'mode=workspace');
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
