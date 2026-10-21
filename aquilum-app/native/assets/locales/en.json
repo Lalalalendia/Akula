@@ -209,6 +209,7 @@
       "reviewClear": "Discard review",
       "reviewNeedBucket": "Select the target bucket in Settings before importing an untrusted proposal.",
       "reviewInvalid": "Proposal rejected (invalid file or too large). Nothing was connected.",
+      "reviewDraftChanged": "S3 bucket/profile changed. Offline review discarded; import the proposal again.",
       "reviewWrongBucket": "Proposal bucket differs from the independently selected Settings bucket.",
       "reviewLoadedUntrusted": "Public proposal loaded, NOT authenticated.",
       "reviewCandidate": "Untrusted candidate bucket",
