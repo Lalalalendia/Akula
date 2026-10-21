@@ -78,6 +78,34 @@ fn scan_candidates(source: &str) -> Vec<WikiLink> {
         .collect()
 }
 fn excluded_ranges(source: &str) -> Vec<Range<usize>> {
+    // Diagnostic opt-in: compare a proven conservative no-code fast path
+    // against the original pulldown-cmark exclusion scanner.
+    #[cfg(feature = "wiki-exclusions-lab")]
+    if exclusions_lab_enabled() && has_no_possible_exclusions(source) {
+        return Vec::new();
+    }
+    excluded_ranges_full(source)
+}
+
+#[cfg(feature = "wiki-exclusions-lab")]
+fn exclusions_lab_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("AKULA_WIKI_EXCLUSIONS_FAST").is_some())
+}
+
+/// A conservative guard: never omit pulldown-cmark if text could contain
+/// inline code, fenced/indented code, or HTML. Excessive fallback is safe.
+#[cfg(feature = "wiki-exclusions-lab")]
+fn has_no_possible_exclusions(source: &str) -> bool {
+    !source.contains("    ")
+        && !source
+            .as_bytes()
+            .iter()
+            .copied()
+            .any(|byte| matches!(byte, b'`' | b'~' | b'<' | b'\t'))
+}
+
+fn excluded_ranges_full(source: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let mut block_start = None;
     for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
@@ -126,6 +154,48 @@ fn overlaps(left: &Range<usize>, right: &Range<usize>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::extract;
+
+    #[cfg(feature = "wiki-exclusions-lab")]
+    #[test]
+    fn exclusion_fast_path_only_skips_when_full_parser_has_no_exclusions() {
+        let heads = [
+            "",
+            "# Heading\n",
+            "A plain paragraph\n",
+            "> quoted\n",
+            "- list item\n",
+            "    ",
+            "\t",
+            "~~~md\n",
+            "```rust\n",
+            "<!-- note -->\n",
+            "<div>hello</div>\n",
+            "A `code span`\n",
+            "a    b\n",
+            "Текст 😀\n",
+        ];
+        let tails = [
+            "[[Example]]",
+            "- [[Note]]\n",
+            "> [[Note]]\n",
+            "[[Note]] `[[Code]]`",
+            "<!-- [[HTML]] -->",
+            "~~~md\\n[[code]]\\n~~~",
+            "    [[indented code]]\n",
+            "[[Папка/Заметка#часть|подпись]]",
+        ];
+        for head in heads {
+            for tail in tails {
+                let source = format!("{head}{tail}");
+                if super::has_no_possible_exclusions(&source) {
+                    assert!(
+                        super::excluded_ranges_full(&source).is_empty(),
+                        "full parser excludes text wrongly skipped by fast path: {source:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn fast_path_is_identical_to_the_full_markdown_scanner() {

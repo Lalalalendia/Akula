@@ -1,0 +1,55 @@
+name: Wiki exclusions fast path A-B-B-A
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/core/src/search/wiki/parser.rs"
+      - "aquilum-app/core/Cargo.toml"
+      - ".github/workflows/wiki-exclusions-lab.yml"
+permissions:
+  contents: read
+jobs:
+  compare:
+    if: startsWith(github.head_ref, 'research/wiki-exclusion-fastpath-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: wiki-exclusions-lab
+      - name: Verify correctness
+        working-directory: aquilum-app
+        run: |
+          cargo fmt --all -- --check
+          cargo test --locked -p aquilum-core --features wiki-exclusions-lab search::wiki -- --test-threads=1
+          cargo test --locked --release -p aquilum-core --features wiki-exclusions-lab benchmark_indexing --no-run
+      - name: Same-runner paired baseline and candidate
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          AQUILUM_BENCH_SIZES: 1000,5000,10000
+        run: |
+          set -euo pipefail
+          for variant in base rich; do
+            if [ "$variant" = rich ]; then export AQUILUM_BENCH_RICH=1; else unset AQUILUM_BENCH_RICH || true; fi
+            for mode in old new new old; do
+              index="${index:-0}"
+              index=$((index+1))
+              if [ "$mode" = new ]; then export AKULA_WIKI_EXCLUSIONS_FAST=1; else unset AKULA_WIKI_EXCLUSIONS_FAST || true; fi
+              file="../wiki-lab-$index-$variant-$mode.log"
+              /usr/bin/time -v -o "../wiki-lab-$index.resources" cargo test --locked --release -p aquilum-core --features wiki-exclusions-lab benchmark_indexing -- --ignored --nocapture --test-threads=1 > "$file" 2>&1
+              echo "$variant $mode"
+              grep 'BENCH-INDEX ' "$file"
+            done
+          done
+      - name: Save raw logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiki-exclusions-${{ github.sha }}
+          path: |
+            wiki-lab-*.log
+            wiki-lab-*.resources
+          retention-days: 30
