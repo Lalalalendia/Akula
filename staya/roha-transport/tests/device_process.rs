@@ -22,28 +22,41 @@ fn read_key(path: &Path) -> SecretKey {
 async fn wait_signal(path: &Path) {
     let start = Instant::now();
     while !path.exists() {
-        assert!(start.elapsed() < Duration::from_secs(20), "no signal: {:?}", path);
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "no signal: {:?}",
+            path
+        );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 
 fn remote_address(dir: &Path) -> EndpointAddr {
-    let socket: SocketAddr = fs::read_to_string(dir.join("ready")).unwrap().parse().unwrap();
+    let socket: SocketAddr = fs::read_to_string(dir.join("ready"))
+        .unwrap()
+        .parse()
+        .unwrap();
     EndpointAddr::new(read_key(&dir.join("server.key")).public()).with_ip_addr(socket)
 }
 
 async fn server(dir: &Path) {
     let expected = read_key(&dir.join("client.key")).public();
     let policy = AllowedPeers::new([expected]);
-    let transport = StayaTransport::bind_loopback_lab(
-        read_key(&dir.join("server.key")),
-        policy.clone(),
-    ).await.unwrap();
+    let transport =
+        StayaTransport::bind_loopback_lab(read_key(&dir.join("server.key")), policy.clone())
+            .await
+            .unwrap();
     let addr = transport.loopback_address_lab().unwrap();
-    fs::write(dir.join("ready"), addr.ip_addrs().next().unwrap().to_string()).unwrap();
+    fs::write(
+        dir.join("ready"),
+        addr.ip_addrs().next().unwrap().to_string(),
+    )
+    .unwrap();
 
     let conn = tokio::time::timeout(Duration::from_secs(20), transport.accept_one())
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(conn.remote_id(), expected);
     transport.authorize_new_operation(&conn).unwrap();
     let (mut tx, mut rx) = conn.accept_bi().await.unwrap();
@@ -60,7 +73,9 @@ async fn server(dir: &Path) {
     );
     fs::write(dir.join("revoked"), b"1").unwrap();
     let (_tx2, _rx2) = tokio::time::timeout(Duration::from_secs(10), conn.accept_bi())
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     // Do not read or apply the second stream's contents.
     assert!(transport.authorize_new_operation(&conn).is_err());
     fs::write(dir.join("audit"), b"FIRST_IN_MEMORY\nSECOND_DENIED\n").unwrap();
@@ -73,7 +88,9 @@ async fn client(dir: &Path) {
     let transport = StayaTransport::bind_loopback_lab(
         read_key(&dir.join("client.key")),
         AllowedPeers::new([expected_server]),
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     let conn = transport.connect(remote_address(dir)).await.unwrap();
     assert_eq!(conn.remote_id(), expected_server);
     let (mut tx, mut rx) = conn.open_bi().await.unwrap();
@@ -85,7 +102,9 @@ async fn client(dir: &Path) {
     let (mut tx2, _rx2) = conn.open_bi().await.unwrap();
     let _ = tx2.write_all(b"SECOND").await;
     let _ = tx2.finish();
-    tokio::time::timeout(Duration::from_secs(10), conn.closed()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), conn.closed())
+        .await
+        .unwrap();
     transport.close().await;
 }
 
@@ -94,7 +113,9 @@ fn child_entry() {
     let Ok(role) = env::var(ROLE) else { return };
     let dir = PathBuf::from(env::var(DIR).unwrap());
     let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all().build().unwrap();
+        .enable_all()
+        .build()
+        .unwrap();
     runtime.block_on(async {
         match role.as_str() {
             "server" => server(&dir).await,
@@ -113,7 +134,8 @@ fn spawn(dir: &Path, role: &str) -> Child {
         .args(["--exact", "child_entry", "--nocapture"])
         .env(ROLE, role)
         .env(DIR, dir)
-        .spawn().unwrap()
+        .spawn()
+        .unwrap()
 }
 
 fn finish(mut child: Child) {
@@ -134,12 +156,17 @@ fn finish(mut child: Child) {
 
 struct TempDir(PathBuf);
 impl Drop for TempDir {
-    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 #[test]
 fn two_os_processes_keep_identity_and_deny_after_live_revoke() {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let dir = env::temp_dir().join(format!("akula-iroh-process-{}-{stamp}", std::process::id()));
     fs::create_dir(&dir).unwrap();
     let _cleanup = TempDir(dir.clone());
@@ -152,14 +179,23 @@ fn two_os_processes_keep_identity_and_deny_after_live_revoke() {
     let receiver = spawn(&dir, "server");
     let start = Instant::now();
     while !dir.join("ready").exists() {
-        assert!(start.elapsed() < Duration::from_secs(20), "server not ready");
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "server not ready"
+        );
         thread::sleep(Duration::from_millis(25));
     }
     finish(spawn(&dir, "client"));
     finish(receiver);
-    assert_eq!(fs::read(dir.join("audit")).unwrap(), b"FIRST_IN_MEMORY\nSECOND_DENIED\n");
+    assert_eq!(
+        fs::read(dir.join("audit")).unwrap(),
+        b"FIRST_IN_MEMORY\nSECOND_DENIED\n"
+    );
 
     // A separate restarted process loads the same test-only 32-byte key.
     finish(spawn(&dir, "restart"));
-    assert_eq!(fs::read_to_string(dir.join("restarted")).unwrap(), receiver_id.to_string());
+    assert_eq!(
+        fs::read_to_string(dir.join("restarted")).unwrap(),
+        receiver_id.to_string()
+    );
 }

@@ -114,10 +114,7 @@ impl StayaTransport {
     }
 
     #[cfg(feature = "process-lab")]
-    pub async fn bind_loopback_lab(
-        secret: SecretKey,
-        peers: AllowedPeers,
-    ) -> Result<Self, String> {
+    pub async fn bind_loopback_lab(secret: SecretKey, peers: AllowedPeers) -> Result<Self, String> {
         let endpoint = Endpoint::builder(presets::Minimal)
             .secret_key(secret)
             .alpns(vec![STAYA_ALPN.to_vec()])
