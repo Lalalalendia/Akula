@@ -22,6 +22,25 @@ function changed(base,head='HEAD',cwd=process.cwd()) {
     base,head,'--'],{encoding:'utf8',maxBuffer:32*1024*1024,cwd});
   return raw.split('\0').filter(Boolean);
 }
+
+const CORE_MANIFEST='aquilum-app/core/Cargo.toml';
+const WORKSPACE_LOCK='aquilum-app/Cargo.lock';
+// Strict fast path: only opt-in local manifest/linkage without changing any
+// existing package record. All other workspace edits retain the full suite.
+function safeManifestOnly(paths,route){
+  if(!Array.isArray(paths)||!route||route.shared_any_risky!==false)return false;
+  return paths.length>0 && paths.includes(CORE_MANIFEST) &&
+    paths.every(p=>p===CORE_MANIFEST||p===WORKSPACE_LOCK);
+}
+function requiredMode(paths,base,head='HEAD'){
+  const original=classify(paths);
+  if(original!=='workspace' || !paths.includes(CORE_MANIFEST) ||
+     !paths.every(p=>p===CORE_MANIFEST||p===WORKSPACE_LOCK))return original;
+  // compute() fails closed on malformed or changed existing Cargo.lock data.
+  const route=require('./ci-shared-manifest-route.cjs').compute(base,head);
+  return safeManifestOnly(paths,route)?'manifest':'workspace';
+}
+
 function main(argv) {
   const args=Object.fromEntries(argv.map(part=>{
     const match=part.match(/^--(base|head)=([^\s]+)$/);
@@ -30,11 +49,11 @@ function main(argv) {
   }));
   if(!args.base) throw Error('--base is required');
   const paths=changed(args.base,args.head||'HEAD');
-  const mode=classify(paths);
+  const mode=requiredMode(paths,args.base,args.head||'HEAD');
   process.stdout.write('mode='+mode+'\n');
 }
 if(require.main===module) {
   try {main(process.argv.slice(2));}
   catch(err){console.error(err.message);process.exitCode=1;}
 }
-module.exports={classify,changed,main};
+module.exports={classify,changed,safeManifestOnly,requiredMode,main};

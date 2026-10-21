@@ -206,6 +206,18 @@ jobs:
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
 
+      # A verified opt-in local package without existing dependency changes
+      # cannot alter the default Native graph. Exercise Core in both feature
+      # modes, plus the existing B1 and Node compatibility acceptance below.
+      - name: Run Core tests in both modes (safe manifest additions)
+        if: needs.classify.outputs.mode == 'manifest'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core
+          cargo test --locked -p aquilum-core --features sync-engine
+
       # Shared Cargo/lock/Core boundary changes retain exact B1a and B1b0
       # security tests under the existing required main gate. Direct source
       # and module changes still run their original specialist workflows.
@@ -501,7 +513,7 @@ jobs:
                 exit 1
               fi
               ;;
-            sync|none)
+            sync|none|manifest)
               if [ "$FRAMES_RESULT" != skipped ]; then
                 echo "::error::Unexpected native fidelity state for non-workspace PR"
                 exit 1
