@@ -368,3 +368,143 @@ fn self_asserted_issuer_and_epoch_match_but_cannot_prove_policy() {
         Ok(Observation::ConsistentOnlyNoAuthorization),
     );
 }
+
+
+// Preview-only shape mirroring Staya's current restricted ASCII queue labels.
+// The actual Staya QueueSelection is NOT linked in this opt-in Core test.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StayaPreviewObject {
+    source_index: usize,
+    wire_alias: String,
+    object_blake3: [u8; 32],
+    object_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PreviewHold {
+    InvalidOffer,
+    InvalidSelection,
+}
+
+/// Preserve the exact accepted-root subsequence, giving transport objects
+/// deterministic safe aliases instead of exposing untrusted display names as
+/// Staya file/path labels. No grant, session key, GET or filesystem rights.
+fn projection_for_staya_preview(
+    offer: &OfferV1,
+    selection: &SelectionDraft,
+    now: u64,
+) -> Result<Vec<StayaPreviewObject>, PreviewHold> {
+    offer.validate(now).map_err(|_| PreviewHold::InvalidOffer)?;
+    if selection.offer_id != offer.offer_id
+        || selection.commitment != offer.commitment()
+        || selection.files.is_empty()
+    {
+        return Err(PreviewHold::InvalidSelection);
+    }
+    let mut cursor = 0usize;
+    let mut projection = Vec::with_capacity(selection.files.len());
+    for (index, file) in offer.files.iter().enumerate() {
+        if selection.files.get(cursor) == Some(file) {
+            projection.push(StayaPreviewObject {
+                source_index: index,
+                wire_alias: format!("object_{index:02}.bin"),
+                object_blake3: file.blake3_root,
+                object_length: file.bytes,
+            });
+            cursor += 1;
+        }
+    }
+    if cursor != selection.files.len() {
+        return Err(PreviewHold::InvalidSelection);
+    }
+    Ok(projection)
+}
+
+#[test]
+fn unicode_and_long_display_names_use_stable_ascii_transport_aliases() {
+    let (mut offer, _, _, _) = fixture();
+    offer.files[0].label = format!("Отчёт_{}", "а".repeat(35));
+    offer.files[1].label = "Вторая заметка.txt".into();
+    offer.validate(NOW).unwrap();
+    let decision = offer
+        .receiver_decision(
+            DecisionAction::Accept,
+            vec![0, 1],
+            NOW,
+            offer.sender,
+            offer.receiver,
+        )
+        .unwrap();
+    let mut session =
+        OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
+    let Outcome::Selected(selection) =
+        session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
+    else {
+        panic!("expected selected draft");
+    };
+    let projection = projection_for_staya_preview(&offer, &selection, NOW + 2).unwrap();
+    assert_eq!(projection.len(), 2);
+    assert_eq!(projection[0].wire_alias, "object_00.bin");
+    assert_eq!(projection[1].wire_alias, "object_01.bin");
+    assert_eq!(projection[0].object_blake3, offer.files[0].blake3_root);
+    assert_eq!(projection[1].object_length, offer.files[1].bytes);
+    assert_eq!(projection[0].source_index, 0);
+    assert_eq!(projection[1].source_index, 1);
+}
+
+#[test]
+fn projection_must_not_accept_reordered_or_forged_roots() {
+    let (offer, selected, _, _) = fixture();
+    let mut reversed = selected.clone();
+    reversed.files = vec![offer.files[1].clone(), offer.files[0].clone()];
+    assert_eq!(
+        projection_for_staya_preview(&offer, &reversed, NOW + 2),
+        Err(PreviewHold::InvalidSelection),
+    );
+    let mut changed = selected.clone();
+    changed.files[0].blake3_root = [55; 32];
+    assert_eq!(
+        projection_for_staya_preview(&offer, &changed, NOW + 2),
+        Err(PreviewHold::InvalidSelection),
+    );
+    let mut duplicate = selected.clone();
+    duplicate.files.push(offer.files[0].clone());
+    assert_eq!(
+        projection_for_staya_preview(&offer, &duplicate, NOW + 2),
+        Err(PreviewHold::InvalidSelection),
+    );
+    let mut changed_offer = offer.clone();
+    changed_offer.files[0].bytes += 1;
+    assert_eq!(
+        projection_for_staya_preview(&changed_offer, &selected, NOW + 2),
+        Err(PreviewHold::InvalidSelection),
+    );
+}
+
+#[test]
+fn projection_does_not_reduce_legacy_grant_limits_or_create_authority() {
+    let (mut offer, _, grant, local) = fixture();
+    offer.files[0].bytes = MAX_RN4C_OBJECT + 1;
+    let decision = offer
+        .receiver_decision(
+            DecisionAction::Accept,
+            vec![0, 1],
+            NOW,
+            offer.sender,
+            offer.receiver,
+        )
+        .unwrap();
+    let mut session =
+        OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
+    let Outcome::Selected(selected) =
+        session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
+    else {
+        panic!("expected selected draft");
+    };
+    let preview = projection_for_staya_preview(&offer, &selected, NOW + 2).unwrap();
+    assert_eq!(preview.len(), 2);
+    assert_eq!(
+        correlate(&offer, &selected, grant, local, NOW + 2),
+        Err(Hold::LegacySingleObject),
+    );
+}
