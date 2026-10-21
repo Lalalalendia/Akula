@@ -14,7 +14,8 @@ impl App {
     pub(super) fn import_owner_proposal_preview(&mut self, dialog: &mut SettingsDialog) -> Effect {
         dialog.owner_review = None;
         dialog.owner_review_notice = None;
-        let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
+        let selected = self.workspace.core.settings.get_config().s3_onboarding;
+        let bucket = selected.bucket.clone();
         if bucket.is_empty() || !aquilum_core::settings::models::YandexS3Onboarding::valid_bucket(&bucket) {
             dialog.owner_review_notice = Some("settings.yandex.reviewNeedBucket");
             return Effect::Content;
