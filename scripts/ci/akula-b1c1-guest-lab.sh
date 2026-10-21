@@ -60,7 +60,9 @@ case "$1" in
     exec_sha="$(sha256sum "$exec_file" | cut -d ' ' -f1)"
     [[ "$cas_sha" =~ ^[0-9a-f]{64}$ && "$exec_sha" == "$cas_sha" ]] ||
       refuse "exec copy differs from pinned CAS sha256"
-    sync "$exec_file" "$exec_root"
+    # Explicitly fsync parent /opt as well: the new enrolled directory
+    # name must survive an abrupt QEMU process death on the same qcow2.
+    sync "$exec_file" "$exec_root" /opt
     exec_opts="$(findmnt -no OPTIONS -T "$exec_file")"
     case ",$exec_opts," in
       *,noexec,*) refuse "fixed executable mount is noexec" ;;
@@ -118,6 +120,47 @@ case "$1" in
       grep -Fq 'b1b2b signed-vm test note' /tmp/akula-b1c1-read ||
       refuse "signed committed ELF did not read test note"
     echo B1C1_QEMU_ROOT_COMMITTED_DYNAMICUSER_NODE_PASS
+    ;;
+  verify-persisted)
+    # After a real guest OS boot /run must be gone. Authentic executable
+    # bytes on disk are NOT permission to start: owner/CAS activation HOLD.
+    test ! -e "$root" && test ! -L "$root" ||
+      refuse "ephemeral CAS state unexpectedly persisted"
+    test ! -L "$exec_root" &&
+      test "$(stat -c '%u:%a' "$exec_root")" = "0:755" ||
+      refuse "persistent executable root not trusted"
+    test ! -L "$exec_file" &&
+      test "$(stat -c '%u:%a:%h' "$exec_file")" = "0:555:1" ||
+      refuse "persisted executable changed its owner/mode/links"
+    test ! -L "$exec_marker" &&
+      test "$(stat -c '%u:%a:%h' "$exec_marker")" = "0:600:1" &&
+      cmp -s "$exec_marker" <(printf 'AKULA-B1C1-CI-EXEC-COPY-V1\n') ||
+      refuse "persisted enrollment marker not trusted"
+    trusted=/etc/akula-b1b2b-lab-public.ed25519
+    test ! -L "$trusted" &&
+      test "$(stat -c '%u:%a:%h' "$trusted")" = "0:600:1" ||
+      refuse "preprovisioned root B1a public key unavailable"
+    /home/akulavm/b1b2b/b1a-fixture verify \
+      "$exec_file" /home/akulavm/b1b2b/v1.manifest \
+      /home/akulavm/b1b2b/v1.sig "$trusted" ||
+      refuse "persistent executable failed original B1a signature"
+    cmp -s "$exec_file" "$node_source" ||
+      refuse "persisted Node bytes are not original signed ELF"
+    if systemctl is-active --quiet "$unit"; then
+      refuse "unconfirmed transient CAS-installed Node auto-started"
+    fi
+    test ! -e "$exec_root/node.pending" ||
+      refuse "unexpected partial executable remains"
+    echo B1C2_GUEST_SIGNED_OPT_NODE_PERSISTED_BUT_ACTIVATION_HELD
+    ;;
+  cleanup-persisted)
+    bash "$0" verify-persisted >/dev/null ||
+      refuse "unsafe persistent-test cleanup denied"
+    rm -- "$exec_file" "$exec_marker"
+    rmdir -- "$exec_root"
+    test ! -e "$exec_root" ||
+      refuse "persistent test namespace remains"
+    echo B1C2_GUEST_SIGNED_OPT_TEST_CLEANUP_PASS
     ;;
   cleanup)
     enrolled

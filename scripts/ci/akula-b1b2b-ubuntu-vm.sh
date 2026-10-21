@@ -6,7 +6,6 @@ if [[ "$(id -u)" == 0 || "$GITHUB_ACTIONS" != true || "$RUNNER_OS" != Linux ]]; 
   echo "B1B2B_REFUSED: CI-only unprivileged runner" >&2
   exit 2
 fi
-vm_total_start=$SECONDS
 for cmd in curl sha256sum gpgv ssh scp ssh-keygen openssl python3 sudo strip; do
   command -v "$cmd" >/dev/null
 done
@@ -118,7 +117,6 @@ CLOUD
   genisoimage -quiet -output "$lab/seed.iso" -volid cidata -rock -joliet \
     user-data meta-data
 )
-image_fetch_start=$SECONDS
 url=https://cloud-images.ubuntu.com/noble/current
 curl -fsSL --retry 3 --connect-timeout 20 --max-time 900 \
   "$url/SHA256SUMS" -o "$lab/SHA256SUMS"
@@ -133,7 +131,6 @@ curl -fsSL --retry 3 --connect-timeout 20 --max-time 900 \
 printf '%s  %s\n' "$sha" "$lab/guest.qcow2" | sha256sum --check --status
 qemu-img info "$lab/guest.qcow2" >/dev/null
 qemu-img resize "$lab/guest.qcow2" 8G >/dev/null
-echo "B1B2B_IMAGE_FETCH_VERIFY_SECONDS=$((SECONDS - image_fetch_start))"
 ssh_port="$(python3 - <<'PY'
 import socket
 with socket.socket() as s:
@@ -141,21 +138,8 @@ with socket.socket() as s:
     print(s.getsockname()[1])
 PY
 )"
-# GitHub's disposable x86_64 Linux runner may expose /dev/kvm but leave
-# it root/kvm-owned. Grant the current non-root CI group access only to this
-# temporary device, never to the guest disk or release trust anchors.
-# If nested virtualization is unavailable, preserve the original TCG path.
 accelerator=tcg
-if [[ -c /dev/kvm ]]; then
-  if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-    if sudo chgrp "$(id -gn)" /dev/kvm && sudo chmod g+rw /dev/kvm; then
-      echo "B1B2B_KVM_CI_GROUP_ACCESS_ENABLED"
-    else
-      echo "B1B2B_KVM_PERMISSION_FALLBACK"
-    fi
-  fi
-  if [[ -r /dev/kvm && -w /dev/kvm ]]; then accelerator=kvm; fi
-fi
+if [[ -r /dev/kvm && -w /dev/kvm ]]; then accelerator=kvm; fi
 echo "B1B2B_QEMU_ACCELERATOR=$accelerator"
 # A disposable, signature-verified image COPY is the ONLY writable guest disk.
 # snapshot=off is essential: forced QEMU death must not discard the entire
@@ -169,7 +153,6 @@ start_qemu(){
     -device virtio-net-pci,netdev=labnet > "$lab/qemu.log" 2>&1 &
   guest_pid="$!"
 }
-first_boot_start=$SECONDS
 start_qemu
 printf 'akula-b1b2b %s\n' "$host_pub" > "$lab/known_hosts"
 chmod 0600 "$lab/known_hosts"
@@ -204,7 +187,6 @@ expected_key_sha="$(sha256sum "$lab/v1.pub" | cut -d ' ' -f1)"
 ssh_lab "sudo test -f /etc/akula-b1b2b-lab.marker &&
   test \"\$(sudo sha256sum /etc/akula-b1b2b-lab-public.ed25519 | cut -d ' ' -f1)\" = '$expected_key_sha'"
 echo "B1B2B_VM_PREBOOT_KEY_TRUST_VERIFIED"
-echo "B1B2B_FIRST_BOOT_VERIFY_SECONDS=$((SECONDS - first_boot_start))"
 ssh_lab "mkdir -m 0700 /home/akulavm/b1b2b"
 scp -q -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes \
   -o "UserKnownHostsFile=$lab/known_hosts" -o GlobalKnownHostsFile=/dev/null \
@@ -274,6 +256,21 @@ ssh_lab "sudo test -f /opt/akula-b1b2b-lab/in-progress &&
   test \"\$(sudo readlink /opt/akula-b1b2b-lab/active)\" = releases/0002"
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh recover"
 echo "B1B2B_VM_OS_REBOOT_RECOVERY_PASS"
+b1c2_mode="$(printenv AKULA_B1C2_PERSISTENCE_PROOF || true)"
+if [[ "$b1c2_mode" == "COLD_BOOT_FILE_HOLD" ]]; then
+  ssh_lab 'sudo bash /home/akulavm/b1b2b/akula-b1c1-guest-lab.sh verify-persisted'
+  # Cross-check surviving bytes against the host's original signed B1a ELF,
+  # independently of the guest's signature and root-owned metadata checks.
+  persisted_sha="$(ssh_lab 'sudo sha256sum /opt/akula-b1c1-committed-lab/node' | cut -d ' ' -f1)"
+  [[ "$persisted_sha" == "$expected_sha" ]] || {
+    echo "B1C2_REFUSED: persisted signed ELF hash changed" >&2
+    exit 1
+  }
+  echo "B1C2_QEMU_SIGNED_OPT_FILE_SURVIVED_OS_REBOOT_HOLD"
+elif [[ -n "$b1c2_mode" ]]; then
+  echo "B1C2_REFUSED: unknown persistence selector" >&2
+  exit 2
+fi
 
 # Separate failure mode: kill the WHOLE virtual machine while the guest
 # installer process is still alive after changing the durable active pointer.
@@ -354,6 +351,21 @@ ssh_lab "sudo test -f /opt/akula-b1b2b-lab/in-progress &&
 echo "B1B2B_VM_HARDOFF_PERSISTENCE_PASS"
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh recover"
 echo "B1B2B_VM_HARDOFF_SIGNED_RECOVERY_PASS"
+if [[ "$b1c2_mode" == "COLD_BOOT_FILE_HOLD" ]]; then
+  ssh_lab 'sudo bash /home/akulavm/b1b2b/akula-b1c1-guest-lab.sh verify-persisted'
+  # Cross-check surviving bytes against the host's original signed B1a ELF,
+  # independently of the guest's signature and root-owned metadata checks.
+  persisted_sha="$(ssh_lab 'sudo sha256sum /opt/akula-b1c1-committed-lab/node' | cut -d ' ' -f1)"
+  [[ "$persisted_sha" == "$expected_sha" ]] || {
+    echo "B1C2_REFUSED: persisted signed ELF hash changed" >&2
+    exit 1
+  }
+  echo "B1C2_QEMU_SIGNED_OPT_FILE_SURVIVED_QEMU_SIGKILL_HOLD"
+  ssh_lab 'sudo bash /home/akulavm/b1b2b/akula-b1c1-guest-lab.sh cleanup-persisted'
+  echo "B1C2_QEMU_DURABLE_TEST_NAMESPACE_CLEANED"
+elif [[ -n "$b1c2_mode" ]]; then
+  echo "B1C2_REFUSED: unknown persistence selector" >&2
+  exit 2
+fi
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh cleanup"
 echo "B1B2B_PASS: schema-valid Ubuntu VM, signed Node, SIGKILL installer, OS reboot, QEMU SIGKILL and signed recovery"
-echo "B1B2B_TOTAL_SCRIPT_SECONDS=$((SECONDS - vm_total_start))"

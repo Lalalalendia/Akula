@@ -44,5 +44,14 @@ guest_result="$(ssh_lab 'sudo bash /home/akulavm/b1b2b/akula-b1c1-guest-lab.sh a
 printf '%s\n' "$guest_result"
 grep -Fq 'B1C1_EXECUTABLE_HANDOFF_SHA256_PASS' <<< "$guest_result"
 grep -Fq 'B1C1_QEMU_ROOT_COMMITTED_DYNAMICUSER_NODE_PASS' <<< "$guest_result"
-ssh_lab 'sudo bash /home/akulavm/b1b2b/akula-b1c1-guest-lab.sh cleanup'
 echo "B1C1_QEMU_CAS_PINNED_SIGNED_REAL_NODE_END_TO_END_PASS"
+b1c2_mode="$(printenv AKULA_B1C2_PERSISTENCE_PROOF || true)"
+if [[ "$b1c2_mode" == "COLD_BOOT_FILE_HOLD" ]]; then
+  ssh_lab 'sudo test -f /opt/akula-b1c1-committed-lab/node'
+  echo "B1C2_QEMU_DURABLE_SIGNED_FILE_STAGED"
+elif [[ -z "$b1c2_mode" ]]; then
+  ssh_lab 'sudo bash /home/akulavm/b1b2b/akula-b1c1-guest-lab.sh cleanup'
+else
+  echo "B1C2_REFUSED: unknown persistence selector" >&2
+  exit 2
+fi

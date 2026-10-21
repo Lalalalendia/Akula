@@ -1,0 +1,58 @@
+name: Akula B1c2 signed Node persistent file boot and QEMU power-loss HOLD
+
+on:
+  pull_request:
+    branches:
+      - main
+      - experiment/akula-server-bootstrap-b1c1-real-elf-qemu-bridge
+    paths:
+      - "scripts/ci/akula-b1b2b-ubuntu-vm.sh"
+      - "scripts/ci/akula-b1c1-vm-hook.sh"
+      - "scripts/ci/akula-b1c1-guest-lab.sh"
+      - ".github/workflows/core-server-bootstrap-b1c2-durable-file.yml"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C2.md"
+      - "aquilum-app/core/tests/server_bootstrap_b1c0.rs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qemu-signed-file-reboot-poweroff:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-bootstrap-b1c2-file-persistence-v1
+          cache-workspace-crates: true
+      - name: Parse QEMU guest scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/ci/akula-b1b2b-ubuntu-vm.sh
+          bash -n scripts/ci/akula-b1b2b-guest-lab.sh
+          bash -n scripts/ci/akula-b1c1-vm-hook.sh
+          bash -n scripts/ci/akula-b1c1-guest-lab.sh
+      - name: Build real signed Node and root CAS bridge
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+          cargo build --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --example akula_b1b2b_release_fixture
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1c0-fixed-node-lab --test server_bootstrap_b1c0 --no-run
+          cargo check --locked -p aquilum-core --no-default-features
+      - name: Actual Ubuntu guest reboot and QEMU SIGKILL persistent signed file HOLD
+        shell: bash
+        env:
+          AKULA_B1C1_VM_BRIDGE: SIGNED_ELF_TO_ROOT_CAS
+          AKULA_B1C2_PERSISTENCE_PROOF: COLD_BOOT_FILE_HOLD
+        run: |
+          set -euo pipefail
+          bash scripts/ci/akula-b1b2b-ubuntu-vm.sh

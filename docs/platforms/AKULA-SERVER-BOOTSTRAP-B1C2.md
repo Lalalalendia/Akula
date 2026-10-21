@@ -1,0 +1,14 @@
+# Akula B1c2 — persisted signed ELF and safe activation HOLD after real guest reboot / QEMU SIGKILL
+
+Scope: an opt-in continuation of [B1c1 PR #511](https://github.com/Lalalalendia/Akula/pull/511) in the **same existing B1b2b GPG-pinned Ubuntu QEMU guest**. The input is the B1a Ed25519-signed real Node, already copied from a pinned FD through the B1c0 owner/CAS file transaction and authenticated by B1c1 before first transient DynamicUser launch.
+
+## Test sequence
+1. The existing B1c1 host hook confirms the original Ed25519 signature, CAS revision 1, fixed published SHA-256 and actual `DynamicUser=yes` read-only Node health. Only when the dedicated `AKULA_B1C2_PERSISTENCE_PROOF=COLD_BOOT_FILE_HOLD` selector is present does it **retain** the root-owned, enrolled executable copy at `/opt/akula-b1c1-committed-lab/node`. The standard B1c1 workflow still cleans up normally.
+2. The existing B1b2b QEMU script performs a real kernel reboot after an interrupted upgrade, checks a different Linux `boot_id`, and restores its own earlier version. **New B1c2 step:** verify that ephemeral `/run/akula-b1c0-one-shot-ci` state disappeared; the separate root-owned /opt executable has correct owner/mode/single link and marker; a pre-boot root-owned B1a Ed25519 public key verifies the *persisted executable* against the original detached manifest and signature. Assert the transient B1c1 systemd unit **did not auto-start**. Report `B1C2_GUEST_SIGNED_OPT_NODE_PERSISTED_BUT_ACTIVATION_HELD`.
+3. The original harness forcibly SIGKILLs the **entire QEMU process**, restarts that same qcow2, independently verifies a changed `boot_id`, restores its B1b2b signed release and runs B1c2's **same fail-closed signature/integrity/autostart HOLD proof** again.
+4. After verifying, remove *only* the two exact known root-owned files and their empty enrolled disposable /opt directory. The original B1b2b cleanup remains intact.
+
+## What this does NOT prove
+The original B1c1 OS-owned witness CAS ledger and ephemeral signed owner approval were test-only and have **not** been persisted independently of the /run staging path. The /opt file surviving a reboot does **not** authorize service execution or prove the owner has not revoked approval. The guest therefore MUST NOT reactivate the Node on its own after reboot. This is **durability of authenticated file bytes plus a correct HOLD**, not a crash-safe CAS+activation transaction or a working durable installer. No user VPS, installed Akula or Vault data are changed.
+
+A complete B1 first install still requires a single direct-to-/opt transaction with durable owner approval and CAS witness, failure injection around each fsync/rename, recovery of an interrupted service commit and a Windows SSH provisioning UI. This test deliberately reuses the current working QEMU guest, avoiding a separate synthetic environment or additional CAS protocol.
