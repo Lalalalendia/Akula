@@ -61,3 +61,7 @@ pub mod node_catalog_lab;
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
+
+// Explicit receiver save-as-new of independently verified staged bytes only.
+#[cfg(feature = "p2p-inbox-lab")]
+pub mod p2p_inbox_lab;
