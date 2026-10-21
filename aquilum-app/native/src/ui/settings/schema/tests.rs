@@ -268,3 +268,21 @@ fn b1d0_native_server_settings_are_nonsecret_and_never_offer_an_install_grant() 
     assert!(config.server_setup.host_public_key.is_empty());
     i18n::set_language("en");
 }
+
+#[test]
+fn system_about_section_links_to_project_telegram_channel() {
+    let sections = blocks(Section::System, &AppConfig::default(), &Context::new(1.0));
+    let about = sections.last().expect("About section should be present");
+    assert_eq!(about.rows.len(), 2, "project channel and app version");
+    let telegram = &about.rows[0];
+    assert_eq!(telegram.label, t("settings.system.projectTelegram"));
+    let hint = t("settings.system.projectTelegramHint");
+    assert_eq!(telegram.description.as_deref(), Some(hint.as_str()));
+    assert!(telegram.setter.is_none());
+    let Control::Buttons(buttons) = &telegram.control else {
+        panic!("project Telegram channel must be a clickable link");
+    };
+    assert_eq!(buttons.len(), 1);
+    assert_eq!(buttons[0].label, "https://t.me/AkulaHubl");
+    assert_eq!(buttons[0].action, Action::OpenUrl("https://t.me/AkulaHubl"));
+}
