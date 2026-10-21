@@ -86,13 +86,15 @@ image="$1"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 extra_packages=()
+glib_package=libglib2.0-0
 if [[ "$#" == 3 ]]; then
-  # minisign is packaged in Noble, not Jammy. Require it only for the
-  # additional real two-version signed E2E acceptance.
+  # Ubuntu Noble has minisign and renamed GLib to the t64 package;
+  # Ubuntu Jammy baseline retains its original runtime package list.
   extra_packages=(minisign)
+  glib_package=libglib2.0-0t64
 fi
 apt-get install -y -qq --no-install-recommends \
-  ca-certificates xvfb openbox wmctrl python3-minimal "${extra_packages[@]}" file libglib2.0-0 libfontconfig1 libfreetype6 \
+  ca-certificates xvfb openbox wmctrl python3-minimal "${extra_packages[@]}" file "$glib_package" libfontconfig1 libfreetype6 \
   libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
   libxkbcommon0 libxkbcommon-x11-0 libx11-6 libx11-xcb1 \
   libxcursor1 libxrandr2 libxi6 libxcb1 libwayland-client0
