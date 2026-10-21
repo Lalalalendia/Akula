@@ -58,6 +58,24 @@ public static class AkulaCredUiQaWindow {
         return found;
     }
 
+    [DllImport("user32.dll")]
+    private static extern int GetDlgCtrlID(IntPtr hwnd);
+    // Standard Win32 IDCANCEL=2, independent of the localized button text
+    // and of an unhelpful top-level UI Automation provider.
+    public static IntPtr[] FindNativeCancelButtons(IntPtr modalRoot) {
+        var found = new List<IntPtr>();
+        EnumChildWindows(modalRoot, delegate (IntPtr hwnd, IntPtr state) {
+            var cls = new StringBuilder(128);
+            if (GetClassName(hwnd, cls, cls.Capacity) != 0
+                && string.Equals(cls.ToString(), "Button", StringComparison.OrdinalIgnoreCase)
+                && GetDlgCtrlID(hwnd) == 2) {
+                found.Add(hwnd);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found.ToArray();
+    }
+
     public static IntPtr[] FindVisibleWindowsForProcess(uint requiredPid) {
         var windows = new List<IntPtr>();
         EnumWindows(delegate (IntPtr hwnd, IntPtr state) {
@@ -209,10 +227,35 @@ try {
             break
         }
     }
-    if ($null -eq $cancel) { throw 'Genuine Windows CredUI Cancel button not found' }
-    $invoke = [System.Windows.Automation.InvokePattern]$cancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    if ($null -eq $invoke) { throw 'Windows CredUI Cancel cannot be activated via UIA' }
-    $invoke.Invoke()
+    if ($null -eq $cancel) {
+        # Find the *same* native dialog's standard IDCANCEL=2. It is
+        # possible for Win32 to expose a masked EDIT while the UIA tree
+        # fails to advertise its standard button. We still REQUIRE UIA
+        # InvokePattern on the resolved native cancel HWND; no BM_CLICK,
+        # keyboard Escape or blind SendMessage can manufacture a UIA PASS.
+        foreach ($buttonHwnd in [AkulaCredUiQaWindow]::FindNativeCancelButtons($handle)) {
+            $possible = [System.Windows.Automation.AutomationElement]::FromHandle($buttonHwnd)
+            if ($null -eq $possible -or -not $possible.Current.IsEnabled) { continue }
+            $possiblePattern = $null
+            if ($possible.TryGetCurrentPattern(
+                [System.Windows.Automation.InvokePattern]::Pattern,
+                [ref]$possiblePattern
+            )) {
+                $cancel = $possible
+                break
+            }
+        }
+    }
+    if ($null -eq $cancel) {
+        throw 'Genuine Windows CredUI Cancel button has no accessible UIA InvokePattern'
+    }
+    $invoke = $null
+    if (-not $cancel.TryGetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke
+    ) -or $null -eq $invoke) {
+        throw 'Windows CredUI Cancel cannot be activated via UIA'
+    }
+    ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
     if (-not $proc.WaitForExit(30000)) {
         throw 'The genuine Windows CredUI Cancel did not return to the native test'
     }
