@@ -6,7 +6,7 @@ This directory contains a **real compiled adapter** between Akula Core
 `OfferV1 / DecisionV1 / OfferSession` and the separately maintained
 `staya-transfer::queue::QueueSelection`. It intentionally does not mirror or
 duplicate Staya's queue implementation. The dependency is pinned to Staya's
-immutable commit `adf4356f3a218bd7fce976ef813a019c3aac471d`.
+immutable commit `ccfe82dc6125e2810e95043a6a4ac55954b710e0`.
 
 The CI workflow checks out this exact Staya revision, builds its existing
 `staya-direct-preview` executable with its locked release compatibility
@@ -39,10 +39,10 @@ receiver-approved subset and a Staya queue commitment.
 ## Not a production authorization
 
 This demo necessarily trusts a **local test operator** to supply two temporary
-Akula DeviceIds and identify the initial Staya endpoint ticket. Staya's
-existing preview provider starts listening before it learns of Akula consent;
-the test controller withholds the invitation until consent but this does
-**not** prove a production enforcement fence against all possible clients.
+Akula DeviceIds and identify the initial Staya endpoint ticket. The gated
+provider now denies real QUIC GET before the controller explicitly arms the
+sender after Akula consent, but the test controller is trusted local input.
+This **does not** establish a production entitlement against hostile local clients.
 
 The next product step is a real Broker-enrolled
 `Akula DeviceId <-> authenticated Iroh EndpointId` mapping and durable

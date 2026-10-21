@@ -162,7 +162,11 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     // Two independent OS processes; the receiver creates a real Iroh key.
     let mut receiver = OwnedProcess::spawn(
         &binary,
-        &["receive-batch", "--lab-request-unlisted", "--lab-probe-before-arm"],
+        &[
+            "receive-batch",
+            "--lab-request-unlisted",
+            "--lab-probe-before-arm",
+        ],
     );
     let receiver_text = receiver.line();
     let receiver_id = receiver_text
@@ -174,8 +178,10 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     // every object in the offer. It will only serve the named receiver key.
     let first_arg = first_path.to_str().expect("test path utf8");
     let last_arg = last_path.to_str().expect("test path utf8");
-    let mut provider =
-        OwnedProcess::spawn(&binary, &["serve-batch-gated", receiver_id, first_arg, last_arg]);
+    let mut provider = OwnedProcess::spawn(
+        &binary,
+        &["serve-batch-gated", receiver_id, first_arg, last_arg],
+    );
     let invitation = provider.line();
     let fields: Vec<&str> = invitation.split_whitespace().collect();
     assert_eq!(fields.first(), Some(&"CONNECT_BATCH"));
