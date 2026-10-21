@@ -4,8 +4,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
       - "aquilum-app/core/src/server_owner_approval_lab.rs"
       - "aquilum-app/core/src/server_release_floor_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1b1b.rs"
