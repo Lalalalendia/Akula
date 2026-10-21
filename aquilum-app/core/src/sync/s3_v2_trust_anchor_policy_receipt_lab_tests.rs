@@ -1195,3 +1195,241 @@ fn two_distinct_publisher_signatures_required_for_successor_quorum() {
     assert_eq!(submit(&mut journal, &approved).unwrap(), SignedSuccessorOutcome::Advanced);
     assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &successor);
 }
+
+
+// E3e: a receiver-issued public challenge is single-use within one local
+// process session. It is never imported from untrusted S3 or stored as a new
+// source of Vault trust. Human approval of keys/pins remains a prerequisite.
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+fn receiver_session_join(
+    f: &Fixture,
+    session: &mut crate::sync::ReceiverJoinSession,
+    journal: &mut S3V2TrustedAnchorJournal,
+    root: &S3PackedHeadV2,
+    policy: &PublisherPolicyV1,
+    pinned: &S3PinnedV2ReadPreview,
+    trusted_owner: &Ed25519KeyPair,
+    signing_key: &Ed25519KeyPair,
+    approved_challenge_override: Option<&str>,
+    scope_override: Option<&S3RemoteAnchorScope>,
+) -> Result<crate::sync::AtomicJoinOutcome, crate::sync::ReceiverJoinSessionError> {
+    use crate::sync::{IndependentlyApprovedJoin, JOIN_GENESIS_TYPE};
+
+    let challenge = session.challenge_hex();
+    let owner_keys = [pk(trusted_owner)];
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let approved = IndependentlyApprovedJoin {
+        bucket: &f.profile.bucket,
+        keyspace: &f.ns,
+        pinned_genesis_root_blake3: &root_pin,
+        pinned_genesis_policy_blake3: &policy_pin,
+        trusted_owner_keys: &owner_keys,
+        owner_quorum: 1,
+        recipient_challenge_hex: approved_challenge_override.unwrap_or(&challenge),
+    };
+    let payload = serde_json::to_vec(&json!({
+        "schema": 1,
+        "purpose": "review-only-join-genesis",
+        "provider": "yandex-object-storage",
+        "endpoint": "https://storage.yandexcloud.net",
+        "region": "ru-central1",
+        "force_path_style": true,
+        "bucket": f.profile.bucket,
+        "current_head_key": f.ns.current_head_key(),
+        "vault_id": f.ns.vault_id(),
+        "root_generation": root.generation(),
+        "root_blake3": root_pin.as_str(),
+        "policy_epoch": policy.epoch(),
+        "policy_blake3": policy_pin.as_str(),
+        "recipient_challenge_hex": challenge.as_str(),
+    })).unwrap();
+    let signature = signing_key.sign(
+        &super::super::super::s3_signed_root_paev1::pae(
+            JOIN_GENESIS_TYPE.as_bytes(), &payload,
+        ),
+    );
+    let signatures = [DecodedSignature {
+        sig: signature.as_ref(), keyid: Some("untrusted-label"),
+    }];
+    session.enroll_once(
+        journal, scope_override.unwrap_or(&f.scope),
+        root, "etag-e3e", pinned, policy,
+        &DecodedDsseEnvelope {
+            payload_type: JOIN_GENESIS_TYPE,
+            payload: &payload,
+            signatures: &signatures,
+        },
+        &approved,
+    )
+}
+
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+#[test]
+fn receiver_session_csprng_nonce_and_one_shot_atomic_join() {
+    use crate::sync::{AtomicJoinOutcome, ReceiverJoinSession, ReceiverJoinSessionError};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let mut session = ReceiverJoinSession::issue(&f.scope).unwrap();
+    let other = ReceiverJoinSession::issue(&f.scope).unwrap();
+    let hex = session.challenge_hex();
+    assert_eq!(hex.len(), 64);
+    assert!(hex.as_bytes().iter().all(|b|
+        b.is_ascii_digit() || (b'a'..=b'f').contains(b)));
+    assert!(hex.as_bytes().iter().any(|b| *b != b'0'));
+    // CSPRNG-generated independent sessions must not reuse a challenge.
+    assert_ne!(hex, other.challenge_hex());
+    let mut journal = f.open();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-e3e");
+    assert_eq!(receiver_session_join(
+        &f, &mut session, &mut journal, &root, &policy, &pinned,
+        &owner, &owner, None, None,
+    ).unwrap(), AtomicJoinOutcome::Inserted);
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &root);
+    assert!(matches!(receiver_session_join(
+        &f, &mut session, &mut journal, &root, &policy, &pinned,
+        &owner, &owner, None, None,
+    ), Err(ReceiverJoinSessionError::AlreadyConsumed)));
+}
+
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+#[test]
+fn wrong_owner_signature_spends_session_without_any_partial_root() {
+    use crate::sync::{ReceiverJoinSession, ReceiverJoinSessionError};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let attacker = signer(42);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-e3e");
+    let mut journal = f.open();
+    let mut session = ReceiverJoinSession::issue(&f.scope).unwrap();
+    assert!(matches!(receiver_session_join(
+        &f, &mut session, &mut journal, &root, &policy, &pinned,
+        &owner, &attacker, None, None,
+    ), Err(ReceiverJoinSessionError::Join(_))));
+    assert!(matches!(receiver_session_join(
+        &f, &mut session, &mut journal, &root, &policy, &pinned,
+        &owner, &owner, None, None,
+    ), Err(ReceiverJoinSessionError::AlreadyConsumed)));
+    assert!(journal.load(&f.scope).unwrap().is_none());
+}
+
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+#[test]
+fn expired_foreign_scope_or_changed_challenge_can_never_enroll() {
+    use crate::sync::{ReceiverJoinSession, ReceiverJoinSessionError};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-e3e");
+    let mut journal = f.open();
+
+    let mut expired = ReceiverJoinSession::issue(&f.scope).unwrap();
+    expired.expire_for_test();
+    assert!(matches!(receiver_session_join(
+        &f, &mut expired, &mut journal, &root, &policy, &pinned,
+        &owner, &owner, None, None,
+    ), Err(ReceiverJoinSessionError::Expired)));
+
+    let mut wrong_challenge = ReceiverJoinSession::issue(&f.scope).unwrap();
+    let altered = "a".repeat(64);
+    assert_ne!(wrong_challenge.challenge_hex(), altered);
+    assert!(matches!(receiver_session_join(
+        &f, &mut wrong_challenge, &mut journal, &root, &policy, &pinned,
+        &owner, &owner, Some(&altered), None,
+    ), Err(ReceiverJoinSessionError::WrongChallenge)));
+
+    let foreign_profile = S3ConnectionProfile {
+        bucket: "other-e3e-bucket".into(), ..f.profile.clone()
+    };
+    let foreign = S3RemoteAnchorScope::new(
+        f.scope.profile_id(), "independently-approved-account-binding",
+        &foreign_profile, &f.ns,
+    ).unwrap();
+    let mut wrong_scope = ReceiverJoinSession::issue(&f.scope).unwrap();
+    assert!(matches!(receiver_session_join(
+        &f, &mut wrong_scope, &mut journal, &root, &policy, &pinned,
+        &owner, &owner, None, Some(&foreign),
+    ), Err(ReceiverJoinSessionError::WrongLocalScope)));
+    assert!(journal.load(&f.scope).unwrap().is_none());
+}
+
+
+
+#[cfg(feature = "signed-vault-join-successor-integration-lab")]
+#[test]
+fn one_shot_receiver_join_then_signed_direct_successor_preserves_same_sqlite_policy() {
+    use crate::sync::{AtomicJoinOutcome, ReceiverJoinSession,
+        ReceiverJoinSessionError, SignedSuccessorError, SignedSuccessorOutcome,
+        SignedRootError};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let publisher = signer(99);
+    let unauthorized = signer(98);
+    let genesis = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let policy_pin = policy.canonical_digest().unwrap();
+    let mut session = ReceiverJoinSession::issue(&f.scope).unwrap();
+    let mut journal = f.open();
+    // Real owner-key approval, live Yandex and the full V2 network read
+    // remain independent prerequisites. This test exercises shared SQLite
+    // state using a synthetic pinned receipt and a signed invitation.
+    // receiver_session_join hardcodes its test-only genesis ETag "etag-e3e".
+    let matched_genesis_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &genesis, "etag-e3e",
+    );
+    assert_eq!(
+        receiver_session_join(
+            &f, &mut session, &mut journal, &genesis, &policy,
+            &matched_genesis_read, &owner, &owner, None, None,
+        ).unwrap(),
+        AtomicJoinOutcome::Inserted,
+    );
+    assert!(matches!(
+        receiver_session_join(
+            &f, &mut session, &mut journal, &genesis, &policy,
+            &matched_genesis_read, &owner, &owner, None, None,
+        ),
+        Err(ReceiverJoinSessionError::AlreadyConsumed),
+    ));
+    let second = successor_for(&f, &genesis, "e3g-successor");
+    let second_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &second, "etag-e3g-second",
+    );
+    assert!(matches!(
+        signed_successor_with_pinned_read(
+            &mut journal, &f, &second, &genesis, &unauthorized,
+            1, "etag-e3g-second", &second_read,
+        ),
+        Err(SignedSuccessorError::InvalidSignature(SignedRootError::MissingQuorum)),
+    ));
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &genesis);
+    assert_eq!(
+        signed_successor_with_pinned_read(
+            &mut journal, &f, &second, &genesis, &publisher,
+            1, "etag-e3g-second", &second_read,
+        ).unwrap(),
+        SignedSuccessorOutcome::Advanced,
+    );
+    drop(journal);
+    let mut reopened = f.open();
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &second);
+    assert_eq!(
+        reopened.load(&f.scope).unwrap().unwrap().previous_root(),
+        Some(&genesis),
+    );
+    assert_eq!(
+        reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(),
+        policy_pin,
+    );
+    assert!(matches!(
+        reopened.record_verified_successor(
+            &f.scope, &second, "etag-e3g-second", &second_read,
+        ),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+}
