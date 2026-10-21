@@ -181,7 +181,8 @@ fn open_actor(trust: &Path, journal: &Path) -> OsWitnessLab {
 
 
 use aquilum_core::server_installer_durable_node::{
-    commit_first_ci_opt, inspect_ci_hold, CrashPoint, DurableError, DurableStatus,
+    commit_first_ci_opt, inspect_ci_hold, inspect_provisioned_opt_hold,
+    CrashPoint, DurableError, DurableStatus,
 };
 use std::os::unix::fs::MetadataExt;
 
@@ -395,4 +396,21 @@ fn b1d0_actual_built_linux_node_elf_uses_one_root_signed_fd_and_opt_receipt() {
     let reopened = open_actor(trust.path(), ledger.path());
     assert_eq!(inspect_ci_hold(&reopened).unwrap(), status);
     println!("B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS");
+}
+
+#[test]
+fn production_inspection_refuses_unenrolled_os_witness_and_does_not_provision() {
+    // This is a disposable GitHub runner, never a user's VPS. A CI witness
+    // fixture from /tmp must NOT supply a production /opt install authority.
+    assert_eq!(std::env::var("GITHUB_ACTIONS").ok().as_deref(), Some("true"));
+    assert_eq!(rustix::process::geteuid().as_raw(), 0);
+    let witness_root = Path::new("/var/lib/akula/server-bootstrap");
+    let destination = Path::new("/opt/akula-node");
+    assert!(fs::symlink_metadata(witness_root).is_err());
+    assert!(fs::symlink_metadata(destination).is_err());
+    let result = inspect_provisioned_opt_hold();
+    assert!(result.is_err(),
+        "unprovisioned fixed OS-owned witness cannot authorize a report");
+    assert!(fs::symlink_metadata(witness_root).is_err());
+    assert!(fs::symlink_metadata(destination).is_err());
 }

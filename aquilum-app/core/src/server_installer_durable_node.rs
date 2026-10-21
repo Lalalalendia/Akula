@@ -355,7 +355,6 @@ fn inspect_locked(dir: &File, actor: &OsWitnessLab)
 #[allow(dead_code, clippy::too_many_arguments)]
 pub(crate) fn commit_first_provisioned_opt(
     pinned: &RootVerifiedFd,
-    actor: &OsWitnessLab,
     owner: &SignedOwnerApproval,
     trusted_owner: &TrustedOwnerApprover,
     scope: ExternalApprovalScope,
@@ -365,8 +364,23 @@ pub(crate) fn commit_first_provisioned_opt(
     challenge: [u8;32],
     now_unix: u64,
 ) -> Result<DurableStatus, DurableError> {
-    commit_in(Destination::ProvisionedOpt, pinned, actor, owner, trusted_owner,
+    // Actor origin is OS-enrolled and fixed under /var/lib/akula. A caller
+    // cannot pass its own test witness actor to a production /opt commit.
+    let actor = OsWitnessLab::open_provisioned_first_install()
+        .map_err(DurableError::Witness)?;
+    commit_in(Destination::ProvisionedOpt, pinned, &actor, owner, trusted_owner,
         scope, staged, proposed, expected_before, challenge, now_unix, CrashPoint::None)
+}
+/// On restart: receipt and executable bytes can be inspected only alongside
+/// the SAME independently root-provisioned production CAS ledger. Never
+/// grants automatic service activation after reboot.
+#[allow(dead_code)]
+pub fn inspect_provisioned_opt_hold() -> Result<DurableStatus, DurableError> {
+    let actor = OsWitnessLab::open_provisioned_first_install()
+        .map_err(DurableError::Witness)?;
+    let root = open_root(Destination::ProvisionedOpt)?;
+    flock(&root, FlockOperation::LockExclusive).map_err(os)?;
+    inspect_locked(&root, &actor)
 }
 #[allow(clippy::too_many_arguments)]
 fn commit_in(

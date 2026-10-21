@@ -31,3 +31,25 @@ This is an actual native UI entry and a reusable public setup state, not an end-
 ## B1d0 exact real executable acceptance (additional)
 
 The Linux UID0 workflow also compiles the actual repository `akula-node-lab` Linux ELF, passes its exact bytes to a test-only Ed25519 B1a signer (not a production release key), pins the resulting signed package FD, consumes a detached test owner approval through the real CAS witness, publishes exactly those bytes directly under the fixed root-owned `/opt/akula-b1d0-ci-node/node`, persists a checksummed receipt, reopens the actor and verifies `LocallyConsistentHold`. A second attempt is refused. This closes the signed *real ELF file* gap in B1d0 but **does not execute or activate** that file; independent QEMU tests B1c1/B1c2 demonstrate runtime and boot durability separately. CI must show `B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS` in the root test job log. No real release signer, user VPS or private data are used.
+
+## B1d0 production witness provenance boundary
+
+The production-only, crate-private `commit_first_provisioned_opt` no longer
+accepts an arbitrary caller-supplied `OsWitnessLab` actor. It must reopen
+its **own** independently pre-enrolled root-owned witness at exactly
+`/var/lib/akula/server-bootstrap/trust` and
+`/var/lib/akula/server-bootstrap/journal`, with root-owned, symlink-free
+ancestry `/var/lib/akula/server-bootstrap` mode 0700 and a **distinct**
+24-byte `AKULA-B1D0-KEY-ENROLLED` marker. A B1b4b CI witness marker is
+not valid for a production /opt file commit. No actor directories,
+signing seed, private owner key, manifest or OS enrollment are created by
+this function. The new read-only `inspect_provisioned_opt_hold` also uses
+this fixed OS witness and returns local consistency **HOLD only**, never an
+authorization to start. CI explicitly proves that a completely unprovisioned
+production witness/destination is not manufactured by inspection, even if
+the disposable root tests have their own separate witness actor.
+
+An independently owned real release-signing trust anchor, owner approval,
+persistent operating-system key provisioning, verified time/revocation and
+power-loss recovery are still prerequisites to exposing any privileged
+installation action to Windows, SSH or a local service.

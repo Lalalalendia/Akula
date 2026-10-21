@@ -7,6 +7,7 @@ on:
       - "aquilum-app/core/Cargo.toml"
       - "aquilum-app/core/src/lib.rs"
       - "aquilum-app/core/src/server_installer_fixed_node_lab.rs"
+      - "aquilum-app/core/src/server_installer_os_witness_lab.rs"
       - "aquilum-app/core/src/server_installer_durable_node.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1d0.rs"
       - ".github/workflows/core-server-bootstrap-b1d0-opt.yml"
@@ -58,6 +59,7 @@ jobs:
           test -x .artifacts/cargo-native/debug/akula-node-lab
           # Production destination must never be created by this test.
           test ! -e /opt/akula-node
+          test ! -e /var/lib/akula/server-bootstrap
           found=0
           for bin in .artifacts/cargo-native/debug/deps/server_bootstrap_b1d0-*; do
             if [[ -f "$bin" && -x "$bin" && "$bin" != *.d ]]; then
