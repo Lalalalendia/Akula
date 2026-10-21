@@ -227,35 +227,40 @@ try {
             break
         }
     }
-    if ($null -eq $cancel) {
-        # Find the *same* native dialog's standard IDCANCEL=2. It is
-        # possible for Win32 to expose a masked EDIT while the UIA tree
-        # fails to advertise its standard button. We still REQUIRE UIA
-        # InvokePattern on the resolved native cancel HWND; no BM_CLICK,
-        # keyboard Escape or blind SendMessage can manufacture a UIA PASS.
+    $activation = $null
+    if ($null -ne $cancel) {
+        $invoke = $null
+        if ($cancel.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke
+        ) -and $null -ne $invoke) {
+            ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
+            $activation = 'UIA_Invoke'
+        }
+    }
+    if ($null -eq $activation) {
+        # The classic native CredUI IDCANCEL control on this Windows runner
+        # does not expose InvokePattern. Microsoft's UIA MSAA proxy can
+        # instead expose LegacyIAccessiblePattern.DoDefaultAction(). Only the
+        # exact enabled HWND with Win32 IDCANCEL=2 INSIDE the already verified,
+        # test-PID-owned masked dialog is eligible. Never send keyboard Escape,
+        # BM_CLICK or a synthetic success token.
         foreach ($buttonHwnd in [AkulaCredUiQaWindow]::FindNativeCancelButtons($handle)) {
             $possible = [System.Windows.Automation.AutomationElement]::FromHandle($buttonHwnd)
             if ($null -eq $possible -or -not $possible.Current.IsEnabled) { continue }
-            $possiblePattern = $null
+            $legacy = $null
             if ($possible.TryGetCurrentPattern(
-                [System.Windows.Automation.InvokePattern]::Pattern,
-                [ref]$possiblePattern
-            )) {
-                $cancel = $possible
+                [System.Windows.Automation.LegacyIAccessiblePattern]::Pattern,
+                [ref]$legacy
+            ) -and $null -ne $legacy) {
+                ([System.Windows.Automation.LegacyIAccessiblePattern]$legacy).DoDefaultAction()
+                $activation = 'UIA_LegacyIAccessible_DefaultAction'
                 break
             }
         }
     }
-    if ($null -eq $cancel) {
-        throw 'Genuine Windows CredUI Cancel button has no accessible UIA InvokePattern'
+    if ($null -eq $activation) {
+        throw 'Genuine Windows CredUI IDCANCEL lacks both UIA Invoke and MSAA DefaultAction'
     }
-    $invoke = $null
-    if (-not $cancel.TryGetCurrentPattern(
-        [System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke
-    ) -or $null -eq $invoke) {
-        throw 'Windows CredUI Cancel cannot be activated via UIA'
-    }
-    ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
     if (-not $proc.WaitForExit(30000)) {
         throw 'The genuine Windows CredUI Cancel did not return to the native test'
     }
@@ -271,7 +276,7 @@ try {
     }
     # The Rust test confirms Cancel and absence of the disposable WinCred target.
     # Never upload or print raw GUI logs.
-    Write-Host "AKULA_YANDEX_CREDUI_CANCEL_PASS: native_modal=True masked_password_fields=$masked mask_proof=$maskProof UIA_cancel=True no_keys_persisted=True"
+    Write-Host "AKULA_YANDEX_CREDUI_CANCEL_PASS: native_modal=True masked_password_fields=$masked mask_proof=$maskProof cancel_activation=$activation no_keys_persisted=True"
 }
 finally {
     if ($null -ne $proc) {
