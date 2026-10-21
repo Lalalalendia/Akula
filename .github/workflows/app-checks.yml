@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Cancel outdated checks for the same PR after a new commit. Other PRs stay independent.
 concurrency:
@@ -35,6 +36,31 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Enforced by the existing ruleset-required "Main PR gate" via classify.
+      # Fail BEFORE expensive Rust compilation when the periodic scan is bad/stale.
+      - name: Require fresh RustSec result and check dependency changes
+        id: dependency_security
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/dependency-security-gate.test.cjs
+          node .github/scripts/dependency-security-gate.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+      - name: Install fast prebuilt cargo-audit for dependency changes
+        if: steps.dependency_security.outputs.scan_required == 'true'
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        with:
+          tool: cargo-audit@0.22.2
+      - name: RustSec audit of changed or bootstrapped dependencies
+        if: steps.dependency_security.outputs.scan_required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit --file aquilum-app/Cargo.lock
+          cargo audit --file aquilum-app/host-broker-lab/Cargo.lock
+
       - name: Classify Rust test scope (fail closed)
         id: scope
         shell: bash
