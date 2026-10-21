@@ -1,0 +1,75 @@
+name: Windows WARP staging Map A/B (developer diagnostic)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/output/device.rs'
+      - 'aquilum-app/native/src/output/dxgi.rs'
+      - 'scripts/benchmarks/native_warp_map_windows_ab.py'
+      - '.github/workflows/native-warp-map-ab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: akula-warp-map-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  warp-map:
+    name: Strict Windows WARP WRITE versus READ_WRITE native GUI
+    runs-on: windows-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Syntax, source SHA and Windows API preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git rev-parse HEAD
+          rustc --version
+          python -m py_compile scripts/benchmarks/native_warp_map_windows_ab.py scripts/benchmarks/native_mipmap_window_ab.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax failed' }
+          python -c "import os,sys;sys.path.insert(0,'scripts/benchmarks');from native_mipmap_window_ab import windows_peak_rss_kib;assert windows_peak_rss_kib(os.getpid()) > 0"
+          if ($LASTEXITCODE -ne 0) { throw 'Missing process memory API' }
+      - name: Compile developer native release
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Native release build failed' }
+          $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path $bin)) { throw 'Missing native executable' }
+          Get-FileHash -Algorithm SHA256 $bin | Format-List
+      - name: Execute three ABBA-mode native Win32 trial pairs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'warp-map-results'
+          python scripts/benchmarks/native_warp_map_windows_ab.py --binary $bin --out $out
+          if ($LASTEXITCODE -ne 0) { throw 'WARP staging A/B failed' }
+          Get-Content (Join-Path $out 'summary.md') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Preserve measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-map-01-${{ github.sha }}
+          path: |
+            warp-map-results/summary.md
+            warp-map-results/matrix.json
+            warp-map-results/**/sample.json
+            warp-map-results/**/metrics.json
+            warp-map-results/**/replay.json
+            warp-map-results/**/process.log
+          retention-days: 14
+          if-no-files-found: warn
