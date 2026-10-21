@@ -55,7 +55,7 @@ impl Fixture {
         this.seed_key(this.recipient, RECIPIENT_EPOCH, recipient_key);
         if allow {
             assert_eq!(
-                this.inbox.allow_route(&this.approval(SENDER_EPOCH, 11)).unwrap(),
+                { let approved = this.approval(SENDER_EPOCH, 11); this.inbox.allow_route(&approved) }.unwrap(),
                 RouteOutcome::Allowed
             );
         }
@@ -177,7 +177,7 @@ fn no_route_no_sender_key_and_wrong_signer_never_yield_ack() {
     assert!(matches!(f.accept(&wire), Err(Error::Unauthorized)));
     assert_eq!(f.inbox.row_count().unwrap(), 0);
     assert_eq!(
-        f.inbox.allow_route(&f.approval(SENDER_EPOCH, 11)).unwrap(),
+        { let approved = f.approval(SENDER_EPOCH, 11); f.inbox.allow_route(&approved) }.unwrap(),
         RouteOutcome::Allowed
     );
     f.inbox
@@ -227,7 +227,7 @@ fn revocation_after_crypto_before_sqlite_commit_is_enforced() {
     // A host-authorized revocation that commits in the verification/commit
     // window is visible inside the immediate acceptance transaction.
     assert_eq!(
-        f.inbox.revoke_route(&f.revocation(SENDER_EPOCH, 91)).unwrap(),
+        { let approved = f.revocation(SENDER_EPOCH, 91); f.inbox.revoke_route(&approved) }.unwrap(),
         RouteOutcome::Revoked
     );
     assert!(matches!(
@@ -243,7 +243,7 @@ fn revocation_after_crypto_before_sqlite_commit_is_enforced() {
     ));
     assert_eq!(f.inbox.row_count().unwrap(), 0);
     assert!(matches!(
-        f.inbox.allow_route(&f.approval(SENDER_EPOCH, 99)),
+        { let approved = f.approval(SENDER_EPOCH, 99); f.inbox.allow_route(&approved) },
         Err(Error::Unauthorized)
     ));
     assert!(matches!(f.accept(&wire), Err(Error::Unauthorized)));
@@ -334,23 +334,23 @@ fn failed_disk_insert_cannot_emit_w4_recipient_receipt() {
 fn host_route_epoch_is_monotonic_and_approval_evidence_is_not_replayable() {
     let mut f = Fixture::new(true);
     assert_eq!(
-        f.inbox.allow_route(&f.approval(SENDER_EPOCH, 11)).unwrap(),
+        { let approved = f.approval(SENDER_EPOCH, 11); f.inbox.allow_route(&approved) }.unwrap(),
         RouteOutcome::Duplicate
     );
     assert!(matches!(
-        f.inbox.allow_route(&f.approval(SENDER_EPOCH, 12)),
+        { let approved = f.approval(SENDER_EPOCH, 12); f.inbox.allow_route(&approved) },
         Err(Error::Conflict)
     ));
     assert_eq!(
-        f.inbox.revoke_route(&f.revocation(SENDER_EPOCH, 99)).unwrap(),
+        { let approved = f.revocation(SENDER_EPOCH, 99); f.inbox.revoke_route(&approved) }.unwrap(),
         RouteOutcome::Revoked
     );
     assert!(matches!(
-        f.inbox.allow_route(&f.approval(SENDER_EPOCH, 11)),
+        { let approved = f.approval(SENDER_EPOCH, 11); f.inbox.allow_route(&approved) },
         Err(Error::Unauthorized)
     ));
     assert!(matches!(
-        f.inbox.allow_route(&f.approval(SENDER_EPOCH + 1, 12)),
+        { let approved = f.approval(SENDER_EPOCH + 1, 12); f.inbox.allow_route(&approved) },
         Err(Error::Unauthorized)
     ));
     assert_eq!(f.inbox.row_count().unwrap(), 0);
