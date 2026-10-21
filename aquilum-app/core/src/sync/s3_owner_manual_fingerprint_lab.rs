@@ -46,6 +46,10 @@ pub fn owner_join_fingerprint_hex(
 ) -> Result<String, IndependentOwnerFingerprintError> {
     if approved.bucket.len() < 3
         || approved.bucket.len() > 63
+        || !approved.bucket.as_bytes().first().is_some_and(|c|
+            c.is_ascii_lowercase() || c.is_ascii_digit())
+        || !approved.bucket.as_bytes().last().is_some_and(|c|
+            c.is_ascii_lowercase() || c.is_ascii_digit())
         || !approved.bucket.bytes().all(|c| c.is_ascii_lowercase()
             || c.is_ascii_digit() || c == b'-')
         || !lower_hex(approved.pinned_genesis_root_blake3, 64, true)
