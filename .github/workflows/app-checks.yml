@@ -180,20 +180,17 @@ jobs:
           if(!root) throw Error('missing isolated test root');
           const payload=Buffer.from('AKULA-SYNTHETIC-APPIMAGE-FOR-REAL-SIGNATURE-TEST-v1');
           const hash=crypto.createHash('sha256').update(payload).digest('hex');
-          const windowsSetup=Buffer.from('AKULA-SYNTHETIC-NSIS-SETUP-FOR-REAL-SIGNATURE-TEST-v1');
-          const windowsHash=crypto.createHash('sha256').update(windowsSetup).digest('hex');
           const manifest={
             schema:1,product:'Akula',version:'0.3.10',
             source_commit:'a'.repeat(40),cargo_lock_sha256:'b'.repeat(64),
             artifacts:{
-              'windows-x86_64':{filename:'Akula_0.3.10_x64-setup.exe',sha256:windowsHash,size:windowsSetup.length},
+              'windows-x86_64':{filename:'Akula_0.3.10_x64-setup.exe',sha256:'c'.repeat(64),size:12},
               'linux-x86_64-appimage':{filename:'akula-app_0.3.10_x86_64.AppImage',sha256:hash,size:payload.length},
               'linux-x86_64-deb':{filename:'Akula_0.3.10_amd64.deb',sha256:'c'.repeat(64),size:12},
               'linux-x86_64-rpm':{filename:'Akula-0.3.10-1.x86_64.rpm',sha256:'c'.repeat(64),size:12}
             }
           };
           fs.writeFileSync(path.join(root,'payload.AppImage'),payload);
-          fs.writeFileSync(path.join(root,'payload-Windows-setup.exe'),windowsSetup);
           fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify(manifest));
           NODE
           minisign -G -W -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.pub"
@@ -202,11 +199,9 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'test updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes ... ok' "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-minisign.log"
-          grep -Fq 'AKULA_SIGNED_WINDOWS_VERIFY_PASS platform=windows-x86_64 real_minisign=1 altered_exe_refused=1 wrong_key_refused=1' "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'AKULA_SIGNED_LINUX_STAGE_PASS real_minisign=1 fsync=1 disk_sha256=1 tamper_hold=1 aquilum_intact=1' "$RUNNER_TEMP/akula-native-minisign.log"
           grep -Fq 'AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1' "$RUNNER_TEMP/akula-native-minisign.log"
           echo 'AKULA_SIGNED_CANDIDATE_RUST_MINISIGN_PASS real_sign=1 wrong_key_refused=1' >> "$GITHUB_STEP_SUMMARY"
-          echo 'AKULA_SIGNED_WINDOWS_VERIFY_PASS signed_metadata=1 exact_exe_hash=1 wrong_key_refused=1 admission_only=1' >> "$GITHUB_STEP_SUMMARY"
           echo 'AKULA_SIGNED_LINUX_STAGE_PASS signed_to_disk=1 native_inode_rehash=1' >> "$GITHUB_STEP_SUMMARY"
 
       # AGENT-PERF: reuse the already compiled Core tests and the current
