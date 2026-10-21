@@ -102,7 +102,10 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
         .with_fixed(Rule::new(Axis::Horizontal, || theme::current().border_default))
         .with(NewWidget::new(body), 1.0);
     let (copied, trash_page) = (ctx.copied, ctx.trash_page);
-    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None };
+    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None,
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        owner_review: None,
+    };
     (NewWidget::new(card), finish)
 }
 
