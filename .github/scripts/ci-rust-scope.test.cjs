@@ -46,3 +46,46 @@ test('deleted/renamed files also select the appropriate scope using real Git',()
 test('missing Git refs do not silently skip mandatory checks',()=>{
   assert.throws(()=>changed('not-a-git-sha','HEAD'));
 });
+
+const {assessModuleImpact}=require('./ci-module-impact.cjs');
+
+test('B0 scope candidate is advisory, never a reason to skip required checks',()=>{
+  for(const path of ['aquilum-app/core/src/server_bootstrap_lab.rs',
+      'aquilum-app/core/tests/server_bootstrap_b0.rs']){
+    const result=assessModuleImpact([path]);
+    assert.equal(result.candidate,'server-bootstrap-b0');
+    assert.equal(result.requiredScope,'workspace');
+    assert.equal(result.maySkipRequiredChecks,false);
+  }
+  const workflow=assessModuleImpact(['.github/workflows/core-server-bootstrap-b0.yml']);
+  assert.equal(workflow.candidate,'server-bootstrap-b0');
+  assert.equal(workflow.maySkipRequiredChecks,false);
+});
+
+test('shared manifests, lock, lib, mixed and unknown files block focused B0 routing',()=>{
+  for(const path of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
+      'aquilum-app/core/src/lib.rs','aquilum-app/core/src/sync/dag.rs',
+      'aquilum-app/native/src/main.rs']){
+    const result=assessModuleImpact(['aquilum-app/core/src/server_bootstrap_lab.rs',path]);
+    assert.equal(result.candidate,null,path);
+    assert.equal(result.requiredScope,'workspace');
+    assert.equal(result.maySkipRequiredChecks,false);
+  }
+  assert.equal(assessModuleImpact(['aquilum-app/core/src/notion_api_probe.rs']).candidate,null);
+  assert.equal(assessModuleImpact(['docs/unrelated.md']).requiredScope,'none');
+});
+
+test('empty/malformed input and moved B0-to-unknown file fail closed',()=>{
+  for(const input of [[],null,[''],['/tmp/b0.rs'],['../escape']]){
+    const result=assessModuleImpact(input);
+    assert.equal(result.candidate,null);
+    assert.equal(result.requiredScope,'workspace');
+    assert.equal(result.maySkipRequiredChecks,false);
+  }
+  const renamed=assessModuleImpact([
+    'aquilum-app/core/src/server_bootstrap_lab.rs',
+    'aquilum-app/core/src/unowned.rs',
+  ]);
+  assert.equal(renamed.candidate,null);
+  assert.equal(renamed.requiredScope,'workspace');
+});
