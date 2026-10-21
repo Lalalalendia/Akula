@@ -31,6 +31,11 @@ jobs:
       mode: ${{ steps.scope.outputs.mode }}
       b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
       node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
+      shared_core_cargo_risky: ${{ steps.scope.outputs.shared_core_cargo_risky }}
+      shared_core_lib_risky: ${{ steps.scope.outputs.shared_core_lib_risky }}
+      shared_lock_risky: ${{ steps.scope.outputs.shared_lock_risky }}
+      shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
+      shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -44,6 +49,8 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           # A shared Cargo or Core boundary still gets both opt-in B1 tests
           # in the mandatory gate, without scheduling two duplicate workflows.
           if git diff --quiet "$BASE_SHA" HEAD -- \
@@ -427,12 +434,216 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
           printf 'Required frame-fidelity lane: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
 
+  route-host-custody:
+    name: Risky shared manifest / host-custody
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+    uses: ./.github/workflows/sync-host-custody.yml
+
+  route-b1b2b-ubuntu:
+    name: Risky shared manifest / b1b2b-ubuntu
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b2b-ubuntu.yml
+
+  route-b1c1-vm:
+    name: Risky shared manifest / b1c1-vm
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1c1-real-elf-vm.yml
+
+  route-b1b2a-systemd:
+    name: Risky shared manifest / b1b2a-systemd
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b2a-systemd.yml
+
+  route-b1b3b-helper:
+    name: Risky shared manifest / b1b3b-helper
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b3b-root-helper.yml
+
+  route-b1b3c-fd:
+    name: Risky shared manifest / b1b3c-fd
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b3c-signed-fd.yml
+
+  route-b1b4a-cas:
+    name: Risky shared manifest / b1b4a-cas
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b4a-cas-fence.yml
+
+  route-b1b4b-witness:
+    name: Risky shared manifest / b1b4b-witness
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b4b-os-witness.yml
+
+  route-b1b4b1-ipc:
+    name: Risky shared manifest / b1b4b1-ipc
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b4b1-witness-ipc.yml
+
+  route-b1c0-node:
+    name: Risky shared manifest / b1c0-node
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1c0-fixed-node.yml
+
+  route-b1d0-opt:
+    name: Risky shared manifest / b1d0-opt
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1d0-opt.yml
+
+  route-b0b-ssh:
+    name: Risky shared manifest / b0b-ssh
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b0b.yml
+
+  route-b1b3a-ipc:
+    name: Risky shared manifest / b1b3a-ipc
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/core-server-bootstrap-b1b3a-ipc.yml
+
+  route-p2p-offer:
+    name: Risky shared manifest / p2p-offer
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_core_lib_risky == 'true' }}
+    uses: ./.github/workflows/p2p-offer-lab.yml
+
+  route-s3-minio:
+    name: Risky shared manifest / s3-minio
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/sync-s3-minio.yml
+
+  route-s3-platform:
+    name: Risky shared manifest / s3-platform
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/sync-s3-platform.yml
+
+  route-pinned-read:
+    name: Risky shared manifest / pinned-read
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/sync-pinned-read.yml
+
+  route-s3-reservation:
+    name: Risky shared manifest / s3-reservation
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/sync-reserved-s3-transaction.yml
+
+  route-sync-protection:
+    name: Risky shared manifest / sync-protection
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/sync-protection.yml
+
+  route-sync-transaction:
+    name: Risky shared manifest / sync-transaction
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/sync-guarded-transaction.yml
+
+  route-text-delta:
+    name: Risky shared manifest / text-delta
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/sync-text-delta-rust.yml
+
+  route-appimage-beta:
+    name: Risky shared manifest / appimage-beta
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/appimage-beta.yml
+
+  route-windows-beta:
+    name: Risky shared manifest / windows-beta
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/windows-beta.yml
+
+  route-vello-half-tie:
+    name: Risky shared manifest / vello-half-tie
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' || needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/native-vello-half-tie-regression.yml
+
+  route-linux-beta:
+    name: Risky shared manifest / linux-beta
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
+    uses: ./.github/workflows/linux-beta.yml
+
+  routed-shared-gate-1:
+    name: Required shared boundary 1
+    needs: [classify, route-host-custody, route-b1b2b-ubuntu, route-b1c1-vm, route-b1b2a-systemd, route-b1b3b-helper, route-b1b3c-fd, route-b1b4a-cas, route-b1b4b-witness, route-b1b4b1-ipc, route-b1c0-node, route-b1d0-opt, route-b0b-ssh]
+    if: ${{ always() && github.event_name == 'pull_request' && needs.classify.outputs.shared_any_risky == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fail if a required routed test did not pass
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          node <<'JS'
+          const needs=JSON.parse(process.env.NEEDS_JSON);
+          const flags=needs.classify?.outputs||{};
+          const cases=[["route-host-custody",["shared_core_cargo_risky"]],["route-b1b2b-ubuntu",["shared_core_cargo_risky"]],["route-b1c1-vm",["shared_core_cargo_risky"]],["route-b1b2a-systemd",["shared_core_cargo_risky"]],["route-b1b3b-helper",["shared_core_cargo_risky"]],["route-b1b3c-fd",["shared_core_cargo_risky","shared_core_lib_risky"]],["route-b1b4a-cas",["shared_core_cargo_risky","shared_core_lib_risky"]],["route-b1b4b-witness",["shared_core_cargo_risky","shared_core_lib_risky"]],["route-b1b4b1-ipc",["shared_core_cargo_risky"]],["route-b1c0-node",["shared_core_cargo_risky","shared_core_lib_risky"]],["route-b1d0-opt",["shared_core_cargo_risky","shared_core_lib_risky"]],["route-b0b-ssh",["shared_core_cargo_risky","shared_core_lib_risky"]]];
+          const errors=[];
+          for(const [job,keys] of cases){
+            const expected=keys.some(k=>flags[k]==='true');
+            const want=expected?'success':'skipped';
+            const actual=needs[job]?.result;
+            if(actual!==want)errors.push(job+': expected '+want+', actual '+actual);
+          }
+          if(errors.length){console.error('SHARED_BOUNDARY_FAIL_CLOSED '+errors.join('; '));process.exit(1);}
+          console.log('SHARED_BOUNDARY_PASS '+cases.length+' correctly routed test groups');
+          JS
+
+  routed-shared-gate-2:
+    name: Required shared boundary 2
+    needs: [classify, route-b1b3a-ipc, route-p2p-offer, route-s3-minio, route-s3-platform, route-pinned-read, route-s3-reservation, route-sync-protection, route-sync-transaction, route-text-delta, route-appimage-beta, route-windows-beta, route-vello-half-tie, route-linux-beta]
+    if: ${{ always() && github.event_name == 'pull_request' && needs.classify.outputs.shared_any_risky == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fail if a required routed test did not pass
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          node <<'JS'
+          const needs=JSON.parse(process.env.NEEDS_JSON);
+          const flags=needs.classify?.outputs||{};
+          const cases=[["route-b1b3a-ipc",["shared_core_cargo_risky","shared_core_lib_risky"]],["route-p2p-offer",["shared_core_cargo_risky","shared_core_lib_risky"]],["route-s3-minio",["shared_core_cargo_risky","shared_lock_risky"]],["route-s3-platform",["shared_core_cargo_risky","shared_lock_risky"]],["route-pinned-read",["shared_core_cargo_risky","shared_lock_risky"]],["route-s3-reservation",["shared_core_cargo_risky","shared_lock_risky"]],["route-sync-protection",["shared_core_cargo_risky","shared_lock_risky"]],["route-sync-transaction",["shared_core_cargo_risky","shared_lock_risky"]],["route-text-delta",["shared_core_cargo_risky","shared_lock_risky"]],["route-appimage-beta",["shared_lock_risky"]],["route-windows-beta",["shared_lock_risky"]],["route-vello-half-tie",["shared_root_cargo_risky","shared_lock_risky"]],["route-linux-beta",["shared_lock_risky"]]];
+          const errors=[];
+          for(const [job,keys] of cases){
+            const expected=keys.some(k=>flags[k]==='true');
+            const want=expected?'success':'skipped';
+            const actual=needs[job]?.result;
+            if(actual!==want)errors.push(job+': expected '+want+', actual '+actual);
+          }
+          if(errors.length){console.error('SHARED_BOUNDARY_FAIL_CLOSED '+errors.join('; '));process.exit(1);}
+          console.log('SHARED_BOUNDARY_PASS '+cases.length+' correctly routed test groups');
+          JS
+
   checks:
     # The ONLY status required by Protect main. GitHub cannot report success
     # until every mandatory lane is green. Always run even on upstream failure.
     name: Main PR gate
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [classify, required-tests, native-frames]
+    needs: [classify, required-tests, native-frames, routed-shared-gate-1, routed-shared-gate-2]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -443,6 +654,9 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky }}
+          SHARED_GATE_1: ${{ needs.routed-shared-gate-1.result }}
+          SHARED_GATE_2: ${{ needs.routed-shared-gate-2.result }}
         run: |
           set -euo pipefail
           echo "Classification: $CLASSIFY_RESULT / $TEST_SCOPE"
@@ -469,6 +683,17 @@ jobs:
               exit 1
               ;;
           esac
+          if [ "$SHARED_RISKY" = true ]; then
+            if [ "$SHARED_GATE_1" != success ] || [ "$SHARED_GATE_2" != success ]; then
+              echo '::error::Required shared-manifest security/OS regressions did not pass'
+              exit 1
+            fi
+          else
+            if [ "$SHARED_GATE_1" != skipped ] || [ "$SHARED_GATE_2" != skipped ]; then
+              echo '::error::Unexpected shared-manifest routing state'
+              exit 1
+            fi
+          fi
           echo "Required checks passed for $TEST_SCOPE scope" >> "$GITHUB_STEP_SUMMARY"
 
   seed-rust-cache:

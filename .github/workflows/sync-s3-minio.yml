@@ -1,6 +1,7 @@
 name: Sync S3/MinIO capability probe
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
@@ -24,8 +25,7 @@ on:
       - 'aquilum-app/core/src/sync/s3_transport/offline_retention.rs'
       - 'aquilum-app/core/src/sync/s3_anchored_delta.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
-      - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+
       - '.github/workflows/sync-s3-minio.yml'
   workflow_dispatch:
 

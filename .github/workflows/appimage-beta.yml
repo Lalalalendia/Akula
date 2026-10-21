@@ -3,6 +3,7 @@
 name: Akula AppImage beta candidate
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
@@ -15,7 +16,6 @@ on:
       - 'aquilum-app/native/packaging/Akula.desktop'
       - 'aquilum-app/native/src/**'
       - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
 
 permissions:
   contents: read

@@ -1,6 +1,7 @@
 name: Akula Bootstrap B1b2a disposable systemd process proof
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
@@ -9,7 +10,7 @@ on:
       - ".github/workflows/core-server-bootstrap-b1b2a-systemd.yml"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2A.md"
       - "aquilum-app/core/src/bin/akula_node_lab.rs"
-      - "aquilum-app/core/Cargo.toml"
+
   workflow_dispatch:
 
 permissions:

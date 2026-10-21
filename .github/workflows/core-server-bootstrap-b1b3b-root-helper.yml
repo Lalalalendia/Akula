@@ -1,10 +1,11 @@
 name: Akula Bootstrap B1b3b real root-owned helper IPC lab
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
-      - "aquilum-app/core/Cargo.toml"
+
       - "aquilum-app/core/src/bin/akula_helper_b1b3b_lab.rs"
       - "aquilum-app/core/examples/akula_b1b3b_fixture.rs"
       - "scripts/ci/akula-b1b3b-root-helper-lab.sh"

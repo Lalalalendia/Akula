@@ -1,6 +1,7 @@
 name: Sync S3-bound custody OS checks
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - "aquilum-app/core/src/sync/profile_binding.rs"
@@ -24,8 +25,7 @@ on:
       - "aquilum-app/core/src/documents/io.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
       - "aquilum-app/core/src/sync/s3_transport/core_stage.rs"
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/Cargo.lock"
+
       - ".github/workflows/sync-s3-platform.yml"
 
 permissions:

@@ -1,6 +1,7 @@
 # RELEASE-LINUX-ID-01: ephemeral DEB/RPM packaging, never a release.
 name: Akula Linux beta candidate
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
@@ -11,7 +12,7 @@ on:
       - 'aquilum-app/native/packaging/Akula.desktop'
       - 'aquilum-app/native/src/**'
       - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+
 permissions:
   contents: read
 concurrency:

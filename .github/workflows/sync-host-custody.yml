@@ -1,9 +1,10 @@
 name: Local host custody without AWS
 
 on:
+  workflow_call:
   pull_request:
     paths:
-      - 'aquilum-app/core/Cargo.toml'
+
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/core/src/app_core.rs'
       - 'aquilum-app/core/src/app_core_installed_host_tests.rs'
@@ -91,7 +92,6 @@ jobs:
       - name: Verify real second OS process and host-held note/history epoch
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --no-default-features --features host-custody host_core_epoch_tests -- --nocapture
-
 
   native-installed-host:
     name: Native Workspace::open host gate / ${{ matrix.os }}

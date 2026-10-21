@@ -1,12 +1,12 @@
 name: Akula P2P offer contract laboratory
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
       - 'aquilum-app/core/src/p2p_offer_lab.rs'
-      - 'aquilum-app/core/src/lib.rs'
-      - 'aquilum-app/core/Cargo.toml'
+
       - '.github/workflows/p2p-offer-lab.yml'
   workflow_dispatch:
 
