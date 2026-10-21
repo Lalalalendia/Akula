@@ -1,0 +1,157 @@
+name: Akula IDE graph accuracy golden lab
+
+on:
+  push:
+    branches:
+      - lab/ide-graph-gortex-ra-20261022
+    paths:
+      - .github/workflows/akula-ide-graph-edges.yml
+      - .github/ide-graph/edge_accuracy_probe.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ide-graph-accuracy-golden
+  cancel-in-progress: true
+
+jobs:
+  fixture-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      DO_NOT_TRACK: "1"
+      GORTEX_LSP_SWEEP: "off"
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Create and compile independent Rust golden fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          export FIXTURE="$RUNNER_TEMP/akula-ide-rust-fixture"
+          export RESULTS="$GITHUB_WORKSPACE/_ide_edge_results"
+          mkdir -p "$RESULTS"
+          python3 -m py_compile .github/ide-graph/edge_accuracy_probe.py
+          python3 .github/ide-graph/edge_accuracy_probe.py make-fixture --fixture "$FIXTURE" --results "$RESULTS"
+          cd "$FIXTURE"
+          git init -q
+          git config user.name "Akula CI Fixture"
+          git config user.email "ci-fixture@example.invalid"
+          git add .
+          git commit -qm "pinned independent Rust call target fixture"
+          git rev-parse HEAD > "$RESULTS/fixture-sha.txt"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/ide-fixture-target"
+          cargo check --offline --locked --manifest-path "$FIXTURE/Cargo.toml" > "$RESULTS/cargo-check.log" 2>&1 || {
+            cat "$RESULTS/cargo-check.log"
+            exit 1
+          }
+          cargo test --offline --locked --manifest-path "$FIXTURE/Cargo.toml" > "$RESULTS/cargo-test.log" 2>&1 || {
+            cat "$RESULTS/cargo-test.log"
+            exit 1
+          }
+
+      - name: Download pinned verified Gortex binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gortex-dist" "$RUNNER_TEMP/bin"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/zzet/gortex/releases/download/v0.64.8/gortex_linux_amd64.tar.gz" \
+            --output "$RUNNER_TEMP/gortex.tar.gz"
+          printf '%s  %s\n' d481313e9d30c61fe3df2e5cf852e3ae3ccc7d5e00fc044fe36efd68e6615edc "$RUNNER_TEMP/gortex.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/gortex.tar.gz" -C "$RUNNER_TEMP/gortex-dist"
+          binary=$(find "$RUNNER_TEMP/gortex-dist" -type f -name gortex -print -quit)
+          test -n "$binary"
+          install -m 755 "$binary" "$RUNNER_TEMP/bin/gortex"
+          "$RUNNER_TEMP/bin/gortex" version > _ide_edge_results/gortex-version.txt
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Gortex native graph and caller evidence
+        shell: bash
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          export FIXTURE="$RUNNER_TEMP/akula-ide-rust-fixture"
+          export RESULTS="$GITHUB_WORKSPACE/_ide_edge_results"
+          export HOME="$RUNNER_TEMP/ide-gortex-home"
+          export XDG_CONFIG_HOME="$HOME/.config"
+          export XDG_CACHE_HOME="$HOME/.cache"
+          export GORTEX_DAEMON_MEMLIMIT=1GiB
+          mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+          gortex daemon start --detach --backend-path "$RUNNER_TEMP/ide-fixture.sqlite" > "$RESULTS/gortex-start.log" 2>&1
+          /usr/bin/time -v -o "$RESULTS/gortex-index-time.txt" \
+            timeout 170 gortex track "$FIXTURE" --wait --wait-timeout 150s > "$RESULTS/gortex-index.log" 2>&1
+          gortex status > "$RESULTS/gortex-status.txt" 2>&1
+          gortex daemon status > "$RESULTS/gortex-daemon-status.txt" 2>&1
+          ps -eo pid,rss,etime,args | grep -E '(^|/)gortex( |$)' | grep -v grep > "$RESULTS/gortex-process-rss.txt" || true
+          gortex query stats --index "$FIXTURE" --format json > "$RESULTS/gortex-stats.json"
+          for symbol in render root_entry api run same public_api internal_api generic exposed_api; do
+            gortex query symbol "$symbol" --index "$FIXTURE" --format json > "$RESULTS/gortex-symbol-$symbol.json" || true
+          done
+          python3 - "$RESULTS" "$FIXTURE" <<'PY'
+          import json,pathlib,sys
+          result_dir=pathlib.Path(sys.argv[1])
+          repo=pathlib.Path(sys.argv[2])
+          wanted=[("render","src/ui.rs"),("root_entry","src/lib.rs"),
+                  ("api","src/domain.rs"),("run","src/domain.rs")]
+          lookup={}
+          for symbol,path in wanted:
+              j=json.loads((result_dir/f"gortex-symbol-{symbol}.json").read_text())
+              items=j.get("results",[]) if isinstance(j,dict) else []
+              hits=[x for x in items if str(x.get("file_path","")).replace("\\","/").endswith(path)]
+              lookup[symbol]=[x.get("id") for x in hits if x.get("id")]
+          (result_dir/"gortex-caller-ids.json").write_text(json.dumps(lookup,indent=2))
+          print(json.dumps(lookup,indent=2))
+          PY
+          for symbol in render root_entry api run; do
+            caller_id=$(python3 - "$RESULTS/gortex-caller-ids.json" "$symbol" <<'PY'
+          import json,sys
+          rows=json.load(open(sys.argv[1]))
+          print((rows.get(sys.argv[2]) or [""])[0])
+          PY
+            )
+            if test -n "$caller_id"; then
+              gortex query calls "$caller_id" --index "$FIXTURE" --format json > "$RESULTS/gortex-calls-$symbol.json" 2> "$RESULTS/gortex-calls-$symbol.err" || true
+            else
+              echo "no file-matched Gortex caller symbol for $symbol" > "$RESULTS/gortex-calls-$symbol.err"
+            fi
+          done
+          gortex daemon stop > "$RESULTS/gortex-stop.log" 2>&1 || true
+
+      - name: rust-analyzer LSP oracle for 11 concrete calls and dirty buffer
+        shell: bash
+        timeout-minutes: 7
+        run: |
+          set -euo pipefail
+          export FIXTURE="$RUNNER_TEMP/akula-ide-rust-fixture"
+          export RESULTS="$GITHUB_WORKSPACE/_ide_edge_results"
+          rustup component add rust-analyzer
+          rust-analyzer --version > "$RESULTS/rust-analyzer-version.txt"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/ide-fixture-target"
+          /usr/bin/time -v -o "$RESULTS/ra-lsp-time.txt" \
+            timeout 350 python3 .github/ide-graph/edge_accuracy_probe.py lsp-oracle \
+              --fixture "$FIXTURE" --results "$RESULTS" > "$RESULTS/ra-lsp.log" 2>&1
+
+      - name: Summarize evidence without fabricating precision
+        shell: bash
+        if: always()
+        run: |
+          python3 .github/ide-graph/edge_accuracy_probe.py evaluate \
+            --fixture "$RUNNER_TEMP/akula-ide-rust-fixture" \
+            --results "$GITHUB_WORKSPACE/_ide_edge_results" || true
+          cat "$GITHUB_WORKSPACE/_ide_edge_results/edge-evaluation.json" 2>/dev/null || true
+
+      - name: Upload fixture comparison artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: akula-ide-graph-accuracy-fixture-linux
+          path: _ide_edge_results
+          if-no-files-found: warn
+          retention-days: 14
