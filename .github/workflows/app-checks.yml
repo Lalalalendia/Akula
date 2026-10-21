@@ -189,6 +189,28 @@ jobs:
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
 
+      # Experimental first-party view; build only when its files change.
+      - name: Opt-in extension task view lab
+        if: needs.classify.outputs.mode == 'workspace'
+        working-directory: aquilum-app
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/src/search/tasks/repository.rs \
+            aquilum-app/core/src/search/service.rs \
+            aquilum-app/native/src/links \
+            aquilum-app/native/src/ui/backlinks \
+            aquilum-app/native/Cargo.toml \
+            aquilum-app/core/Cargo.toml; then
+            echo 'Extension view unaffected'
+          else
+            cargo test --locked -p aquilum-core --features extension-view-lab search::tasks::repository::tests::read_only_preview
+            cargo test --locked -p aquilum-native --features extension-view-lab links::panel::tests::first_party_task_view
+          fi
+
       # Shared Cargo/lock/Core boundary changes retain exact B1a and B1b0
       # security tests under the existing required main gate. Direct source
       # and module changes still run their original specialist workflows.
