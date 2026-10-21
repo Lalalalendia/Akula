@@ -322,6 +322,12 @@ mod atomic_join_lab;
 #[cfg(feature = "signed-vault-atomic-join-lab")]
 pub use atomic_join_lab::{AtomicJoinError, AtomicJoinOutcome};
 
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+#[path = "s3_v2_signed_successor_lab.rs"]
+mod signed_successor_lab;
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+pub use signed_successor_lab::{SignedSuccessorError, SignedSuccessorOutcome};
+
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_policy_receipt_lab_tests.rs"]
 mod tests;
