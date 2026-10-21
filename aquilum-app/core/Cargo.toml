@@ -37,6 +37,10 @@ signed-vault-pinned-join-lab = ["signed-vault-pairing-lab", "signed-vault-policy
 signed-vault-atomic-join-lab = ["signed-vault-pinned-join-lab"]
 # E3d: CURRENT stored publisher quorum plus complete pinned direct successor.
 signed-vault-signed-successor-lab = ["signed-vault-atomic-join-lab"]
+# E3e: receiver-issued one-shot session on the current E3c admission gate.
+signed-vault-receiver-session-lab = ["signed-vault-atomic-join-lab"]
+# E3g: compile the E3d/E3e experiments together and test their shared state.
+signed-vault-join-successor-integration-lab = ["signed-vault-signed-successor-lab", "signed-vault-receiver-session-lab"]
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.
