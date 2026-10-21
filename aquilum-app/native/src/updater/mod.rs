@@ -116,15 +116,33 @@ impl Updater {
         let agent = aquilum_core::web_agent::web_agent("updates");
         let response = agent.get(&release.url).call().map_err(|e| e.to_string())?;
         let total = download_guard::content_length(response.header("Content-Length"))?;
-        let data = download_guard::read_payload(response.into_reader(), total, |done, total| {
-            self.set(Status::Downloading {
-                version: release.version.clone(),
-                done,
-                total,
-            });
-        })?;
+        // The publisher-authenticated manifest determines the exact download
+        // budget. Never allocate according to an untrusted HTTP header alone.
+        let data = download_guard::read_signed_payload(
+            response.into_reader(), total, release.size,
+            |done, total| {
+                self.set(Status::Downloading {
+                    version: release.version.clone(),
+                    done,
+                    total,
+                });
+            },
+        )?;
+        // Confirm both independently signed package bytes AND the manifest
+        // (which binds version, product, SHA-256, size and platform).
         verify(&data, &release.signature, PUBLIC_KEY)?;
-        *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(data);
+        let candidate = release::admit_signed_payload(
+            &release.manifest, &release.manifest_signature, data,
+        )?;
+        if candidate.version() != release.version
+            || candidate.sha256() != release.sha256
+            || candidate.bytes().len() as u64 != release.size
+        {
+            return Err("signed update offer changed between discovery and download".into());
+        }
+        // The legacy API is still a Vec, but on Windows apply() cannot execute
+        // it. The future Windows transaction must consume the sealed candidate.
+        *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(candidate.into_bytes());
         Ok(())
     }
 
