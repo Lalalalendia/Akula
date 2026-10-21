@@ -85,6 +85,12 @@ test('signed Windows candidate uses protected main-only secrets and cannot publi
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY/);
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD/);
   assert.match(yaml, /test-windows-beta\.ps1/);
+  // Review-only Windows artifacts must use the typed SignedCandidate v1
+  // namespace. A legacy unsigned "platforms" listing cannot satisfy it.
+  assert.match(yaml, /schema = 1/);
+  assert.match(yaml, /artifacts = \[ordered\]@\{/);
+  assert.match(yaml, /filename = \$package\[0\]\.Name/);
+  assert.doesNotMatch(yaml, /platforms = \[ordered\]@\{/);
   assert.match(yaml, /signed_manifest=1 independent_verify=1 tamper_refused=1 no_release=1/);
   assert.doesNotMatch(yaml, /gh release|create-release|contents:\s*write|pull_request:|push:/);
 });
