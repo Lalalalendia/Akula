@@ -1,0 +1,88 @@
+name: Staya RN4E1a — main-baseline grant/File Gate compatibility
+
+on:
+  push:
+    branches:
+      - "experiment/staya-rn4e1a-main-parity-*"
+  pull_request:
+    paths:
+      - ".github/workflows/staya-rn4e1a-main-parity.yml"
+      - "aquilum-app/core/Cargo.toml"
+      - "aquilum-app/core/src/sync/mod.rs"
+      - "aquilum-app/core/src/sync/peer_grant_lab.rs"
+      - "aquilum-app/core/tests/rn4c_peer_grant_lab.rs"
+      - "aquilum-app/core/tests/rn4d_revocation_fence.rs"
+      - "aquilum-app/core/tests/rn4e_filegate_boundary.rs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  main-baseline-parity:
+    name: Main baseline / grant journal + real File Gate — ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTFLAGS: "-Zcrate-attr=feature(if_let_guard)"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Enforce exact main-baseline and default-off change scope
+        run: |
+          set -euo pipefail
+          grep -q 'staya-core-grant-lab = \[\]' aquilum-app/core/Cargo.toml
+          grep -q '#\[cfg(feature = "staya-core-grant-lab")\]' aquilum-app/core/src/sync/mod.rs
+          if grep -q 'staya-core-grant-lab' aquilum-app/native/Cargo.toml; then
+            echo "native product was accidentally enrolled" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import subprocess
+          base = subprocess.check_output(["git", "merge-base", "HEAD", "origin/main"], text=True).strip()
+          assert base, "unable to derive main merge base"
+          observed = set(subprocess.check_output([
+              "git", "diff", "--name-only", f"{base}..HEAD"
+          ], text=True).splitlines())
+          allowed = {
+              "aquilum-app/core/Cargo.toml",
+              "aquilum-app/core/src/sync/mod.rs",
+              "aquilum-app/core/src/sync/peer_grant_lab.rs",
+              "aquilum-app/core/tests/rn4c_peer_grant_lab.rs",
+              "aquilum-app/core/tests/rn4d_revocation_fence.rs",
+              "aquilum-app/core/tests/rn4e_filegate_boundary.rs",
+              ".github/workflows/staya-rn4e1a-main-parity.yml",
+              "docs/sync/staya-rn4e1a-main-parity.md",
+          }
+          assert observed <= allowed, f"out-of-scope changes: {sorted(observed - allowed)}"
+          assert len(observed) >= 8, "missing required isolated main-port files"
+          assert not any(p.startswith("aquilum-app/native/") for p in observed)
+          print("RN-4E1a SCOPE: main-only minimal feature-gated lab; no runtime activation")
+          PY
+      - name: Check research Rust formatting
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check             aquilum-app/core/src/sync/peer_grant_lab.rs             aquilum-app/core/tests/rn4c_peer_grant_lab.rs             aquilum-app/core/tests/rn4d_revocation_fence.rs             aquilum-app/core/tests/rn4e_filegate_boundary.rs
+      - name: Test current Core with the exact grant / File Gate regression matrix
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml             -p aquilum-core --features staya-core-grant-lab             --test rn4c_peer_grant_lab             --test rn4d_revocation_fence             --test rn4e_filegate_boundary             -- --nocapture --test-threads=1
+          git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Assert acceptance is lab-only
+        run: |
+          echo "RN-4E1a integrated main ${mainHead}; source lab 5f4d1b61b8570ca7bca76ede3e9d81720c6c322c." >> "$GITHUB_STEP_SUMMARY"
+          echo "Cross-process SQLite grant ordering and disposable Core File Gate only; no Bao, production custody, durable APPLIED, ACK, or P2P product enablement." >> "$GITHUB_STEP_SUMMARY"
