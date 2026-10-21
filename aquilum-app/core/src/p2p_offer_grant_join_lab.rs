@@ -482,6 +482,34 @@ fn projection_must_not_accept_reordered_or_forged_roots() {
 }
 
 #[test]
+fn selecting_only_second_object_projects_no_unselected_root() {
+    let (offer, _, _, _) = fixture();
+    let decision = offer
+        .receiver_decision(
+            DecisionAction::Accept,
+            vec![1],
+            NOW,
+            offer.sender,
+            offer.receiver,
+        )
+        .unwrap();
+    let mut session =
+        OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
+    let Outcome::Selected(selected) = session
+        .resolve(&decision, offer.receiver, NOW + 1)
+        .unwrap()
+    else {
+        panic!("expected selected draft");
+    };
+    let plan = projection_for_staya_preview(&offer, &selected, NOW + 2).unwrap();
+    assert_eq!(plan.len(), 1);
+    assert_eq!(plan[0].source_index, 1);
+    assert_eq!(plan[0].wire_alias, "object_01.bin");
+    assert_eq!(plan[0].object_blake3, offer.files[1].blake3_root);
+    assert_ne!(plan[0].object_blake3, offer.files[0].blake3_root);
+}
+
+#[test]
 fn projection_does_not_reduce_legacy_grant_limits_or_create_authority() {
     let (mut offer, _, grant, local) = fixture();
     offer.files[0].bytes = MAX_RN4C_OBJECT + 1;
