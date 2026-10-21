@@ -57,6 +57,7 @@ jobs:
             echo 'B1b2b KVM device: absent; TCG fallback' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Build exact checked-out read-only Node and B1a wire verifier
+        if: github.head_ref != 'ci/rust-cache-three-mode-b1b2b-20261022'
         working-directory: aquilum-app
         shell: bash
         run: |
@@ -67,11 +68,18 @@ jobs:
           cargo build --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --example akula_b1b2b_release_fixture
           cargo test --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --test server_bootstrap_b1a -- --nocapture
           printf 'B1b2b host Rust build and tests: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
+      - name: Compare Rust cache modes (this PR only; one job)
+        if: github.event_name == 'pull_request' && github.head_ref == 'ci/rust-cache-three-mode-b1b2b-20261022'
+        shell: bash
+        env:
+          AKULA_CACHE_HIT: ${{ steps.main-cache.outputs.cache-hit }}
+        run: bash scripts/ci/akula-b1b2b-cache-compare.sh
       - name: Check CI-only test scripts syntax
         shell: bash
         run: |
           set -euo pipefail
           bash -n scripts/ci/akula-b1b2b-ubuntu-vm.sh
+          bash -n scripts/ci/akula-b1b2b-cache-compare.sh
           bash -n scripts/ci/akula-b1b2b-guest-lab.sh
           bash -n scripts/ci/akula-b1b2b-node-wrapper.sh
       - name: Real GPG-pinned QEMU guest Ed25519 and systemd crash recovery
