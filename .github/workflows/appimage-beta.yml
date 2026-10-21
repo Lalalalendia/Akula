@@ -54,6 +54,25 @@ jobs:
           grep -Fq 'test result: ok. 5 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-first-gui-ack.log"
           echo 'AKULA_LINUX_FIRST_GUI_ACK_IPC_PASS peer_credentials=1 exact_child=1 negative_parent=1'
 
+      # RELEASE-LINUX-ACK-PASSCRED-01: tests from the exact native source,
+      # including Linux-kernel SCM_CREDENTIALS, pidfd and live OS ancestry.
+      # An ACK witness is never a release or install authorization.
+      - name: Verify one-shot Linux ACK receiver against actual sender credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition=2024 --test -D warnings \
+            aquilum-app/native/src/updater/linux_ack_receiver.rs \
+            -o "$RUNNER_TEMP/akula-linux-ack-receiver-tests"
+          "$RUNNER_TEMP/akula-linux-ack-receiver-tests" --nocapture --test-threads=2 \
+            2>&1 | tee "$RUNNER_TEMP/akula-linux-ack-receiver.log"
+          grep -Fq 'test tests::actual_kernel_credentials_accept_only_once ... ok' "$RUNNER_TEMP/akula-linux-ack-receiver.log"
+          grep -Fq 'test tests::wrong_nonce_hash_pid_and_repeated_wire_are_rejected ... ok' "$RUNNER_TEMP/akula-linux-ack-receiver.log"
+          grep -Fq 'test tests::missing_ack_consumes_nonce_without_accepting_late_replay ... ok' "$RUNNER_TEMP/akula-linux-ack-receiver.log"
+          grep -Fq 'test tests::unrelated_session_cannot_claim_same_generation_even_with_leaked_fd ... ok' "$RUNNER_TEMP/akula-linux-ack-receiver.log"
+          grep -Fq 'test result: ok. 6 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-ack-receiver.log"
+          echo 'AKULA_LINUX_ACK_RECEIVER_PASS kernel_passcred=1 pidfd=1 tree=1 one_shot=1 wrong_sender_hold=1'
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
