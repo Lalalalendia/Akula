@@ -19,6 +19,12 @@ on:
 permissions:
   contents: read
 
+# Only test the newest candidate for each PR to avoid competing for runners
+# with obsolete commits in the same review branch.
+concurrency:
+  group: yc-s3-e3h-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   independent-owner-fingerprint:
     name: Receiver fingerprint challenge before Yandex S3 GET
