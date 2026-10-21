@@ -258,7 +258,7 @@ mod tests {
         fs::write(&zip_file, bytes).unwrap();
         let report = inspect_zip(&zip_file, ScanLimits::default()).unwrap();
         assert_eq!(report.entries.len(), 3);
-        assert_eq!(report.backlinks.len(), 1);
+        assert_eq!(report.backlinks.len(), 1, "unresolved ZIP references: {:?}", report.references);
         assert_eq!(report.entries.iter().filter(|e| e.csv.is_some()).count(), 1);
         assert_eq!(report.notion_workspace_completeness_verified, false);
     }
