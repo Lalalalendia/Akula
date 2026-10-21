@@ -310,5 +310,8 @@ impl W4Outbox {
 #[cfg(feature = "messaging-key-ledger-lab")]
 pub mod key_ledger;
 
+#[cfg(feature = "messaging-w4-inbox-lab")]
+pub mod inbox;
+
 #[cfg(test)]
 mod tests;
