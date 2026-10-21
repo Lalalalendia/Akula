@@ -101,7 +101,7 @@ fn first_local_user_journey_create_save_restart_search_and_open() {
     let (selected, snippet) = match &h.app.popup {
         Some(Popup::Search(state)) => (
             state.selected_path(),
-            state.results[0].snippet.clone(),
+            state.selected_snippet().to_owned(),
         ),
         _ => panic!("search must remain open until the result is chosen"),
     };
