@@ -20,6 +20,7 @@ const MAX_NOTE_BYTES: usize = 8 * 1024 * 1024;
 pub struct PublishReport {
     pub created: Vec<String>,
     pub existing_untouched: Vec<String>,
+    pub conflicts_untouched: Vec<String>,
     pub stopped_at: Option<String>,
     pub completed: bool,
 }
@@ -71,8 +72,7 @@ pub fn publish_approved(
             return Err("Notion candidate UUID must be canonical".into());
         }
         let page = format!("{IMPORT_DIR}/{id}.md");
-        let source = format!("{IMPORT_DIR}/source-{id}.md");
-        if item.relative_path != page && item.relative_path != source {
+        if item.relative_path != page {
             return Err("Notion import path is not a safe generated UUID path".into());
         }
         if !paths.insert(item.relative_path.as_str()) {
@@ -110,7 +110,7 @@ pub fn publish_approved(
 
     let mut report = PublishReport {
         created: Vec::new(), existing_untouched: Vec::new(),
-        stopped_at: None, completed: false,
+        conflicts_untouched: Vec::new(), stopped_at: None, completed: false,
     };
     for item in &preview.candidates {
         let output = root.join(&item.relative_path);
@@ -122,7 +122,18 @@ pub fn publish_approved(
         }
         match fs::symlink_metadata(&output) {
             Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {
-                report.existing_untouched.push(item.relative_path.clone());
+                // A matching prior import is safe to skip. A local edit or
+                // unrelated file at the same path is a conflict, NOT proof
+                // that the source record was imported successfully.
+                let same = usize::try_from(meta.len()).ok()
+                    .filter(|size| *size <= MAX_NOTE_BYTES)
+                    .and_then(|_| fs::read(&output).ok())
+                    .is_some_and(|bytes| bytes == item.markdown.as_bytes());
+                if same {
+                    report.existing_untouched.push(item.relative_path.clone());
+                } else {
+                    report.conflicts_untouched.push(item.relative_path.clone());
+                }
                 continue;
             }
             Ok(_) => {
@@ -149,7 +160,11 @@ pub fn publish_approved(
             }
         }
     }
-    report.completed = true;
+    if !report.conflicts_untouched.is_empty() {
+        report.stopped_at = Some("local edits or unrelated existing files were preserved".into());
+    } else {
+        report.completed = true;
+    }
     Ok(report)
 }
 
@@ -212,8 +227,9 @@ mod tests {
         let path=workspace.join(format!("Notion-import/{A}.md"));
         gate::write(&core,&path,"user edit",None,Source::Me,None).unwrap();
         let third=publish_approved(&core,&workspace,&data,true).unwrap();
-        assert!(third.completed);
-        assert_eq!(third.existing_untouched.len(),2);
+        assert!(!third.completed);
+        assert_eq!(third.conflicts_untouched.len(),1);
+        assert_eq!(third.existing_untouched.len(),1);
         assert_eq!(fs::read_to_string(path).unwrap(),"user edit");
     }
 
