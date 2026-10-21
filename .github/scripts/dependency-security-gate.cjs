@@ -118,7 +118,16 @@ async function main() {
     if (!repo || !token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
       throw new Error('missing authenticated repository Actions reader');
     }
-    console.error('SECURITY: ' + await checkLatestAudit(repo, token));
+    try {
+      console.error('SECURITY: ' + await checkLatestAudit(repo, token));
+    } catch (error) {
+      // Allow a remediation PR to replace a bad main lockfile/policy only if
+      // its OWN fresh full cargo audit succeeds in subsequent required steps.
+      // No local dependency/policy change means mandatory global HOLD.
+      if (!local) throw error;
+      console.error('MAIN SECURITY HOLD: ' + error.message +
+        '; dependency/policy PR must now pass an independent full local RustSec audit');
+    }
   }
   process.stdout.write('scan_required=' + (local ? 'true' : 'false') + '\n');
 }
