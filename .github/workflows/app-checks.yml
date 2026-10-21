@@ -163,7 +163,7 @@ jobs:
       # Reuse the existing required Rust runner rather than queuing another job.
       # The test-only publisher key is ephemeral and never leaves RUNNER_TEMP.
       - name: Real ephemeral Minisign signature admitted by native Rust
-        if: needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-') || startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-'))
+        if: needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-') || startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-') || github.head_ref == 'feature/windows-signed-manifest-v1-matrix-20261021')
         working-directory: aquilum-app
         shell: bash
         run: |
