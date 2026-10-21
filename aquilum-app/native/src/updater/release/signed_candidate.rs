@@ -576,6 +576,34 @@ mod tests {
     }
 
     #[test]
+    fn signed_offer_metadata_refuses_rollback_missing_platform_and_unknown_fields() {
+        let data = b"synthetic bytes";
+        let raw = fixture(data, "0.3.10");
+        let offer = inspect_offer_authenticated(&raw, TARGET_LINUX_APPIMAGE, "0.3.9")
+            .unwrap().expect("newer authenticated offer");
+        assert_eq!(offer.version, "0.3.10");
+        assert_eq!(offer.size, data.len() as u64);
+        assert_eq!(offer.sha256, digest_hex(data));
+
+        // Equal is not a new offer; an older signed manifest is a HOLD.
+        assert!(inspect_offer_authenticated(&raw, TARGET_LINUX_APPIMAGE, "0.3.10")
+            .unwrap().is_none());
+        assert!(inspect_offer_authenticated(&raw, TARGET_LINUX_APPIMAGE, "0.3.11")
+            .unwrap_err().contains("not strictly newer"));
+        let mut changed: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        changed["artifacts"].as_object_mut().unwrap()
+            .remove("linux-x86_64-appimage");
+        assert!(inspect_offer_authenticated(
+            &serde_json::to_vec(&changed).unwrap(), TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).unwrap_err().contains("required signed AppImage artifact missing"));
+        let mut changed: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        changed["untrusted_url"] = json!("https://other.example/update.exe");
+        assert!(inspect_offer_authenticated(
+            &serde_json::to_vec(&changed).unwrap(), TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).is_err());
+    }
+
+    #[test]
     fn changed_same_size_bytes_are_rejected() {
         let data = b"fixture package bytes";
         let mut tampered = data.to_vec();
