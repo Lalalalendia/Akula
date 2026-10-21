@@ -6,6 +6,7 @@ impl App {
         while let Ok(picked) = self.picked_rx.try_recv() {
             title |= self.on_picked(root, picked);
         }
+        self.on_transfer_picked(root);
         self.refresh_covers(root);
         let requests = self.embeds.as_ref().map(embeds::Embeds::take_requests).unwrap_or_default();
         for request in requests {

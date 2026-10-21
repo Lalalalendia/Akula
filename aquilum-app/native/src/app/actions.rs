@@ -25,6 +25,9 @@ impl App {
         if matches!(self.popup, Some(Popup::Workspaces(_))) {
             return self.on_workspaces_action(root, id, &action);
         }
+        if matches!(self.popup, Some(Popup::Transfers(_))) {
+            return self.on_transfer_action(root, id, &action);
+        }
         if self.popup.is_some() {
             return self.on_popup_action(root, id, &action);
         }
@@ -173,6 +176,8 @@ impl App {
         } else if Some(id) == chrome.graph_button && action.downcast_ref::<Pressed>().is_some() {
             self.open_graph(root);
             return true;
+        } else if id == chrome.transfer_button && action.downcast_ref::<Pressed>().is_some() {
+            self.open_transfers(root);
         } else if Some(id) == chrome.home_button
             && action.downcast_ref::<Pressed>().is_some()
             && let Some(home) = self.home.clone()
