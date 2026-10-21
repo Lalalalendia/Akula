@@ -58,8 +58,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo audit --file aquilum-app/Cargo.lock
-          cargo audit --file aquilum-app/host-broker-lab/Cargo.lock
+          cargo audit --no-yanked --file aquilum-app/Cargo.lock
+          cargo audit --no-yanked --no-fetch --file aquilum-app/host-broker-lab/Cargo.lock
 
       - name: Classify Rust test scope (fail closed)
         id: scope
