@@ -31,6 +31,11 @@ jobs:
       mode: ${{ steps.scope.outputs.mode }}
       b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
       node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
+      shared_core_cargo_risky: ${{ steps.scope.outputs.shared_core_cargo_risky }}
+      shared_core_lib_risky: ${{ steps.scope.outputs.shared_core_lib_risky }}
+      shared_lock_risky: ${{ steps.scope.outputs.shared_lock_risky }}
+      shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
+      shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -44,6 +49,8 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           # A shared Cargo or Core boundary still gets both opt-in B1 tests
           # in the mandatory gate, without scheduling two duplicate workflows.
           if git diff --quiet "$BASE_SHA" HEAD -- \
@@ -427,12 +434,23 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
           printf 'Required frame-fidelity lane: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
 
+  shared-labs:
+    name: Required shared-manifest OS/security route
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' }}
+    uses: ./.github/workflows/ci-shared-manifest-labs.yml
+    with:
+      core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+      lib: ${{ needs.classify.outputs.shared_core_lib_risky == 'true' }}
+      lock: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
+      root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
+
   checks:
     # The ONLY status required by Protect main. GitHub cannot report success
     # until every mandatory lane is green. Always run even on upstream failure.
     name: Main PR gate
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [classify, required-tests, native-frames]
+    needs: [classify, required-tests, native-frames, shared-labs]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -443,6 +461,8 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky }}
+          ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail
           echo "Classification: $CLASSIFY_RESULT / $TEST_SCOPE"
@@ -469,6 +489,17 @@ jobs:
               exit 1
               ;;
           esac
+          if [ "$SHARED_RISKY" = true ]; then
+            if [ "$ROUTED_SHARED_RESULT" != success ]; then
+              echo '::error::Required shared-manifest security/OS regressions did not pass'
+              exit 1
+            fi
+          else
+            if [ "$ROUTED_SHARED_RESULT" != skipped ]; then
+              echo '::error::Unexpected shared-manifest routing state'
+              exit 1
+            fi
+          fi
           echo "Required checks passed for $TEST_SCOPE scope" >> "$GITHUB_STEP_SUMMARY"
 
   seed-rust-cache:

@@ -1,13 +1,13 @@
 name: Akula Bootstrap B1b4b OS-owned CAS witness proof
 
 on:
+  workflow_call:
   pull_request:
     branches:
       - main
       - experiment/akula-server-bootstrap-b1b4a-cas-fence
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
+
       - "aquilum-app/core/src/server_witness_lab.rs"
       - "aquilum-app/core/src/server_installer_os_witness_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1b4b.rs"

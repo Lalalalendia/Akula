@@ -1,0 +1,123 @@
+'use strict';
+const {execFileSync}=require('node:child_process');
+const CORE='aquilum-app/core/Cargo.toml';
+const LOCK='aquilum-app/Cargo.lock';
+const LIB='aquilum-app/core/src/lib.rs';
+const ROOT='aquilum-app/Cargo.toml';
+function changes(diff){
+  return String(diff||'').split(/\r?\n/)
+    .filter(x=>(x.startsWith('+')&&!x.startsWith('+++'))||(x.startsWith('-')&&!x.startsWith('---')))
+    .filter(x=>!/^[-+]\s*(?:#(?!\[).*|)$/.test(x));
+}
+function cargoAdditive(diff){
+  const lines=changes(diff),added=[],removed=[];
+  for(const row of lines)(row[0]==='+'?added:removed).push(row.slice(1).trim());
+  const packageNames=new Set(),features=new Set();
+  const pathDep=/^([a-z][a-z0-9-]*)\s*=\s*\{\s*path\s*=\s*"\.\.\/\.\.\/modules\/[a-z][a-z0-9-]*"\s*,\s*optional\s*=\s*true\s*\}$/;
+  const optFeature=/^([a-z][a-z0-9-]*)\s*=\s*\[\s*"dep:([a-z][a-z0-9-]*)"\s*\]$/;
+  const emptyFeature=/^([a-z][a-z0-9-]*)\s*=\s*\[\s*\]$/;
+  for(const line of added){
+    let m=pathDep.exec(line);
+    if(m){if(packageNames.has(m[1]))return {safe:false};packageNames.add(m[1]);continue;}
+    m=optFeature.exec(line);
+    if(m){if(features.has(m[1]))return {safe:false};features.add(m[1]);continue;}
+    m=emptyFeature.exec(line);
+    if(m&&/(?:-lab|-probe)$/.test(m[1])){
+      if(features.has(m[1]))return {safe:false};features.add(m[1]);continue;
+    }
+    return {safe:false};
+  }
+  for(const line of removed){
+    const m=emptyFeature.exec(line);
+    if(!m||!features.has(m[1])||!added.some(a=>optFeature.test(a)&&optFeature.exec(a)[1]===m[1]))return {safe:false};
+  }
+  const referenced=added.map(line=>optFeature.exec(line)).filter(Boolean).map(x=>x[2]);
+  if(packageNames.size!==new Set(referenced).size || [...packageNames].some(p=>!referenced.includes(p)))return {safe:false};
+  if(referenced.some(p=>!packageNames.has(p)))return {safe:false};
+  return {safe:true,packages:packageNames,features};
+}
+function blocks(raw){
+  const out=new Map();
+  const sections=String(raw||'').split(/\n(?=\[\[package\]\]\n)/);
+  if(!sections[0].includes('version = 4'))return null;
+  for(const section of sections){
+    if(!section.startsWith('[[package]]\n'))continue;
+    const name=/^name = "([^"]+)"$/m.exec(section)?.[1];
+    const version=/^version = "([^"]+)"$/m.exec(section)?.[1];
+    if(!name||!version)return null;
+    const key=name+'@'+version;
+    if(out.has(key))return null;
+    out.set(key,section);
+  }
+  return out;
+}
+function deps(block){
+  const m=/^dependencies = \[\n((?: [^\n]*\n)*)\]/m.exec(block);
+  return m?m[1].split('\n').filter(Boolean).map(x=>/^ "([^"]+)",$/.exec(x)?.[1]):null;
+}
+function lockAdditive(before,after,addedPackages){
+  const old=blocks(before),now=blocks(after);
+  if(!old||!now||!old.size||!now.size)return false;
+  const added=[];
+  for(const [key,val] of now){
+    if(!old.has(key))added.push([key,val]);
+    else if(old.get(key)!==val){
+      if(!key.startsWith('aquilum-core@'))return false;
+      const oldBlock=old.get(key),x=deps(oldBlock),y=deps(val);
+      if(!x||!y||x.some(z=>!y.includes(z))||new Set(y).size!==y.length)return false;
+      const extra=y.filter(z=>!x.includes(z));
+      if(extra.length!==addedPackages.size||extra.some(z=>!addedPackages.has(z)))return false;
+      const scrub=s=>s.replace(/^dependencies = \[\n(?: [^\n]*\n)*\]/m,'dependencies = [REDACTED]');
+      if(scrub(oldBlock)!==scrub(val))return false;
+    }
+  }
+  if([...old.keys()].some(k=>!now.has(k)))return false;
+  if(added.length!==addedPackages.size)return false;
+  for(const [key,val] of added){
+    const name=key.slice(0,key.lastIndexOf('@'));
+    if(!addedPackages.has(name)||!key.endsWith('@0.1.0')||/^source = |^checksum = /m.test(val))return false;
+    if(!/^\[\[package\]\]\nname = "[^"]+"\nversion = "0\.1\.0"\ndependencies = \[\n(?: "[^"]+",\n)*\]\n?$/m.test(val.trim()))return false;
+  }
+  if(added.length&&old.get([...old.keys()].find(k=>k.startsWith('aquilum-core@')))===now.get([...old.keys()].find(k=>k.startsWith('aquilum-core@'))))return false;
+  return true;
+}
+function libAdditive(diff,features){
+  const rows=changes(diff);
+  if(rows.length%2!==0||rows.some(x=>!x.startsWith('+')))return false;
+  for(let i=0;i<rows.length;i+=2){
+    const feature=/^\+\s*#\[cfg\(feature = "([a-z][a-z0-9-]*)"\)\]$/.exec(rows[i]);
+    const module=/^\+\s*pub mod ([a-z][a-z0-9_]*)\s*;$/.exec(rows[i+1]);
+    if(!feature||!module||!features.has(feature[1])||module[1]!==feature[1].replaceAll('-','_'))return false;
+  }
+  return true;
+}
+function assess({paths,coreDiff='',lockBefore='',lockAfter='',libDiff=''}){
+  const changed=new Set(paths);
+  const cargo=changed.has(CORE)?cargoAdditive(coreDiff):{safe:true,packages:new Set(),features:new Set()};
+  const lockSafe=changed.has(LOCK)&&changed.has(CORE)&&cargo.safe&&lockAdditive(lockBefore,lockAfter,cargo.packages);
+  const coreRisk=changed.has(CORE)&&(!cargo.safe||(changed.has(LOCK)&&!lockSafe));
+  const lockRisk=changed.has(LOCK)&&!lockSafe;
+  const libRisk=changed.has(LIB)&&!(changed.has(CORE)&&cargo.safe&&libAdditive(libDiff,cargo.features));
+  const rootRisk=changed.has(ROOT);
+  return {shared_core_cargo_risky:coreRisk,shared_lock_risky:lockRisk,shared_core_lib_risky:libRisk,shared_root_cargo_risky:rootRisk,
+    shared_any_risky:coreRisk||lockRisk||libRisk||rootRisk};
+}
+function git(...args){return execFileSync('git',args,{encoding:'utf8',maxBuffer:16*1024*1024});}
+function compute(base,head){
+  if(!/^[0-9a-f]{40}$/.test(base)||!(head==='HEAD'||/^[0-9a-f]{40}$/.test(head)))throw Error('bad base/head SHA');
+  const names=git('diff','--name-only','-z','--no-renames',base,head,'--').split('\0').filter(Boolean);
+  const coreDiff=names.includes(CORE)?git('diff','--unified=0',base,head,'--',CORE):'';
+  const libDiff=names.includes(LIB)?git('diff','--unified=0',base,head,'--',LIB):'';
+  const lockBefore=names.includes(LOCK)?git('show',base+':'+LOCK):'';
+  const lockAfter=names.includes(LOCK)?git('show',head+':'+LOCK):'';
+  return assess({paths:names,coreDiff,libDiff,lockBefore,lockAfter});
+}
+if(require.main===module){
+  try{
+    const p=Object.fromEntries(process.argv.slice(2).map(x=>{const m=/^--(base|head)=(.+)$/.exec(x);if(!m)throw Error('bad argument');return [m[1],m[2]];}));
+    const r=compute(p.base,p.head||'HEAD');
+    for(const [k,v] of Object.entries(r))process.stdout.write(k+'='+v+'\n');
+    process.stderr.write('CI_SHARED_MANIFEST_ROUTE '+JSON.stringify(r)+'\n');
+  }catch(e){console.error('CI_SHARED_MANIFEST_ROUTE_FAIL_CLOSED '+e.message);process.exitCode=1;}
+}
+module.exports={cargoAdditive,lockAdditive,libAdditive,assess,compute,CORE,LOCK,LIB,ROOT};
