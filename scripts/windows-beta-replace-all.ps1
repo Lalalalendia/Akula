@@ -90,24 +90,33 @@ function Test-AkulaBetaReplaceAll {
     Start-Sleep -Milliseconds 300
     Send-AkulaBetaShortcut -Process $app -Action Copy -ExpectedNoteTitle 'Large paste proof'
     $pasteStillResponsive = $false
+    $clipboardKind = 'poison'
+    $clipboardChars = 0
     for ($probe = 0; $probe -lt 25; $probe++) {
       Start-Sleep -Milliseconds 200
       $app.Refresh()
       if ($app.HasExited) { throw 'Installed Akula exited after saving paste but before Ctrl+Z' }
       try {
         $beforeUndoCopied = Get-Clipboard -Raw -ErrorAction Stop
-        if ($beforeUndoCopied -ceq $beforeUndoPoison) { continue }
-        $pasteStillResponsive = [string]::Equals(
-          $beforeUndoCopied.Replace("`r`n", "`n").TrimEnd([char]10),
-          $replacement, [System.StringComparison]::Ordinal)
-        break
+        $normalCopied = $beforeUndoCopied.Replace("`r`n", "`n").TrimEnd([char]10)
+        if ([string]::Equals($normalCopied, $beforeUndoPoison, [StringComparison]::Ordinal)) { continue }
+        $clipboardChars = $normalCopied.Length
+        $pasteStillResponsive = [string]::Equals($normalCopied, $replacement, [StringComparison]::Ordinal)
+        $clipboardKind = if ($pasteStillResponsive) {
+          'replacement'
+        } elseif ([string]::Equals($normalCopied, 'Large paste proof', [StringComparison]::Ordinal)) {
+          'title'
+        } else {
+          'other'
+        }
+        if ($pasteStillResponsive) { break }
       } catch [System.Runtime.InteropServices.ExternalException] {
         # OS clipboard can be transiently locked.
       }
     }
     $app.Refresh()
     $responsive = $app.Responding
-    Write-Host "AKULA_WINDOWS_PASTE_GUI_PROBE responsive=$responsive clipboard_exact=$pasteStillResponsive process_alive=$(!$app.HasExited)"
+    Write-Host "AKULA_WINDOWS_PASTE_GUI_PROBE responsive=$responsive clipboard_exact=$pasteStillResponsive clipboard_kind=$clipboardKind clipboard_chars=$clipboardChars process_alive=$(!$app.HasExited)"
     if (!$pasteStillResponsive) {
       throw 'Installed GUI did not serve exact Ctrl+A/C clipboard readback after paste, before Ctrl+Z'
     }
