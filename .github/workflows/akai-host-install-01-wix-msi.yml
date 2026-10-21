@@ -1,0 +1,69 @@
+name: AKAI-HOST-INSTALL-01 — isolated per-machine MSI and signing hold
+
+on:
+  pull_request:
+    paths:
+      - "packaging/host-broker-lab/**"
+      - "scripts/host-broker/**"
+      - ".github/workflows/akai-host-install-01-wix-msi.yml"
+      - "docs/agents/akai-host-install-01-wix-msi.md"
+  push:
+    branches:
+      - "agent/akai-host-install01-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-windows-msi:
+    name: Real Windows MSI install/uninstall and unsigned release refusal
+    runs-on: windows-2022
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+      - name: Build unchanged isolated Broker, not installed native
+        run: |
+          cargo build --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --bin akula-host-broker-lab
+          if ($LASTEXITCODE -ne 0) { throw "Isolated broker build failed" }
+          cargo test --locked --manifest-path aquilum-app/host-broker-lab/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw "Isolated broker tests failed" }
+      - name: Install pinned WiX tool (build dependency only)
+        run: |
+          dotnet tool install wix --version 5.0.1 --tool-path "$env:RUNNER_TEMP\wix"
+          if ($LASTEXITCODE -ne 0) { throw "WiX version 5.0.1 install failed" }
+      - name: Build separate x64 perMachine demand-only MSI
+        run: |
+          $wix = Join-Path $env:RUNNER_TEMP "wix\wix.exe"
+          $exe = (Resolve-Path "aquilum-app/host-broker-lab/target/debug/akula-host-broker-lab.exe").Path
+          $msi = Join-Path $env:RUNNER_TEMP "akula-host-broker-research.msi"
+          & $wix build -arch x64 -d "BrokerExe=$exe" -out $msi packaging/host-broker-lab/HostBrokerResearch.wxs
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $msi)) { throw "WiX MSI build failed" }
+      - name: Release gate must reject both unsigned binary and MSI
+        run: |
+          $exe = (Resolve-Path "aquilum-app/host-broker-lab/target/debug/akula-host-broker-lab.exe").Path
+          $msi = Join-Path $env:RUNNER_TEMP "akula-host-broker-research.msi"
+          $refused = $false
+          try {
+            & ./scripts/host-broker/Assert-SignedReleaseCandidate.ps1 -BrokerExe $exe -Msi $msi -ExpectedPublisherThumbprint ('1' * 40)
+          } catch { $refused = $true }
+          if (-not $refused) { throw "Unsigned CI MSI was incorrectly accepted as a signed release" }
+      - name: Real per-machine installation, immutable binary checks, removal
+        run: |
+          $exe = (Resolve-Path "aquilum-app/host-broker-lab/target/debug/akula-host-broker-lab.exe").Path
+          $msi = Join-Path $env:RUNNER_TEMP "akula-host-broker-research.msi"
+          & ./scripts/host-broker/Test-ResearchMsi.ps1 -Msi $msi -BuiltBrokerExe $exe
+      - name: Explicit non-release boundary
+        run: |
+          "Unsigned MSI built only on an ephemeral runner. Not uploaded or attached to an Akula release." >> $env:GITHUB_STEP_SUMMARY
+          "Broker is demand-only, registration absent, no service autostart, and no MCP grant or file authority." >> $env:GITHUB_STEP_SUMMARY
+          "A real release requires publisher-pinned signatures on both MSI and service PE, a signed installer chain, and registered-root policy review." >> $env:GITHUB_STEP_SUMMARY
