@@ -55,6 +55,10 @@ impl SearchState {
         std::path::PathBuf::from(&self.results[self.selected].path)
     }
 
+    pub fn selected_snippet(&self) -> &str {
+        &self.results[self.selected].snippet
+    }
+
     #[cfg(feature = "memory-probe")]
     pub fn generation(&self) -> u64 {
         self.worker.current()
