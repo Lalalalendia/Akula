@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use uuid::Uuid;
 
 pub mod http;
+pub mod projection;
 pub const API_VERSION: &str = "2026-03-11";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
