@@ -6,17 +6,21 @@ name: Yandex S3 native read-only bridge preview
 on:
   pull_request:
     paths:
+      # New feature-owned files only. Subscribing a new workflow to the
+      # existing native/src/app/** and schema/** families violates the
+      # repository's protected CI fanout budget.
       - '.github/workflows/yandex-s3-native-preview.yml'
-      - 'aquilum-app/core/src/sync/yandex_readonly_probe.rs'
-      - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/native/src/yandex_credentials.rs'
       - 'aquilum-app/native/src/yandex_probe_session.rs'
       - 'aquilum-app/native/src/yandex_probe_worker.rs'
-      - 'aquilum-app/native/src/app/**'
-      - 'aquilum-app/native/src/ui/settings/**'
-      - 'aquilum-app/native/assets/locales/*.json'
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+      - 'aquilum-app/native/src/native_modules.rs'
+      - 'aquilum-app/native/src/app/init/bootstrap.rs'
+      - 'aquilum-app/native/src/app/lifecycle/tick.rs'
+      - 'aquilum-app/native/src/app/settings/press.rs'
+      - 'aquilum-app/native/src/app/settings/context.rs'
+      - 'aquilum-app/native/src/app/settings/section.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context.rs'
       - 'scripts/test-yandex-credui-cancel.ps1'
   workflow_dispatch:
 

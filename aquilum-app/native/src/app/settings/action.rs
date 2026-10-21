@@ -30,7 +30,6 @@ impl App {
             return self.keep(dialog, None, effect, root);
         }
 
-
         if let Some(picked) = action.downcast_ref::<Picked>() {
             let Some(menu) = menu else {
                 self.popup = Some(Popup::Settings { dialog, menu: None });

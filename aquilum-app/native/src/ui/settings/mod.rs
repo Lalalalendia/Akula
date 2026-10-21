@@ -3,7 +3,6 @@ pub mod schema;
 
 mod control;
 mod layout;
-
 use std::collections::HashMap;
 
 use aquilum_core::settings::models::AppConfig;
