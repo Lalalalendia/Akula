@@ -107,6 +107,8 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
     let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None,
         #[cfg(feature = "yandex-owner-review-ui-preview")]
         owner_review: None,
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        owner_review_notice: None,
     };
     (NewWidget::new(card), finish)
 }
