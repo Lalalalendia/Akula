@@ -136,7 +136,8 @@ pub fn dialog(rows: &[QueueRow], choosing: bool, error: Option<&str>) -> (NewWid
         .with_fixed(rule())
         .with_fixed(footer));
     let layer = Modal::new(card, &t("transfer.title"), CardSize::Window(card_size), Role::Dialog, false);
-    (layer, TransferDialog { layer: layer.id(), close: close_id, choose: choose_id, actions })
+    let layer_id = layer.id();
+    (layer, TransferDialog { layer: layer_id, close: close_id, choose: choose_id, actions })
 }
 
 #[cfg(test)]
