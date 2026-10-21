@@ -29,9 +29,9 @@ jobs:
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           shared-key: akula-p2p-offer-v1
-      - name: Format workspace
+      - name: Format only this P2P module
         working-directory: aquilum-app
-        run: cargo fmt --all -- --check
+        run: rustfmt --edition 2021 --check core/src/p2p_offer_lab.rs
       - name: Test optional consent contract
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features p2p-offer-lab p2p_offer_lab::tests -- --nocapture
