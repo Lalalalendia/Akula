@@ -27,6 +27,7 @@ pub struct SearchService {
     pub render_lock: Arc<Mutex<()>>,
     pub next_render_epoch: Arc<AtomicU64>,
     next_generation: Arc<AtomicU64>,
+    stopped: Arc<AtomicBool>,
 }
 
 pub struct CachedGraph {
@@ -96,6 +97,7 @@ impl SearchService {
             render_lock: Arc::new(Mutex::new(())),
             next_render_epoch: Arc::new(AtomicU64::new(0)),
             next_generation: Arc::new(AtomicU64::new(0)),
+            stopped: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -109,6 +111,9 @@ impl SearchService {
     /// Repeated shutdown is harmless.
     pub fn shutdown(&self) {
         let _guard = self.prepare_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // A late UI search or MCP guest request can still own a cloned Core.
+        // Forbid re-creating IndexWriter after the shutdown fence.
+        self.stopped.store(true, Ordering::Release);
         let active = self.active.write().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
         let guest = self.guest.write().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
         if let Some(index) = active {
@@ -123,6 +128,9 @@ impl SearchService {
 
     pub fn prepare(&self, workspace: &str) -> Result<SearchIndexStatus, SearchError> {
         let _guard = self.prepare_lock.lock().map_err(SearchError::task)?;
+        if self.stopped.load(Ordering::Acquire) {
+            return Err(SearchError::task("search service already shut down"));
+        }
         let root = workspace_root(workspace)?;
         if let Some(status) = self.status_for_root(&root) {
             return Ok(status);
@@ -152,6 +160,9 @@ impl SearchService {
     }
 
     pub fn open_index(&self, root: PathBuf, visible: bool) -> Result<OpenIndex, SearchError> {
+        if self.stopped.load(Ordering::Acquire) {
+            return Err(SearchError::task("search service already shut down"));
+        }
         fs::create_dir_all(&self.base_directory)?;
         let key = blake3::hash(root.to_string_lossy().as_bytes()).to_hex();
         let storage = self.base_directory.join(key.as_str());
@@ -437,6 +448,10 @@ mod tests {
         old.shutdown();
         assert!(stale_client.active_root().is_none(), "shutdown left an active index");
         stale_client.shutdown(); // idempotent across cloned clients
+        assert!(stale_client.prepare(&workspace).is_err(),
+            "late search task reopened an IndexWriter after shutdown");
+        assert!(stale_client.open_guest(&workspace).is_err(),
+            "late guest request reopened an IndexWriter after shutdown");
 
         // This is a new app session with the same real filesystem/SQLite/Tantivy
         // paths. LockBusy must not be hidden or delayed with an arbitrary sleep.
