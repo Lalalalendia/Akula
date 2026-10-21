@@ -56,6 +56,12 @@ pub enum Action {
     NewToken,
     Copy(usize, String),
     OpenUrl(&'static str),
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    ImportOwnerProposal,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    CompareOwnerCode,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    ClearOwnerProposal,
     CheckUpdates,
     InstallUpdate,
 }
