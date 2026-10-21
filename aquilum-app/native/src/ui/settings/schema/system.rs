@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) const AUTHOR_URL: &str = "https://t.me/dmitriy_yiu";
+pub(super) const PROJECT_TELEGRAM_URL: &str = "https://t.me/AkulaHubl";
 
 pub(super) fn update_row(status: &crate::updater::Status) -> Row {
     use crate::updater::Status;
@@ -51,9 +51,9 @@ pub(super) fn system(config: &AppConfig, ctx: &Context) -> Vec<Block> {
             title: t("settings.system.about"),
             rows: vec![
                 info(
-                    t("settings.system.author"),
-                    Some(t("settings.system.authorHint")),
-                    Control::Buttons(vec![Button::new(AUTHOR_URL.to_owned(), Action::OpenUrl(AUTHOR_URL))]),
+                    t("settings.system.projectTelegram"),
+                    Some(t("settings.system.projectTelegramHint")),
+                    Control::Buttons(vec![Button::new(PROJECT_TELEGRAM_URL.to_owned(), Action::OpenUrl(PROJECT_TELEGRAM_URL))]),
                 ),
                 info(
                     t("settings.system.version"),
