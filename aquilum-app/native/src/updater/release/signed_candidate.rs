@@ -502,6 +502,55 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "CI supplies the real ephemeral Minisign-signed Windows manifest"]
+    fn ephemeral_minisign_windows_fixture_accepts_signed_exact_bytes() {
+        use base64::Engine;
+        use std::{env, fs, path::PathBuf};
+        let root = PathBuf::from(
+            env::var("AKULA_SIGNED_CANDIDATE_TEST_ROOT")
+                .expect("Windows Minisign fixture root required by CI"),
+        );
+        let manifest = fs::read(root.join("manifest-windows.json")).unwrap();
+        let signature = base64::engine::general_purpose::STANDARD
+            .encode(fs::read(root.join("manifest-windows.minisig")).unwrap());
+        let key = base64::engine::general_purpose::STANDARD
+            .encode(fs::read(root.join("publisher.pub")).unwrap());
+        let wrong_key = base64::engine::general_purpose::STANDARD
+            .encode(fs::read(root.join("other.pub")).unwrap());
+        let payload = fs::read(root.join("payload.NSIS")).unwrap();
+
+        let admitted = admit_with_trusted_key(
+            &manifest, &signature, payload.clone(), &key,
+            TARGET_WINDOWS_NSIS, "0.3.9",
+        ).expect("real Minisign-signed Windows installer bytes must authenticate");
+        assert_eq!(admitted.bytes(), payload.as_slice());
+        assert_eq!(admitted.version(), "0.3.10");
+        assert_eq!(admitted.sha256(), digest_hex(&payload));
+
+        let mut changed_bytes = payload.clone();
+        changed_bytes[0] ^= 1;
+        assert!(admit_with_trusted_key(
+            &manifest, &signature, changed_bytes, &key,
+            TARGET_WINDOWS_NSIS, "0.3.9",
+        ).unwrap_err().contains("downloaded bytes"));
+        assert!(admit_with_trusted_key(
+            &manifest, &signature, payload.clone(), &wrong_key,
+            TARGET_WINDOWS_NSIS, "0.3.9",
+        ).unwrap_err().contains("authentication failed"));
+        let mut changed_manifest = manifest.clone();
+        changed_manifest.push(b' ');
+        assert!(admit_with_trusted_key(
+            &changed_manifest, &signature, payload.clone(), &key,
+            TARGET_WINDOWS_NSIS, "0.3.9",
+        ).unwrap_err().contains("authentication failed"));
+        assert!(admit_with_trusted_key(
+            &manifest, &signature, payload, &key,
+            TARGET_WINDOWS_NSIS, "0.3.10",
+        ).unwrap_err().contains("not strictly newer"));
+        println!("AKULA_WINDOWS_REAL_MINISIGN_ADMISSION_PASS correct_key=1 exact_nsis=1 wrong_key=0 downgrade=0");
+    }
+
+    #[test]
     fn production_admission_refuses_before_parse_without_publisher_root() {
         let result = admit(b"{}", "", b"any bytes".to_vec());
         assert!(result.unwrap_err().contains("channel remains disabled"));
