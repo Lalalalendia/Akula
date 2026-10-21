@@ -151,6 +151,82 @@ impl OwnerReviewProposal {
     }
 }
 
+/// A UI-only offline comparison attempt. This is intentionally distinct from
+/// the actual E3e receiver admission session: a successful review NEVER
+/// registers trust, opens credentials, contacts Yandex or authorizes sync.
+/// Later admission MUST create a fresh scope-bound E3e challenge and repeat
+/// owner approval, not reuse this preliminary check.
+pub struct OwnerReviewPreviewAttempt {
+    proposal: OwnerReviewProposal,
+    challenge_hex: String,
+    deadline: std::time::Instant,
+    spent: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OwnerReviewPreviewError {
+    BadProposal(OwnerReviewProposalError),
+    EntropyUnavailable,
+    ClockUnavailable,
+    Expired,
+    AlreadySpent,
+    Comparison(OwnerReviewProposalError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OwnerReviewPreviewResult {
+    /// Only the owner-supplied, full 256-bit public comparison string matches
+    /// this ephemeral candidate. NOT connected, trusted or enrolled.
+    FingerprintMatchedOfflineOnly,
+}
+
+impl OwnerReviewPreviewAttempt {
+    pub fn import_untrusted(bytes: &[u8]) -> Result<Self, OwnerReviewPreviewError> {
+        use ring::rand::{SecureRandom, SystemRandom};
+        let proposal = OwnerReviewProposal::parse_untrusted_json(bytes)
+            .map_err(OwnerReviewPreviewError::BadProposal)?;
+        let mut challenge = [0u8; 32];
+        SystemRandom::new().fill(&mut challenge)
+            .map_err(|_| OwnerReviewPreviewError::EntropyUnavailable)?;
+        if challenge.iter().all(|b| *b == 0) {
+            return Err(OwnerReviewPreviewError::EntropyUnavailable);
+        }
+        let mut challenge_hex = String::with_capacity(64);
+        for b in challenge {
+            use std::fmt::Write as _;
+            write!(challenge_hex, "{b:02x}")
+                .map_err(|_| OwnerReviewPreviewError::EntropyUnavailable)?;
+        }
+        let deadline = std::time::Instant::now()
+            .checked_add(std::time::Duration::from_secs(300))
+            .ok_or(OwnerReviewPreviewError::ClockUnavailable)?;
+        Ok(Self { proposal, challenge_hex, deadline, spent: false })
+    }
+
+    pub fn untrusted_bucket(&self) -> &str { self.proposal.bucket() }
+    pub fn challenge_hex(&self) -> &str { &self.challenge_hex }
+
+    /// Compare exactly ONCE. Bad input, mismatch or expiry spends the attempt.
+    /// This deliberately returns no `IndependentlyApprovedJoin`, ETag or
+    /// S3PinnedV2ReadPreview receipt.
+    pub fn verify_once(
+        &mut self, entered_from_independent_owner: &str,
+    ) -> Result<OwnerReviewPreviewResult, OwnerReviewPreviewError> {
+        if std::mem::replace(&mut self.spent, true) {
+            return Err(OwnerReviewPreviewError::AlreadySpent);
+        }
+        if std::time::Instant::now() >= self.deadline {
+            return Err(OwnerReviewPreviewError::Expired);
+        }
+        self.proposal.verify_independent_owner_code(
+            &self.challenge_hex, entered_from_independent_owner,
+        ).map_err(OwnerReviewPreviewError::Comparison)?;
+        Ok(OwnerReviewPreviewResult::FingerprintMatchedOfflineOnly)
+    }
+
+    pub fn spent(&self) -> bool { self.spent }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
