@@ -41,7 +41,7 @@ pub struct Context {
 impl Context {
     #[cfg(test)]
     pub fn new(scale: f64) -> Self {
-        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
+        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None, #[cfg(feature = "yandex-owner-review-ui-preview")] owner_review: None }
     }
 }
 
