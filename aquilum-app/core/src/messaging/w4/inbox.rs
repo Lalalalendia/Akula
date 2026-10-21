@@ -70,6 +70,24 @@ impl W4Inbox {
                 PRIMARY KEY(sender,message)
              );",
         )?;
+        #[cfg(feature = "messaging-blue-w3-lab")]
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS messaging_w4_trusted_devices(
+                device BLOB PRIMARY KEY CHECK(length(device)=16),
+                epoch INTEGER NOT NULL CHECK(epoch>0),
+                ed25519 BLOB NOT NULL CHECK(length(ed25519)=32),
+                evidence BLOB NOT NULL CHECK(length(evidence)=32),
+                revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN(0,1))
+             );
+             CREATE TABLE IF NOT EXISTS messaging_w3_allowed_routes(
+                sender BLOB NOT NULL CHECK(length(sender)=16),
+                recipient BLOB NOT NULL CHECK(length(recipient)=16),
+                sender_epoch INTEGER NOT NULL CHECK(sender_epoch>0),
+                evidence BLOB NOT NULL CHECK(length(evidence)=32),
+                revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN(0,1)),
+                PRIMARY KEY(sender,recipient)
+             );",
+        )?;
         Ok(Self { db })
     }
 
@@ -108,11 +126,22 @@ impl W4Inbox {
             return Err(Error::Unauthorized);
         }
 
-        let sender = input.sender.as_uuid().into_bytes();
-        let recipient = input.recipient.as_uuid().into_bytes();
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::persist_in_transaction(tx, input, signer)
+    }
+
+    /// Common SQLite receipt writer. Callers must authenticate the input,
+    /// check the current policy, and (for real network traffic) hold the
+    /// same-DB IMMEDIATE authorization/revocation fence transaction.
+    fn persist_in_transaction(
+        tx: rusqlite::Transaction<'_>,
+        input: &AuthenticatedW3<'_>,
+        signer: &Ed25519KeyPair,
+    ) -> Result<InboundResult, Error> {
+        let sender = input.sender.as_uuid().into_bytes();
+        let recipient = input.recipient.as_uuid().into_bytes();
         let existing: Option<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64)> = tx
             .query_row(
                 "SELECT digest,ciphertext,receipt,recipient,epoch,expiry_ms
@@ -204,6 +233,9 @@ impl W4Inbox {
             .query_row("SELECT COUNT(*) FROM messaging_w4_inbox", [], |r| r.get(0))?)
     }
 }
+
+#[cfg(feature = "messaging-blue-w3-lab")]
+mod blue;
 
 #[cfg(test)]
 mod tests;
