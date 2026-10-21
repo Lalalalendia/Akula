@@ -63,7 +63,7 @@ fn source_shortcuts_work_without_a_layout_frame_after_long_select_all_paste() {
         for state in [KeyState::Down, KeyState::Up] {
             root.handle_text_event(TextEvent::Keyboard(KeyboardEvent {
                 state,
-                key: Key::Character(key.to_owned()),
+                key: Key::Character(key.into()),
                 code: Code::Unidentified,
                 location: Location::Standard,
                 modifiers: crate::test_dir::command(),
