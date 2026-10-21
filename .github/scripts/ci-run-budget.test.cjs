@@ -174,3 +174,20 @@ test('job timing API failure does not hide the existing weekly audit',async()=>{
   assert.match(summary,/Weekly CI/);
   assert.match(summary,/Sampling unavailable: Actions jobs API HTTP 503/);
 });
+
+test('specialized PR CI cancels stale revisions but preserves manual labs and independent PRs',()=>{
+  const fs=require('node:fs');
+  const path=require('node:path');
+  const files=["core-server-bootstrap-b1b0-staging.yml","core-server-bootstrap-b1b4a-cas-fence.yml","core-server-bootstrap-b1b4b-os-witness.yml","core-server-bootstrap-b1c0-fixed-node.yml","core-node-d1-loopback.yml","core-node-d15-catalog.yml","core-headless-smoke.yml","sync-installed-os-owner-witness.yml"];
+  const group='  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}';
+  for(const file of files){
+    const yaml=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
+    assert.match(yaml,/^  pull_request:/m,file);
+    assert.match(yaml,/^  workflow_dispatch:/m,file);
+    assert.match(yaml,/^permissions:/m,file);
+    assert.match(yaml,/^  contents: read$/m,file);
+    assert.match(yaml,/^concurrency:$/m,file);
+    assert.ok(yaml.includes(group),file);
+    assert.match(yaml,/^  cancel-in-progress: true$/m,file);
+  }
+});
