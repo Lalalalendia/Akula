@@ -35,7 +35,9 @@ jobs:
         run: rustfmt --edition 2021 --check aquilum-app/core/src/messaging/mod.rs
       - name: Run deterministic model tests
         working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-core --features messaging-core-lab messaging:: -- --nocapture
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features messaging-core-lab 'messaging::' -- --nocapture
       - name: Ensure feature-off Akula core remains buildable
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-core --no-default-features
