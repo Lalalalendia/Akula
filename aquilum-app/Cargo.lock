@@ -2,6 +2,7 @@
 # It is not intended for manual editing.
 version = 4
 
+# Temporary CI-only draft acceptance; locked packages unchanged.
 [[package]]
 name = "ab_glyph"
 version = "0.2.32"
