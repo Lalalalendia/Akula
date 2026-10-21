@@ -49,6 +49,8 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
+# Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
+sync-text-delta = ["dep:zstd"]
 # Separately selected packaged build: force every default Core::open through
 # the compiler-pinned local host registry. No AWS SDK or S3 engine implied.
 sync-installed-host = ["host-custody"]
@@ -116,6 +118,8 @@ ureq = "2.12"
 httparse = "1"
 yrs = "0.28"
 memchr = "2"
+# Local in-memory compression only; no S3, host File Gate or UI activation.
+zstd = { version = "=0.13.3", optional = true }
 
 # Official AWS Rust SDK used only for opt-in S3 provider capability tests.
 aws-config = { version = "1.12.0", optional = true }
