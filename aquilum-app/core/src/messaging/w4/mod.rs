@@ -32,6 +32,7 @@ pub enum Error {
     Mismatch,
     Conflict,
     Expired,
+    MailboxFull,
     Missing,
 }
 impl From<rusqlite::Error> for Error {
@@ -306,6 +307,9 @@ impl W4Outbox {
         }
     }
 }
+
+#[cfg(feature = "messaging-w4-inbox-lab")]
+pub mod inbox;
 
 #[cfg(test)]
 mod tests;

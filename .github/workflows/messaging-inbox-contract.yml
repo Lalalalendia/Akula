@@ -1,0 +1,40 @@
+name: Akula messaging receiver journal contract
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/messaging/**'
+      - 'docs/messaging/**'
+      - '.github/workflows/messaging-inbox-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-msg-inbox-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  durable-inbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Inbound durable W4 receipt tests
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features messaging-w4-inbox-lab 'messaging::' -- --nocapture
+      - name: Core with all message features off
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --no-default-features
+      - name: Formatting
+        run: rustfmt --edition 2021 --check aquilum-app/core/src/messaging/mod.rs
