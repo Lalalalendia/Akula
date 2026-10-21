@@ -86,10 +86,10 @@ function Assert-Installed([string]$version, [string]$digest) {
   if ($registered.Count -ne 1) { throw 'Duplicate or missing Akula uninstall identity' }
 }
 
-function Wait-AkulaGUI {
+function Wait-AkulaGUI([int]$excludedPid = -1) {
   for ($i = 0; $i -lt 55; $i++) {
     $candidate = @(Get-Process -Name 'akula-app' -ErrorAction SilentlyContinue |
-      Where-Object { $_.MainWindowHandle -ne 0 })
+      Where-Object { $_.MainWindowHandle -ne 0 -and $_.Id -ne $excludedPid })
     if ($candidate.Count -gt 0) { return $candidate[0] }
     Start-Sleep -Seconds 1
   }
@@ -110,7 +110,7 @@ function Close-AkulaGUI {
 
 # Existing Windows beta smoke completed and uninstalled Akula, keeping user data.
 if (Test-Path -LiteralPath $exe) { throw 'Earlier Windows beta smoke left Akula installed' }
-Invoke-NSIS $v1 @('/S')
+Invoke-NSIS -installer $v1 -flags @('/S')
 Assert-Installed '0.3.9' $expectedV1
 $guiArgs = '--vault "' + $vault + '" --open "' + $note + '"'
 Start-Process -FilePath $exe -ArgumentList $guiArgs | Out-Null
@@ -118,9 +118,9 @@ $old = Wait-AkulaGUI
 Write-Host "AKULA_WINDOWS_REAL_V1_GUI_PASS pid=$($old.Id)"
 
 # The real upstream Windows auto-updater used these NSIS upgrade flags.
-Invoke-NSIS $v2 @('/S','/R','/UPDATE','/ARGS')
+Invoke-NSIS -installer $v2 -flags @('/S','/R','/UPDATE','/ARGS')
 Assert-Installed '0.3.10' $expectedV2
-$new = Wait-AkulaGUI
+$new = Wait-AkulaGUI -excludedPid $old.Id
 Assert-Witnesses
 Write-Host 'AKULA_WINDOWS_REAL_UPGRADE_PASS v1=0.3.9 v2=0.3.10 nsis=1 sha256=1 gui=1 upstream_intact=1'
 
@@ -130,9 +130,9 @@ Stop-Process -Id $new.Id -Force
 for ($i = 0; $i -lt 35 -and (Get-Process -Id $new.Id -ErrorAction SilentlyContinue); $i++) {
   Start-Sleep -Milliseconds 500
 }
-Invoke-NSIS $v1 @('/S','/R','/UPDATE','/ARGS')
+Invoke-NSIS -installer $v1 -flags @('/S','/R','/UPDATE','/ARGS')
 Assert-Installed '0.3.9' $expectedV1
-$restored = Wait-AkulaGUI
+$restored = Wait-AkulaGUI -excludedPid $new.Id
 Assert-Witnesses
 Write-Host 'AKULA_WINDOWS_REAL_RECOVERY_PASS old_version=0.3.9 exact_binary=1 gui=1 note=1 upstream_intact=1'
 Close-AkulaGUI
@@ -140,7 +140,7 @@ Close-AkulaGUI
 if (!(Test-Path -LiteralPath $state)) { throw 'Akula AppData absent after upgrade/recovery' }
 $uninstaller = Join-Path $install 'uninstall.exe'
 if (!(Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'NSIS uninstaller missing' }
-Invoke-NSIS $uninstaller @('/S')
+Invoke-NSIS -installer $uninstaller -flags @('/S')
 for ($i = 0; $i -lt 60 -and ((Test-Path $exe) -or (Test-Path $registry)); $i++) {
   Start-Sleep -Seconds 1
 }
