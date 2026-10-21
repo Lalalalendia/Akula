@@ -360,7 +360,7 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         assert_eq!(saved.bytes, manifest.size);
         assert_eq!(saved.blake3_root, manifest.id.0);
         let accepted_bytes = fs::read(&inbox_target).expect("read real created inbox file");
-        assert_eq!(accepted_bytes, *expected);
+        assert_eq!(accepted_bytes.as_slice(), *expected);
 
         // Reusing the valid stage is not permission to replace user bytes.
         assert!(matches!(
@@ -369,7 +369,7 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
             ),
             Err(aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists),
         ));
-        assert_eq!(fs::read(&inbox_target).unwrap(), *expected);
+        assert_eq!(fs::read(&inbox_target).unwrap().as_slice(), *expected);
         staged_directories.push(parent.to_path_buf());
     }
     assert_eq!(receiver.line(), "STY_G1K_UNLISTED_GET_DENIED=true");
