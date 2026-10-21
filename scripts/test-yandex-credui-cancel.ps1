@@ -11,6 +11,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop' -or
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class AkulaCredUiQaWindow {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -27,18 +28,17 @@ public static class AkulaCredUiQaWindow {
     // Windows Security caption rather than the requested message caption.
     // Enumerate ONLY windows owned by the independently identified cargo-test
     // child; never pick an unrelated process's credential prompt.
-    public static IntPtr FindVisibleWindowForProcess(uint requiredPid) {
-        IntPtr found = IntPtr.Zero;
+    public static IntPtr[] FindVisibleWindowsForProcess(uint requiredPid) {
+        var windows = new List<IntPtr>();
         EnumWindows(delegate (IntPtr hwnd, IntPtr state) {
             uint ownerPid;
             GetWindowThreadProcessId(hwnd, out ownerPid);
             if (ownerPid == requiredPid && IsWindowVisible(hwnd)) {
-                found = hwnd;
-                return false;
+                windows.Add(hwnd);
             }
             return true;
         }, IntPtr.Zero);
-        return found;
+        return windows.ToArray();
     }
 }
 '@ -ErrorAction Stop
@@ -98,41 +98,60 @@ Write-Host 'AKULA_CREDUI_IGNORED_TEST_DISCOVERY_PASS: exact_test_present=True'
 $proc = $null
 try {
     $proc = Start-Process -FilePath $testExe -ArgumentList $testArgs -WorkingDirectory $cargoWorkdir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $editType = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit
+    )
     $handle = [IntPtr]::Zero
+    $dialog = $null
+    $masked = 0
+    $maxWindowCount = 0
+    $maxEditCount = 0
     for ($attempt = 0; $attempt -lt 240; $attempt++) {
         Start-Sleep -Milliseconds 500
         $proc.Refresh()
         if ($proc.HasExited) {
-            throw "Isolated native CredUI Rust test exited before presenting a dialog, code=$($proc.ExitCode)"
+            throw "Isolated native CredUI Rust test exited before presenting a masked dialog, code=$($proc.ExitCode)"
         }
-        # Only inspect the test executable's own visible windows; never
-        # select or close unrelated credential prompts from another process.
-        $handle = [AkulaCredUiQaWindow]::FindVisibleWindowForProcess([uint32]$proc.Id)
+        # A Rust GUI test can own multiple visible top-level windows. Do NOT
+        # assume EnumWindows' first match is the Windows Security modal.
+        # Search only windows of this exact compiled Rust test PID, never
+        # other users' credential dialogs or unrelated desktop windows.
+        $windows = @([AkulaCredUiQaWindow]::FindVisibleWindowsForProcess([uint32]$proc.Id))
+        $maxWindowCount = [Math]::Max($maxWindowCount, $windows.Count)
+        foreach ($candidateHandle in $windows) {
+            $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($candidateHandle)
+            if ($null -eq $candidate) { continue }
+            try {
+                $candidateFields = $candidate.FindAll(
+                    [System.Windows.Automation.TreeScope]::Descendants, $editType
+                )
+                $maxEditCount = [Math]::Max($maxEditCount, $candidateFields.Count)
+                $candidateMasked = 0
+                for ($i = 0; $i -lt $candidateFields.Count; $i++) {
+                    if ($candidateFields.Item($i).Current.IsPassword) { $candidateMasked++ }
+                }
+                if ($candidateMasked -ge 1) {
+                    $handle = $candidateHandle
+                    $dialog = $candidate
+                    $masked = $candidateMasked
+                    break
+                }
+            }
+            catch [System.Windows.Automation.ElementNotAvailableException] {
+                # A window was destroyed while iterating; retry a fresh tree.
+            }
+        }
         if ($handle -ne [IntPtr]::Zero) { break }
     }
-    if ($handle -eq [IntPtr]::Zero) {
-        throw "Native CredUI test window unavailable for exact test process; interactive=$([Environment]::UserInteractive)"
+    if ($handle -eq [IntPtr]::Zero -or $null -eq $dialog -or $masked -lt 1) {
+        # Sanitized metadata only; no title, field text, username or secret.
+        throw "CredUI masked window unavailable: test_pid_window_count=$maxWindowCount max_edit_controls=$maxEditCount interactive=$([Environment]::UserInteractive)"
     }
     [uint32]$owner = 0
     if ([AkulaCredUiQaWindow]::GetWindowThreadProcessId($handle, [ref]$owner) -eq 0 -or
         $owner -ne [uint32]$proc.Id) {
         throw 'Native credential modal is not owned by the isolated Rust test process'
-    }
-    $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
-    if ($null -eq $dialog) {
-        throw 'Windows UI Automation cannot access the test process modal'
-    }
-    $editType = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Edit
-    )
-    $fields = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editType)
-    $masked = 0
-    for ($i = 0; $i -lt $fields.Count; $i++) {
-        if ($fields.Item($i).Current.IsPassword) { $masked++ }
-    }
-    if ($masked -lt 1) {
-        throw 'Real Microsoft CredUI has no password-masked UI Automation edit field'
     }
     $buttonType = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
