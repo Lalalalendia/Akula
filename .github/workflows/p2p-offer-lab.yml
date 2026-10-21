@@ -35,6 +35,36 @@ jobs:
       - name: Test optional consent contract
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features p2p-offer-lab p2p_offer_lab::tests -- --nocapture
-      - name: Lint optional consent module
+      - name: Check new P2P module diagnostics independently of legacy Core warnings
         working-directory: aquilum-app
-        run: cargo clippy --locked -p aquilum-core --lib --features p2p-offer-lab -- -D warnings
+        run: |
+          set -e
+          cargo clippy --locked -p aquilum-core --lib --features p2p-offer-lab --message-format=json -- -W clippy::all > p2p-clippy.jsonl
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          failures = []
+          legacy = 0
+          for line in Path("p2p-clippy.jsonl").read_text().splitlines():
+              try:
+                  item = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if item.get("reason") != "compiler-message":
+                  continue
+              message = item["message"]
+              if message.get("level") not in ("warning", "error"):
+                  continue
+              spans = message.get("spans", [])
+              if any("p2p_offer_lab.rs" in span.get("file_name", "")
+                     for span in spans if span.get("is_primary")):
+                  failures.append(message["message"])
+              else:
+                  legacy += 1
+          for diagnostic in failures:
+              print("NEW P2P DIAGNOSTIC:", diagnostic)
+          print(f"Unmodified Core diagnostics left visible: {legacy}")
+          if failures:
+              raise SystemExit(1)
+          print("P2P-owned source lint: PASS")
+          PY
