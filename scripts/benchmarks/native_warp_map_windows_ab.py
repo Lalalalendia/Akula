@@ -64,14 +64,27 @@ def run(binary, out, trial, mode):
     if not isinstance(stages, list) or len(stages) != rp.get("frames") or len(stages) < 20:
         raise RuntimeError("Unaligned or insufficient replay-only frame stages")
     for item in stages:
-        for field in ("sceneMs", "rendererDrawMs", "outputPresentMs", "velloMs", "scrollShiftMs"):
+        for field in ("sceneMs", "rendererDrawMs", "outputPresentMs", "velloMs", "scrollShiftMs", "outputMapMs", "outputUnmapMs", "outputCopySubmitMs", "outputPresentCallMs"):
             if not isinstance(item.get(field), (int, float)) or not 0 <= item[field] < 100000:
                 raise ValueError("Invalid frame stage " + field)
+    for item in stages:
+        for field in ("outputCopyBytes", "outputCopyRects", "outputMapCalls"):
+            if not isinstance(item.get(field), int) or item[field] < 0:
+                raise ValueError("Invalid native output counter: " + field)
+    if not any(item["outputCopyBytes"] > 0 and item["outputCopyRects"] > 0
+               and item["outputMapCalls"] > 0 for item in stages):
+        raise RuntimeError("No native staging-map and copy witness")
     row = dict(trial=trial, mode=mode, note_sha256=digest, exe_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                frames=len(stages), rss_kib=peak, visible_window=witness, replay=rp,
                output_present_p95_ms=percentile([s["outputPresentMs"] for s in stages], .95),
                renderer_draw_p95_ms=percentile([s["rendererDrawMs"] for s in stages], .95),
-               scroll_shift_p95_ms=percentile([s["scrollShiftMs"] for s in stages], .95))
+               scroll_shift_p95_ms=percentile([s["scrollShiftMs"] for s in stages], .95),
+               map_p95_ms=percentile([s["outputMapMs"] for s in stages], .95),
+               unmap_p95_ms=percentile([s["outputUnmapMs"] for s in stages], .95),
+               copy_submit_p95_ms=percentile([s["outputCopySubmitMs"] for s in stages], .95),
+               present_call_p95_ms=percentile([s["outputPresentCallMs"] for s in stages], .95),
+               copy_bytes=sum(s["outputCopyBytes"] for s in stages),
+               copy_rects=sum(s["outputCopyRects"] for s in stages))
     (root / "sample.json").write_text(json.dumps(row, indent=2, ensure_ascii=False), encoding="utf-8")
     print("AKULA_WARP_MAP_SAMPLE trial=%d mode=%s frames=%d output_p95_ms=%.3f rss_kib=%d" %
           (trial, mode, len(stages), row["output_present_p95_ms"], peak), flush=True)
@@ -101,16 +114,21 @@ def main():
         raise RuntimeError("Incomplete or mismatched six-process A/B")
     lines = ["# WARP-MAP-01 — developer-only exact WARP 3×AB/BA", "",
              "Real visible Win32 GUI and strict WARP on a Windows CI runner. Measurements are CPU",
-             "work, not physical display scanout. Map and CopySubresourceRegion are not yet",
-             "separately timed; outputPresent includes the native output call and host bookkeeping.", "",
-             "| Mode | Output-present p95 ms | Renderer-draw p95 ms | Scroll-shift p95 ms | Peak RSS MiB |",
-             "|---|---:|---:|---:|---:|"]
+             "work, not physical display scanout. CopySubresourceRegion is measured only",
+             "for CPU submission, not GPU completion. Present1 may wait for vsync.", "",
+             "| Mode | Map p95 | Unmap p95 | Copy call p95 | Present1 call p95 | Host present p95 | Draw p95 | Scroll shift p95 | Copy MiB | RSS MiB |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for mode in MODES:
         subset = [r for r in rows if r["mode"] == mode]
-        lines.append("| %s | %.3f | %.3f | %.3f | %.1f |" %
-            (mode, median(r["output_present_p95_ms"] for r in subset),
+        lines.append("| %s | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f | %.1f | %.1f |" %
+            (mode, median(r["map_p95_ms"] for r in subset),
+             median(r["unmap_p95_ms"] for r in subset),
+             median(r["copy_submit_p95_ms"] for r in subset),
+             median(r["present_call_p95_ms"] for r in subset),
+             median(r["output_present_p95_ms"] for r in subset),
              median(r["renderer_draw_p95_ms"] for r in subset),
              median(r["scroll_shift_p95_ms"] for r in subset),
+             median(r["copy_bytes"] for r in subset)/1048576,
              median(r["rss_kib"] for r in subset)/1024))
     (out / "matrix.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
     (out / "summary.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
