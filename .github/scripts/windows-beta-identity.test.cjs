@@ -188,6 +188,8 @@ test('Windows updater cannot execute a downloaded setup while signed rollback is
   assert.match(windowsApply, /Err\("HOLD: Windows Akula updater needs signed transactional install/);
   assert.doesNotMatch(windowsApply, /ShellExecuteW|std::process::exit|std::fs::write|before_exit\(\)/,
     'a release-channel mistake must never execute an unapproved Windows installer');
-  assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = ""/);
+  // Public-key pinning belongs to #527, which can merge independently.
+  // An empty or owner-pinned public key must NEVER activate a Windows apply.
+  assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
   assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*false\s*\}/);
 });
