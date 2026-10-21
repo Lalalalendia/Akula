@@ -190,8 +190,8 @@ test('Windows beta NSIS apply only accepts signed typed candidate and remains ga
   assert.match(windowsApply, /if !super::release::channel_ready\(\)/);
   assert.match(windowsApply, /stage_signed_windows_setup\(candidate.bytes\(\), candidate.sha256\(\)\)/);
   assert.match(windowsApply, /ShellExecuteW/);
-  assert.match(windowsApply, /file\.sync_all\(\)/);
-  assert.match(windowsApply, /if actual != expected_sha256/);
+  assert.match(apply, /file\.sync_all\(\)/);
+  assert.match(apply, /if actual != expected_sha256/);
   assert.doesNotMatch(windowsApply, /pub(?:\(crate\))? fn apply\(payload: &\[u8\]/,
     'unsigned arbitrary bytes cannot be a Windows installer argument');
   assert.match(updater, /payload: Arc<Mutex<Option<release::SignedCandidate>>>/);
