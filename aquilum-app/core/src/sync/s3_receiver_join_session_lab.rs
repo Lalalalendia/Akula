@@ -32,6 +32,8 @@ pub enum ReceiverJoinSessionError {
     Join(AtomicJoinError),
     #[cfg(feature = "signed-vault-join-successor-integration-lab")]
     LiveYandexRead(PinnedJoinError),
+    #[cfg(feature = "signed-vault-manual-owner-review-lab")]
+    ManualOwnerReview(super::super::super::IndependentOwnerFingerprintError),
 }
 
 #[derive(Debug)]
@@ -156,6 +158,51 @@ impl ReceiverJoinSession {
         approved: &IndependentlyApprovedJoin<'_>,
     ) -> Result<AtomicJoinOutcome, ReceiverJoinSessionError> {
         self.consume_for_approved_scope(scope, approved)?;
+        Self::finish_verified_yandex_join(
+            client, journal, scope, root, policy, signed_offer, approved,
+        ).await
+    }
+
+    /// E3h: the host MUST obtain `entered_out_of_band_hex` from a separate,
+    /// authenticated owner-controlled channel. It must NEVER copy or prefill
+    /// the expected value from candidate S3 objects or invitation payload.
+    /// A wrong or missing 256-bit fingerprint burns the session and cannot
+    /// perform any S3 request or SQLite trust registration.
+    #[cfg(feature = "signed-vault-manual-owner-review-lab")]
+    pub async fn enroll_after_independent_owner_review_once(
+        &mut self,
+        client: &AwsS3ProbeClient,
+        journal: &mut S3V2TrustedAnchorJournal,
+        scope: &S3RemoteAnchorScope,
+        root: &S3PackedHeadV2,
+        policy: &PublisherPolicyV1,
+        signed_offer: &DecodedDsseEnvelope<'_>,
+        approved: &IndependentlyApprovedJoin<'_>,
+        entered_out_of_band_hex: &str,
+    ) -> Result<AtomicJoinOutcome, ReceiverJoinSessionError> {
+        self.consume_for_approved_scope(scope, approved)?;
+        super::super::super::s3_owner_manual_fingerprint_lab::
+            verify_independently_entered_owner_fingerprint(
+                approved, entered_out_of_band_hex,
+            ).map_err(ReceiverJoinSessionError::ManualOwnerReview)?;
+        Self::finish_verified_yandex_join(
+            client, journal, scope, root, policy, signed_offer, approved,
+        ).await
+    }
+
+    // Exactly ONE internal S3-to-SQLite path under both session entrypoints.
+    // Caller-owned ETag/pinned receipts are never substituted for the SDK's
+    // actual bounded read; E3c remains the authority for atomic enrollment.
+    #[cfg(feature = "signed-vault-join-successor-integration-lab")]
+    async fn finish_verified_yandex_join(
+        client: &AwsS3ProbeClient,
+        journal: &mut S3V2TrustedAnchorJournal,
+        scope: &S3RemoteAnchorScope,
+        root: &S3PackedHeadV2,
+        policy: &PublisherPolicyV1,
+        signed_offer: &DecodedDsseEnvelope<'_>,
+        approved: &IndependentlyApprovedJoin<'_>,
+    ) -> Result<AtomicJoinOutcome, ReceiverJoinSessionError> {
         let (etag, pinned_read) =
             super::super::super::s3_join_pinned_lab::verify_yandex_join_for_atomic_session(
                 client, scope, root, policy, approved, signed_offer,
