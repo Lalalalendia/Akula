@@ -1,6 +1,7 @@
 //! Transfer preparation UI. No transport or file authorization is exposed here.
 //! Rows are in-memory drafts, never a claim that data was sent or verified.
 
+use aquilum_core::sync::DeviceId;
 use masonry::accesskit::Role;
 use masonry::core::{NewWidget, PropertySet, WidgetId};
 use masonry::kurbo::{Axis, Size};
@@ -43,7 +44,8 @@ pub enum DeviceStatus {
 
 #[derive(Clone, Debug)]
 pub struct DeviceRow {
-    pub index: usize,
+    pub id: DeviceId,
+    pub key: [u8; 32],
     pub name: String,
     pub fingerprint: String,
     pub status: DeviceStatus,
@@ -55,7 +57,7 @@ pub struct TransferDialog {
     pub close: WidgetId,
     pub choose: WidgetId,
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
-    pub device_actions: Vec<(WidgetId, usize)>,
+    pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
 }
 
 fn card_size(room: Size) -> Size {
@@ -159,7 +161,7 @@ pub fn dialog(rows: &[QueueRow], devices: &[DeviceRow], choosing: bool, error: O
                 if device.selected { t("transfer.deviceSelected") } else { t("transfer.selectDevice") },
                 Variant::Ghost,
             ));
-            device_actions.push((button.id(), device.index));
+            device_actions.push((button.id(), device.id, device.key));
             entry = entry.with_fixed(button);
         }
         info = info.with_fixed(NewWidget::new(entry).with_props(

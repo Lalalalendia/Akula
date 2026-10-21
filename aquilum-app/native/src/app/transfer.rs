@@ -82,23 +82,30 @@ impl TransferState {
         }
     }
 
-    fn choose_peer(&mut self, index: usize) {
-        // Never choose an unknown, revoked or zero-fingerprint identity.
-        self.selected_peer = self.peers.get(index)
-            .filter(|peer| peer.status == transfer_ui::DeviceStatus::IdentityChecked
-                && peer.fingerprint != [0; 32])
-            .map(|peer| (peer.id, peer.fingerprint));
+    fn choose_peer(&mut self, binding: (DeviceId, [u8; 32])) {
+        // Always match the *exact* displayed DeviceId and key, never a stale
+        // list index which might now refer to a completely different peer.
+        let matches: Vec<_> = self.peers.iter().filter(|peer| peer.id == binding.0).collect();
+        self.selected_peer = if matches.len() == 1
+            && matches[0].fingerprint == binding.1
+            && binding.1 != [0; 32]
+            && matches[0].status == transfer_ui::DeviceStatus::IdentityChecked
+        {
+            Some(binding)
+        } else {
+            None
+        };
     }
 
     fn reconcile_selection(&mut self) {
-        if let Some(binding) = self.selected_peer
-            && !self.peers.iter().any(|peer| {
-                peer.status == transfer_ui::DeviceStatus::IdentityChecked
-                    && peer.fingerprint != [0; 32]
-                    && (peer.id, peer.fingerprint) == binding
-            })
-        {
-            self.selected_peer = None;
+        if let Some(binding) = self.selected_peer {
+            let matches: Vec<_> = self.peers.iter().filter(|peer| peer.id == binding.0).collect();
+            if matches.len() != 1 || matches[0].fingerprint != binding.1
+                || matches[0].fingerprint == [0; 32]
+                || matches[0].status != transfer_ui::DeviceStatus::IdentityChecked
+            {
+                self.selected_peer = None;
+            }
         }
     }
 
@@ -106,15 +113,21 @@ impl TransferState {
     /// signed, custody-checked first-party registry adapter is a prerequisite.
     #[cfg(test)]
     pub(super) fn apply_test_peer_snapshot(&mut self, peers: Vec<TransferPeer>) {
-        self.peers = peers.into_iter().take(MAX_DEVICE_ROWS)
+        // Refuse oversize rosters rather than truncating away a conflicting ID.
+        if peers.len() > MAX_DEVICE_ROWS {
+            self.peers.clear();
+            self.selected_peer = None;
+            return;
+        }
+        self.peers = peers.into_iter()
             .filter(|peer| !peer.id.as_uuid().is_nil())
             .collect();
-        // Duplicate identities with conflicting fingerprints are withheld;
+        // Any duplicate DeviceId is ambiguous, even with identical key bytes;
         // no UI selection can authorize a transfer in any case.
         let mut ambiguous = Vec::new();
         for (index, peer) in self.peers.iter().enumerate() {
-            if self.peers.iter().any(|other| {
-                other.id == peer.id && other.fingerprint != peer.fingerprint
+            if self.peers.iter().enumerate().any(|(other_index, other)| {
+                other_index != index && other.id == peer.id
             }) {
                 ambiguous.push(index);
             }
@@ -126,7 +139,7 @@ impl TransferState {
     }
 
     fn device_rows(&self) -> Vec<transfer_ui::DeviceRow> {
-        self.peers.iter().enumerate().take(MAX_DEVICE_ROWS).map(|(index, peer)| {
+        self.peers.iter().take(MAX_DEVICE_ROWS).map(|peer| {
             let name: String = peer.name.chars()
                 .filter(|c| !c.is_control()).take(64).collect();
             let name = if name.trim().is_empty() {
@@ -139,7 +152,7 @@ impl TransferState {
             let fingerprint = peer.fingerprint[..8].iter()
                 .map(|byte| format!("{byte:02x}")).collect::<String>();
             transfer_ui::DeviceRow {
-                index, name, fingerprint,
+                id: peer.id, key: peer.fingerprint, name, fingerprint,
                 status: if peer.fingerprint == [0; 32] {
                     transfer_ui::DeviceStatus::Unverified
                 } else {
@@ -236,9 +249,9 @@ impl App {
             }
             refresh = true;
         } else if pressed
-            && let Some((_, index)) = dialog.device_actions.iter().find(|(button, _)| *button == id)
+            && let Some((_, device_id, key)) = dialog.device_actions.iter().find(|(button, _, _)| *button == id)
         {
-            self.transfer.choose_peer(*index);
+            self.transfer.choose_peer((*device_id, *key));
             refresh = true;
         }
         self.popup = Some(Popup::Transfers(dialog));
