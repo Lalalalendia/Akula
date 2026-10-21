@@ -3,7 +3,7 @@
 //! Fixture key/route provisioning is intentionally test-only.
 
 use super::*;
-use crate::messaging::w4::{verify_receipt, key_ledger::W4TrustLedger};
+use crate::messaging::w4::{key_ledger::W4TrustLedger, verify_receipt};
 use akula_blue_w3::{new_recipient, seal_v2, SignedHeader};
 use ed25519_dalek::SigningKey;
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -55,7 +55,11 @@ impl Fixture {
         this.seed_key(this.recipient, RECIPIENT_EPOCH, recipient_key);
         if allow {
             assert_eq!(
-                { let approved = this.approval(SENDER_EPOCH, 11); this.inbox.allow_route(&approved) }.unwrap(),
+                {
+                    let approved = this.approval(SENDER_EPOCH, 11);
+                    this.inbox.allow_route(&approved)
+                }
+                .unwrap(),
                 RouteOutcome::Allowed
             );
         }
@@ -138,7 +142,9 @@ fn genuine_blue_packet_commits_ciphertext_and_real_recipient_signed_ack() {
     let original_packet: Vec<u8> = f
         .inbox
         .db
-        .query_row("SELECT ciphertext FROM messaging_w4_inbox", [], |r| r.get(0))
+        .query_row("SELECT ciphertext FROM messaging_w4_inbox", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(original_packet, wire);
 
@@ -177,7 +183,11 @@ fn no_route_no_sender_key_and_wrong_signer_never_yield_ack() {
     assert!(matches!(f.accept(&wire), Err(Error::Unauthorized)));
     assert_eq!(f.inbox.row_count().unwrap(), 0);
     assert_eq!(
-        { let approved = f.approval(SENDER_EPOCH, 11); f.inbox.allow_route(&approved) }.unwrap(),
+        {
+            let approved = f.approval(SENDER_EPOCH, 11);
+            f.inbox.allow_route(&approved)
+        }
+        .unwrap(),
         RouteOutcome::Allowed
     );
     f.inbox
@@ -188,7 +198,11 @@ fn no_route_no_sender_key_and_wrong_signer_never_yield_ack() {
         )
         .unwrap();
     assert!(matches!(f.accept(&wire), Err(Error::Unauthorized)));
-    f.seed_key(f.sender, SENDER_EPOCH, f.sender_signer.verifying_key().to_bytes());
+    f.seed_key(
+        f.sender,
+        SENDER_EPOCH,
+        f.sender_signer.verifying_key().to_bytes(),
+    );
 
     let imposter = Ed25519KeyPair::from_seed_unchecked(&[9; 32]).unwrap();
     assert!(matches!(
@@ -227,7 +241,11 @@ fn revocation_after_crypto_before_sqlite_commit_is_enforced() {
     // A host-authorized revocation that commits in the verification/commit
     // window is visible inside the immediate acceptance transaction.
     assert_eq!(
-        { let approved = f.revocation(SENDER_EPOCH, 91); f.inbox.revoke_route(&approved) }.unwrap(),
+        {
+            let approved = f.revocation(SENDER_EPOCH, 91);
+            f.inbox.revoke_route(&approved)
+        }
+        .unwrap(),
         RouteOutcome::Revoked
     );
     assert!(matches!(
@@ -243,7 +261,10 @@ fn revocation_after_crypto_before_sqlite_commit_is_enforced() {
     ));
     assert_eq!(f.inbox.row_count().unwrap(), 0);
     assert!(matches!(
-        { let approved = f.approval(SENDER_EPOCH, 99); f.inbox.allow_route(&approved) },
+        {
+            let approved = f.approval(SENDER_EPOCH, 99);
+            f.inbox.allow_route(&approved)
+        },
         Err(Error::Unauthorized)
     ));
     assert!(matches!(f.accept(&wire), Err(Error::Unauthorized)));
@@ -264,7 +285,10 @@ fn key_revocation_blocks_even_replay_of_previously_committed_receipt() {
         .unwrap();
     assert!(matches!(f.accept(&wire), Err(Error::Unauthorized)));
     assert_eq!(f.inbox.row_count().unwrap(), 1);
-    assert_eq!(result.signed_receipt.len(), super::super::super::RECEIPT_LEN);
+    assert_eq!(
+        result.signed_receipt.len(),
+        super::super::super::RECEIPT_LEN
+    );
 }
 
 #[test]
@@ -274,10 +298,7 @@ fn invalid_ciphertext_and_expiry_never_store() {
     let mut tampered = wire.clone();
     let last = tampered.len() - 1;
     tampered[last] ^= 1;
-    assert!(matches!(
-        f.accept(&tampered),
-        Err(Error::InvalidSignature)
-    ));
+    assert!(matches!(f.accept(&tampered), Err(Error::InvalidSignature)));
     let attacker = SigningKey::from_bytes(&[8; 32]);
     let forged = seal_v2(
         &attacker,
@@ -292,10 +313,7 @@ fn invalid_ciphertext_and_expiry_never_store() {
         b"forged",
     )
     .unwrap();
-    assert!(matches!(
-        f.accept(&forged),
-        Err(Error::InvalidSignature)
-    ));
+    assert!(matches!(f.accept(&forged), Err(Error::InvalidSignature)));
     assert!(matches!(
         f.inbox.accept_blue_packet(
             &wire,
@@ -327,30 +345,50 @@ fn failed_disk_insert_cannot_emit_w4_recipient_receipt() {
         .db
         .execute_batch("DROP TRIGGER deny_all_inserts")
         .unwrap();
-    assert_eq!(f.accept(&wire).unwrap().status, super::super::InboundStatus::Stored);
+    assert_eq!(
+        f.accept(&wire).unwrap().status,
+        super::super::InboundStatus::Stored
+    );
 }
 
 #[test]
 fn host_route_epoch_is_monotonic_and_approval_evidence_is_not_replayable() {
     let mut f = Fixture::new(true);
     assert_eq!(
-        { let approved = f.approval(SENDER_EPOCH, 11); f.inbox.allow_route(&approved) }.unwrap(),
+        {
+            let approved = f.approval(SENDER_EPOCH, 11);
+            f.inbox.allow_route(&approved)
+        }
+        .unwrap(),
         RouteOutcome::Duplicate
     );
     assert!(matches!(
-        { let approved = f.approval(SENDER_EPOCH, 12); f.inbox.allow_route(&approved) },
+        {
+            let approved = f.approval(SENDER_EPOCH, 12);
+            f.inbox.allow_route(&approved)
+        },
         Err(Error::Conflict)
     ));
     assert_eq!(
-        { let approved = f.revocation(SENDER_EPOCH, 99); f.inbox.revoke_route(&approved) }.unwrap(),
+        {
+            let approved = f.revocation(SENDER_EPOCH, 99);
+            f.inbox.revoke_route(&approved)
+        }
+        .unwrap(),
         RouteOutcome::Revoked
     );
     assert!(matches!(
-        { let approved = f.approval(SENDER_EPOCH, 11); f.inbox.allow_route(&approved) },
+        {
+            let approved = f.approval(SENDER_EPOCH, 11);
+            f.inbox.allow_route(&approved)
+        },
         Err(Error::Unauthorized)
     ));
     assert!(matches!(
-        { let approved = f.approval(SENDER_EPOCH + 1, 12); f.inbox.allow_route(&approved) },
+        {
+            let approved = f.approval(SENDER_EPOCH + 1, 12);
+            f.inbox.allow_route(&approved)
+        },
         Err(Error::Unauthorized)
     ));
     assert_eq!(f.inbox.row_count().unwrap(), 0);

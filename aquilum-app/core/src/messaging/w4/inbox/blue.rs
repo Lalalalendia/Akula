@@ -130,8 +130,7 @@ fn route_is_current(
 }
 
 fn valid_identity_pair(sender: DeviceId, recipient: DeviceId) -> bool {
-    sender.as_uuid().into_bytes() != [0; 16]
-        && recipient.as_uuid().into_bytes() != [0; 16]
+    sender.as_uuid().into_bytes() != [0; 16] && recipient.as_uuid().into_bytes() != [0; 16]
 }
 
 fn map_crypto_failure(error: W3Error) -> Error {
@@ -150,10 +149,7 @@ impl W4Inbox {
     /// A route may be approved ONLY by host code possessing a sealed proof.
     /// The current sender's pinned signing key must already be in the shared
     /// W4 key ledger. Revocation is sticky for the same epoch.
-    pub fn allow_route(
-        &mut self,
-        approved: &ApprovedInboxRoute,
-    ) -> Result<RouteOutcome, Error> {
+    pub fn allow_route(&mut self, approved: &ApprovedInboxRoute) -> Result<RouteOutcome, Error> {
         if !valid_identity_pair(approved.sender, approved.recipient)
             || approved.sender_epoch == 0
             || approved.sender_epoch > i64::MAX as u64
@@ -353,19 +349,13 @@ impl W4Inbox {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if current_key(&tx, header.sender_id, header.epoch)?
-            != Some(verified_sender_key)
-            || !route_is_current(
-                &tx,
-                header.sender_id,
-                header.recipient_id,
-                header.epoch,
-            )?
+        if current_key(&tx, header.sender_id, header.epoch)? != Some(verified_sender_key)
+            || !route_is_current(&tx, header.sender_id, header.recipient_id, header.epoch)?
         {
             return Err(Error::Unauthorized);
         }
-        let expected_recipient = current_key(&tx, header.recipient_id, recipient_epoch)?
-            .ok_or(Error::Unauthorized)?;
+        let expected_recipient =
+            current_key(&tx, header.recipient_id, recipient_epoch)?.ok_or(Error::Unauthorized)?;
         if recipient_signer.public_key().as_ref() != expected_recipient.as_slice() {
             return Err(Error::Unauthorized);
         }
