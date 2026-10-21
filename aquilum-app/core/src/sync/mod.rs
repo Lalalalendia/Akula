@@ -86,6 +86,7 @@ mod s3_owner_review_proposal_lab;
 #[cfg(feature = "signed-vault-manual-owner-review-lab")]
 pub use s3_owner_review_proposal_lab::{
     OwnerReviewProposal, OwnerReviewProposalError, MAX_OWNER_REVIEW_PROPOSAL_BYTES,
+    OwnerReviewPreviewAttempt, OwnerReviewPreviewError, OwnerReviewPreviewResult,
 };
 #[cfg(feature = "signed-vault-manual-owner-review-lab")]
 pub use s3_owner_manual_fingerprint_lab::{
