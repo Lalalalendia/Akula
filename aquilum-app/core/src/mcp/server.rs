@@ -373,7 +373,7 @@ impl Endpoint {
         &self,
         body: &str,
         principal: RequestPrincipal,
-        head: &Head,
+        _head: &Head,
         connection: &mut Connection,
         keep_alive: bool,
     ) -> Result<bool, Failure> {
@@ -401,7 +401,7 @@ impl Endpoint {
                 if !eligible {
                     protocol::handle_without_tools(body)
                 } else {
-                    let bearer = head
+                    let bearer = _head
                         .header("authorization")
                         .and_then(|value| value.trim().split_once(' '))
                         .map(|(_, token)| token.trim())
@@ -417,7 +417,7 @@ impl Endpoint {
                             .and_then(|v| uuid::Uuid::parse_str(v).ok())
                             .ok_or_else(denied)?;
                         let path = args
-                            .get("path")
+                            .get("note")
                             .and_then(Value::as_str)
                             .ok_or_else(denied)?;
                         // A guest UUID only selects an ALREADY trusted test
@@ -1192,7 +1192,7 @@ mod tests {
                 json!({
                     "jsonrpc": "2.0", "id": 11, "method": "tools/call",
                     "params": { "name": "read_note", "arguments": {
-                        "vaultId": vault.as_uuid().to_string(), "path": path
+                        "vaultId": vault.as_uuid().to_string(), "note": path
                     }}
                 }),
             )

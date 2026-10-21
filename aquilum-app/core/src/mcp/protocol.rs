@@ -103,7 +103,11 @@ pub(crate) fn handle_fixture_scoped_read(body: &str, call: ToolCaller<'_>) -> Op
     handle_with_scope(body, call, ToolVisibility::ScopedReadFixture)
 }
 
-fn handle_with_scope(body: &str, call: ToolCaller<'_>, visibility: ToolVisibility) -> Option<String> {
+fn handle_with_scope(
+    body: &str,
+    call: ToolCaller<'_>,
+    visibility: ToolVisibility,
+) -> Option<String> {
     let message = match serde_json::from_str::<Value>(body) {
         Ok(value) => value,
         Err(error) => {
@@ -123,7 +127,11 @@ fn handle_with_scope(body: &str, call: ToolCaller<'_>, visibility: ToolVisibilit
     }
 }
 
-fn handle_single(message: Value, call: ToolCaller<'_>, visibility: ToolVisibility) -> Option<Value> {
+fn handle_single(
+    message: Value,
+    call: ToolCaller<'_>,
+    visibility: ToolVisibility,
+) -> Option<Value> {
     let request = match serde_json::from_value::<RpcRequest>(message) {
         Ok(request) => request,
         Err(error) => return Some(failure(Value::Null, PARSE_ERROR, &error.to_string())),
@@ -190,9 +198,9 @@ fn dispatch(
                         "type": "object",
                         "properties": {
                             "vaultId": {"type": "string"},
-                            "path": {"type": "string"}
+                            "note": {"type": "string"}
                         },
-                        "required": ["vaultId", "path"],
+                        "required": ["vaultId", "note"],
                         "additionalProperties": false
                     }
                 })],
