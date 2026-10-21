@@ -50,6 +50,9 @@ mod recovery_review;
 /// Crypto envelope contract only: no production key custody or archive writer yet.
 pub mod sealed_archive;
 mod recovery_dashboard;
+// S3-E2E-01: separate read-only dashboard for a bound remote VaultId.
+#[cfg(feature = "sync-s3")]
+mod s3_publication_dashboard;
 mod planner;
 mod protection_store;
 #[cfg(feature = "sync-s3")]
@@ -97,6 +100,10 @@ pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimi
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
+#[cfg(feature = "sync-s3")]
+pub use s3_publication_dashboard::{
+    native_s3_bound_publication_overview, S3_PROFILE_BINDINGS_FILENAME,
+};
 pub use recovery_dashboard::{
     native_recovery_overview, native_recovery_case_preview, native_record_recovery_decision,
     NativeRecoveryOverview, NativeRecoveryExample, NativeRecoveryCasePreview,
