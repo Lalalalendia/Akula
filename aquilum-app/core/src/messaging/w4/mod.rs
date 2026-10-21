@@ -307,5 +307,8 @@ impl W4Outbox {
     }
 }
 
+#[cfg(feature = "messaging-w4-inbox-lab")]
+pub mod inbox;
+
 #[cfg(test)]
 mod tests;
