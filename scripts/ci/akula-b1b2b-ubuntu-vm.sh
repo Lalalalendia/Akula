@@ -203,6 +203,14 @@ ssh_lab "cd /home/akulavm/b1b2b &&
   mv akula-b1b2b-node-wrapper.sh wrapper &&
   chmod 0555 b1a-fixture wrapper &&
   sudo bash akula-b1b2b-guest-lab.sh bootstrap"
+# B1c1 runs ONLY in the explicit disposable QEMU bridge workflow.
+# Default B1b2b signed Node lab remains behaviorally unchanged.
+if [[ "${AKULA_B1C1_VM_BRIDGE:-}" == "SIGNED_ELF_TO_ROOT_CAS" ]]; then
+  source scripts/ci/akula-b1c1-vm-hook.sh
+elif [[ -n "${AKULA_B1C1_VM_BRIDGE:-}" ]]; then
+  echo "B1C1_REFUSED: unknown VM extension selector" >&2
+  exit 2
+fi
 ssh_lab "sudo bash /home/akulavm/b1b2b/akula-b1b2b-guest-lab.sh negative"
 # Hard-kill the installer after atomic activation, then reboot the entire
 # guest OS BEFORE recovery. This is an OS reboot, not a VM power cut.
