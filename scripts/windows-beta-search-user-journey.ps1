@@ -145,9 +145,9 @@ try {
     if ($null -eq $copied) { throw 'Opened search result did not copy its editor text' }
     $normalize = {
         param([string]$Value)
-        $Value.Replace([string][char]13 + [char]10, [string][char]10).
-            Replace([string][char]13, [string][char]10).
-            TrimEnd([char]10)
+        $cr = [string][char]13
+        $lf = [string][char]10
+        $Value.Replace(($cr + $lf), $lf).Replace($cr, $lf).TrimEnd([char]10)
     }
     $seen = & $normalize $copied
     $expected = & $normalize $expectedTarget
