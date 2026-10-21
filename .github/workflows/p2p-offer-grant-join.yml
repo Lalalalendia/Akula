@@ -1,0 +1,41 @@
+name: Akula P2P offer versus existing grant shape
+
+on:
+  pull_request:
+    branches:
+      - main
+      - experiment/akula-p2p-offer-contract-20261021
+    paths:
+      - 'aquilum-app/core/src/p2p_offer_grant_join_lab.rs'
+      - 'aquilum-app/core/src/lib.rs'
+      - 'docs/sync/AK-P2P-OFFER-01.md'
+      - '.github/workflows/p2p-offer-grant-join.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2p-offer-join-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  correlation-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-p2p-offer-v1
+      - name: Rustfmt only the two P2P modules
+        working-directory: aquilum-app
+        run: rustfmt --edition 2021 --check core/src/p2p_offer_lab.rs core/src/p2p_offer_grant_join_lab.rs
+      - name: Test non-authorizing correlation
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features p2p-offer-lab p2p_offer_grant_join_lab -- --nocapture
+      - name: Static analysis
+        working-directory: aquilum-app
+        run: cargo clippy --locked -p aquilum-core --all-targets --features p2p-offer-lab -- -D warnings

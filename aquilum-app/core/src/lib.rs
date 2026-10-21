@@ -61,3 +61,7 @@ pub mod node_catalog_lab;
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
+
+// Strictly test-only consistency study against older RN-4C grant shape.
+#[cfg(all(test, feature = "p2p-offer-lab"))]
+mod p2p_offer_grant_join_lab;

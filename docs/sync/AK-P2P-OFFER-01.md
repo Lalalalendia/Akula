@@ -30,3 +30,15 @@ GitHub Actions runs Rustfmt, opt-in core tests and Clippy. All tests use synthet
 Target: cargo test --locked -p aquilum-core --features p2p-offer-lab p2p_offer_lab::tests
 
 Next integration: add **real policy-issued** bounded TransferGrant and a fail-closed adapter between the offer state and the existing Staya verified batch. Do not connect a draft selection directly to the Staya sender.
+
+## AK-P2P-GRANT-JOIN-02 — current RN-4C ledger compatibility
+
+The older [RN-4C / RN-4E1b-03a grant research #433](https://github.com/Lalalalendia/Akula/pull/433) already has an opt-in Core SQLite grant model; **do not implement a second grant issuer**. It holds **one active grant per (VaultId, DeviceId)** and uses `MAX_LAB_GRANT_BYTES = 4 MiB`. An Akula OfferV1 permits 8 files of 8 MiB each. These are incompatible as a direct batch grant.
+
+An additional **test-only** source file `p2p_offer_grant_join_lab.rs` mirrors the public `StoredPull` field shape **without importing #433's unmerged code**. It compares consent selection to one observed grant: exact known sender/receiver, real-peer-id-shaped fixture, local VaultId, one immutable content root + size, policy issuer + epoch, nonce and expiry. A matching fixture returns only `ConsistentOnlyNoAuthorization`; it grants no GET and cannot invoke File Gate.
+
+**Negative tests:** two selected files, over-4-MiB selected object, spoofed sender/receiver/QUIC peer, foreign vault, changed recipient, wrong root/length, mismatched nonce, stale epoch, untrusted issuer, invalid expiry and post-accept offer mutation.
+
+**Limits:** local identities, observed grant, issuer and epoch are all injected *test fixtures*. This does **not** exercise actual SQLite, signature checks, OS Broker, current revocation, sealed issuer, network or file bytes. The source `SelectionDraft` remains ordinary in-process data and is not a capability. Do not promote this consistency check to authorization or a production API.
+
+**Required next step:** marry the actual Core/Broker-controlled `StoredPull` to a QUIC authenticated remote identity, minted durable recipient consent, and short grant fencing. Align multi-file roots with a genuinely revised grant model (atomic root-set or per-root serial grants with durable nonce/replay handling), while preserving the one active grant invariant until migrated and reviewed. No longer-lived grant than the offer, no network reads before explicit consent.
