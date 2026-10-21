@@ -175,8 +175,13 @@ impl W4TrustLedger {
             return Ok(LedgerOutcome::Duplicate);
         }
         tx.execute(
-            "UPDATE messaging_w4_trusted_devices SET revoked=1 WHERE device=?1 AND epoch=?2",
-            params![device.as_slice(),approved.epoch as i64],
+            "UPDATE messaging_w4_trusted_devices
+             SET revoked=1,evidence=?3 WHERE device=?1 AND epoch=?2",
+            params![
+                device.as_slice(),
+                approved.epoch as i64,
+                approved.evidence_digest.as_slice()
+            ],
         )?;
         tx.commit()?;
         Ok(LedgerOutcome::Revoked)
