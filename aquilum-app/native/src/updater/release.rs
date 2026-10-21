@@ -130,6 +130,16 @@ pub(super) fn find() -> Result<Option<Release>, String> {
     }))
 }
 
+/// The native installer receives only candidates authenticated under the
+/// exact signed manifest. This does NOT authorize a Windows apply/rollback.
+pub(super) fn admit_signed_payload(
+    manifest: &[u8],
+    signature: &str,
+    payload: Vec<u8>,
+) -> Result<signed_candidate::SignedCandidate, String> {
+    signed_candidate::admit(manifest, signature, payload)
+}
+
 fn decoded(text: &str) -> Result<String, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(text.trim()).map_err(|e| e.to_string())?;
