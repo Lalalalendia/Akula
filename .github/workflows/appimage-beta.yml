@@ -9,6 +9,7 @@ on:
       - '.github/workflows/appimage-beta.yml'
       - '.github/scripts/appimage-beta-identity.test.cjs'
       - 'scripts/appimage-beta-smoke.sh'
+      - 'scripts/appimage-kernel-ack-supervisor.rs'
       - 'aquilum-app/native/packaging/akula-linux.json'
       - 'aquilum-app/native/packaging/Akula.desktop'
       - 'aquilum-app/native/src/**'
@@ -72,6 +73,16 @@ jobs:
           grep -Fq 'test tests::unrelated_session_cannot_claim_same_generation_even_with_leaked_fd ... ok' "$RUNNER_TEMP/akula-linux-ack-receiver.log"
           grep -Fq 'test result: ok. 6 passed; 0 failed;' "$RUNNER_TEMP/akula-linux-ack-receiver.log"
           echo 'AKULA_LINUX_ACK_RECEIVER_PASS kernel_passcred=1 pidfd=1 tree=1 one_shot=1 wrong_sender_hold=1'
+
+      - name: Compile native kernel-attributed real AppImage GUI supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          rustc --edition=2024 -D warnings \
+            scripts/appimage-kernel-ack-supervisor.rs \
+            -o dist/akula-kernel-gui-supervisor
+          test -x dist/akula-kernel-gui-supervisor
 
       - uses: swatinem/rust-cache@v2
         with:
