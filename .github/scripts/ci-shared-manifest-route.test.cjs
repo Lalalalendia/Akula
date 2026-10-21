@@ -46,3 +46,15 @@ test('root manifest and direct lock edits always retain previously owned gates',
   assert.equal(flags({paths:[ROOT]}).shared_root_cargo_risky,true);
   assert.equal(flags({paths:[LOCK]}).shared_lock_risky,true);
 });
+
+test('installed-owner OS security is required only for its owned files or a risky Core manifest',()=>{
+  const owned=["aquilum-app/core/src/sync/host_install_unix_root.rs","aquilum-app/core/src/sync/host_install_witness.rs","aquilum-app/core/src/sync/mod.rs","aquilum-app/native/Cargo.toml",".github/workflows/sync-installed-os-owner-witness.yml","docs/sync/adr-0038-unix-root-owned-install-receipt.md"];
+  for(const file of owned){
+    const result=assess({paths:[file]});
+    assert.equal(result.installed_owner_owned,true,file);
+    assert.equal(result.shared_any_risky,false,file);
+  }
+  assert.equal(assess({paths:['README.md','aquilum-app/core/src/notion_api_probe.rs']}).installed_owner_owned,false);
+  assert.equal(flags({}).installed_owner_owned,false,'optional Core crate does not start OS owner test');
+  assert.equal(assess({paths:[CORE],coreDiff:'+ring = "0.18"\n'}).shared_core_cargo_risky,true,'risky Core still routes OS owner');
+});
