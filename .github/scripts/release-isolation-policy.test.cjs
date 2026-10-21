@@ -78,7 +78,16 @@ test('publisher key proof cannot publish, run on PR code or bypass protected env
 test('signed Windows beta may publish only after manually approved independent verification', () => {
   const yaml = file('.github/workflows/akula-windows-signed-candidate.yml');
   assert.match(yaml, /^name: Akula Windows signed candidate \(review only\)$/m);
-  assert.match(yaml, /^on:\n  workflow_dispatch:\n    inputs:\n      publish_beta:/m);
+  assert.ok(
+    yaml.includes("run-name: Akula Windows v${{ inputs.release_version }} - ${{ inputs.publish_beta && 'PUBLISH' || 'VERIFY' }}"),
+    'Actions runs must show the version and publication intent',
+  );
+  assert.match(yaml, /^on:\n  workflow_dispatch:\n    inputs:\n      release_version:/m);
+  assert.match(yaml, /release_version:\n        description:[^\n]+\n        type: string\n        required: true/);
+  assert.match(yaml, /AKULA_REQUESTED_VERSION: \$\{\{ inputs\.release_version \}\}/);
+  assert.ok(yaml.includes('Workflow display version $requested does not match the native Akula Cargo version'),
+    'mismatched run-name versions must fail before building');
+  assert.match(yaml, /m\.version!==process\.env\.AKULA_REQUESTED_VERSION/);
   assert.match(yaml, /publish_beta:\n        description:[^\n]+\n        type: boolean\n        required: true\n        default: false/);
   assert.match(yaml, /^permissions:\n  contents: read$/m);
   assert.match(yaml, /if: github.ref == 'refs\/heads\/main'/);
