@@ -18,6 +18,7 @@ pub enum BridgeError {
     Offer(OfferError),
     Declined,
     ForgedOrReorderedSelection,
+    InvalidInvitation,
     Staya(QueueError),
 }
 
@@ -76,6 +77,63 @@ pub fn prepare_staya_batch(
         offer_indexes,
         offer_commitment: selected.commitment,
     })
+}
+
+/// Verify the ACTUAL serialized Staya invitation against the approved queue
+/// before the receiver is allowed to consume it. The expected sender key
+/// MUST be independently obtained from trusted enrollment or out-of-band
+/// operator verification; reading it from the same invitation is NOT trust.
+pub fn verify_staya_invitation(
+    prepared: &PreparedBatch,
+    invitation: &str,
+    expected_sender_endpoint: [u8; 32],
+) -> Result<(), BridgeError> {
+    if invitation.is_empty() || invitation.len() > 8192 {
+        return Err(BridgeError::InvalidInvitation);
+    }
+    let fields: Vec<&str> = invitation.split_whitespace().collect();
+    let selected = prepared.queue.entries();
+    if fields.first() != Some(&"CONNECT_BATCH")
+        || fields.len() != 4 + selected.len() * 3
+        || fields[3].parse::<usize>().ok() != Some(selected.len())
+        || fields[2] != hex(&prepared.queue.commitment())
+    {
+        return Err(BridgeError::InvalidInvitation);
+    }
+    let ticket = decode_hex(fields[1]).ok_or(BridgeError::InvalidInvitation)?;
+    let addr: iroh::EndpointAddr =
+        postcard::from_bytes(&ticket).map_err(|_| BridgeError::InvalidInvitation)?;
+    if addr.is_empty() || addr.id.as_bytes() != &expected_sender_endpoint {
+        return Err(BridgeError::InvalidInvitation);
+    }
+    for (slot, entry) in selected.iter().enumerate() {
+        let offset = 4 + slot * 3;
+        if fields[offset] != entry.label
+            || fields[offset + 1] != hex(&entry.manifest.id.0)
+            || fields[offset + 2].parse::<u64>().ok() != Some(entry.manifest.size)
+        {
+            return Err(BridgeError::InvalidInvitation);
+        }
+    }
+    Ok(())
+}
+
+fn hex(data: &[u8]) -> String {
+    data.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    if value.is_empty() || value.len() > 8192 || !value.len().is_multiple_of(2) {
+        return None;
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let token = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(token, 16).ok()
+        })
+        .collect()
 }
 
 #[cfg(test)]
