@@ -1,11 +1,17 @@
 # RELEASE-AKULA-WINDOWS-SIGNED-CANDIDATE-01
 # Manual, protected and main-only. Builds a REAL installer, signs the bytes
-# and metadata under the owner's key, verifies both independently. Never
-# creates a GitHub Release or enables the application updater.
+# and metadata under the owner's key, verifies both independently. Publishing
+# requires a separate explicit owner opt-in and protected environment review.
 name: Akula Windows signed candidate (review only)
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_beta:
+        description: Publish independently verified signed Akula Windows candidate to GitHub Releases
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -206,3 +212,87 @@ jobs:
         if: always()
         shell: bash
         run: rm -f "$RUNNER_TEMP/akula-trusted.pub" "$RUNNER_TEMP/"*.minisig "$RUNNER_TEMP/approved-filename"
+
+  publish-windows-beta:
+    # Only an explicit owner-approved manual dispatch on protected main may
+    # publish the SAME four signed bytes accepted by independent-verification.
+    if: ${{ github.ref == 'refs/heads/main' && inputs.publish_beta == true }}
+    needs: independent-verification
+    runs-on: ubuntu-24.04
+    environment: akula-release
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: akula-windows-signed-stage-NOT-RELEASE
+          path: dist
+      - name: Verify exact signed package again and reject existing release/tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+          node - <<'NODE'
+          const fs=require('node:fs'), path=require('node:path'), crypto=require('node:crypto');
+          const source=fs.readFileSync('aquilum-app/native/src/updater/release.rs','utf8');
+          const match=source.match(/pub\(super\) const PUBLIC_KEY: &str = "([^"]+)";/);
+          if(!match) throw Error('Akula trusted publisher key absent');
+          const pub=Buffer.from(match[1],'base64');
+          if(!pub.toString('utf8').startsWith('untrusted comment: minisign public key: D7A66B6D4046F6C5\n'))
+            throw Error('Wrong Akula signed publisher root');
+          fs.writeFileSync(process.env.RUNNER_TEMP+'/akula-release.pub',pub,{mode:0o600});
+          const m=JSON.parse(fs.readFileSync('dist/latest.json','utf8'));
+          if(m.schema!==1 || m.product!=='Akula' || m.source_commit!==process.env.GITHUB_SHA)
+            throw Error('Unexpected signed product/source');
+          if(!/^\d+\.\d+\.\d+$/.test(m.version)) throw Error('Invalid Akula version');
+          if(Object.keys(m.artifacts).join(',')!=='windows-x86_64')
+            throw Error('A Windows-only release may not claim unbuilt platforms');
+          const a=m.artifacts['windows-x86_64'],filename='Akula_'+m.version+'_x64-setup.exe';
+          if(a.filename!==filename) throw Error('Wrong signed Windows filename');
+          const exe=fs.readFileSync(path.join('dist',filename));
+          if(exe.length!==a.size || crypto.createHash('sha256').update(exe).digest('hex')!==a.sha256)
+            throw Error('Publisher-signed package digest does not match candidate');
+          const cargo=fs.readFileSync('aquilum-app/native/Cargo.toml','utf8');
+          if(!cargo.includes('version = "'+m.version+'"')) throw Error('Signed version not in approved source');
+          const lock=crypto.createHash('sha256').update(fs.readFileSync('aquilum-app/Cargo.lock')).digest('hex');
+          if(m.cargo_lock_sha256!==lock) throw Error('Signed source lock mismatch');
+          fs.writeFileSync(process.env.RUNNER_TEMP+'/akula-version',m.version+'\n');
+          NODE
+          version="$(cat "$RUNNER_TEMP/akula-version")"
+          package="Akula_${version}_x64-setup.exe"
+          for artifact in "dist/$package" 'dist/latest.json'; do
+            base64 -d "$artifact.sig" > "$RUNNER_TEMP/$(basename "$artifact").minisig"
+            minisign -Vm "$artifact" -x "$RUNNER_TEMP/$(basename "$artifact").minisig" -p "$RUNNER_TEMP/akula-release.pub" -Q
+          done
+          tag="v${version}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists; publication never overwrites" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Signed release tag $tag already exists" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_ENV"
+          echo "file=$package" >> "$GITHUB_ENV"
+      - name: Publish manually approved signed Windows beta as latest Akula release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "v${version}" \
+            "dist/${file}" "dist/${file}.sig" dist/latest.json dist/latest.json.sig \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Akula v${version} (Windows beta)" --latest \
+            --notes "Signed Windows NSIS beta. Contains no automatic rollback: reinstall the previous signed version if NSIS fails. This Akula release is independent of Aquilum."
+          echo "AKULA_SIGNED_WINDOWS_BETA_PUBLISHED version=${version} source=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
