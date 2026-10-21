@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - experiment/akula-p2p-offer-contract-20261021
+      - feature/akula-staya-consent-provider-boundary-20261022
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
