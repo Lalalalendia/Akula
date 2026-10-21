@@ -178,3 +178,25 @@ test('CI candidate manifest records actual checkout and hashes after the GUI tes
   assert.doesNotMatch(provenance, /gh release create|Invoke-WebRequest|Start-Process/,
     'manifest must neither distribute a release nor run other executables');
 });
+
+test('Windows beta NSIS apply only accepts signed typed candidate and remains gated', () => {
+  const apply = read('aquilum-app/native/src/updater/apply.rs');
+  const release = read('aquilum-app/native/src/updater/release.rs');
+  const updater = read('aquilum-app/native/src/updater/mod.rs');
+  const windowsApply = apply.split('#[cfg(target_os = "windows")]')[1]
+    ?.split('#[cfg(target_os = "macos")]')[0];
+  assert.ok(windowsApply, 'Windows apply implementation must exist');
+  assert.match(windowsApply, /candidate: &super::release::SignedCandidate/);
+  assert.match(windowsApply, /if !super::release::channel_ready\(\)/);
+  assert.match(windowsApply, /stage_signed_windows_setup\(candidate.bytes\(\), candidate.sha256\(\)\)/);
+  assert.match(windowsApply, /ShellExecuteW/);
+  assert.match(apply, /file\.sync_all\(\)/);
+  assert.match(apply, /if actual != expected_sha256/);
+  assert.doesNotMatch(windowsApply, /pub(?:\(crate\))? fn apply\(payload: &\[u8\]/,
+    'unsigned arbitrary bytes cannot be a Windows installer argument');
+  assert.match(updater, /payload: Arc<Mutex<Option<release::SignedCandidate>>>/);
+  assert.doesNotMatch(updater, /Some\(candidate.into_bytes\(\)\);\s*Ok\(\(\)\)/,
+    'unsealing an authenticated Windows candidate before apply is prohibited');
+  assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
+  assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
+});

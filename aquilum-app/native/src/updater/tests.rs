@@ -11,13 +11,21 @@ fn versions_compare_numerically() {
 }
 
 #[test]
-fn no_upstream_update_channel_is_available() {
+fn independent_akula_signed_update_channel_is_windows_installed_only() {
     assert_eq!(ENDPOINT, "https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json");
-    assert!(PUBLIC_KEY.is_empty(), "an Akula signing key must be provisioned separately");
-    assert!(!channel_ready());
-    assert!(!available(), "installed builds must not offer an upstream Aquilum update");
+    assert!(!PUBLIC_KEY.is_empty(), "owner-pinned Akula public key must be compiled in");
+    assert_eq!(
+        channel_ready(),
+        cfg!(all(target_os = "windows", feature = "installed")),
+    );
+    assert_eq!(
+        available(),
+        cfg!(all(target_os = "windows", feature = "installed")),
+        "only own signed Windows beta has a live update channel",
+    );
 }
 
+#[cfg(not(all(target_os = "windows", feature = "installed")))]
 #[test]
 fn disabled_update_channel_never_starts_network_work() {
     let updater = Updater::new(Arc::new(|| {}));
@@ -37,4 +45,18 @@ fn installed_linux_apply_refuses_unauthorized_bytes_without_shutdown() {
     let error = result.unwrap_err();
     assert!(error.contains("HOLD"), "Linux apply must refuse absent publisher and GUI ACK");
     assert!(!shutdown_called, "Linux apply cannot stop Akula before trusted admission");
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn installed_windows_apply_cannot_accept_unsigned_bytes() {
+    // Production Windows apply now requires a private-field SignedCandidate.
+    // An unverified byte slice is not an executable interface or authority.
+    let result = super::release::admit_signed_payload(
+        b"{\"version\":\"999.999.999\"}",
+        "not a signed manifest",
+        b"MZ synthetic unsigned NSIS bytes".to_vec(),
+    );
+    assert!(result.is_err(), "unsigned bytes must never produce an installer");
+    assert_eq!(channel_ready(), cfg!(feature = "installed"));
 }
