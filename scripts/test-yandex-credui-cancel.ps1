@@ -57,13 +57,18 @@ $argv = @('test', '--locked', '-p', 'aquilum-native',
     '--', '--exact', '--ignored', '--test-threads=1')
 # Cargo returns SUCCESS even when --exact executes zero tests. Verify
 # the complete Rust test name before launching the interactive process.
-$list = & $cargo test --locked -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview -- --list --ignored
+# This script is launched from the repository root by the workflow,
+# not from the nested aquilum-app Cargo workspace. Resolve the manifest
+# explicitly: discovery failure must never be converted into an empty PASS.
+$manifestPath = Join-Path $cargoWorkdir 'Cargo.toml'
+$list = & $cargo test --locked --manifest-path $manifestPath -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview -- --list --ignored
 if ($LASTEXITCODE -ne 0) {
     throw 'CredUI test discovery failed'
 }
 if (-not (@($list) | Where-Object { $_ -eq "$($testFilter): test" })) {
     throw 'CredUI ignored test is missing: refusing false-green zero-test CI'
 }
+Write-Host 'AKULA_CREDUI_IGNORED_TEST_DISCOVERY_PASS: exact_test_present=True'
 $proc = $null
 try {
     $proc = Start-Process -FilePath $cargo -ArgumentList $argv -WorkingDirectory $cargoWorkdir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
