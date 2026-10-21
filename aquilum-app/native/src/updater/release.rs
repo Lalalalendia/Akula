@@ -22,11 +22,17 @@ fn parse_manifest(reader: impl Read) -> Result<serde_json::Value, String> {
     }
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
-// No Akula signing key is provisioned. Never reuse the Aquilum signing key.
-pub(super) const PUBLIC_KEY: &str = "";
+// Akula-owned Minisign public key, supplied by the repository owner.
+// This is the BASE64 of the complete two-line Minisign .pub file, exactly as
+// release::verify() expects. The private key and password stay outside Git.
+// Key ID (human-readable Minisign comment): D7A66B6D4046F6C5.
+// Public-key pinning does NOT grant release publication or updater authority.
+pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3QTY2QjZENDA0NkY2QzUKUldURjlrWkFiV3VtMXh2SFFsdEljaUw0T0pUakVmd1krZG4wVmJ1REVmaEx1eWcrMFIzTjQzMi8K";
 
-/// Intentionally fail closed until a separately signed Akula release stream
-/// exists, with a tested upgrade/migration path and a pinned Akula public key.
+/// Intentionally fail closed until a *real* signed Akula release stream
+/// exists, its Windows updater has strict signed-candidate admission and
+/// installed NSIS rollback/startup acceptance has passed. Pinning a public
+/// key by itself must never switch on network downloads or installation.
 pub(super) const fn channel_ready() -> bool {
     false
 }
@@ -95,6 +101,20 @@ pub(super) fn verify(data: &[u8], signature: &str, key: &str) -> Result<(), Stri
 #[cfg(test)]
 mod input_tests {
     use super::*;
+
+    #[test]
+    fn owner_pinned_akula_minisign_public_key_decodes_but_cannot_enable_updates() {
+        let formatted = decoded(PUBLIC_KEY).expect("owner-provided base64 is malformed");
+        assert_eq!(
+            formatted.lines().next(),
+            Some("untrusted comment: minisign public key: D7A66B6D4046F6C5"),
+            "the installed Akula publisher key ID unexpectedly changed",
+        );
+        assert_eq!(formatted.lines().count(), 2, "expected exactly one Minisign key record");
+        minisign_verify::PublicKey::decode(&formatted)
+            .expect("owner-provided key must be a valid Minisign public key");
+        assert!(!channel_ready(), "public key alone must not authorize publication");
+    }
 
     #[test]
     fn small_well_formed_manifest_is_accepted() {

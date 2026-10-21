@@ -9,6 +9,8 @@ on:
       - 'aquilum-app/native/src/updater/apply.rs'
       - 'aquilum-app/native/src/updater/mod.rs'
       - 'aquilum-app/native/src/updater/tests.rs'
+      - 'aquilum-app/native/src/updater/release.rs'
+      - '.github/scripts/release-isolation-policy.test.cjs'
       - '.github/workflows/linux-appimage-rollback-lab.yml'
       - 'docs/release/AKULA-LINUX-ROLLBACK-LAB-01.md'
       - 'docs/release/AKULA-LINUX-RUNTIME-GATE-01.md'
@@ -54,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test .github/scripts/release-isolation-policy.test.cjs
-          grep -Fq 'pub(super) const PUBLIC_KEY: &str = "";' aquilum-app/native/src/updater/release.rs
+          # The release-isolation policy pins the exact owner key bytes;
+          # a populated PUBLIC_KEY alone must not enable updater apply.
           grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'false'
-          echo 'AKULA_RELEASE_HOLD_PASS signing=disabled updater=disabled'
+          echo 'AKULA_RELEASE_HOLD_PASS publisher_root=pinned updater=disabled'
