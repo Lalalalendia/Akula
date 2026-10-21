@@ -96,16 +96,17 @@ jobs:
           $signature = (Get-Content -LiteralPath $sigFile -Raw).Trim()
           $hash = (Get-FileHash -LiteralPath $package[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           $lock = (Get-FileHash -LiteralPath 'aquilum-app/Cargo.lock' -Algorithm SHA256).Hash.ToLowerInvariant()
-          $url = "https://github.com/Lalalalendia/Akula/releases/download/v$version/$($package[0].Name)"
+          # SignedCandidate v1 binds a product and artifact table.
+          # A Windows-only candidate MUST NOT claim unbuilt Linux packages.
           $manifest = [ordered]@{
+            schema = 1
             product = 'Akula'
             version = $version
             source_commit = $env:GITHUB_SHA
             cargo_lock_sha256 = $lock
-            platforms = [ordered]@{
+            artifacts = [ordered]@{
               'windows-x86_64' = [ordered]@{
-                url = $url
-                signature = $signature
+                filename = $package[0].Name
                 sha256 = $hash
                 size = $package[0].Length
               }
@@ -165,20 +166,28 @@ jobs:
           node - <<'NODE'
           const fs=require('node:fs'), path=require('node:path'),crypto=require('node:crypto');
           const m=JSON.parse(fs.readFileSync('dist/latest.json','utf8'));
+          if(Object.keys(m).sort().join(',')!=='artifacts,cargo_lock_sha256,product,schema,source_commit,version')
+            throw Error('Unexpected contract fields in signed release metadata');
           if(m.product!=='Akula'||!/^\d+\.\d+\.\d+$/.test(m.version)
             ||m.source_commit!==process.env.GITHUB_SHA||!(/^[a-f0-9]{64}$/.test(m.cargo_lock_sha256)))
             throw Error('Wrong signed release provenance');
           const source=crypto.createHash('sha256').update(fs.readFileSync('aquilum-app/Cargo.lock')).digest('hex');
           if(m.cargo_lock_sha256!==source)throw Error('Signed release has wrong Cargo.lock digest');
-          const asset=m.platforms['windows-x86_64'];
+          if(m.schema!==1 || !m.artifacts || Object.keys(m.artifacts).length!==1 ||
+             !Object.hasOwn(m.artifacts,'windows-x86_64'))
+            throw Error('Signed review-only manifest must contain only its built Windows asset');
+          const asset=m.artifacts['windows-x86_64'];
           const filename='Akula_'+m.version+'_x64-setup.exe';
-          if(asset.url!==('https://github.com/Lalalalendia/Akula/releases/download/v'+m.version+'/'+filename))
-            throw Error('Wrong platform/host/version/filename in release');
+          if(asset.filename!==filename || Object.keys(asset).sort().join(',')!=='filename,sha256,size')
+            throw Error('Wrong platform, filename or fields in signed manifest');
+          const sourceRelease=fs.readFileSync('aquilum-app/native/src/updater/release.rs','utf8');
+          if(!sourceRelease.includes('https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json'))
+            throw Error('Akula installer lookup must never use an external publisher');
           const bytes=fs.readFileSync(path.join('dist',filename));
           if(asset.size!==bytes.length||asset.sha256!==crypto.createHash('sha256').update(bytes).digest('hex'))
             throw Error('Signed manifest bytes do not match actual NSIS artifact');
-          const packageSignature=fs.readFileSync('dist/'+filename+'.sig','utf8').trim();
-          if(asset.signature!==packageSignature)throw Error('Signed metadata signature mismatch');
+          if(!fs.readFileSync('dist/'+filename+'.sig','utf8').trim())
+            throw Error('Detached installer signature missing');
           fs.writeFileSync(process.env.RUNNER_TEMP+'/approved-filename',filename+'\n');
           NODE
           setup="$(cat "$RUNNER_TEMP/approved-filename")"
