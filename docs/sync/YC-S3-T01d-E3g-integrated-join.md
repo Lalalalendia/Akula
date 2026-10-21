@@ -33,3 +33,20 @@ The Linux+Windows exact-head CI first lists and requires E3e one-shot, E3d disti
 Source RFC: [YC-S3-T01d](https://app.notion.com/p/3ff32a84beec813ebfdff9b96bf103d1).
 
 **Acceptance:** exact-head Linux+Windows CI must execute a nonzero number of E3g cases with all assertions passing. Keep Draft until then.
+
+
+## E3g network-to-trust handoff (21 October)
+
+The previous E3g test uses `S3PinnedV2ReadPreview::for_trust_anchor_test`, a synthetic receipt. This is adequate for SQLite and cryptographic transitions but cannot authorize a production enrollment. The latest E3g branch adds a **separate internal, read-only entrypoint**:
+
+`ReceiverJoinSession::enroll_from_yandex_read_once(client, journal, scope, root, policy, signed_offer, independently_approved)`
+
+1. The receiving device *spends* its existing CSPRNG challenge **before** any cloud request and validates the original device/profile/scope and independently received challenge.
+2. The E3b implementation verifies the owner's DSSE invitation against the externally supplied trusted keys and exact approved root/policy BLAKE3 fingerprints **before** contacting a provider.
+3. A precisely Yandex-bound `AwsS3ProbeClient` reads the expected root and its observed ETag. The existing bounded V2 inspector then verifies canonical root bytes, manifest, index, packs, DAG ancestry and a final root re-read using actual HTTP/SigV4 GET.
+4. Only an internal `pub(crate)` handoff receives the exact `S3PinnedV2ReadPreview` and ETag, and passes them straight to E3c's atomic root+policy SQLite enrollment. The diagnostic public `preview_yandex_join_genesis_read_only` still returns **only the summary**, not reusable authorization evidence.
+5. A failed signature, wrong scope, timeout, corrupt object, account-binding discrepancy or SQLite failure consumes the ephemeral challenge. A new receiver challenge is required to retry.
+
+An explicit adversarial async test uses a real `AwsS3ProbeClient` SDK constructor but **no S3 call**, requiring forged owner evidence to be rejected locally and a retry to yield `AlreadyConsumed`. Its presence and execution are mandatory in Linux+Windows E3g CI.
+
+**This code path has NOT been exercised against a real user Yandex account or a complete real V2 object graph.** A successful negative test and MinIO reader test from E3f are separate evidence, not a combined live Yandex PASS. There is still no user-visible authenticated approval/QR screen, independent Yandex principal attestation or external monotonic rollback witness. Release remains blocked, no File Gate, no S3 PUT/CAS/DELETE and no automatic Sync.
