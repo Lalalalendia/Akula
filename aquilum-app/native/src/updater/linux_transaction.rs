@@ -21,6 +21,7 @@ const MAX_PAYLOAD: usize = 512 * 1024 * 1024;
 
 const LOCK_EX: i32 = 2;
 const LOCK_NB: i32 = 4;
+const LOCK_UN: i32 = 8;
 unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
 }
@@ -74,6 +75,14 @@ pub(crate) struct Gate {
     _lock: File,
     parent: PathBuf,
     active: PathBuf,
+}
+
+// Release the same advisory OS lock explicitly before closing the descriptor.
+// SIGKILL remains covered by kernel fd teardown; no lockfile is unlinked.
+impl Drop for Gate {
+    fn drop(&mut self) {
+        let _ = unsafe { flock(self._lock.as_raw_fd(), LOCK_UN) };
+    }
 }
 
 impl Gate {
@@ -345,7 +354,13 @@ mod tests {
         assert_eq!(gate.recover().unwrap(), Recovery::Clean);
         assert!(Gate::acquire(&f.app).is_err(), "second independently opened fd must not bypass flock");
         drop(gate);
-        assert!(Gate::acquire(&f.app).is_ok());
+        let reacquired = Gate::acquire(&f.app);
+        assert!(
+            reacquired.is_ok(),
+            "independent Linux fd must reacquire after explicit flock unlock: {:?}",
+            reacquired.as_ref().err()
+        );
+        drop(reacquired);
         f.assert_untouched();
     }
 
