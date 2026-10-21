@@ -26,6 +26,8 @@ pub struct Context {
     pub home_page: String,
     pub mcp: Option<McpStatus>,
     pub sync_recovery: Option<NativeRecoveryOverview>,
+    #[cfg(feature = "s3-e2e01-review-preview")]
+    pub s3_bound_publications: Option<NativeRecoveryOverview>,
     pub sync_selected: Option<NativeRecoveryCasePreview>,
     pub sync_notice: Option<String>,
     pub copied: Option<usize>,
