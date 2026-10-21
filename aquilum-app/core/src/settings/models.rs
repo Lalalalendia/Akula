@@ -491,7 +491,8 @@ mod server_setup_tests {
             host_key_fingerprint: fingerprint,
         };
         assert!(draft.valid_offline_pin());
-        draft.host_key_fingerprint.replace_range(9..10,"A");
+        let replacement = if &draft.host_key_fingerprint[9..10] == "A" { "B" } else { "A" };
+        draft.host_key_fingerprint.replace_range(9..10, replacement);
         assert!(!draft.valid_offline_pin(), "independently supplied digest mismatch");
         assert!(!ServerBootstrapDraft::valid_public_key(
             "-----BEGIN OPENSSH PRIVATE KEY-----"));

@@ -132,7 +132,7 @@ fn open_root(dest: Destination) -> Result<File, DurableError> {
     let mut data = vec![0u8; expected_marker.len()];
     marker.read_exact(&mut data)?;
     let after = marker.metadata()?;
-    if data != expected_marker
+    if data.as_slice() != expected_marker
         || before.dev() != after.dev() || before.ino() != after.ino()
         || before.ctime() != after.ctime()
         || before.ctime_nsec() != after.ctime_nsec()
