@@ -133,6 +133,21 @@ impl App {
         }
 
         let (mut effect, menu) = self.on_binding(root, &mut dialog.bindings, id, action);
+        // An already displayed owner code must never be attributed to a
+        // different local bucket or AWS profile after the user edits setup.
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        if dialog.section == super::Section::Sync
+            && let Some(review) = dialog.owner_review.as_ref()
+        {
+            let selected = self.workspace.core.settings.get_config().s3_onboarding;
+            if !review.still_matches_local_draft(
+                &selected.bucket, &selected.aws_profile_name,
+            ) {
+                dialog.owner_review = None;
+                dialog.owner_review_notice = Some("settings.yandex.reviewDraftChanged");
+                effect = Effect::Content;
+            }
+        }
         if action.downcast_ref::<Pressed>().is_some()
             && let Some(Binding::Button(button)) = dialog.bindings.get(&id)
         {
