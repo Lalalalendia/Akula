@@ -33,6 +33,7 @@ pub enum Error {
     Conflict,
     Expired,
     Missing,
+    MailboxFull,
 }
 impl From<rusqlite::Error> for Error {
     fn from(value: rusqlite::Error) -> Self {
