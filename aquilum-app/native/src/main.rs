@@ -28,6 +28,8 @@ mod links;
 mod history;
 mod host;
 mod metrics;
+#[cfg(feature = "p2p-device-identity")]
+mod p2p_device_identity_cli;
 #[cfg(feature = "memory-probe")]
 mod memory_probe;
 
@@ -80,6 +82,10 @@ mod workspace;
 pub use args::Args;
 
 fn main() {
+    #[cfg(feature = "p2p-device-identity")]
+    if let Some(code) = p2p_device_identity_cli::dispatch() {
+        std::process::exit(code);
+    }
     #[cfg(target_os = "windows")]
     unsafe {
         #[link(name = "winmm")]

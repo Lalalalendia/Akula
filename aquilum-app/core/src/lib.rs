@@ -63,3 +63,7 @@ pub mod node_catalog_lab;
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
+
+// OS-backed transport identity; no peer enrollment or File Gate grant.
+#[cfg(feature = "p2p-device-identity")]
+pub mod p2p_device_identity;

@@ -54,6 +54,8 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
+# Explicit, opt-in device identity via OS credentials; no network grants.
+p2p-device-identity = ["dep:windows"]
 # Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
 sync-text-delta = ["dep:zstd"]
 # Separately selected packaged build: force every default Core::open through
@@ -141,3 +143,7 @@ tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=0.38.44", features = ["fs", "process"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Reuse windows 0.62 already locked for the native app; no new crate.
+windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_System_Threading"] }

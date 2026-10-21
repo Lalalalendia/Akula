@@ -28,6 +28,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 [features]
 installed = []
 memory-probe = []
+# Explicit Windows OS-backed device identity; does not start a transport.
+p2p-device-identity = ["aquilum-core/p2p-device-identity"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.
