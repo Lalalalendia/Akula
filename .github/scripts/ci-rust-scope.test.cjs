@@ -192,3 +192,24 @@ test('File Gate timing-only workflow runs on own sources, not every Core manifes
   assert.match(w,/workflow_dispatch:/,'manual profiling stays available');
   assert.match(w,/Six fresh Core processes per note size/);
 });
+
+test('main-only registry source archive retains immutable PR cache safety',()=>{
+  const code=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  const seed=code.split('  seed-rust-cache:\n')[1];
+  assert.ok(seed,'existing seed job remains');
+  assert.match(seed,/if: github.event_name == 'push'/);
+  assert.match(seed,/id: registry-cache-probe/);
+  assert.match(seed,/uses: actions\/cache\/restore@v4/);
+  assert.match(seed,/lookup-only: true/);
+  assert.match(seed,/cargo fetch --locked --manifest-path aquilum-app\/Cargo.toml/);
+  assert.match(seed,/uses: actions\/cache\/save@v4/);
+  assert.match(seed,/key: akula-registry-source-v1-/);
+  assert.match(seed,/hashFiles\('aquilum-app\/Cargo.lock'\)/);
+  assert.match(seed,/registry-cache-probe.outputs.cache-hit != 'true'/);
+  assert.ok(!/cache\/save@v4/.test(code.split('  seed-rust-cache:\n')[0]),
+    'no PR-context writable cache action');
+  assert.match(seed,/~\/\.cargo\/registry\/cache/);
+  assert.match(seed,/~\/\.cargo\/registry\/index/);
+  assert.match(seed,/~\/\.cargo\/git/);
+  assert.equal((code.match(/\n  seed-rust-cache:\n/g)||[]).length,1,'do not add new seed jobs');
+});

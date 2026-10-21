@@ -513,3 +513,38 @@ jobs:
         run: |
           echo "Shared Rust cache exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
           echo "Only the main branch can save the shared cache; PRs restore but never upload." >> "$GITHUB_STEP_SUMMARY"
+
+      # Source archives only: no compiled target. Written exclusively in the
+      # existing main/push seed job. PRs only restore for measurement.
+      - name: Probe trusted registry-only cache
+        id: registry-cache-probe
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git
+          key: akula-registry-source-v1-${{ runner.os }}-${{ hashFiles('aquilum-app/Cargo.lock') }}
+          lookup-only: true
+      - name: Fetch locked source dependencies when registry cache is absent
+        if: steps.registry-cache-probe.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked --manifest-path aquilum-app/Cargo.toml
+      - name: Save trusted registry-only cache for measurements
+        if: steps.registry-cache-probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git
+          key: akula-registry-source-v1-${{ runner.os }}-${{ hashFiles('aquilum-app/Cargo.lock') }}
+      - name: Registry-only cache observation
+        shell: bash
+        env:
+          REGISTRY_HIT: ${{ steps.registry-cache-probe.outputs.cache-hit }}
+        run: |
+          echo "Trusted registry-only source cache exact hit: ${REGISTRY_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Registry-only archive is seeded only from default-branch push; source dependencies are locked." >> "$GITHUB_STEP_SUMMARY"
