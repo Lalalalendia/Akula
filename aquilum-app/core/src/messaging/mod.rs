@@ -103,10 +103,7 @@ pub struct OutboundMessage {
 impl OutboundMessage {
     /// PRECONDITION: the caller has durably queued the original encrypted
     /// bytes; this pure model has no access to a journal and cannot prove it.
-    pub fn after_durable_enqueue(
-        descriptor: Descriptor,
-        queued_at_ms: u64,
-    ) -> Result<Self, Error> {
+    pub fn after_durable_enqueue(descriptor: Descriptor, queued_at_ms: u64) -> Result<Self, Error> {
         if descriptor.id == [0; 16]
             || descriptor.policy_epoch == 0
             || descriptor.expires_at_ms <= queued_at_ms
@@ -270,6 +267,6 @@ impl OutboundMessage {
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod scale_tests;
+#[cfg(test)]
+mod tests;

@@ -47,7 +47,10 @@ fn no_connection_means_no_ack_until_recipient_returns() {
     outgoing.step(20, Event::RouteAvailable).unwrap();
     assert_eq!(outgoing.step(21, Event::SendAttempt), Ok(Phase::InTransit));
     // Destination not online: no signed acknowledgement is available.
-    assert_eq!(outgoing.step(30, Event::TransportFailed), Ok(Phase::NeedsRetry));
+    assert_eq!(
+        outgoing.step(30, Event::TransportFailed),
+        Ok(Phase::NeedsRetry)
+    );
     outgoing.step(40, Event::RouteLost).unwrap();
     assert!(!outgoing.recipient_accepted());
 
@@ -55,7 +58,11 @@ fn no_connection_means_no_ack_until_recipient_returns() {
     outgoing.step(100, Event::RouteAvailable).unwrap();
     assert_eq!(outgoing.step(101, Event::SendAttempt), Ok(Phase::InTransit));
     assert_eq!(
-        outgoing.accept_receipt(110, &receipt(&meta, AUTHORIZED_SIGNATURE), &TestOnlyVerifier),
+        outgoing.accept_receipt(
+            110,
+            &receipt(&meta, AUTHORIZED_SIGNATURE),
+            &TestOnlyVerifier
+        ),
         Ok(ReceiptOutcome::NewlyAccepted)
     );
     assert!(outgoing.recipient_accepted());
@@ -66,13 +73,19 @@ fn relay_failure_is_not_recipient_acceptance() {
     let (meta, mut outgoing) = pending();
     outgoing.step(10, Event::RouteAvailable).unwrap();
     outgoing.step(11, Event::SendAttempt).unwrap();
-    assert_eq!(outgoing.step(20, Event::RelayStored), Ok(Phase::RelayStored));
+    assert_eq!(
+        outgoing.step(20, Event::RelayStored),
+        Ok(Phase::RelayStored)
+    );
     assert!(!outgoing.recipient_accepted());
 
     // The voluntary relay disappears. Its previous receipt cannot be a
     // durable acceptance receipt from the final device.
     assert_eq!(outgoing.step(30, Event::RouteLost), Ok(Phase::RelayStored));
-    assert_eq!(outgoing.step(40, Event::TransportFailed), Ok(Phase::RelayStored));
+    assert_eq!(
+        outgoing.step(40, Event::TransportFailed),
+        Ok(Phase::RelayStored)
+    );
     assert!(!outgoing.recipient_accepted());
     outgoing.step(50, Event::RouteAvailable).unwrap();
     outgoing.step(51, Event::SendAttempt).unwrap();
@@ -160,7 +173,11 @@ fn forged_or_inconsistent_receipts_do_not_change_state() {
         Err(Error::InvalidProof)
     );
     assert_eq!(
-        outgoing.accept_receipt(26, &receipt(&meta, &vec![1; MAX_RECEIPT_PROOF_BYTES + 1]), &TestOnlyVerifier),
+        outgoing.accept_receipt(
+            26,
+            &receipt(&meta, &vec![1; MAX_RECEIPT_PROOF_BYTES + 1]),
+            &TestOnlyVerifier
+        ),
         Err(Error::InvalidProof)
     );
     assert_eq!(outgoing.phase(), Phase::InTransit);
@@ -195,12 +212,19 @@ fn recipient_receipts_are_idempotent_but_must_still_be_verified() {
 fn expiry_and_monotonic_virtual_time_fail_closed() {
     let (meta, mut outgoing) = pending();
     assert_eq!(outgoing.step(999, Event::Tick), Ok(Phase::LocalQueued));
-    assert_eq!(outgoing.step(998, Event::RouteAvailable), Err(Error::TimeReversal));
+    assert_eq!(
+        outgoing.step(998, Event::RouteAvailable),
+        Err(Error::TimeReversal)
+    );
     assert_eq!(outgoing.now_ms(), 999);
     assert_eq!(outgoing.step(1000, Event::Tick), Ok(Phase::Expired));
     assert_eq!(outgoing.step(1001, Event::SendAttempt), Err(Error::Expired));
     assert_eq!(
-        outgoing.accept_receipt(1002, &receipt(&meta, AUTHORIZED_SIGNATURE), &TestOnlyVerifier),
+        outgoing.accept_receipt(
+            1002,
+            &receipt(&meta, AUTHORIZED_SIGNATURE),
+            &TestOnlyVerifier
+        ),
         Err(Error::Expired)
     );
     assert!(!outgoing.recipient_accepted());
@@ -209,7 +233,10 @@ fn expiry_and_monotonic_virtual_time_fail_closed() {
 #[test]
 fn unsolicited_receipt_and_relay_ack_are_rejected_before_send() {
     let (meta, mut outgoing) = pending();
-    assert_eq!(outgoing.step(1, Event::RelayStored), Err(Error::InvalidTransition));
+    assert_eq!(
+        outgoing.step(1, Event::RelayStored),
+        Err(Error::InvalidTransition)
+    );
     assert_eq!(
         outgoing.accept_receipt(2, &receipt(&meta, AUTHORIZED_SIGNATURE), &TestOnlyVerifier),
         Err(Error::InvalidTransition)
@@ -222,11 +249,20 @@ fn unsolicited_receipt_and_relay_ack_are_rejected_before_send() {
 fn malformed_descriptors_are_rejected_without_io() {
     let mut meta = descriptor();
     meta.id = [0; 16];
-    assert_eq!(OutboundMessage::after_durable_enqueue(meta, 0).unwrap_err(), Error::InvalidDescriptor);
+    assert_eq!(
+        OutboundMessage::after_durable_enqueue(meta, 0).unwrap_err(),
+        Error::InvalidDescriptor
+    );
     meta.id = [7; 16];
     meta.policy_epoch = 0;
-    assert_eq!(OutboundMessage::after_durable_enqueue(meta, 0).unwrap_err(), Error::InvalidDescriptor);
+    assert_eq!(
+        OutboundMessage::after_durable_enqueue(meta, 0).unwrap_err(),
+        Error::InvalidDescriptor
+    );
     meta.policy_epoch = 1;
     meta.expires_at_ms = 10;
-    assert_eq!(OutboundMessage::after_durable_enqueue(meta, 10).unwrap_err(), Error::InvalidDescriptor);
+    assert_eq!(
+        OutboundMessage::after_durable_enqueue(meta, 10).unwrap_err(),
+        Error::InvalidDescriptor
+    );
 }
