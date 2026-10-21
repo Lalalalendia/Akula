@@ -258,3 +258,25 @@ fn markdown_warnings_block_complete_root_claim() {
     assert!(!report.root_traversal_complete);
     assert!(report.warnings.iter().any(|x| x.contains("markdown warnings")));
 }
+
+#[test]
+fn malformed_relation_property_cannot_disappear_from_the_graph() {
+    let mut client = simple();
+    client.replies.front_mut().unwrap().1["properties"] =
+        json!({"Relation":{"type":"relation"}});
+    assert!(inspect_root(&mut client,A,ProbeLimits::default())
+        .unwrap_err().contains("relation property missing stable ID"));
+}
+
+#[test]
+fn malformed_relation_target_fails_instead_of_being_skipped() {
+    let mut client = Fake { replies: VecDeque::from([
+        (ReadRequest::Page(A.into()),json!({"object":"page","id":A,
+            "properties":{"Linked":{"type":"relation","id":"ref"}}})),
+        (ReadRequest::PageProperty {page:A.into(),property:"ref".into(),cursor:None},
+            list(vec![json!({"object":"property_item","type":"relation",
+                "relation":{}})],false,None)),
+    ]) };
+    assert!(inspect_root(&mut client,A,ProbeLimits::default())
+        .unwrap_err().contains("relation item missing target ID"));
+}
