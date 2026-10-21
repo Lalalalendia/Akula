@@ -266,6 +266,9 @@ impl OutboundMessage {
     }
 }
 
+#[cfg(all(test, feature = "messaging-sim-lab"))]
+mod building_sim;
+
 #[cfg(test)]
 mod scale_tests;
 #[cfg(test)]
