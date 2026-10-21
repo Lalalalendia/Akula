@@ -17,17 +17,6 @@ pub(super) fn content_length(raw: Option<&str>) -> Result<Option<u64>, String> {
     Ok(Some(size))
 }
 
-/// Compare the bytes *actually read*, not just a Content-Length assertion.
-/// Keeps a bounded in-memory buffer because the current minisign verifier
-/// authenticates the entire downloaded artifact as a byte slice.
-pub(super) fn read_payload(
-    reader: impl Read,
-    total: Option<u64>,
-    on_progress: impl FnMut(u64, Option<u64>),
-) -> Result<Vec<u8>, String> {
-    read_with_limit(reader, total, MAX_UPDATE_BYTES, on_progress)
-}
-
 /// Enforce the *signed* artifact size as the stream budget, not merely the
 /// legacy 512 MiB ceiling. An untrusted HTTP Content-Length cannot override it.
 pub(super) fn read_signed_payload(
