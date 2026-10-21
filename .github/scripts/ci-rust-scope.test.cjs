@@ -11,6 +11,22 @@ test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
     '.github/scripts/ci-run-budget.cjs']), 'none');
 });
+
+test('CI-only workflow and routing script changes do not compile unrelated Rust',()=>{
+  for(const onlyCi of [
+    ['.github/workflows/app-checks.yml'],
+    ['.github/workflows/app-checks.yml','.github/scripts/ci-rust-scope.cjs'],
+    ['.github/workflows/ci-shared-manifest-labs.yml','.github/scripts/ci-shared-routing-contract.test.cjs'],
+    ['.github/workflows/app-checks.yml','docs/ci.md']
+  ]) assert.equal(classify(onlyCi),'none',onlyCi.join(','));
+  // Any actual Rust/Cargo change, even alongside CI changes, keeps the full gate.
+  for(const rust of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
+    'aquilum-app/native/src/main.rs','aquilum-app/core/src/files/gate/write.rs']){
+    assert.equal(classify([rust,'.github/workflows/app-checks.yml']),'workspace',rust);
+  }
+  assert.equal(classify(['.github/workflows/app-checks.yml',
+    'aquilum-app/core/src/sync/guarded_note_write.rs']),'sync');
+});
 test('only sync implementation and its contract tests use focused lane',()=>{
   assert.equal(classify(['aquilum-app/core/src/sync/pinned_windows.rs',
     'aquilum-app/core/src/sync/journal.rs',
@@ -22,8 +38,7 @@ test('any native, core outside sync, Cargo config or gate change requires all te
     'aquilum-app/native/src/ui/editor.rs',
     'aquilum-app/Cargo.lock',
     'aquilum-app/core/Cargo.toml',
-    'aquilum-app/native/vendor/ratex-parser/src/parser.rs',
-    '.github/workflows/app-checks.yml'
+    'aquilum-app/native/vendor/ratex-parser/src/parser.rs'
   ]) assert.equal(classify([name,'aquilum-app/core/src/sync/identity.rs']),'workspace',name);
 });
 test('deleted/renamed files also select the appropriate scope using real Git',()=>{
