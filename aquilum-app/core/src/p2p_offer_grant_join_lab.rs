@@ -437,8 +437,9 @@ fn unicode_and_long_display_names_use_stable_ascii_transport_aliases() {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selection) =
-        session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
+    let Outcome::Selected(selection) = session
+        .resolve(&decision, offer.receiver, NOW + 1)
+        .unwrap()
     else {
         panic!("expected selected draft");
     };
@@ -496,8 +497,9 @@ fn projection_does_not_reduce_legacy_grant_limits_or_create_authority() {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selected) =
-        session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
+    let Outcome::Selected(selected) = session
+        .resolve(&decision, offer.receiver, NOW + 1)
+        .unwrap()
     else {
         panic!("expected selected draft");
     };
