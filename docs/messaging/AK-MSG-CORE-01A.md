@@ -50,6 +50,17 @@ plaintext serialization. The ordinary Akula configuration is unchanged.
 - Delivery after recipient absence, relay outage and revoked trust are
   model-level test scenarios, not evidence of physical Bluetooth/CGNAT paths.
 
+## Contract-only scale test
+
+The `messaging::scale_tests` fixture instantiates **2,000 logical Akula clients**
+across five floors and 70 rooms per floor, then exercises a fixed mix of
+nonreachable recipients, relay loss, failed transport and revoked trust.
+The expected result is 1,500 authorized recipient acknowledgements and 500
+revoked senders that never advance. This is an **in-memory state-machine
+smoke test**; it does NOT simulate BLE propagation, walls, routes, actual
+movement, or the 36 physical/network scenarios in Notion. Those require
+separate calibrated transport and mobility models.
+
 ## Validation
 
 From `aquilum-app`:

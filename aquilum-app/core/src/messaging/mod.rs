@@ -271,3 +271,5 @@ impl OutboundMessage {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod scale_tests;
