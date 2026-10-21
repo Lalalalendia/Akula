@@ -135,7 +135,7 @@ jobs:
               $app.WaitForExit(5000) | Out-Null
             }
           }
-      - name: Real Microsoft CredUI masked field and Cancel via Windows UI Automation
+      - name: Real Microsoft CredUI masked native field and UIA Cancel
         shell: pwsh
         run: |
           # The Rust test is ignored by default and limited to ephemeral CI.
