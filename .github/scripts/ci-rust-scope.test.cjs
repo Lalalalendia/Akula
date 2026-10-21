@@ -5,7 +5,7 @@ const cp=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {classify,changed}=require('./ci-rust-scope.cjs');
+const {classify,changed,safeManifestOnly}=require('./ci-rust-scope.cjs');
 
 test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
@@ -227,4 +227,43 @@ test('main-only registry source archive retains immutable PR cache safety',()=>{
   assert.match(seed,/~\/\.cargo\/registry\/index/);
   assert.match(seed,/~\/\.cargo\/git/);
   assert.equal((code.match(/\n  seed-rust-cache:\n/g)||[]).length,1,'do not add new seed jobs');
+});
+
+test('safe isolated Cargo feature routes only Core, never unrelated Native/OS tests',()=>{
+  const core='aquilum-app/core/Cargo.toml',lock='aquilum-app/Cargo.lock';
+  const safe={shared_any_risky:false};
+  const risky={shared_any_risky:true};
+  assert.equal(safeManifestOnly([core,lock],safe),true);
+  assert.equal(safeManifestOnly([core],safe),true);
+  assert.equal(safeManifestOnly([core,lock,'aquilum-app/core/src/node_catalog_lab.rs'],safe),false);
+  assert.equal(safeManifestOnly([lock],safe),false,'standalone lock edit remains full suite');
+  assert.equal(safeManifestOnly([core,lock],risky),false,'existing dependency changes remain full suite');
+  assert.equal(safeManifestOnly([core,lock],null),false,'missing classification never skips coverage');
+  assert.equal(safeManifestOnly([],safe),false);
+});
+test('real git comment-only Cargo+lock change enters focused Core mode; risky changes stay full',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'akula-manifest-mode-'));
+  const git=(...args)=>cp.execFileSync('git',args,{cwd:dir,encoding:'utf8'}).trim();
+  const mode=base=>cp.execFileSync(process.execPath,
+    [path.join(__dirname,'ci-rust-scope.cjs'),'--base='+base,'--head=HEAD'],
+    {cwd:dir,encoding:'utf8'}).trim();
+  try{
+    git('init','-q');git('config','user.name','CI');git('config','user.email','ci@example.invalid');
+    const core=path.join(dir,'aquilum-app/core/Cargo.toml');
+    const lock=path.join(dir,'aquilum-app/Cargo.lock');
+    fs.mkdirSync(path.dirname(core),{recursive:true});
+    fs.writeFileSync(core,'[package]\\nname = "aquilum-core"\\nversion = "0.3.10"\\n[features]\\ndefault = []\\n');
+    const before='# Cargo lock\\nversion = 4\\n\\n[[package]]\\nname = "aquilum-core"\\nversion = "0.3.10"\\ndependencies = [\\n "serde",\\n]\\n\\n[[package]]\\nname = "serde"\\nversion = "1.0.0"\\nsource = "registry+https://example.invalid/index"\\nchecksum = "fixture"\\n';
+    fs.writeFileSync(lock,before.replaceAll('\\n','\n'));
+    git('add','.');git('commit','-qm','baseline');const base=git('rev-parse','HEAD');
+    fs.appendFileSync(core,'# CI comment\\n');
+    fs.writeFileSync(lock,before.replaceAll('\\n','\n').replace('# Cargo lock\n','# Cargo lock\n# CI header comment\n'));
+    git('add','.');git('commit','-qm','safe-comment');
+    assert.equal(mode(base),'mode=manifest');
+    // Existing locked source/checksum change must re-enable full workspace test.
+    const safe=git('rev-parse','HEAD');
+    fs.writeFileSync(lock,fs.readFileSync(lock,'utf8').replace('checksum = "fixture"','checksum = "changed"'));
+    git('add','.');git('commit','-qm','unsafe-dependency-change');
+    assert.equal(mode(safe),'mode=workspace');
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
