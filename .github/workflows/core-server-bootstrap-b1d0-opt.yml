@@ -68,18 +68,36 @@ jobs:
           # Production destination must never be created by this test.
           test ! -e /opt/akula-node
           test ! -e /var/lib/akula/server-bootstrap
+          # Ubuntu hosted runners commonly customize /opt ownership/mode
+          # for preinstalled tools. Production must REJECT this, not relax
+          # the strict root:root 0755 requirement. A private mount namespace
+          # bind-mounts a fresh root-owned 0755 directory over /opt for ONLY
+          # this disposable root test process; the runner /opt is untouched.
+          echo "B1D0_RUNNER_OPT_BEFORE=$(stat -c '%u:%a' /opt)"
+          lab_opt=/var/tmp/akula-b1d0-opt-ci-root
+          test ! -e "$lab_opt" && test ! -L "$lab_opt"
+          sudo -n install -d -o root -g root -m 0755 "$lab_opt"
+          test "$(sudo -n stat -c '%u:%a' "$lab_opt")" = "0:755"
           found=0
           for bin in .artifacts/cargo-native/debug/deps/server_bootstrap_b1d0-*; do
             if [[ -f "$bin" && -x "$bin" && "$bin" != *.d ]]; then
-              sudo -n env GITHUB_ACTIONS=true RUNNER_OS=Linux \
-                AKULA_B1D0_CI=STRICT_ROOT_ONE_SHOT_FILE_ONLY \
-                AKULA_B1D0_REAL_ELF="$PWD/.artifacts/cargo-native/debug/akula-node-lab" \
-                "$PWD/$bin" --test-threads=1 --nocapture \
+              sudo -n unshare --mount --propagation private -- bash -c '
+                set -euo pipefail
+                mount --bind /var/tmp/akula-b1d0-opt-ci-root /opt
+                test "$(stat -c "%u:%a" /opt)" = "0:755"
+                test ! -e /opt/akula-node
+                test ! -e /opt/akula-b1d0-ci-node
+                export GITHUB_ACTIONS=true RUNNER_OS=Linux
+                export AKULA_B1D0_CI=STRICT_ROOT_ONE_SHOT_FILE_ONLY
+                export AKULA_B1D0_REAL_ELF="$1"
+                "$2" --test-threads=1 --nocapture
+              ' akula-b1d0-ci "$PWD/.artifacts/cargo-native/debug/akula-node-lab" "$PWD/$bin" \
                 | tee "$RUNNER_TEMP/b1d0-root-tests.log"
               found=$((found + 1))
             fi
           done
           test "$found" -eq 1
+          sudo -n rmdir -- "$lab_opt"
           test ! -e /opt/akula-b1d0-ci-node
           test ! -e /opt/akula-node
           grep -Fq 'B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS' \

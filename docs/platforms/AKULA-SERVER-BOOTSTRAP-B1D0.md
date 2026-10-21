@@ -53,3 +53,9 @@ An independently owned real release-signing trust anchor, owner approval,
 persistent operating-system key provisioning, verified time/revocation and
 power-loss recovery are still prerequisites to exposing any privileged
 installation action to Windows, SSH or a local service.
+
+## Hosted Ubuntu runner /opt ownership refusal (exact-head CI repair)
+
+On commit b9658636, the first Linux UID0 run (#39601844241) **compiled both Rust Core test binaries and real akula-node-lab ELF successfully**, but 8 of 9 root tests failed with **DurableError::UntrustedRoot** before reaching signed file CAS. This indicates the runner's /opt metadata did not satisfy the deliberately fixed root:root 0755 trust boundary; the initial error did NOT prove a signed package/CAS defect. Do NOT loosen production owner/mode requirements for compatibility with a managed GitHub runner.
+
+The profile workflow now logs actual /opt UID/mode, creates an empty root-owned 0755 **temporary filesystem directory**, and invokes each real UID0 test in a separate Linux mount namespace with that directory bind-mounted over /opt. This leaves the host runner's /opt untouched and keeps identical production trust rules. The test directory must be empty after test cleanup and is then removed. All Linux root tests and the real ELF marker remain mandatory. This proves only first-install file+receipt and process re-open, not power-loss of the same virtual disk or service activation.
