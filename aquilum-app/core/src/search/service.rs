@@ -99,6 +99,28 @@ impl SearchService {
         }
     }
 
+    /// Stop all search indexing before the host starts a new session against
+    /// the same Tantivy directory. The native search dialog holds an Arc<Core>
+    /// in its request thread and can outlive its App object; dropping the UI
+    /// alone does not guarantee that its IndexWriter lock is released.
+    ///
+    /// Serialize with index preparation, take ownership under short locks,
+    /// then synchronously join worker threads with all slots unlocked.
+    /// Repeated shutdown is harmless.
+    pub fn shutdown(&self) {
+        let _guard = self.prepare_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let active = self.active.write().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        let guest = self.guest.write().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        if let Some(index) = active {
+            index.stop();
+        }
+        if let Some(guest) = guest {
+            guest.index.stop();
+        }
+        clear_if(&self.analysis_graph, |_| true);
+        clear_if(&self.render_graph, |_| true);
+    }
+
     pub fn prepare(&self, workspace: &str) -> Result<SearchIndexStatus, SearchError> {
         let _guard = self.prepare_lock.lock().map_err(SearchError::task)?;
         let root = workspace_root(workspace)?;
