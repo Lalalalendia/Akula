@@ -7,6 +7,9 @@ on:
       - experiment/akula-p2p-offer-contract-20261021
     paths:
       - 'interop/akula-staya/**'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/lib.rs'
+      - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
 
@@ -47,6 +50,9 @@ jobs:
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
+      - name: Check Akula real create-new inbox, corruption, and no-overwrite
+        shell: bash
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
       - name: Lint actual integration crate
         shell: bash
         run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --all-targets -- -D warnings
