@@ -28,6 +28,29 @@ pub(super) fn read_payload(
     read_with_limit(reader, total, MAX_UPDATE_BYTES, on_progress)
 }
 
+/// Enforce the *signed* artifact size as the stream budget, not merely the
+/// legacy 512 MiB ceiling. An untrusted HTTP Content-Length cannot override it.
+pub(super) fn read_signed_payload(
+    reader: impl Read,
+    total: Option<u64>,
+    signed_size: u64,
+    on_progress: impl FnMut(u64, Option<u64>),
+) -> Result<Vec<u8>, String> {
+    if signed_size == 0 || signed_size > MAX_UPDATE_BYTES {
+        return Err("signed updater payload size is outside the approved budget".into());
+    }
+    if let Some(reported) = total
+        && reported != signed_size
+    {
+        return Err("updater Content-Length conflicts with signed artifact size".into());
+    }
+    let payload = read_with_limit(reader, total, signed_size, on_progress)?;
+    if payload.len() as u64 != signed_size {
+        return Err("downloaded updater payload differs from signed artifact size".into());
+    }
+    Ok(payload)
+}
+
 fn read_with_limit(
     mut reader: impl Read,
     total: Option<u64>,
@@ -78,6 +101,27 @@ fn read_with_limit(
 mod tests {
     use super::*;
     use std::io::{Cursor, Read};
+
+    #[test]
+    fn signed_size_is_a_strict_stream_budget_even_without_http_length() {
+        let bytes = Cursor::new(vec![0x42u8; 20]);
+        assert_eq!(
+            read_signed_payload(bytes, None, 20, |_, _| {}).unwrap().len(),
+            20,
+        );
+        assert!(read_signed_payload(
+            Cursor::new(vec![0x42u8; 21]), None, 20, |_, _| {},
+        ).is_err(), "a dishonest signed-sized stream must fail");
+        assert!(read_signed_payload(
+            Cursor::new(vec![0x42u8; 19]), None, 20, |_, _| {},
+        ).is_err(), "truncated package without Content-Length must fail");
+        assert!(read_signed_payload(
+            Cursor::new(vec![0x42u8; 20]), Some(21), 20, |_, _| {},
+        ).unwrap_err().contains("conflicts"));
+        assert!(read_signed_payload(
+            Cursor::new(vec![0x42u8; 20]), None, MAX_UPDATE_BYTES + 1, |_, _| {},
+        ).is_err());
+    }
 
     #[test]
     fn exact_size_and_progress_are_preserved() {
