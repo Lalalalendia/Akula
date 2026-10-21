@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
+      b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -42,6 +43,16 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          # A shared Cargo or Core boundary still gets both opt-in B1 tests
+          # in the mandatory gate, without scheduling two duplicate workflows.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/Cargo.toml aquilum-app/Cargo.lock \
+            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs \
+            aquilum-app/core/src/server_release_lab.rs; then
+            echo 'b1_shared_compat=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'b1_shared_compat=true' >> "$GITHUB_OUTPUT"
+          fi
 
   required-tests:
     if: github.event_name == 'pull_request'
@@ -167,6 +178,20 @@ jobs:
           set -euo pipefail
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
+
+      # Shared Cargo/lock/Core boundary changes retain exact B1a and B1b0
+      # security tests under the existing required main gate. Direct source
+      # and module changes still run their original specialist workflows.
+      - name: B1a/B1b0 signed-release and staging compatibility
+        if: needs.classify.outputs.b1_shared_compat == 'true'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A Core re-export must not become an independent verifier implementation.
+          grep -Fx 'pub use akula_server_release_b1a::*;' core/src/server_release_lab.rs
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab \
+            --test server_bootstrap_b1a --test server_bootstrap_b1b0 -- --nocapture
 
       # RELEASE-SIGNED-CANDIDATE-01: real CLI Minisign -> native Rust interop.
       # Reuse the existing required Rust runner rather than queuing another job.
