@@ -36,7 +36,7 @@ fn undo_of_large_replacement_remounts_a_bounded_window_before_layout() {
 
     // Complete content must remain available through the persistent Rope,
     // including the originally unloaded first line.
-    assert_eq!(doc.copy(0..original.find('\\n').unwrap()), "строка 0");
+    assert_eq!(doc.copy(0..original.find('\n').unwrap()), "строка 0");
     doc.include(0);
     assert_eq!(doc.loaded().0, 0);
     agrees(&doc, &original);
