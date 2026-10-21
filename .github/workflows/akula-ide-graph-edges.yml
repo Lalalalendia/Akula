@@ -47,6 +47,7 @@ jobs:
           git commit -qm "pinned independent Rust call target fixture"
           git rev-parse HEAD > "$RESULTS/fixture-sha.txt"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/ide-fixture-target"
+          cargo generate-lockfile --offline --manifest-path "$FIXTURE/Cargo.toml" > "$RESULTS/cargo-lock.log" 2>&1
           cargo check --offline --locked --manifest-path "$FIXTURE/Cargo.toml" > "$RESULTS/cargo-check.log" 2>&1 || {
             cat "$RESULTS/cargo-check.log"
             exit 1
