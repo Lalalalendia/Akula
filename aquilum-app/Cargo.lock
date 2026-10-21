@@ -2,6 +2,7 @@
 # It is not intended for manual editing.
 version = 4
 
+# CI-SCOPE-PROBE: PR-only unchanged lock data; this comment must not enter main.
 [[package]]
 name = "ab_glyph"
 version = "0.2.32"
