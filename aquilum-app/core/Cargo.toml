@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Inert first-party internal task view; no new dependencies.
+extension-view-lab = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.

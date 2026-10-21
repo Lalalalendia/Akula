@@ -118,6 +118,7 @@
       "other": "{{count}} совпадения"
     }
   },
+  "extensionLab": {"tasksTab":"Задачи","tasksTitle":"Задачи текущей заметки","tasksEmpty":"Задач нет","tasksUnavailable":"Индекс ещё готовится","tasksTruncated":"Показаны первые 64 задачи"},
   "backlinks": {
     "panelTitle": "Ссылки документа",
     "modeLabel": "Режим отображения ссылок",

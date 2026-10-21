@@ -116,6 +116,7 @@
       "other": "{{count}} matches"
     }
   },
+  "extensionLab": {"tasksTab":"Tasks","tasksTitle":"Tasks in this note","tasksEmpty":"No tasks","tasksUnavailable":"Index is not ready","tasksTruncated":"Showing the first 64 tasks"},
   "backlinks": {
     "panelTitle": "Document links",
     "modeLabel": "Link display mode",

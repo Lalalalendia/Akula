@@ -249,6 +249,35 @@ impl SearchService {
         }
     }
 
+    /// Internal read-only task view, scoped to the active indexed document.
+    #[cfg(feature = "extension-view-lab")]
+    pub fn task_preview_for_document(
+        &self, workspace: &str, document: &Path,
+    ) -> Result<Vec<super::tasks::Task>, SearchError> {
+        use super::models::SearchIndexState;
+        use super::paths::{canonical_path, is_hidden, is_markdown, strip_root};
+        use rusqlite::{Connection, OpenFlags};
+        let document = canonical_path(document);
+        self.with_index(workspace, |index| {
+            if strip_root(&index.root, &document).is_none()
+                || !is_markdown(&document) || is_hidden(&index.root, &document)
+            {
+                return Err(SearchError::invalid_workspace("Document outside the indexed scope"));
+            }
+            let before = index.progress.snapshot();
+            if before.state != SearchIndexState::Ready || before.updating {
+                return Err(SearchError::Unavailable { message: "Index updating".into() });
+            }
+            let db = Connection::open_with_flags(&index.metadata_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let tasks = super::tasks::repository::read_preview(&db, &document.to_string_lossy())?;
+            let after = index.progress.snapshot();
+            if after.generation != before.generation || after.revision != before.revision || after.updating {
+                return Err(SearchError::Unavailable { message: "Index changed".into() });
+            }
+            Ok(tasks)
+        })
+    }
+
     pub fn index_paths(&self, workspace: &str) -> Result<(PathBuf, PathBuf), SearchError> {
         let paths = |open: &OpenIndex| Ok((open.root.clone(), open.metadata_path.clone()));
         if let Ok(found) = self.with_index(workspace, paths) {

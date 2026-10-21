@@ -43,6 +43,8 @@ pub fn body(mode: Mode, methods: &[Method], method: Method, listing: Option<&Lis
             (Mode::Backlinks, _) => t("backlinks.mentionsTitle"),
             (Mode::Outgoing, _) => t("backlinks.outgoingTitle"),
             (Mode::History, _) => t("history.title"),
+            #[cfg(feature = "extension-view-lab")]
+            (Mode::Tasks, _) => t("extensionLab.tasksTitle"),
         };
         let head = Flex::row().cross_axis_alignment(CrossAxisAlignment::Center);
         let head = if graph {

@@ -31,6 +31,8 @@ pub fn panel(mode: Mode, has_analysis: bool, width: f64, open: bool, from: bool)
     if has_analysis {
         entries.push((Mode::Analysis, icons::GRAPH_ANALYSIS, t("analysis.tab")));
     }
+    #[cfg(feature = "extension-view-lab")]
+    entries.push((Mode::Tasks, icons::CLIPBOARD, t("extensionLab.tasksTab")));
     entries.push((Mode::History, icons::HISTORY, t("backlinks.historyTab")));
     for (item, icon, label) in entries {
         let button = NewWidget::new(IconButton::mode(icon, label, item == mode));

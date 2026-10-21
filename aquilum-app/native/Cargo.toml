@@ -26,6 +26,8 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
+# First-party read-only view experiment, excluded from normal builds.
+extension-view-lab = ["aquilum-core/extension-view-lab"]
 installed = []
 memory-probe = []
 # Installer-enforced local custody flavor; does not pull in AWS/S3.

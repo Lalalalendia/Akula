@@ -21,6 +21,24 @@ pub fn run(core: &Core, request: &Request) -> Listing {
     let notice = |key: &str| Listing { generation: request.generation, items: Vec::new(), notice: Some(t(key)) };
     match (request.mode, request.method) {
         (Mode::History, _) => listing(Vec::new(), "history.empty"),
+        #[cfg(feature = "extension-view-lab")]
+        (Mode::Tasks, _) => {
+            match core.search.task_preview_for_document(&workspace, &request.document) {
+                Ok(tasks) => {
+                    let more = tasks.len() > 64;
+                    let items = tasks.into_iter().take(64).map(|task| Item {
+                        title: format!("{} {}", if task.done { "[x]" } else { "[ ]" }, task.text),
+                        counter: Some(task.line.to_string()),
+                        target: Target::Note(request.document.clone(), None),
+                        reasons: Vec::new(),
+                    }).collect();
+                    let mut view = listing(items, "extensionLab.tasksEmpty");
+                    if more { view.notice = Some(t("extensionLab.tasksTruncated")); }
+                    view
+                }
+                Err(_) => notice("extensionLab.tasksUnavailable"),
+            }
+        },
         (Mode::Backlinks, _) => {
             let items = core.search.backlinks(&workspace, &document).unwrap_or_default();
             let items = counted(items.into_iter().map(|link| (link.title, Target::Note(PathBuf::from(link.path), Some(link.offset)))));
@@ -138,6 +156,23 @@ mod tests {
         assert!(out.items.iter().any(|i| matches!(&i.target, Target::Wiki(t) if t == "Нет такой")));
         let none = run(&core, &request(vault.path(), "a.md", Mode::Backlinks));
         assert!(none.items.is_empty() && none.notice.is_some());
+        core.shutdown();
+    }
+
+    #[cfg(feature = "extension-view-lab")]
+    #[test]
+    fn first_party_task_view_is_scoped_and_read_only() {
+        let (vault, _data, core) = indexed(&[
+            ("a.md", "- [ ] alpha\n- [x] beta\n"),
+            ("b.md", "- [ ] private\n"),
+        ]);
+        let path = vault.path().join("a.md");
+        let before = std::fs::read(&path).unwrap();
+        let listing = run(&core, &request(vault.path(), "a.md", Mode::Tasks));
+        assert_eq!(listing.items.len(), 2);
+        assert_eq!(listing.items[0].title, "[ ] alpha");
+        assert_eq!(listing.items[1].title, "[x] beta");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
         core.shutdown();
     }
 

@@ -6,6 +6,8 @@ pub enum Mode {
     Outgoing,
     Analysis,
     History,
+    #[cfg(feature = "extension-view-lab")]
+    Tasks,
 }
 
 impl Mode {
@@ -15,11 +17,16 @@ impl Mode {
             Mode::Outgoing => "outgoing",
             Mode::Analysis => "analysis",
             Mode::History => "history",
+            #[cfg(feature = "extension-view-lab")]
+            Mode::Tasks => "tasks",
         }
     }
 
     pub fn from_key(key: &str) -> Option<Mode> {
-        [Mode::Backlinks, Mode::Outgoing, Mode::Analysis, Mode::History].into_iter().find(|m| m.key() == key)
+        [
+            Mode::Backlinks, Mode::Outgoing, Mode::Analysis, Mode::History,
+            #[cfg(feature = "extension-view-lab")] Mode::Tasks,
+        ].into_iter().find(|m| m.key() == key)
     }
 }
 
