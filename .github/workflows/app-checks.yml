@@ -192,7 +192,7 @@ jobs:
       # Shared Cargo/lock/Core boundary changes retain exact B1a and B1b0
       # security tests under the existing required main gate. Direct source
       # and module changes still run their original specialist workflows.
-      - name: B1a/B1b0 signed-release and staging compatibility
+      - name: B1a/B1b0/B1b1 release and approval compatibility
         if: needs.classify.outputs.b1_shared_compat == 'true'
         working-directory: aquilum-app
         shell: bash
@@ -202,6 +202,11 @@ jobs:
           grep -Fx 'pub use akula_server_release_b1a::*;' core/src/server_release_lab.rs
           cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab \
             --test server_bootstrap_b1a --test server_bootstrap_b1b0 -- --nocapture
+          # B1b1c includes the B1b1b/B1b1a feature ancestry. All three
+          # unprivileged, inert ledger/security suites remain covered.
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1c-witness-lab \
+            --test server_bootstrap_b1b1a --test server_bootstrap_b1b1b \
+            --test server_bootstrap_b1b1c -- --nocapture
 
       # Shared Cargo/lock/Core boundary is checked in-place: separate Node
       # workflow runs are needed only for changes to their owned source/tests.

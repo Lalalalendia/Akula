@@ -149,3 +149,29 @@ test('shared Cargo/lib changes route D1-D2 contracts to required gate without ex
   assert.match(gate,/--features node-lab --bin akula-node-lab/);
   assert.match(gate,/--test headless_node_d1 --test headless_node_d2 --test node_catalog_lab/);
 });
+
+test('B1b1 signed ledger and approval tests are covered on shared Cargo/Core changes',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  for(const wf of ['core-server-bootstrap-b1b1-floor.yml',
+      'core-server-bootstrap-b1b1b-approval.yml',
+      'core-server-bootstrap-b1b1c-witness.yml']){
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',wf),'utf8');
+    const policy=parse(body);
+    for(const shared of ['aquilum-app/core/Cargo.toml','aquilum-app/core/src/lib.rs',
+        'aquilum-app/Cargo.lock','aquilum-app/Cargo.toml']){
+      assert.equal(matches(policy,shared),false,wf+' shared '+shared);
+    }
+    assert.match(body,/workflow_dispatch:/,'retain manual lab execution');
+  }
+  const floor=parse(fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b1b1-floor.yml'),'utf8'));
+  const approval=parse(fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b1b1b-approval.yml'),'utf8'));
+  const witness=parse(fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b1b1c-witness.yml'),'utf8'));
+  assert.equal(matches(floor,'aquilum-app/core/src/server_release_floor_lab.rs'),true);
+  assert.equal(matches(approval,'aquilum-app/core/src/server_owner_approval_lab.rs'),true);
+  assert.equal(matches(witness,'aquilum-app/core/src/server_witness_lab.rs'),true);
+  const gate=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.equal(parse(gate).t,'global','mandatory gate must remain unfiltered');
+  assert.match(gate,/--features server-bootstrap-b1b1c-witness-lab/);
+  for(const suite of ['server_bootstrap_b1b1a','server_bootstrap_b1b1b','server_bootstrap_b1b1c'])
+    assert.ok(gate.includes('--test '+suite),suite+' retained in mandatory contract');
+});
