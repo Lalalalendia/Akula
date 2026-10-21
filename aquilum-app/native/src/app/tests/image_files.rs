@@ -76,7 +76,14 @@ fn corrupt_oversized_and_unsupported_files_do_not_open_or_modify_the_note() {
         let mut encoder = png::Encoder::new(&mut header, 65_000, 65_000);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        let _writer = encoder.write_header().unwrap();
+        let mut writer = encoder.write_header().unwrap();
+        // The PNG decoder requires an IDAT chunk even when only reading
+        // dimensions. An IHDR-only fixture fails with MissingImageData before
+        // the preview pixel-budget guard is exercised.
+        // This valid zlib envelope has no image rows on purpose: dimensions
+        // must be rejected before decoding any pixel data.
+        writer.write_chunk(png::chunk::IDAT, &[0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]).unwrap();
+        writer.finish().unwrap();
     }
     assert!(header.len() < 1024, "test must remain a tiny compressed input");
     let dimensions = image::ImageReader::new(std::io::Cursor::new(&header))
