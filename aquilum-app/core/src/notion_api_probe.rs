@@ -296,6 +296,11 @@ impl<T: NotionReadTransport> Scan<'_, T> {
         }
 
         let markdown = self.request(ReadRequest::Markdown(id.to_owned()))?;
+        // API 2026-03-11 includes object and page identity. Do not accept
+        // arbitrary JSON (or another page's body) as a complete snapshot.
+        if required_id(&markdown, "page_markdown")? != id {
+            return Err("Notion markdown page ID mismatch".into());
+        }
         if markdown.get("markdown").and_then(Value::as_str).is_none() {
             return Err("Notion markdown response missing text".into());
         }
@@ -305,6 +310,12 @@ impl<T: NotionReadTransport> Scan<'_, T> {
         if markdown.get("unknown_block_ids").and_then(Value::as_array)
             .is_none_or(|a| !a.is_empty()) {
             self.warnings.push(format!("page {id}: unknown/not-rendered markdown blocks"));
+        }
+        // A page can contain warnings even when it reports truncated=false.
+        // Missing/invalid warning metadata must not falsely certify completeness.
+        if markdown.get("warnings").and_then(Value::as_array)
+            .is_none_or(|a| !a.is_empty()) {
+            self.warnings.push(format!("page {id}: markdown warnings or unverified warning metadata"));
         }
         self.insert("markdown", id.to_owned(), markdown)?;
         self.queue(TaskKind::Blocks, id, depth + 1)
