@@ -6,7 +6,7 @@ use std::io::Read;
 // installation; the Windows transaction/Bridge/ACK remain separate gates.
 #[allow(dead_code)]
 mod signed_candidate;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use signed_candidate::SignedCandidate;
 
 pub(super) const ENDPOINT: &str =
