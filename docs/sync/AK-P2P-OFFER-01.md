@@ -42,3 +42,26 @@ An additional **test-only** source file `p2p_offer_grant_join_lab.rs` mirrors th
 **Limits:** local identities, observed grant, issuer and epoch are all injected *test fixtures*. This does **not** exercise actual SQLite, signature checks, OS Broker, current revocation, sealed issuer, network or file bytes. The source `SelectionDraft` remains ordinary in-process data and is not a capability. Do not promote this consistency check to authorization or a production API.
 
 **Required next step:** marry the actual Core/Broker-controlled `StoredPull` to a QUIC authenticated remote identity, minted durable recipient consent, and short grant fencing. Align multi-file roots with a genuinely revised grant model (atomic root-set or per-root serial grants with durable nonce/replay handling), while preserving the one active grant invariant until migrated and reviewed. No longer-lived grant than the offer, no network reads before explicit consent.
+
+## AK-P2P-STAYA-PREVIEW-03 — display labels are not transport paths
+
+Cross-repository contract finding: Akula `OfferV1` accepts display-only UTF-8
+labels up to 180 bytes, while the existing
+[Staya QueueSelection](https://github.com/Lalalalendia/staya-transfer/blob/main/src/queue.rs)
+accepts only up to 64 bytes of restricted ASCII with additional basename rules.
+Do not pass Akula display names directly into Staya queue or receiver paths.
+The two commitment formats are separately domain-separated and are **not equal**.
+
+The additional **test-only** `projection_for_staya_preview` illustrates a
+deterministic, reversible-by-index mapping of accepted **ordered subsets**
+to `object_00.bin` .. `object_07.bin` transport aliases, while retaining
+the original immutable BLAKE3 root and exact byte length. It rejects foreign
+roots, changed manifests, duplicated or reordered selections. These aliases
+are not destination filenames: original display labels must remain separate.
+
+This is a compatibility hypothesis, **not actual linked Staya code**. It
+does not compute Staya's `QueueSelection::commitment()`, authenticate the
+offer, prove user consent, pin source files, issue Core grants or start GET.
+Final interop acceptance requires exercising the actual Staya crate and real
+two-process QUIC with only synthetic sources; legacy single-root <=4 MiB
+grants remain incompatible with arbitrary batches.
