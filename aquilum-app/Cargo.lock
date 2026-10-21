@@ -2,6 +2,7 @@
 # It is not intended for manual editing.
 version = 4
 
+# CI-FANOUT-SMOKE: temporary PR-only header note; no locked package data changed.
 [[package]]
 name = "ab_glyph"
 version = "0.2.32"

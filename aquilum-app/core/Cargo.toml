@@ -12,6 +12,7 @@ default = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
+# Routing probe: harmless manifest-only changes must not launch unrelated OS suites.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
