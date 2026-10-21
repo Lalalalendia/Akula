@@ -2,6 +2,8 @@ pub mod active;
 mod agent_principals;
 #[cfg(test)]
 mod agent_disclosure_epoch_lab;
+#[cfg(test)]
+mod akcb_03_composite_lab;
 mod agent_scoped_read;
 mod agent_vault_grants;
 pub mod bridge;
