@@ -36,6 +36,7 @@ jobs:
       shared_lock_risky: ${{ steps.scope.outputs.shared_lock_risky }}
       shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
       shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
+      installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -437,10 +438,11 @@ jobs:
   shared-labs:
     name: Required shared-manifest OS/security route
     needs: classify
-    if: ${{ needs.classify.outputs.shared_any_risky == 'true' }}
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
     uses: ./.github/workflows/ci-shared-manifest-labs.yml
     with:
       core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+      owner: ${{ needs.classify.outputs.installed_owner_owned == 'true' }}
       lib: ${{ needs.classify.outputs.shared_core_lib_risky == 'true' }}
       lock: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
       root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
@@ -461,7 +463,7 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
-          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
           ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail

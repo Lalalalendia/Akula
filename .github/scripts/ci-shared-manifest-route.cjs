@@ -4,6 +4,8 @@ const CORE='aquilum-app/core/Cargo.toml';
 const LOCK='aquilum-app/Cargo.lock';
 const LIB='aquilum-app/core/src/lib.rs';
 const ROOT='aquilum-app/Cargo.toml';
+// Owner-only OS acceptance always runs for its own sources, not for every shared manifest.
+const INSTALLED_OWNER_PATHS=new Set(["aquilum-app/core/src/sync/host_install_unix_root.rs","aquilum-app/core/src/sync/host_install_witness.rs","aquilum-app/core/src/sync/mod.rs","aquilum-app/native/Cargo.toml",".github/workflows/sync-installed-os-owner-witness.yml","docs/sync/adr-0038-unix-root-owned-install-receipt.md"]);
 function changes(diff){
   return String(diff||'').split(/\r?\n/)
     .filter(x=>(x.startsWith('+')&&!x.startsWith('+++'))||(x.startsWith('-')&&!x.startsWith('---')))
@@ -99,8 +101,10 @@ function assess({paths,coreDiff='',lockBefore='',lockAfter='',libDiff=''}){
   const lockRisk=changed.has(LOCK)&&!lockSafe;
   const libRisk=changed.has(LIB)&&!(changed.has(CORE)&&cargo.safe&&libAdditive(libDiff,cargo.features));
   const rootRisk=changed.has(ROOT);
+  const installedOwnerOwned=[...changed].some(p=>INSTALLED_OWNER_PATHS.has(p));
   return {shared_core_cargo_risky:coreRisk,shared_lock_risky:lockRisk,shared_core_lib_risky:libRisk,shared_root_cargo_risky:rootRisk,
-    shared_any_risky:coreRisk||lockRisk||libRisk||rootRisk};
+    shared_any_risky:coreRisk||lockRisk||libRisk||rootRisk,
+    installed_owner_owned:installedOwnerOwned};
 }
 function git(...args){return execFileSync('git',args,{encoding:'utf8',maxBuffer:16*1024*1024});}
 function compute(base,head){
