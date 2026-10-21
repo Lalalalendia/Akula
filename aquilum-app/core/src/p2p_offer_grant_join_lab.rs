@@ -153,9 +153,7 @@ fn fixture() -> (OfferV1, SelectionDraft, StoredPullShape, LocalClaims) {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selection) = session
-        .resolve(&decision, offer.receiver, NOW + 1)
-        .unwrap()
+    let Outcome::Selected(selection) = session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
     else {
         panic!("expected selection");
     };
@@ -204,8 +202,7 @@ fn batch_selection_fails_old_one_object_grant_model() {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selected) = session.resolve(&d, offer.receiver, NOW + 1).unwrap()
-    else {
+    let Outcome::Selected(selected) = session.resolve(&d, offer.receiver, NOW + 1).unwrap() else {
         panic!("expected selection");
     };
     assert_eq!(
@@ -231,8 +228,7 @@ fn greater_than_four_megabytes_cannot_be_mapped() {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selected) = session.resolve(&d, offer.receiver, NOW + 1).unwrap()
-    else {
+    let Outcome::Selected(selected) = session.resolve(&d, offer.receiver, NOW + 1).unwrap() else {
         panic!("expected selection");
     };
     assert_eq!(
@@ -436,9 +432,7 @@ fn unicode_and_long_display_names_use_stable_ascii_transport_aliases() {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selection) = session
-        .resolve(&decision, offer.receiver, NOW + 1)
-        .unwrap()
+    let Outcome::Selected(selection) = session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
     else {
         panic!("expected selected draft");
     };
@@ -495,9 +489,7 @@ fn selecting_only_second_object_projects_no_unselected_root() {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selected) = session
-        .resolve(&decision, offer.receiver, NOW + 1)
-        .unwrap()
+    let Outcome::Selected(selected) = session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
     else {
         panic!("expected selected draft");
     };
@@ -524,9 +516,7 @@ fn projection_does_not_reduce_legacy_grant_limits_or_create_authority() {
         .unwrap();
     let mut session =
         OfferSession::new_sender(offer.clone(), NOW, offer.sender, offer.receiver).unwrap();
-    let Outcome::Selected(selected) = session
-        .resolve(&decision, offer.receiver, NOW + 1)
-        .unwrap()
+    let Outcome::Selected(selected) = session.resolve(&decision, offer.receiver, NOW + 1).unwrap()
     else {
         panic!("expected selected draft");
     };
