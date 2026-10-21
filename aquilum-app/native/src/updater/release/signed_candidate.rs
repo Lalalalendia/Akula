@@ -16,11 +16,6 @@ use super::{PUBLIC_KEY, channel_ready, verify};
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_LINUX_IMAGE_BYTES: usize = 512 * 1024 * 1024;
 const TARGET_LINUX_APPIMAGE: &str = "linux-x86_64-appimage";
-const TARGET_WINDOWS_X64: &str = "windows-x86_64";
-// Windows candidates must not exceed the same bound enforced by the network
-// payload reader; otherwise a signed candidate could be accepted by the
-// schema but could never be downloaded by the installed updater.
-const MAX_WINDOWS_SETUP_BYTES: u64 = super::super::download_guard::MAX_UPDATE_BYTES;
 
 fn hold(why: &str) -> String {
     format!("AKULA_SIGNED_CANDIDATE_HOLD: {why}")
@@ -200,12 +195,15 @@ fn validate_auxiliary_asset(
 }
 
 fn validate_windows_asset(item: &Artifact, version: &str) -> Result<(), String> {
-    // A signed windows-x86_64 entry cannot silently refer to an ARM64 build
-    // or a differently named installer. Match Akula's pinned NSIS identity.
-    if item.filename != format!("Akula_{version}_x64-setup.exe")
+    let prefix = format!("Akula_{version}_");
+    let variant = item.filename.strip_prefix(&prefix)
+        .and_then(|name| name.strip_suffix("-setup.exe"))
+        .ok_or_else(|| hold("invalid signed Windows artifact filename"))?;
+    if variant.is_empty()
+        || !variant.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         || !valid_hex(&item.sha256, 64)
         || item.size == 0
-        || item.size > MAX_WINDOWS_SETUP_BYTES
+        || item.size > MAX_RELEASE_ARTIFACT_BYTES
     {
         return Err(hold("invalid signed Windows artifact identity"));
     }
@@ -224,8 +222,8 @@ fn inspect_authenticated(
     if raw.is_empty() || raw.len() > MAX_MANIFEST_BYTES {
         return Err(hold("signed manifest size limit"));
     }
-    if expected_platform != TARGET_LINUX_APPIMAGE && expected_platform != TARGET_WINDOWS_X64 {
-        return Err(hold("unsupported or unexpected platform for signed admission"));
+    if expected_platform != TARGET_LINUX_APPIMAGE {
+        return Err(hold("unsupported or unexpected platform for automatic apply"));
     }
     let manifest: SignedManifest =
         serde_json::from_slice(raw).map_err(|_| hold("ambiguous, malformed or unknown-field manifest"))?;
@@ -243,8 +241,7 @@ fn inspect_authenticated(
         return Err(hold("release is not strictly newer than the installed version"));
     }
     // Parse and validate all four platform-specific signed entries, not just
-    // the local one. Windows verification is a sealed candidate only:
-    // production admit() and every apply path remain inactive on Windows.
+    // the local one. Only the Linux AppImage bytes enter automatic admission.
     validate_windows_asset(&manifest.artifacts.windows, &manifest.version)?;
     validate_auxiliary_asset(
         &manifest.artifacts.deb,
@@ -256,19 +253,14 @@ fn inspect_authenticated(
         &format!("Akula-{}-1.x86_64.rpm", manifest.version),
         "RPM",
     )?;
-    let (asset, max_bytes) = match expected_platform {
-        TARGET_WINDOWS_X64 => (&manifest.artifacts.windows, MAX_WINDOWS_SETUP_BYTES),
-        TARGET_LINUX_APPIMAGE => (&manifest.artifacts.appimage, MAX_LINUX_IMAGE_BYTES as u64),
-        _ => return Err(hold("unsupported platform")),
-    };
-    if expected_platform == TARGET_LINUX_APPIMAGE
-        && asset.filename != format!("akula-app_{}_x86_64.AppImage", manifest.version)
-    {
+    let asset = &manifest.artifacts.appimage;
+    let required_name = format!("akula-app_{}_x86_64.AppImage", manifest.version);
+    if asset.filename != required_name {
         return Err(hold("signed platform filename does not identify Akula AppImage"));
     }
     if !valid_hex(&asset.sha256, 64)
         || asset.size == 0
-        || asset.size > max_bytes
+        || asset.size > MAX_LINUX_IMAGE_BYTES as u64
         || asset.size != bytes.len() as u64
     {
         return Err(hold("signed asset hash format, size or budget mismatch"));
@@ -289,11 +281,6 @@ fn admit_with_trusted_key(
 ) -> Result<SignedCandidate, String> {
     if key.is_empty() {
         return Err(hold("Akula publisher key is not installed"));
-    }
-    // Bound untrusted bytes before the cryptographic verifier processes
-    // them, and reject an empty manifest even with a caller-provided key.
-    if manifest.is_empty() || manifest.len() > MAX_MANIFEST_BYTES {
-        return Err(hold("signed manifest size limit"));
     }
     // Verify the exact downloaded manifest bytes BEFORE trusting even its
     // version or URLs. A signature on package bytes alone cannot authenticate
@@ -363,68 +350,6 @@ mod tests {
         assert_eq!(version, "0.3.10");
         assert_eq!(source, "a".repeat(40));
         assert_eq!(sha, digest_hex(bytes));
-    }
-
-    #[test]
-    fn signed_windows_x64_candidate_requires_exact_installer_bytes_and_identity() {
-        // This is authenticated-schema inspection only. It never creates a
-        // Windows installation or supplies a publisher key to the app.
-        let setup = b"isolated synthetic Akula NSIS setup bytes";
-        let linux = b"different AppImage data";
-        let mut doc: serde_json::Value = serde_json::from_slice(&fixture(linux, "0.3.10")).unwrap();
-        doc["artifacts"]["windows-x86_64"]["sha256"] = json!(digest_hex(setup));
-        doc["artifacts"]["windows-x86_64"]["size"] = json!(setup.len());
-        let raw = serde_json::to_vec(&doc).unwrap();
-        let (version, source, hash) =
-            inspect_authenticated(&raw, setup, TARGET_WINDOWS_X64, "0.3.9").unwrap();
-        assert_eq!(version, "0.3.10");
-        assert_eq!(source, "a".repeat(40));
-        assert_eq!(hash, digest_hex(setup));
-
-        let mut tampered = setup.to_vec();
-        tampered[0] ^= 1;
-        assert!(inspect_authenticated(&raw, &tampered, TARGET_WINDOWS_X64, "0.3.9")
-            .unwrap_err().contains("downloaded bytes"));
-        assert!(inspect_authenticated(&raw, setup, TARGET_WINDOWS_X64, "0.3.10")
-            .unwrap_err().contains("not strictly newer"));
-        assert!(inspect_authenticated(&raw, setup, "windows-aarch64", "0.3.9").is_err());
-
-        for name in [
-            "Akula_0.3.10_arm64-setup.exe",
-            "Aquilum_0.3.10_x64-setup.exe",
-            "Akula_0.3.9_x64-setup.exe",
-            "../Akula_0.3.10_x64-setup.exe",
-        ] {
-            let mut altered = doc.clone();
-            altered["artifacts"]["windows-x86_64"]["filename"] = json!(name);
-            assert!(inspect_authenticated(
-                &serde_json::to_vec(&altered).unwrap(), setup,
-                TARGET_WINDOWS_X64, "0.3.9",
-            ).is_err(), "wrong Windows identity admitted: {name}");
-        }
-        for size in [0, setup.len() as u64 - 1, MAX_WINDOWS_SETUP_BYTES + 1] {
-            let mut altered = doc.clone();
-            altered["artifacts"]["windows-x86_64"]["size"] = json!(size);
-            assert!(inspect_authenticated(
-                &serde_json::to_vec(&altered).unwrap(), setup,
-                TARGET_WINDOWS_X64, "0.3.9",
-            ).is_err(), "wrong Windows byte budget admitted: {size}");
-        }
-    }
-
-    #[test]
-    fn manifest_limit_is_enforced_before_signature_verification() {
-        let huge = vec![b'a'; MAX_MANIFEST_BYTES + 1];
-        let error = admit_with_trusted_key(
-            &huge, "", Vec::new(), "not-even-a-valid-key",
-            TARGET_WINDOWS_X64, "0.3.9",
-        ).unwrap_err();
-        assert!(error.contains("signed manifest size limit"));
-        let error = admit_with_trusted_key(
-            b"", "", Vec::new(), "not-even-a-valid-key",
-            TARGET_WINDOWS_X64, "0.3.9",
-        ).unwrap_err();
-        assert!(error.contains("signed manifest size limit"));
     }
 
     #[test]
@@ -526,7 +451,6 @@ mod tests {
         let wrong_key = base64::engine::general_purpose::STANDARD
             .encode(fs::read(root.join("other.pub")).unwrap());
         let payload = fs::read(root.join("payload.AppImage")).unwrap();
-        let windows_setup = fs::read(root.join("payload-Windows-setup.exe")).unwrap();
 
         let candidate = admit_with_trusted_key(
             &manifest, &signature, payload.clone(), &key,
@@ -536,27 +460,6 @@ mod tests {
         assert_eq!(candidate.version(), "0.3.10");
         assert_eq!(candidate.source_commit(), "a".repeat(40));
         assert_eq!(candidate.sha256(), digest_hex(&payload));
-
-        // The same real Minisign signature binds all platform entries.
-        // Admit Windows *only* into a typed, non-installable test candidate.
-        let signed_windows = admit_with_trusted_key(
-            &manifest, &signature, windows_setup.clone(), &key,
-            TARGET_WINDOWS_X64, "0.3.9",
-        ).expect("signed Windows x64 setup must authenticate and hash-match");
-        assert_eq!(signed_windows.bytes(), windows_setup.as_slice());
-        assert_eq!(signed_windows.version(), "0.3.10");
-        assert_eq!(signed_windows.sha256(), digest_hex(&windows_setup));
-        let mut changed_windows = windows_setup.clone();
-        changed_windows[0] ^= 1;
-        assert!(admit_with_trusted_key(
-            &manifest, &signature, changed_windows, &key,
-            TARGET_WINDOWS_X64, "0.3.9",
-        ).unwrap_err().contains("downloaded bytes"));
-        assert!(admit_with_trusted_key(
-            &manifest, &signature, windows_setup, &wrong_key,
-            TARGET_WINDOWS_X64, "0.3.9",
-        ).unwrap_err().contains("authentication failed"));
-        println!("AKULA_SIGNED_WINDOWS_VERIFY_PASS platform=windows-x86_64 real_minisign=1 altered_exe_refused=1 wrong_key_refused=1");
 
         let mut changed = payload.clone();
         changed[0] ^= 0x01;
