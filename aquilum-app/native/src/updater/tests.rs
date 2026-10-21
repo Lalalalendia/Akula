@@ -13,7 +13,8 @@ fn versions_compare_numerically() {
 #[test]
 fn no_upstream_update_channel_is_available() {
     assert_eq!(ENDPOINT, "https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json");
-    assert!(PUBLIC_KEY.is_empty(), "an Akula signing key must be provisioned separately");
+    assert!(!PUBLIC_KEY.is_empty(), "owner-pinned Akula public key must be compiled in");
+    assert!(!channel_ready(), "key provisioning alone must not authorize an update");
     assert!(!channel_ready());
     assert!(!available(), "installed builds must not offer an upstream Aquilum update");
 }
