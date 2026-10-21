@@ -15,9 +15,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     environment: akula-release
-    env:
-      CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
-      CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,14 +27,6 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_REF" = 'refs/heads/main'
-          test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" || {
-            echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY in the protected akula-release environment"
-            exit 1
-          }
-          test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD:-}" || {
-            echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD in the protected akula-release environment"
-            exit 1
-          }
           node - <<'NODE'
           const fs=require('fs');
           const file=fs.readFileSync('aquilum-app/native/src/updater/release.rs','utf8');
@@ -62,9 +51,20 @@ jobs:
 
       - name: Prove installed Akula private key actually signs
         shell: bash
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
+            test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY:-}" || {
+              echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY in the protected akula-release environment"
+              exit 1
+            }
+            test -n "${CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD:-}" || {
+              echo "::error title=Missing secret::Set CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD in the protected akula-release environment"
+              exit 1
+            }
           printf 'AKULA-PUBLISHER-OWNER-KEY-V1\n%s\n%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/challenge.txt"
           cargo packager signer sign "$RUNNER_TEMP/challenge.txt"
           test -s "$RUNNER_TEMP/challenge.txt.sig"
