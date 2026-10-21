@@ -21,3 +21,20 @@ jobs:
       - name: Compile and test API protocol
         working-directory: aquilum-app
         run: cargo test -p aquilum-core --locked --features notion-api-probe notion_api_probe -- --nocapture
+      - name: Compile read-only Notion CLI
+        working-directory: aquilum-app
+        run: cargo build -p aquilum-core --locked --features notion-api-probe --bin akula-notion-api-probe
+      - name: Refuse unconfigured CLI without network or output files
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(mktemp)"
+          error="$(mktemp)"
+          trap 'rm -f "$output" "$error"' EXIT
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe --bin akula-notion-api-probe -- >"$output" 2>"$error"; then
+            echo "CLI unexpectedly accepted missing root" >&2
+            exit 1
+          fi
+          test ! -s "$output"
+          grep -q "explicit-authorized-root-uuid" "$error"
