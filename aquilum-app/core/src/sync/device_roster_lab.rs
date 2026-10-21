@@ -140,8 +140,7 @@ impl ObservedDevice {
 
     /// UI hint only, not a peer authentication token.
     pub fn display_fingerprint(&self) -> [u8; 32] {
-        let mut hash =
-            blake3::Hasher::new_derive_key("Akula/STY-DEVICE-01a/device-fingerprint/v1");
+        let mut hash = blake3::Hasher::new_derive_key("Akula/STY-DEVICE-01a/device-fingerprint/v1");
         hash.update(&self.device_public_key);
         *hash.finalize().as_bytes()
     }
@@ -252,7 +251,10 @@ mod tests {
         assert_eq!(observed.epoch(), 8);
         assert_eq!(observed.devices().len(), 1);
         assert_eq!(observed.devices()[0].status(), RosterStatus::RecordedOnly);
-        assert_eq!(observed.devices()[0].device_id(), roster.devices[0].device_id);
+        assert_eq!(
+            observed.devices()[0].device_id(),
+            roster.devices[0].device_id
+        );
         assert_eq!(observed.devices()[0].endpoint_public_key(), [3; 32]);
         assert_ne!(observed.devices()[0].display_fingerprint(), [0; 32]);
     }
@@ -262,16 +264,28 @@ mod tests {
         let (roster, pinned) = fixture();
         let mut changed = roster.clone();
         changed.devices[0].device_public_key = [4; 32];
-        assert_eq!(inspect_signed_roster(&changed, &pinned), Err(RosterError::InvalidSignature));
+        assert_eq!(
+            inspect_signed_roster(&changed, &pinned),
+            Err(RosterError::InvalidSignature)
+        );
         let mut changed = roster.clone();
         changed.devices[0].endpoint_public_key = [5; 32];
-        assert_eq!(inspect_signed_roster(&changed, &pinned), Err(RosterError::InvalidSignature));
+        assert_eq!(
+            inspect_signed_roster(&changed, &pinned),
+            Err(RosterError::InvalidSignature)
+        );
         let mut changed = roster.clone();
         changed.devices[0].status = RosterStatus::Revoked;
-        assert_eq!(inspect_signed_roster(&changed, &pinned), Err(RosterError::InvalidSignature));
+        assert_eq!(
+            inspect_signed_roster(&changed, &pinned),
+            Err(RosterError::InvalidSignature)
+        );
         let mut changed = roster;
         changed.epoch += 1;
-        assert_eq!(inspect_signed_roster(&changed, &pinned), Err(RosterError::InvalidSignature));
+        assert_eq!(
+            inspect_signed_roster(&changed, &pinned),
+            Err(RosterError::InvalidSignature)
+        );
     }
 
     #[test]
@@ -279,16 +293,28 @@ mod tests {
         let (roster, pinned) = fixture();
         let mut other = pinned;
         other.owner_public_key = owner(12).public_key().as_ref().try_into().unwrap();
-        assert_eq!(inspect_signed_roster(&roster, &other), Err(RosterError::InvalidSignature));
+        assert_eq!(
+            inspect_signed_roster(&roster, &other),
+            Err(RosterError::InvalidSignature)
+        );
         let mut other = pinned;
         other.vault_id = VaultId::new();
-        assert_eq!(inspect_signed_roster(&roster, &other), Err(RosterError::WrongVault));
+        assert_eq!(
+            inspect_signed_roster(&roster, &other),
+            Err(RosterError::WrongVault)
+        );
         let mut other = pinned;
         other.witnessed_min_epoch = 9;
-        assert_eq!(inspect_signed_roster(&roster, &other), Err(RosterError::Rollback));
+        assert_eq!(
+            inspect_signed_roster(&roster, &other),
+            Err(RosterError::Rollback)
+        );
         let mut other = pinned;
         other.witnessed_min_epoch = 0;
-        assert_eq!(inspect_signed_roster(&roster, &other), Err(RosterError::MissingIndependentPin));
+        assert_eq!(
+            inspect_signed_roster(&roster, &other),
+            Err(RosterError::MissingIndependentPin)
+        );
     }
 
     #[test]
@@ -296,13 +322,19 @@ mod tests {
         let (roster, pinned) = fixture();
         let mut duplicate = roster.clone();
         duplicate.devices.push(duplicate.devices[0].clone());
-        assert_eq!(inspect_signed_roster(&duplicate, &pinned), Err(RosterError::AmbiguousIdentity));
+        assert_eq!(
+            inspect_signed_roster(&duplicate, &pinned),
+            Err(RosterError::AmbiguousIdentity)
+        );
         let mut collision = roster.clone();
         let mut second = collision.devices[0].clone();
         second.device_id = DeviceId::new();
         collision.devices.push(second);
         collision.devices.sort_by_key(|item| item.device_id);
-        assert_eq!(inspect_signed_roster(&collision, &pinned), Err(RosterError::AmbiguousIdentity));
+        assert_eq!(
+            inspect_signed_roster(&collision, &pinned),
+            Err(RosterError::AmbiguousIdentity)
+        );
         let mut huge = roster;
         huge.devices = (0..=MAX_ROSTER_DEVICES)
             .map(|_| ClaimedDevice {
@@ -312,7 +344,10 @@ mod tests {
                 status: RosterStatus::RecordedOnly,
             })
             .collect();
-        assert_eq!(inspect_signed_roster(&huge, &pinned), Err(RosterError::Oversize));
+        assert_eq!(
+            inspect_signed_roster(&huge, &pinned),
+            Err(RosterError::Oversize)
+        );
     }
 
     #[test]
@@ -323,7 +358,13 @@ mod tests {
         let revoked = sign(roster, &owner(11));
         let observed = inspect_signed_roster(&revoked, &pinned).unwrap();
         assert_eq!(observed.devices()[0].status(), RosterStatus::Revoked);
-        let later = IndependentlyPinnedOwner { witnessed_min_epoch: 10, ..pinned };
-        assert_eq!(inspect_signed_roster(&revoked, &later), Err(RosterError::Rollback));
+        let later = IndependentlyPinnedOwner {
+            witnessed_min_epoch: 10,
+            ..pinned
+        };
+        assert_eq!(
+            inspect_signed_roster(&revoked, &later),
+            Err(RosterError::Rollback)
+        );
     }
 }
