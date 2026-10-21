@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/core/src/notion_api_probe.rs'
+      - 'aquilum-app/core/src/bin/akula_notion_api_probe.rs'
       - 'aquilum-app/core/src/notion_api_probe/**'
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
@@ -11,6 +12,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+
+concurrency:
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   read-only-contract:
     runs-on: ubuntu-24.04
