@@ -202,9 +202,9 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         created_unix: now,
         expires_unix: now + 120,
         files: vec![
-            source("Договор / только отображение.txt", &first),
-            source("Не выбран / не отправлять.txt", &forbidden),
-            source("Архив / только отображение.bin", &last),
+            source("Договор — только отображение.txt", &first),
+            source("Не выбран — не отправлять.txt", &forbidden),
+            source("Архив — только отображение.bin", &last),
         ],
     };
     let decision = offer
@@ -276,7 +276,7 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
             .to_string_lossy()
             .starts_with("staya-direct-preview-batch-receiver-"));
         let actual = fs::read(&stage).expect("independent physical readback");
-        assert_eq!(actual, *expected, "verified bytes must match source");
+        assert_eq!(actual.as_slice(), *expected, "verified bytes must match source");
         let manifest = prepared.queue.entries()[slot].manifest;
         assert_eq!(actual.len() as u64, manifest.size);
         assert_eq!(*blake3::hash(&actual).as_bytes(), manifest.id.0);
