@@ -9,6 +9,7 @@ on:
       - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/core/src/sync/mod.rs'
       - 'aquilum-app/core/src/sync/s3_owner_manual_fingerprint_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_owner_review_proposal_lab.rs'
       - 'aquilum-app/core/src/sync/s3_receiver_join_session_lab.rs'
       - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab_tests.rs'
       - '.github/workflows/yc-s3-e3h-owner-manual-review.yml'
@@ -52,6 +53,8 @@ jobs:
           for case_name in \
             sync::s3_owner_manual_fingerprint_lab::tests::full_owner_digest_binds_vault_bucket_pins_quorum_and_challenge \
             sync::s3_owner_manual_fingerprint_lab::tests::duplicate_or_zero_owner_keys_never_form_a_valid_manual_review \
+            sync::s3_owner_review_proposal_lab::tests::proposal_import_does_not_replace_owner_out_of_band_approval \
+            sync::s3_owner_review_proposal_lab::tests::candidate_parser_rejects_untrusted_scope_authority_and_oversize \
             sync::s3_v2_trust_anchor::policy_receipt_lab::tests::independent_fingerprint_mismatch_burns_session_before_yandex_get \
             sync::s3_v2_trust_anchor::policy_receipt_lab::tests::matched_independent_fingerprint_does_not_bypass_owner_signature; do
             grep -F -- "${case_name}: test" e3h-cases.txt
@@ -64,6 +67,9 @@ jobs:
           cargo test --locked -p aquilum-core --no-default-features \
             --features signed-vault-manual-owner-review-lab \
             s3_owner_manual_fingerprint_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-manual-owner-review-lab \
+            s3_owner_review_proposal_lab::tests -- --test-threads=1
           cargo test --locked -p aquilum-core --no-default-features \
             --features signed-vault-manual-owner-review-lab \
             s3_v2_trust_anchor::policy_receipt_lab::tests -- --test-threads=1
