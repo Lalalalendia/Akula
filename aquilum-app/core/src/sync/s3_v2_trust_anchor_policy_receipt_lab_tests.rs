@@ -460,7 +460,6 @@ fn valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build
     assert_eq!(anchored.etag(), "etag-e2b-genesis");
 }
 
-
 #[test]
 fn signed_policy_blocks_legacy_same_root_genesis_and_successor_noop() {
     let f = Fixture::new();
@@ -867,4 +866,332 @@ fn unsigned_successor_cannot_advance_signed_owner_policy_trust() {
         reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(),
         policy_pin,
     );
+}
+
+ 
+// E3d: the already-verified E3c genesis may advance only via the latest
+// durably saved publisher quorum and the pre-existing complete V2 pinned read.
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+fn successor_for(
+    f: &Fixture, previous: &S3PackedHeadV2, label: &str,
+) -> S3PackedHeadV2 {
+    S3PackedHeadV2::new(
+        &f.ns, previous.generation() + 1,
+        OperationId::new(),
+        &blake3::hash(format!("{label}/manifest").as_bytes()).to_hex().to_string(),
+        OperationId::new(),
+        &blake3::hash(format!("{label}/index").as_bytes()).to_hex().to_string(),
+        Some(previous.digest(&f.ns).unwrap()),
+    ).unwrap()
+}
+
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+fn signed_successor_with_pinned_read(
+    j: &mut S3V2TrustedAnchorJournal,
+    f: &Fixture,
+    candidate: &S3PackedHeadV2,
+    predecessor: &S3PackedHeadV2,
+    publisher: &Ed25519KeyPair,
+    claimed_epoch: u64,
+    etag: &str,
+    complete_read: &S3PinnedV2ReadPreview,
+) -> Result<crate::sync::SignedSuccessorOutcome, crate::sync::SignedSuccessorError> {
+    use crate::sync::ROOT_PAYLOAD_TYPE;
+    let bytes = serde_json::to_vec(&json!({
+        "schema": 1,
+        "provider": "yandex-object-storage",
+        "endpoint": "https://storage.yandexcloud.net",
+        "region": "ru-central1",
+        "force_path_style": true,
+        "bucket": f.profile.bucket,
+        "current_head_key": f.ns.current_head_key(),
+        "vault_id": f.ns.vault_id(),
+        "generation": candidate.generation(),
+        "root_blake3": candidate.digest(&f.ns).unwrap(),
+        "previous_root_blake3": predecessor.digest(&f.ns).unwrap(),
+        "policy_epoch": claimed_epoch,
+    })).unwrap();
+    let raw = publisher.sign(&super::super::super::s3_signed_root_paev1::pae(
+        ROOT_PAYLOAD_TYPE.as_bytes(), &bytes,
+    ));
+    let signatures = [DecodedSignature {
+        sig: raw.as_ref(), keyid: Some("untrusted-keyid-hint"),
+    }];
+    j.record_verified_signed_successor(
+        &f.scope, candidate, etag, complete_read,
+        &DecodedDsseEnvelope {
+            payload_type: ROOT_PAYLOAD_TYPE,
+            payload: &bytes,
+            signatures: &signatures,
+        },
+    )
+}
+
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+#[test]
+fn signed_successor_advances_one_generation_idempotently_and_survives_restart() {
+    use crate::sync::SignedSuccessorOutcome;
+
+    let f = Fixture::new();
+    let owner = signer(1);
+    let publisher = signer(99);
+    let genesis = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = genesis.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let mut j = f.open();
+    let genesis_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &genesis, "genesis-etag",
+    );
+    signed_atomic_join(
+        &f, &mut j, &genesis, &policy, &genesis_read, "genesis-etag",
+        &owner, &owner, &root_pin, &policy_pin,
+    ).unwrap();
+    let next = successor_for(&f, &genesis, "valid-gen2");
+    let verified = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &next, "generation2-etag",
+    );
+    assert_eq!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &publisher, 1,
+        "generation2-etag", &verified,
+    ).unwrap(), SignedSuccessorOutcome::Advanced);
+    assert_eq!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &publisher, 1,
+        "generation2-etag", &verified,
+    ).unwrap(), SignedSuccessorOutcome::Unchanged);
+    assert_eq!(j.load(&f.scope).unwrap().unwrap().root(), &next);
+    assert_eq!(j.load(&f.scope).unwrap().unwrap().previous_root(), Some(&genesis));
+    assert_eq!(j.load_publisher_policy(&f.scope).unwrap().unwrap().digest(), policy_pin);
+    drop(j);
+    let mut reopened = f.open();
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &next);
+    let third = successor_for(&f, &next, "valid-gen3");
+    let third_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &third, "generation3-etag",
+    );
+    assert_eq!(signed_successor_with_pinned_read(
+        &mut reopened, &f, &third, &next, &publisher, 1,
+        "generation3-etag", &third_read,
+    ).unwrap(), SignedSuccessorOutcome::Advanced);
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &third);
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().previous_root(), Some(&next));
+    assert_eq!(reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(), policy_pin);
+}
+
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+#[test]
+fn unsigned_wrong_publisher_or_etag_can_never_advance_signed_root() {
+    use crate::sync::{SignedRootError, SignedSuccessorError};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let genesis = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = genesis.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let mut j = f.open();
+    let genesis_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &genesis, "genesis-etag",
+    );
+    signed_atomic_join(&f, &mut j, &genesis, &policy,
+        &genesis_read, "genesis-etag", &owner, &owner,
+        &root_pin, &policy_pin).unwrap();
+    let next = successor_for(&f, &genesis, "candidate");
+    let verified = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &next, "etag-2",
+    );
+    assert!(matches!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &signer(98), 1, "etag-2", &verified,
+    ), Err(SignedSuccessorError::InvalidSignature(SignedRootError::MissingQuorum))));
+    assert!(matches!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &signer(99), 1, "wrong-etag", &verified,
+    ), Err(SignedSuccessorError::InvalidPinnedRead)));
+    assert!(matches!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &signer(99), 2, "etag-2", &verified,
+    ), Err(SignedSuccessorError::InvalidSignature(SignedRootError::WrongScope))));
+    assert_eq!(j.load(&f.scope).unwrap().unwrap().root(), &genesis);
+}
+
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+#[test]
+fn revoked_publisher_signature_is_rechecked_inside_root_transaction() {
+    use crate::sync::{SignedRootError, SignedSuccessorError, SignedSuccessorOutcome};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let new_owner = signer(2);
+    let old_publisher = signer(99);
+    let new_publisher = signer(98);
+    let genesis = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = genesis.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let mut j = f.open();
+    let genesis_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &genesis, "genesis-etag",
+    );
+    signed_atomic_join(&f, &mut j, &genesis, &policy,
+        &genesis_read, "genesis-etag", &owner, &owner,
+        &root_pin, &policy_pin).unwrap();
+    let next = successor_for(&f, &genesis, "revocation-gen2");
+    let verified = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &next, "etag-2",
+    );
+    let mut other = f.open();
+    let rotated_bytes = next_policy(
+        &policy, &[pk(&new_owner)], 1, &[pk(&new_publisher)],
+    );
+    assert_eq!(record(
+        &mut other, &f.scope, &rotated_bytes, &[&owner, &new_owner],
+    ).unwrap(), PolicyReceiptOutcome::Advanced);
+    assert!(matches!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &old_publisher, 1, "etag-2", &verified,
+    ), Err(SignedSuccessorError::InvalidSignature(SignedRootError::MissingQuorum))));
+    assert_eq!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &new_publisher, 2, "etag-2", &verified,
+    ).unwrap(), SignedSuccessorOutcome::Advanced);
+    assert_eq!(other.load(&f.scope).unwrap().unwrap().root(), &next);
+    assert_eq!(other.load_publisher_policy(&f.scope).unwrap().unwrap().policy().epoch(), 2);
+}
+
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+#[test]
+fn two_handles_reject_signed_sibling_fork_and_legacy_root_promotion() {
+    use crate::sync::{SignedSuccessorError, SignedSuccessorOutcome};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let publisher = signer(99);
+    let genesis = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = genesis.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let mut first = f.open();
+    let genesis_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &genesis, "genesis-etag",
+    );
+    signed_atomic_join(&f, &mut first, &genesis, &policy,
+        &genesis_read, "genesis-etag", &owner, &owner,
+        &root_pin, &policy_pin).unwrap();
+    let mut second = f.open();
+    let accepted = successor_for(&f, &genesis, "accepted-gen2");
+    let sibling = successor_for(&f, &genesis, "sibling-fork-gen2");
+    let accepted_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &accepted, "etag-accepted",
+    );
+    let sibling_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &sibling, "etag-fork",
+    );
+    assert_eq!(signed_successor_with_pinned_read(
+        &mut first, &f, &accepted, &genesis, &publisher, 1,
+        "etag-accepted", &accepted_read,
+    ).unwrap(), SignedSuccessorOutcome::Advanced);
+    assert!(matches!(signed_successor_with_pinned_read(
+        &mut second, &f, &sibling, &genesis, &publisher, 1,
+        "etag-fork", &sibling_read,
+    ), Err(SignedSuccessorError::Root(S3V2TrustAnchorError::RollbackOrFork))));
+    assert!(matches!(second.record_verified_successor(
+        &f.scope, &sibling, "etag-fork", &sibling_read,
+    ), Err(S3V2TrustAnchorError::UnverifiedRead)));
+    assert_eq!(second.load(&f.scope).unwrap().unwrap().root(), &accepted);
+}
+
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+#[test]
+fn root_only_policy_missing_cannot_bootstrap_signed_successor() {
+    use crate::sync::SignedSuccessorError;
+    let f = Fixture::new();
+    let mut j = f.with_pinned_root();
+    let genesis = j.load(&f.scope).unwrap().unwrap().root().clone();
+    let next = successor_for(&f, &genesis, "no-policy-gen2");
+    let verified = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &next, "etag-2",
+    );
+    assert!(matches!(signed_successor_with_pinned_read(
+        &mut j, &f, &next, &genesis, &signer(99), 1, "etag-2", &verified,
+    ), Err(SignedSuccessorError::Policy(V2PolicyReceiptError::MissingPolicy))));
+    assert_eq!(j.load(&f.scope).unwrap().unwrap().root(), &genesis);
+}
+
+
+#[cfg(feature = "signed-vault-signed-successor-lab")]
+#[test]
+fn two_distinct_publisher_signatures_required_for_successor_quorum() {
+    use crate::sync::{SignedRootError, SignedSuccessorError, SignedSuccessorOutcome,
+        ROOT_PAYLOAD_TYPE};
+    let f = Fixture::new();
+    let owner = signer(1);
+    let first_publisher = signer(99);
+    let second_publisher = signer(98);
+    let genesis = f.root();
+    let (initial_policy, _) = first_policy(&f, &owner);
+    let mut candidate_policy = serde_json::to_value(&initial_policy).unwrap();
+    candidate_policy["publisher_keys"] = json!([
+        pk(&first_publisher), pk(&second_publisher),
+    ]);
+    candidate_policy["publisher_quorum"] = json!(2);
+    let policy = PublisherPolicyV1::parse_for_review(
+        &serde_json::to_vec(&candidate_policy).unwrap(),
+    ).unwrap();
+    let root_pin = genesis.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let mut journal = f.open();
+    let genesis_read = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &genesis, "etag-genesis",
+    );
+    signed_atomic_join(
+        &f, &mut journal, &genesis, &policy, &genesis_read,
+        "etag-genesis", &owner, &owner, &root_pin, &policy_pin,
+    ).unwrap();
+
+    let successor = successor_for(&f, &genesis, "two-publisher-quorum");
+    let etag = "etag-multi";
+    let preview = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &successor, etag,
+    );
+    let payload = serde_json::to_vec(&json!({
+        "schema": 1,
+        "provider": "yandex-object-storage",
+        "endpoint": "https://storage.yandexcloud.net",
+        "region": "ru-central1",
+        "force_path_style": true,
+        "bucket": f.profile.bucket,
+        "current_head_key": f.ns.current_head_key(),
+        "vault_id": f.ns.vault_id(),
+        "generation": successor.generation(),
+        "root_blake3": successor.digest(&f.ns).unwrap(),
+        "previous_root_blake3": root_pin,
+        "policy_epoch": 1,
+    })).unwrap();
+    let pae = super::super::super::s3_signed_root_paev1::pae(
+        ROOT_PAYLOAD_TYPE.as_bytes(), &payload,
+    );
+    let sig_a = first_publisher.sign(&pae).as_ref().to_vec();
+    let sig_b = second_publisher.sign(&pae).as_ref().to_vec();
+
+    let submit = |journal: &mut S3V2TrustedAnchorJournal, sigs: &[DecodedSignature<'_>]| {
+        journal.record_verified_signed_successor(
+            &f.scope, &successor, etag, &preview,
+            &DecodedDsseEnvelope {
+                payload_type: ROOT_PAYLOAD_TYPE,
+                payload: &payload,
+                signatures: sigs,
+            },
+        )
+    };
+    // Repeating the same cryptographic key under different keyid labels
+    // must NEVER simulate a two-publisher threshold.
+    let duplicated = [
+        DecodedSignature { sig: &sig_a, keyid: Some("owner-one") },
+        DecodedSignature { sig: &sig_a, keyid: Some("owner-two-forged") },
+    ];
+    assert!(matches!(
+        submit(&mut journal, &duplicated),
+        Err(SignedSuccessorError::InvalidSignature(SignedRootError::MissingQuorum))
+    ));
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &genesis);
+
+    let approved = [
+        DecodedSignature { sig: &sig_a, keyid: Some("arbitrary-a") },
+        DecodedSignature { sig: &sig_b, keyid: Some("arbitrary-b") },
+    ];
+    assert_eq!(submit(&mut journal, &approved).unwrap(), SignedSuccessorOutcome::Advanced);
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &successor);
 }

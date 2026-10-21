@@ -1,0 +1,80 @@
+name: YC-S3 E3d signed V2 successor gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3c-atomic-join-20261020
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab_tests.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_signed_successor_lab.rs'
+      - '.github/workflows/yc-s3-e3d-signed-successor.yml'
+      - 'docs/sync/YC-S3-T01d-E3d-signed-successor-lab.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-successor:
+    name: Signed direct V2 successor / read-only trust advancement
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Current publisher quorum, full pinned V2, revocation, fork and rollback
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fail if the E3d feature or its new test was accidentally omitted.
+          primary_test=sync::s3_v2_trust_anchor::policy_receipt_lab::tests::signed_successor_advances_one_generation_idempotently_and_survives_restart
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-signed-successor-lab -- --list |
+            grep -F -- "${primary_test}: test" >/dev/null
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-signed-successor-lab s3_v2_trust_anchor::policy_receipt_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-signed-successor-lab s3_v2_trust_anchor::tests -- --test-threads=1
+      - name: E3b E3a E2a E1 signed identity regression
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-signed-successor-lab s3_join_pinned_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-signed-successor-lab s3_join_genesis_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-signed-successor-lab s3_publisher_policy_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-signed-successor-lab s3_signed_root_paev1::tests -- --test-threads=1
+      - name: Default Core and E2b-only remain isolated
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          # --exact without a full module path silently runs zero tests.
+          case_name=sync::s3_v2_trust_anchor::policy_receipt_lab::tests::valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-receipt-lab -- --list |
+            grep -F -- "${case_name}: test" >/dev/null
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-policy-receipt-lab "$case_name" -- --exact
+          if grep -Eq 'signed-vault-(signed-successor|atomic-join|pinned-join|policy-receipt|pairing)-lab' native/Cargo.toml; then
+            echo 'Trust experiments must not ship in ordinary native application'
+            exit 1
+          fi
