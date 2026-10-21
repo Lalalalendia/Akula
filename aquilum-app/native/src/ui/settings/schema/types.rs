@@ -18,6 +18,8 @@ pub enum Setter {
     Scale,
     HomePage,
     Autostart,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    OwnerReviewCode,
 }
 
 pub struct Context {
