@@ -40,9 +40,13 @@ pub fn prepare_staya_batch(
     authenticated_receiver: PeerBinding,
     now: u64,
 ) -> Result<PreparedBatch, BridgeError> {
-    let mut session =
-        OfferSession::new_sender(offer.clone(), now, authenticated_sender, authenticated_receiver)
-            .map_err(BridgeError::Offer)?;
+    let mut session = OfferSession::new_sender(
+        offer.clone(),
+        now,
+        authenticated_sender,
+        authenticated_receiver,
+    )
+    .map_err(BridgeError::Offer)?;
     let Outcome::Selected(selected) = session
         .resolve(decision, authenticated_receiver, now)
         .map_err(BridgeError::Offer)?
@@ -139,9 +143,7 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aquilum_core::p2p_offer_lab::{
-        DecisionAction, OfferedFile, PeerBinding, SCHEMA,
-    };
+    use aquilum_core::p2p_offer_lab::{DecisionAction, OfferedFile, PeerBinding, SCHEMA};
     use aquilum_core::sync::DeviceId;
     use uuid::Uuid;
 
@@ -202,13 +204,21 @@ mod tests {
         assert_eq!(prepared.queue.entries().len(), 2);
         assert_eq!(prepared.queue.entries()[0].label, "object_00.bin");
         assert_eq!(prepared.queue.entries()[1].label, "object_02.bin");
-        assert_eq!(prepared.queue.entries()[0].manifest.id.0, offer.files[0].blake3_root);
-        assert_eq!(prepared.queue.entries()[1].manifest.id.0, offer.files[2].blake3_root);
-        assert!(prepared
-            .queue
-            .entries()
-            .iter()
-            .all(|file| file.manifest.id.0 != offer.files[1].blake3_root));
+        assert_eq!(
+            prepared.queue.entries()[0].manifest.id.0,
+            offer.files[0].blake3_root
+        );
+        assert_eq!(
+            prepared.queue.entries()[1].manifest.id.0,
+            offer.files[2].blake3_root
+        );
+        assert!(
+            prepared
+                .queue
+                .entries()
+                .iter()
+                .all(|file| file.manifest.id.0 != offer.files[1].blake3_root)
+        );
     }
 
     #[test]
