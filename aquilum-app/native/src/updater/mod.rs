@@ -14,6 +14,12 @@ mod startup_ack;
 #[cfg(target_os = "linux")]
 mod linux_first_gui_ack;
 
+// One-shot kernel-authenticated receiving side, compiled but NOT yet wired to
+// the installed package updater or allowed to authorize a release.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod linux_ack_receiver;
+
 #[cfg(all(target_os = "linux", feature = "installed"))]
 pub(crate) fn on_first_presented_frame() {
     linux_first_gui_ack::on_first_presented_frame();

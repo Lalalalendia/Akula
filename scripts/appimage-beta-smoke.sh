@@ -48,7 +48,10 @@ echo 'AKULA_APPIMAGE_STRUCTURE_PASS apprun=1 own_bin=1 own_desktop=1 upstream_pa
 # -i is critical: without it, bash -s reads EOF and returns success without
 # executing the heredoc, yielding a dangerous false-positive GUI acceptance.
 # pipefail preserves container exit failures when output is captured by tee.
-docker run --rm -i -v "$PWD/dist:/dist:ro" ubuntu:22.04 bash -s -- "/dist/$(basename "$image")" <<'UBUNTU' | tee "$container_log"
+docker run --rm -i \
+  -e GITHUB_ACTIONS=true -e AKULA_DISPOSABLE_ACK_TEST=1 \
+  -v "$PWD/dist:/dist:ro" ubuntu:22.04 \
+  bash -s -- "/dist/$(basename "$image")" <<'UBUNTU' | tee "$container_log"
 set -euo pipefail
 image="$1"
 export DEBIAN_FRONTEND=noninteractive
@@ -225,6 +228,54 @@ grep -Fxq 'AKULA_LINUX_FIRST_GUI_ACK_PASS real_appimage=1 bound_pid=1 nonce=1 di
   exit 1
 }
 echo 'AKULA_LINUX_FIRST_GUI_ACK_PASS real_appimage=1 bound_pid=1 nonce=1 digest=1'
+
+# Third real GUI launch is checked by a Rust supervisor using kernel
+# SCM_CREDENTIALS (actual sender PID/UID/GID), pidfd and the AppImage
+# process tree. This prevents a forged textual PID from counting as ACK.
+test -x /dist/akula-kernel-gui-supervisor
+kernel_log=/tmp/akula-kernel-gui-supervisor.log
+kernel_sha="$(sha256sum "$image" | awk '{print $1}')"
+/dist/akula-kernel-gui-supervisor "$image" "$kernel_sha" \
+  /tmp/vault /tmp/vault/First.md > "$kernel_log" 2>&1 &
+kernel_supervisor_pid=$!
+kernel_window=0
+for attempt in $(seq 1 60); do
+  if wmctrl -l | grep -q 'Akula'; then kernel_window=1; break; fi
+  if ! kill -0 "$kernel_supervisor_pid" 2>/dev/null; then break; fi
+  sleep 0.5
+done
+[[ "$kernel_window" == 1 ]] || {
+  echo 'Kernel-credential real AppImage witness never opened a GUI window' >&2
+  cat "$kernel_log" >&2 || true
+  tail -60 /tmp/akula-native-passcred-child.log >&2 || true
+  exit 1
+}
+kernel_ack=0
+for attempt in $(seq 1 75); do
+  if grep -Fxq 'AKULA_LINUX_KERNEL_REAL_GUI_ACK_RECEIVED' "$kernel_log"; then
+    kernel_ack=1; break
+  fi
+  if ! kill -0 "$kernel_supervisor_pid" 2>/dev/null; then break; fi
+  sleep 0.5
+done
+[[ "$kernel_ack" == 1 ]] || {
+  echo 'Real AppImage ACK was not attributed to the OS sending process' >&2
+  cat "$kernel_log" >&2 || true
+  tail -60 /tmp/akula-native-passcred-child.log >&2 || true
+  exit 1
+}
+wmctrl -c Akula
+wait "$kernel_supervisor_pid"
+grep -Fxq 'AKULA_LINUX_KERNEL_REAL_GUI_ACK_PASS passcred=1 pidfd=1 os_tree=1 nonce=1 digest=1' "$kernel_log"
+[[ "$(sha256sum /tmp/vault/First.md)" == "$original" ]] || {
+  echo 'Kernel-credential GUI ACK mutated the Markdown vault' >&2
+  exit 1
+}
+[[ "$(sha256sum /usr/bin/aquilum-app /usr/share/applications/Aquilum.desktop /tmp/user/.local/share/com.dmitriy.aquilum-app/keep)" == "$witness_before" ]] || {
+  echo 'Kernel-credential GUI ACK changed an Aquilum witness' >&2
+  exit 1
+}
+echo 'AKULA_LINUX_KERNEL_REAL_GUI_ACK_PASS passcred=1 pidfd=1 os_tree=1 nonce=1 digest=1'
 UBUNTU
 
 # An exit code of zero alone does NOT prove the container executed its script.
@@ -232,4 +283,5 @@ UBUNTU
 grep -Fxq 'AKULA_APPIMAGE_GUI_PASS app=Akula isolated_xdg=1 original_note_intact=1' "$container_log"
 grep -Fxq 'AKULA_APPIMAGE_COEXIST_PASS upstream_executable=unchanged upstream_desktop=unchanged upstream_appdata=unchanged' "$container_log"
 grep -Fxq 'AKULA_LINUX_FIRST_GUI_ACK_PASS real_appimage=1 bound_pid=1 nonce=1 digest=1' "$container_log"
+grep -Fxq 'AKULA_LINUX_KERNEL_REAL_GUI_ACK_PASS passcred=1 pidfd=1 os_tree=1 nonce=1 digest=1' "$container_log"
 echo 'AKULA_APPIMAGE_HOST_GATE_PASS child_script_executed=1 gui_and_coexistence_confirmed=1'
