@@ -13,7 +13,7 @@ pub(super) const YANDEX_AWS_PROFILE_DOCS: &str = "https://yandex.cloud/ru/docs/s
 /// YC-S3-T01, UI stage only. A validated draft is NOT authorization, remote
 /// account identity proof, a live S3 HEAD, or permission to start syncing.
 /// Explicitly no field accepts a secret: native TextEditor fields are plaintext.
-pub(super) fn yandex_setup(config: &AppConfig) -> Block {
+pub(super) fn yandex_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.s3_onboarding;
     #[allow(unused_mut)]
     let mut rows = vec![
