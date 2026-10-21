@@ -71,3 +71,18 @@ test('publisher key proof cannot publish, run on PR code or bypass protected env
   assert.match(yaml, /tamper_refused=1 no_release=1/);
   assert.doesNotMatch(yaml, /gh release|create-release|contents:\s*write|upload-artifact|pull_request:|push:/);
 });
+
+
+test('signed Windows candidate uses protected main-only secrets and cannot publish a Release', () => {
+  const yaml = file('.github/workflows/akula-windows-signed-candidate.yml');
+  assert.match(yaml, /^name: Akula Windows signed candidate \(review only\)$/m);
+  assert.match(yaml, /^on:\n  workflow_dispatch:\s*$/m);
+  assert.match(yaml, /^permissions:\n  contents: read$/m);
+  assert.match(yaml, /if: github.ref == 'refs\/heads\/main'/);
+  assert.match(yaml, /environment: akula-release/);
+  assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY/);
+  assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD/);
+  assert.match(yaml, /test-windows-beta\.ps1/);
+  assert.match(yaml, /signed_manifest=1 independent_verify=1 tamper_refused=1 no_release=1/);
+  assert.doesNotMatch(yaml, /gh release|create-release|contents:\s*write|pull_request:|push:/);
+});
