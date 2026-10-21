@@ -16,6 +16,8 @@ mod apply;
 mod bindings;
 mod refresh;
 mod recovery;
+#[cfg(feature = "yandex-owner-review-ui-preview")]
+mod owner_review;
 
 use crate::system;
 use crate::ui::menu::Menu;
