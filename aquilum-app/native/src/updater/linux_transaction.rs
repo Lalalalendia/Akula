@@ -14,13 +14,14 @@ use std::path::{Path, PathBuf};
 const LOCK_NAME: &str = ".akula-appimage-update.lock";
 const PREFIX: &str = ".akula-appimage-update.";
 const RECEIPT: &str = "prepared.v1";
-const CANDIDATE: &str = "candidate.AppImage";
+pub(crate) const CANDIDATE: &str = "candidate.AppImage";
 const PREVIOUS: &str = "previous.AppImage";
 const FAILED: &str = "failed.AppImage";
 const MAX_PAYLOAD: usize = 512 * 1024 * 1024;
 
 const LOCK_EX: i32 = 2;
 const LOCK_NB: i32 = 4;
+const LOCK_UN: i32 = 8;
 unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
 }
@@ -70,14 +71,22 @@ enum Recovery {
     PendingUnacknowledged,
 }
 
-struct Gate {
+pub(crate) struct Gate {
     _lock: File,
     parent: PathBuf,
     active: PathBuf,
 }
 
+// Release the same advisory OS lock explicitly before closing the descriptor.
+// SIGKILL remains covered by kernel fd teardown; no lockfile is unlinked.
+impl Drop for Gate {
+    fn drop(&mut self) {
+        let _ = unsafe { flock(self._lock.as_raw_fd(), LOCK_UN) };
+    }
+}
+
 impl Gate {
-    fn acquire(active: &Path) -> Result<Self, String> {
+    pub(crate) fn acquire(active: &Path) -> Result<Self, String> {
         let name = active.file_name().and_then(OsStr::to_str)
             .ok_or_else(|| bad("invalid installed AppImage filename"))?;
         if !name.starts_with("akula-app_") || !name.ends_with("_x86_64.AppImage")
@@ -165,7 +174,7 @@ impl Gate {
         Ok(())
     }
 
-    fn prepare(&self, nonce: &str, payload: &[u8]) -> Result<PathBuf, String> {
+    pub(crate) fn prepare(&self, nonce: &str, payload: &[u8]) -> Result<PathBuf, String> {
         if !valid_nonce(nonce) || payload.is_empty() || payload.len() > MAX_PAYLOAD {
             return Err(bad("invalid generation or bounded payload"));
         }
@@ -192,7 +201,7 @@ impl Gate {
         Ok(stage)
     }
 
-    fn backup_old(&self, stage: &Path) -> Result<(), String> {
+    pub(crate) fn backup_old(&self, stage: &Path) -> Result<(), String> {
         self.sole_stage(stage)?;
         if !is_real_file(&self.active)? || !is_real_file(&stage.join(CANDIDATE))?
             || is_real_file(&stage.join(PREVIOUS))?
@@ -205,7 +214,7 @@ impl Gate {
         Ok(())
     }
 
-    fn publish_new(&self, stage: &Path) -> Result<(), String> {
+    pub(crate) fn publish_new(&self, stage: &Path) -> Result<(), String> {
         self.sole_stage(stage)?;
         if !is_real_file(&stage.join(PREVIOUS))?
             || !is_real_file(&stage.join(CANDIDATE))?
@@ -248,7 +257,7 @@ impl Gate {
     /// Explicit cold rollback. Caller must independently establish that the
     /// new application has stopped and no generation-bound GUI ACK was issued.
     /// It never deletes the failed candidate; backup survives until final rename.
-    fn rollback_unacknowledged(&self, stage: &Path) -> Result<(), String> {
+    pub(crate) fn rollback_unacknowledged(&self, stage: &Path) -> Result<(), String> {
         self.sole_stage(stage)?;
         if !is_real_file(&stage.join(PREVIOUS))?
             || !is_real_file(&self.active)?
@@ -345,7 +354,13 @@ mod tests {
         assert_eq!(gate.recover().unwrap(), Recovery::Clean);
         assert!(Gate::acquire(&f.app).is_err(), "second independently opened fd must not bypass flock");
         drop(gate);
-        assert!(Gate::acquire(&f.app).is_ok());
+        let reacquired = Gate::acquire(&f.app);
+        assert!(
+            reacquired.is_ok(),
+            "independent Linux fd must reacquire after explicit flock unlock: {:?}",
+            reacquired.as_ref().err()
+        );
+        drop(reacquired);
         f.assert_untouched();
     }
 
