@@ -128,7 +128,7 @@ pub fn publish_approved(
                 let same = usize::try_from(meta.len()).ok()
                     .filter(|size| *size <= MAX_NOTE_BYTES)
                     .and_then(|_| fs::read(&output).ok())
-                    .is_some_and(|bytes| bytes == item.markdown.as_bytes());
+                    .is_some_and(|bytes| bytes.as_slice() == item.markdown.as_bytes());
                 if same {
                     report.existing_untouched.push(item.relative_path.clone());
                 } else {
