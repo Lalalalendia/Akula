@@ -35,6 +35,8 @@ signed-vault-pairing-lab = ["signed-vault-policy-lab"]
 signed-vault-pinned-join-lab = ["signed-vault-pairing-lab", "signed-vault-policy-receipt-lab"]
 # E3c: one protected SQLite root + policy genesis admission, no S3 writer.
 signed-vault-atomic-join-lab = ["signed-vault-pinned-join-lab"]
+# E3d: CURRENT stored publisher quorum plus complete pinned direct successor.
+signed-vault-signed-successor-lab = ["signed-vault-atomic-join-lab"]
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.
