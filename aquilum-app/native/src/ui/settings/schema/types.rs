@@ -36,6 +36,8 @@ pub struct Context {
     pub update: Option<crate::updater::Status>,
     #[cfg(feature = "yandex-owner-review-ui-preview")]
     pub owner_review: Option<crate::ui::settings::owner_review::OwnerReviewView>,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    pub owner_review_notice: Option<&'static str>,
 }
 
 impl Context {
