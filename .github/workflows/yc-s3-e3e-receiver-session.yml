@@ -1,0 +1,72 @@
+name: YC-S3 E3e receiver challenge session lab
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3c-atomic-join-20261020
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/s3_receiver_join_session_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab_tests.rs'
+      - '.github/workflows/yc-s3-e3e-receiver-session.yml'
+      - 'docs/sync/YC-S3-T01d-E3e-receiver-session-lab.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  receiver-session:
+    name: One-shot CSPRNG Vault join / no cloud writes
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Verify one-use challenge test names exist
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-receiver-session-lab -- --list > receiver-tests.txt
+          for name in receiver_session_csprng_nonce_and_one_shot_atomic_join wrong_owner_signature_spends_session_without_any_partial_root expired_foreign_scope_or_changed_challenge_can_never_enroll; do
+            grep -F -- "sync::s3_v2_trust_anchor::policy_receipt_lab::tests::${name}: test" receiver-tests.txt >/dev/null
+          done
+      - name: E3e tests and E3c atomic V2 root policy regressions
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-receiver-session-lab s3_v2_trust_anchor::policy_receipt_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-receiver-session-lab s3_v2_trust_anchor::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-receiver-session-lab s3_join_genesis_lab::tests -- --test-threads=1
+      - name: Default Core remains without E3e or any trust admission feature
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          if grep -Eq 'signed-vault-(receiver-session|atomic-join|pinned-join|pairing|policy-receipt)-lab' native/Cargo.toml; then
+            echo 'The installed Akula native application must never enable research trust enrollment implicitly'
+            exit 1
+          fi

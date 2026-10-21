@@ -322,6 +322,12 @@ mod atomic_join_lab;
 #[cfg(feature = "signed-vault-atomic-join-lab")]
 pub use atomic_join_lab::{AtomicJoinError, AtomicJoinOutcome};
 
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+#[path = "s3_receiver_join_session_lab.rs"]
+mod receiver_join_session_lab;
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+pub use receiver_join_session_lab::{ReceiverJoinSession, ReceiverJoinSessionError};
+
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_policy_receipt_lab_tests.rs"]
 mod tests;

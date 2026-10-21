@@ -152,6 +152,8 @@ pub use s3_v2_trust_anchor::{
 };
 #[cfg(feature = "signed-vault-atomic-join-lab")]
 pub use s3_v2_trust_anchor::{AtomicJoinError, AtomicJoinOutcome};
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+pub use s3_v2_trust_anchor::{ReceiverJoinSession, ReceiverJoinSessionError};
 #[cfg(feature = "sync-s3")]
 pub use s3_v2_trust_anchor::{
     S3V2TrustAnchorError, S3V2TrustAnchorOutcome,
