@@ -10,6 +10,7 @@ description = "Inert Linux B1b0 private staging parity laboratory"
 [workspace]
 
 [dependencies]
+akula-server-release-b1a = { path = "../bootstrap-b1a" }
 blake3 = "1.8.5"
 ring = "0.17.14"
 serde = { version = "1", features = ["derive"] }

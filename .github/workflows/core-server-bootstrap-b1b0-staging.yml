@@ -7,6 +7,7 @@ on:
       - "aquilum-app/core/Cargo.toml"
       - "aquilum-app/core/src/lib.rs"
       - "aquilum-app/core/src/server_release_lab.rs"
+      - "modules/bootstrap-b1a/**"
       - "aquilum-app/core/src/server_staging_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b1b0.rs"
       - "modules/bootstrap-b1b0/**"

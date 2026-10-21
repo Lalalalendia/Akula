@@ -1,12 +1,6 @@
-//! Bootstrap B1b0 parity package: inert Linux-only private staging.
-//!
-//! This experimental crate does not add remote installation or execution.
-//! For now, its B1a dependency is the original Core source, not a second copy.
-//! Production Core remains unchanged until a shared B1a crate exists.
-
+//! Inert B1b0 staging uses the shared, tested B1a signed-release identity.
+//! Production Core remains unchanged until its own compatibility gate passes.
 #[cfg(target_os = "linux")]
-#[path = "../../../aquilum-app/core/src/server_release_lab.rs"]
-pub mod server_release_lab;
-
+pub use akula_server_release_b1a as server_release_lab;
 #[cfg(target_os = "linux")]
 pub mod server_staging_lab;
