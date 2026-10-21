@@ -31,11 +31,31 @@ pub enum QueueAction {
     Remove,
 }
 
+/// Read-only UI classification. These labels never convey Vault/File Gate
+/// entitlement or grant authority to send. A signed owner registry is not
+/// yet connected, so shipping Akula supplies no IdentityChecked rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeviceStatus {
+    Unverified,
+    IdentityChecked,
+    Revoked,
+}
+
+#[derive(Clone, Debug)]
+pub struct DeviceRow {
+    pub index: usize,
+    pub name: String,
+    pub fingerprint: String,
+    pub status: DeviceStatus,
+    pub selected: bool,
+}
+
 pub struct TransferDialog {
     pub layer: WidgetId,
     pub close: WidgetId,
     pub choose: WidgetId,
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
+    pub device_actions: Vec<(WidgetId, usize)>,
 }
 
 fn card_size(room: Size) -> Size {
@@ -66,7 +86,7 @@ fn display_size(bytes: u64) -> String {
 
 /// The only actionable controls modify local drafts or open the local picker.
 /// No button can reach QUIC, File Gate, YDB or any source of peer authority.
-pub fn dialog(rows: &[QueueRow], choosing: bool, error: Option<&str>) -> (NewWidget<Modal>, TransferDialog) {
+pub fn dialog(rows: &[QueueRow], devices: &[DeviceRow], choosing: bool, error: Option<&str>) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
     let choose = NewWidget::new(TextButton::new(
@@ -111,11 +131,43 @@ pub fn dialog(rows: &[QueueRow], choosing: bool, error: Option<&str>) -> (NewWid
         .with(Padding::all(Length::px(size::DIALOG_PADDING))));
     let queue = NewWidget::new(ScrollArea::new(queue));
 
+    let mut device_actions = Vec::new();
     let mut info = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
-        .with_fixed(details(&t("transfer.devices")))
-        .with_fixed(hint(&t("transfer.noDevices")))
-        .with_fixed(hint(&t("transfer.offline")));
+        .with_fixed(details(&t("transfer.devices")));
+    if devices.is_empty() {
+        info = info.with_fixed(hint(&t("transfer.noDevices")));
+    }
+    // Device rows do not initiate transfers. An identity-checked key is not
+    // an owner-signed Vault ACL; selecting it only prepares a UI draft.
+    for device in devices {
+        let state = match device.status {
+            DeviceStatus::Unverified => t("transfer.deviceUnverified"),
+            DeviceStatus::IdentityChecked => t("transfer.deviceIdentityChecked"),
+            DeviceStatus::Revoked => t("transfer.deviceRevoked"),
+        };
+        let name = details(&device.name);
+        let description = hint(&format!("{} · {}", device.fingerprint, state));
+        let labels = NewWidget::new(
+            Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
+                .with_fixed(name).with_fixed(description),
+        );
+        let mut entry = Flex::row().cross_axis_alignment(CrossAxisAlignment::Center)
+            .with(labels, 1.0);
+        if device.status == DeviceStatus::IdentityChecked {
+            let button = NewWidget::new(TextButton::new(
+                if device.selected { t("transfer.deviceSelected") } else { t("transfer.selectDevice") },
+                Variant::Ghost,
+            ));
+            device_actions.push((button.id(), device.index));
+            entry = entry.with_fixed(button);
+        }
+        info = info.with_fixed(NewWidget::new(entry).with_props(
+            PropertySet::new().with(Padding::all(Length::px(size::SPACE_8))),
+        ));
+    }
+    info = info.with_fixed(hint(&t("transfer.deviceSelectionOnly")));
+    info = info.with_fixed(hint(&t("transfer.offline")));
     if let Some(error) = error {
         info = info.with_fixed(hint(error));
     }
@@ -137,7 +189,7 @@ pub fn dialog(rows: &[QueueRow], choosing: bool, error: Option<&str>) -> (NewWid
         .with_fixed(footer));
     let layer = Modal::new(card, &t("transfer.title"), CardSize::Window(card_size), Role::Dialog, false);
     let layer_id = layer.id();
-    (layer, TransferDialog { layer: layer_id, close: close_id, choose: choose_id, actions })
+    (layer, TransferDialog { layer: layer_id, close: close_id, choose: choose_id, actions, device_actions })
 }
 
 #[cfg(test)]

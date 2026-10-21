@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use aquilum_core::sync::DeviceId;
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
@@ -15,6 +16,18 @@ use crate::ui::transfer::{self as transfer_ui, QueueAction};
 use crate::ui::widgets::Pressed;
 
 const MAX_DRAFTS: usize = 32;
+const MAX_DEVICE_ROWS: usize = 32;
+
+/// A display-only identity observation. The first-party owner registry still
+/// needs to supply a verified snapshot. No production path populates this
+/// collection, and neither this struct nor the UI authorizes File Gate writes.
+#[derive(Clone, Debug)]
+pub(super) struct TransferPeer {
+    pub(super) id: DeviceId,
+    pub(super) fingerprint: [u8; 32],
+    pub(super) name: String,
+    pub(super) status: transfer_ui::DeviceStatus,
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct Draft {
@@ -28,6 +41,8 @@ pub(super) struct TransferState {
     pub(super) drafts: Vec<Draft>,
     pub(super) choosing: bool,
     pub(super) error: Option<String>,
+    peers: Vec<TransferPeer>,
+    selected_peer: Option<(DeviceId, [u8; 32])>,
 }
 
 impl TransferState {
@@ -67,6 +82,74 @@ impl TransferState {
         }
     }
 
+    fn choose_peer(&mut self, index: usize) {
+        // Never choose an unknown, revoked or zero-fingerprint identity.
+        self.selected_peer = self.peers.get(index)
+            .filter(|peer| peer.status == transfer_ui::DeviceStatus::IdentityChecked
+                && peer.fingerprint != [0; 32])
+            .map(|peer| (peer.id, peer.fingerprint));
+    }
+
+    fn reconcile_selection(&mut self) {
+        if let Some(binding) = self.selected_peer
+            && !self.peers.iter().any(|peer| {
+                peer.status == transfer_ui::DeviceStatus::IdentityChecked
+                    && peer.fingerprint != [0; 32]
+                    && (peer.id, peer.fingerprint) == binding
+            })
+        {
+            self.selected_peer = None;
+        }
+    }
+
+    /// Synthetic source seam, compiled only in tests. In product builds a
+    /// signed, custody-checked first-party registry adapter is a prerequisite.
+    #[cfg(test)]
+    pub(super) fn apply_test_peer_snapshot(&mut self, peers: Vec<TransferPeer>) {
+        self.peers = peers.into_iter().take(MAX_DEVICE_ROWS)
+            .filter(|peer| !peer.id.as_uuid().is_nil())
+            .collect();
+        // Duplicate identities with conflicting fingerprints are withheld;
+        // no UI selection can authorize a transfer in any case.
+        let mut ambiguous = Vec::new();
+        for (index, peer) in self.peers.iter().enumerate() {
+            if self.peers.iter().any(|other| {
+                other.id == peer.id && other.fingerprint != peer.fingerprint
+            }) {
+                ambiguous.push(index);
+            }
+        }
+        for index in ambiguous {
+            self.peers[index].status = transfer_ui::DeviceStatus::Unverified;
+        }
+        self.reconcile_selection();
+    }
+
+    fn device_rows(&self) -> Vec<transfer_ui::DeviceRow> {
+        self.peers.iter().enumerate().take(MAX_DEVICE_ROWS).map(|(index, peer)| {
+            let name: String = peer.name.chars()
+                .filter(|c| !c.is_control()).take(64).collect();
+            let name = if name.trim().is_empty() {
+                peer.id.to_string()
+            } else {
+                name
+            };
+            // Public-key fingerprints are display metadata, not evidence that
+            // a device is online, allowed to read, or entitled to receive.
+            let fingerprint = peer.fingerprint[..8].iter()
+                .map(|byte| format!("{byte:02x}")).collect::<String>();
+            transfer_ui::DeviceRow {
+                index, name, fingerprint,
+                status: if peer.fingerprint == [0; 32] {
+                    transfer_ui::DeviceStatus::Unverified
+                } else {
+                    peer.status
+                },
+                selected: self.selected_peer == Some((peer.id, peer.fingerprint)),
+            }
+        }).collect()
+    }
+
     fn rows(&self) -> Vec<transfer_ui::QueueRow> {
         self.drafts.iter().enumerate().map(|(index, item)| {
             let raw = item.path.file_name().unwrap_or_default().to_string_lossy();
@@ -88,7 +171,10 @@ impl App {
     }
 
     fn show_transfers(&mut self, root: &mut RenderRoot) {
-        let (layer, dialog) = transfer_ui::dialog(&self.transfer.rows(), self.transfer.choosing, self.transfer.error.as_deref());
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            self.transfer.choosing, self.transfer.error.as_deref(),
+        );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
         self.popup = Some(Popup::Transfers(dialog));
@@ -148,6 +234,11 @@ impl App {
                 QueueAction::Toggle => self.transfer.toggle(*index),
                 QueueAction::Remove => self.transfer.remove(*index),
             }
+            refresh = true;
+        } else if pressed
+            && let Some((_, index)) = dialog.device_actions.iter().find(|(button, _)| *button == id)
+        {
+            self.transfer.choose_peer(*index);
             refresh = true;
         }
         self.popup = Some(Popup::Transfers(dialog));
