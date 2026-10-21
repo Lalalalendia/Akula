@@ -7,11 +7,13 @@ on:
       - 'aquilum-app/core/src/messaging/**'
       - 'docs/messaging/**'
       - '.github/workflows/messaging-trust-ledger.yml'
-  push:
-    branches: ['feature/akula-messaging-trust-ledger-20261021']
 
 permissions:
   contents: read
+
+concurrency:
+  group: akula-msg-trust-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   trust-registry:
