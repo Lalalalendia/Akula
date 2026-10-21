@@ -17,7 +17,7 @@ fn list(results: Vec<Value>, more: bool, cursor: Option<&str>) -> Value {
 fn simple() -> Fake {
     Fake { replies: VecDeque::from([
         (ReadRequest::Page(A.into()),json!({"object":"page","id":A,"properties":{}})),
-        (ReadRequest::Markdown(A.into()), json!({"markdown":"hello","truncated":false,"unknown_block_ids":[]})),
+        (ReadRequest::Markdown(A.into()), json!({"object":"page_markdown","id":A,"markdown":"hello","truncated":false,"unknown_block_ids":[],"warnings":[]})),
         (ReadRequest::BlockChildren {id:A.into(),cursor:None},list(vec![
             json!({"object":"block","id":B,"type":"paragraph","has_children":false,
                 "paragraph":{"rich_text":[{"type":"mention","mention":{"type":"page","page":{"id":A}}}]}})
@@ -62,7 +62,7 @@ fn relation_property_fetches_first_page_once() {
         (ReadRequest::Page(A.into()),json!({"object":"page","id":A,"properties":{"Rel":{"type":"relation","id":prop}}})),
         (ReadRequest::PageProperty{page:A.into(),property:prop.into(),cursor:None},
             list(vec![json!({"object":"property_item","type":"relation","relation":{"id":B}})],false,None)),
-        (ReadRequest::Markdown(A.into()),json!({"markdown":"","truncated":false,"unknown_block_ids":[]})),
+        (ReadRequest::Markdown(A.into()),json!({"object":"page_markdown","id":A,"markdown":"","truncated":false,"unknown_block_ids":[],"warnings":[]})),
         (ReadRequest::BlockChildren{id:A.into(),cursor:None},list(vec![],false,None)),
     ])};
     let report=inspect_root(&mut c,A,ProbeLimits::default()).unwrap();
@@ -72,7 +72,7 @@ fn relation_property_fetches_first_page_once() {
 #[test]
 fn unrecognized_partial_markdown_is_reported() {
     let mut c=simple();
-    c.replies.get_mut(1).unwrap().1=json!({"markdown":"partial","truncated":true,"unknown_block_ids":[B]});
+    c.replies.get_mut(1).unwrap().1=json!({"object":"page_markdown","id":A,"markdown":"partial","truncated":true,"unknown_block_ids":[B],"warnings":[]});
     let report=inspect_root(&mut c,A,ProbeLimits::default()).unwrap();
     assert_eq!(report.warnings.len(),2);
     assert!(!report.root_traversal_complete);
@@ -85,7 +85,7 @@ fn relation_edge_preserves_stable_property_id() {
         (ReadRequest::Page(A.into()),json!({"object":"page","id":A,"properties":{"Связь":{"type":"relation","id":"X%3Aa"}}})),
         (ReadRequest::PageProperty{page:A.into(),property:"X%3Aa".into(),cursor:None},
             list(vec![json!({"object":"property_item","type":"relation","relation":{"id":B}})],false,None)),
-        (ReadRequest::Markdown(A.into()),json!({"markdown":"","truncated":false,"unknown_block_ids":[]})),
+        (ReadRequest::Markdown(A.into()),json!({"object":"page_markdown","id":A,"markdown":"","truncated":false,"unknown_block_ids":[],"warnings":[]})),
         (ReadRequest::BlockChildren{id:A.into(),cursor:None},list(vec![],false,None)),
     ])};
     let report=inspect_root(&mut c,A,ProbeLimits::default()).unwrap();
@@ -134,7 +134,7 @@ fn relation_26_targets_cross_page_preserves_identity_without_claiming_completion
         (ReadRequest::PageProperty {page:A.into(),property:PROPERTY.into(),cursor:Some("page-2".into())},
             list(second,false,None)),
         (ReadRequest::Markdown(A.into()),
-            json!({"markdown":"fixture","truncated":false,"unknown_block_ids":[]})),
+            json!({"object":"page_markdown","id":A,"markdown":"fixture","truncated":false,"unknown_block_ids":[],"warnings":[]})),
         (ReadRequest::BlockChildren {id:A.into(),cursor:None},list(vec![],false,None)),
     ]) };
     let report = inspect_root(&mut client,A,ProbeLimits::default()).unwrap();
@@ -169,7 +169,7 @@ fn two_linked_databases_with_multiple_views_preserve_schema_and_relation() {
         (ReadRequest::Page(ROOT.into()),
             json!({"object":"page","id":ROOT,"properties":{}})),
         (ReadRequest::Markdown(ROOT.into()),
-            json!({"markdown":"root","truncated":false,"unknown_block_ids":[]})),
+            json!({"object":"page_markdown","id":ROOT,"markdown":"root","truncated":false,"unknown_block_ids":[],"warnings":[]})),
         (ReadRequest::BlockChildren {id:ROOT.into(),cursor:None},
             list(vec![
                 json!({"object":"block","id":DB_A,"type":"child_database","has_children":false}),
@@ -211,11 +211,11 @@ fn two_linked_databases_with_multiple_views_preserve_schema_and_relation() {
         (ReadRequest::PageProperty {page:ROW_A.into(),property:REL.into(),cursor:None},
             list(vec![json!({"object":"property_item","type":"relation","relation":{"id":ROW_B}})],false,None)),
         (ReadRequest::Markdown(ROW_A.into()),
-            json!({"markdown":"row A","truncated":false,"unknown_block_ids":[]})),
+            json!({"object":"page_markdown","id":ROW_A,"markdown":"row A","truncated":false,"unknown_block_ids":[],"warnings":[]})),
         (ReadRequest::Page(ROW_B.into()),
             json!({"object":"page","id":ROW_B,"properties":{"Status":{"type":"select"}}})),
         (ReadRequest::Markdown(ROW_B.into()),
-            json!({"markdown":"row B","truncated":false,"unknown_block_ids":[]})),
+            json!({"object":"page_markdown","id":ROW_B,"markdown":"row B","truncated":false,"unknown_block_ids":[],"warnings":[]})),
         (ReadRequest::BlockChildren {id:ROW_A.into(),cursor:None},list(vec![],false,None)),
         (ReadRequest::BlockChildren {id:ROW_B.into(),cursor:None},list(vec![],false,None)),
     ]) };
@@ -239,4 +239,22 @@ fn two_linked_databases_with_multiple_views_preserve_schema_and_relation() {
     assert_eq!(source.json.pointer("/properties/Linked tests/relation/data_source_id")
         .and_then(Value::as_str),Some(DS_B));
     assert!(client.replies.is_empty());
+}
+
+#[test]
+fn markdown_identity_mismatch_is_rejected() {
+    let mut client = simple();
+    client.replies.get_mut(1).unwrap().1["id"] = json!(B);
+    assert!(inspect_root(&mut client,A,ProbeLimits::default())
+        .unwrap_err().contains("markdown page ID mismatch"));
+}
+
+#[test]
+fn markdown_warnings_block_complete_root_claim() {
+    let mut client = simple();
+    client.replies.get_mut(1).unwrap().1["warnings"] =
+        json!([{"code":"unsupported_block","message":"content not represented"}]);
+    let report = inspect_root(&mut client,A,ProbeLimits::default()).unwrap();
+    assert!(!report.root_traversal_complete);
+    assert!(report.warnings.iter().any(|x| x.contains("markdown warnings")));
 }
