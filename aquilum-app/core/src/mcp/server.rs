@@ -1314,6 +1314,21 @@ mod tests {
             "SCOPED_AGENT_A_ONLY"
         );
 
+        // An opened root must not authorize a replacement at the old path.
+        // Windows may permit or refuse rename despite a pinned HANDLE.
+        let renamed = dir.path().join("X-renamed");
+        if fs::rename(&x, &renamed).is_ok() {
+            fs::create_dir(&x).unwrap();
+            fs::write(x.join("note.md"), "SUBSTITUTED_UNTRUSTED_BYTES").unwrap();
+            let substituted = read(&url, key_a.as_str(), receipt_x.vault_id(), "note.md");
+            assert_eq!(substituted["result"]["isError"], true);
+            assert_eq!(
+                substituted["result"]["content"][0]["text"],
+                "MCP_AGENT_SCOPE_DENIED"
+            );
+            assert!(!substituted.to_string().contains("SUBSTITUTED_UNTRUSTED_BYTES"));
+        }
+
         // Previously successful HTTP tokens must not survive grant revoke.
         let epoch = grant_store
             .lock()
