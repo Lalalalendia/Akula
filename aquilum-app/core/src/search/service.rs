@@ -27,7 +27,7 @@ pub struct SearchService {
     pub render_lock: Arc<Mutex<()>>,
     pub next_render_epoch: Arc<AtomicU64>,
     next_generation: Arc<AtomicU64>,
-    stopped: Arc<AtomicBool>,
+    pub(super) stopped: Arc<AtomicBool>,
 }
 
 pub struct CachedGraph {
