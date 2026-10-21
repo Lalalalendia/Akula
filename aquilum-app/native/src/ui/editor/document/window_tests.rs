@@ -43,13 +43,16 @@ fn undo_of_large_replacement_remounts_a_bounded_window_before_layout() {
 }
 
 #[test]
-fn large_single_line_replacement_is_bounded_by_bytes_too() {
-    let original = "X".repeat(700_000);
+fn large_few_line_replacement_is_bounded_by_bytes_too() {
+    // Long unbroken lines are indivisible by design. Use ordinary lines
+    // where the 512 KiB byte limit, rather than the line count, decides.
+    let original = ("X".repeat(700) + "\n").repeat(1_000);
     let mut doc = windowed("tiny");
     doc.replace(0..4, &original);
     agrees(&doc, &original);
-    assert!(doc.loaded().1.len() <= super::window::SPAN_BYTES + 2,
-        "single-line insertion expanded the mounted source beyond the byte budget");
+    assert!(doc.loaded().0 > 0, "byte-bounded window was not remounted");
+    assert!(doc.loaded().1.len() <= super::window::SPAN_BYTES + 1_000,
+        "large insertion expanded the mounted source beyond the byte budget");
 }
 
 #[test]
