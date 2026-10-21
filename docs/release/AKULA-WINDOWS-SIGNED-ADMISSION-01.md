@@ -1,74 +1,58 @@
-# AKULA-WINDOWS-SIGNED-ADMISSION-01 — authenticate Windows update candidates without installation
+# RELEASE-WINDOWS-APPLY-HOLD-01 — refuse unsafe automatic Windows install
 
-**Status: DRAFT / TEST-ONLY / updater HOLD.** This is a narrow preparation step for
-Akula-to-Akula Windows auto-update, separate from the Linux signed-stage and
-the [Windows beta installer smoke](../../scripts/test-windows-beta.ps1).
+**Status: DRAFT / FAIL-CLOSED / NO RELEASE.**
 
-## Threat boundary
+This PR isolates an existing unsafe compatibility mechanism. The inherited
+Windows `updater::apply(&[u8], before_exit)` wrote a downloaded installer to
+a PID-named directory in the ordinary OS temp location and attempted to
+launch the installer with `/S /R /UPDATE /ARGS`. It had no durable
+prior-generation backup, first-start GUI acknowledgement, or crash rollback.
+The disabled `channel_ready()` gate prevented normal users from invoking it,
+but an accidental release-channel toggle would have exposed that path.
 
-A downloaded NSIS executable or the CI-generated `candidate-manifest.json`
-is **not** a trusted update. An attacker may substitute JSON fields or bytes,
-offer an Aquilum binary, re-label an ARM64 installer as x64, or replay a
-valid but older version. The Windows updater must not grant authority from
-network JSON, a GitHub artifact URL, a filename alone, or an unsigned digest.
+## What is now enforced
 
-## This increment
+- Windows `apply()` **always returns HOLD**, with an actionable error.
+  It does not write an executable, launch a process, end the current app,
+  invoke `before_exit`, or modify Akula/Aquilum data.
+- A Windows-only Rust test invokes this function with synthetic unsigned bytes,
+  confirms `HOLD` and verifies that the pre-exit closure is not called.
+- An independent Windows beta Node policy test checks the source boundary
+  against regression to `ShellExecuteW`, temp installer writes or process
+  exit. The guard accepts both the currently disabled empty publisher key
+  and a separately reviewed pinned public key; **key provisioning must not
+  enable the release channel**.
+- The GitHub release workflow and updater publication channel remain disabled.
 
-The existing private `SignedCandidate` admission layer now understands
-`windows-x86_64` as an independently **verified, inert** candidate:
-- Authenticate the **entire raw publisher manifest** with the pinned-key
-  Minisign verifier before parsing or trusting any release field.
-- Require product `Akula`, supported schema, an exact 40-hex source commit,
-  64-hex `Cargo.lock` digest and a strictly newer numeric release version.
-- Require the Windows platform entry to name exactly
-  `Akula_<version>_x64-setup.exe`. Reject an Aquilum or wrong-architecture
-  setup, traversal path or stale package filename.
-- Check the exact Windows payload's size and SHA-256 against that authenticated
-  entry, with a strict 512-MiB ceiling shared with the network download reader. Continue validating every other signed
-  platform entry, so malformed cross-platform metadata fails closed.
-- Carry the authenticated bytes, version, source revision and digest inside a
-  privately constructible `SignedCandidate`; do not reduce the result to
-  an unlabelled `Vec<u8>` at an eventual Windows staging boundary.
-- Use the **existing** required Linux Rust CI lane with an ephemeral
-  Minisign key generated on the hosted runner. One real detached signature
-  binds *both* independent synthetic AppImage and Windows setup payloads;
-  altered same-size bytes and a different key must fail.
+## Avoid duplicate signing mechanisms
 
-No actual Windows installer is run by this new admission test. The existing
-hosted Windows NSIS GUI tests remain a distinct mandatory acceptance gate.
+The complete signed-candidate, version, platform, manifest and SHA-256 checks
+are being implemented separately in
+[PR #522 — Windows real NSIS upgrade and signed candidate](https://github.com/Lalalalendia/Akula/pull/522).
+The independently owner-provided Minisign public key and protected workflow
+are handled in
+[PR #527 — owner key pinning](https://github.com/Lalalalendia/Akula/pull/527).
 
-## Explicitly NOT unlocked
+Earlier experimental Windows admission work in this branch duplicated #522.
+That duplicate implementation and its CI fixture **were reverted** before
+acceptance. This PR must remain limited to forbidding unsafe install.
 
-- `release::PUBLIC_KEY` is still empty and
-  `release::channel_ready()` remains `false`.
-- Production `signed_candidate::admit()` remains limited to a disabled Linux
-  x86_64 AppImage path. A caller cannot enable Windows update admission through
-  this testing change.
-- `Updater::find()`, `Updater::download()` and the `release.yml`
-  HOLD workflow are unchanged. The **old Windows `apply()` path now returns
-  HOLD unconditionally**, instead of launching the downloaded NSIS installer
-  from a process-specific temp directory. This prevents an accidental channel
-  toggle from bypassing a signed staging and rollback authority. Any future
-  Windows `apply()` implementation must be a separate reviewed transaction
-  with a protected prior-generation backup, a first-GUI acknowledgement
-  and crash-tested automatic rollback.
-- No Akula publisher private key, release, manifest publication, permanent
-  trust root, Authenticode certificate or migration from Aquilum is introduced.
+## Still missing before user-facing Windows auto-update
 
-## Next independent gates before Windows auto-update
+1. The **actual** verified Akula publisher manifest and download must be
+   joined with the exact candidate bytes in the updater (no raw `Vec<u8>`
+   without a typed proof at the installation boundary).
+2. OS-protected staging with a single authoritative lock, package rehash,
+   Akula-only identity and verified destination, durable journal and
+   protected previous version.
+3. Generation-bound first-GUI acknowledgement, reboot/crash detection,
+   **automatic** rollback and tamper-resistant persisted version floor.
+4. Complete Windows 10/11 installed and physical acceptance, separate
+   publisher approval and only then enabling a signed release channel.
 
-1. An Akula publisher key-ceremony and offline signed-release process,
-   a pinned source/lock provenance bundle and a policy-safe monotonic
-   version-floor witness.
-2. Transactionally stage the exact signed Windows installer with rehash and
-   Win32 identity/ACL/symlink protections under a single-instance OS lock;
-   never execute an arbitrary URL or silently overwrite a previous installer.
-3. Prove Akula v1 → v2 on hosted **installed** Windows, including `Ctrl+A`,
-   `Ctrl+V`, `Ctrl+Z` large-document persistence, preserved user data,
-   forced termination during upgrade, first-render ACK and actual rollback.
-4. Real physical Windows 10/11 acceptance, independent security review,
-   explicit release approval and only then enabling a new publisher channel.
+The real two-version NSIS laboratory in #522 proves upgrade compatibility
+and **manual** restoration only. It is not equivalent to crash-safe
+in-application update, and this change does not make it so.
 
-Do **not** treat a green schema or cryptographic test as proof that Windows
-auto-update works today. Related release lock:
-[AKULA-RELEASE-LOCK-01](AKULA-RELEASE-LOCK-01.md).
+The ordinary update flow must fail safely until the missing guarantees are
+implemented and independently verified.
