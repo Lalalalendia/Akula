@@ -1,7 +1,7 @@
 use windows::Win32::Foundation::{HMODULE, HWND, RECT};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_SDK_VERSION,
+    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CPU_ACCESS_WRITE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_SDK_VERSION,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
@@ -23,6 +23,11 @@ pub(super) struct Gpu {
     pub canvas: ID3D11Texture2D,
     pub stale: [Vec<Area>; BUFFERS as usize],
     pub back: usize,
+    /// Whether the staging texture is mapped with explicitly readable CPU memory.
+    pub map_read_write: bool,
+    /// Developer-only experiment; installed builds never read the trial variable.
+    #[cfg(not(feature = "installed"))]
+    pub map_trial: bool,
 }
 
 pub(super) fn capacity(need: u32, have: u32) -> u32 {
@@ -37,7 +42,7 @@ fn device(driver: D3D_DRIVER_TYPE) -> windows::core::Result<(ID3D11Device, ID3D1
     Ok((device.expect("устройство D3D11"), context.expect("контекст D3D11")))
 }
 
-pub(super) fn texture(device: &ID3D11Device, width: u32, height: u32) -> windows::core::Result<ID3D11Texture2D> {
+pub(super) fn texture(device: &ID3D11Device, width: u32, height: u32, map_read_write: bool) -> windows::core::Result<ID3D11Texture2D> {
     let desc = D3D11_TEXTURE2D_DESC {
         Width: width,
         Height: height,
@@ -47,7 +52,8 @@ pub(super) fn texture(device: &ID3D11Device, width: u32, height: u32) -> windows
         SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
         Usage: D3D11_USAGE_STAGING,
         BindFlags: 0,
-        CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
+        CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32
+            | if map_read_write { D3D11_CPU_ACCESS_READ.0 as u32 } else { 0 },
         MiscFlags: 0,
     };
     let mut texture = None;
@@ -63,12 +69,38 @@ pub(super) fn region(a: Area) -> D3D11_BOX {
     D3D11_BOX { left: a.x, top: a.y, front: 0, right: a.x + a.w, bottom: a.y + a.h, back: 1 }
 }
 
+#[cfg(not(feature = "installed"))]
+fn parse_map_trial(value: Option<&str>) -> Result<Option<bool>, &'static str> {
+    match value {
+        None => Ok(None),
+        Some("write") => Ok(Some(false)),
+        Some("read_write") => Ok(Some(true)),
+        _ => Err("AKULA_EXPERIMENTAL_WARP_MAP must be write or read_write"),
+    }
+}
+
 pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String> {
+    // Exact-mode research is isolated from the installed release, which keeps
+    // its existing WARP-first -> hardware fallback and WRITE staging policy.
+    #[cfg(not(feature = "installed"))]
+    let trial = match std::env::var("AKULA_EXPERIMENTAL_WARP_MAP") {
+        Ok(value) => parse_map_trial(Some(&value)).map_err(str::to_owned)?,
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => return Err(format!("invalid Akula WARP map trial environment: {error}")),
+    };
+    #[cfg(feature = "installed")]
+    let trial: Option<bool> = None;
     #[cfg(feature = "memory-probe")]
     let first = if std::env::var_os("AQ_PROBE_HARDWARE").is_some() { D3D_DRIVER_TYPE_HARDWARE } else { D3D_DRIVER_TYPE_WARP };
     #[cfg(not(feature = "memory-probe"))]
     let first = D3D_DRIVER_TYPE_WARP;
-    let (device, context) = device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE)).map_err(|e| format!("D3D11: {e}"))?;
+    // Never let a "WARP" sample silently use the physical GPU instead.
+    let (device, context) = if trial.is_some() {
+        device(D3D_DRIVER_TYPE_WARP)
+    } else {
+        device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE))
+    }
+    .map_err(|e| format!("D3D11: {e}"))?;
     let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }.map_err(|e| format!("DXGI: {e}"))?;
     let desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: width,
@@ -87,6 +119,38 @@ pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String>
     unsafe {
         let _ = factory.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
     }
-    let canvas = texture(&device, width, height).map_err(|e| format!("холст: {e}"))?;
-    Ok(Gpu { device, context, chain, canvas, stale: Default::default(), back: 0 })
+    let map_read_write = trial.unwrap_or(false);
+    let canvas = texture(&device, width, height, map_read_write)
+        .map_err(|e| format!("холст: {e}"))?;
+    #[cfg(not(feature = "installed"))]
+    if let Some(read_write) = trial {
+        let mode = if read_write { "read_write" } else { "write" };
+        // Emitted only after device, swap chain and staging texture exist.
+        eprintln!("AKULA_WARP_MAP_PROBE requested={mode} actual={mode} driver=warp strict=1");
+    }
+    Ok(Gpu {
+        device, context, chain, canvas, stale: Default::default(), back: 0,
+        map_read_write,
+        #[cfg(not(feature = "installed"))]
+        map_trial: trial.is_some(),
+    })
+}
+
+#[cfg(all(test, not(feature = "installed")))]
+mod warp_map_trial_tests {
+    use super::parse_map_trial;
+
+    #[test]
+    fn absent_trial_preserves_shipping_write_map() {
+        assert_eq!(parse_map_trial(None), Ok(None));
+        assert_eq!(parse_map_trial(Some("write")), Ok(Some(false)));
+        assert_eq!(parse_map_trial(Some("read_write")), Ok(Some(true)));
+    }
+
+    #[test]
+    fn invalid_and_ambiguous_trials_fail_closed() {
+        for value in ["", "1", "READ_WRITE", "hardware", "read-only"] {
+            assert!(parse_map_trial(Some(value)).is_err(), "{value}");
+        }
+    }
 }
