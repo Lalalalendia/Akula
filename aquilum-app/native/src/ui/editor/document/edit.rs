@@ -39,7 +39,22 @@ impl Document {
         }
         let (base, end) = self.loaded_range();
         if range.start >= base && range.end <= end {
-            self.splice(range, insert);
+            // A large undo or paste can expand one formerly tiny mounted
+            // window into tens of thousands of lines. Incremental splice would
+            // classify and lay out that *entire* window on the GUI thread.
+            // Keep the persistent Rope exact, but remount a bounded window
+            // at the end of the insertion before any next layout pass.
+            let large_window_insert = self.windowed
+                && (insert.len() > super::window::SPAN_BYTES
+                    || insert.bytes().filter(|&byte| byte == b'\n').take(super::window::MARGIN + 1).count()
+                        > super::window::MARGIN);
+            if large_window_insert {
+                self.full.replace(range.clone(), insert);
+                self.rescan_from(range.start);
+                self.load(range.start + insert.len(), None);
+            } else {
+                self.splice(range, insert);
+            }
             return;
         }
         let delta = insert.len() as isize - range.len() as isize;
