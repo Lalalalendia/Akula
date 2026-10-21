@@ -50,3 +50,12 @@ The previous E3g test uses `S3PinnedV2ReadPreview::for_trust_anchor_test`, a syn
 An explicit adversarial async test uses a real `AwsS3ProbeClient` SDK constructor but **no S3 call**, requiring forged owner evidence to be rejected locally and a retry to yield `AlreadyConsumed`. Its presence and execution are mandatory in Linux+Windows E3g CI.
 
 **This code path has NOT been exercised against a real user Yandex account or a complete real V2 object graph.** A successful negative test and MinIO reader test from E3f are separate evidence, not a combined live Yandex PASS. There is still no user-visible authenticated approval/QR screen, independent Yandex principal attestation or external monotonic rollback witness. Release remains blocked, no File Gate, no S3 PUT/CAS/DELETE and no automatic Sync.
+
+
+## Operator-owned Yandex acceptance prerequisites (not yet executed)
+
+A future **user-authorized** acceptance must use a disposable/private Yandex bucket, a fresh service account restricted to that bucket with `storage.viewer` (not `storage.editor` or `storage.uploader`), and credentials supplied only to the installed host/SDK credential provider, never GitHub Actions logs, Notion or this repository. Yandex documents that `storage.viewer` can read bucket objects and metadata while the writing roles grant uploads or deletion. The test must verify the exact intended `https://storage.yandexcloud.net` endpoint and independently confirmed owner keys and genesis/policy digests. A viewer account cannot seed a V2 fixture; that must be provisioned separately by the owner before read-only acceptance.
+
+Acceptance evidence: (a) exact challenge consumed once, (b) signature and owner policy verified off-S3, (c) real Yandex HEAD/GET complete V2 content and final root re-read, (d) atomic *local app-data-only* root+policy registration, (e) denial under incorrect key, bucket, pin, ETag, revoked publisher or missing credentials, and (f) no Object Storage PUT/DELETE, File Gate or note mutation. Record only sanitized result codes, non-secret provider/bucket identifiers and test counts.
+
+Official role reference: https://yandex.cloud/en/docs/storage/security/ and bucket-scoped role assignment: https://yandex.cloud/en/docs/storage/operations/buckets/iam-access.
