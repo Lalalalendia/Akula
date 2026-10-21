@@ -55,6 +55,7 @@ jobs:
           set -euo pipefail
           test ! -e /opt/akula-b1d0-ci-node
           test ! -L /opt/akula-b1d0-ci-node
+          test -x .artifacts/cargo-native/debug/akula-node-lab
           # Production destination must never be created by this test.
           test ! -e /opt/akula-node
           found=0
@@ -62,11 +63,15 @@ jobs:
             if [[ -f "$bin" && -x "$bin" && "$bin" != *.d ]]; then
               sudo -n env GITHUB_ACTIONS=true RUNNER_OS=Linux \
                 AKULA_B1D0_CI=STRICT_ROOT_ONE_SHOT_FILE_ONLY \
-                "$PWD/$bin" --test-threads=1 --nocapture
+                AKULA_B1D0_REAL_ELF="$PWD/.artifacts/cargo-native/debug/akula-node-lab" \
+                "$PWD/$bin" --test-threads=1 --nocapture \
+                | tee "$RUNNER_TEMP/b1d0-root-tests.log"
               found=$((found + 1))
             fi
           done
           test "$found" -eq 1
           test ! -e /opt/akula-b1d0-ci-node
           test ! -e /opt/akula-node
+          grep -Fq 'B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS' \
+            "$RUNNER_TEMP/b1d0-root-tests.log"
           echo "B1D0_DURABLE_FIRST_NODE_CAS_FILE_AND_RESTART_HOLD_PASS"

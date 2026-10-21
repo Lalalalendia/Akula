@@ -43,17 +43,18 @@ struct Case {
     before:WitnessCheckpoint,after:WitnessCheckpoint,challenge:[u8;32],
 }
 impl Case {
-    fn new()->Self{
+    fn new()->Self{ Self::with_package(NODE) }
+    fn with_package(package: &[u8])->Self{
         assert_eq!(rustix::process::geteuid().as_raw(),0);
         let dir=tempfile::tempdir().unwrap();
         fs::set_permissions(dir.path(),Permissions::from_mode(0o700)).unwrap();
         let rk=key(0x31);
-        let hash:[u8;32]=digest::digest(&digest::SHA256,NODE)
+        let hash:[u8;32]=digest::digest(&digest::SHA256,package)
             .as_ref().try_into().unwrap();
         let m=ReleaseManifestV1{
             platform:TargetPlatform::LinuxX86_64,
             version:Version{major:1,minor:0,patch:0},
-            release_sequence:17,package_size:NODE.len() as u64,
+            release_sequence:17,package_size:package.len() as u64,
             not_before_unix:NOW-60,expires_unix:NOW+120,
             package_sha256:hash,signer_id:"b1b4a-test-release".into(),
         };
@@ -66,7 +67,7 @@ impl Case {
         let release=verify_signed_release(
             &SignedRelease{manifest:m.clone(),signature:sig},
             &signer,ReleaseFloor::initial(),NOW).unwrap();
-        write(&dir.path().join("node"),NODE);
+        write(&dir.path().join("node"),package);
         write(&dir.path().join("manifest"),&m.canonical_signed_bytes());
         write(&dir.path().join("signature"),&sig);
         let trust=RootPinnedReleaseTrust{
@@ -109,7 +110,7 @@ impl Case {
             approver_id:owner_signer.approver_id.clone(),
             scope_binding:binding,previous_head:before.accepted_floor,
             proposed_head:newhead,staged_package_sha256:hash,
-            staged_package_size:NODE.len() as u64,expected_witness_revision:0,
+            staged_package_size:package.len() as u64,expected_witness_revision:0,
             approval_nonce:[0x55;16],
             issued_at_unix:NOW-10,expires_at_unix:NOW+45,
         };
@@ -362,4 +363,36 @@ fn symlink_target_is_denied_without_modifying_the_victim() {
         Err(DurableError::NeedsRepair)));
     assert_eq!(before, fs::read("/etc/passwd").unwrap());
     assert_eq!(actor.current_checkpoint().unwrap().revision, 0);
+}
+
+#[test]
+fn b1d0_actual_built_linux_node_elf_uses_one_root_signed_fd_and_opt_receipt() {
+    // Executable is compiled from this exact PR before root tests run.
+    // Ephemeral CI-only signer signs its actual bytes; no production key.
+    let path = std::env::var("AKULA_B1D0_REAL_ELF")
+        .expect("real Akula Node path must be provided explicitly by CI");
+    let binary = fs::read(&path).expect("real built Node");
+    assert!(binary.len() > 1024 && binary.starts_with(b"\x7fELF"),
+        "never accept a synthetic fixture in this acceptance");
+    assert!(binary.len() < 512 * 1024 * 1024);
+    let _root = RootFixture::new();
+    let c = Case::with_package(&binary);
+    let (trust, ledger) = provision();
+    let actor = open_actor(trust.path(), ledger.path());
+    let status = commit(&c, &actor, CrashPoint::None)
+        .expect("real signed ELF direct /opt owner CAS");
+    assert_eq!(status, DurableStatus::LocallyConsistentHold {
+        revision: 1, sha256: c.pinned.receipt.package_sha256,
+    });
+    let installed = fs::read(Path::new(CI_ROOT).join("node")).unwrap();
+    assert_eq!(installed, binary,
+        "direct /opt install MUST contain the exact signed executable bytes");
+    assert_eq!(digest::digest(&digest::SHA256, &installed).as_ref(),
+        c.pinned.receipt.package_sha256.as_slice());
+    assert!(matches!(commit(&c, &actor, CrashPoint::None),
+        Err(DurableError::NeedsRepair)));
+    drop(actor);
+    let reopened = open_actor(trust.path(), ledger.path());
+    assert_eq!(inspect_ci_hold(&reopened).unwrap(), status);
+    println!("B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS");
 }
