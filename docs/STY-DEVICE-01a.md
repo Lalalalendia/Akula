@@ -8,7 +8,10 @@ This is an independent Core contract, not an installed trusted-device registry.
   one DeviceId, raw Ed25519 device public key, remote EndpointId public bytes,
   and RecordedOnly / Revoked state.
 - Requires a separately pinned owner public key AND a separately witnessed
-  monotonic epoch floor. Rejects signature edits, cross-vault or wrong owner,
+  monotonic epoch floor. For a candidate at exactly the witnessed epoch,
+  requires an independently stored, domain-separated snapshot digest: a different
+  *validly signed* snapshot at the same epoch is rejected as WitnessMismatch.
+  Rejects signature edits, cross-vault or wrong owner,
   replay below the external floor, nil IDs, zero keys, duplicate IDs, duplicate
   EndpointId keys, nonsorted records and oversize input. No JSON canonicality risk.
 - The result is an immutable read-only observation. RecordedOnly is NOT

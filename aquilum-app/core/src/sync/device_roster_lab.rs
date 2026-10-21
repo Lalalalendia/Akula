@@ -55,6 +55,9 @@ pub struct IndependentlyPinnedOwner {
     pub owner_public_key: [u8; 32],
     /// Durable independent monotonic witness, never read from candidate.
     pub witnessed_min_epoch: u64,
+    /// Digest of that exact epoch's claim, sealed by an independent witness.
+    /// Mandatory when the candidate epoch equals witnessed_min_epoch.
+    pub witnessed_epoch_digest: Option<[u8; 32]>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +68,7 @@ pub enum RosterError {
     AmbiguousIdentity,
     WrongVault,
     Rollback,
+    WitnessMismatch,
     InvalidSignature,
 }
 
@@ -109,6 +113,14 @@ impl OwnerSignedRoster {
             bytes.push(device.status.tag());
         }
         Ok(bytes)
+    }
+
+    /// A domain-separated snapshot digest for independent durable witnessing.
+    /// A digest supplied by the candidate itself is NOT a trusted witness.
+    pub fn claim_digest(&self) -> Result<[u8; 32], RosterError> {
+        let mut digest = blake3::Hasher::new_derive_key("Akula/STY-DEVICE-01a/witness/v1");
+        digest.update(&self.canonical_claim()?);
+        Ok(*digest.finalize().as_bytes())
     }
 }
 
@@ -190,6 +202,14 @@ pub fn inspect_signed_roster(
     UnparsedPublicKey::new(&signature::ED25519, pinned.owner_public_key)
         .verify(&bytes, &signed.signature)
         .map_err(|_| RosterError::InvalidSignature)?;
+    if signed.epoch == pinned.witnessed_min_epoch {
+        let expected_digest = pinned
+            .witnessed_epoch_digest
+            .ok_or(RosterError::MissingIndependentPin)?;
+        if signed.claim_digest()? != expected_digest {
+            return Err(RosterError::WitnessMismatch);
+        }
+    }
     Ok(VerifiedRosterObservation {
         vault_id: signed.vault_id,
         epoch: signed.epoch,
@@ -228,6 +248,7 @@ mod tests {
             vault_id,
             owner_public_key: signer.public_key().as_ref().try_into().unwrap(),
             witnessed_min_epoch: 7,
+            witnessed_epoch_digest: None,
         };
         let claim = OwnerSignedRoster {
             vault_id,
@@ -347,6 +368,29 @@ mod tests {
         assert_eq!(
             inspect_signed_roster(&huge, &pinned),
             Err(RosterError::Oversize)
+        );
+    }
+
+    #[test]
+    fn same_epoch_signed_fork_is_rejected_by_independent_witness() {
+        let (roster, mut pinned) = fixture();
+        pinned.witnessed_min_epoch = roster.epoch;
+        assert_eq!(
+            inspect_signed_roster(&roster, &pinned),
+            Err(RosterError::MissingIndependentPin)
+        );
+        pinned.witnessed_epoch_digest = Some(roster.claim_digest().unwrap());
+        assert!(inspect_signed_roster(&roster, &pinned).is_ok());
+
+        // Both snapshots are owner-signed and have the same epoch; the
+        // external digest, not the signature alone, prevents a fork.
+        let mut conflicting = roster.clone();
+        conflicting.devices[0].status = RosterStatus::Revoked;
+        let conflicting = sign(conflicting, &owner(11));
+        assert_eq!(conflicting.epoch, roster.epoch);
+        assert_eq!(
+            inspect_signed_roster(&conflicting, &pinned),
+            Err(RosterError::WitnessMismatch)
         );
     }
 
