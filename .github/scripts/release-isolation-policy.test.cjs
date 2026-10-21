@@ -42,6 +42,8 @@ test('safe standalone Windows beta remains separate; updater remains off', () =>
   assert.doesNotMatch(beta, /sync-installed-host/);
   const pinned = updater.match(/pub\(super\) const PUBLIC_KEY: &str = "([^"]+)";/);
   assert.ok(pinned, 'Akula must have an explicit pinned public key');
+  // Exact key bytes, not merely the human-readable comment, are trust-critical.
+  assert.equal(pinned[1], 'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3QTY2QjZENDA0NkY2QzUKUldURjlrWkFiV3VtMXh2SFFsdEljaUw0T0pUakVmd1krZG4wVmJ1REVmaEx1eWcrMFIzTjQzMi8K', 'Akula publisher root changed without a reviewed key rotation');
   const decoded = Buffer.from(pinned[1], 'base64').toString('utf8');
   assert.equal(decoded.split('\n')[0], 'untrusted comment: minisign public key: D7A66B6D4046F6C5');
   assert.match(decoded.split('\n')[1], /^RW[A-Za-z0-9+/]+$/);
