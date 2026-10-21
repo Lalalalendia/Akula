@@ -81,7 +81,7 @@ fn download(inner: &Inner, url: &str) -> Option<PathBuf> {
     url.hash(&mut hasher);
     let ext = crate::images::extension(url).map(str::to_ascii_lowercase).unwrap_or_default();
     let name = if ext.is_empty() { format!("{:016x}", hasher.finish()) } else { format!("{:016x}.{ext}", hasher.finish()) };
-    let target = inner.cache.join(name);
+    let target = inner.cache.join(&name);
     // A cached image cannot bypass the same input-byte bound. Do not follow
     // a cache symlink into an unrelated file.
     if let Ok(meta) = std::fs::symlink_metadata(&target) {
