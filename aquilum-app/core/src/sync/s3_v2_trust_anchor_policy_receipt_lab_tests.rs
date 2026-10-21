@@ -1491,3 +1491,120 @@ async fn receiver_live_yandex_path_denies_invalid_owner_before_network() {
     assert!(journal.load(&f.scope).unwrap().is_none());
     assert!(journal.load_publisher_policy(&f.scope).is_err());
 }
+
+
+/// An independently entered, full fingerprint mismatch burns a fresh
+/// receiver challenge before *any* signed invitation or S3 operation.
+#[cfg(feature = "signed-vault-manual-owner-review-lab")]
+#[tokio::test]
+async fn independent_fingerprint_mismatch_burns_session_before_yandex_get() {
+    use crate::sync::{
+        AwsS3ProbeClient, IndependentlyApprovedJoin,
+        IndependentOwnerFingerprintError, ReceiverJoinSession,
+        ReceiverJoinSessionError, JOIN_GENESIS_TYPE,
+        owner_join_fingerprint_hex,
+    };
+    let f = Fixture::new();
+    let root = f.root();
+    let owner = signer(1);
+    let (policy, _) = first_policy(&f, &owner);
+    let keys = [pk(&owner)];
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let client = AwsS3ProbeClient::connect(f.profile.clone(), f.ns.clone())
+        .await.unwrap();
+    let mut journal = f.open();
+    let mut session = ReceiverJoinSession::issue(&f.scope).unwrap();
+    let challenge = session.challenge_hex();
+    let approved = IndependentlyApprovedJoin {
+        bucket: &f.profile.bucket,
+        keyspace: &f.ns,
+        pinned_genesis_root_blake3: &root_pin,
+        pinned_genesis_policy_blake3: &policy_pin,
+        trusted_owner_keys: &keys,
+        owner_quorum: 1,
+        recipient_challenge_hex: &challenge,
+    };
+    let verified_fingerprint = owner_join_fingerprint_hex(&approved).unwrap();
+    let another_fingerprint = if verified_fingerprint == "f".repeat(64) {
+        "e".repeat(64)
+    } else {
+        "f".repeat(64)
+    };
+    let bogus_offer = DecodedDsseEnvelope {
+        payload_type: JOIN_GENESIS_TYPE,
+        payload: b"not-the-owner-signed-invitation",
+        signatures: &[],
+    };
+    assert!(matches!(
+        session.enroll_after_independent_owner_review_once(
+            &client, &mut journal, &f.scope, &root, &policy,
+            &bogus_offer, &approved, &another_fingerprint,
+        ).await,
+        Err(ReceiverJoinSessionError::ManualOwnerReview(
+            IndependentOwnerFingerprintError::Mismatch,
+        ))
+    ));
+    assert!(matches!(
+        session.enroll_after_independent_owner_review_once(
+            &client, &mut journal, &f.scope, &root, &policy,
+            &bogus_offer, &approved, &verified_fingerprint,
+        ).await,
+        Err(ReceiverJoinSessionError::AlreadyConsumed)
+    ));
+    assert!(journal.load(&f.scope).unwrap().is_none());
+}
+
+/// Even a perfectly matched independent fingerprint does NOT replace the
+/// DSSE owner signature, the bounded V2 read or the SQLite admission gate.
+#[cfg(feature = "signed-vault-manual-owner-review-lab")]
+#[tokio::test]
+async fn matched_independent_fingerprint_does_not_bypass_owner_signature() {
+    use crate::sync::{
+        AwsS3ProbeClient, IndependentlyApprovedJoin, PinnedJoinError,
+        ReceiverJoinSession, ReceiverJoinSessionError, JOIN_GENESIS_TYPE,
+        owner_join_fingerprint_hex,
+    };
+    let f = Fixture::new();
+    let root = f.root();
+    let owner = signer(1);
+    let (policy, _) = first_policy(&f, &owner);
+    let keys = [pk(&owner)];
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let client = AwsS3ProbeClient::connect(f.profile.clone(), f.ns.clone())
+        .await.unwrap();
+    let mut journal = f.open();
+    let mut session = ReceiverJoinSession::issue(&f.scope).unwrap();
+    let challenge = session.challenge_hex();
+    let approved = IndependentlyApprovedJoin {
+        bucket: &f.profile.bucket,
+        keyspace: &f.ns,
+        pinned_genesis_root_blake3: &root_pin,
+        pinned_genesis_policy_blake3: &policy_pin,
+        trusted_owner_keys: &keys,
+        owner_quorum: 1,
+        recipient_challenge_hex: &challenge,
+    };
+    let independently_entered = owner_join_fingerprint_hex(&approved).unwrap();
+    let forged = DecodedDsseEnvelope {
+        payload_type: JOIN_GENESIS_TYPE,
+        payload: b"forged-owner-invitation",
+        signatures: &[],
+    };
+    assert!(matches!(
+        session.enroll_after_independent_owner_review_once(
+            &client, &mut journal, &f.scope, &root, &policy,
+            &forged, &approved, &independently_entered,
+        ).await,
+        Err(ReceiverJoinSessionError::LiveYandexRead(PinnedJoinError::Join(_)))
+    ));
+    assert!(journal.load(&f.scope).unwrap().is_none());
+    assert!(matches!(
+        session.enroll_after_independent_owner_review_once(
+            &client, &mut journal, &f.scope, &root, &policy,
+            &forged, &approved, &independently_entered,
+        ).await,
+        Err(ReceiverJoinSessionError::AlreadyConsumed)
+    ));
+}
