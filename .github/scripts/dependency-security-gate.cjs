@@ -19,8 +19,8 @@ const LOCAL_SCAN_PATHS = new Set([
 function mustScanLocally(paths) {
   return paths.some(p =>
     LOCAL_SCAN_PATHS.has(p) ||
-    /(^|\\/)Cargo\\.(?:toml|lock)$/.test(p) ||
-    /(^|\\/)audit\\.toml$/.test(p)
+    /(^|\/)Cargo\.(?:toml|lock)$/.test(p) ||
+    /(^|\/)audit\.toml$/.test(p)
   );
 }
 
