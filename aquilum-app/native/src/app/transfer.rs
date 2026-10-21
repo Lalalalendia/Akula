@@ -42,7 +42,7 @@ pub(super) struct TransferState {
     pub(super) choosing: bool,
     pub(super) error: Option<String>,
     peers: Vec<TransferPeer>,
-    selected_peer: Option<(DeviceId, [u8; 32])>,
+    pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
 }
 
 impl TransferState {
@@ -82,7 +82,7 @@ impl TransferState {
         }
     }
 
-    fn choose_peer(&mut self, binding: (DeviceId, [u8; 32])) {
+    pub(super) fn choose_peer(&mut self, binding: (DeviceId, [u8; 32])) {
         // Always match the *exact* displayed DeviceId and key, never a stale
         // list index which might now refer to a completely different peer.
         let matches: Vec<_> = self.peers.iter().filter(|peer| peer.id == binding.0).collect();
@@ -138,7 +138,7 @@ impl TransferState {
         self.reconcile_selection();
     }
 
-    fn device_rows(&self) -> Vec<transfer_ui::DeviceRow> {
+    pub(super) fn device_rows(&self) -> Vec<transfer_ui::DeviceRow> {
         self.peers.iter().take(MAX_DEVICE_ROWS).map(|peer| {
             let name: String = peer.name.chars()
                 .filter(|c| !c.is_control()).take(64).collect();
