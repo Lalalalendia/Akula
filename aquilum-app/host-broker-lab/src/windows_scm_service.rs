@@ -197,7 +197,12 @@ fn run_service() -> io::Result<()> {
     )?;
     let outcome = if let Some(pipe) = pipe {
         // Stop and blocked/idle client are both serviced by overlapped I/O.
-        pipe.run_until_stop(event.0)
+        pipe.run_until_stop(event.0, || {
+            if let Some(ref witness) = _custody {
+                witness.recheck_fixed_names()?;
+            }
+            Ok(())
+        })
     } else {
         let state = unsafe { WaitForSingleObject(event.0, INFINITE) };
         if state == WAIT_OBJECT_0 {

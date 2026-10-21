@@ -32,8 +32,8 @@ const FILE_READ_ATTRIBUTES: u32 = 0x80;
 const READ_CONTROL: u32 = 0x0002_0000;
 const FILE_SHARE_READ: u32 = 0x1;
 const FILE_SHARE_WRITE: u32 = 0x2;
-// No FILE_SHARE_DELETE: the inspected directory/file names may not be moved
-// while the service holds both pinned handles.
+// No FILE_SHARE_DELETE limits some mutation paths but does NOT guarantee
+// a directory name cannot change while HANDLEs remain open on Windows.
 const OPEN_EXISTING: u32 = 3;
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
@@ -361,16 +361,49 @@ fn strict_protected_acl(
 }
 
 /// Owned opened-handle witness, never a proof of policy content or a permit.
-/// Pinned handles prohibit namespace deletion while they remain live. A
-/// privileged Administrator remains in the trusted computing base.
+/// Windows can rename an opened directory despite no FILE_SHARE_DELETE:
+/// these HANDLEs pin objects, NOT their original pathname. Admin remains TCB.
+/// A short-lived comparison is not a substitute for handle-relative I/O.
+/// Only a production signed issuer with protected root enrollment can grant.
 pub(crate) struct CustodyWitness {
     _directory: OwnedHandle,
     _marker: OwnedHandle,
 }
 
+fn opened_identity(handle: &OwnedHandle) -> io::Result<(u32, u32, u32)> {
+    let mut info = ByHandleInformation::default();
+    if unsafe { GetFileInformationByHandle(handle.0, &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if info.volume_serial == 0 || (info.file_index_high == 0 && info.file_index_low == 0) {
+        return Err(refuse("missing by-HANDLE physical identity"));
+    }
+    Ok((
+        info.volume_serial,
+        info.file_index_high,
+        info.file_index_low,
+    ))
+}
+
 impl CustodyWitness {
     pub(crate) fn inspect_fixed() -> io::Result<Self> {
         Self::inspect_at(CUSTODY_DIR, CUSTODY_MARKER)
+    }
+
+    /// Reopen BOTH exact fixed names, revalidate their current OS owner/DACL
+    /// and compare fresh HANDLE identities against the startup-pinned ones.
+    /// Any missing/renamed/replaced name or changed ACL aborts a deny-only IPC
+    /// iteration. This cannot protect a future pathname use after the check.
+    pub(crate) fn recheck_fixed_names(&self) -> io::Result<()> {
+        let fresh = Self::inspect_fixed()?;
+        if opened_identity(&fresh._directory)? != opened_identity(&self._directory)?
+            || opened_identity(&fresh._marker)? != opened_identity(&self._marker)?
+        {
+            return Err(refuse(
+                "fixed Broker namespace no longer names the pinned objects",
+            ));
+        }
+        Ok(())
     }
     fn inspect_at(directory: &str, marker: &str) -> io::Result<Self> {
         if !directory.starts_with(r"C:\")
@@ -417,6 +450,41 @@ mod tests {
             std::mem::offset_of!(ByHandleInformation, file_index_low),
             48
         );
+    }
+
+    #[test]
+    fn held_directory_handles_do_not_certify_a_stable_path() {
+        use std::fs;
+        let parent = std::env::temp_dir().join(format!(
+            "akai-custody-path-falsifier-{}",
+            std::process::id()
+        ));
+        if parent.exists() {
+            panic!("refuse to mutate preexisting path");
+        }
+        fs::create_dir(&parent).unwrap();
+        let original = parent.join("original");
+        let renamed = parent.join("renamed");
+        fs::create_dir(&original).unwrap();
+        let pinned = opened_non_reparse(&original.to_string_lossy(), true).unwrap();
+        let id = opened_identity(&pinned).unwrap();
+        if fs::rename(&original, &renamed).is_ok() {
+            // The namespace changed, even though the old object still exists.
+            assert!(opened_non_reparse(&original.to_string_lossy(), true).is_err());
+            let moved = opened_non_reparse(&renamed.to_string_lossy(), true).unwrap();
+            assert_eq!(opened_identity(&moved).unwrap(), id);
+            drop(moved);
+            fs::create_dir(&original).unwrap();
+            let replacement = opened_non_reparse(&original.to_string_lossy(), true).unwrap();
+            assert_ne!(opened_identity(&replacement).unwrap(), id);
+            drop(replacement);
+        } else {
+            let same = opened_non_reparse(&original.to_string_lossy(), true).unwrap();
+            assert_eq!(opened_identity(&same).unwrap(), id);
+            drop(same);
+        }
+        drop(pinned);
+        fs::remove_dir_all(parent).unwrap();
     }
 
     #[test]
