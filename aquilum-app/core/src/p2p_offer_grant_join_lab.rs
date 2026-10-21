@@ -340,10 +340,10 @@ fn mutated_offer_after_accept_cannot_reuse_selection() {
 
 #[test]
 fn forged_selection_with_matching_public_fields_is_not_consent_proof() {
-    let (offer, mut selected, grant, local) = fixture();
+    let (offer, _, grant, local) = fixture();
     // SelectionDraft is a public-data snapshot, not signed recipient consent.
     // A caller can reconstruct it without running OfferSession::resolve.
-    selected = SelectionDraft {
+    let selected = SelectionDraft {
         offer_id: offer.offer_id,
         commitment: offer.commitment(),
         files: vec![offer.files[0].clone()],
