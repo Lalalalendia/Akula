@@ -414,6 +414,94 @@ fn revoked_publisher_cannot_verify_pinned_root_after_restart() {
 }
 
 
+#[test]
+fn valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build() {
+    let f = Fixture::new();
+    let owner = signer(1);
+    let mut journal = f.with_pinned_root();
+    let original = journal.load(&f.scope).unwrap().unwrap().root().clone();
+    let (policy, bytes) = first_policy(&f, &owner);
+    let policy_pin = policy.canonical_digest().unwrap();
+    journal.enroll_externally_approved_genesis_policy(
+        &f.scope, &policy_pin, &bytes,
+    ).unwrap();
+    // A legitimate, fully validated owner-policy receipt is readable.
+    assert_eq!(
+        journal.load_publisher_policy(&f.scope).unwrap().unwrap().digest(),
+        policy_pin,
+    );
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &original);
+
+    let successor = S3PackedHeadV2::new(
+        &f.ns, 2, OperationId::new(),
+        &blake3::hash(b"valid-policy-unsigned-gen2-manifest").to_hex().to_string(),
+        OperationId::new(),
+        &blake3::hash(b"valid-policy-unsigned-gen2-index").to_hex().to_string(),
+        Some(original.digest(&f.ns).unwrap()),
+    ).unwrap();
+    let preview = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &successor, "etag-untrusted-successor",
+    );
+    // A complete pinned read does not grant publisher authorization.
+    assert!(matches!(
+        journal.record_verified_successor(
+            &f.scope, &successor, "etag-untrusted-successor", &preview,
+        ), Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    drop(journal);
+    let mut reopened = f.open();
+    assert!(matches!(
+        reopened.record_verified_successor(
+            &f.scope, &successor, "etag-untrusted-successor", &preview,
+        ), Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    let anchored = reopened.load(&f.scope).unwrap().unwrap();
+    assert_eq!(anchored.root(), &original);
+    assert_eq!(anchored.etag(), "etag-e2b-genesis");
+}
+
+
+#[test]
+fn signed_policy_blocks_legacy_same_root_genesis_and_successor_noop() {
+    let f = Fixture::new();
+    let owner = signer(1);
+    let mut journal = f.with_pinned_root();
+    let saved = journal.load(&f.scope).unwrap().unwrap();
+    let root = saved.root().clone();
+    let etag = saved.etag().to_string();
+    let (policy, policy_bytes) = first_policy(&f, &owner);
+    let pin = policy.canonical_digest().unwrap();
+    journal.enroll_externally_approved_genesis_policy(
+        &f.scope, &pin, &policy_bytes,
+    ).unwrap();
+
+    // Neither a successful read nor the fact that the exact root already
+    // exists may be interpreted as signed owner/publisher authorization.
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &root, &etag,
+    );
+    assert!(matches!(
+        journal.record_verified_successor(&f.scope, &root, &etag, &pinned),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    assert!(matches!(
+        journal.enroll_verified_genesis(
+            &f.scope, &root.digest(&f.ns).unwrap(), &root, &etag, &pinned,
+        ),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    drop(journal);
+
+    let mut reopened = f.open();
+    assert!(matches!(
+        reopened.record_verified_successor(&f.scope, &root, &etag, &pinned),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &root);
+    assert_eq!(reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(), pin);
+}
+
+
 /// Reconstruct the ORIGINAL V2 journal schema with an already trusted root.
 /// Merely opening a new E2b-format database does not test migration.
 fn plant_legacy_v2_root(f: &Fixture) -> S3PackedHeadV2 {
@@ -516,4 +604,267 @@ fn incomplete_publisher_policy_row_blocks_regular_v2_root_load() {
         reopened.load_publisher_policy(&f.scope),
         Err(V2PolicyReceiptError::Root(S3V2TrustAnchorError::CorruptedAnchor)),
     ));
+}
+
+
+// E3c tests share the established E2b test's registered protected workspace,
+// S3 namespace, synthetic owner signer and single guarded SQLite file.
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+fn signed_atomic_join(
+    f: &Fixture,
+    journal: &mut S3V2TrustedAnchorJournal,
+    root: &S3PackedHeadV2,
+    policy: &PublisherPolicyV1,
+    complete_read: &S3PinnedV2ReadPreview,
+    observed_etag: &str,
+    trusted_owner: &Ed25519KeyPair,
+    signer: &Ed25519KeyPair,
+    root_pin: &str,
+    policy_pin: &str,
+) -> Result<crate::sync::AtomicJoinOutcome, crate::sync::AtomicJoinError> {
+    use crate::sync::{IndependentlyApprovedJoin, JOIN_GENESIS_TYPE};
+
+    let owner_keys = [pk(trusted_owner)];
+    let approved = IndependentlyApprovedJoin {
+        bucket: &f.profile.bucket,
+        keyspace: &f.ns,
+        pinned_genesis_root_blake3: root_pin,
+        pinned_genesis_policy_blake3: policy_pin,
+        trusted_owner_keys: &owner_keys,
+        owner_quorum: 1,
+        recipient_challenge_hex:
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    };
+    let payload = serde_json::to_vec(&json!({
+        "schema": 1,
+        "purpose": "review-only-join-genesis",
+        "provider": "yandex-object-storage",
+        "endpoint": "https://storage.yandexcloud.net",
+        "region": "ru-central1",
+        "force_path_style": true,
+        "bucket": f.profile.bucket,
+        "current_head_key": f.ns.current_head_key(),
+        "vault_id": f.ns.vault_id(),
+        "root_generation": root.generation(),
+        "root_blake3": root_pin,
+        "policy_epoch": policy.epoch(),
+        "policy_blake3": policy_pin,
+        "recipient_challenge_hex": approved.recipient_challenge_hex,
+    })).unwrap();
+    let signature = signer.sign(&super::super::super::s3_signed_root_paev1::pae(
+        JOIN_GENESIS_TYPE.as_bytes(), &payload,
+    ));
+    let signs = [DecodedSignature {
+        sig: signature.as_ref(), keyid: Some("untrusted-owner-keyid"),
+    }];
+    journal.enroll_signed_pinned_genesis_atomically(
+        &f.scope, root, observed_etag, complete_read, policy,
+        &DecodedDsseEnvelope {
+            payload_type: JOIN_GENESIS_TYPE,
+            payload: &payload,
+            signatures: &signs,
+        }, &approved,
+    )
+}
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn atomic_signed_join_persists_root_and_policy_together_after_restart() {
+    use crate::sync::AtomicJoinOutcome;
+
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-joined");
+    let mut j = f.open();
+    assert!(j.load(&f.scope).unwrap().is_none());
+    assert_eq!(signed_atomic_join(&f, &mut j, &root, &policy, &pinned,
+        "etag-joined", &owner, &owner, &root_pin, &policy_pin).unwrap(),
+        AtomicJoinOutcome::Inserted);
+    assert_eq!(j.load(&f.scope).unwrap().unwrap().root(), &root);
+    assert_eq!(j.load_publisher_policy(&f.scope).unwrap().unwrap().digest(), policy_pin);
+    // Repeated same join cannot create a new genesis or mutate a baseline.
+    assert_eq!(signed_atomic_join(&f, &mut j, &root, &policy, &pinned,
+        "etag-joined", &owner, &owner, &root_pin, &policy_pin).unwrap(),
+        AtomicJoinOutcome::Unchanged);
+    drop(j);
+    let reopened = f.open();
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &root);
+    assert_eq!(reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(), policy_pin);
+    assert_eq!(reopened.db.query_row(
+        "SELECT COUNT(*) FROM s3_v2_trusted_roots", [], |r| r.get::<_, i64>(0),
+    ).unwrap(), 1);
+}
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn invalid_owner_signature_never_creates_only_half_of_a_join() {
+    use crate::sync::AtomicJoinError;
+
+    let f = Fixture::new();
+    let (trusted, attacker) = (signer(1), signer(42));
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &trusted);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-joined");
+    let mut j = f.open();
+    assert!(matches!(signed_atomic_join(
+        &f, &mut j, &root, &policy, &pinned, "etag-joined",
+        &trusted, &attacker, &root_pin, &policy_pin,
+    ), Err(AtomicJoinError::UnverifiedJoin(_))));
+    assert!(j.load(&f.scope).unwrap().is_none());
+    assert!(j.db.query_row(
+        "SELECT COUNT(*) FROM s3_v2_trusted_roots", [], |r| r.get::<_, i64>(0),
+    ).unwrap() == 0);
+}
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn missing_complete_pinned_read_never_creates_a_trusted_policy() {
+    use crate::sync::AtomicJoinError;
+
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "wrong-etag");
+    let mut j = f.open();
+    assert!(matches!(signed_atomic_join(
+        &f, &mut j, &root, &policy, &pinned, "etag-joined",
+        &owner, &owner, &root_pin, &policy_pin,
+    ), Err(AtomicJoinError::UnverifiedJoin(_))));
+    assert!(j.load(&f.scope).unwrap().is_none());
+    assert!(j.load_publisher_policy(&f.scope).is_err());
+}
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn independently_wrong_policy_pin_cannot_create_a_partial_join() {
+    use crate::sync::AtomicJoinError;
+
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-joined");
+    let invalid_policy_pin = "f".repeat(64);
+    let mut j = f.open();
+    assert!(matches!(signed_atomic_join(
+        &f, &mut j, &root, &policy, &pinned, "etag-joined",
+        &owner, &owner, &root_pin, &invalid_policy_pin,
+    ), Err(AtomicJoinError::UnverifiedJoin(_))));
+    assert!(j.load(&f.scope).unwrap().is_none());
+}
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn previously_anchored_root_cannot_be_silently_upgraded_or_rebound() {
+    use crate::sync::AtomicJoinError;
+
+    let f = Fixture::new();
+    let owner = signer(1);
+    let mut j = f.with_pinned_root();
+    let root = j.load(&f.scope).unwrap().unwrap().root().clone();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-e2b-genesis");
+    // Legacy root-only enrollment is explicitly NOT silently converted to
+    // an atomic owner-signed join by an unreviewed background process.
+    assert!(matches!(signed_atomic_join(
+        &f, &mut j, &root, &policy, &pinned, "etag-e2b-genesis",
+        &owner, &owner, &root_pin, &policy_pin,
+    ), Err(AtomicJoinError::ConflictingBinding)));
+    assert!(j.load_publisher_policy(&f.scope).unwrap().is_none());
+}
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn two_handles_compete_but_only_one_atomic_genesis_is_inserted() {
+    use crate::sync::{AtomicJoinError, AtomicJoinOutcome};
+
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(&f.scope, &root, "etag-joined");
+    let mut first = f.open();
+    let mut second = f.open();
+    assert_eq!(signed_atomic_join(
+        &f, &mut first, &root, &policy, &pinned, "etag-joined",
+        &owner, &owner, &root_pin, &policy_pin,
+    ).unwrap(), AtomicJoinOutcome::Inserted);
+    // One other handle sees committed root+policy together, not two states.
+    assert_eq!(signed_atomic_join(
+        &f, &mut second, &root, &policy, &pinned, "etag-joined",
+        &owner, &owner, &root_pin, &policy_pin,
+    ).unwrap(), AtomicJoinOutcome::Unchanged);
+
+    let foreign_root = f.root();
+    let foreign_pin = foreign_root.digest(&f.ns).unwrap();
+    let foreign_pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &foreign_root, "etag-other",
+    );
+    assert!(matches!(signed_atomic_join(
+        &f, &mut second, &foreign_root, &policy, &foreign_pinned,
+        "etag-other", &owner, &owner, &foreign_pin, &policy_pin,
+    ), Err(AtomicJoinError::ConflictingBinding)));
+    assert_eq!(first.load(&f.scope).unwrap().unwrap().root(), &root);
+}
+
+
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[test]
+fn unsigned_successor_cannot_advance_signed_owner_policy_trust() {
+    let f = Fixture::new();
+    let owner = signer(1);
+    let root = f.root();
+    let (policy, _) = first_policy(&f, &owner);
+    let root_pin = root.digest(&f.ns).unwrap();
+    let policy_pin = policy.canonical_digest().unwrap();
+    let pinned = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &root, "etag-genesis",
+    );
+    let mut journal = f.open();
+    signed_atomic_join(
+        &f, &mut journal, &root, &policy, &pinned, "etag-genesis",
+        &owner, &owner, &root_pin, &policy_pin,
+    ).unwrap();
+
+    let unsigned = S3PackedHeadV2::new(
+        &f.ns, 2, OperationId::new(),
+        &blake3::hash(b"unsigned-manifest").to_hex().to_string(),
+        OperationId::new(),
+        &blake3::hash(b"unsigned-index").to_hex().to_string(),
+        Some(root_pin),
+    ).unwrap();
+    let full_read_without_signature = S3PinnedV2ReadPreview::for_trust_anchor_test(
+        &f.scope, &unsigned, "etag-unsigned",
+    );
+    // A fully pinned, directly linked S3 state still does not demonstrate
+    // publisher authorization. Legacy promotion must HOLD for joined Vaults.
+    assert!(matches!(
+        journal.record_verified_successor(
+            &f.scope, &unsigned, "etag-unsigned",
+            &full_read_without_signature,
+        ),
+        Err(S3V2TrustAnchorError::UnverifiedRead),
+    ));
+    assert_eq!(journal.load(&f.scope).unwrap().unwrap().root(), &root);
+    drop(journal);
+    let reopened = f.open();
+    assert_eq!(reopened.load(&f.scope).unwrap().unwrap().root(), &root);
+    assert_eq!(
+        reopened.load_publisher_policy(&f.scope).unwrap().unwrap().digest(),
+        policy_pin,
+    );
 }

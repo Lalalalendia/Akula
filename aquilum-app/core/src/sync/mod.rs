@@ -150,6 +150,8 @@ pub use s3_remote_anchor::{
 pub use s3_v2_trust_anchor::{
     PolicyReceiptOutcome, V2PolicyReceiptError, V2TrustedPublisherPolicy,
 };
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+pub use s3_v2_trust_anchor::{AtomicJoinError, AtomicJoinOutcome};
 #[cfg(feature = "sync-s3")]
 pub use s3_v2_trust_anchor::{
     S3V2TrustAnchorError, S3V2TrustAnchorOutcome,

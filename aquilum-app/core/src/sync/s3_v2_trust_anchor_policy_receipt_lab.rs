@@ -316,6 +316,12 @@ impl S3V2TrustedAnchorJournal {
     }
 }
 
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+#[path = "s3_v2_atomic_join_lab.rs"]
+mod atomic_join_lab;
+#[cfg(feature = "signed-vault-atomic-join-lab")]
+pub use atomic_join_lab::{AtomicJoinError, AtomicJoinOutcome};
+
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_policy_receipt_lab_tests.rs"]
 mod tests;

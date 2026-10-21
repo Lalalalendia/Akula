@@ -269,3 +269,69 @@ fn protected_appdata_journal_refuses_user_vault_location() {
     // root-admission guard prevents placing journal/WAL inside Markdown.
     assert!(f.tmp.path().exists());
 }
+
+#[test]
+fn policy_extension_is_fail_closed_across_build_feature_modes() {
+    let f = Fixture::new();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let mut journal = S3V2TrustedAnchorJournal::open(&admission, &f.journal_path()).unwrap();
+    let genesis = f.genesis();
+    journal.enroll_verified_genesis(
+        &f.scope, &digest(&genesis, &f.scope), &genesis,
+        "etag-genesis", &verified(&genesis, "etag-genesis", &f.scope),
+    ).unwrap();
+    // A syntactically complete policy state is NOT a verified one.
+    // No build mode may silently discard the policy to advance a root.
+    let db = rusqlite::Connection::open(f.journal_path()).unwrap();
+    #[cfg(not(feature = "signed-vault-policy-receipt-lab"))]
+    db.execute_batch(
+        "ALTER TABLE s3_v2_trusted_roots ADD COLUMN policy_json BLOB;
+         ALTER TABLE s3_v2_trusted_roots ADD COLUMN policy_blake3 TEXT;
+         ALTER TABLE s3_v2_trusted_roots ADD COLUMN policy_receipt TEXT;"
+    ).unwrap();
+    db.execute(
+        "UPDATE s3_v2_trusted_roots
+         SET policy_json=?2,policy_blake3=?3,policy_receipt=?4
+         WHERE profile_id=?1",
+        params![
+            f.scope.profile_id(), b"unverified-policy".as_slice(),
+            "0".repeat(64), "unverified-receipt"
+        ],
+    ).unwrap();
+
+    let next = f.next(&genesis);
+    assert!(journal.load(&f.scope).is_err());
+    assert!(journal.record_verified_successor(
+        &f.scope, &next, "etag-next",
+        &verified(&next, "etag-next", &f.scope),
+    ).is_err());
+    assert_eq!(db.query_row(
+        "SELECT head_etag FROM s3_v2_trusted_roots WHERE profile_id=?1",
+        params![f.scope.profile_id()],
+        |row| row.get::<_, String>(0),
+    ).unwrap(), "etag-genesis");
+}
+
+#[test]
+#[cfg(not(feature = "signed-vault-policy-receipt-lab"))]
+fn partial_policy_schema_is_never_ignored_by_old_v2_reader() {
+    let f = Fixture::new();
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    let mut journal = S3V2TrustedAnchorJournal::open(&admission, &f.journal_path()).unwrap();
+    let genesis = f.genesis();
+    journal.enroll_verified_genesis(
+        &f.scope, &digest(&genesis, &f.scope), &genesis,
+        "etag-genesis", &verified(&genesis, "etag-genesis", &f.scope),
+    ).unwrap();
+    let db = rusqlite::Connection::open(f.journal_path()).unwrap();
+    db.execute_batch("ALTER TABLE s3_v2_trusted_roots ADD COLUMN policy_json BLOB;").unwrap();
+    assert!(matches!(
+        journal.load(&f.scope), Err(S3V2TrustAnchorError::CorruptedAnchor)
+    ));
+    let next = f.next(&genesis);
+    assert!(matches!(
+        journal.record_verified_successor(
+            &f.scope, &next, "etag-next", &verified(&next, "etag-next", &f.scope),
+        ), Err(S3V2TrustAnchorError::CorruptedAnchor)
+    ));
+}

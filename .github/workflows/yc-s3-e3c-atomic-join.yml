@@ -1,0 +1,87 @@
+name: YC-S3 E3c atomic signed pinned join
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3b-pinned-join-20261020
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_tests.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab_tests.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_atomic_join_lab.rs'
+      - '.github/workflows/yc-s3-e3c-atomic-join.yml'
+      - 'docs/sync/YC-S3-T01d-E3c-atomic-join-lab.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  atomic-join:
+    name: Atomic gen1 V2 root and policy / no cloud writer
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: E3c SQLite all-or-nothing and historical E2b integrity regression
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-atomic-join-lab s3_v2_trust_anchor::policy_receipt_lab::tests -- --test-threads=1
+      - name: E3b full read E3a signed invitation and E2a owner-policy regressions
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-atomic-join-lab s3_join_pinned_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-atomic-join-lab s3_join_genesis_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-atomic-join-lab s3_publisher_policy_lab::tests -- --test-threads=1
+      - name: Legacy V2 journal must refuse policy downgrade in standard Core
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          # An unmatched cargo --exact filter exits 0 after executing ZERO
+          # tests. Verify the fully qualified test exists before each run.
+          run_exact_test() {
+            local feature="$1" name="$2"
+            cargo test --locked -p aquilum-core --no-default-features --features "$feature" -- --list |
+              grep -F -- "${name}: test" >/dev/null
+            cargo test --locked -p aquilum-core --no-default-features --features "$feature" "$name" -- --exact
+          }
+          run_exact_test sync-s3 sync::s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes
+          run_exact_test sync-s3 sync::s3_v2_trust_anchor::tests::partial_policy_schema_is_never_ignored_by_old_v2_reader
+          run_exact_test signed-vault-policy-receipt-lab sync::s3_v2_trust_anchor::tests::policy_extension_is_fail_closed_across_build_feature_modes
+          run_exact_test signed-vault-policy-receipt-lab sync::s3_v2_trust_anchor::policy_receipt_lab::tests::valid_enrolled_policy_blocks_legacy_unsigned_successor_even_in_e2b_only_build
+      - name: Compile standard Core without experimental trust features
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          if grep -Eq 'signed-vault-(root|policy|pairing|pinned-join|atomic-join)-lab' native/Cargo.toml; then
+            echo 'Trust experiments must not be enabled by regular Akula native build'
+            exit 1
+          fi
