@@ -13,6 +13,9 @@ pub struct OwnerReview {
     pub attempt: OwnerReviewPreviewAttempt,
     pub typed: String,
     pub state: ReviewState,
+    // The user's locally selected credential profile must not change under a
+    // review attempt. It is NOT proof of cloud account identity.
+    pub selected_profile: String,
 }
 
 #[derive(Clone)]
@@ -23,12 +26,17 @@ pub struct OwnerReviewView {
 }
 
 impl OwnerReview {
-    pub fn new(attempt: OwnerReviewPreviewAttempt) -> Self {
+    pub fn new(attempt: OwnerReviewPreviewAttempt, selected_profile: String) -> Self {
         Self {
             attempt,
             typed: String::new(),
             state: ReviewState::AwaitingIndependentOwner,
+            selected_profile,
         }
+    }
+
+    pub fn still_matches_local_draft(&self, bucket: &str, profile: &str) -> bool {
+        self.attempt.untrusted_bucket() == bucket && self.selected_profile == profile
     }
     pub fn view(&self) -> OwnerReviewView {
         OwnerReviewView {
@@ -59,7 +67,10 @@ mod tests {
         let bytes = serde_json::to_vec(&candidate).unwrap();
         assert!(bytes.len() < MAX_OWNER_REVIEW_PROPOSAL_BYTES);
         let attempt = OwnerReviewPreviewAttempt::import_untrusted(&bytes).unwrap();
-        let review = OwnerReview::new(attempt);
+        let review = OwnerReview::new(attempt, "test-review-profile".into());
+        assert!(review.still_matches_local_draft("preview-bucket", "test-review-profile"));
+        assert!(!review.still_matches_local_draft("other-bucket", "test-review-profile"));
+        assert!(!review.still_matches_local_draft("preview-bucket", "other-profile"));
         assert!(review.typed.is_empty());
         assert_eq!(review.state, ReviewState::AwaitingIndependentOwner);
         assert_eq!(review.view().challenge_hex.unwrap().len(), 64);
