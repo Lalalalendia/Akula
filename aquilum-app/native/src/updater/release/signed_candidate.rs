@@ -16,6 +16,8 @@ use super::{PUBLIC_KEY, channel_ready, verify};
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_LINUX_IMAGE_BYTES: usize = 512 * 1024 * 1024;
 const TARGET_LINUX_APPIMAGE: &str = "linux-x86_64-appimage";
+const TARGET_WINDOWS_NSIS: &str = "windows-x86_64";
+const MAX_WINDOWS_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
 
 fn hold(why: &str) -> String {
     format!("AKULA_SIGNED_CANDIDATE_HOLD: {why}")
@@ -161,7 +163,7 @@ fn inspect_authenticated(
     if raw.is_empty() || raw.len() > MAX_MANIFEST_BYTES {
         return Err(hold("signed manifest size limit"));
     }
-    if expected_platform != TARGET_LINUX_APPIMAGE {
+    if expected_platform != TARGET_LINUX_APPIMAGE && expected_platform != TARGET_WINDOWS_NSIS {
         return Err(hold("unsupported or unexpected platform for automatic apply"));
     }
     let manifest: SignedManifest =
@@ -192,14 +194,27 @@ fn inspect_authenticated(
         &format!("Akula-{}-1.x86_64.rpm", manifest.version),
         "RPM",
     )?;
-    let asset = &manifest.artifacts.appimage;
-    let required_name = format!("akula-app_{}_x86_64.AppImage", manifest.version);
-    if asset.filename != required_name {
-        return Err(hold("signed platform filename does not identify Akula AppImage"));
+    // The selected asset must be bound to its OS installer identity,
+    // not just to a valid signature for another Akula platform.
+    let (asset, expected_name, budget) = if expected_platform == TARGET_WINDOWS_NSIS {
+        (
+            &manifest.artifacts.windows,
+            format!("Akula_{}_x64-setup.exe", manifest.version),
+            MAX_WINDOWS_INSTALLER_BYTES,
+        )
+    } else {
+        (
+            &manifest.artifacts.appimage,
+            format!("akula-app_{}_x86_64.AppImage", manifest.version),
+            MAX_LINUX_IMAGE_BYTES as u64,
+        )
+    };
+    if asset.filename != expected_name {
+        return Err(hold("signed platform filename does not identify the approved Akula installer"));
     }
     if !valid_hex(&asset.sha256, 64)
         || asset.size == 0
-        || asset.size > MAX_LINUX_IMAGE_BYTES as u64
+        || asset.size > budget
         || asset.size != bytes.len() as u64
     {
         return Err(hold("signed asset hash format, size or budget mismatch"));
@@ -248,10 +263,20 @@ pub(super) fn admit(
             TARGET_LINUX_APPIMAGE, env!("CARGO_PKG_VERSION"),
         )
     }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        admit_with_trusted_key(
+            manifest, signature, payload, PUBLIC_KEY,
+            TARGET_WINDOWS_NSIS, env!("CARGO_PKG_VERSION"),
+        )
+    }
+    #[cfg(not(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "x86_64"),
+    )))]
     {
         let _ = (manifest, signature, payload);
-        Err(hold("only installed Linux x86_64 AppImage admission is supported"))
+        Err(hold("only Windows NSIS or Linux x86_64 AppImage admission is supported"))
     }
 }
 
@@ -289,6 +314,54 @@ mod tests {
         assert_eq!(version, "0.3.10");
         assert_eq!(source, "a".repeat(40));
         assert_eq!(sha, digest_hex(bytes));
+    }
+
+    #[test]
+    fn windows_nsis_requires_exact_publisher_signed_package_identity() {
+        // Structural checks here are deliberately not a signature verifier.
+        // admit_with_trusted_key authenticates the entire manifest first.
+        let package = b"synthetic Windows installer bytes";
+        let mut entry: serde_json::Value =
+            serde_json::from_slice(&fixture(b"other OS", "0.3.10")).unwrap();
+        entry["artifacts"]["windows-x86_64"] = json!({
+            "filename": "Akula_0.3.10_x64-setup.exe",
+            "sha256": digest_hex(package),
+            "size": package.len(),
+        });
+        let signed_shape = serde_json::to_vec(&entry).unwrap();
+        let identity = inspect_authenticated(
+            &signed_shape, package, TARGET_WINDOWS_NSIS, "0.3.9",
+        ).unwrap();
+        assert_eq!(identity.0, "0.3.10");
+        assert_eq!(identity.2, digest_hex(package));
+
+        let mut corrupted = package.to_vec();
+        corrupted[0] ^= 1;
+        assert!(inspect_authenticated(
+            &signed_shape, &corrupted, TARGET_WINDOWS_NSIS, "0.3.9",
+        ).unwrap_err().contains("downloaded bytes"));
+
+        for wrong_version in ["0.3.10", "0.3.11"] {
+            assert!(inspect_authenticated(
+                &signed_shape, package, TARGET_WINDOWS_NSIS, wrong_version,
+            ).unwrap_err().contains("not strictly newer"));
+        }
+        for wrong_name in [
+            "Aquilum_0.3.10_x64-setup.exe",
+            "Akula_0.3.10_arm64-setup.exe",
+            "Akula_0.3.9_x64-setup.exe",
+            "../Akula_0.3.10_x64-setup.exe",
+        ] {
+            let mut replaced = entry.clone();
+            replaced["artifacts"]["windows-x86_64"]["filename"] = json!(wrong_name);
+            assert!(inspect_authenticated(
+                &serde_json::to_vec(&replaced).unwrap(),
+                package, TARGET_WINDOWS_NSIS, "0.3.9",
+            ).is_err(), "{wrong_name}");
+        }
+        assert!(inspect_authenticated(
+            &signed_shape, package, TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).is_err(), "the same signed entry must not authorize a different platform");
     }
 
     #[test]
