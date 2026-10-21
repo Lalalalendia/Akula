@@ -27,6 +27,7 @@ pub mod viewer;
 pub mod tokens;
 pub mod widgets;
 pub mod workspaces;
+pub mod transfer;
 
 mod frame;
 mod header;
