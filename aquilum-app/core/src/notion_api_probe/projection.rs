@@ -30,7 +30,7 @@ fn safe_title(value: &Value) -> String {
             .collect::<String>())
         .filter(|v| !v.is_empty());
     title.unwrap_or_else(|| "Notion page".into())
-        .replace(['\r','\n','\0'], " ")
+        .chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
 }
 
 pub fn prepare_import(source: &SourcePreview) -> Result<ImportPreview, String> {
