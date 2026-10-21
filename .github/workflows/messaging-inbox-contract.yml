@@ -7,11 +7,13 @@ on:
       - 'aquilum-app/core/src/messaging/**'
       - 'docs/messaging/**'
       - '.github/workflows/messaging-inbox-contract.yml'
-  push:
-    branches: ['feature/akula-messaging-inbox-20261021']
 
 permissions:
   contents: read
+
+concurrency:
+  group: akula-msg-inbox-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   durable-inbox:
