@@ -9,9 +9,9 @@ use std::sync::mpsc::{Receiver, channel};
 
 use aquilum_core::{Core, CoreEvent, EventSink};
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub const APP_ID: &str = "io.github.lalalendia.akula";
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub const APP_ID: &str = "com.dmitriy.aquilum-app";
 
 pub struct Workspace {
@@ -29,9 +29,10 @@ impl Workspace {
     pub fn open(data_dir: Option<&Path>, vault: Option<&Path>, wake: impl Fn() + Send + Sync + 'static) -> Result<Self, String> {
         let data_dir = data_dir_or_default(data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
-        // Akula on Windows deliberately never imports Aquilum/Quantum app data.
-        // Explicit migration, with review and backups, belongs to a separate tool.
-        #[cfg(not(target_os = "windows"))]
+        // Windows/Linux Akula never auto-import Aquilum/Quantum app data.
+        // macOS is frozen and retains its previous migration behavior.
+        // Any cross-product migration needs an explicit, reviewed backup tool.
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         if data_dir.ends_with(APP_ID) {
             aquilum_core::migration::migrate_legacy_data(&data_dir);
         }
@@ -95,6 +96,24 @@ fn platform_data_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+    }
+}
+
+// RELEASE-LINUX-ID-01: checked without modifying user home directories.
+#[cfg(all(test, target_os = "linux"))]
+mod akula_linux_identity_tests {
+    use super::*;
+
+    #[test]
+    fn standalone_app_id_is_independent_of_aquilum() {
+        assert_eq!(APP_ID, "io.github.lalalendia.akula");
+        assert_ne!(APP_ID, "com.dmitriy.aquilum-app");
+    }
+
+    #[test]
+    fn explicit_test_directory_is_preserved() {
+        let test_path = Path::new("/tmp/akula-linux-test-data");
+        assert_eq!(data_dir_or_default(Some(test_path)).unwrap(), test_path);
     }
 }
 

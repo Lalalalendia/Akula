@@ -6,6 +6,9 @@
 mod core_scan;
 mod dag;
 mod delta;
+// Experimental and opt-in versioned codec; never an S3 writer or File Gate.
+#[cfg(feature = "sync-text-delta")]
+pub(crate) mod text_delta_codec;
 mod download;
 mod dag_store;
 pub mod fake;
@@ -53,6 +56,8 @@ mod protection_store;
 mod s3_preimage_capture;
 #[cfg(feature = "sync-s3")]
 mod s3_reserved_replace;
+#[cfg(all(test, feature = "sync-s3"))]
+mod cold_oracle_report;
 #[cfg(feature = "sync-s3")]
 mod profile_binding;
 mod path;

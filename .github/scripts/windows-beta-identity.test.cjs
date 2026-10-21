@@ -37,10 +37,12 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
 });
 
 test('Windows runtime data and global process identities do not alias Aquilum', () => {
-  assert.match(workspace, /#\[cfg\(target_os = "windows"\)\]\s*pub const APP_ID: &str = "io\.github\.lalalendia\.akula";/);
-  assert.match(workspace, /#\[cfg\(not\(target_os = "windows"\)\)\]\s*pub const APP_ID: &str = "com\.dmitriy\.aquilum-app";/);
-  assert.match(workspace, /#\[cfg\(not\(target_os = "windows"\)\)\]\s*if data_dir\.ends_with\(APP_ID\)/);
-  assert.match(autostart, /#\[cfg\(target_os = "windows"\)\]\s*const NAME: &str = "Akula";/);
+  // Akula Linux now intentionally shares Akula's independent identity,
+  // not Aquilum's AppData. Windows has not changed its product identity.
+  assert.match(workspace, /#\[cfg\(any\(target_os = "windows", target_os = "linux"\)\)\]\s*pub const APP_ID: &str = "io\.github\.lalalendia\.akula";/);
+  assert.match(workspace, /#\[cfg\(not\(any\(target_os = "windows", target_os = "linux"\)\)\)\]\s*pub const APP_ID: &str = "com\.dmitriy\.aquilum-app";/);
+  assert.match(workspace, /#\[cfg\(not\(any\(target_os = "windows", target_os = "linux"\)\)\)\]\s*if data_dir\.ends_with\(APP_ID\)/);
+  assert.match(autostart, /#\[cfg\(any\(target_os = "windows", target_os = "linux"\)\)\]\s*const NAME: &str = "Akula";/);
   assert.match(instance, /pub const WINDOW_CLASS: &str = "AkulaWindow";/);
 });
 
@@ -143,4 +145,58 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
   const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
   assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
     'UI readback must never simulate success by writing to the note');
+});
+
+test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
+  const provenance = read('scripts/windows-beta-candidate-manifest.ps1');
+  const smoke = workflow.indexOf('Install, verify UIA Copy, edit, restart and uninstall beside Aquilum sentinel');
+  const manifest = workflow.indexOf('Verify candidate provenance and write manifest');
+  const upload = workflow.indexOf('Upload candidate (not a release)');
+  assert.ok(smoke >= 0 && manifest > smoke && upload > manifest,
+    'candidate may be uploaded only after installed GUI persistence succeeds');
+  for (const required of [
+    'scripts/windows-beta-candidate-manifest.ps1',
+    'dist/candidate-manifest.json',
+    'if-no-files-found: error',
+    'github.run_id',
+    'github.run_attempt',
+  ]) {
+    assert.ok(workflow.includes(required), 'candidate artifact missing: ' + required);
+  }
+  for (const required of [
+    'git -C $env:GITHUB_WORKSPACE rev-parse HEAD',
+    "$env:GITHUB_EVENT_NAME -eq 'pull_request'",
+    'Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256',
+    'Get-FileHash -LiteralPath $binary -Algorithm SHA256',
+    'Get-FileHash -LiteralPath $lock -Algorithm SHA256',
+    'actual_checkout_sha = $source',
+    'gui_persistence_smoke',
+    'AKULA_WINDOWS_BETA_PROVENANCE_PASS',
+  ]) {
+    assert.ok(provenance.includes(required), 'provenance invariant missing: ' + required);
+  }
+  assert.doesNotMatch(provenance, /gh release create|Invoke-WebRequest|Start-Process/,
+    'manifest must neither distribute a release nor run other executables');
+});
+
+test('Windows beta NSIS apply only accepts signed typed candidate and remains gated', () => {
+  const apply = read('aquilum-app/native/src/updater/apply.rs');
+  const release = read('aquilum-app/native/src/updater/release.rs');
+  const updater = read('aquilum-app/native/src/updater/mod.rs');
+  const windowsApply = apply.split('#[cfg(target_os = "windows")]')[1]
+    ?.split('#[cfg(target_os = "macos")]')[0];
+  assert.ok(windowsApply, 'Windows apply implementation must exist');
+  assert.match(windowsApply, /candidate: &super::release::SignedCandidate/);
+  assert.match(windowsApply, /if !super::release::channel_ready\(\)/);
+  assert.match(windowsApply, /stage_signed_windows_setup\(candidate.bytes\(\), candidate.sha256\(\)\)/);
+  assert.match(windowsApply, /ShellExecuteW/);
+  assert.match(apply, /file\.sync_all\(\)/);
+  assert.match(apply, /if actual != expected_sha256/);
+  assert.doesNotMatch(windowsApply, /pub(?:\(crate\))? fn apply\(payload: &\[u8\]/,
+    'unsigned arbitrary bytes cannot be a Windows installer argument');
+  assert.match(updater, /payload: Arc<Mutex<Option<release::SignedCandidate>>>/);
+  assert.doesNotMatch(updater, /Some\(candidate.into_bytes\(\)\);\s*Ok\(\(\)\)/,
+    'unsealing an authenticated Windows candidate before apply is prohibited');
+  assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
+  assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
 });

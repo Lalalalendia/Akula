@@ -1,0 +1,9 @@
+[package]
+name = "akula-host-broker-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Deliberately independent from Akula's Cargo workspace and binary: no
+# implicit native feature, installer service, File Gate or lockfile mutation.
+[workspace]

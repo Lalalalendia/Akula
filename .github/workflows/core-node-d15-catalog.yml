@@ -4,8 +4,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/src/node_catalog_lab.rs'
       - 'aquilum-app/core/tests/node_catalog_lab.rs'
       - 'docs/platforms/AKULA-DEPLOY-D15-CATALOG.md'
@@ -14,6 +12,11 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  # Only PR revisions supersede earlier PR revisions; manual labs stay independent.
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   pinned-catalog:

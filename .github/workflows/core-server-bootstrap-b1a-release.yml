@@ -1,0 +1,55 @@
+name: Akula Bootstrap B1a offline signed release proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "modules/bootstrap-b1a/**"
+      - "aquilum-app/core/tests/server_bootstrap_b1a.rs"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1A.md"
+      - ".github/workflows/core-server-bootstrap-b1a-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-bootstrap-b1a-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-signature-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-b1a-release-proof-v1
+          cache-workspace-crates: true
+      - name: Verify Core exposes the shared signed-release API
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx 'pub use akula_server_release_b1a::*;' aquilum-app/core/src/server_release_lab.rs
+      - name: Run shared B1a eight original security contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/bootstrap-b1a/Cargo.toml -- --nocapture
+      - name: Verify Ed25519 release trust, rollback and exact signed bytes
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --test server_bootstrap_b1a -- --nocapture
+      - name: Prove default Core remains unchanged without B1a
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features

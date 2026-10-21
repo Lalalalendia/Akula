@@ -35,6 +35,21 @@ impl Line {
         *self = Line::default();
     }
 
+    /// Last painted layout and the byte end of *source* text exposed on screen.
+    /// The added ellipsis is decoration, never part of the copyable filename.
+    pub fn visible_selection_layout(&self, width: f64, source: &str) -> Option<(&Layout<BrushIndex>, usize)> {
+        let (full, cached, _) = self.full.as_ref()?;
+        if cached.as_str() != source {
+            return None;
+        }
+        if f64::from(full.width()) <= width {
+            return Some((full, source.len()));
+        }
+        let (shown, cut) = self.cut.as_ref()?;
+        let prefix = source.get(..*cut)?.trim_end();
+        Some((shown, prefix.len()))
+    }
+
     pub fn layout(&mut self, ctx: &mut PaintCtx<'_>, text: &str, width: f64, style: Style) -> &Layout<BrushIndex> {
         let (font_cx, layout_cx) = ctx.text_contexts();
         if self.full.as_ref().is_none_or(|(_, t, s)| t != text || *s != style) {

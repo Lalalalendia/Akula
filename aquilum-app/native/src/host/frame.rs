@@ -44,6 +44,22 @@ impl Host {
             output.set_background(u32::from_be_bytes([rgba.a, rgba.r, rgba.g, rgba.b]));
         }
         let full = std::mem::take(&mut self.full_next) || output.fresh();
+        // Developer-only A/B falsifier: force rasterization rather than reuse
+        // copied BGRA rows during a live replay. Normal and installed frames
+        // do not check this environment variable.
+        #[cfg(not(feature = "installed"))]
+        let full = full || {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let enabled = *ENABLED.get_or_init(|| {
+                std::env::var("AKULA_EXPERIMENTAL_IMAGE_FORCE_FULL_REDRAW").ok().as_deref() == Some("1")
+            });
+            let active = enabled && self.replay.as_ref().is_some_and(crate::replay::Replay::running);
+            if active {
+                static FIRST: std::sync::Once = std::sync::Once::new();
+                FIRST.call_once(|| eprintln!("AKULA_IMAGE_REPLAY_FULL_REDRAW_APPLIED"));
+            }
+            active
+        };
         let raster_start = Instant::now();
         let drawn = match self.renderer.draw(&layers, width, height, scale, background, full, output) {
             Ok(drawn) => drawn,
@@ -57,7 +73,7 @@ impl Host {
         let present_start = Instant::now();
         #[cfg(feature = "memory-probe")]
         let presented = !drawn.is_empty();
-        #[cfg(all(target_os = "macos", feature = "installed"))]
+        #[cfg(all(any(target_os = "macos", target_os = "linux"), feature = "installed"))]
         let startup_frame_presented = !drawn.is_empty();
         if !drawn.is_empty() {
             output.present(&drawn);
@@ -68,7 +84,7 @@ impl Host {
         // ACK only after a nonempty frame is presented AND the native window
         // has been revealed; scheduling it before reveal could acknowledge a
         // hidden app which never reached its visible GUI startup path.
-        #[cfg(all(target_os = "macos", feature = "installed"))]
+        #[cfg(all(any(target_os = "macos", target_os = "linux"), feature = "installed"))]
         if startup_frame_presented {
             crate::updater::on_first_presented_frame();
         }

@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
+      b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
+      node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -42,6 +44,25 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          # A shared Cargo or Core boundary still gets both opt-in B1 tests
+          # in the mandatory gate, without scheduling two duplicate workflows.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/Cargo.toml aquilum-app/Cargo.lock \
+            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs \
+            aquilum-app/core/src/server_release_lab.rs; then
+            echo 'b1_shared_compat=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'b1_shared_compat=true' >> "$GITHUB_OUTPUT"
+          fi
+          # Read-only Node D1/D1.5/D2 contracts move into this mandatory lane
+          # when shared workspace/Core boundaries change.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/Cargo.toml aquilum-app/Cargo.lock \
+            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs; then
+            echo 'node_shared_compat=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'node_shared_compat=true' >> "$GITHUB_OUTPUT"
+          fi
 
   required-tests:
     if: github.event_name == 'pull_request'
@@ -71,6 +92,15 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/architecture-budget.test.cjs
           node .github/scripts/architecture-budget.cjs --base="$BASE_SHA" --head=HEAD --summary="$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce no-growth source and workflow fanout ratchet
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          node --test .github/scripts/ci-file-ratchet.test.cjs
+          node .github/scripts/ci-file-ratchet.cjs --base="$BASE_SHA" --head=HEAD
 
       # PLUGIN-00: documentation/source-boundary inventory only; no runtime or new status check.
       - name: Plugin architecture contract
@@ -158,6 +188,106 @@ jobs:
           set -euo pipefail
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
+
+      # Shared Cargo/lock/Core boundary changes retain exact B1a and B1b0
+      # security tests under the existing required main gate. Direct source
+      # and module changes still run their original specialist workflows.
+      - name: B1a/B1b0/B1b1 release and approval compatibility
+        if: needs.classify.outputs.b1_shared_compat == 'true'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A Core re-export must not become an independent verifier implementation.
+          grep -Fx 'pub use akula_server_release_b1a::*;' core/src/server_release_lab.rs
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab \
+            --test server_bootstrap_b1a --test server_bootstrap_b1b0 -- --nocapture
+          # B1b1c includes the B1b1b/B1b1a feature ancestry. All three
+          # unprivileged, inert ledger/security suites remain covered.
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1c-witness-lab \
+            --test server_bootstrap_b1b1a --test server_bootstrap_b1b1b \
+            --test server_bootstrap_b1b1c -- --nocapture
+
+      # Shared Cargo/lock/Core boundary is checked in-place: separate Node
+      # workflow runs are needed only for changes to their owned source/tests.
+      - name: Node D1/D1.5/D2 scoped read and loopback compatibility
+        if: needs.classify.outputs.node_shared_compat == 'true'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+          cargo test --locked -p aquilum-core --features node-lab \
+            --test headless_node_d1 --test headless_node_d2 --test node_catalog_lab -- --nocapture
+
+      # RELEASE-SIGNED-CANDIDATE-01: real CLI Minisign -> native Rust interop.
+      # Reuse the existing required Rust runner rather than queuing another job.
+      # The test-only publisher key is ephemeral and never leaves RUNNER_TEMP.
+      - name: Real ephemeral Minisign signature admitted by native Rust
+        if: needs.classify.outputs.mode == 'workspace' && (startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-CANDIDATE-') || startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-') || startsWith(github.event.pull_request.title, 'RELEASE-WINDOWS-NSIS-UPGRADE-') || github.head_ref == 'feature/windows-signed-manifest-v1-matrix-20261021')
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y minisign
+          export AKULA_SIGNED_CANDIDATE_TEST_ROOT="$RUNNER_TEMP/akula-signed-candidate-native"
+          mkdir -m 700 -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT"
+          trap 'rm -rf "$AKULA_SIGNED_CANDIDATE_TEST_ROOT"' EXIT
+          node <<'NODE'
+          const fs=require('node:fs');
+          const crypto=require('node:crypto');
+          const path=require('node:path');
+          const root=process.env.AKULA_SIGNED_CANDIDATE_TEST_ROOT;
+          if(!root) throw Error('missing isolated test root');
+          const payload=Buffer.from('AKULA-SYNTHETIC-APPIMAGE-FOR-REAL-SIGNATURE-TEST-v1');
+          const hash=crypto.createHash('sha256').update(payload).digest('hex');
+          const manifest={
+            schema:1,product:'Akula',version:'0.3.10',
+            source_commit:'a'.repeat(40),cargo_lock_sha256:'b'.repeat(64),
+            artifacts:{
+              'windows-x86_64':{filename:'Akula_0.3.10_x64-setup.exe',sha256:'c'.repeat(64),size:12},
+              'linux-x86_64-appimage':{filename:'akula-app_0.3.10_x86_64.AppImage',sha256:hash,size:payload.length},
+              'linux-x86_64-deb':{filename:'Akula_0.3.10_amd64.deb',sha256:'c'.repeat(64),size:12},
+              'linux-x86_64-rpm':{filename:'Akula-0.3.10-1.x86_64.rpm',sha256:'c'.repeat(64),size:12}
+            }
+          };
+          fs.writeFileSync(path.join(root,'payload.AppImage'),payload);
+          fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify(manifest));
+          // The protected Windows-only publisher must never sign
+          // fabricated Linux artifact hashes just to fill a matrix.
+          const windowsBytes=Buffer.from('MZ-AKULA-CI-ONLY-WINDOWS-NSIS-PAYLOAD-v1');
+          const windowsHash=crypto.createHash('sha256').update(windowsBytes).digest('hex');
+          const winManifest={
+            schema:1, product:'Akula', version:'0.3.10',
+            source_commit:'a'.repeat(40), cargo_lock_sha256:'b'.repeat(64),
+            artifacts:{
+              'windows-x86_64':{
+                filename:'Akula_0.3.10_x64-setup.exe',
+                sha256:windowsHash,
+                size:windowsBytes.length
+              }
+            }
+          };
+          fs.writeFileSync(path.join(root,'payload.NSIS'),windowsBytes);
+          fs.writeFileSync(path.join(root,'manifest-windows.json'),JSON.stringify(winManifest));
+          NODE
+          minisign -G -W -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.pub"
+          minisign -G -W -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/other.key" -p "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/other.pub"
+          minisign -S -q -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -m "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest.json" -x "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest.minisig"
+          minisign -S -q -s "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/publisher.key" -m "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest-windows.json" -x "$AKULA_SIGNED_CANDIDATE_TEST_ROOT/manifest-windows.minisig"
+          cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-minisign.log"
+          grep -Fq 'test updater::release::signed_candidate::tests::ephemeral_minisign_fixture_accepts_exact_bytes ... ok' "$RUNNER_TEMP/akula-native-minisign.log"
+          grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-minisign.log"
+          grep -Fq 'AKULA_SIGNED_LINUX_STAGE_PASS real_minisign=1 fsync=1 disk_sha256=1 tamper_hold=1 aquilum_intact=1' "$RUNNER_TEMP/akula-native-minisign.log"
+          grep -Fq 'AKULA_SIGNED_LINUX_ROLLBACK_PASS signed_candidate=1 v1_restored=1 v2_preserved_as_failed=1' "$RUNNER_TEMP/akula-native-minisign.log"
+          echo 'AKULA_SIGNED_CANDIDATE_RUST_MINISIGN_PASS real_sign=1 wrong_key_refused=1' >> "$GITHUB_STEP_SUMMARY"
+          echo 'AKULA_SIGNED_LINUX_STAGE_PASS signed_to_disk=1 native_inode_rehash=1' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && ( "$GITHUB_HEAD_REF" == release/windows-nsis-self-update-01 || "$GITHUB_HEAD_REF" == feature/windows-signed-manifest-v1-matrix-20261021 || "$GITHUB_HEAD_REF" == release/akula-signed-metadata-discovery-01-20261021 ) ]]; then
+            cargo test --locked -p aquilum-native --bin aquilum-native updater::release::signed_candidate::tests::ephemeral_minisign_windows_fixture_accepts_signed_exact_bytes -- --exact --ignored --nocapture 2>&1 | tee "$RUNNER_TEMP/akula-native-windows-minisign.log"
+            grep -Fq 'AKULA_WINDOWS_REAL_MINISIGN_ADMISSION_PASS correct_key=1 exact_nsis=1 wrong_key=0 downgrade=0' "$RUNNER_TEMP/akula-native-windows-minisign.log"
+            grep -Fq 'test result: ok. 1 passed; 0 failed;' "$RUNNER_TEMP/akula-native-windows-minisign.log"
+            echo 'AKULA_WINDOWS_SIGNED_NSIS_RUST_PASS real_minisign=1 exact_bytes=1 wrong_key_denied=1' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # AGENT-PERF: reuse the already compiled Core tests and the current
       # required-tests runner rather than introducing another queued job.

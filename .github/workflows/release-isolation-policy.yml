@@ -1,0 +1,33 @@
+# Tiny independent required evidence for any edits to retired release entrypoint.
+# Only static fail-closed policy is asserted; no installers, keys, or artifacts.
+name: Akula release isolation policy
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/release-isolation-policy.yml'
+      - '.github/workflows/akula-publisher-key-proof.yml'
+      - '.github/workflows/akula-windows-signed-candidate.yml'
+      - '.github/scripts/release-isolation-policy.test.cjs'
+      - 'docs/release/legacy-aquilum-release.yml'
+      - 'docs/release/AKULA-RELEASE-LOCK-01.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/release-isolation-policy.yml'
+      - '.github/scripts/release-isolation-policy.test.cjs'
+      - 'docs/release/legacy-aquilum-release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  release-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify old publisher/installer release cannot execute
+        run: node --test .github/scripts/release-isolation-policy.test.cjs

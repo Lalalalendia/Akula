@@ -4,9 +4,29 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { validateRelease } = require('./release-source-contract.cjs');
+const { validateRelease, validateHeldRelease } = require('./release-source-contract.cjs');
 
-const original = fs.readFileSync(path.resolve(__dirname, '..', 'workflows', 'release.yml'), 'utf8');
+const original = fs.readFileSync(path.resolve(__dirname, '..', '..', 'docs', 'release', 'legacy-aquilum-release.yml'), 'utf8');
+const held = fs.readFileSync(path.resolve(__dirname, '..', 'workflows', 'release.yml'), 'utf8');
+
+test('active release is immutable HOLD, historical Aquilum code is archive-only', () => {
+  assert.deepEqual(validateHeldRelease(held, original), []);
+});
+
+for (const [reason, modified] of [
+  ['add a release job', held + '\n  publish:\n    runs-on: ubuntu-latest\n'],
+  ['enable write permissions', held.replace('contents: read', 'contents: write')],
+  ['remove explicit nonzero exit', held.replace('          exit 1', '          exit 0')],
+  ['enable push trigger', held.replace('  workflow_dispatch:', '  workflow_dispatch:\n  push:')],
+  ['remove release hold name', held.replace('name: Akula Release (HOLD)', 'name: Release')],
+]) {
+  test('fail closed when operator tries to ' + reason, () => {
+    assert.ok(validateHeldRelease(modified, original).length > 0);
+  });
+}
+test('archive byte tampering fails even if workflow remains held', () => {
+  assert.ok(validateHeldRelease(held, original + '\n').length > 0);
+});
 
 function mustReject(yaml, reason) {
   const errors = validateRelease(yaml);

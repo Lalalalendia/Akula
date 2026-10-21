@@ -32,6 +32,35 @@ fn mip_linger_enabled() -> bool {
     })
 }
 
+// Developer-only per-image prefilter decision provenance. Trace ephemeral
+// image IDs, never filenames/paths/pixel bytes. Once per (ID, reason).
+#[cfg(not(feature = "installed"))]
+fn trace_mip_decision(
+    id: u64, reason: &'static str, level: u8, source: &ImageSource,
+    geometry: Affine, brush: Affine,
+) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| {
+        std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF").ok().as_deref() == Some("1")
+    }) {
+        return;
+    }
+    static SEEN: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<(u64, &'static str)>>
+    > = std::sync::OnceLock::new();
+    if SEEN.get_or_init(Default::default)
+        .lock().unwrap_or_else(|e| e.into_inner())
+        .insert((id, reason))
+    {
+        let g = geometry.as_coeffs();
+        let b = brush.as_coeffs();
+        eprintln!(
+            "AKULA_IMAGE_MIP_DECISION image_id={id} reason={reason} level={level} pixmap={} geom={g:?} brush={b:?}",
+            matches!(source, ImageSource::Pixmap(_))
+        );
+    }
+}
+
 // Developer-only selective L2 experiment. This is never an installed feature.
 #[cfg(any(test, not(feature = "installed")))]
 fn mip_direct_l2_enabled() -> bool {
@@ -54,6 +83,11 @@ struct MipDiagnostics {
     generated_pixels: u64,
     evicted: u64,
     build_nanos: u128,
+    distinct_requested_ids: std::collections::HashSet<u64>,
+    // Only hashed on the first request for each runtime ID; three
+    // complete scanlines are sufficient to distinguish the deterministic
+    // benchmark's seeded PNGs. This is NOT a full-content file hash.
+    distinct_sampled_pixel_fingerprints: std::collections::HashSet<blake3::Hash>,
 }
 
 #[derive(Default)]
@@ -130,6 +164,42 @@ impl Images {
         #[cfg(not(feature = "installed"))]
         {
             self.diag.requests += 1;
+            // Count distinct source images actually used by the sampler,
+            // not just filenames enumerated in a benchmark note. Enabled
+            // only for multisource diagnostic runs.
+            static DISTINCT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *DISTINCT.get_or_init(|| std::env::var("AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF").ok().as_deref() == Some("1"))
+                && self.diag.distinct_requested_ids.insert(id)
+            {
+                // Do not equate fresh runtime IDs with distinct image bytes.
+                // Fingerprint the first/middle/last *decoded* RGBA scanline
+                // once per ID. The seeded fixture has unique first-row RGBA
+                // values for every PNG, so this is an independent contents
+                // witness. Hashing the whole 4.3MiB source during a measured
+                // frame would substantially perturb CPU p95.
+                let row_bytes = usize::from(base.width()) * 4;
+                let height = usize::from(base.height());
+                let raw = base.data_as_u8_slice();
+                if row_bytes > 0 && height > 0 && raw.len() >= row_bytes * height {
+                    let mut fingerprint = blake3::Hasher::new();
+                    fingerprint.update(&base.width().to_le_bytes());
+                    fingerprint.update(&base.height().to_le_bytes());
+                    for row in [0, height / 2, height - 1] {
+                        let offset = row * row_bytes;
+                        fingerprint.update(&raw[offset..offset + row_bytes]);
+                    }
+                    let digest = fingerprint.finalize();
+                    if std::env::var("AKULA_EXPERIMENTAL_IMAGE_RESOLVE_PROOF")
+                        .ok().as_deref() == Some("1")
+                    {
+                        // This proves requested pixel content for this blob
+                        // ID. A separate converter 'used' result proves that
+                        // a mip was successfully returned for rasterization.
+                        eprintln!("AKULA_IMAGE_MIP_CONTENT image_id={id} fingerprint={digest}");
+                    }
+                    self.diag.distinct_sampled_pixel_fingerprints.insert(digest);
+                }
+            }
         }
         // A warmed final level is the common scrolling case. Avoid scanning
         // the budget and walking intermediate mip levels just to reuse it.
@@ -267,14 +337,21 @@ impl Images {
             self.diag.evicted += (previous_count - self.mips.len()) as u64;
             // This diagnostic prints once per 128 real frame passes, not per
             // image paint, so it cannot dominate the measured frame p95.
-            if frame % 128 == 0
+            // Keep normal diagnostics sparse; in the multisource stress
+            // experiment report every 32 frames so the last sample does not
+            // undercount sources visited during a six-second fling.
+            let multisource = std::env::var("AKULA_EXPERIMENTAL_IMAGE_DISTINCT_PROOF")
+                .ok().as_deref() == Some("1");
+            if (frame % 128 == 0 || (multisource && frame % 32 == 0))
                 && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_PROOF").ok().as_deref() == Some("1")
             {
                 eprintln!(
-                    "AKULA_MIP_CACHE frames={frame} requests={} final_hits={} generated={} generated_pixels={} evicted={} generated_ms={:.3} resident_levels={}",
+                    "AKULA_MIP_CACHE frames={frame} requests={} final_hits={} generated={} generated_pixels={} evicted={} generated_ms={:.3} resident_levels={} distinct_requested_ids={} distinct_sampled_pixel_fingerprints={}",
                     self.diag.requests, self.diag.final_hits, self.diag.generated,
                     self.diag.generated_pixels, self.diag.evicted,
                     self.diag.build_nanos as f64 / 1_000_000.0, self.mips.len(),
+                    self.diag.distinct_requested_ids.len(),
+                    self.diag.distinct_sampled_pixel_fingerprints.len(),
                 );
             }
         }
@@ -413,15 +490,25 @@ fn brush_to_paint_candidate_tuned(
     }
     let Some(id) = original_id else { return (paint, brush_transform) };
     let Brush::Image(image) = &mut paint else { return (paint, brush_transform) };
-    if !matches!(image.sampler.quality, ImageQuality::Medium | ImageQuality::High)
-        || image.sampler.x_extend != Extend::Pad
-        || image.sampler.y_extend != Extend::Pad
-    {
+    if !matches!(image.sampler.quality, ImageQuality::Medium | ImageQuality::High) {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "quality", 0, &image.image, effective_geometry, brush_transform);
+        return (paint, brush_transform);
+    }
+    if image.sampler.x_extend != Extend::Pad || image.sampler.y_extend != Extend::Pad {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "extend", 0, &image.image, effective_geometry, brush_transform);
         return (paint, brush_transform);
     }
     let level = mipmap::level_for_transform(effective_geometry * brush_transform);
-    if level == 0 { return (paint, brush_transform); }
+    if level == 0 {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "transform", 0, &image.image, effective_geometry, brush_transform);
+        return (paint, brush_transform);
+    }
     if let Some(reduced) = images.mip_source(id, &image.image, level) {
+        #[cfg(not(feature = "installed"))]
+        trace_mip_decision(id, "used", level, &image.image, effective_geometry, brush_transform);
         // A real GUI A/B is invalid without evidence that an image took this path.
         // Emit once only in explicit developer diagnostic mode.
         if !cfg!(feature = "installed")
@@ -441,6 +528,8 @@ fn brush_to_paint_candidate_tuned(
         // Geometry, clipping, draw alpha and alignment stay unchanged.
         return (paint, brush_transform * Affine::scale(f64::from(1_u16 << level)));
     }
+    #[cfg(not(feature = "installed"))]
+    trace_mip_decision(id, "unavailable", level, &image.image, effective_geometry, brush_transform);
     (paint, brush_transform)
 }
 

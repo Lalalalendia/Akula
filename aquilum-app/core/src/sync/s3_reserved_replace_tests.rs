@@ -39,7 +39,12 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
-    let temp = tempfile::tempdir().unwrap();
+    fixture_with_temp(tempfile::tempdir().unwrap())
+}
+
+/// Reuse the ordinary integration fixture inside an OS child whose enclosing
+/// disposable directory is retained by the parent after std::process::abort.
+fn fixture_with_temp(temp: tempfile::TempDir) -> Fixture {
     let root = temp.path().join("vault");
     let appdata = temp.path().join("appdata");
     fs::create_dir(&root).unwrap();
@@ -807,18 +812,57 @@ fn p0g3d08_os_process_probe_entrypoint() {
     ).unwrap();
 
     // No child writes are permitted, even on the successful HOLD path.
-    let result = inspect_cold_s3_replace_with_history_hold(
-        &admission, &bindings, &journal, &originals, operation,
-    );
     match mode.as_ref() {
         "hold" => {
+            let result = inspect_cold_s3_replace_with_history_hold(
+                &admission, &bindings, &journal, &originals, operation,
+            );
             let review = result.expect("cross-process cold evidence must match");
             assert_eq!(review.status, InertColdUnifiedStatus::LocallyConsistentHold);
             assert_eq!(review.operation_id, operation);
         }
         "deny" => {
+            let result = inspect_cold_s3_replace_with_history_hold(
+                &admission, &bindings, &journal, &originals, operation,
+            );
             assert!(result.is_err(),
                 "damaged or incomplete cross-process evidence must fail closed");
+        }
+        "vm-classify" => {
+            let result = inspect_cold_s3_replace_with_history_hold(
+                &admission, &bindings, &journal, &originals, operation,
+            );
+            // A real VM force-off may preserve all domains or only a subset.
+            // HOLD is diagnostic; a partial image MUST be denied, never applied.
+            match result {
+                Ok(review) => {
+                    assert_eq!(review.status, InertColdUnifiedStatus::LocallyConsistentHold);
+                    assert_eq!(review.operation_id, operation);
+                    println!("AKULA_P0G3D08D_VM_COLD_CLASS=HOLD");
+                }
+                Err(error) => {
+                    println!("AKULA_P0G3D08D_VM_COLD_CLASS=DENY ({error:?})");
+                }
+            }
+            assert!(journal.read_existing_replace_attempt(operation)
+                .unwrap().is_some(), "post-V8 VM force-off lost consumed V7 fence");
+        }
+        "oracle-hold" | "oracle-deny" => {
+            use crate::sync::cold_oracle_report::{ColdOracleReport, ColdOracleVerdict};
+            let inspected = inspect_cold_s3_replace_with_history_classified(
+                &admission, &bindings, &journal, &originals, operation,
+            );
+            let report = ColdOracleReport::from_classified_inspector(operation, &inspected);
+            let expected = if mode == "oracle-hold" {
+                ColdOracleVerdict::LocallyConsistentHold
+            } else {
+                ColdOracleVerdict::Deny
+            };
+            assert_eq!(report.verdict, expected,
+                "the native cold inspector must select the expected fail-closed result");
+            // Out-of-band diagnostics only; report contains no paths, bytes
+            // or capability to authorize an S3 apply, ACK or baseline advance.
+            println!("AKULA_G1_COLD_ORACLE={}", report.to_json());
         }
         other => panic!("unknown P0g-3d-08 child mode: {other}"),
     }
@@ -858,6 +902,113 @@ fn p0g3d08_run_child(
         .contains("p0g3d08_os_process_probe_entrypoint ... ok"),
         "child must actually run the named Rust test, not pass an empty filter: {}",
         String::from_utf8_lossy(&result.stdout));
+}
+
+/// G1: reuse the existing native cold inspector in a *different* OS process
+/// and require exactly one schema-versioned, non-authorizing JSON verdict.
+fn p0g3d09_run_oracle_child(
+    root: &std::path::Path,
+    appdata: &std::path::Path,
+    operation: OperationId,
+    expected_verdict: &str,
+    expected_reason: &str,
+) -> serde_json::Value {
+    assert!(matches!(expected_verdict, "LOCALLY_CONSISTENT_HOLD" | "DENY"));
+    let mode = if expected_verdict == "LOCALLY_CONSISTENT_HOLD" {
+        "oracle-hold"
+    } else {
+        "oracle-deny"
+    };
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact").arg(P0G3D08_CHILD).arg("--nocapture")
+        .env("AKULA_P0G3D08_CHILD_MODE", mode)
+        .env("AKULA_P0G3D08_ROOT", root)
+        .env("AKULA_P0G3D08_APPDATA", appdata)
+        .env("AKULA_P0G3D08_OPERATION", operation.to_string())
+        .output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(),
+        "the independent native verifier failed: stdout={stdout}, stderr={stderr}");
+    // The report is inserted into the libtest output by --nocapture; the
+    // test name and the final result are separate anchors, not adjacent text.
+    assert!(stdout.contains(&format!("test {P0G3D08_CHILD} ...")),
+        "libtest did not execute the exact named cold verifier: {stdout}");
+    assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"),
+        "libtest result was missing or not successful: {stdout}");
+    let json_line = stdout.lines().find_map(|line| {
+        line.split_once("AKULA_G1_COLD_ORACLE=").map(|(_, json)| json)
+    }).expect("independent OS process did not emit a versioned oracle report");
+    let report: serde_json::Value = serde_json::from_str(json_line)
+        .expect("native oracle report must be parseable as a single JSON object");
+    assert_eq!(report["schema"], "akula.sync.cold-oracle.v1");
+    assert_eq!(report["operation_id"], operation.to_string());
+    assert_eq!(report["verdict"], expected_verdict);
+    assert_eq!(report["reason_code"], expected_reason);
+    assert_eq!(report["authority"], "none");
+    for key in ["receipt_issued", "automatic_apply_allowed",
+                "remote_ack_allowed", "baseline_promotion_allowed"] {
+        assert_eq!(report[key], false, "{key} must remain denied");
+    }
+    report
+}
+
+#[test]
+fn p0g3d09_oracle_reports_hold_and_history_tamper_deny_across_processes() {
+    let f = fixture();
+    publish_strict_candidate_and_record_v8(&f);
+    assert_no_remote_ack(&f);
+    let version = f.journal.borrow()
+        .read_existing_replace_receipt_candidate(f.intent.operation_id)
+        .unwrap().unwrap();
+    let history = f.root.join(".aquilum").join("history")
+        .join(f.intent.path.as_str())
+        .join(version.cold_history_fields().0);
+    assert!(history.is_file());
+    let Fixture {
+        _temp: keep_fixture, core, root, appdata, bindings, custody,
+        journal, cache, protected, intent, old_hash, new_text, ..
+    } = f;
+    drop(bindings);
+    drop(custody);
+    drop(journal);
+    drop(cache);
+    drop(protected);
+    drop(core);
+
+    let positive = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id,
+        "LOCALLY_CONSISTENT_HOLD", "CORRELATED_NOT_DURABLE",
+    );
+    assert_eq!(positive["reason_code"], "CORRELATED_NOT_DURABLE");
+
+    fs::write(&history, vec![b'X'; new_text.len()]).unwrap();
+    let negative = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id,
+        "DENY", "IMMUTABLE_HISTORY_REJECTED",
+    );
+    assert_eq!(negative["reason_code"], "IMMUTABLE_HISTORY_REJECTED");
+
+    // The report is not a proof of persistence, or a permission to ACK.
+    let mut cold = SqliteSyncJournal::open(&appdata.join("journal.sqlite")).unwrap();
+    assert_eq!(cold.get(intent.operation_id).unwrap().unwrap().phase,
+        JournalPhase::Staged);
+    let baseline = cold.baseline(intent.vault_id, intent.document_id)
+        .unwrap().unwrap();
+    assert_eq!(Some(baseline.revision_id), intent.expected_baseline);
+    assert_eq!(baseline.content_hash, old_hash);
+    assert!(cold.read_existing_replace_attempt(intent.operation_id)
+        .unwrap().is_some(), "the V7 one-shot fence must survive");
+    assert!(matches!(cold.mark_applied(intent.operation_id),
+        Err(JournalError::LocalDownloadNeedsNativeReceipt)));
+    drop(cold);
+    let originals = SqliteProtectionStore::open_existing_read_only(
+        &appdata.join("originals.sqlite"),
+    ).unwrap();
+    assert_eq!(originals.read_bound_preimage(intent.operation_id)
+        .unwrap().unwrap().original.bytes, b"unchanged private original");
+    drop(originals);
+    drop(keep_fixture);
 }
 
 #[test]
@@ -953,6 +1104,11 @@ fn p0g3d08_real_os_child_rejects_v7_claim_without_v8_or_publication() {
     drop(protected);
     drop(core);
     p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    let early = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id,
+        "DENY", "PRIMARY_NOT_PUBLISHED",
+    );
+    assert_eq!(early["authority"], "none");
     assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
         b"unchanged private original");
     drop(keep_fixture);
@@ -995,7 +1151,328 @@ fn p0g3d08_real_os_child_rejects_published_primary_and_history_without_v8() {
     drop(protected);
     drop(core);
     p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+    let incomplete = p0g3d09_run_oracle_child(
+        &root, &appdata, intent.operation_id,
+        "DENY", "V8_MISSING",
+    );
+    assert_eq!(incomplete["automatic_apply_allowed"], false);
     assert_eq!(fs::read(root.join(intent.path.as_str())).unwrap(),
         new_text.as_bytes());
     drop(keep_fixture);
+}
+
+
+/// P0g-3d-08c: an actual writer aborts at a precise stage in a disposable
+/// fixture. The parent has never held this child's Core or SQLite handles.
+/// This is still NOT a physical power-cut durability test.
+const P0G3D08C_WRITER_CHILD: &str =
+    "sync::s3_reserved_replace::tests::p0g3d08c_writer_abort_entrypoint";
+
+fn p0g3d08c_abort_at(workdir: &std::path::Path, stage: &str) -> ! {
+    if std::env::var("AKULA_P0G3D08D_VM_PAUSE").as_deref() == Ok("1") {
+        // Only the final V8 seam is authorized for this first Linux VM lab.
+        // The host receives this marker over live SSH stdout and force-kills
+        // QEMU itself. A guest-side abort or shutdown is NOT the experiment.
+        assert!(cfg!(target_os = "linux") && stage == "after-v8",
+            "VM force-off experiment is restricted to Linux after-v8");
+        println!("AKULA_P0G3D08D_VM_READY=after-v8");
+        std::io::Write::flush(&mut std::io::stdout())
+            .expect("flush out-of-band host witness before VM kill");
+        loop {
+            std::thread::park();
+        }
+    }
+    // Ordinary #444 process-crash tests retain their disposable disk marker.
+    // The VM mode above must perform ZERO guest-disk writes after V8 before
+    // the external QEMU kill; only the host owns the live marker.
+    fs::write(workdir.join("p0g3d08c-crash-marker"), stage)
+        .expect("write independent test-only crash marker");
+    std::process::abort();
+}
+
+#[test]
+fn p0g3d08c_writer_abort_entrypoint() {
+    let Some(stage) = std::env::var_os("AKULA_P0G3D08C_STAGE") else {
+        return;
+    };
+    let stage = stage.to_string_lossy();
+    let workdir = PathBuf::from(
+        std::env::var_os("AKULA_P0G3D08C_WORKDIR").unwrap(),
+    );
+    assert!(matches!(stage.as_ref(),
+        "after-v7" | "after-primary" | "after-history" | "after-v8"));
+    let temp = tempfile::Builder::new()
+        .prefix("writer-crash-fixture-")
+        .tempdir_in(&workdir).unwrap();
+    let f = fixture_with_temp(temp);
+    // Serialized before any crash seam; the independent parent can locate
+    // the existing vault, databases and immutable one-shot operation.
+    let identity = serde_json::json!({
+        "root": f.root.to_str().unwrap(),
+        "appdata": f.appdata.to_str().unwrap(),
+        "operation": f.intent.operation_id.to_string(),
+    });
+    fs::write(workdir.join("p0g3d08c-fixture.json"),
+        serde_json::to_vec(&identity).unwrap()).unwrap();
+    if std::env::var("AKULA_P0G3D08D_VM_PAUSE").as_deref() == Ok("1") {
+        assert!(cfg!(target_os = "linux") && stage == "after-v8",
+            "VM force-off test must not pause a different platform or seam");
+        // The fixture (original, previous baseline, SQLite DB namespaces,
+        // registration) is setup, not part of the intentionally ambiguous
+        // destructive step. Flush setup before the V7 / publication window.
+        let status = std::process::Command::new("sync").status()
+            .expect("Linux VM fixture preflight sync");
+        assert!(status.success(), "Linux VM fixture preflight sync failed");
+        // Unlike fixture.json on the tested guest disk, this goes over live
+        // SSH stdout to the host BEFORE any deliberate QEMU force-kill.
+        println!("AKULA_P0G3D08D_VM_FIXTURE={identity}");
+        std::io::Write::flush(&mut std::io::stdout())
+            .expect("flush out-of-band fixture identity to host");
+    }
+
+    let admission = RegisteredReadAdmission::open(&f.core, &f.root).unwrap();
+    if stage == "after-v7" {
+        let _ignored = f.custody.with_cooperative_writer_lifetime(
+            &admission, f.keyspace.vault_id(), &f.scope,
+            || -> Result<(), FileCommandError> {
+                let _held = prepare(&f, &admission)?;
+                assert_editor_reserved(&f);
+                assert!(f.journal.borrow()
+                    .read_existing_replace_attempt(f.intent.operation_id)
+                    .map_err(refused)?
+                    .is_some());
+                // Retain editor reservation and OS custody until process abort.
+                p0g3d08c_abort_at(&workdir, "after-v7");
+            },
+        );
+        panic!("writer failed to abort immediately after V7 claim");
+    }
+
+    // The existing File Gate is still the ONLY primary publisher.
+    // The after-primary seam is cfg(test) only and guarded by the disposable
+    // workdir plus exact target note path in write_checked_history_under_gate.
+    let outcome = save_existing_note_with_prewrite_strict_history_under_custody(
+        &admission, &f.custody, f.keyspace.vault_id(), &f.scope,
+        &f.intent.path, &f.new_text, &f.old_hash,
+        Source::External, Some("p0g3d08c-abort-writer"),
+        || prepare(&f, &admission),
+        |prepared| prepared.inspect_before_write(
+            &admission, &f.bindings, &f.journal.borrow(), &f.protected,
+        ),
+        |prepared, primary, history| {
+            prepared.inspect_after_write(
+                &admission, &f.bindings, &f.journal.borrow(),
+                &f.protected, primary,
+            )?;
+            if stage == "after-history" {
+                p0g3d08c_abort_at(&workdir, "after-history");
+            }
+            let claim = f.journal.borrow()
+                .read_existing_replace_attempt(f.intent.operation_id)
+                .map_err(refused)?
+                .ok_or_else(|| refused("V7 claim missing in child writer"))?;
+            let original = f.protected.read_bound_preimage(f.intent.operation_id)
+                .map_err(refused)?
+                .ok_or_else(|| refused("protected BLOB missing in child writer"))?;
+            let pinned = PinnedReadOnlyRoot::open(&f.root).map_err(refused)?;
+            let observed = pinned.read_identified_bounded(
+                &f.intent.path, MAX_PROTECTED_ORIGINAL_BYTES as u64,
+            ).map_err(refused)?;
+            let candidate = InertExistingReplaceReceiptCandidate::from_strict_history(
+                &claim, &original, history, &observed,
+            ).map_err(refused)?;
+            f.journal.borrow_mut()
+                .record_existing_replace_receipt_candidate_once(&candidate)
+                .map_err(refused)?;
+            if stage == "after-v8" {
+                p0g3d08c_abort_at(&workdir, "after-v8");
+            }
+            Ok(())
+        },
+    );
+    panic!("writer unexpectedly returned instead of aborting at {stage}: {outcome:?}");
+}
+
+#[test]
+fn p0g3d08c_real_writer_abort_matrix_has_no_automatic_replay() {
+    for stage in ["after-v7", "after-primary", "after-history", "after-v8"] {
+        let workdir = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact").arg(P0G3D08C_WRITER_CHILD).arg("--nocapture")
+            .env("AKULA_P0G3D08C_STAGE", stage)
+            .env("AKULA_P0G3D08C_WORKDIR", workdir.path())
+            .output().unwrap();
+        assert!(!output.status.success(),
+            "writer must abort at {stage} rather than complete: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr));
+        let marker = fs::read_to_string(
+            workdir.path().join("p0g3d08c-crash-marker"),
+        ).unwrap_or_else(|_| panic!(
+            "writer crashed before reaching {stage}; stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+        assert_eq!(marker, stage, "writer must reach the exact crash seam");
+
+        let record: serde_json::Value = serde_json::from_slice(&fs::read(
+            workdir.path().join("p0g3d08c-fixture.json"),
+        ).unwrap()).unwrap();
+        let root = PathBuf::from(record["root"].as_str().unwrap());
+        let appdata = PathBuf::from(record["appdata"].as_str().unwrap());
+        let operation: OperationId = record["operation"].as_str().unwrap()
+            .parse().unwrap();
+        // Compare resolved components, not raw Windows path spellings.
+        // Require the precise disposable fixture/vault hierarchy as well.
+        let canonical_workdir = crate::search::paths::canonical_path(workdir.path());
+        let canonical_root = crate::search::paths::canonical_path(&root);
+        let relative = crate::search::paths::strip_root(&canonical_workdir, &canonical_root)
+            .expect("writer may only use its disposable test vault");
+        let components: Vec<_> = relative.components().collect();
+        assert_eq!(components.len(), 2, "writer root must be fixture/vault");
+        assert!(components[0].as_os_str().to_string_lossy()
+            .starts_with("writer-crash-fixture-"),
+            "writer root must use a disposable crash fixture");
+        assert_eq!(components[1].as_os_str(), std::ffi::OsStr::new("vault"));
+        let primary = root.join("Reserved.md");
+        let original = b"unchanged private original";
+        let target = "remote candidate using the real local history service "
+            .repeat(100);
+        let visible = fs::read(&primary).unwrap();
+        if stage == "after-v7" {
+            assert_eq!(visible, original);
+        } else {
+            assert_eq!(visible, target.as_bytes());
+        }
+
+        // A NEW process cannot reuse any previous in-memory history witness.
+        // Before V8 commit it must fail closed; after V8 only forensic HOLD.
+        let classification = if stage == "after-v8" { "hold" } else { "deny" };
+        p0g3d08_run_child(&root, &appdata, operation, classification);
+
+        let journal = SqliteSyncJournal::open_existing_read_only(
+            &appdata.join("journal.sqlite"),
+        ).unwrap();
+        assert_eq!(journal.get(operation).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(journal.read_existing_replace_attempt(operation)
+            .unwrap().is_some());
+        let v8 = journal.read_existing_replace_receipt_candidate(operation)
+            .unwrap();
+        assert_eq!(v8.is_some(), stage == "after-v8");
+        let protected = SqliteProtectionStore::open_existing_read_only(
+            &appdata.join("originals.sqlite"),
+        ).unwrap();
+        assert_eq!(protected.read_bound_preimage(operation)
+            .unwrap().unwrap().original.bytes, original);
+        let intent = journal.get(operation).unwrap().unwrap().intent;
+        let committed = journal.baseline(intent.vault_id, intent.document_id)
+            .unwrap().unwrap();
+        assert_eq!(Some(committed.revision_id), intent.expected_baseline);
+        assert_eq!(committed.content_hash,
+            blake3::hash(original).to_hex().to_string());
+    }
+}
+
+
+/// P0g-3d-08d-1: selectively remove one independently persisted domain AFTER
+/// a complete V8 candidate. This models possible post-power-loss *images*,
+/// not a real VM hard-off or a proven storage durability barrier.
+///
+/// Each disposable case starts from a fully correlated, cold-reopenable V8
+/// candidate. After dropping ALL writer/Core handles, only one domain is
+/// changed; a second OS process must refuse the now-incomplete evidence.
+/// No production publisher, auto-retry, S3 ACK or baseline promotion.
+#[test]
+fn p0g3d08d_partial_persistence_domains_fail_closed_after_v8() {
+    for lost in ["v8_row", "history_name", "primary_rollback"] {
+        let f = fixture();
+        publish_strict_candidate_and_record_v8(&f);
+        assert_no_remote_ack(&f);
+
+        let version_id = f.journal.borrow()
+            .read_existing_replace_receipt_candidate(f.intent.operation_id)
+            .unwrap().unwrap().cold_history_fields().0.to_owned();
+        let historical = f.root.join(".aquilum").join("history")
+            .join(f.intent.path.as_str()).join(version_id);
+        let primary = f.root.join(f.intent.path.as_str());
+        assert!(historical.is_file(), "fresh strict history must exist");
+        assert_eq!(fs::read(&primary).unwrap(), f.new_text.as_bytes());
+
+        let Fixture {
+            _temp: keep_fixture, core, root, appdata, bindings, custody,
+            journal, cache, protected, intent, old_hash, ..
+        } = f;
+        drop(bindings);
+        drop(custody);
+        drop(journal);
+        drop(cache);
+        drop(protected);
+        drop(core);
+
+        // Read-only control from an independent OS process: all domains
+        // match before the laboratory mutates exactly one.
+        p0g3d08_run_child(&root, &appdata, intent.operation_id, "hold");
+
+        match lost {
+            "v8_row" => {
+                // V7 and the protected original remain, V8 disappears from
+                // its *own* WAL/FULL domain after a committed transaction.
+                let db = rusqlite::Connection::open(appdata.join("journal.sqlite"))
+                    .unwrap();
+                let rows = db.execute(
+                    "DELETE FROM sync_existing_replace_receipt_candidates WHERE operation_id=?1",
+                    [intent.operation_id.to_string()],
+                ).unwrap();
+                assert_eq!(rows, 1, "the completed candidate must exist");
+                drop(db);
+            }
+            "history_name" => {
+                // The published primary + V8 remain, but the immutable
+                // HistoryService directory entry is no longer visible.
+                fs::remove_file(&historical).unwrap();
+                assert!(!historical.exists());
+            }
+            "primary_rollback" => {
+                // Model a visible pre-publication name/content after V8:
+                // retain the published candidate separately in this fixture.
+                let parked = root.join(".p0g3d08d-parked-candidate");
+                fs::rename(&primary, &parked).unwrap();
+                fs::write(&primary, b"unchanged private original").unwrap();
+                assert_eq!(fs::read(&primary).unwrap(), b"unchanged private original");
+                assert!(parked.is_file());
+            }
+            _ => unreachable!(),
+        }
+
+        // A *new* Core/HistoryService + three SQLite read-only stores must
+        // reject the incomplete image, without attempting replay/repair.
+        p0g3d08_run_child(&root, &appdata, intent.operation_id, "deny");
+
+        // Independent failure domains must NOT silently rewrite the logical
+        // baseline or make StageDownload eligible for remote ACK.
+        let mut cold = SqliteSyncJournal::open(&appdata.join("journal.sqlite"))
+            .unwrap();
+        assert_eq!(cold.get(intent.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        let baseline = cold.baseline(intent.vault_id, intent.document_id)
+            .unwrap().unwrap();
+        assert_eq!(Some(baseline.revision_id), intent.expected_baseline);
+        assert_eq!(baseline.content_hash, old_hash);
+        assert!(cold.read_existing_replace_attempt(intent.operation_id)
+            .unwrap().is_some(), "V7 must not be replayed or cleared");
+        assert!(matches!(cold.mark_applied(intent.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)),
+            "partial durable image must never authorize StageDownload");
+        drop(cold);
+
+        let originals = SqliteProtectionStore::open_existing_read_only(
+            &appdata.join("originals.sqlite"),
+        ).unwrap();
+        assert_eq!(originals.read_bound_preimage(intent.operation_id)
+            .unwrap().unwrap().original.bytes, b"unchanged private original",
+            "independent original must remain recoverable");
+        drop(originals);
+        drop(keep_fixture);
+    }
 }

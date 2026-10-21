@@ -70,6 +70,25 @@ pub fn show(width: f64) {
 }
 
 fn shown() -> u32 {
+    // IMG-PERF-08: the normal reader proactively decodes a 1280px PNG
+    // down to ~320-334px when its rendered width is only 200px. That is
+    // desirable production behavior: another mip pyramid is unnecessary.
+    // Developer-only opt-in preserves full 1280px source pixels to stress
+    // image LOD, retention and eviction separately from that optimization.
+    #[cfg(not(feature = "installed"))]
+    {
+        static FULL_SOURCE: OnceLock<bool> = OnceLock::new();
+        if *FULL_SOURCE.get_or_init(|| {
+            std::env::var("AKULA_EXPERIMENTAL_IMAGE_FORCE_NATIVE_DECODE")
+                .ok().as_deref() == Some("1")
+        }) {
+            static WITNESS: std::sync::Once = std::sync::Once::new();
+            WITNESS.call_once(|| eprintln!(
+                "AKULA_IMAGE_NATIVE_SOURCE_DECODE_APPLIED max_width={MAX_WIDTH}"
+            ));
+            return MAX_WIDTH;
+        }
+    }
     SHOWN.load(Ordering::Relaxed)
 }
 

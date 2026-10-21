@@ -530,11 +530,21 @@ mod tests {
         let listing = Command::new(&executable).arg("--list").output().unwrap();
         assert!(listing.status.success(), "cannot list subprocess test names");
         let listed = String::from_utf8_lossy(&listing.stdout);
+        // Resolve the helper by this exact module's name. Both Linux and
+        // macOS transaction tests contain a child_crash_at_transaction_boundary
+        // helper; a suffix-only lookup can silently launch the other helper
+        // with the wrong environment and report a false crash-test failure.
+        // The printed test list omits the binary crate name, while
+        // module_path!() includes it.
+        let suite = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest);
+        let exact = format!("{suite}::child_crash_at_transaction_boundary");
         let helper = listed
             .lines()
             .filter_map(|line| line.strip_suffix(": test"))
-            .find(|name| name.ends_with("::child_crash_at_transaction_boundary"))
-            .expect("test harness did not register crash subprocess helper");
+            .find(|name| *name == exact.as_str())
+            .expect("test harness did not register this module's crash subprocess helper");
         let mut child = Command::new(&executable)
             .arg("--exact")
             .arg(helper)

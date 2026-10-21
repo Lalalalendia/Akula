@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-core"
-version = "0.3.9"
+version = "0.3.10"
 description = "Aquilum core: documents, files, search, history and settings without any UI"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -9,11 +9,41 @@ workspace = ".."
 
 [features]
 default = []
+# Metadata-only negotiation lab: no transport, staging, or File Gate.
+p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
-server-bootstrap-b0-lab = []
+server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
+# Developer-only actual pinned OpenSSH KEX probe; no remote installation.
+server-bootstrap-b0-openssh-lab = ["server-bootstrap-b0-lab"]
+# Pure offline release-signature gate; never executes or installs a package.
+server-bootstrap-b1a-release-lab = ["dep:akula-server-release-b1a"]
+# Linux-only inert staging laboratory; requires B1a verifier, no executable install.
+server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
+# Linux-only inert release-floor chain lab, requiring verified staged bytes.
+server-bootstrap-b1b1-floor-lab = ["server-bootstrap-b1b-custody-lab"]
+# Detached operator signature and inert witness CAS request, never installs.
+server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
+# Linux-only inert local cooperating-writer CAS witness laboratory.
+server-bootstrap-b1b1c-witness-lab = ["server-bootstrap-b1b1b-approval-lab"]
+# Real Linux AF_UNIX peer creds and signed, strictly fixed PREVIEW wire protocol; no install.
+server-bootstrap-b1b3a-helper-ipc-lab = []
+# OS UID-0 Linux service test. Real kernel SO_PEERCRED, root-owned policy,
+# fixed Preview only; no install action in the protocol or executable.
+server-bootstrap-b1b3b-root-helper-lab = ["server-bootstrap-b1b3a-helper-ipc-lab"]
+# Root-owned helper additionally verifies a real B1a signed ELF by pinned FD.
+server-bootstrap-b1b3c-pinned-fd-lab = ["server-bootstrap-b1b3b-root-helper-lab", "server-bootstrap-b1a-release-lab"]
+# Inert signed owner + external witness CAS correspondence. No installation.
+server-bootstrap-b1b4a-cas-fence-lab = ["server-bootstrap-b1b3c-pinned-fd-lab", "server-bootstrap-b1b1c-witness-lab"]
+# Linux UID0 OS-owned sealed test signer and signed CAS journal readback; NO install.
+server-bootstrap-b1b4b-os-witness-lab = ["server-bootstrap-b1b4a-cas-fence-lab"]
+# Root-owned read-only witness Unix IPC lab, no signer or install opcode.
+server-bootstrap-b1b4b1-witness-ipc-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
+# Test-only signed FD -> fixed root-owned Node file transaction after owner/CAS.
+# Does not launch Node or expose install IPC to Akula application.
+server-bootstrap-b1c0-fixed-node-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
@@ -21,6 +51,8 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
+# Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
+sync-text-delta = ["dep:zstd"]
 # Separately selected packaged build: force every default Core::open through
 # the compiler-pinned local host registry. No AWS SDK or S3 engine implied.
 sync-installed-host = ["host-custody"]
@@ -33,12 +65,44 @@ sync-installed-host-unix-root-witness = ["sync-installed-host-witness"]
 # Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
 sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
 
+[[example]]
+name = "akula_b1b3c_fixture"
+path = "examples/akula_b1b3c_fixture.rs"
+required-features = ["server-bootstrap-b1b3c-pinned-fd-lab"]
+
+[[example]]
+name = "akula_b1b3b_fixture"
+path = "examples/akula_b1b3b_fixture.rs"
+required-features = ["server-bootstrap-b1b3b-root-helper-lab"]
+
+[[bin]]
+name = "akula-witness-b1b4b1-lab"
+path = "src/bin/akula_witness_b1b4b1_lab.rs"
+required-features = ["server-bootstrap-b1b4b1-witness-ipc-lab"]
+
+[[example]]
+name = "akula_b1b4b1_witness_fixture"
+path = "examples/akula_b1b4b1_witness_fixture.rs"
+required-features = ["server-bootstrap-b1b4b1-witness-ipc-lab"]
+
+[[bin]]
+name = "akula-helper-b1b3b-lab"
+path = "src/bin/akula_helper_b1b3b_lab.rs"
+required-features = ["server-bootstrap-b1b3b-root-helper-lab"]
+
+[[example]]
+name = "akula_b1b2b_release_fixture"
+path = "examples/akula_b1b2b_release_fixture.rs"
+required-features = ["server-bootstrap-b1a-release-lab"]
+
 [[bin]]
 name = "akula-node-lab"
 path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
+akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"
@@ -58,6 +122,8 @@ ureq = "2.12"
 httparse = "1"
 yrs = "0.28"
 memchr = "2"
+# Local in-memory compression only; no S3, host File Gate or UI activation.
+zstd = { version = "=0.13.3", optional = true }
 
 # Official AWS Rust SDK used only for opt-in S3 provider capability tests.
 aws-config = { version = "1.12.0", optional = true }

@@ -1,0 +1,50 @@
+name: Sync P0g3d08d native Ubuntu VM hard-off
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/ci/akula-p0g3d08d-vm-hardoff.sh'
+      - 'docs/sync/p0g3d08d-ubuntu-vm-hardoff.md'
+      - 'aquilum-app/core/src/sync/s3_reserved_replace_tests.rs'
+      - '.github/workflows/sync-native-vm-hardoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-p0g3d08d-vm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-guest-hard-off:
+    name: Real guest QEMU hard-off and cold Core / Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: p0g3d08d-native-vm-ubuntu
+      - name: Install QEMU + signed Ubuntu image verifier + disposable ext4 tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            qemu-system-x86 qemu-utils genisoimage ubuntu-keyring \
+            openssh-client e2fsprogs
+      - name: Syntax-check hard-off harness
+        shell: bash
+        run: bash -n scripts/ci/akula-p0g3d08d-vm-hardoff.sh
+      - name: Host SIGKILL of real QEMU guest after native V8 and cold restart
+        shell: bash
+        run: bash scripts/ci/akula-p0g3d08d-vm-hardoff.sh

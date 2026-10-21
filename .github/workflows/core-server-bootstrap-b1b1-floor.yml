@@ -1,0 +1,41 @@
+name: Akula Bootstrap B1b1a inert release floor ledger
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "aquilum-app/core/src/server_release_lab.rs"
+      - "aquilum-app/core/src/server_staging_lab.rs"
+      - "aquilum-app/core/src/server_release_floor_lab.rs"
+      - "aquilum-app/core/tests/server_bootstrap_b1b1a.rs"
+      - ".github/workflows/core-server-bootstrap-b1b1-floor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-bootstrap-b1b1a-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  floor-ledger-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Normalize isolated lab formatting for test compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_release_floor_lab.rs aquilum-app/core/tests/server_bootstrap_b1b1a.rs
+      - name: Verify signed release, staged bytes, monotonic ledger and crash holds
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1b1-floor-lab --test server_bootstrap_b1b1a -- --nocapture
+          cargo check --locked -p aquilum-core --no-default-features

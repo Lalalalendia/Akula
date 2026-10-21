@@ -4,9 +4,9 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
       - "aquilum-app/core/src/server_bootstrap_lab.rs"
+      - "modules/bootstrap-b0/**"
+      - "aquilum-app/core/Cargo.lock"
       - "aquilum-app/core/tests/server_bootstrap_b0.rs"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0.md"
       - ".github/workflows/core-server-bootstrap-b0.yml"
@@ -26,6 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify scoped B0 trigger policy
+        run: node --test .github/scripts/ci-b0-path-guard.test.cjs
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native

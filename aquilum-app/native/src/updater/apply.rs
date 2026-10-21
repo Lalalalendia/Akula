@@ -1,18 +1,103 @@
+// Windows beta uses the same proven NSIS upgrade flags as upstream Aquilum.
+// Unlike the inherited API, the executable entrypoint cannot accept arbitrary
+// Vec<u8>: only Akula's publisher-authenticated SignedCandidate can reach it.
+// This intentionally does NOT promise automatic crash rollback of NSIS.
 #[cfg(target_os = "windows")]
-pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
+pub(crate) fn apply(
+    candidate: &super::release::SignedCandidate,
+    before_exit: impl FnOnce(),
+) -> Result<(), String> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
     use windows::core::{HSTRING, w};
-    let dir = std::env::temp_dir().join(format!("akula-update-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let installer = dir.join("Akula-setup.exe");
-    std::fs::write(&installer, payload).map_err(|e| e.to_string())?;
-    before_exit();
-    let started = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(installer.as_os_str()), &HSTRING::from("/S /R /UPDATE /ARGS"), None, SW_SHOW) };
-    if started.0 as isize <= 32 {
-        return Err(format!("установщик не запустился, код {}", started.0 as isize));
+
+    if !super::release::channel_ready() {
+        return Err("HOLD: Akula signed Windows release channel is not published yet".into());
     }
+    let installer = stage_signed_windows_setup(candidate.bytes(), candidate.sha256())?;
+    // All signature verification, signed size checks and a disk rehash have
+    // completed before saving state, closing the UI or executing an installer.
+    before_exit();
+    let started = unsafe {
+        ShellExecuteW(
+            None, w!("open"), &HSTRING::from(installer.as_os_str()),
+            &HSTRING::from("/S /R /UPDATE /ARGS"), None, SW_SHOW,
+        )
+    };
+    if started.0 as isize <= 32 {
+        return Err(format!("Akula NSIS update could not start: {}", started.0 as isize));
+    }
+    // Let NSIS replace the per-user installed exe after old process handles
+    // close. The beta installer is not a transactional rollback engine.
     std::process::exit(0);
+}
+
+#[cfg(target_os = "windows")]
+fn stage_signed_windows_setup(bytes: &[u8], expected_sha256: &str) -> Result<std::path::PathBuf, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Write};
+
+    if !bytes.starts_with(b"MZ") || bytes.len() < 128 {
+        return Err("signed Windows installer is not a PE executable".into());
+    }
+    // create_dir is exclusive: never reuse a PID-named directory or overwrite
+    // an existing file. The current per-user temp root supplies its ACL.
+    let directory = std::env::temp_dir()
+        .join(format!("akula-signed-update-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&directory).map_err(|e| format!("cannot stage Akula update: {e}"))?;
+    let installer = directory.join("Akula-setup.exe");
+    let stage_result = (|| -> Result<(), String> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true).create_new(true).open(&installer)
+            .map_err(|e| format!("cannot create fresh Akula installer: {e}"))?;
+        file.write_all(bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+
+        // Verify the exact on-disk bytes again. The signed in-memory payload
+        // alone is insufficient proof of what will be handed to ShellExecuteW.
+        let mut file = std::fs::File::open(&installer).map_err(|e| e.to_string())?;
+        if file.metadata().map_err(|e| e.to_string())?.len() != bytes.len() as u64 {
+            return Err("staged Akula NSIS byte count differs from signed candidate".into());
+        }
+        let mut hash = Sha256::new();
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 { break; }
+            hash.update(&buf[..n]);
+        }
+        let actual: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        if actual != expected_sha256 {
+            return Err("staged Akula NSIS hash differs from publisher-signed candidate".into());
+        }
+        Ok(())
+    })();
+    if let Err(error) = stage_result {
+        // We created this unique folder ourselves; never remove an arbitrary
+        // preexisting or caller-provided update path.
+        let _ = std::fs::remove_dir_all(&directory);
+        return Err(error);
+    }
+    Ok(installer)
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_beta_tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn staging_requires_pe_and_rehashes_exact_bytes() {
+        assert!(stage_signed_windows_setup(b"not an executable", &"0".repeat(64)).is_err());
+        let mut bytes = vec![0x42u8; 256];
+        bytes[..2].copy_from_slice(b"MZ");
+        assert!(stage_signed_windows_setup(&bytes, &"0".repeat(64)).is_err());
+        let hash: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+        let path = stage_signed_windows_setup(&bytes, &hash).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -98,15 +183,13 @@ pub fn supported() -> bool {
 
 #[cfg(target_os = "linux")]
 pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let image = appimage().ok_or("обновление поддерживается только для AppImage")?;
-    let fresh = image.with_extension("update");
-    std::fs::write(&fresh, payload).map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-    before_exit();
-    std::fs::rename(&fresh, &image).map_err(|e| e.to_string())?;
-    let _ = std::process::Command::new(&image).spawn();
-    std::process::exit(0);
+    // Direct in-place rename destroyed the previous AppImage before the new
+    // generation could prove a healthy startup. All Linux update entrypoints
+    // now share the native transaction module's explicit fail-closed gate.
+    // Even a mistaken future channel_ready() enablement cannot re-enable
+    // the old overwrite. The crash-tested state machine is compiled into
+    // the app, but production signing evidence + first-render ACK are HOLD.
+    super::linux_transaction::guarded_runtime_apply(payload, before_exit)
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

@@ -12,6 +12,7 @@ impl App {
         let (panel_tx, panel_rx) = channel();
         let (search_tx, search_rx) = channel();
         let (picked_tx, picked_rx) = channel();
+        let (transfer_tx, transfer_rx) = channel();
         let (home_tx, home_rx) = channel();
         let (titles_tx, titles_rx) = channel();
         let workspace_wake = Arc::clone(&workspace.wake);
@@ -28,6 +29,7 @@ impl App {
             popup: None,
             typing: None,
             graph: graph_page::GraphState::default(),
+            transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,
             note: None,
@@ -76,6 +78,8 @@ impl App {
             picked_tx,
             failed_renames: channel(),
             picked_rx,
+            transfer_tx,
+            transfer_rx,
             home: None,
             home_tx,
             home_rx,

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Categories=Office;
+Comment=Local-first Markdown and knowledge workspace
+Exec=akula-app
+StartupWMClass=akula-app
+Icon=akula-app
+Name=Akula
+Terminal=false
+Type=Application

@@ -1,0 +1,85 @@
+# RELEASE-LINUX-ID-01: ephemeral DEB/RPM packaging, never a release.
+name: Akula Linux beta candidate
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/linux-beta.yml'
+      - '.github/scripts/linux-beta-identity.test.cjs'
+      - 'scripts/linux-beta-smoke.sh'
+      - 'aquilum-app/native/packaging/akula-linux-nfpm.yaml'
+      - 'aquilum-app/native/packaging/Akula.desktop'
+      - 'aquilum-app/native/src/**'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+permissions:
+  contents: read
+concurrency:
+  group: akula-linux-beta-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  NFPM_VERSION: 2.47.0
+jobs:
+  linux-beta:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v7
+      - name: Assert Akula Linux identity boundary
+        run: node --test .github/scripts/linux-beta-identity.test.cjs
+      - name: Native build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # Ubuntu runners may have versioned libunwind *-dev headers incompatible with the pinned toolchain.
+          sudo apt-get remove -y $(dpkg-query -W -f='${Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
+          sudo apt-get install -y libunwind-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            pkg-config curl rpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: akula-linux-beta
+          cache-on-failure: true
+      - name: Pinned checksum-verified nfpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+          curl -fsSL --retry 5 "$base/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" -o nfpm.tar.gz
+          curl -fsSL --retry 5 "$base/checksums.txt" -o checksums.txt
+          checksum="$(grep " nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz\$" checksums.txt | awk '{print $1}')"
+          test -n "$checksum"
+          echo "$checksum  nfpm.tar.gz" | sha256sum -c -
+          tar -xzf nfpm.tar.gz nfpm
+          sudo install -m 0755 nfpm /usr/local/bin/nfpm
+      - name: Build local-only Akula
+        working-directory: aquilum-app
+        run: cargo build --release --locked -p aquilum-native --features installed
+      - name: Package independent DEB and RPM
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 --manifest-path aquilum-app/Cargo.toml | jq -r '.packages[] | select(.name == "aquilum-native") | .version')"
+          test -n "$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          mkdir -p dist aquilum-app/native/packaging/stage
+          install -m 0755 .artifacts/cargo-native/release/aquilum-native aquilum-app/native/packaging/stage/akula-app
+          (
+            cd aquilum-app/native
+            nfpm package -f packaging/akula-linux-nfpm.yaml -p deb -t "$GITHUB_WORKSPACE/dist/Akula_${version}_amd64.deb"
+            nfpm package -f packaging/akula-linux-nfpm.yaml -p rpm -t "$GITHUB_WORKSPACE/dist/Akula-${version}-1.x86_64.rpm"
+          )
+          sha256sum "dist/Akula_${version}_amd64.deb" "dist/Akula-${version}-1.x86_64.rpm"
+      - name: Prove independent Linux installed application and coexistence
+        shell: bash
+        run: bash scripts/linux-beta-smoke.sh "$VERSION"
+      - name: Upload unsigned test candidates (NOT releases)
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-linux-beta-candidate-${{ github.sha }}
+          path: |
+            dist/Akula_*.deb
+            dist/Akula-*.rpm
+          retention-days: 14

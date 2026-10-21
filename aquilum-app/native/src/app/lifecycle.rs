@@ -2,7 +2,7 @@ use super::*;
 
 impl App {
     pub fn title(&self) -> String {
-        let product = if cfg!(target_os = "windows") { "Akula" } else { "Aquilum" };
+        let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
         match &self.note {
             Some(note) => format!("{} — {product}", note.path.file_stem().unwrap_or_default().to_string_lossy()),
             None => product.to_owned(),

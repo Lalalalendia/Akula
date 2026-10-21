@@ -1,0 +1,46 @@
+name: Akula Bootstrap B1b2a disposable systemd process proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/ci/akula-b1b2a-systemd-lab.sh"
+      - "scripts/ci/akula-b1b2a-node-wrapper.sh"
+      - ".github/workflows/core-server-bootstrap-b1b2a-systemd.yml"
+      - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1B2A.md"
+      - "aquilum-app/core/src/bin/akula_node_lab.rs"
+      - "aquilum-app/core/Cargo.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-bootstrap-b1b2a-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actual-systemd-process:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-b1b2a-systemd-lab-v1
+          cache-workspace-crates: true
+      - name: Build feature-gated Linux-only read-only Node lab
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+      - name: Real systemd transient unit confinement, bearer auth and SIGKILL restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/akula-b1b2a-systemd-lab.sh

@@ -102,3 +102,26 @@ remain separate release HOLDs; a CI artifact is not a public installer.
 Do not merge/release unless exact-commit Windows NSIS and independent legacy
 sentinel acceptance pass. GitHub upload-artifact is a **test artifact**,
 never equivalent to a published GitHub Release.
+
+## CI candidate provenance (not a trusted signature)
+
+After the hosted GUI persistence check succeeds, CI uploads one **temporary**
+artifact containing the unsigned `Akula_*-setup.exe` and
+`candidate-manifest.json`. The artifact name is keyed by GitHub Actions
+run ID and attempt; it no longer claims that the event SHA is necessarily
+the binary source SHA.
+
+The manifest records `actual_checkout_sha` from `git rev-parse HEAD`,
+the triggering event SHA, installer SHA-256 and size, compiled executable
+SHA-256, `Cargo.lock` SHA-256, and the passing smoke classification.
+A pull request typically builds GitHub's temporary integration commit,
+**not** merely the PR branch HEAD. A manually dispatched build can check
+out a requested SHA different from the workflow event SHA. Always verify
+`actual_checkout_sha` against the intended source revision before using
+a candidate.
+
+SHA-256 in the same ZIP helps identify and detect accidental file changes;
+it does **not** authenticate the publisher or make an unsigned NSIS binary
+safe to run. The CI run, source commit and trusted GitHub artifact access
+remain necessary context. No updater, signing keys or GitHub Release are
+activated by this metadata.
