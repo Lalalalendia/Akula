@@ -288,4 +288,45 @@ mod tests {
                 .err(), Some(OwnerReviewProposalError::Oversized),
         );
     }
+
+    #[test]
+    fn preview_attempt_matches_once_without_creating_an_enrollment_receipt() {
+        let bytes = serde_json::to_vec(&fixture()).unwrap();
+        let mut attempt = OwnerReviewPreviewAttempt::import_untrusted(&bytes).unwrap();
+        let challenge = attempt.challenge_hex().to_owned();
+        assert_eq!(challenge.len(), 64);
+        let correct = owner_join_fingerprint_hex(
+            &attempt.proposal.approval_for_challenge(&challenge),
+        ).unwrap();
+        assert_eq!(attempt.verify_once(&correct),
+            Ok(OwnerReviewPreviewResult::FingerprintMatchedOfflineOnly));
+        assert!(attempt.spent());
+        assert_eq!(attempt.verify_once(&correct),
+            Err(OwnerReviewPreviewError::AlreadySpent));
+        let mut second = OwnerReviewPreviewAttempt::import_untrusted(&bytes).unwrap();
+        assert_ne!(second.challenge_hex(), challenge);
+        assert!(matches!(second.verify_once(&correct),
+            Err(OwnerReviewPreviewError::Comparison(_))));
+        assert_eq!(second.verify_once(&correct), Err(OwnerReviewPreviewError::AlreadySpent));
+    }
+
+    #[test]
+    fn preview_attempt_rejects_bad_import_and_oversize_without_any_network_or_disk() {
+        let invalid = vec![b'X'; MAX_OWNER_REVIEW_PROPOSAL_BYTES + 1];
+        assert!(matches!(
+            OwnerReviewPreviewAttempt::import_untrusted(&invalid),
+            Err(OwnerReviewPreviewError::BadProposal(OwnerReviewProposalError::Oversized))
+        ));
+        let bytes = serde_json::to_vec(&fixture()).unwrap();
+        let mut attempt = OwnerReviewPreviewAttempt::import_untrusted(&bytes).unwrap();
+        assert!(matches!(attempt.verify_once(&"0".repeat(64)),
+            Err(OwnerReviewPreviewError::Comparison(
+                OwnerReviewProposalError::Comparison(
+                    IndependentOwnerFingerprintError::InvalidIndependentEntry
+                )
+            ))
+        ));
+        assert_eq!(attempt.verify_once(&"f".repeat(64)),
+            Err(OwnerReviewPreviewError::AlreadySpent));
+    }
 }
