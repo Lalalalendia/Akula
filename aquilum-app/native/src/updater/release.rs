@@ -70,7 +70,7 @@ pub(super) const fn channel_ready() -> bool {
     false
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct Release {
     pub(super) version: String,
     pub(super) url: String,
