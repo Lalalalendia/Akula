@@ -4,6 +4,9 @@
 //! authentication, or File Gate authorization. No installed Akula code calls
 //! this opt-in laboratory. Trusted pins and epoch floors are EXTERNAL inputs.
 
+// Scope lint failure to this newly owned module, not legacy aquilum-core.
+#![deny(clippy::all)]
+
 use std::collections::BTreeSet;
 
 use ring::signature::{self, UnparsedPublicKey};

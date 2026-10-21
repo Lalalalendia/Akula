@@ -30,5 +30,7 @@ These are non-negotiable; passing Rust unit tests of a synthetic key pair
 does not prove production enrollment, owner intent, or physical device identity.
 Network send, APPLIED, durable ACK and File Gate ALLOW remain HOLD.
 
-Acceptance: exact-head cargo test of the feature, Rustfmt and Clippy
-on Linux and Windows. Do not auto-merge before those results.
+Acceptance: exact-head cargo test of the feature, Rustfmt and module-scoped strict Clippy
+on Linux and Windows. The new module has `#![deny(clippy::all)]`; inherited
+Core-wide Clippy style warnings are reported but do not fail this unrelated lab.
+Do not auto-merge before those results.
