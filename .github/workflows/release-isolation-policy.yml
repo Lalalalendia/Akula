@@ -8,6 +8,7 @@ on:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-isolation-policy.yml'
       - '.github/workflows/akula-publisher-key-proof.yml'
+      - '.github/workflows/akula-windows-signed-candidate.yml'
       - '.github/scripts/release-isolation-policy.test.cjs'
       - 'docs/release/legacy-aquilum-release.yml'
       - 'docs/release/AKULA-RELEASE-LOCK-01.md'
