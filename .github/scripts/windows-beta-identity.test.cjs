@@ -198,5 +198,5 @@ test('Windows beta NSIS apply only accepts signed typed candidate and remains ga
   assert.doesNotMatch(updater, /Some\(candidate.into_bytes\(\)\);\s*Ok\(\(\)\)/,
     'unsealing an authenticated Windows candidate before apply is prohibited');
   assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = "[^"]*"/);
-  assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*false\s*\}/);
+  assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*cfg!\(all\(target_os = "windows", feature = "installed"\)\)\s*\}/);
 });
