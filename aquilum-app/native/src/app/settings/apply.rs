@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 impl App {
     pub(super) fn apply(&mut self, setter: Setter, value: Value) -> Effect {
