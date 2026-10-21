@@ -30,6 +30,7 @@ jobs:
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
       b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
+      node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -52,6 +53,15 @@ jobs:
             echo 'b1_shared_compat=false' >> "$GITHUB_OUTPUT"
           else
             echo 'b1_shared_compat=true' >> "$GITHUB_OUTPUT"
+          fi
+          # Read-only Node D1/D1.5/D2 contracts move into this mandatory lane
+          # when shared workspace/Core boundaries change.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/Cargo.toml aquilum-app/Cargo.lock \
+            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs; then
+            echo 'node_shared_compat=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'node_shared_compat=true' >> "$GITHUB_OUTPUT"
           fi
 
   required-tests:
@@ -192,6 +202,18 @@ jobs:
           grep -Fx 'pub use akula_server_release_b1a::*;' core/src/server_release_lab.rs
           cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab \
             --test server_bootstrap_b1a --test server_bootstrap_b1b0 -- --nocapture
+
+      # Shared Cargo/lock/Core boundary is checked in-place: separate Node
+      # workflow runs are needed only for changes to their owned source/tests.
+      - name: Node D1/D1.5/D2 scoped read and loopback compatibility
+        if: needs.classify.outputs.node_shared_compat == 'true'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+          cargo test --locked -p aquilum-core --features node-lab \
+            --test headless_node_d1 --test headless_node_d2 --test node_catalog_lab -- --nocapture
 
       # RELEASE-SIGNED-CANDIDATE-01: real CLI Minisign -> native Rust interop.
       # Reuse the existing required Rust runner rather than queuing another job.
