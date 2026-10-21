@@ -421,6 +421,8 @@ pub use policy_receipt_lab::{AtomicJoinError, AtomicJoinOutcome};
 
 #[cfg(feature = "signed-vault-signed-successor-lab")]
 pub use policy_receipt_lab::{SignedSuccessorError, SignedSuccessorOutcome};
+#[cfg(feature = "signed-vault-receiver-session-lab")]
+pub use policy_receipt_lab::{ReceiverJoinSession, ReceiverJoinSessionError};
 
 #[cfg(test)]
 #[path = "s3_v2_trust_anchor_tests.rs"]

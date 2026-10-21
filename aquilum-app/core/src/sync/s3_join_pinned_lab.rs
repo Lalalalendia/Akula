@@ -103,14 +103,14 @@ pub fn inspect_pinned_join_receipt(
 /// The ETag is not authenticated out of band and cannot select a new root:
 /// exact independently approved bytes MUST match, before and after the
 /// existing full bounded pack/manifest/index inspector.
-pub async fn preview_yandex_join_genesis_read_only(
+async fn verified_yandex_join_read_internal(
     client: &AwsS3ProbeClient,
     scope: &S3RemoteAnchorScope,
     expected_root: &S3PackedHeadV2,
     expected_policy: &PublisherPolicyV1,
     approved: &IndependentlyApprovedJoin<'_>,
     owner_offer: &DecodedDsseEnvelope<'_>,
-) -> Result<PinnedJoinReadOnlyObservation, PinnedJoinError> {
+) -> Result<(PinnedJoinReadOnlyObservation, String, S3PinnedV2ReadPreview), PinnedJoinError> {
     // Do the immutable identity+signature checks BEFORE network, not by
     // trusting arbitrary owner keys, namespace, or root bytes from S3.
     checked_scope(scope, approved)?;
@@ -139,10 +139,46 @@ pub async fn preview_yandex_join_genesis_read_only(
     let read = client.inspect_explicitly_pinned_v2_read_only(
         scope, expected_root, &etag, None,
     ).await.map_err(PinnedJoinError::Pinned)?;
-    inspect_pinned_join_receipt(
+    let observation = inspect_pinned_join_receipt(
         scope, expected_root, expected_policy, approved, owner_offer,
         &etag, &read,
-    )
+    )?;
+    Ok((observation, etag, read))
+}
+
+
+/// Existing diagnostic-only API: do not expose internal pinned-read evidence
+/// to an untrusted caller or convert it to authority.
+pub async fn preview_yandex_join_genesis_read_only(
+    client: &AwsS3ProbeClient,
+    scope: &S3RemoteAnchorScope,
+    expected_root: &S3PackedHeadV2,
+    expected_policy: &PublisherPolicyV1,
+    approved: &IndependentlyApprovedJoin<'_>,
+    owner_offer: &DecodedDsseEnvelope<'_>,
+) -> Result<PinnedJoinReadOnlyObservation, PinnedJoinError> {
+    let (observation, _, _) = verified_yandex_join_read_internal(
+        client, scope, expected_root, expected_policy, approved, owner_offer,
+    ).await?;
+    Ok(observation)
+}
+
+/// E3g-only internal handoff: the recipient session can consume a
+/// fully verified REAL remote V2 read without a synthetic test receipt.
+/// The exact ETag and receipt never come from a caller-supplied success flag.
+#[cfg(feature = "signed-vault-join-successor-integration-lab")]
+pub(crate) async fn verify_yandex_join_for_atomic_session(
+    client: &AwsS3ProbeClient,
+    scope: &S3RemoteAnchorScope,
+    expected_root: &S3PackedHeadV2,
+    expected_policy: &PublisherPolicyV1,
+    approved: &IndependentlyApprovedJoin<'_>,
+    owner_offer: &DecodedDsseEnvelope<'_>,
+) -> Result<(String, S3PinnedV2ReadPreview), PinnedJoinError> {
+    let (_, etag, pinned_read) = verified_yandex_join_read_internal(
+        client, scope, expected_root, expected_policy, approved, owner_offer,
+    ).await?;
+    Ok((etag, pinned_read))
 }
 
 #[cfg(test)]

@@ -1,0 +1,92 @@
+name: YC-S3 E3g combined receiver join and signed successor
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3d-signed-v2-successor-20261020
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_receiver_join_session_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_join_pinned_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab_tests.rs'
+      - '.github/workflows/yc-s3-e3g-integrated-join.yml'
+      - 'docs/sync/YC-S3-T01d-E3g-integrated-join.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrated-trust-lab:
+    name: One-shot signed Vault genesis to publisher-approved V2 successor
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Assert both feature families and the integrated test exist
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features --features signed-vault-join-successor-integration-lab -- --list > e3g-test-list.txt
+          for name in \
+            one_shot_receiver_join_then_signed_direct_successor_preserves_same_sqlite_policy \
+            receiver_session_csprng_nonce_and_one_shot_atomic_join \
+            two_distinct_publisher_signatures_required_for_successor_quorum \
+            receiver_live_yandex_path_denies_invalid_owner_before_network; do
+            grep -F -- "sync::s3_v2_trust_anchor::policy_receipt_lab::tests::${name}: test" e3g-test-list.txt
+          done
+      - name: Run exact integrated trust transition (not a zero-test filter)
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-join-successor-integration-lab \
+            sync::s3_v2_trust_anchor::policy_receipt_lab::tests::one_shot_receiver_join_then_signed_direct_successor_preserves_same_sqlite_policy \
+            -- --exact --test-threads=1
+      - name: Exercise all E3c E3d E3e trust and E3a pairing regressions
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-join-successor-integration-lab \
+            s3_v2_trust_anchor::policy_receipt_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-join-successor-integration-lab \
+            s3_v2_trust_anchor::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-join-successor-integration-lab \
+            s3_join_genesis_lab::tests -- --test-threads=1
+      - name: Guard default Core and installed native release from trust lab
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          if grep -Eq 'signed-vault-(join-successor-integration|signed-successor|receiver-session|atomic-join|pinned-join|pairing|policy-receipt)-lab' native/Cargo.toml; then
+            echo 'Trust experiments cannot be native release features'
+            exit 1
+          fi
