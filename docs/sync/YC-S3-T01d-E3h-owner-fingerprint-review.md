@@ -27,7 +27,7 @@ The hash is a comparison code, not a MAC, signer identity, proof of freshness, s
 - Spends the existing one-time challenge **before** comparing the 64-character external value, running a network request or touching SQLite.
 - Rejects malformed, uppercase, truncated or incorrect independent entries. All errors consume the session; a new request requires a new owner challenge.
 - Only after a full match delegates to the **same** E3g DSSE/Ed25519 owner check, Yandex-bound bounded pinned V2 GET, and E3c atomic local root+publisher policy insertion.
-- The older laboratory `enroll_from_yandex_read_once` remains available for test compatibility. A production installed-host surface must expose **only a reviewed admission method** and must bind the input to the currently active user-controlled approval interaction.
+- In the E3h branch, the older laboratory `enroll_from_yandex_read_once` is restricted to `pub(crate)` for in-crate regression tests. External code cannot call that raw network entrypoint. The lower-level E3c laboratory enrollment API is still public behind its separate research feature, so shipping must exclude it and expose **only the reviewed host-controlled admission surface**.
 - No text is saved to settings JSON, logs, S3 or user Markdown.
 
 ## Tests and acceptance
