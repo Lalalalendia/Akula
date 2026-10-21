@@ -38,6 +38,9 @@ pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
 #[cfg(test)]
 mod fault_matrix;
+// Inert owner-signed roster verifier; no production pairing, grant or UI hook.
+#[cfg(feature = "device-roster-lab")]
+pub mod device_roster_lab;
 mod identity;
 mod journal;
 mod local_create;
