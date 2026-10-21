@@ -2,9 +2,9 @@
 name: Installed host Unix owner preflight (non-release)
 
 on:
+  workflow_call:
   pull_request:
     paths:
-      - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/core/src/sync/host_install_unix_root.rs'
       - 'aquilum-app/core/src/sync/host_install_witness.rs'
       - 'aquilum-app/core/src/sync/mod.rs'
