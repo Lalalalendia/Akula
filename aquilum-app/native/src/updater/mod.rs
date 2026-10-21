@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex};
 
 use release::{PUBLIC_KEY, Release, find, verify};
 
-pub use apply::apply;
+pub(crate) use apply::apply;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
@@ -50,6 +50,11 @@ pub enum Status {
 #[derive(Clone)]
 pub struct Updater {
     status: Arc<Mutex<Status>>,
+    // A Windows installer may only cross the apply boundary as a sealed,
+    // publisher-authenticated SignedCandidate, never arbitrary bytes.
+    #[cfg(target_os = "windows")]
+    payload: Arc<Mutex<Option<release::SignedCandidate>>>,
+    #[cfg(not(target_os = "windows"))]
     payload: Arc<Mutex<Option<Vec<u8>>>>,
     wake: Arc<dyn Fn() + Send + Sync>,
 }
@@ -140,9 +145,14 @@ impl Updater {
         {
             return Err("signed update offer changed between discovery and download".into());
         }
-        // The legacy API is still a Vec, but on Windows apply() cannot execute
-        // it. The future Windows transaction must consume the sealed candidate.
-        *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(candidate.into_bytes());
+        #[cfg(target_os = "windows")]
+        {
+            *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(candidate);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            *self.payload.lock().unwrap_or_else(|e| e.into_inner()) = Some(candidate.into_bytes());
+        }
         Ok(())
     }
 
@@ -150,7 +160,20 @@ impl Updater {
         self.set(Status::Failed(error));
     }
 
-    pub fn take_ready(&self) -> Option<Vec<u8>> {
+    // A single GUI call-site retains the same name on each target, but the
+    // Windows type is non-forgeable outside signed manifest admission.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn take_ready(&self) -> Option<release::SignedCandidate> {
+        if !matches!(self.status(), Status::Ready(_)) {
+            return None;
+        }
+        let candidate = self.payload.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+        self.set(Status::Installing);
+        Some(candidate)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub(crate) fn take_ready(&self) -> Option<Vec<u8>> {
         if !matches!(self.status(), Status::Ready(_)) {
             return None;
         }

@@ -11,14 +11,21 @@ fn versions_compare_numerically() {
 }
 
 #[test]
-fn no_upstream_update_channel_is_available() {
+fn independent_akula_signed_update_channel_is_windows_installed_only() {
     assert_eq!(ENDPOINT, "https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json");
     assert!(!PUBLIC_KEY.is_empty(), "owner-pinned Akula public key must be compiled in");
-    assert!(!channel_ready(), "key provisioning alone must not authorize an update");
-    assert!(!channel_ready());
-    assert!(!available(), "installed builds must not offer an upstream Aquilum update");
+    assert_eq!(
+        channel_ready(),
+        cfg!(all(target_os = "windows", feature = "installed")),
+    );
+    assert_eq!(
+        available(),
+        cfg!(all(target_os = "windows", feature = "installed")),
+        "only own signed Windows beta has a live update channel",
+    );
 }
 
+#[cfg(not(all(target_os = "windows", feature = "installed")))]
 #[test]
 fn disabled_update_channel_never_starts_network_work() {
     let updater = Updater::new(Arc::new(|| {}));
@@ -42,12 +49,14 @@ fn installed_linux_apply_refuses_unauthorized_bytes_without_shutdown() {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn installed_windows_apply_refuses_unstaged_bytes_without_shutdown() {
-    let mut shutdown_called = false;
-    let result = super::apply(b"synthetic unsigned NSIS bytes", || {
-        shutdown_called = true;
-    });
-    let error = result.unwrap_err();
-    assert!(error.contains("HOLD"), "Windows install must refuse nontransactional apply");
-    assert!(!shutdown_called, "Windows must never exit before trusted staging and rollback");
+fn installed_windows_apply_cannot_accept_unsigned_bytes() {
+    // Production Windows apply now requires a private-field SignedCandidate.
+    // An unverified byte slice is not an executable interface or authority.
+    let result = super::release::admit_signed_payload(
+        b"{\"version\":\"999.999.999\"}",
+        "not a signed manifest",
+        b"MZ synthetic unsigned NSIS bytes".to_vec(),
+    );
+    assert!(result.is_err(), "unsigned bytes must never produce an installer");
+    assert_eq!(channel_ready(), cfg!(feature = "installed"));
 }

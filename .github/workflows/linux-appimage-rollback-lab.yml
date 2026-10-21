@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test .github/scripts/release-isolation-policy.test.cjs
-          # The release-isolation policy pins the exact owner key bytes;
-          # a populated PUBLIC_KEY alone must not enable updater apply.
-          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'false'
-          echo 'AKULA_RELEASE_HOLD_PASS publisher_root=pinned updater=disabled'
+          # Linux rollback/update authority must remain OFF even though the
+          # independently signed Windows beta is now allowed.
+          grep -A2 'const fn channel_ready()' aquilum-app/native/src/updater/release.rs | grep -Fq 'cfg!(all(target_os = "windows", feature = "installed"))'
+          echo 'AKULA_RELEASE_HOLD_PASS publisher_root=pinned linux_updater=disabled'
