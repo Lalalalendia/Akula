@@ -13,6 +13,7 @@ import time
 from native_mipmap_window_ab import windows_gui_witness, windows_peak_rss_kib
 
 MODES = ("write", "read_write")
+TRIALS = tuple(range(1, 7))  # six alternating pairs, twelve independent GUI processes
 TEXT = "# WARP staging scroll\n\n" + "".join(
     "## Section %d\nA long **bold** Unicode строка with wrapped text and [[links]].\n\n" % n
     for n in range(500)
@@ -85,6 +86,17 @@ def run(binary, out, trial, mode):
                present_call_p95_ms=percentile([s["outputPresentCallMs"] for s in stages], .95),
                copy_bytes=sum(s["outputCopyBytes"] for s in stages),
                copy_rects=sum(s["outputCopyRects"] for s in stages))
+    # A p95 alone hides rare multi-millisecond Map stalls. Report p99,
+    # maxima and exact pixel workloads without filtering unusual frames.
+    row.update(
+        map_p99_ms=percentile([s["outputMapMs"] for s in stages], .99),
+        map_max_ms=max(s["outputMapMs"] for s in stages),
+        map_over_1ms=sum(s["outputMapMs"] > 1.0 for s in stages),
+        renderer_draw_p99_ms=percentile([s["rendererDrawMs"] for s in stages], .99),
+        raster_pixels=sum(s["rasterPixels"] for s in stages),
+        shifted_pixels=sum(s["shiftedPixels"] for s in stages),
+        map_calls=sum(s["outputMapCalls"] for s in stages),
+    )
     (root / "sample.json").write_text(json.dumps(row, indent=2, ensure_ascii=False), encoding="utf-8")
     print("AKULA_WARP_MAP_SAMPLE trial=%d mode=%s frames=%d output_p95_ms=%.3f rss_kib=%d" %
           (trial, mode, len(stages), row["output_present_p95_ms"], peak), flush=True)
@@ -107,12 +119,26 @@ def main():
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     rows = []
-    for trial in (1, 2, 3):
+    for trial in TRIALS:
         for mode in (MODES if trial % 2 else tuple(reversed(MODES))):
             rows.append(run(binary, out, trial, mode))
-    if len(rows) != 6 or len({r["note_sha256"] for r in rows}) != 1 or len({r["exe_sha256"] for r in rows}) != 1:
-        raise RuntimeError("Incomplete or mismatched six-process A/B")
-    lines = ["# WARP-MAP-01 — developer-only exact WARP 3×AB/BA", "",
+    if len(rows) != len(TRIALS) * len(MODES) or len({r["note_sha256"] for r in rows}) != 1 or len({r["exe_sha256"] for r in rows}) != 1:
+        raise RuntimeError("Incomplete or mismatched twelve-process A/B")
+    by_pair = {(r["trial"], r["mode"]): r for r in rows}
+    if len(by_pair) != len(rows):
+        raise RuntimeError("Duplicate trial/mode rather than independent measurements")
+    # A previous WRITE process rasterized 13.6 million pixels versus 2.76
+    # million in its partner. Such a pair is not valid performance evidence.
+    for trial in TRIALS:
+        write, readable = (by_pair[(trial, mode)] for mode in MODES)
+        for metric in ("raster_pixels", "shifted_pixels", "copy_bytes"):
+            left, right = write[metric], readable[metric]
+            if max(left, right) == 0 or abs(left - right) / max(left, right) > .05:
+                raise RuntimeError(
+                    "Unmatched trial %s %s: WRITE=%s READ_WRITE=%s"
+                    % (trial, metric, left, right)
+                )
+    lines = ["# WARP-MAP-01 — developer-only exact WARP 6 alternating pairs", "",
              "Real visible Win32 GUI and strict WARP on a Windows CI runner. Measurements are CPU",
              "work, not physical display scanout. CopySubresourceRegion is measured only",
              "for CPU submission, not GPU completion. Present1 may wait for vsync.", "",
@@ -130,6 +156,26 @@ def main():
              median(r["scroll_shift_p95_ms"] for r in subset),
              median(r["copy_bytes"] for r in subset)/1048576,
              median(r["rss_kib"] for r in subset)/1024))
+    lines.extend([
+        "",
+        "## Paired frame tails and workloads (unfiltered)",
+        "",
+        "p99 and maxima expose stalls hidden by p95. All pairs are validated for",
+        "rasterized, shifted and copied pixel counts within 5% before reporting.",
+        "A smaller CPU call time is not proof of better physical display latency.",
+        "",
+        "| Trial | WRITE Map p99 ms | READ_WRITE Map p99 ms | WRITE Map max ms | READ_WRITE Map max ms | WRITE Map>1ms | READ_WRITE Map>1ms | Shift p95 WRITE ms | Shift p95 READ_WRITE ms | Raster pixels WRITE | Raster pixels READ_WRITE |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for trial in TRIALS:
+        write, readable = (by_pair[(trial, mode)] for mode in MODES)
+        lines.append("| %d | %.4f | %.4f | %.4f | %.4f | %d | %d | %.4f | %.4f | %d | %d |" % (
+            trial, write["map_p99_ms"], readable["map_p99_ms"],
+            write["map_max_ms"], readable["map_max_ms"],
+            write["map_over_1ms"], readable["map_over_1ms"],
+            write["scroll_shift_p95_ms"], readable["scroll_shift_p95_ms"],
+            write["raster_pixels"], readable["raster_pixels"],
+        ))
     (out / "matrix.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
     (out / "summary.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
     print("\n".join(lines))
