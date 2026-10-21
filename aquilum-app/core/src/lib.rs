@@ -52,5 +52,8 @@ pub mod server_installer_cas_fence_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b4b-os-witness-lab"))]
 pub mod server_installer_os_witness_lab;
 
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1c0-fixed-node-lab"))]
+pub mod server_installer_fixed_node_lab;
+
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
