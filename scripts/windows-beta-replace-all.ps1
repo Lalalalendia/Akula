@@ -82,7 +82,60 @@ function Test-AkulaBetaReplaceAll {
     }
 
     Send-AkulaBetaShortcut -Process $app -Action Undo -ExpectedNoteTitle 'Large paste proof'
-    Await-AkulaDiskContent -Process $app -Expected $original -Phase 'Ctrl+Z restore'
+    try {
+      Await-AkulaDiskContent -Process $app -Expected $original -Phase 'Ctrl+Z restore'
+    } catch {
+      # Diagnose the failing boundary without printing note or clipboard bytes:
+      # model restored but disk not -> save path; both unchanged -> input/history;
+      # any other contents -> partial undo or altered editor source.
+      $diskState = 'unreadable'
+      $diskChars = -1
+      try {
+        $diskText = [System.IO.File]::ReadAllText($note)
+        $diskChars = $diskText.Length
+        $normalizedDisk = $diskText.Replace("`r`n", "`n").TrimEnd([char]10)
+        $diskState = if ([string]::Equals($normalizedDisk, $original.TrimEnd([char]10), [StringComparison]::Ordinal)) {
+          'original'
+        } elseif ([string]::Equals($normalizedDisk, $replacement, [StringComparison]::Ordinal)) {
+          'replacement'
+        } else {
+          'other'
+        }
+      } catch [System.IO.IOException] {
+        $diskState = 'locked'
+      }
+      $guiState = 'unreadable'
+      $guiChars = -1
+      try {
+        $poison = 'AKULA_UNDO_DIAG_POISON_' + [Guid]::NewGuid().ToString('N')
+        Set-Clipboard -Value $poison -ErrorAction Stop
+        Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'
+        Start-Sleep -Milliseconds 300
+        Send-AkulaBetaShortcut -Process $app -Action Copy -ExpectedNoteTitle 'Large paste proof'
+        for ($probe = 0; $probe -lt 15; $probe++) {
+          Start-Sleep -Milliseconds 200
+          $copied = Get-Clipboard -Raw -ErrorAction Stop
+          if ($copied -ceq $poison) { continue }
+          $guiChars = $copied.Length
+          $normalizedGui = $copied.Replace("`r`n", "`n").TrimEnd([char]10)
+          $guiState = if ([string]::Equals($normalizedGui, $original.TrimEnd([char]10), [StringComparison]::Ordinal)) {
+            'original'
+          } elseif ([string]::Equals($normalizedGui, $replacement, [StringComparison]::Ordinal)) {
+            'replacement'
+          } else {
+            'other'
+          }
+          break
+        }
+        if ($guiState -eq 'unreadable') { $guiState = 'clipboard_not_replaced' }
+      } catch {
+        $guiState = 'shortcut_or_clipboard_error'
+      }
+      $app.Refresh()
+      $alive = !$app.HasExited
+      Write-Host "AKULA_WINDOWS_UNDO_FAILURE_DIAGNOSTIC disk=$diskState disk_chars=$diskChars gui=$guiState gui_chars=$guiChars process_alive=$alive"
+      throw
+    }
     if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $originalHash) {
       throw 'Ctrl+Z did not recover exact original source bytes'
     }
