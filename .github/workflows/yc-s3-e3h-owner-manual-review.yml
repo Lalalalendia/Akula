@@ -1,0 +1,82 @@
+name: YC-S3 E3h independently matched owner fingerprint
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3g-integrated-join-successor-20261021
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/s3_owner_manual_fingerprint_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_receiver_join_session_lab.rs'
+      - 'aquilum-app/core/src/sync/s3_v2_trust_anchor_policy_receipt_lab_tests.rs'
+      - '.github/workflows/yc-s3-e3h-owner-manual-review.yml'
+      - 'docs/sync/YC-S3-T01d-E3h-owner-fingerprint-review.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  independent-owner-fingerprint:
+    name: Receiver fingerprint challenge before Yandex S3 GET
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Check all exact E3h test identities before running
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-manual-owner-review-lab -- --list > e3h-cases.txt
+          for case_name in \
+            sync::s3_owner_manual_fingerprint_lab::tests::full_owner_digest_binds_vault_bucket_pins_quorum_and_challenge \
+            sync::s3_owner_manual_fingerprint_lab::tests::duplicate_or_zero_owner_keys_never_form_a_valid_manual_review \
+            sync::s3_v2_trust_anchor::policy_receipt_lab::tests::independent_fingerprint_mismatch_burns_session_before_yandex_get \
+            sync::s3_v2_trust_anchor::policy_receipt_lab::tests::matched_independent_fingerprint_does_not_bypass_owner_signature; do
+            grep -F -- "${case_name}: test" e3h-cases.txt
+          done
+      - name: Test manual approval and prior E3g signed V2 policies
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-manual-owner-review-lab \
+            s3_owner_manual_fingerprint_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-manual-owner-review-lab \
+            s3_v2_trust_anchor::policy_receipt_lab::tests -- --test-threads=1
+          cargo test --locked -p aquilum-core --no-default-features \
+            --features signed-vault-manual-owner-review-lab \
+            s3_join_genesis_lab::tests -- --test-threads=1
+      - name: Build default Core and forbid native trust lab activation
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+          if grep -Eq 'signed-vault-(manual-owner-review|join-successor-integration|signed-successor|receiver-session|atomic-join|pinned-join|pairing|policy-receipt)-lab' native/Cargo.toml; then
+            echo 'Trust experiments are not installed native capabilities'
+            exit 1
+          fi
