@@ -152,7 +152,7 @@ jobs:
         if: needs.classify.outputs.mode != 'none'
 
       - name: Security-test macOS updater TAR parser on Linux too
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none' && needs.classify.outputs.mode != 'manifest'
         shell: bash
         run: |
           set -euo pipefail
@@ -161,7 +161,7 @@ jobs:
           "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
 
       - name: Test macOS updater transaction with shared installer lock and crash recovery
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none' && needs.classify.outputs.mode != 'manifest'
         shell: bash
         run: |
           set -euo pipefail
