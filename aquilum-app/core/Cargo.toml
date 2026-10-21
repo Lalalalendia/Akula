@@ -37,6 +37,8 @@ server-bootstrap-b1b3c-pinned-fd-lab = ["server-bootstrap-b1b3b-root-helper-lab"
 server-bootstrap-b1b4a-cas-fence-lab = ["server-bootstrap-b1b3c-pinned-fd-lab", "server-bootstrap-b1b1c-witness-lab"]
 # Linux UID0 OS-owned sealed test signer and signed CAS journal readback; NO install.
 server-bootstrap-b1b4b-os-witness-lab = ["server-bootstrap-b1b4a-cas-fence-lab"]
+# Root-owned read-only witness Unix IPC lab, no signer or install opcode.
+server-bootstrap-b1b4b1-witness-ipc-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
 # Test-only signed FD -> fixed root-owned Node file transaction after owner/CAS.
 # Does not launch Node or expose install IPC to Akula application.
 server-bootstrap-b1c0-fixed-node-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
@@ -68,6 +70,16 @@ required-features = ["server-bootstrap-b1b3c-pinned-fd-lab"]
 name = "akula_b1b3b_fixture"
 path = "examples/akula_b1b3b_fixture.rs"
 required-features = ["server-bootstrap-b1b3b-root-helper-lab"]
+
+[[bin]]
+name = "akula-witness-b1b4b1-lab"
+path = "src/bin/akula_witness_b1b4b1_lab.rs"
+required-features = ["server-bootstrap-b1b4b1-witness-ipc-lab"]
+
+[[example]]
+name = "akula_b1b4b1_witness_fixture"
+path = "examples/akula_b1b4b1_witness_fixture.rs"
+required-features = ["server-bootstrap-b1b4b1-witness-ipc-lab"]
 
 [[bin]]
 name = "akula-helper-b1b3b-lab"

@@ -130,6 +130,12 @@ fn kernel_peer(stream: &UnixStream) -> Result<RawLinuxUcred, PreflightError> {
     }
     Ok(creds)
 }
+/// Kernel-reported peer UID, not supplied by client frames or filesystem
+/// metadata. Reused by opt-in read-only witness IPC.
+pub fn verified_peer_uid(stream: &UnixStream) -> Result<u32, PreflightError> {
+    kernel_peer(stream).map(|peer| peer.uid)
+}
+
 struct Decoder<'a> { buf: &'a [u8], cursor: usize }
 impl Decoder<'_> {
     fn take<const N: usize>(&mut self) -> Result<[u8; N], PreflightError> {

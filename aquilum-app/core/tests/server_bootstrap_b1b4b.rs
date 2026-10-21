@@ -313,3 +313,30 @@ fn expired_pinned_artifact_never_reaches_the_witness_ledger() {
         Err(OsWitnessError::Pinned(PinError::Release(ReleaseError::Expired)))));
     assert_eq!(fs::read_dir(journal.path()).unwrap().count(), 0);
 }
+
+#[cfg(feature = "server-bootstrap-b1b4b1-witness-ipc-lab")]
+#[test]
+fn ci_optional_real_witness_ipc_checkpoint_fixture() {
+    // Absolutely no mutation unless the disposable GitHub runner explicitly
+    // selects this exact, test-only UID0 bootstrap operation.
+    if std::env::var("AKULA_B1B4B1_CI_SEED").ok().as_deref()
+        != Some("APPROVED_DISPOSABLE_ROOT_CAS_ONLY")
+    {
+        return;
+    }
+    assert_eq!(std::env::var("GITHUB_ACTIONS").ok().as_deref(), Some("true"));
+    assert_eq!(rustix::process::geteuid().as_raw(), 0);
+    let actor = OsWitnessLab::open(
+        std::path::Path::new("/run/akula-b1b4b1-lab/trust"),
+        std::path::Path::new("/run/akula-b1b4b1-lab/journal"),
+    ).unwrap();
+    assert_eq!(actor.current_checkpoint().unwrap(), WitnessCheckpoint::genesis());
+    let c = Case::new();
+    let attested = actor.attest_new_record(
+        &c.pinned, &c.owner, &c.owner_signer, c.scope,
+        &c.stage, c.proposed, c.before, c.challenge, NOW,
+    ).unwrap();
+    assert_eq!(attested.claim.after.revision, 1);
+    assert_eq!(attested.claim.after.accepted_floor.floor.sequence, 17);
+    assert_eq!(actor.current_checkpoint().unwrap(), attested.claim.after);
+}
