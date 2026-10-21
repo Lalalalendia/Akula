@@ -20,6 +20,12 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded PR attempts rather than consuming Linux/Windows runners
+# on every intermediate implementation commit.
+concurrency:
+  group: yc-s3-e3i-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   owner-review-ui:
     name: Offline-only owner review UI, no trusted admission
@@ -38,6 +44,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Install Linux native UI build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libglib2.0-dev libgtk-3-dev libpango1.0-dev \
+            libatk1.0-dev libcairo2-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libxkbcommon-dev libxkbcommon-x11-0
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
