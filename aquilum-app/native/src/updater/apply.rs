@@ -1,18 +1,11 @@
 #[cfg(target_os = "windows")]
-pub fn apply(payload: &[u8], before_exit: impl FnOnce()) -> Result<(), String> {
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
-    use windows::core::{HSTRING, w};
-    let dir = std::env::temp_dir().join(format!("akula-update-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let installer = dir.join("Akula-setup.exe");
-    std::fs::write(&installer, payload).map_err(|e| e.to_string())?;
-    before_exit();
-    let started = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(installer.as_os_str()), &HSTRING::from("/S /R /UPDATE /ARGS"), None, SW_SHOW) };
-    if started.0 as isize <= 32 {
-        return Err(format!("установщик не запустился, код {}", started.0 as isize));
-    }
-    std::process::exit(0);
+pub fn apply(_payload: &[u8], _before_exit: impl FnOnce()) -> Result<(), String> {
+    // Windows must not launch a silently downloaded installer from a PID
+    // temp path. Even an accidentally enabled release channel cannot skip
+    // publisher-signed admission, OS-locked staging, a previous-generation
+    // backup, first-GUI ACK and tested rollback. The current sealed
+    // SignedCandidate verification layer is intentionally inert.
+    Err("HOLD: Windows Akula updater needs signed transactional install and crash-tested rollback".into())
 }
 
 #[cfg(target_os = "macos")]
