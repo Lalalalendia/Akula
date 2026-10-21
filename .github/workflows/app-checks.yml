@@ -47,7 +47,8 @@ jobs:
           # in the mandatory gate, without scheduling two duplicate workflows.
           if git diff --quiet "$BASE_SHA" HEAD -- \
             aquilum-app/Cargo.toml aquilum-app/Cargo.lock \
-            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs; then
+            aquilum-app/core/Cargo.toml aquilum-app/core/src/lib.rs \
+            aquilum-app/core/src/server_release_lab.rs; then
             echo 'b1_shared_compat=false' >> "$GITHUB_OUTPUT"
           else
             echo 'b1_shared_compat=true' >> "$GITHUB_OUTPUT"
@@ -187,6 +188,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # A Core re-export must not become an independent verifier implementation.
+          grep -Fx 'pub use akula_server_release_b1a::*;' core/src/server_release_lab.rs
           cargo test --locked -p aquilum-core --features server-bootstrap-b1b-custody-lab \
             --test server_bootstrap_b1a --test server_bootstrap_b1b0 -- --nocapture
 

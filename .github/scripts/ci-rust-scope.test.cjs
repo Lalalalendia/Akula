@@ -99,12 +99,12 @@ test('B1a/B1b0 scoped workflows retain full checks on owned code but not shared 
     'aquilum-app/core/Cargo.toml','aquilum-app/core/src/lib.rs',
     'aquilum-app/Cargo.lock','aquilum-app/Cargo.toml'
   ];
+  shared.push('aquilum-app/core/src/server_release_lab.rs');
   for(const file of shared){
     assert.equal(matches(b1a,file),false,'shared changes use required gate: '+file);
     assert.equal(matches(b1b0,file),false,'shared changes use required gate: '+file);
   }
-  for(const file of ['modules/bootstrap-b1a/src/lib.rs',
-      'aquilum-app/core/src/server_release_lab.rs']){
+  for(const file of ['modules/bootstrap-b1a/src/lib.rs']){
     assert.equal(matches(b1a,file),true,'B1a owner path: '+file);
     assert.equal(matches(b1b0,file),true,'B1b0 dependent path: '+file);
   }
@@ -114,6 +114,8 @@ test('B1a/B1b0 scoped workflows retain full checks on owned code but not shared 
   const gate=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
   assert.equal(parse(gate).t,'global','required application gate must remain unfiltered');
   assert.match(gate,/b1_shared_compat: \$\{\{ steps\.scope\.outputs\.b1_shared_compat \}\}/);
+  assert.match(gate,/core\/src\/server_release_lab\.rs; then/);
+  assert.match(gate,/grep -Fx 'pub use akula_server_release_b1a::\*;'/);
   assert.match(gate,/--features server-bootstrap-b1b-custody-lab/);
   assert.match(gate,/--test server_bootstrap_b1a --test server_bootstrap_b1b0/);
 });
