@@ -13,7 +13,7 @@ default = []
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
-server-bootstrap-b0-lab = []
+server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
 server-bootstrap-b0-openssh-lab = ["server-bootstrap-b0-lab"]
 # Pure offline release-signature gate; never executes or installs a package.
@@ -99,6 +99,7 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"

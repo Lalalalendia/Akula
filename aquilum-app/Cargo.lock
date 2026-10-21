@@ -123,6 +123,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "akula-server-bootstrap-b0"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "ring",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,6 +199,7 @@ version = "0.1.0"
 name = "aquilum-core"
 version = "0.3.9"
 dependencies = [
+ "akula-server-bootstrap-b0",
  "atomic-write-file",
  "aws-config",
  "aws-sdk-s3",

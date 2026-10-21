@@ -40,7 +40,8 @@ pub struct ServerTarget {
 }
 
 impl ServerTarget {
-    pub(crate) fn validate(&self) -> Result<(), B0Error> {
+    /// Public for the opt-in Core preflight adapter; never authorizes installation.
+    pub fn validate(&self) -> Result<(), B0Error> {
         if self.ssh_port == 0 || self.trusted_key_sha256.iter().all(|byte| *byte == 0) {
             return Err(B0Error::InvalidTarget);
         }
@@ -108,7 +109,8 @@ pub struct PackagePin {
 }
 
 impl PackagePin {
-    pub(crate) fn validate(&self) -> Result<(), B0Error> {
+    /// Public for the opt-in Core preflight adapter; never authorizes installation.
+    pub fn validate(&self) -> Result<(), B0Error> {
         if self.version.is_empty() || self.version.len() > 64
             || !self.version.bytes().all(|b| b.is_ascii_alphanumeric()
                 || b == b'.' || b == b'+' || b == b'-')
