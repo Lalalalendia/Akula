@@ -396,6 +396,71 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn shutdown_releases_index_writer_for_next_core_while_old_clone_is_alive() {
+        use super::SearchService;
+        use crate::search::models::SearchIndexState;
+        use crate::search::query::Request;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        let temporary = tempfile::tempdir().unwrap();
+        let vault = temporary.path().join("notes");
+        fs::create_dir_all(&vault).unwrap();
+        fs::write(vault.join("test.md"), "# One\n\nshutdownsearchmarker\n").unwrap();
+        let workspace = vault.to_string_lossy().into_owned();
+        let store = temporary.path().join("persistent-index");
+        let make_search = || {
+            SearchService::new(
+                store.clone(),
+                Arc::new(|_: Vec<PathBuf>| {}),
+                Arc::new(|_| {}),
+            )
+        };
+        let old = make_search();
+        old.prepare(&workspace).expect("index should open");
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            let status = old.status(Some(&workspace));
+            if status.state == SearchIndexState::Ready
+                && !status.updating && status.indexed_documents >= 1
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "first index never completed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Simulates a search dialog background task holding SearchService
+        // after the native App and main Core shutdown begin.
+        let stale_client = old.clone();
+        old.shutdown();
+        assert!(stale_client.active_root().is_none(), "shutdown left an active index");
+        stale_client.shutdown(); // idempotent across cloned clients
+
+        // This is a new app session with the same real filesystem/SQLite/Tantivy
+        // paths. LockBusy must not be hidden or delayed with an arbitrary sleep.
+        let restarted = make_search();
+        restarted.prepare(&workspace).expect("new app cannot reopen the old index");
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            let status = restarted.status(Some(&workspace));
+            if status.state == SearchIndexState::Ready && !status.updating
+                && status.indexed_documents >= 1
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "restarted index never completed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let result = restarted
+            .search(&workspace, &Request::new("shutdownsearchmarker"))
+            .expect("query should not see a LockBusy or stale session");
+        assert_eq!(result.results.len(), 1, "saved source is not searchable");
+        restarted.shutdown();
+    }
+
+    #[test]
     fn only_the_current_index_version_stays_on_disk() {
         let directory = tempfile::tempdir().unwrap();
         let storage = directory.path();
