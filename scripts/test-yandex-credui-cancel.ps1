@@ -12,6 +12,7 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Runtime.InteropServices;
 public static class AkulaCredUiQaWindow {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -28,6 +29,35 @@ public static class AkulaCredUiQaWindow {
     // Windows Security caption rather than the requested message caption.
     // Enumerate ONLY windows owned by the independently identified cargo-test
     // child; never pick an unrelated process's credential prompt.
+    private const int GWL_STYLE = -16;
+    private const int ES_PASSWORD = 0x0020;
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW", SetLastError = true)]
+    private static extern int GetClassName(IntPtr hwnd, StringBuilder className, int maxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowLongW", SetLastError = true)]
+    private static extern int GetWindowStyle(IntPtr hwnd, int offset);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool EnumChildWindows(IntPtr hwndParent, EnumWindowsCallback callback, IntPtr state);
+
+    // Windows UIA does not guarantee every classic native EDIT advertises
+    // IsPassword. Check the actual Win32 style instead, never read the
+    // credential text. Only windows owned by the exact test PID are visited.
+    public static int CountNativeMaskedPasswordEdits(IntPtr root) {
+        int found = 0;
+        EnumChildWindows(root, delegate (IntPtr hwnd, IntPtr state) {
+            var cls = new StringBuilder(128);
+            if (GetClassName(hwnd, cls, cls.Capacity) == 0) return true;
+            string name = cls.ToString();
+            if (string.Equals(name, "Edit", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("RichEdit", StringComparison.OrdinalIgnoreCase)) {
+                if ((GetWindowStyle(hwnd, GWL_STYLE) & ES_PASSWORD) != 0) {
+                    found++;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     public static IntPtr[] FindVisibleWindowsForProcess(uint requiredPid) {
         var windows = new List<IntPtr>();
         EnumWindows(delegate (IntPtr hwnd, IntPtr state) {
@@ -105,6 +135,7 @@ try {
     $handle = [IntPtr]::Zero
     $dialog = $null
     $masked = 0
+    $maskProof = ''
     $maxWindowCount = 0
     $maxEditCount = 0
     for ($attempt = 0; $attempt -lt 240; $attempt++) {
@@ -131,10 +162,15 @@ try {
                 for ($i = 0; $i -lt $candidateFields.Count; $i++) {
                     if ($candidateFields.Item($i).Current.IsPassword) { $candidateMasked++ }
                 }
-                if ($candidateMasked -ge 1) {
+                # The classic Win32 ES_PASSWORD flag is an independent
+                # actual-rendering proof if the UIA provider omits IsPassword.
+                # Both checks are metadata-only: NEVER read field values.
+                $nativeMasked = [AkulaCredUiQaWindow]::CountNativeMaskedPasswordEdits($candidateHandle)
+                if ($candidateMasked -ge 1 -or $nativeMasked -ge 1) {
                     $handle = $candidateHandle
                     $dialog = $candidate
-                    $masked = $candidateMasked
+                    $masked = [Math]::Max($candidateMasked, $nativeMasked)
+                    $maskProof = if ($candidateMasked -ge 1) { 'UIA_IsPassword' } else { 'Win32_ES_PASSWORD' }
                     break
                 }
             }
@@ -192,7 +228,7 @@ try {
     }
     # The Rust test confirms Cancel and absence of the disposable WinCred target.
     # Never upload or print raw GUI logs.
-    Write-Host "AKULA_YANDEX_CREDUI_CANCEL_PASS: native_modal=True masked_password_fields=$masked UIA_cancel=True no_keys_persisted=True"
+    Write-Host "AKULA_YANDEX_CREDUI_CANCEL_PASS: native_modal=True masked_password_fields=$masked mask_proof=$maskProof UIA_cancel=True no_keys_persisted=True"
 }
 finally {
     if ($null -ne $proc) {
