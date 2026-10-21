@@ -37,14 +37,17 @@ struct SignedManifest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlatformArtifacts {
-    #[serde(rename = "windows-x86_64")]
-    windows: Artifact,
-    #[serde(rename = "linux-x86_64-appimage")]
-    appimage: Artifact,
-    #[serde(rename = "linux-x86_64-deb")]
-    deb: Artifact,
-    #[serde(rename = "linux-x86_64-rpm")]
-    rpm: Artifact,
+    // A protected single-OS publisher run may sign only artifacts it built.
+    // Never require synthetic digests for another OS. The selected platform
+    // is mandatory below; every present entry remains strictly validated.
+    #[serde(rename = "windows-x86_64", default)]
+    windows: Option<Artifact>,
+    #[serde(rename = "linux-x86_64-appimage", default)]
+    appimage: Option<Artifact>,
+    #[serde(rename = "linux-x86_64-deb", default)]
+    deb: Option<Artifact>,
+    #[serde(rename = "linux-x86_64-rpm", default)]
+    rpm: Option<Artifact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,9 +179,9 @@ fn numeric_version(value: &str) -> Result<[u32; 3], String> {
     Ok(version)
 }
 
-// All signed platforms must have usable, bounded, unambiguous metadata.
-// A Linux updater must not accept a malformed signed Windows/DEB/RPM matrix
-// that another OS could interpret differently under the same product key.
+// Every PRESENT signed platform must have usable, bounded, unambiguous
+// metadata; absent platforms are not claimed by a single-platform build.
+// A client must reject absence of its own required signed artifact.
 const MAX_RELEASE_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 
 fn validate_auxiliary_asset(
@@ -205,7 +208,7 @@ fn validate_windows_asset(item: &Artifact, version: &str) -> Result<(), String> 
         || !variant.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         || !valid_hex(&item.sha256, 64)
         || item.size == 0
-        || item.size > MAX_RELEASE_ARTIFACT_BYTES
+        || item.size > MAX_WINDOWS_INSTALLER_BYTES
     {
         return Err(hold("invalid signed Windows artifact identity"));
     }
@@ -242,30 +245,48 @@ fn inspect_authenticated(
     if next <= current {
         return Err(hold("release is not strictly newer than the installed version"));
     }
-    // Parse and validate all four platform-specific signed entries, not just
-    // the local one. Only the Linux AppImage bytes enter automatic admission.
-    validate_windows_asset(&manifest.artifacts.windows, &manifest.version)?;
-    validate_auxiliary_asset(
-        &manifest.artifacts.deb,
-        &format!("Akula_{}_amd64.deb", manifest.version),
-        "DEB",
-    )?;
-    validate_auxiliary_asset(
-        &manifest.artifacts.rpm,
-        &format!("Akula-{}-1.x86_64.rpm", manifest.version),
-        "RPM",
-    )?;
-    // The selected asset must be bound to its OS installer identity,
-    // not just to a valid signature for another Akula platform.
+    // Reject malformed metadata on ANY included platform: the same signed
+    // document must have unambiguous meaning for each OS that can consume it.
+    if let Some(item) = &manifest.artifacts.windows {
+        validate_windows_asset(item, &manifest.version)?;
+    }
+    if let Some(item) = &manifest.artifacts.appimage {
+        validate_auxiliary_asset(
+            item,
+            &format!("akula-app_{}_x86_64.AppImage", manifest.version),
+            "AppImage",
+        )?;
+        if item.size > MAX_LINUX_IMAGE_BYTES as u64 {
+            return Err(hold("invalid signed AppImage artifact size"));
+        }
+    }
+    if let Some(item) = &manifest.artifacts.deb {
+        validate_auxiliary_asset(
+            item,
+            &format!("Akula_{}_amd64.deb", manifest.version),
+            "DEB",
+        )?;
+    }
+    if let Some(item) = &manifest.artifacts.rpm {
+        validate_auxiliary_asset(
+            item,
+            &format!("Akula-{}-1.x86_64.rpm", manifest.version),
+            "RPM",
+        )?;
+    }
+    // A partial signed manifest is valid only for the actual OS artifact it
+    // names. No missing platform can borrow another OS's signed bytes.
     let (asset, expected_name, budget) = if expected_platform == TARGET_WINDOWS_NSIS {
         (
-            &manifest.artifacts.windows,
+            manifest.artifacts.windows.as_ref()
+                .ok_or_else(|| hold("required signed Windows artifact missing"))?,
             format!("Akula_{}_x64-setup.exe", manifest.version),
             MAX_WINDOWS_INSTALLER_BYTES,
         )
     } else {
         (
-            &manifest.artifacts.appimage,
+            manifest.artifacts.appimage.as_ref()
+                .ok_or_else(|| hold("required signed AppImage artifact missing"))?,
             format!("akula-app_{}_x86_64.AppImage", manifest.version),
             MAX_LINUX_IMAGE_BYTES as u64,
         )
@@ -426,6 +447,48 @@ mod tests {
     }
 
     #[test]
+    fn windows_only_signed_manifest_shape_matches_protected_candidate_workflow() {
+        let payload = b"real Windows NSIS bytes synthetic fixture";
+        let version = "0.3.10";
+        let manifest = serde_json::to_vec(&json!({
+            "schema": 1,
+            "product": "Akula",
+            "version": version,
+            "source_commit": "a".repeat(40),
+            "cargo_lock_sha256": "b".repeat(64),
+            "artifacts": {
+                "windows-x86_64": {
+                    "filename": format!("Akula_{version}_x64-setup.exe"),
+                    "sha256": digest_hex(payload),
+                    "size": payload.len()
+                }
+            }
+        })).unwrap();
+        let accepted = inspect_authenticated(
+            &manifest, payload, TARGET_WINDOWS_NSIS, "0.3.9",
+        ).unwrap();
+        assert_eq!(accepted.0, version);
+        assert_eq!(accepted.2, digest_hex(payload));
+
+        // A Windows-only signed manifest MUST NOT authorize Linux:
+        // absence is semantically different from a zero-byte package.
+        let missing = inspect_authenticated(
+            &manifest, payload, TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).unwrap_err();
+        assert!(missing.contains("required signed AppImage artifact missing"), "{missing}");
+
+        let mut changed: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        changed["artifacts"]["linux-x86_64-appimage"] = json!({
+            "filename": "Aquilum_0.3.10_x86_64.AppImage",
+            "sha256": digest_hex(payload),
+            "size": payload.len()
+        });
+        assert!(inspect_authenticated(
+            &serde_json::to_vec(&changed).unwrap(), payload, TARGET_WINDOWS_NSIS, "0.3.9",
+        ).is_err(), "a malformed other-OS artifact must still be rejected");
+    }
+
+    #[test]
     fn changed_same_size_bytes_are_rejected() {
         let data = b"fixture package bytes";
         let mut tampered = data.to_vec();
@@ -451,12 +514,17 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fields_and_missing_platforms_refuse_admission() {
+    fn unknown_fields_and_missing_selected_platform_refuse_admission() {
         let bytes = b"new";
         let raw = fixture(bytes, "0.3.10");
         let mut doc: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        // An unused platform may be omitted by a single-OS publisher.
         doc["artifacts"].as_object_mut().unwrap().remove("linux-x86_64-rpm");
-        assert!(inspect_authenticated(&serde_json::to_vec(&doc).unwrap(), bytes, TARGET_LINUX_APPIMAGE, "0.3.9").is_err());
+        assert!(inspect_authenticated(&serde_json::to_vec(&doc).unwrap(), bytes, TARGET_LINUX_APPIMAGE, "0.3.9").is_ok());
+        // But omitting the selected AppImage must fail closed.
+        doc["artifacts"].as_object_mut().unwrap().remove("linux-x86_64-appimage");
+        assert!(inspect_authenticated(&serde_json::to_vec(&doc).unwrap(), bytes, TARGET_LINUX_APPIMAGE, "0.3.9")
+            .unwrap_err().contains("required signed AppImage artifact missing"));
         let mut doc: serde_json::Value = serde_json::from_slice(&raw).unwrap();
         doc["artifacts"]["other-os"] = json!({"filename":"other","sha256":"c".repeat(64),"size":12});
         assert!(inspect_authenticated(&serde_json::to_vec(&doc).unwrap(), bytes, TARGET_LINUX_APPIMAGE, "0.3.9").is_err());
