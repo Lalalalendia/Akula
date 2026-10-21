@@ -35,6 +35,8 @@ fn full_root_inventory_with_mention_and_no_writes() {
     assert!(report.links.iter().any(|e|e.kind=="mention" && e.to==A));
     assert!(report.links.iter().any(|e|e.kind=="contains" && e.to==B));
     assert_eq!(report.summary().counts["block"],1);
+    assert_eq!(report.summary().link_counts.get("contains"), Some(&1));
+    assert_eq!(report.summary().link_counts.get("mention"), Some(&1));
     assert!(client.replies.is_empty());
 }
 #[test]
