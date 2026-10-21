@@ -21,11 +21,21 @@ impl App {
         let mut ctx = self.settings_context(dialog.section, dialog.copied, dialog.trash_page);
         ctx.sync_selected = dialog.sync_selected.clone();
         ctx.sync_notice = dialog.sync_notice.clone();
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        {
+            ctx.owner_review = dialog.owner_review.as_ref().map(|p| p.view());
+            ctx.owner_review_notice = dialog.owner_review_notice;
+        }
         let (card, finish) = settings::card(&config, &ctx, dialog.section);
         root.edit_widget(dialog.layer, |mut w| Modal::set_card(&mut w.downcast(), card, &crate::i18n::t("settings.title")));
         let mut fresh = finish(dialog.layer);
         fresh.sync_selected = dialog.sync_selected;
         fresh.sync_notice = dialog.sync_notice;
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        {
+            fresh.owner_review = dialog.owner_review;
+            fresh.owner_review_notice = dialog.owner_review_notice;
+        }
         root.focus_on(Some(fresh.layer));
         if let Some(offset) = offset {
             fresh.content.edit(root, |mut area| ScrollArea::set_offset(&mut area, offset));
@@ -65,6 +75,11 @@ impl App {
         dialog.trash_page = 0;
         dialog.sync_selected = None;
         dialog.sync_notice = None;
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        {
+            dialog.owner_review = None;
+            dialog.owner_review_notice = None;
+        }
         self.interface.set_settings_section(section.key());
         let config = self.workspace.core.settings.get_config();
         let ctx = self.settings_context(section, None, 0);
@@ -83,6 +98,11 @@ impl App {
         let mut ctx = self.settings_context(section, copied, page);
         ctx.sync_selected = dialog.sync_selected.clone();
         ctx.sync_notice = dialog.sync_notice.clone();
+        #[cfg(feature = "yandex-owner-review-ui-preview")]
+        {
+            ctx.owner_review = dialog.owner_review.as_ref().map(|p| p.view());
+            ctx.owner_review_notice = dialog.owner_review_notice;
+        }
         let (content, bindings) = settings::content(&config, &ctx, section);
         let Some(Popup::Settings { dialog, .. }) = &mut self.popup else { return };
         let switches = switch_travel(root, &dialog.bindings);
