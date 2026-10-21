@@ -92,10 +92,8 @@ impl SyntheticFiles {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "akula-staya-e2e-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("akula-staya-e2e-{}-{nonce}", std::process::id()));
         fs::create_dir(&path).expect("private disposable test root");
         Self(path)
     }
@@ -167,14 +165,16 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     // every object in the offer. It will only serve the named receiver key.
     let first_arg = first_path.to_str().expect("test path utf8");
     let last_arg = last_path.to_str().expect("test path utf8");
-    let mut provider = OwnedProcess::spawn(
-        &binary,
-        &["serve-batch", receiver_id, first_arg, last_arg],
-    );
+    let mut provider =
+        OwnedProcess::spawn(&binary, &["serve-batch", receiver_id, first_arg, last_arg]);
     let invitation = provider.line();
     let fields: Vec<&str> = invitation.split_whitespace().collect();
     assert_eq!(fields.first(), Some(&"CONNECT_BATCH"));
-    assert_eq!(fields.len(), 10, "two explicit roots in real Staya invitation");
+    assert_eq!(
+        fields.len(),
+        10,
+        "two explicit roots in real Staya invitation"
+    );
     let endpoint_addr: EndpointAddr =
         postcard::from_bytes(&unhex(fields[1])).expect("decode real Iroh endpoint ticket");
     assert!(!endpoint_addr.is_empty(), "direct-only reachable transport");
@@ -208,22 +208,24 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         ],
     };
     let decision = offer
-        .receiver_decision(DecisionAction::Accept, vec![0, 2], now, sender, receiver_peer)
+        .receiver_decision(
+            DecisionAction::Accept,
+            vec![0, 2],
+            now,
+            sender,
+            receiver_peer,
+        )
         .expect("explicit bounded accepted subset");
 
     // A forged commitment must be denied *before* handing the ticket to
     // the actual Staya receiver process.
     let mut forged = decision.clone();
     forged.manifest_commitment = [0x70; 32];
-    assert!(prepare_staya_batch(
-        offer.clone(), &forged, sender, receiver_peer, now + 1
-    ).is_err());
+    assert!(prepare_staya_batch(offer.clone(), &forged, sender, receiver_peer, now + 1).is_err());
 
     // This call crosses the real Akula -> real Staya library boundary.
-    let prepared = prepare_staya_batch(
-        offer.clone(), &decision, sender, receiver_peer, now + 1
-    )
-    .expect("validated Akula consent becomes a Staya queue, not a grant");
+    let prepared = prepare_staya_batch(offer.clone(), &decision, sender, receiver_peer, now + 1)
+        .expect("validated Akula consent becomes a Staya queue, not a grant");
     assert_eq!(prepared.offer_indexes, [0, 2]);
     assert_eq!(prepared.queue.entries().len(), 2);
     assert_eq!(prepared.queue.entries()[0].label, "object_00.bin");
@@ -236,8 +238,7 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         assert_eq!(fields[base + 1], hex(&object.manifest.id.0));
         assert_eq!(fields[base + 2], object.manifest.size.to_string());
         assert_ne!(
-            object.manifest.id.0,
-            offer.files[1].blake3_root,
+            object.manifest.id.0, offer.files[1].blake3_root,
             "unselected root may not be served"
         );
     }
@@ -247,14 +248,16 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     verify_staya_invitation(&prepared, &invitation, sender.endpoint_id)
         .expect("approved real Staya invitation must match live Akula offer");
     assert!(verify_staya_invitation(&prepared, &invitation, [0u8; 32]).is_err());
-    let mut changed_invitation = fields.iter().map(|field| (*field).to_owned()).collect::<Vec<_>>();
+    let mut changed_invitation = fields
+        .iter()
+        .map(|field| (*field).to_owned())
+        .collect::<Vec<_>>();
     changed_invitation[5] = hex(&offer.files[1].blake3_root);
-    assert!(verify_staya_invitation(
-        &prepared,
-        &changed_invitation.join(" "),
-        sender.endpoint_id
-    )
-    .is_err(), "inserting unselected content must fail before GET");
+    assert!(
+        verify_staya_invitation(&prepared, &changed_invitation.join(" "), sender.endpoint_id)
+            .is_err(),
+        "inserting unselected content must fail before GET"
+    );
 
     // A separate, unlisted cryptographic receiver cannot GET bytes even
     // with the same endpoint ticket and otherwise valid invitation.
@@ -264,7 +267,12 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     assert_ne!(outsider_id, receiver_text);
     outsider.send(&invitation);
     assert!(!outsider.finish().success(), "unlisted receiver must fail");
-    assert!(!outsider.output.try_iter().any(|line| line.starts_with("STAGED_QUEUE ")));
+    assert!(
+        !outsider
+            .output
+            .try_iter()
+            .any(|line| line.starts_with("STAGED_QUEUE "))
+    );
 
     // Actual QUIC/Bao transfer begins only after the explicit Akula accept
     // and independent manifest/transport commitment checks in this process.
@@ -273,7 +281,10 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     for (slot, expected) in [&first[..], &last[..]].iter().enumerate() {
         let report = receiver.line();
         let prefix = format!("STAGED_QUEUE {slot} ");
-        assert!(report.starts_with(&prefix), "unexpected Staya output: {report}");
+        assert!(
+            report.starts_with(&prefix),
+            "unexpected Staya output: {report}"
+        );
         assert!(report.contains("NOT_APPLIED=true"));
         let stage_path = report
             .strip_prefix(&prefix)
@@ -284,13 +295,19 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         let stage = PathBuf::from(stage_path);
         let parent = stage.parent().expect("stage parent");
         assert!(parent.starts_with(std::env::temp_dir()));
-        assert!(parent
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("staya-direct-preview-batch-receiver-"));
+        assert!(
+            parent
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("staya-direct-preview-batch-receiver-")
+        );
         let actual = fs::read(&stage).expect("independent physical readback");
-        assert_eq!(actual.as_slice(), *expected, "verified bytes must match source");
+        assert_eq!(
+            actual.as_slice(),
+            *expected,
+            "verified bytes must match source"
+        );
         let manifest = prepared.queue.entries()[slot].manifest;
         assert_eq!(actual.len() as u64, manifest.size);
         assert_eq!(*blake3::hash(&actual).as_bytes(), manifest.id.0);
@@ -298,7 +315,10 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     }
     assert_eq!(receiver.line(), "STY_G1K_UNLISTED_GET_DENIED=true");
     let finish = receiver.line();
-    assert!(finish.starts_with("QUEUE_COMPLETE COUNT=2 COMMITMENT="), "{finish}");
+    assert!(
+        finish.starts_with("QUEUE_COMPLETE COUNT=2 COMMITMENT="),
+        "{finish}"
+    );
     assert!(finish.contains(&hex(&prepared.queue.commitment())));
     assert!(finish.contains("VERIFIED_ITEMS=2/2"));
     assert!(finish.contains("NOT_APPLIED=true"));
