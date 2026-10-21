@@ -56,3 +56,18 @@ test('this policy runs when the release workflow is edited', () => {
   assert.match(ci, /\.github\/workflows\/release\.yml/);
   assert.match(ci, /node --test \.github\/scripts\/release-isolation-policy\.test\.cjs/);
 });
+
+
+test('publisher key proof cannot publish, run on PR code or bypass protected environment', () => {
+  const yaml = file('.github/workflows/akula-publisher-key-proof.yml');
+  assert.match(yaml, /^name: Akula publisher key proof \(no release\)$/m);
+  assert.match(yaml, /^on:\n  workflow_dispatch:\s*$/m);
+  assert.match(yaml, /^permissions:\n  contents: read$/m);
+  assert.match(yaml, /if: github.ref == 'refs\/heads\/main'/);
+  assert.match(yaml, /environment: akula-release/);
+  assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY/);
+  assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD/);
+  assert.match(yaml, /minisign -Vm /);
+  assert.match(yaml, /tamper_refused=1 no_release=1/);
+  assert.doesNotMatch(yaml, /gh release|create-release|contents:\s*write|upload-artifact|pull_request:|push:/);
+});
