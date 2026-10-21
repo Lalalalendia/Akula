@@ -5,8 +5,9 @@ const { execFileSync } = require('node:child_process');
 // build configuration, native UI, or any other core component still receives
 // the entire Rust test suite. Documentation-only PRs don't need Rust at all.
 function classify(changedPaths) {
-  const relevant=changedPaths.filter(p=>p.startsWith('aquilum-app/')
-    ||p==='.github/workflows/app-checks.yml');
+  // CI scripts and workflow definitions are validated by Node/policy checks.
+  // They are not Rust source changes and must not schedule an entire workspace build.
+  const relevant=changedPaths.filter(p=>p.startsWith('aquilum-app/'));
   if(relevant.length===0) return 'none';
   const syncOnly=relevant.every(p=>p.startsWith('aquilum-app/core/src/sync/')
     ||p==='aquilum-app/core/tests/sync_contract.rs');
