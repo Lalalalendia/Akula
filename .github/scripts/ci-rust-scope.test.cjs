@@ -279,3 +279,21 @@ test('real git comment-only Cargo+lock change enters focused Core mode; risky ch
     assert.equal(mode(base),'mode=workspace');
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('additive manifest-only changes never rerun unrelated macOS updater security suites',()=>{
+  const yaml=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  for(const name of ['Security-test macOS updater TAR parser on Linux too',
+      'Test macOS updater transaction with shared installer lock and crash recovery']){
+    const marker='      - name: '+name+'\n';
+    const i=yaml.indexOf(marker);
+    assert.ok(i>=0,name+' stays a protected runnable step');
+    const section=yaml.slice(i,i+350);
+    assert.match(section,/if: needs\.classify\.outputs\.mode != 'none' && needs\.classify\.outputs\.mode != 'manifest'/,
+      name+' runs for sync/workspace, skips additive manifest');
+  }
+  assert.match(yaml,/Run Core tests in both modes \(safe manifest additions\)/);
+  assert.match(yaml,/--features sync-engine/);
+  assert.match(yaml,/B1a\/B1b0\/B1b1 release and approval compatibility/);
+  assert.match(yaml,/Node D1\/D1\.5\/D2 scoped read and loopback compatibility/);
+  assert.match(yaml,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
