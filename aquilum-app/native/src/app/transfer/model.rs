@@ -3,7 +3,7 @@ use super::*;
 use crate::i18n::t;
 
 impl TransferState {
-    pub(super) fn stage(&mut self, paths: Vec<PathBuf>) {
+    pub(in crate::app) fn stage(&mut self, paths: Vec<PathBuf>) {
         self.error = None;
         for path in paths {
             if self.drafts.iter().any(|entry| entry.path == path) {
@@ -27,19 +27,19 @@ impl TransferState {
         }
     }
 
-    pub(super) fn toggle(&mut self, index: usize) {
+    pub(in crate::app) fn toggle(&mut self, index: usize) {
         if let Some(item) = self.drafts.get_mut(index) {
             item.paused = !item.paused;
         }
     }
 
-    pub(super) fn remove(&mut self, index: usize) {
+    pub(in crate::app) fn remove(&mut self, index: usize) {
         if index < self.drafts.len() {
             self.drafts.remove(index);
         }
     }
 
-    pub(super) fn choose_peer(&mut self, binding: (DeviceId, [u8; 32])) {
+    pub(in crate::app) fn choose_peer(&mut self, binding: (DeviceId, [u8; 32])) {
         // Always match the *exact* displayed DeviceId and key, never a stale
         // list index which might now refer to a completely different peer.
         let matches: Vec<_> = self.peers.iter().filter(|peer| peer.id == binding.0).collect();
@@ -95,7 +95,7 @@ impl TransferState {
         self.reconcile_selection();
     }
 
-    pub(super) fn device_rows(&self) -> Vec<transfer_ui::DeviceRow> {
+    pub(in crate::app) fn device_rows(&self) -> Vec<transfer_ui::DeviceRow> {
         self.peers.iter().take(MAX_DEVICE_ROWS).map(|peer| {
             let name: String = peer.name.chars()
                 .filter(|c| !c.is_control()).take(64).collect();
@@ -120,7 +120,7 @@ impl TransferState {
         }).collect()
     }
 
-    pub(super) fn rows(&self) -> Vec<transfer_ui::QueueRow> {
+    pub(in crate::app) fn rows(&self) -> Vec<transfer_ui::QueueRow> {
         self.drafts.iter().enumerate().map(|(index, item)| {
             let raw = item.path.file_name().unwrap_or_default().to_string_lossy();
             let mut name: String = raw.chars().filter(|c| !c.is_control()).take(96).collect();
