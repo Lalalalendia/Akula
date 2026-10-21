@@ -89,3 +89,31 @@ test('empty/malformed input and moved B0-to-unknown file fail closed',()=>{
   assert.equal(renamed.candidate,null);
   assert.equal(renamed.requiredScope,'workspace');
 });
+
+test('B1a/B1b0 scoped workflows retain full checks on owned code but not shared Cargo',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const workflow=name=>parse(fs.readFileSync(path.join(__dirname,'../workflows',name),'utf8'));
+  const b1a=workflow('core-server-bootstrap-b1a-release.yml');
+  const b1b0=workflow('core-server-bootstrap-b1b0-staging.yml');
+  const shared=[
+    'aquilum-app/core/Cargo.toml','aquilum-app/core/src/lib.rs',
+    'aquilum-app/Cargo.lock','aquilum-app/Cargo.toml'
+  ];
+  for(const file of shared){
+    assert.equal(matches(b1a,file),false,'shared changes use required gate: '+file);
+    assert.equal(matches(b1b0,file),false,'shared changes use required gate: '+file);
+  }
+  for(const file of ['modules/bootstrap-b1a/src/lib.rs',
+      'aquilum-app/core/src/server_release_lab.rs']){
+    assert.equal(matches(b1a,file),true,'B1a owner path: '+file);
+    assert.equal(matches(b1b0,file),true,'B1b0 dependent path: '+file);
+  }
+  assert.equal(matches(b1b0,'modules/bootstrap-b1b0/src/server_staging_lab.rs'),true);
+  assert.equal(matches(b1a,'aquilum-app/core/tests/server_bootstrap_b1a.rs'),true);
+  assert.equal(matches(b1b0,'aquilum-app/core/tests/server_bootstrap_b1b0.rs'),true);
+  const gate=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.equal(parse(gate).t,'global','required application gate must remain unfiltered');
+  assert.match(gate,/b1_shared_compat: \$\{\{ steps\.scope\.outputs\.b1_shared_compat \}\}/);
+  assert.match(gate,/--features server-bootstrap-b1b-custody-lab/);
+  assert.match(gate,/--test server_bootstrap_b1a --test server_bootstrap_b1b0/);
+});
