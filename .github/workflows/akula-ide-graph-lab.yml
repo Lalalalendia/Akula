@@ -1,0 +1,135 @@
+name: Akula IDE graph index lab (manual branch)
+
+on:
+  push:
+    branches:
+      - lab/ide-graph-gortex-ra-20261022
+    paths:
+      - .github/workflows/akula-ide-graph-lab.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-ide-graph-lab
+  cancel-in-progress: true
+
+jobs:
+  compare-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout pinned Akula snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: b804a84aab6699611d2d681270c61a6d108c35e5
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Record inputs and baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _ide_graph_results
+          git rev-parse HEAD | tee _ide_graph_results/akula-sha.txt
+          uname -a | tee _ide_graph_results/uname.txt
+          cat /etc/os-release > _ide_graph_results/os-release.txt
+          df -h . > _ide_graph_results/disk.txt
+          python3 - <<'PY'
+          import json, pathlib, statistics
+          root = pathlib.Path(".")
+          own = [p for p in root.rglob("*.rs") if "vendor" not in p.parts and "target" not in p.parts]
+          vend = [p for p in root.rglob("*.rs") if "vendor" in p.parts]
+          result = {"own_rs":len(own),"vendor_rs":len(vend),"own_bytes":sum(x.stat().st_size for x in own),"vendor_bytes":sum(x.stat().st_size for x in vend)}
+          pathlib.Path("_ide_graph_results/files.json").write_text(json.dumps(result,indent=2))
+          print(result)
+          PY
+
+      - name: Install verified pinned Gortex release
+        shell: bash
+        timeout-minutes: 4
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/graph-tool" "$RUNNER_TEMP/bin"
+          url="https://github.com/zzet/gortex/releases/download/v0.64.8/gortex_linux_amd64.tar.gz"
+          curl --fail --location --retry 3 --retry-delay 2 "$url" --output "$RUNNER_TEMP/gortex.tar.gz"
+          printf '%s  %s\n' d481313e9d30c61fe3df2e5cf852e3ae3ccc7d5e00fc044fe36efd68e6615edc "$RUNNER_TEMP/gortex.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/gortex.tar.gz" -C "$RUNNER_TEMP/graph-tool"
+          binary=$(find "$RUNNER_TEMP/graph-tool" -type f -name gortex -print -quit)
+          test -n "$binary"
+          cp "$binary" "$RUNNER_TEMP/bin/gortex"
+          chmod +x "$RUNNER_TEMP/bin/gortex"
+          "$RUNNER_TEMP/bin/gortex" version | tee _ide_graph_results/gortex-version.txt
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Gortex AST-only isolated cold index
+        shell: bash
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/graph-home/.config" "$RUNNER_TEMP/graph-home/.cache"
+          export HOME="$RUNNER_TEMP/graph-home"
+          export XDG_CONFIG_HOME="$HOME/.config"
+          export XDG_CACHE_HOME="$HOME/.cache"
+          export DO_NOT_TRACK=1
+          export GORTEX_LSP_SWEEP=off
+          export GORTEX_DAEMON_MEMLIMIT=2GiB
+          gortex daemon start --detach --backend-path "$RUNNER_TEMP/akula-gortex.sqlite" > _ide_graph_results/gortex-start.log 2>&1
+          set +e
+          /usr/bin/time -v -o _ide_graph_results/gortex-cold-time.txt timeout 530 gortex track "$GITHUB_WORKSPACE" --wait --wait-timeout 8m > _ide_graph_results/gortex-track.log 2>&1
+          ec=$?
+          set -e
+          echo "$ec" > _ide_graph_results/gortex-exit.txt
+          gortex status > _ide_graph_results/gortex-status.txt 2>&1 || true
+          gortex daemon status > _ide_graph_results/gortex-daemon-status.txt 2>&1 || true
+          gortex query stats --index "$GITHUB_WORKSPACE" --format json > _ide_graph_results/gortex-stats.json 2> _ide_graph_results/gortex-query-error.txt || true
+          ps -eo pid,rss,vsz,etime,args | grep -E '(^|/)gortex( |$)' | grep -v grep > _ide_graph_results/gortex-processes.txt || true
+          du -a "$RUNNER_TEMP/akula-gortex.sqlite"* > _ide_graph_results/gortex-store-size.txt 2>&1 || true
+          gortex daemon stop > _ide_graph_results/gortex-stop.txt 2>&1 || true
+          exit "$ec"
+
+      - name: rust-analyzer independent workspace analysis
+        shell: bash
+        if: success()
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          rustup component add rust-analyzer
+          rust-analyzer --version | tee _ide_graph_results/rust-analyzer-version.txt
+          set +e
+          /usr/bin/time -v -o _ide_graph_results/rust-analyzer-time.txt timeout 390 rust-analyzer analysis-stats aquilum-app > _ide_graph_results/rust-analyzer-analysis.txt 2>&1
+          ec=$?
+          set -e
+          echo "$ec" > _ide_graph_results/rust-analyzer-exit.txt
+          exit "$ec"
+
+      - name: Summarize observed measurements
+        shell: bash
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib,re,json
+          d=pathlib.Path("_ide_graph_results")
+          data={}
+          for name in ("gortex","rust-analyzer"):
+              p=d/(name+"-time.txt")
+              t=p.read_text(errors="replace") if p.exists() else ""
+              for label,key in (("Elapsed (wall clock) time","elapsed"),("Maximum resident set size","max_rss_kb"),("User time (seconds)","user_seconds"),("System time (seconds)","system_seconds")):
+                  m=re.search(r"^\s*"+re.escape(label)+r"\s*:\s*(.*?)\s*$",t,re.M)
+                  if m: data[name+"_"+key]=m.group(1)
+              exitfile=d/(name+"-exit.txt")
+              data[name+"_exit"]=exitfile.read_text().strip() if exitfile.exists() else "not_run"
+          data["interpretation"]="Gortex track parent RSS is NOT daemon peak RSS; use daemon status and process snapshot. rust-analyzer analysis-stats is NOT a graph-edge precision comparator."
+          (d/"summary.json").write_text(json.dumps(data,indent=2))
+          print(json.dumps(data,indent=2))
+          PY
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: akula-ide-graph-lab-linux
+          path: _ide_graph_results
+          retention-days: 14
+          if-no-files-found: warn
