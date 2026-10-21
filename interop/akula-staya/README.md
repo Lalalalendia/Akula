@@ -25,9 +25,10 @@ receiver-approved subset and a Staya queue commitment.
 4. Materialize the exact approved roots and sizes into the **actual Staya**
    `QueueSelection` using restricted ASCII transport aliases
    (`object_00.bin`, `object_02.bin`).
-5. Compare every offered Staya root, size, order and its independent Staya
-   commitment against the provider's real `CONNECT_BATCH` invitation.
-   Unselected root #1 cannot enter Staya's provider selection.
+5. Call the reusable `verify_staya_invitation` bridge: decode the real
+   serialized Iroh endpoint ticket and compare expected endpoint, every root,
+   size, order, alias, and Staya commitment against the approved queue.
+   Mutated tickets and unselected root #1 fail **before GET**.
 6. An outsider receiver with a different real QUIC key must be refused.
 7. Send the invitation only after Akula consent. Receive actual Bao ranges,
    then independently read the private staged files, checking byte identity,
