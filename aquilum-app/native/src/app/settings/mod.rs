@@ -67,19 +67,21 @@ impl App {
         } else {
             None
         };
+        #[cfg(feature = "s3-e2e01-review-preview")]
+        let s3_bound_publications = if section == Section::Sync {
+            workspace.as_deref().map(|root| {
+                aquilum_core::sync::native_s3_bound_publication_overview(
+                    &self.workspace.core, &self.workspace.data_dir, root,
+                )
+            })
+        } else {
+            None
+        };
         Context {
             workspace,
             sync_recovery,
             #[cfg(feature = "s3-e2e01-review-preview")]
-            s3_bound_publications: if section == Section::Sync {
-                workspace.as_deref().map(|root| {
-                    aquilum_core::sync::native_s3_bound_publication_overview(
-                        &self.workspace.core, &self.workspace.data_dir, root,
-                    )
-                })
-            } else {
-                None
-            },
+            s3_bound_publications,
             sync_selected: None,
             sync_notice: None,
             scale: self.interface.scale(),
