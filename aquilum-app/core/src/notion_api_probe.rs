@@ -322,11 +322,14 @@ impl<T: NotionReadTransport> Scan<'_, T> {
             .is_none_or(|a| !a.is_empty()) {
             self.warnings.push(format!("page {id}: unknown/not-rendered markdown blocks"));
         }
-        // A page can contain warnings even when it reports truncated=false.
-        // Missing/invalid warning metadata must not falsely certify completeness.
-        if markdown.get("warnings").and_then(Value::as_array)
-            .is_none_or(|a| !a.is_empty()) {
-            self.warnings.push(format!("page {id}: markdown warnings or unverified warning metadata"));
+        // GET /pages/{id}/markdown does not require a warnings field.
+        // The optional field is currently documented for Markdown updates.
+        if let Some(raw_warnings) = markdown.get("warnings") {
+            let warnings = raw_warnings.as_array()
+                .ok_or("Notion markdown warnings must be an array when present")?;
+            if !warnings.is_empty() {
+                self.warnings.push(format!("page {id}: markdown parser warnings"));
+            }
         }
         self.insert("markdown", id.to_owned(), markdown)?;
         self.queue(TaskKind::Blocks, id, depth + 1)
