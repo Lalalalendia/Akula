@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # New PR revisions supersede old ones; explicit manual runs remain independent.
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   actual-root-witness-read-only-ipc:
     runs-on: ubuntu-24.04

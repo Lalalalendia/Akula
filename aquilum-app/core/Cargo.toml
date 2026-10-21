@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-core"
-version = "0.3.9"
+version = "0.3.10"
 description = "Aquilum core: documents, files, search, history and settings without any UI"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -9,17 +9,19 @@ workspace = ".."
 
 [features]
 default = []
-# Opt-in pure message state-machine experiment; no network, storage, UI or workers.
+# Opt-in pure messaging state machine; no network, storage, UI or workers.
 messaging-core-lab = []
+# Metadata-only negotiation lab: no transport, staging, or File Gate.
+p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
-server-bootstrap-b0-lab = []
+server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
 server-bootstrap-b0-openssh-lab = ["server-bootstrap-b0-lab"]
 # Pure offline release-signature gate; never executes or installs a package.
-server-bootstrap-b1a-release-lab = []
+server-bootstrap-b1a-release-lab = ["dep:akula-server-release-b1a"]
 # Linux-only inert staging laboratory; requires B1a verifier, no executable install.
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.
@@ -44,6 +46,9 @@ server-bootstrap-b1b4b1-witness-ipc-lab = ["server-bootstrap-b1b4b-os-witness-la
 # Test-only signed FD -> fixed root-owned Node file transaction after owner/CAS.
 # Does not launch Node or expose install IPC to Akula application.
 server-bootstrap-b1c0-fixed-node-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
+# Fixed /opt first-install file commit with a root-owned durable receipt and
+# conservative HOLD on startup or crash. No public installer RPC or auto-start.
+server-bootstrap-b1d0-durable-node = ["server-bootstrap-b1c0-fixed-node-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
@@ -101,6 +106,8 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
+akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"

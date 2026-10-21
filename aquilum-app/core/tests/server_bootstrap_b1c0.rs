@@ -352,3 +352,147 @@ fn expired_signed_source_refuses_before_any_write_or_cas() {
     assert_eq!(actor.current_checkpoint().unwrap().revision, 0);
     assert!(fs::read_dir(sandbox.path()).unwrap().next().is_none());
 }
+
+
+// B1c1: disposable Ubuntu QEMU integration, deliberately opt-in. The public
+// B1a key is pre-provisioned by guest cloud-init, NOT accepted from staged
+// release/SSH. This proves exact original signing key + REAL ELF + CAS file
+// commit. Owner consent and witness keys remain NONPRODUCTION test signers.
+const B1C1_DOMAIN: &[u8] = b"Akula Node B1a signed release manifest v1\0";
+fn b1c1_take<const N: usize>(input: &[u8], at: &mut usize) -> [u8; N] {
+    let end = at.checked_add(N).expect("wire offset overflow");
+    let part: [u8; N] = input.get(*at..end)
+        .expect("truncated external signed manifest")
+        .try_into().expect("exact B1a field width");
+    *at = end;
+    part
+}
+fn b1c1_u32(input: &[u8], at: &mut usize) -> u32 {
+    u32::from_be_bytes(b1c1_take::<4>(input, at))
+}
+fn b1c1_u64(input: &[u8], at: &mut usize) -> u64 {
+    u64::from_be_bytes(b1c1_take::<8>(input, at))
+}
+fn b1c1_manifest(wire: &[u8]) -> ReleaseManifestV1 {
+    assert!(wire.len() <= 256 && wire.starts_with(B1C1_DOMAIN),
+        "external B1a signing domain must match");
+    let mut at = B1C1_DOMAIN.len();
+    assert_eq!(b1c1_take::<1>(wire, &mut at), [1], "schema");
+    assert_eq!(b1c1_take::<1>(wire, &mut at), [1], "Linux platform");
+    let m = ReleaseManifestV1 {
+        platform: TargetPlatform::LinuxX86_64,
+        version: Version {
+            major: b1c1_u32(wire, &mut at),
+            minor: b1c1_u32(wire, &mut at),
+            patch: b1c1_u32(wire, &mut at),
+        },
+        release_sequence: b1c1_u64(wire, &mut at),
+        package_size: b1c1_u64(wire, &mut at),
+        not_before_unix: b1c1_u64(wire, &mut at),
+        expires_unix: b1c1_u64(wire, &mut at),
+        package_sha256: b1c1_take::<32>(wire, &mut at),
+        signer_id: {
+            let len = b1c1_take::<1>(wire, &mut at)[0] as usize;
+            let end = at.checked_add(len).expect("signer size overflow");
+            let id = std::str::from_utf8(wire.get(at..end)
+                .expect("truncated B1a signer")).expect("signer UTF-8").to_owned();
+            at = end;
+            id
+        },
+    };
+    assert_eq!(at, wire.len(), "unexpected unsigned manifest suffix");
+    assert_eq!(m.canonical_signed_bytes(), wire, "noncanonical B1a wire");
+    assert_eq!(m.signer_id, "akula-b1b2b-ephemeral-test");
+    m
+}
+#[test]
+fn ci_real_preprovisioned_signed_elf_b1c1() {
+    if std::env::var("AKULA_B1C1_VM_PROOF").ok().as_deref()
+        != Some("SIGNED_ELF_TO_FIXED_NODE_CAS_ONLY") { return; }
+    assert_eq!(std::env::var("GITHUB_ACTIONS").ok().as_deref(), Some("true"));
+    assert_eq!(std::env::var("RUNNER_OS").ok().as_deref(), Some("Linux"));
+    assert_eq!(rustix::process::geteuid().as_raw(), 0);
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let trusted_pub = std::path::Path::new("/etc/akula-b1b2b-lab-public.ed25519");
+    let marker = std::path::Path::new("/etc/akula-b1b2b-lab.marker");
+    for path in [trusted_pub, marker] {
+        let meta = fs::symlink_metadata(path).expect("missing provisioned root trust");
+        assert!(meta.is_file() && meta.uid() == 0 && meta.nlink() == 1
+            && meta.permissions().mode() & 0o7777 == 0o600,
+            "root-controlled immutable guest provisioner only");
+    }
+    let source = std::path::Path::new("/home/akulavm/b1b2b");
+    let actual_elf = fs::read(source.join("v1.node")).expect("real signed Node ELF");
+    assert!(actual_elf.len() >= 1024 && actual_elf.starts_with(b"\x7fELF"),
+        "real Linux ELF required, synthetic bytes are forbidden");
+    let wire = fs::read(source.join("v1.manifest")).unwrap();
+    let manifest = b1c1_manifest(&wire);
+    let signature: [u8; 64] = fs::read(source.join("v1.sig")).unwrap()
+        .try_into().expect("exact Ed25519 signature");
+    let trusted_public_key: [u8; 32] = fs::read(trusted_pub).unwrap()
+        .try_into().expect("pre-boot provisioned public key");
+    let signed = SignedRelease { manifest, signature };
+    let trusted = TrustedReleaseSigner {
+        signer_id: signed.manifest.signer_id.clone(), ed25519_public: trusted_public_key,
+    };
+    let verified = verify_signed_release(
+        &signed, &trusted, ReleaseFloor::initial(), now,
+    ).expect("external root-pinned B1a signature and freshness");
+    assert_eq!(verified.manifest().package_size, actual_elf.len() as u64);
+    let original_digest = digest::digest(&digest::SHA256, &actual_elf);
+    assert_eq!(verified.manifest().package_sha256.as_slice(),
+        original_digest.as_ref(), "signed bytes must be this ELF");
+
+    // Reuse the existing independently tested signed-owner/CAS fixture.
+    // Replace its TEST synthetic B1a package ONLY after authenticating the
+    // actual VM release using pre-boot trusted public key above.
+    let sandbox = IsolatedRootTarget::new();
+    let mut c = Case::new();
+    let stage_root = c._dir.path();
+    write(&stage_root.join("node"), &actual_elf);
+    write(&stage_root.join("manifest"), &wire);
+    write(&stage_root.join("signature"), &signature);
+    let pinned_trust = RootPinnedReleaseTrust {
+        trusted_signer: trusted,
+        previous_floor: ReleaseFloor::initial(),
+        approved_manifest_fingerprint:
+            verified.release_floor_candidate().signed_manifest_fingerprint,
+        approved_package_sha256: verified.manifest().package_sha256,
+        approved_release_sequence: verified.manifest().release_sequence,
+    };
+    c.pinned = verify_root_staged(stage_root, &pinned_trust, now)
+        .expect("pin the exact B1a signed root-staged VM inode");
+    c.stage.verified_package = c.pinned.receipt.clone();
+    c.proposed.proposed_head.floor = c.pinned.receipt.proposed_floor;
+    c.owner.claim.scope_binding.signed_manifest_fingerprint =
+        c.pinned.receipt.signed_manifest_fingerprint;
+    c.owner.claim.proposed_head = c.proposed.proposed_head;
+    c.owner.claim.staged_package_sha256 = c.pinned.receipt.package_sha256;
+    c.owner.claim.staged_package_size = c.pinned.receipt.byte_length;
+    c.owner.claim.issued_at_unix = now.saturating_sub(5);
+    c.owner.claim.expires_at_unix = now.checked_add(30).unwrap();
+    c.owner.signature = key(0x32).sign(&c.owner.claim.canonical_bytes())
+        .as_ref().try_into().unwrap();
+    let (trust, journal) = provision();
+    let actor = open_actor(trust.path(), journal.path());
+    let receipt = commit_first_signed_node_in_ci(
+        &c.pinned, &actor, &c.owner, &c.owner_signer, c.scope,
+        &c.stage, c.proposed, c.before, c.challenge, now,
+    ).expect("real signed ELF + detached synthetic owner + OS-owned CAS commit");
+    assert!(receipt.no_activation_was_performed);
+    assert_eq!(receipt.witness_revision, 1);
+    assert_eq!(receipt.installed_sha256, verified.manifest().package_sha256);
+    let installed = sandbox.path().join("node");
+    let installed_metadata = fs::metadata(&installed).unwrap();
+    assert_eq!(installed_metadata.uid(), 0);
+    assert_eq!(installed_metadata.permissions().mode() & 0o7777, 0o555);
+    assert_eq!(installed_metadata.len(), actual_elf.len() as u64);
+    assert_eq!(fs::read(&installed).unwrap(), actual_elf,
+        "byte-exact real ELF from signed B1a release");
+    assert_eq!(actor.current_checkpoint().unwrap().revision, 1);
+    println!("B1C1_GUEST_ROOT_PINNED_ACTUAL_SIGNED_ELF_CAS_COMMIT_PASS");
+    // Guest-only: keep the fixed executable until the host's separate
+    // systemd activation/health probe completes and explicitly cleans it.
+    std::mem::forget(sandbox);
+}
