@@ -4,7 +4,7 @@ use aquilum_core::settings::models::YandexS3Onboarding;
 /// YC-S3-T01, UI stage only. A validated draft is NOT authorization, remote
 /// account identity proof, a live S3 HEAD, or permission to start syncing.
 /// Explicitly no field accepts a secret: native TextEditor fields are plaintext.
-pub(super) fn yandex_setup(config: &AppConfig) -> Block {
+pub(crate) fn yandex_setup(config: &AppConfig) -> Block {
     let draft = &config.s3_onboarding;
     let rows = vec![
         info(t("settings.yandex.explanation"), Some(t("settings.yandex.explanationHint")),
