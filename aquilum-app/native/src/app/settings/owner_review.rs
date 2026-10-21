@@ -43,7 +43,7 @@ impl App {
             dialog.owner_review_notice = Some("settings.yandex.reviewWrongBucket");
             return Effect::Content;
         }
-        dialog.owner_review = Some(OwnerReview::new(attempt));
+        dialog.owner_review = Some(OwnerReview::new(attempt, selected.aws_profile_name));
         dialog.owner_review_notice = Some("settings.yandex.reviewLoadedUntrusted");
         Effect::Content
     }
