@@ -15,6 +15,10 @@ messaging-core-lab = []
 messaging-w4-lab = ["messaging-core-lab"]
 # Experimental typed DeviceId->W4 signing key ledger; no real enrollment UI.
 messaging-key-ledger-lab = ["messaging-w4-lab"]
+# Durable W4 incoming journal, composable with the W4 trust registry.
+messaging-w4-inbox-lab = ["messaging-w4-lab"]
+# Blue W3 cryptographic entrypoint with same-DB authorization/commit fencing.
+messaging-blue-w3-lab = ["messaging-w4-inbox-lab", "messaging-key-ledger-lab", "dep:akula-blue-w3", "dep:ed25519-dalek"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = []
 node-lab = ["node-catalog-lab"]
@@ -105,6 +109,9 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+# Lab-only authenticated W3 v2 ingress; pinned to independently green Blue SHA.
+akula-blue-w3 = { git = "https://github.com/calex794/blue", rev = "76675f9fbb7e86c67a24d20dae60b0ce8227b1c3", optional = true }
+ed25519-dalek = { version = "2.2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"
