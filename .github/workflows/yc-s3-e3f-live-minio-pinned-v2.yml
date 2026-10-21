@@ -1,0 +1,82 @@
+name: YC-S3 E3f real MinIO V2 pinned read (test-only bucket)
+
+on:
+  pull_request:
+    branches:
+      - main
+      - lab/yc-s3-t01d-e3c-atomic-join-20261020
+    paths:
+      - 'aquilum-app/core/src/sync/s3_transport/v2_readonly_tests.rs'
+      - '.github/workflows/yc-s3-e3f-live-minio-pinned-v2.yml'
+      - 'docs/sync/YC-S3-T01d-E3f-live-minio-v2-read.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  minio-full-v2-read:
+    name: Real MinIO S3 GET / full pinned V2 integrity and HOLD
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_ACCESS_KEY_ID: 'e3f-ci-only-access'
+      AWS_SECRET_ACCESS_KEY: 'e3f-ci-only-secret-nonprod'
+      AWS_REGION: 'us-east-1'
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AQ_S3_TEST_ENDPOINT: 'http://127.0.0.1:9000'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Start a disposable localhost-only MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Quay's former upstream image requires authentication. Match
+          # the working S3/MinIO capability workflow's public image and
+          # writable non-root tmpfs, avoiding a new, unverified registry.
+          docker run -d --rm --name akula-e3f-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700 \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl --max-time 2 -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs akula-e3f-minio || true
+          exit 1
+      - name: Prove ignored live test exists and run it against real S3 protocol
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          case_name=sync::s3_transport::v2_readonly::tests::live_minio_full_pinned_v2_get_and_corruption_hold
+          cargo test --locked -p aquilum-core --no-default-features --features sync-s3 -- --list --ignored > e3f-cases.txt
+          grep -F -- "${case_name}: test" e3f-cases.txt
+          cargo test --locked -p aquilum-core --no-default-features --features sync-s3 "$case_name" -- --exact --ignored --nocapture
+      - name: Verify ordinary Core remains independent of test-only S3
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
+      - name: Stop disposable MinIO
+        if: always()
+        shell: bash
+        run: |
+          docker logs akula-e3f-minio --tail 20 || true
+          docker rm -f akula-e3f-minio || true
