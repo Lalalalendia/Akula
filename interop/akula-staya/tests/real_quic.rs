@@ -2,7 +2,7 @@
 //! decision and the actual Staya QueueSelection. Only disposable test files.
 //! This is not proof of trusted long-lived Device enrollment or File Gate.
 
-use akula_staya_integration::prepare_staya_batch;
+use akula_staya_integration::{prepare_staya_batch, verify_staya_invitation};
 use aquilum_core::{
     p2p_offer_lab::{DecisionAction, OfferV1, OfferedFile, PeerBinding, SCHEMA},
     sync::DeviceId,
@@ -241,6 +241,20 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
             "unselected root may not be served"
         );
     }
+
+    // The real bridge validates the original serialized Iroh ticket and
+    // Staya ordered-root commitment before releasing it to the receiver.
+    verify_staya_invitation(&prepared, &invitation, sender.endpoint_id)
+        .expect("approved real Staya invitation must match live Akula offer");
+    assert!(verify_staya_invitation(&prepared, &invitation, [0u8; 32]).is_err());
+    let mut changed_invitation = fields.iter().map(|field| (*field).to_owned()).collect::<Vec<_>>();
+    changed_invitation[5] = hex(&offer.files[1].blake3_root);
+    assert!(verify_staya_invitation(
+        &prepared,
+        &changed_invitation.join(" "),
+        sender.endpoint_id
+    )
+    .is_err(), "inserting unselected content must fail before GET");
 
     // A separate, unlisted cryptographic receiver cannot GET bytes even
     // with the same endpoint ticket and otherwise valid invitation.
