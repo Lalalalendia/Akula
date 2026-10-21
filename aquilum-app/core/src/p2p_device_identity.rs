@@ -147,8 +147,8 @@ mod windows_store {
         Win32::{
             Foundation::{CloseHandle, ERROR_NOT_FOUND, HANDLE},
             Security::Credentials::{
-                CredFree, CredReadW, CredWriteW, CREDENTIALW,
-                CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+                CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
+                CRED_TYPE_GENERIC,
             },
             System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject},
         },
@@ -185,10 +185,9 @@ mod windows_store {
         fn acquire() -> Result<Self, IdentityError> {
             // A bounded per-logon-session mutex prevents two cooperating Akula
             // processes from racing to replace a newly enrolled credential.
-            let handle = unsafe {
-                CreateMutexW(None, false, w!("Local\\AkulaP2PIrohEnrollmentV1"))
-            }
-            .map_err(|_| IdentityError::StoreUnavailable)?;
+            let handle =
+                unsafe { CreateMutexW(None, false, w!("Local\\AkulaP2PIrohEnrollmentV1")) }
+                    .map_err(|_| IdentityError::StoreUnavailable)?;
             let outcome = unsafe { WaitForSingleObject(handle, 30_000) };
             if outcome.0 != 0 && outcome.0 != 0x80 {
                 let _ = unsafe { CloseHandle(handle) };
@@ -212,9 +211,7 @@ mod windows_store {
     fn read_record(target: &str) -> Result<Zeroizing<[u8; RECORD_SIZE]>, IdentityError> {
         let target = wide(target);
         let mut raw: *mut CREDENTIALW = ptr::null_mut();
-        match unsafe {
-            CredReadW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None, &mut raw)
-        } {
+        match unsafe { CredReadW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None, &mut raw) } {
             Err(error) if error.code() == ERROR_NOT_FOUND.to_hresult() => {
                 return Err(IdentityError::NotInitialized);
             }
@@ -249,8 +246,7 @@ mod windows_store {
             Persist: CRED_PERSIST_LOCAL_MACHINE,
             ..CREDENTIALW::default()
         };
-        unsafe { CredWriteW(&mut credential, 0) }
-            .map_err(|_| IdentityError::StoreUnavailable)
+        unsafe { CredWriteW(&mut credential, 0) }.map_err(|_| IdentityError::StoreUnavailable)
     }
 
     pub(super) fn load_named(target: &str) -> Result<DeviceIdentity, IdentityError> {
@@ -290,22 +286,37 @@ mod tests {
         let identity = DeviceIdentity::from_seed(Zeroizing::new([7u8; 32])).unwrap();
         let record = encode(&identity);
         let reread = decode(&record[..]).unwrap();
-        assert_eq!(reread.endpoint_public_bytes(), identity.endpoint_public_bytes());
+        assert_eq!(
+            reread.endpoint_public_bytes(),
+            identity.endpoint_public_bytes()
+        );
         assert_eq!(reread.endpoint_id_hex().len(), 64);
         let mut corrupted = record.clone();
         corrupted[8] ^= 1;
-        assert!(matches!(decode(&corrupted[..]), Err(IdentityError::CorruptCredential)));
+        assert!(matches!(
+            decode(&corrupted[..]),
+            Err(IdentityError::CorruptCredential)
+        ));
         corrupted[8] ^= 1;
         corrupted[0] ^= 1;
-        assert!(matches!(decode(&corrupted[..]), Err(IdentityError::CorruptCredential)));
-        assert!(matches!(decode(&record[..71]), Err(IdentityError::CorruptCredential)));
+        assert!(matches!(
+            decode(&corrupted[..]),
+            Err(IdentityError::CorruptCredential)
+        ));
+        assert!(matches!(
+            decode(&record[..71]),
+            Err(IdentityError::CorruptCredential)
+        ));
     }
 
     #[cfg(not(windows))]
     #[test]
     fn never_falls_back_to_plaintext_storage_without_os_backend() {
         assert!(matches!(load(), Err(IdentityError::UnsupportedPlatform)));
-        assert!(matches!(initialize(), Err(IdentityError::UnsupportedPlatform)));
+        assert!(matches!(
+            initialize(),
+            Err(IdentityError::UnsupportedPlatform)
+        ));
     }
 
     #[cfg(windows)]
@@ -317,10 +328,7 @@ mod tests {
                 windows_store::delete_named_test_only(&self.0);
             }
         }
-        let target = format!(
-            "Lalalalendia/Akula/P2P/test/{}",
-            uuid::Uuid::new_v4()
-        );
+        let target = format!("Lalalalendia/Akula/P2P/test/{}", uuid::Uuid::new_v4());
         let _cleanup = Cleanup(target.clone());
         assert!(matches!(
             windows_store::load_named(&target),
@@ -333,7 +341,12 @@ mod tests {
             Err(IdentityError::AlreadyInitialized)
         ));
         drop(initialized);
-        assert_eq!(windows_store::load_named(&target).unwrap().endpoint_id_hex(), expected);
+        assert_eq!(
+            windows_store::load_named(&target)
+                .unwrap()
+                .endpoint_id_hex(),
+            expected
+        );
 
         // The test harness is a second real OS process, not a fresh object in
         // the same address space. It must reopen Credential Manager itself.
@@ -358,6 +371,11 @@ mod tests {
             return;
         };
         let expected = std::env::var("AKULA_P2P_TEST_EXPECTED_PUBLIC").unwrap();
-        assert_eq!(windows_store::load_named(&target).unwrap().endpoint_id_hex(), expected);
+        assert_eq!(
+            windows_store::load_named(&target)
+                .unwrap()
+                .endpoint_id_hex(),
+            expected
+        );
     }
 }
