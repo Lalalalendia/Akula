@@ -140,9 +140,15 @@ class LspClient:
                         k, val = line.split(":", 1)
                         headers[k.lower()] = val.strip()
                 count = int(headers["content-length"])
-                body = self.proc.stdout.read(count)
-                if len(body) != count:
-                    raise EOFError("short LSP packet")
+                parts = []
+                remaining = count
+                while remaining:
+                    chunk = self.proc.stdout.read(remaining)
+                    if not chunk:
+                        raise EOFError("short LSP packet")
+                    parts.append(chunk)
+                    remaining -= len(chunk)
+                body = b"".join(parts)
                 self.q.put(json.loads(body))
         except Exception as exc:
             self.q.put({"_reader_error": str(exc)})
