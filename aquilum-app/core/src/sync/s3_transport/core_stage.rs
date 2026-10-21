@@ -269,10 +269,82 @@ mod tests {
         assert!(validate_additive_intent(&keyspace, &intent, &tombstone).is_err());
     }
 
+    /// Separate, real OS process: re-open only the receiver's Core, registered
+    /// workspace, SQLite state, pinned S3 snapshot and host-bound File Gate.
+    /// The parent has already published one immutable MinIO revision but
+    /// must NOT perform the child's local publication. No automatic Sync,
+    /// confirmed baseline, ACK or overwrite is enabled by this test helper.
+    #[tokio::test]
+    async fn s3_e2e01_receiver_child_entrypoint() {
+        use crate::app_core::{Core, CoreEvent};
+        use crate::sync::filegate_custody_identity::SqliteCustodyIdentityStore;
+        use crate::sync::host_admission::RegisteredReadAdmission;
+        use crate::sync::profile_binding::SqliteRegisteredS3Bindings;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        let Some(intent_json) = std::env::var_os("AKULA_S3_E2E01_CHILD_INTENT") else {
+            return;
+        };
+        let intent: OperationIntent =
+            serde_json::from_str(intent_json.to_str().unwrap()).unwrap();
+        let root = PathBuf::from(std::env::var_os("AKULA_S3_E2E01_ROOT").unwrap());
+        let appdata = PathBuf::from(std::env::var_os("AKULA_S3_E2E01_APPDATA").unwrap());
+        let custody_scope =
+            PathBuf::from(std::env::var_os("AKULA_S3_E2E01_CUSTODY_SCOPE").unwrap());
+        let budget: u64 = std::env::var("AKULA_S3_E2E01_LIMIT").unwrap().parse().unwrap();
+        let endpoint = std::env::var("AQ_S3_TEST_ENDPOINT").unwrap();
+        assert!(endpoint.starts_with("http://127.0.0.1:")
+            || endpoint.starts_with("http://localhost:"),
+            "the cross-process writer is restricted to disposable loopback MinIO");
+
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let ns = S3Keyspace::new("akula-sync/core-stage-ci", intent.vault_id).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-core-stage-test".into(),
+            region: "us-east-1".into(),
+            endpoint: Some(endpoint),
+            force_path_style: true,
+        };
+        let receiver = AwsS3ProbeClient::connect(profile, ns).await.unwrap();
+        let verified = receiver.materialize_verified_revision_metadata_store(256 * 1024)
+            .await.unwrap().unwrap();
+        let bindings = SqliteRegisteredS3Bindings::open(
+            &admission, &appdata.join("s3-profiles.sqlite"),
+        ).unwrap();
+        let custody = SqliteCustodyIdentityStore::open(
+            &admission, &appdata.join("s3-custody.sqlite"),
+        ).unwrap();
+        let mut journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+        let mut cache = SqliteDagStore::open(&appdata.join("blobs.sqlite")).unwrap();
+
+        let destination = root.join(intent.path.as_str());
+        assert!(!destination.exists(), "receiver must start without this note");
+        let created = receiver.receive_single_verified_s3_additive_once(
+            &verified, &admission, &bindings, &custody, &custody_scope,
+            &mut journal, &mut cache, intent.clone(), budget,
+        ).await.unwrap();
+        let bytes = fs::read(&destination).unwrap();
+        assert_eq!(created.byte_length, bytes.len() as u64);
+        assert_eq!(blake3::hash(&bytes).to_hex().to_string(),
+            intent.expected_content_hash);
+        assert!(matches!(
+            journal.mark_applied(intent.operation_id),
+            Err(JournalError::LocalDownloadNeedsNativeReceipt)
+        ));
+        assert_eq!(journal.get(intent.operation_id).unwrap().unwrap().phase,
+            JournalPhase::Staged);
+        assert!(journal.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
+        assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+        println!("AKULA_S3_E2E01_CHILD=UNCONFIRMED_LOCAL_CREATE");
+    }
+
     #[tokio::test]
     #[ignore = "requires isolated loopback MinIO"]
     async fn live_minio_two_core_verified_stage_and_no_replace() {
-        verify_live_core_roundtrip("Проверенный S3-текст\n".as_bytes(), 4096).await;
+        verify_live_core_roundtrip("Проверенный S3-текст\n".as_bytes(), 4096, false).await;
     }
 
     #[tokio::test]
@@ -281,10 +353,23 @@ mod tests {
         // Intentionally larger than the metadata/diagnostic 1 MiB ceiling.
         // Deterministic content and a partial final SDK chunk exercise bounds.
         let bytes = vec![b'A'; 3 * 1024 * 1024 + 17];
-        verify_live_core_roundtrip(&bytes, bytes.len() as u64).await;
+        verify_live_core_roundtrip(&bytes, bytes.len() as u64, false).await;
     }
 
-    async fn verify_live_core_roundtrip(bytes: &[u8], max_blob_bytes: u64) {
+    #[tokio::test]
+    #[ignore = "requires isolated loopback MinIO"]
+    async fn live_minio_two_os_processes_verified_additive_receive() {
+        // A real 1 KiB Markdown note: network publication happens in the
+        // parent, receiver Core + SQLite + guarded creation in a separate
+        // child process. A physical second PC and native GUI are NOT tested.
+        let mut bytes = b"# E2E-01\n\n".to_vec();
+        bytes.resize(1024, b'x');
+        verify_live_core_roundtrip(&bytes, bytes.len() as u64, true).await;
+    }
+
+    async fn verify_live_core_roundtrip(
+        bytes: &[u8], max_blob_bytes: u64, receiver_in_child: bool,
+    ) {
         use crate::app_core::{Core, CoreEvent};
         use crate::sync::{JournalError, RegisteredReadAdmission};
         use crate::sync::profile_binding::SqliteRegisteredS3Bindings;
@@ -501,6 +586,51 @@ mod tests {
             &admission, &app_b.join("s3-custody.sqlite"),
         ).unwrap();
         custody.bind_registered_s3(&admission, &bindings, &custody_scope).unwrap();
+
+        if receiver_in_child {
+            // The parent only staged the object and provisioned independently
+            // checked host/profile custody. It now drops EVERY receiver Core
+            // and SQLite handle before launching a fresh OS process to
+            // re-fetch the verified S3 head and perform guarded publication.
+            drop(custody);
+            drop(bindings);
+            drop(admission);
+            drop(cache);
+            drop(journal);
+            drop(second_core);
+            const CHILD: &str =
+                "sync::s3_transport::core_stage::tests::s3_e2e01_receiver_child_entrypoint";
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("--exact").arg(CHILD).arg("--nocapture")
+                .env("AKULA_S3_E2E01_CHILD_INTENT",
+                     serde_json::to_string(&intent).unwrap())
+                .env("AKULA_S3_E2E01_ROOT", &root_b)
+                .env("AKULA_S3_E2E01_APPDATA", &app_b)
+                .env("AKULA_S3_E2E01_CUSTODY_SCOPE", &custody_scope)
+                .env("AKULA_S3_E2E01_LIMIT", max_blob_bytes.to_string())
+                .env("AQ_S3_TEST_ENDPOINT", profile.endpoint.as_deref().unwrap())
+                .output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(),
+                "second Akula process failed: {stdout}\n{stderr}");
+            assert!(stdout.contains(&format!("test {CHILD} ...")),
+                "exact child libtest did not execute: {stdout}");
+            assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"),
+                "child libtest did not pass: {stdout}");
+            assert!(stdout.contains("AKULA_S3_E2E01_CHILD=UNCONFIRMED_LOCAL_CREATE"),
+                "child did not report verified but unconfirmed local creation: {stdout}");
+
+            // A third independent SQLite opening (parent after child exit)
+            // must see only Staged and no synthetic confirmed baseline.
+            let cold_journal = SqliteSyncJournal::open(&app_b.join("ops.sqlite")).unwrap();
+            assert_eq!(cold_journal.get(operation_id).unwrap().unwrap().phase,
+                JournalPhase::Staged);
+            assert!(cold_journal.baseline(vault, record.document_id).unwrap().is_none());
+            assert_eq!(cold_journal.local_publication_review_queue().unwrap().len(), 1);
+            assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
+            return;
+        }
 
         // Exercise the full verified-head -> cache -> host File Gate path.
         let published = reader.receive_single_verified_s3_additive_once(
