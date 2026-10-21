@@ -175,3 +175,20 @@ test('B1b1 signed ledger and approval tests are covered on shared Cargo/Core cha
   for(const suite of ['server_bootstrap_b1b1a','server_bootstrap_b1b1b','server_bootstrap_b1b1c'])
     assert.ok(gate.includes('--test '+suite),suite+' retained in mandatory contract');
 });
+
+test('File Gate timing-only workflow runs on own sources, not every Core manifest change',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const w=fs.readFileSync(path.join(__dirname,
+    '../workflows/filegate-history-stage-profile.yml'),'utf8');
+  const policy=parse(w);
+  assert.equal(matches(policy,'aquilum-app/core/Cargo.toml'),false);
+  for(const file of [
+    'aquilum-app/core/src/files/document.rs',
+    'aquilum-app/core/src/files/gate/write.rs',
+    'aquilum-app/core/src/history/service.rs',
+    'aquilum-app/core/src/history/store.rs',
+    '.github/workflows/filegate-history-stage-profile.yml'
+  ]) assert.equal(matches(policy,file),true,file);
+  assert.match(w,/workflow_dispatch:/,'manual profiling stays available');
+  assert.match(w,/Six fresh Core processes per note size/);
+});
