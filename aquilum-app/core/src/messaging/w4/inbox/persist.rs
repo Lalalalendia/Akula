@@ -10,6 +10,8 @@ use super::{
 };
 use crate::messaging::w4::{Error, DOMAIN, RECEIPT_LEN};
 
+type ExistingInboxRecord = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64);
+
 impl W4Inbox {
     /// Common SQLite receipt writer. Callers must authenticate the input,
     /// check the current policy, and (for real network traffic) hold the
@@ -21,7 +23,7 @@ impl W4Inbox {
     ) -> Result<InboundResult, Error> {
         let sender = input.sender.as_uuid().into_bytes();
         let recipient = input.recipient.as_uuid().into_bytes();
-        let existing: Option<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64)> = tx
+        let existing: Option<ExistingInboxRecord> = tx
             .query_row(
                 "SELECT digest,ciphertext,receipt,recipient,epoch,expiry_ms
                  FROM messaging_w4_inbox WHERE sender=?1 AND message=?2",

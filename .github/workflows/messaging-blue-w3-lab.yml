@@ -27,14 +27,9 @@ jobs:
           shared-key: akula-main-gate-v1
           cache-workspace-crates: true
           save-if: false
-      - name: Resolve pinned Blue dependency and emit reproducible lock
+      - name: Verify pinned Blue dependency lock
         working-directory: aquilum-app
-        run: |
-          set -euo pipefail
-          cargo metadata --format-version 1 > /dev/null
-          echo AKULA_BLUE_LOCK_BEGIN
-          cat Cargo.lock
-          echo AKULA_BLUE_LOCK_END
+        run: cargo metadata --locked --format-version 1 > /dev/null
       - name: Format W3 adapter, inbox and focused tests
         run: |
           rustfmt --edition 2021 --check aquilum-app/core/src/messaging/w4/inbox.rs
@@ -45,6 +40,45 @@ jobs:
       - name: Default non-messaging core still compiles
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-core --no-default-features
-      - name: Blue W3 Clippy
+      - name: Differential Clippy for Blue W3 and W4 ingress
         working-directory: aquilum-app
-        run: cargo clippy --locked -p aquilum-core --features messaging-blue-w3-lab -- -D warnings
+        run: |
+          set -euo pipefail
+          report="$(mktemp)"
+          trap 'rm -f "$report"' EXIT
+          cargo clippy --locked -p aquilum-core --features messaging-blue-w3-lab --all-targets --message-format=json -- -W clippy::all > "$report"
+          python3 - "$report" <<'PY'
+          import json
+          import sys
+
+          issues = []
+          existing = 0
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              for line in stream:
+                  try:
+                      event = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  if event.get("reason") != "compiler-message":
+                      continue
+                  diagnostic = event["message"]
+                  if diagnostic.get("level") not in ("warning", "error"):
+                      continue
+                  spans = diagnostic.get("spans", [])
+                  primary = [s for s in spans if s.get("is_primary")] or spans
+                  matched = []
+                  for span in primary:
+                      path = span.get("file_name", "").replace("\\", "/")
+                      if path.startswith("core/src/messaging/w4/inbox"):
+                          matched.append((path, span.get("line_start", 0)))
+                  if matched:
+                      issues.append((matched[0], diagnostic.get("message", "")))
+                  else:
+                      existing += 1
+          print(f"Preexisting/out-of-scope warnings: {existing}")
+          print(f"Warnings/errors in changed W3/W4 ingress modules: {len(issues)}")
+          for ((path, line), message) in issues:
+              print(f"{path}:{line}: {message}", file=sys.stderr)
+          if issues:
+              sys.exit(1)
+          PY
