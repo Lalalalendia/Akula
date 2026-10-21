@@ -296,3 +296,20 @@ fn malformed_markdown_warnings_field_is_rejected() {
     assert!(inspect_root(&mut client,A,ProbeLimits::default())
         .unwrap_err().contains("warnings must be an array"));
 }
+
+#[test]
+fn markdown_without_optional_warnings_is_accepted() {
+    let mut client = simple();
+    client.replies.get_mut(1).unwrap().1.as_object_mut().unwrap().remove("warnings");
+    let report = inspect_root(&mut client,A,ProbeLimits::default()).unwrap();
+    assert!(report.root_traversal_complete);
+    assert!(report.warnings.is_empty());
+}
+
+#[test]
+fn malformed_optional_markdown_warnings_are_rejected() {
+    let mut client = simple();
+    client.replies.get_mut(1).unwrap().1["warnings"] = json!("not an array");
+    assert!(inspect_root(&mut client,A,ProbeLimits::default())
+        .unwrap_err().contains("warnings must be an array"));
+}
