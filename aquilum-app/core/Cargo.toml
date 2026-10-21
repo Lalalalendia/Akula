@@ -41,6 +41,8 @@ signed-vault-signed-successor-lab = ["signed-vault-atomic-join-lab"]
 signed-vault-receiver-session-lab = ["signed-vault-atomic-join-lab"]
 # E3g: compile the E3d/E3e experiments together and test their shared state.
 signed-vault-join-successor-integration-lab = ["signed-vault-signed-successor-lab", "signed-vault-receiver-session-lab"]
+# E3h: require a separately entered, full 256-bit owner fingerprint before network.
+signed-vault-manual-owner-review-lab = ["signed-vault-join-successor-integration-lab"]
 # Detached operator signature and inert witness CAS request, never installs.
 server-bootstrap-b1b1b-approval-lab = ["server-bootstrap-b1b1-floor-lab"]
 # Linux-only inert local cooperating-writer CAS witness laboratory.
