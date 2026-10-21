@@ -30,16 +30,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - name: Format isolated Rust lab sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustfmt --edition 2021 aquilum-app/core/src/server_staging_lab.rs aquilum-app/core/tests/server_bootstrap_b1b0.rs
       - name: Verify isolated B1b0 matches unchanged Core source
         shell: bash
         run: |
           set -euo pipefail
           cmp aquilum-app/core/src/server_staging_lab.rs modules/bootstrap-b1b0/src/server_staging_lab.rs
+      - name: Format isolated Rust lab sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 aquilum-app/core/src/server_staging_lab.rs aquilum-app/core/tests/server_bootstrap_b1b0.rs
       - name: Run standalone B1b0 adversarial parity tests
         shell: bash
         run: |
