@@ -52,6 +52,8 @@ pub struct SettingsDialog {
     pub sync_selected: Option<aquilum_core::sync::NativeRecoveryCasePreview>,
     pub sync_notice: Option<String>,
     pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
+    #[cfg(feature = "yandex-owner-review-ui-preview")]
+    pub owner_review: Option<owner_review::OwnerReview>,
 }
 
 fn card_size(room: Size) -> Size {
