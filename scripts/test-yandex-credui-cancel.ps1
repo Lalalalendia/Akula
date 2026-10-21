@@ -8,7 +8,10 @@ if ($PSVersionTable.PSEdition -ne 'Desktop' -or
     [System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Threading.ApartmentState]::STA) {
     throw 'Native CredUI automation requires STA Windows PowerShell 5.1'
 }
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, Accessibility -ErrorAction Stop
+# Windows PowerShell 5.1's managed UIA wrapper lacks LegacyIAccessiblePattern.
+# Use the OS MSAA IAccessible COM contract only for the already pinned Cancel HWND.
+$accessibilityAssembly = [Accessibility.IAccessible].Assembly.Location
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -76,6 +79,42 @@ public static class AkulaCredUiQaWindow {
         return found.ToArray();
     }
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool IsChild(IntPtr parent, IntPtr possibleChild);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool IsWindowEnabled(IntPtr hwnd);
+    [DllImport("oleacc.dll", PreserveSig = true)]
+    private static extern int AccessibleObjectFromWindow(
+        IntPtr hwnd, uint objectId, ref Guid iid,
+        [MarshalAs(UnmanagedType.Interface)] out Accessibility.IAccessible accessible);
+
+    // Native MSAA fallback for an exact child HWND that the caller has
+    // already tied to an isolated, masked, same-process CredUI dialog.
+    // No BM_CLICK, Escape key, SendMessage or simulated success is permitted.
+    public static bool InvokeNativeCancelMsaa(
+        IntPtr maskedDialog, IntPtr button, uint requiredPid) {
+        if (button == IntPtr.Zero || !IsChild(maskedDialog, button)
+            || !IsWindowEnabled(button) || GetDlgCtrlID(button) != 2) return false;
+        uint buttonPid;
+        if (GetWindowThreadProcessId(button, out buttonPid) == 0
+            || buttonPid != requiredPid) return false;
+        var cls = new StringBuilder(128);
+        if (GetClassName(button, cls, cls.Capacity) == 0
+            || !string.Equals(cls.ToString(), "Button", StringComparison.OrdinalIgnoreCase))
+            return false;
+        // OBJID_CLIENT = -4 (DWORD 0xFFFFFFFC), IID_IAccessible.
+        var iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
+        Accessibility.IAccessible acc = null;
+        int hr = AccessibleObjectFromWindow(button, 0xFFFFFFFCu, ref iid, out acc);
+        if (hr != 0 || acc == null) return false;
+        try {
+            acc.accDoDefaultAction(0); // CHILDID_SELF, real OS default action.
+            return true;
+        } finally {
+            if (Marshal.IsComObject(acc)) Marshal.ReleaseComObject(acc);
+        }
+    }
+
     public static IntPtr[] FindVisibleWindowsForProcess(uint requiredPid) {
         var windows = new List<IntPtr>();
         EnumWindows(delegate (IntPtr hwnd, IntPtr state) {
@@ -89,7 +128,7 @@ public static class AkulaCredUiQaWindow {
         return windows.ToArray();
     }
 }
-'@ -ErrorAction Stop
+'@ -ReferencedAssemblies $accessibilityAssembly -ErrorAction Stop
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $cargoWorkdir = Join-Path $repoRoot 'aquilum-app'
@@ -238,22 +277,14 @@ try {
         }
     }
     if ($null -eq $activation) {
-        # The classic native CredUI IDCANCEL control on this Windows runner
-        # does not expose InvokePattern. Microsoft's UIA MSAA proxy can
-        # instead expose LegacyIAccessiblePattern.DoDefaultAction(). Only the
-        # exact enabled HWND with Win32 IDCANCEL=2 INSIDE the already verified,
-        # test-PID-owned masked dialog is eligible. Never send keyboard Escape,
-        # BM_CLICK or a synthetic success token.
+        # The managed UIA wrapper on Windows PowerShell 5.1 does NOT provide
+        # LegacyIAccessiblePattern. Ask the native OS MSAA IAccessible provider
+        # for the real default action of the same verified IDCANCEL child HWND.
+        # The P/Invoke helper rechecks parent, exact PID, class, ID and enabled.
         foreach ($buttonHwnd in [AkulaCredUiQaWindow]::FindNativeCancelButtons($handle)) {
-            $possible = [System.Windows.Automation.AutomationElement]::FromHandle($buttonHwnd)
-            if ($null -eq $possible -or -not $possible.Current.IsEnabled) { continue }
-            $legacy = $null
-            if ($possible.TryGetCurrentPattern(
-                [System.Windows.Automation.LegacyIAccessiblePattern]::Pattern,
-                [ref]$legacy
-            ) -and $null -ne $legacy) {
-                ([System.Windows.Automation.LegacyIAccessiblePattern]$legacy).DoDefaultAction()
-                $activation = 'UIA_LegacyIAccessible_DefaultAction'
+            if ([AkulaCredUiQaWindow]::InvokeNativeCancelMsaa(
+                $handle, $buttonHwnd, [uint32]$proc.Id)) {
+                $activation = 'MSAA_IAccessible_DefaultAction'
                 break
             }
         }
