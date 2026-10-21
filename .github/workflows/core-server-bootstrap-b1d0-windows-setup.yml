@@ -44,7 +44,7 @@ jobs:
         working-directory: aquilum-app
         run: |
           $ErrorActionPreference='Stop'
-          cargo test --locked -p aquilum-core server_setup_tests
+          cargo test --locked -p aquilum-core --features server-bootstrap-b0-lab server_setup_tests
       - name: Compile and test native Windows setup safety
         shell: pwsh
         working-directory: aquilum-app

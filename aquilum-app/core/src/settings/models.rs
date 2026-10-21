@@ -288,7 +288,7 @@ impl ServerBootstrapDraft {
     }
     pub fn valid_user(s: &str) -> bool {
         if s.is_empty() { return true; }
-        s.len() <= 32 && s.as_bytes().first().is_some_and(|c|
+        s != "root" && s.len() <= 32 && s.as_bytes().first().is_some_and(|c|
             c.is_ascii_lowercase() || *c == b'_')
             && s.bytes().all(|c| c.is_ascii_lowercase()
                 || c.is_ascii_digit() || c == b'_' || c == b'-')
@@ -356,6 +356,27 @@ impl ServerBootstrapDraft {
             }
         }
         result
+    }
+    /// Map the *offline-only* native draft to the portable B0 typed target.
+    /// The result is NOT the peer identity learned in an SSH key exchange
+    /// and grants no installation privilege. Preview transport must still
+    /// reverify signed host KEX against this exact SHA-256.
+    #[cfg(feature = "server-bootstrap-b0-lab")]
+    pub fn to_unconnected_b0_target(
+        &self,
+    ) -> Option<crate::server_bootstrap_lab::ServerTarget> {
+        if !self.valid_offline_pin() { return None; }
+        let wire = Self::wire(&self.host_public_key)?;
+        let sha: [u8; 32] = ring::digest::digest(&ring::digest::SHA256, &wire)
+            .as_ref().try_into().ok()?;
+        let target = crate::server_bootstrap_lab::ServerTarget {
+            host: self.host.clone(),
+            ssh_port: self.ssh_port,
+            ssh_user: self.ssh_user.clone(),
+            trusted_key_sha256: sha,
+        };
+        target.validate().ok()?;
+        Some(target)
     }
     /// TRUE means the operator-entered independent host-key pair is coherent
     /// for a future read-only preflight; it does NOT authenticate any server
@@ -491,6 +512,14 @@ mod server_setup_tests {
             host_key_fingerprint: fingerprint,
         };
         assert!(draft.valid_offline_pin());
+        #[cfg(feature = "server-bootstrap-b0-lab")]
+        {
+            let target = draft.to_unconnected_b0_target().unwrap();
+            assert_eq!(target.host, "vps.example.org");
+            assert_eq!(target.ssh_user, "ubuntu");
+            assert_eq!(target.ssh_port, 22);
+            assert_eq!(target.trusted_key_sha256.as_slice(), hash.as_ref());
+        }
         let replacement = if &draft.host_key_fingerprint[9..10] == "A" { "B" } else { "A" };
         draft.host_key_fingerprint.replace_range(9..10, replacement);
         assert!(!draft.valid_offline_pin(), "independently supplied digest mismatch");
@@ -513,7 +542,7 @@ mod server_setup_tests {
         for host in ["http://bad.com","foo/bar","foo;id","-danger","evil host"] {
             assert!(!ServerBootstrapDraft::valid_host(host));
         }
-        for user in ["root;id","-i","../../id","Ubuntu","user name"] {
+        for user in ["root","root;id","-i","../../id","Ubuntu","user name"] {
             assert!(!ServerBootstrapDraft::valid_user(user));
         }
         assert!(!ServerBootstrapDraft::valid_fingerprint("MD5:some-key"));
