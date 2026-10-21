@@ -291,6 +291,12 @@ impl S3V2TrustedAnchorJournal {
         let root_json = root.encode(scope.keyspace())
             .map_err(|_| S3V2TrustAnchorError::InvalidExternalPin)?;
         let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A caller without an owner/publisher signature must never receive
+        // even a success-shaped "Unchanged" result for a policy-bearing Vault.
+        // Check under the SQLite lock BEFORE the idempotent legacy branch.
+        if enrolled_policy_present(&tx, scope)? {
+            return Err(S3V2TrustAnchorError::UnverifiedRead);
+        }
         if let Some(old) = Self::load_from(&tx, scope)? {
             if old.root == *root && old.root_etag == etag
                 && old.previous_root.is_none()
@@ -336,18 +342,17 @@ impl S3V2TrustedAnchorJournal {
         let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let old = Self::load_from(&tx, scope)?
             .ok_or(S3V2TrustAnchorError::MissingTrustedAnchor)?;
+        // E2b/E3c policy takes precedence over the legacy no-op path too:
+        // an unsigned API may not report successful publisher authorization.
+        if enrolled_policy_present(&tx, scope)? {
+            return Err(S3V2TrustAnchorError::UnverifiedRead);
+        }
         if old.root == *root {
             if old.root_etag != etag {
                 return Err(S3V2TrustAnchorError::RootRewritten);
             }
             tx.commit()?;
             return Ok(S3V2TrustAnchorOutcome::Unchanged);
-        }
-        // A policy-bearing Vault may only advance through an explicitly
-        // authenticated signed-successor API. E2b alone must already HOLD.
-        // The guard is not conditional on the E3c feature flag.
-        if enrolled_policy_present(&tx, scope)? {
-            return Err(S3V2TrustAnchorError::UnverifiedRead);
         }
         if root.generation() <= old.root.generation() {
             return Err(S3V2TrustAnchorError::RollbackOrFork);
