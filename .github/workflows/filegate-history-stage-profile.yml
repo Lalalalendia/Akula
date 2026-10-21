@@ -3,7 +3,6 @@ name: File Gate History stages (diagnostic)
 on:
   pull_request:
     paths:
-      - "aquilum-app/core/Cargo.toml"
       - "aquilum-app/core/src/files/document.rs"
       - "aquilum-app/core/src/files/gate/write.rs"
       - "aquilum-app/core/src/history/service.rs"
