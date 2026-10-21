@@ -51,19 +51,45 @@ $env:AKULA_CREDUI_CANCEL_CI = '1'
 $stdout = Join-Path $env:RUNNER_TEMP 'akula-credui-cancel-qa-stdout.log'
 $stderr = Join-Path $env:RUNNER_TEMP 'akula-credui-cancel-qa-stderr.log'
 $testFilter = 'yandex_credentials::tests::windows_credui_cancel_real_os_dialog_does_not_persist'
-$argv = @('test', '--locked', '-p', 'aquilum-native',
-    '--features', 'installed,yandex-s3-connection-preview',
-    '--bin', 'aquilum-native', $testFilter,
-    '--', '--exact', '--ignored', '--test-threads=1')
+# Cargo's process tree can differ between Windows runner images. Instead of
+# trying to locate a cargo-spawned test child, resolve the exact rustc test
+# executable through cargo's machine-readable compiler-artifact stream.
+$testArgs = @($testFilter, '--exact', '--ignored', '--test-threads=1')
 # Cargo returns SUCCESS even when --exact executes zero tests. Verify
 # the complete Rust test name before launching the interactive process.
 # This script is launched from the repository root by the workflow,
 # not from the nested aquilum-app Cargo workspace. Resolve the manifest
 # explicitly: discovery failure must never be converted into an empty PASS.
 $manifestPath = Join-Path $cargoWorkdir 'Cargo.toml'
-$list = & $cargo test --locked --manifest-path $manifestPath -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview -- --list --ignored
+$artifactStream = @(& $cargo test --locked --manifest-path $manifestPath -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview --no-run --message-format=json)
 if ($LASTEXITCODE -ne 0) {
-    throw 'CredUI test discovery failed'
+    throw 'CredUI Rust test-harness compilation failed'
+}
+$compiledTests = @($artifactStream | ForEach-Object {
+    try {
+        $entry = $_ | ConvertFrom-Json -ErrorAction Stop
+        if ($entry.reason -eq 'compiler-artifact' -and $entry.target.name -eq 'aquilum-native' -and
+            @($entry.target.kind) -contains 'bin' -and $entry.profile.test -eq $true -and
+            -not [string]::IsNullOrWhiteSpace([string]$entry.executable)) {
+            [string]$entry.executable
+        }
+    }
+    catch [System.ArgumentException] {
+        # Cargo progress and diagnostics are not artifact JSON objects.
+    }
+} | Select-Object -Unique)
+if ($compiledTests.Count -ne 1) {
+    throw "CredUI exact Rust test artifact not uniquely identified: count=$($compiledTests.Count)"
+}
+$testExe = [System.IO.Path]::GetFullPath([string]$compiledTests[0])
+if (-not (Test-Path -LiteralPath $testExe -PathType Leaf) -or
+    [System.IO.Path]::GetExtension($testExe) -ne '.exe' -or
+    [System.IO.Path]::GetFileName($testExe) -notmatch '^aquilum[-_]native[-_]') {
+    throw 'CredUI resolved executable fails test-harness identity checks'
+}
+$list = @(& $testExe --list --ignored)
+if ($LASTEXITCODE -ne 0) {
+    throw 'CredUI Rust test-harness discovery failed'
 }
 if (-not (@($list) | Where-Object { $_ -eq "$($testFilter): test" })) {
     throw 'CredUI ignored test is missing: refusing false-green zero-test CI'
@@ -71,54 +97,30 @@ if (-not (@($list) | Where-Object { $_ -eq "$($testFilter): test" })) {
 Write-Host 'AKULA_CREDUI_IGNORED_TEST_DISCOVERY_PASS: exact_test_present=True'
 $proc = $null
 try {
-    $proc = Start-Process -FilePath $cargo -ArgumentList $argv -WorkingDirectory $cargoWorkdir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $proc = Start-Process -FilePath $testExe -ArgumentList $testArgs -WorkingDirectory $cargoWorkdir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $handle = [IntPtr]::Zero
-    $observedRustTestProcess = $false
-    $discoveredByTestPid = $false
     for ($attempt = 0; $attempt -lt 240; $attempt++) {
         Start-Sleep -Milliseconds 500
         $proc.Refresh()
         if ($proc.HasExited) {
-            throw "Isolated native CredUI test exited before presenting a dialog, code=$($proc.ExitCode)"
+            throw "Isolated native CredUI Rust test exited before presenting a dialog, code=$($proc.ExitCode)"
         }
-        $handle = [AkulaCredUiQaWindow]::FindWindow($null, $title)
-        if ($handle -ne [IntPtr]::Zero) { break }
-        # A localized Windows Security modal need not expose the requested
-        # CredUI caption as its TOP-LEVEL window title. Inspect only visible
-        # top-level windows belonging to the cargo-spawned Rust test process.
-        if (($attempt % 4) -ne 0) { continue }
-        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue)
-        foreach ($child in $children) {
-            if ($child.Name -notmatch '^aquilum[-_]native') { continue }
-            $observedRustTestProcess = $true
-            $candidate = [AkulaCredUiQaWindow]::FindVisibleWindowForProcess([uint32]$child.ProcessId)
-            if ($candidate -ne [IntPtr]::Zero) {
-                $handle = $candidate
-                $discoveredByTestPid = $true
-                break
-            }
-        }
+        # Only inspect the test executable's own visible windows; never
+        # select or close unrelated credential prompts from another process.
+        $handle = [AkulaCredUiQaWindow]::FindVisibleWindowForProcess([uint32]$proc.Id)
         if ($handle -ne [IntPtr]::Zero) { break }
     }
     if ($handle -eq [IntPtr]::Zero) {
-        throw "Native CredUI window unavailable: interactive=$([Environment]::UserInteractive) rust_test_child_seen=$observedRustTestProcess; runner may not expose interactive desktop"
+        throw "Native CredUI test window unavailable for exact test process; interactive=$([Environment]::UserInteractive)"
     }
     [uint32]$owner = 0
-    if ([AkulaCredUiQaWindow]::GetWindowThreadProcessId($handle, [ref]$owner) -eq 0 -or $owner -eq 0) {
-        throw 'Could not identify the native CredUI dialog process'
-    }
-    # Only act on the actual child launched by the isolated cargo test.
-    $testChild = Get-CimInstance Win32_Process -Filter "ProcessId = $owner"
-    if ($null -eq $testChild -or [int]$testChild.ParentProcessId -ne $proc.Id -or
-        $testChild.Name -notmatch '^aquilum[-_]native') {
-        throw 'Native credential dialog is not owned by the isolated Rust test child'
+    if ([AkulaCredUiQaWindow]::GetWindowThreadProcessId($handle, [ref]$owner) -eq 0 -or
+        $owner -ne [uint32]$proc.Id) {
+        throw 'Native credential modal is not owned by the isolated Rust test process'
     }
     $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
     if ($null -eq $dialog) {
-        throw 'Windows UI Automation cannot access the test-child modal'
-    }
-    if ($dialog.Current.Name -ne $title -and -not $discoveredByTestPid) {
-        throw 'CredUI dialog caption mismatch outside the test-child fallback'
+        throw 'Windows UI Automation cannot access the test process modal'
     }
     $editType = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -161,6 +163,13 @@ try {
     }
     if ($proc.ExitCode -ne 0) {
         throw "Windows CredUI Cancel/persistence assertions failed, code=$($proc.ExitCode)"
+    }
+    # The Rust harness must have actually executed the requested test.
+    # Do not upload or print raw GUI logs, even for synthetic credentials.
+    $output = [System.IO.File]::ReadAllText($stdout)
+    if (-not $output.Contains("test $testFilter ... ok") -or
+        $output -notmatch 'test result: ok\. 1 passed; 0 failed') {
+        throw 'CredUI Rust harness exited successfully but did not report exactly one passing test'
     }
     # The Rust test confirms Cancel and absence of the disposable WinCred target.
     # Never upload or print raw GUI logs.
