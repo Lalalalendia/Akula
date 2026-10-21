@@ -178,8 +178,9 @@ impl Device {
             destination: initial,
             dwell_until: 0,
             journey: 0,
-            // Hypothetical opt-in fraction, NOT measured user consent.
-            may_forward: id % 5 != 0,
+            // Synthetic opt-in, seeded independently of id % 5 (floor).
+            // Otherwise an entire floor would wrongly have zero relays.
+            may_forward: mix(scenario.seed ^ ((id as u64) << 7) ^ 0xC0FF_EE30) % 5 != 0,
             moves,
         };
         if moves {
@@ -657,6 +658,10 @@ mod tests {
         let devices: Vec<_> = (0..DEVICE_COUNT).map(|i| Device::new(i, cfg)).collect();
         for floor in 0..FLOOR_COUNT {
             assert_eq!(devices.iter().filter(|d| d.position.floor as usize == floor).count(), 400);
+            let relays = devices.iter().filter(|d| {
+                d.position.floor as usize == floor && d.may_forward
+            }).count();
+            assert!((200..390).contains(&relays), "relay consent must not depend on floor");
             for room in 0..ROOMS_PER_FLOOR {
                 let position = Position::room(floor as u8, room as u8);
                 let occupants = devices.iter().filter(|d| d.position == position).count();
@@ -737,6 +742,14 @@ mod tests {
         assert_eq!(outage.recipient_accepted, outage.messages);
         assert!(outage.total_delivery_ticks > normal.total_delivery_ticks,
             "offline window must delay newly created messages");
+    }
+
+    #[test]
+    fn synthetic_ble_carry_by_moving_devices_improves_contact_opportunities() {
+        let static_case = run(Scenario::baseline(Links::BleOnly, Movement::Stationary, Outages::None));
+        let moving_case = run(Scenario::baseline(Links::BleOnly, Movement::All, Outages::None));
+        assert!(moving_case.recipient_accepted > static_case.recipient_accepted,
+            "walking carriers should help the calibrated-future contact model");
     }
 
     #[test]
