@@ -203,6 +203,10 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
                             || *url == "https://console.yandex.cloud/",
                             "Only pinned HTTPS Yandex documentation destinations are allowed");
                     }
+                    #[cfg(feature = "yandex-owner-review-ui-preview")]
+                    Action::ImportOwnerProposal | Action::ClearOwnerProposal => {
+                        assert!(!button.enabled, "empty bucket/review must keep preview inert");
+                    }
                     other => panic!("An S3 setup button must not grant write/sync capability: {other:?}"),
                 }
             }
