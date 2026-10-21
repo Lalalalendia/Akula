@@ -197,7 +197,7 @@ version = "0.1.0"
 
 [[package]]
 name = "aquilum-core"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "akula-server-bootstrap-b0",
  "atomic-write-file",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "aquilum-native"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "accesskit_macos",
  "accesskit_unix",
