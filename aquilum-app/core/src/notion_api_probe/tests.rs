@@ -280,3 +280,19 @@ fn malformed_relation_target_fails_instead_of_being_skipped() {
     assert!(inspect_root(&mut client,A,ProbeLimits::default())
         .unwrap_err().contains("relation item missing target ID"));
 }
+
+#[test]
+fn missing_optional_markdown_warnings_is_valid() {
+    let mut client = simple();
+    client.replies.get_mut(1).unwrap().1.as_object_mut().unwrap().remove("warnings");
+    let report = inspect_root(&mut client,A,ProbeLimits::default()).unwrap();
+    assert!(report.root_traversal_complete);
+}
+
+#[test]
+fn malformed_markdown_warnings_field_is_rejected() {
+    let mut client = simple();
+    client.replies.get_mut(1).unwrap().1["warnings"] = json!("not an array");
+    assert!(inspect_root(&mut client,A,ProbeLimits::default())
+        .unwrap_err().contains("warnings must be an array"));
+}
