@@ -81,6 +81,10 @@ impl App {
             trash_page,
             autostart: crate::autostart::available().then(crate::autostart::enabled),
             update: crate::updater::available().then(|| self.updater.status()),
+            #[cfg(feature = "yandex-owner-review-ui-preview")]
+            owner_review: None,
+            #[cfg(feature = "yandex-owner-review-ui-preview")]
+            owner_review_notice: None,
         }
     }
 
