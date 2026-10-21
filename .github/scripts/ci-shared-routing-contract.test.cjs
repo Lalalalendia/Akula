@@ -45,3 +45,28 @@ test('one skipped caller on harmless edits, with old Main PR gate failing closed
   assert.match(shared,/test "\$B" = success/);
   assert.match(core,/ci-shared-manifest-route.cjs --base="\$BASE_SHA" --head=HEAD/);
 });
+
+test('ordinary Core PRs schedule no independent perf workflows; opt-in routes remain',()=>{
+  const perf=fs.readFileSync(path.join(__dirname,'../workflows/core-perf.yml'),'utf8');
+  const compare=fs.readFileSync(path.join(__dirname,'../workflows/core-perf-compare.yml'),'utf8');
+  assert.match(perf,/^on:\n  workflow_call:/m);
+  assert.match(perf,/types: \[labeled, edited\]/);
+  assert.doesNotMatch(perf,/types: \[opened, synchronize/);
+  assert.match(perf,/^  workflow_dispatch:/m,'manual baseline remains');
+  assert.match(perf,/^  paired:\n/m,'paired comparison is called from one baseline workflow');
+  assert.match(perf,/uses: \.\/\.github\/workflows\/core-perf-compare\.yml/);
+  assert.match(compare,/^on:\n  workflow_call:/m);
+  assert.doesNotMatch(compare,/^  pull_request:/m,'paired comparison has no independent PR trigger');
+  assert.match(core,/perf_core_changed: \$\{\{ steps\.scope\.outputs\.perf_core_changed \}\}/);
+  assert.match(core,/perf-opt-in:/);
+  assert.match(core,/uses: \.\/\.github\/workflows\/core-perf\.yml/);
+  assert.match(core,/needs\.classify\.outputs\.perf_core_changed == 'true'/);
+  for(const line of ["aquilum-app/core/",".github/workflows/core-perf.yml",".github/workflows/core-perf-compare.yml"]){
+    assert.ok(core.includes(line),'preserve previous path scope: '+line);
+  }
+  assert.match(core,/contains\(github\.event\.pull_request\.labels\.\*\.name, 'perf-ci'\)/);
+  assert.match(perf,/startsWith\(github\.event\.pull_request\.title, 'perf:'\)/);
+  assert.match(perf,/startsWith\(github\.head_ref, 'perf\/'\)/);
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
+    'performance measurements remain optional, never weaken Main PR gate');
+});

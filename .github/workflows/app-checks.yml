@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
+      perf_core_changed: ${{ steps.scope.outputs.perf_core_changed }}
       b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
       node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
       shared_core_cargo_risky: ${{ steps.scope.outputs.shared_core_cargo_risky }}
@@ -52,6 +53,14 @@ jobs:
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
           node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          # Respect the former perf path filter; ordinary CI-only / docs changes never launch benchmarks.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/ \
+            .github/workflows/core-perf.yml .github/workflows/core-perf-compare.yml; then
+            echo 'perf_core_changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'perf_core_changed=true' >> "$GITHUB_OUTPUT"
+          fi
           # A shared Cargo or Core boundary still gets both opt-in B1 tests
           # in the mandatory gate, without scheduling two duplicate workflows.
           if git diff --quiet "$BASE_SHA" HEAD -- \
@@ -434,6 +443,18 @@ jobs:
           start=$SECONDS
           cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
           printf 'Required frame-fidelity lane: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
+
+  perf-opt-in:
+    name: Optional Core performance measurements
+    needs: classify
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.classify.outputs.perf_core_changed == 'true' &&
+      (startsWith(github.head_ref, 'perf/') ||
+       startsWith(github.event.pull_request.title, 'perf(') ||
+       startsWith(github.event.pull_request.title, 'perf:') ||
+       contains(github.event.pull_request.labels.*.name, 'perf-ci'))
+    uses: ./.github/workflows/core-perf.yml
 
   shared-labs:
     name: Required shared-manifest OS/security route
