@@ -119,3 +119,33 @@ test('B1a/B1b0 scoped workflows retain full checks on owned code but not shared 
   assert.match(gate,/--features server-bootstrap-b1b-custody-lab/);
   assert.match(gate,/--test server_bootstrap_b1a --test server_bootstrap_b1b0/);
 });
+
+test('shared Cargo/lib changes route D1-D2 contracts to required gate without extra workflows',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const wf=name=>parse(fs.readFileSync(path.join(__dirname,'../workflows',name),'utf8'));
+  const d1=wf('core-node-d1-loopback.yml');
+  const d15=wf('core-node-d15-catalog.yml');
+  const d2=wf('core-node-d2-scoped-read.yml');
+  for(const file of ['aquilum-app/core/Cargo.toml','aquilum-app/core/src/lib.rs',
+      'aquilum-app/Cargo.lock','aquilum-app/Cargo.toml']){
+    for(const w of [d1,d15,d2]){
+      assert.equal(matches(w,file),false,'use required gate for '+file);
+    }
+  }
+  assert.equal(matches(d1,'aquilum-app/core/src/bin/akula_node_lab.rs'),true);
+  assert.equal(matches(d2,'aquilum-app/core/src/bin/akula_node_lab.rs'),true);
+  assert.equal(matches(d15,'aquilum-app/core/src/node_catalog_lab.rs'),true);
+  assert.equal(matches(d2,'aquilum-app/core/src/node_catalog_lab.rs'),true);
+  assert.equal(matches(d15,'modules/node-catalog/src/catalog.rs'),false);
+  assert.equal(matches(d2,'modules/node-catalog/src/catalog.rs'),false);
+  assert.equal(matches(d1,'modules/node-catalog/src/catalog.rs'),false);
+  const isolated=fs.readFileSync(path.join(__dirname,'../workflows/node-catalog-isolated.yml'),'utf8');
+  assert.equal(matches(parse(isolated),'modules/node-catalog/src/catalog.rs'),true);
+  assert.match(isolated,/--features node-lab/);
+  assert.match(isolated,/--test headless_node_d2/);
+  const gate=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.equal(parse(gate).t,'global');
+  assert.match(gate,/node_shared_compat: \$\{\{ steps\.scope\.outputs\.node_shared_compat \}\}/);
+  assert.match(gate,/--features node-lab --bin akula-node-lab/);
+  assert.match(gate,/--test headless_node_d1 --test headless_node_d2 --test node_catalog_lab/);
+});
