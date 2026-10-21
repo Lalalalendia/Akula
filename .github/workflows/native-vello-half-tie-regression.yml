@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: vello-half-tie-release-${{ github.event.pull_request.number || github.ref }}
+  group: vello-half-tie-release-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

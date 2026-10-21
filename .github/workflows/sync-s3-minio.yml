@@ -33,7 +33,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sync-s3-minio-${{ github.event.pull_request.number }}
+  group: sync-s3-minio-${{ github.event.pull_request.number }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

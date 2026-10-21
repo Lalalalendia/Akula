@@ -10,6 +10,8 @@ test('migrated security workflows retain source-specific triggers and manual inv
   for(const [id,file,keys] of routeEntries){
     const body=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
     assert.match(body,/^on:\n  workflow_call:\n  pull_request:/m,file+' stays callable and reacts to owned paths');
+    const group=body.match(/^  group: (.*)$/m)?.[1];
+    if(group)assert.ok(group.includes('github.workflow'),file+' separate direct and routed concurrency');
     const header=body.split(/\n(?:jobs:|permissions:|concurrency:|env:)/)[0];
     for(const p of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock','aquilum-app/core/src/lib.rs','aquilum-app/Cargo.toml']){
       assert.ok(!header.includes("- '"+p+"'")&&!header.includes('- "'+p+'"'),file+': no broad trigger '+p);

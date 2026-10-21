@@ -56,7 +56,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pinned-read-${{ github.event.pull_request.number }}
+  group: pinned-read-${{ github.event.pull_request.number }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

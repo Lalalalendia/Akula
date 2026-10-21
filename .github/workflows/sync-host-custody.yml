@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: p0-host-light-${{ github.event.pull_request.number || github.ref }}
+  group: p0-host-light-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
