@@ -146,8 +146,10 @@ impl ReceiverJoinSession {
     /// This method does not infer account identity from an S3 response:
     /// the caller must independently authenticate the account binding and
     /// owner's key set. No File Gate, user note write, S3 writer or Sync.
+    // E3h deliberately makes the older raw-approval network entrypoint
+    // internal. External callers must use the manually reviewed path.
     #[cfg(feature = "signed-vault-join-successor-integration-lab")]
-    pub async fn enroll_from_yandex_read_once(
+    pub(crate) async fn enroll_from_yandex_read_once(
         &mut self,
         client: &AwsS3ProbeClient,
         journal: &mut S3V2TrustedAnchorJournal,
