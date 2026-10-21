@@ -33,6 +33,55 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+      # One-PR measured network comparison, with no PR cache writes.
+      - name: Start trusted source-only network restore
+        if: github.event_name == 'pull_request' && github.head_ref == 'ci/b1b2b-registry-network-compare-20261022'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          printf 'AKULA_SOURCE_NET_START_NS=%s\n' "$(date +%s%N)" >> "$GITHUB_ENV"
+      - name: Restore trusted Cargo source archive over network
+        if: github.event_name == 'pull_request' && github.head_ref == 'ci/b1b2b-registry-network-compare-20261022'
+        id: registry-network-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git
+          key: akula-registry-source-v1-${{ runner.os }}-${{ hashFiles('aquilum-app/Cargo.lock') }}
+          fail-on-cache-miss: true
+      - name: Source-only offline build and signed-release tests
+        if: github.event_name == 'pull_request' && github.head_ref == 'ci/b1b2b-registry-network-compare-20261022'
+        shell: bash
+        env:
+          REGISTRY_HIT: ${{ steps.registry-network-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [[ "$REGISTRY_HIT" != true ]]; then
+            echo 'CACHE_NETWORK_REFUSED: missing main source archive' >&2
+            exit 1
+          fi
+          downloaded_at=$(date +%s%N)
+          source_restore_ms=$(( (downloaded_at - AKULA_SOURCE_NET_START_NS) / 1000000 ))
+          export CARGO_TARGET_DIR="$(mktemp -d "$RUNNER_TEMP/akula-slim-target.XXXXXXXX")"
+          export CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true
+          started_at=$(date +%s%N)
+          cd aquilum-app
+          rustfmt --edition 2021 core/examples/akula_b1b2b_release_fixture.rs
+          cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
+          cargo build --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --example akula_b1b2b_release_fixture
+          cargo test --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --test server_bootstrap_b1a -- --nocapture
+          source_host_ms=$(( ($(date +%s%N) - started_at) / 1000000 ))
+          source_target_bytes=$(du -sb "$CARGO_TARGET_DIR" | cut -f1)
+          printf 'AKULA_SOURCE_RESTORE_MS=%s\nAKULA_SOURCE_HOST_MS=%s\nAKULA_SOURCE_TARGET_BYTES=%s\n' "$source_restore_ms" "$source_host_ms" "$source_target_bytes" >> "$GITHUB_ENV"
+          echo "CACHE_NETWORK_SOURCE_PASS restore_ms=$source_restore_ms host_ms=$source_host_ms target_bytes=$source_target_bytes"
+      - name: Start full Rust cache network timer
+        if: github.event_name == 'pull_request' && github.head_ref == 'ci/b1b2b-registry-network-compare-20261022'
+        shell: bash
+        run: |
+          printf 'AKULA_FULL_NET_START_NS=%s\n' "$(date +%s%N)" >> "$GITHUB_ENV"
       # Reuse the same cache as the required main gate; never save from PRs.
       - name: Restore shared main Rust cache (read-only)
         id: main-cache
@@ -43,6 +92,20 @@ jobs:
           add-job-id-key: false
           cache-workspace-crates: true
           save-if: false
+      - name: Record real full-cache restore duration
+        if: github.event_name == 'pull_request' && github.head_ref == 'ci/b1b2b-registry-network-compare-20261022'
+        shell: bash
+        env:
+          FULL_HIT: ${{ steps.main-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [[ "$FULL_HIT" != true ]]; then
+            echo 'CACHE_NETWORK_REFUSED: missing full main archive' >&2
+            exit 1
+          fi
+          full_restore_ms=$(( ($(date +%s%N) - AKULA_FULL_NET_START_NS) / 1000000 ))
+          printf 'AKULA_FULL_RESTORE_MS=%s\n' "$full_restore_ms" >> "$GITHUB_ENV"
+          echo "CACHE_NETWORK_FULL_RESTORE_MS=$full_restore_ms"
       - name: Record cache and KVM availability (diagnostic)
         shell: bash
         env:
@@ -62,11 +125,33 @@ jobs:
         run: |
           set -euo pipefail
           start=$SECONDS
+          host_start_ns=$(date +%s%N)
           rustfmt --edition 2021 core/examples/akula_b1b2b_release_fixture.rs
           cargo build --locked -p aquilum-core --features node-lab --bin akula-node-lab
           cargo build --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --example akula_b1b2b_release_fixture
           cargo test --locked -p aquilum-core --features server-bootstrap-b1a-release-lab --test server_bootstrap_b1a -- --nocapture
           printf 'B1b2b host Rust build and tests: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$(printenv GITHUB_HEAD_REF || true)" == "ci/b1b2b-registry-network-compare-20261022" ]]; then
+            full_host_ms=$(( ($(date +%s%N) - host_start_ns) / 1000000 ))
+            source_total_ms=$((AKULA_SOURCE_RESTORE_MS + AKULA_SOURCE_HOST_MS))
+            full_total_ms=$((AKULA_FULL_RESTORE_MS + full_host_ms))
+            full_target_bytes=$(du -sb "../.artifacts/cargo-native" | cut -f1)
+            {
+              echo '### B1b2b real network: source-only vs full Rust cache'
+              echo "Git commit: $(git rev-parse HEAD); compiler: $(rustc --version)"
+              echo ''
+              echo '| Mode | Network restore (ms) | Build and tests (ms) | Total (ms) | Target bytes |'
+              echo '| --- | ---: | ---: | ---: | ---: |'
+              echo "| Source-only, offline | $AKULA_SOURCE_RESTORE_MS | $AKULA_SOURCE_HOST_MS | $source_total_ms | $AKULA_SOURCE_TARGET_BYTES |"
+              echo "| Full cache, read-only | $AKULA_FULL_RESTORE_MS | $full_host_ms | $full_total_ms | $full_target_bytes |"
+              echo ''
+              echo 'Identical locked Rust build/test commands on one runner.'
+              echo 'Both caches restored from trusted main through the actual GitHub network.'
+              echo 'No PR cache writes. Original signed Ubuntu VM and recovery gate follows unchanged.'
+              echo 'One run is an observation, not proof of repeatable speedup.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "CACHE_NETWORK_HOST_COMPARE_PASS source_total_ms=$source_total_ms full_total_ms=$full_total_ms"
+          fi
       - name: Check CI-only test scripts syntax
         shell: bash
         run: |
