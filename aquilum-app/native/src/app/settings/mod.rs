@@ -16,6 +16,8 @@ mod apply;
 mod bindings;
 mod refresh;
 mod recovery;
+#[cfg(all(windows, feature = "server-readonly-preflight"))]
+pub(super) mod server;
 
 use crate::system;
 use crate::ui::menu::Menu;
@@ -67,7 +69,16 @@ impl App {
         } else {
             None
         };
+        let server_probe = if section == Section::Server {
+            let current = self.workspace.core.settings.get_config().server_setup;
+            self.server_probe.as_ref()
+                .filter(|(draft, _)| draft == &current)
+                .map(|(_, status)| status.clone())
+        } else {
+            None
+        };
         Context {
+            server_probe,
             workspace,
             sync_recovery,
             sync_selected: None,

@@ -15,6 +15,8 @@ impl App {
         let (transfer_tx, transfer_rx) = channel();
         let (home_tx, home_rx) = channel();
         let (titles_tx, titles_rx) = channel();
+        #[cfg(all(windows, feature = "server-readonly-preflight"))]
+        let (server_probe_tx, server_probe_rx) = channel();
         let workspace_wake = Arc::clone(&workspace.wake);
         let auto_update = workspace.core.settings.get_config().updates.auto;
         let mut app = App {
@@ -24,6 +26,11 @@ impl App {
             interface,
             popup: None,
             typing: None,
+            server_probe: None,
+            #[cfg(all(windows, feature = "server-readonly-preflight"))]
+            server_probe_tx,
+            #[cfg(all(windows, feature = "server-readonly-preflight"))]
+            server_probe_rx,
             graph: graph_page::GraphState::default(),
             transfer: transfer::TransferState::default(),
             suggest_layer: None,

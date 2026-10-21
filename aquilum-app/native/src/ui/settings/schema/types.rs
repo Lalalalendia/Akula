@@ -20,7 +20,18 @@ pub enum Setter {
     Autostart,
 }
 
+/// Session-only result; never persisted as installation approval or a
+/// trusted server identity. Stale replies are discarded if any input changes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ServerProbeView {
+    Checking,
+    Observed { facts: String },
+    Unsupported { facts: String },
+    Failed,
+}
+
 pub struct Context {
+    pub server_probe: Option<ServerProbeView>,
     pub workspace: Option<PathBuf>,
     pub scale: f64,
     pub home_page: String,
@@ -37,12 +48,14 @@ pub struct Context {
 impl Context {
     #[cfg(test)]
     pub fn new(scale: f64) -> Self {
-        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
+        Context { server_probe: None, workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    /// Read-only SSH KEX + host inspection; no package/install/approval.
+    VerifyServer,
     InspectRecovery(String),
     RequestRecoveryReview(NativeRecoveryDecision),
     OpenTrash,

@@ -5,6 +5,12 @@ impl App {
         let core = &self.workspace.core;
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
+            Action::VerifyServer => {
+                #[cfg(all(windows, feature = "server-readonly-preflight"))]
+                { self.request_server_probe() }
+                #[cfg(not(all(windows, feature = "server-readonly-preflight")))]
+                { Effect::None }
+            },
             // This handler is reached only for ordinary settings buttons.
             // Review actions require the separately confirmed modal flow.
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,

@@ -268,3 +268,58 @@ fn b1d0_native_server_settings_are_nonsecret_and_never_offer_an_install_grant() 
     assert!(config.server_setup.host_public_key.is_empty());
     i18n::set_language("en");
 }
+
+#[test]
+fn b1_e2e_01_native_verify_button_never_grants_install() {
+    use base64::Engine;
+    use sha2::Digest;
+    let mut wire = b"\0\0\0\x0bssh-ed25519\0\0\0\x20".to_vec();
+    wire.extend_from_slice(&[7u8;32]);
+    assert_eq!(wire.len(), 51);
+    let public = format!(
+        "ssh-ed25519 {}",
+        base64::engine::general_purpose::STANDARD.encode(&wire),
+    );
+    let fingerprint = format!(
+        "SHA256:{}",
+        base64::engine::general_purpose::STANDARD_NO_PAD
+            .encode(sha2::Sha256::digest(&wire)),
+    );
+    let mut config = AppConfig::default();
+    config.server_setup.host = "vps.example.org".into();
+    config.server_setup.ssh_user = "ubuntu".into();
+    config.server_setup.host_public_key = public;
+    config.server_setup.host_key_fingerprint = fingerprint;
+    assert!(config.server_setup.valid_offline_pin());
+    let mut ctx = Context::new(1.0);
+    let buttons = |config: &AppConfig, ctx: &Context| {
+        let page = &blocks(Section::Server, &config, ctx)[0];
+        let buttons = page.rows.iter().find_map(|row| {
+            if let Control::Buttons(ref list) = row.control {
+                Some(list.clone())
+            } else { None }
+        }).expect("server actions");
+        assert_eq!(buttons.len(), 2);
+        assert!(matches!(buttons[0].action, Action::VerifyServer));
+        assert!(!buttons[1].enabled, "a read-only KEX is never an install grant");
+        buttons
+    };
+    let prepared = buttons(&config, &ctx);
+    assert_eq!(prepared[0].enabled, cfg!(all(
+        target_os = "windows", feature = "server-readonly-preflight",
+    )));
+    ctx.server_probe = Some(ServerProbeView::Checking);
+    assert!(!buttons(&config, &ctx)[0].enabled, "duplicate SSH probes must be disabled");
+    ctx.server_probe = Some(ServerProbeView::Observed {
+        facts: "Ubuntu / x86_64; 4 CPU; 8192 MiB RAM".into(),
+    });
+    let observed = blocks(Section::Server, &config, &ctx);
+    assert!(observed[0].rows.iter().any(|row|
+        row.label == t("settings.server.observedFacts")
+    ));
+    assert!(!buttons(&config, &ctx)[1].enabled);
+    let mut bad = config.clone();
+    bad.server_setup.host_public_key = "-----BEGIN OPENSSH PRIVATE KEY-----".into();
+    assert!(!bad.server_setup.valid_offline_pin());
+    assert!(!buttons(&bad, &ctx)[0].enabled);
+}

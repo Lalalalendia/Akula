@@ -28,6 +28,9 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 [features]
 installed = []
 memory-probe = []
+# Opt-in Windows native "Verify SSH" read-only user flow. No install RPC.
+# Remains absent from default/signed builds until independent preflight QA.
+server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.

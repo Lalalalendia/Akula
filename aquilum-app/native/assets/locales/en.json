@@ -202,7 +202,7 @@
     "server": {
       "title": "Your server · setup draft",
       "state": "Installation status",
-      "stateHint": "First installation of Akula Node on your own Linux server. No connection or remote change has occurred.",
+      "stateHint": "SSH identity verification is separate from installation. A successful SSH check does not mean Node is installed or running.",
       "notConnected": "Not connected · install locked",
       "host": "Server address",
       "hostHint": "DNS host or IPv4. Draft fields do not run SSH.",
@@ -222,9 +222,15 @@
       "noSecretsHint": "Never paste an SSH private key, password, seed, token or sudo credential.",
       "noCredentials": "Secrets are neither accepted nor stored",
       "verify": "Host inspection and installation",
-      "verifyHint": "Disabled until protected Windows OpenSSH transport, real owner approval and the Linux installer pass security acceptance.",
-      "verifyButton": "Verify SSH (unavailable)",
-      "installButton": "Install Node (unavailable)"
+      "verifyHint": "In the opt-in read-only build, Akula uses pinned SSH solely to inspect host facts. Installation remains unavailable.",
+      "verifyButton": "Verify SSH",
+      "installButton": "Install Node (unavailable)",
+      "probing": "Verifying signed SSH host key and reading server facts…",
+      "verifiedReadOnly": "SSH host verified; facts received · Node not installed",
+      "unsupported": "SSH host key verified, but server fails Node requirements",
+      "verificationFailed": "SSH verification denied or unavailable · no install",
+      "observedFacts": "Observed server resources",
+      "observedFactsHint": "Read only after signed SSH key exchange. Not approval to install or proof Node is running."
     },
     "yandex": {
       "title": "Yandex Object Storage · setup",

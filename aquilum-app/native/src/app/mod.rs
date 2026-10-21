@@ -111,6 +111,16 @@ pub struct App {
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
+    // Session-only, bound to an exact public draft. Does NOT constitute
+    // owner approval, package receipt or persistent server trust.
+    server_probe: Option<(
+        aquilum_core::settings::models::ServerBootstrapDraft,
+        crate::ui::settings::schema::ServerProbeView,
+    )>,
+    #[cfg(all(windows, feature = "server-readonly-preflight"))]
+    server_probe_tx: Sender<settings::server::ProbeReport>,
+    #[cfg(all(windows, feature = "server-readonly-preflight"))]
+    server_probe_rx: Receiver<settings::server::ProbeReport>,
     graph: graph_page::GraphState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,

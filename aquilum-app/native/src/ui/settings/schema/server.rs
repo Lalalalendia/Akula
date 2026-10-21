@@ -4,15 +4,25 @@ use aquilum_core::settings::models::ServerBootstrapDraft;
 /// Native first-stage owner-server setup: *public* draft only.
 /// No SSH private key, password, sudo credential or token is accepted.
 /// Matching public host identity is NOT permission to connect or install.
-pub(super) fn server_setup(config: &AppConfig) -> Block {
+pub(super) fn server_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.server_setup;
     let pin_matches = draft.valid_offline_pin();
-    Block {
-        title: t("settings.server.title"),
-        rows: vec![
+    let probe = ctx.server_probe.as_ref();
+    let probing = matches!(probe, Some(ServerProbeView::Checking));
+    let state_key = match probe {
+        Some(ServerProbeView::Checking) => "settings.server.probing",
+        Some(ServerProbeView::Observed { .. }) => "settings.server.verifiedReadOnly",
+        Some(ServerProbeView::Unsupported { .. }) => "settings.server.unsupported",
+        Some(ServerProbeView::Failed) => "settings.server.verificationFailed",
+        None => "settings.server.notConnected",
+    };
+    let mut rows = vec![
             info(t("settings.server.state"), Some(t("settings.server.stateHint")),
                 Control::Status {
-                    text: t("settings.server.notConnected"), tone: Tone::Danger,
+                    text: t(state_key),
+                    tone: if matches!(probe, Some(ServerProbeView::Observed { .. })) {
+                        Tone::Secondary
+                    } else { Tone::Danger },
                 }),
             row(t("settings.server.host"), Some(t("settings.server.hostHint")),
                 Control::Text { value: draft.host.clone(), commit: true },
@@ -78,12 +88,28 @@ pub(super) fn server_setup(config: &AppConfig) -> Block {
             info(t("settings.server.verify"), Some(t("settings.server.verifyHint")),
                 Control::Buttons(vec![
                     Button::new(t("settings.server.verifyButton"),
-                        Action::OpenUrl("https://github.com/Lalalalendia/Akula"))
-                        .enabled(false),
+                        Action::VerifyServer)
+                        .enabled(cfg!(all(target_os = "windows",
+                            feature = "server-readonly-preflight"))
+                            && pin_matches && !probing),
                     Button::new(t("settings.server.installButton"),
                         Action::OpenUrl("https://github.com/Lalalalendia/Akula"))
                         .enabled(false),
                 ])),
-        ],
+    ];
+    if let Some(ServerProbeView::Observed { facts }
+        | ServerProbeView::Unsupported { facts }) = probe
+    {
+        // Only normalized, bounded typed host facts; never SSH stderr,
+        // shell output, credentials or an installation-success claim.
+        rows.push(info(
+            t("settings.server.observedFacts"),
+            Some(t("settings.server.observedFactsHint")),
+            Control::Status {
+                text: facts.clone(),
+                tone: Tone::Secondary,
+            },
+        ));
     }
+    Block { title: t("settings.server.title"), rows }
 }
