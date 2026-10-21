@@ -46,6 +46,7 @@ echo 'AKULA_APPIMAGE_STRUCTURE_PASS apprun=1 own_bin=1 own_desktop=1 upstream_pa
 # Optional second real version is created only by the isolated signed-staging
 # PR job. Its absence in normal beta builds is not an E2E success.
 e2e_args=()
+container_image=ubuntu:22.04
 e2e_lock_digest=""
 if [[ -d "$PWD/dist/e2e-v2" ]]; then
   v2="$PWD/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage"
@@ -55,6 +56,10 @@ if [[ -d "$PWD/dist/e2e-v2" ]]; then
     exit 1
   }
   e2e_args=("/dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage" "/dist/e2e-v2/transaction-helper")
+  # Jammy 22.04 has no minisign CLI package. Run this additional
+  # signed, two-version GUI experiment on Noble 24.04; regular AppImage
+  # smoke still uses Jammy 22.04 unchanged.
+  container_image=ubuntu:24.04
   [[ -s "$PWD/dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt" ]] || {
     echo 'CI-only v2 lockfile provenance missing' >&2
     exit 1
@@ -75,13 +80,19 @@ docker run --rm -i \
   -e GITHUB_ACTIONS=true -e AKULA_DISPOSABLE_UPDATE_LAB=1 \
   -e AKULA_E2E_SOURCE_COMMIT="${GITHUB_SHA:-}" -e AKULA_E2E_LOCK_SHA256="$e2e_lock_digest" \
   -v "$PWD/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" \
-  ubuntu:22.04 bash -s -- "/dist/$(basename "$image")" "${e2e_args[@]}" <<'UBUNTU' | tee "$container_log"
+  "$container_image" bash -s -- "/dist/$(basename "$image")" "${e2e_args[@]}" <<'UBUNTU' | tee "$container_log"
 set -euo pipefail
 image="$1"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+extra_packages=()
+if [[ "$#" == 3 ]]; then
+  # minisign is packaged in Noble, not Jammy. Require it only for the
+  # additional real two-version signed E2E acceptance.
+  extra_packages=(minisign)
+fi
 apt-get install -y -qq --no-install-recommends \
-  ca-certificates xvfb openbox wmctrl python3-minimal minisign file libglib2.0-0 libfontconfig1 libfreetype6 \
+  ca-certificates xvfb openbox wmctrl python3-minimal "${extra_packages[@]}" file libglib2.0-0 libfontconfig1 libfreetype6 \
   libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
   libxkbcommon0 libxkbcommon-x11-0 libx11-6 libx11-xcb1 \
   libxcursor1 libxrandr2 libxi6 libxcb1 libwayland-client0
