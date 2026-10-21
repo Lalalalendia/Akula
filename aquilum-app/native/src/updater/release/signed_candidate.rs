@@ -73,6 +73,13 @@ impl SignedCandidate {
         &self.bytes
     }
 
+    /// Bytes leave the sealed candidate only for the legacy UI handoff,
+    /// whose Windows apply entrypoint still refuses installation. The final
+    /// transaction boundary must receive SignedCandidate, never this Vec.
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
     pub(crate) fn version(&self) -> &str {
         &self.version
     }
@@ -215,23 +222,34 @@ fn validate_windows_asset(item: &Artifact, version: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// Strictly validate already-authenticated metadata and package bytes.
-/// This function is NOT itself a signature verifier; it must never be used
-/// directly as a release authorization path.
-fn inspect_authenticated(
+/// Authenticated offer metadata; not a filesystem write grant.
+/// In particular, a Windows NSIS offer is installer_required, never an
+/// authorization to run the legacy in-place updater.
+#[derive(Clone, Debug)]
+pub(super) struct VerifiedOffer {
+    pub(super) version: String,
+    pub(super) filename: String,
+    pub(super) sha256: String,
+    pub(super) size: u64,
+    pub(super) source_commit: String,
+}
+
+/// Parse a manifest only after its exact raw bytes have been authenticated.
+/// This structural helper is also used by the byte-level admission tests;
+/// it never verifies a signature on its own.
+fn inspect_offer_authenticated(
     raw: &[u8],
-    bytes: &[u8],
     expected_platform: &str,
     running_version: &str,
-) -> Result<(String, String, String), String> {
+) -> Result<Option<VerifiedOffer>, String> {
     if raw.is_empty() || raw.len() > MAX_MANIFEST_BYTES {
         return Err(hold("signed manifest size limit"));
     }
     if expected_platform != TARGET_LINUX_APPIMAGE && expected_platform != TARGET_WINDOWS_NSIS {
         return Err(hold("unsupported or unexpected platform for automatic apply"));
     }
-    let manifest: SignedManifest =
-        serde_json::from_slice(raw).map_err(|_| hold("ambiguous, malformed or unknown-field manifest"))?;
+    let manifest: SignedManifest = serde_json::from_slice(raw)
+        .map_err(|_| hold("ambiguous, malformed or unknown-field manifest"))?;
     if manifest.schema != 1 || manifest.product != "Akula" {
         return Err(hold("wrong product or schema"));
     }
@@ -240,13 +258,15 @@ fn inspect_authenticated(
     {
         return Err(hold("invalid source or lock provenance"));
     }
+
     let next = numeric_version(&manifest.version)?;
     let current = numeric_version(running_version)?;
-    if next <= current {
+    if next < current {
         return Err(hold("release is not strictly newer than the installed version"));
     }
-    // Reject malformed metadata on ANY included platform: the same signed
-    // document must have unambiguous meaning for each OS that can consume it.
+
+    // A signed Windows-only candidate may omit unbuilt Linux artifacts.
+    // Nevertheless, reject malformed cross-platform entries if they appear.
     if let Some(item) = &manifest.artifacts.windows {
         validate_windows_asset(item, &manifest.version)?;
     }
@@ -274,8 +294,7 @@ fn inspect_authenticated(
             "RPM",
         )?;
     }
-    // A partial signed manifest is valid only for the actual OS artifact it
-    // names. No missing platform can borrow another OS's signed bytes.
+
     let (asset, expected_name, budget) = if expected_platform == TARGET_WINDOWS_NSIS {
         (
             manifest.artifacts.windows.as_ref()
@@ -294,17 +313,85 @@ fn inspect_authenticated(
     if asset.filename != expected_name {
         return Err(hold("signed platform filename does not identify the approved Akula installer"));
     }
-    if !valid_hex(&asset.sha256, 64)
-        || asset.size == 0
-        || asset.size > budget
-        || asset.size != bytes.len() as u64
-    {
+    if !valid_hex(&asset.sha256, 64) || asset.size == 0 || asset.size > budget {
         return Err(hold("signed asset hash format, size or budget mismatch"));
     }
-    if digest_hex(bytes) != asset.sha256 {
+    if next == current {
+        return Ok(None);
+    }
+    Ok(Some(VerifiedOffer {
+        version: manifest.version.clone(),
+        filename: asset.filename.clone(),
+        sha256: asset.sha256.clone(),
+        size: asset.size,
+        source_commit: manifest.source_commit.clone(),
+    }))
+}
+
+/// Never use this without prior signature verification. Used only after the
+/// Minisign gate in admit_with_trusted_key or within synthetic unit fixtures.
+fn inspect_authenticated(
+    raw: &[u8],
+    bytes: &[u8],
+    expected_platform: &str,
+    running_version: &str,
+) -> Result<(String, String, String), String> {
+    let offer = inspect_offer_authenticated(raw, expected_platform, running_version)?
+        .ok_or_else(|| hold("release is not strictly newer than the installed version"))?;
+    if offer.size != bytes.len() as u64 {
+        return Err(hold("signed asset hash format, size or budget mismatch"));
+    }
+    if digest_hex(bytes) != offer.sha256 {
         return Err(hold("downloaded bytes are not the signed platform asset"));
     }
-    Ok((manifest.version, manifest.source_commit, asset.sha256.clone()))
+    Ok((offer.version, offer.source_commit, offer.sha256))
+}
+
+/// The sole positive metadata-checking routine (the key is injectable ONLY
+/// within this private module, for real ephemeral Minisign CI fixtures).
+fn signed_offer_with_trusted_key(
+    manifest: &[u8],
+    signature: &str,
+    key: &str,
+    platform: &str,
+    current: &str,
+) -> Result<Option<VerifiedOffer>, String> {
+    if key.is_empty() {
+        return Err(hold("Akula publisher key is not installed"));
+    }
+    verify(manifest, signature, key)
+        .map_err(|_| hold("signed manifest publisher authentication failed"))?;
+    inspect_offer_authenticated(manifest, platform, current)
+}
+
+/// A production metadata offer has neither a caller-provided trust key nor a
+/// caller-provided platform/version. The release channel remains HOLD.
+pub(super) fn offer(manifest: &[u8], signature: &str) -> Result<Option<VerifiedOffer>, String> {
+    if !channel_ready() || PUBLIC_KEY.is_empty() {
+        return Err(hold("Akula signed-release channel remains disabled"));
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        signed_offer_with_trusted_key(
+            manifest, signature, PUBLIC_KEY,
+            TARGET_WINDOWS_NSIS, env!("CARGO_PKG_VERSION"),
+        )
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        signed_offer_with_trusted_key(
+            manifest, signature, PUBLIC_KEY,
+            TARGET_LINUX_APPIMAGE, env!("CARGO_PKG_VERSION"),
+        )
+    }
+    #[cfg(not(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+    )))]
+    {
+        let _ = (manifest, signature);
+        Err(hold("no signed updater format for this OS/architecture"))
+    }
 }
 
 fn admit_with_trusted_key(
@@ -486,6 +573,34 @@ mod tests {
         assert!(inspect_authenticated(
             &serde_json::to_vec(&changed).unwrap(), payload, TARGET_WINDOWS_NSIS, "0.3.9",
         ).is_err(), "a malformed other-OS artifact must still be rejected");
+    }
+
+    #[test]
+    fn signed_offer_metadata_refuses_rollback_missing_platform_and_unknown_fields() {
+        let data = b"synthetic bytes";
+        let raw = fixture(data, "0.3.10");
+        let offer = inspect_offer_authenticated(&raw, TARGET_LINUX_APPIMAGE, "0.3.9")
+            .unwrap().expect("newer authenticated offer");
+        assert_eq!(offer.version, "0.3.10");
+        assert_eq!(offer.size, data.len() as u64);
+        assert_eq!(offer.sha256, digest_hex(data));
+
+        // Equal is not a new offer; an older signed manifest is a HOLD.
+        assert!(inspect_offer_authenticated(&raw, TARGET_LINUX_APPIMAGE, "0.3.10")
+            .unwrap().is_none());
+        assert!(inspect_offer_authenticated(&raw, TARGET_LINUX_APPIMAGE, "0.3.11")
+            .unwrap_err().contains("not strictly newer"));
+        let mut changed: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        changed["artifacts"].as_object_mut().unwrap()
+            .remove("linux-x86_64-appimage");
+        assert!(inspect_offer_authenticated(
+            &serde_json::to_vec(&changed).unwrap(), TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).unwrap_err().contains("required signed AppImage artifact missing"));
+        let mut changed: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        changed["untrusted_url"] = json!("https://other.example/update.exe");
+        assert!(inspect_offer_authenticated(
+            &serde_json::to_vec(&changed).unwrap(), TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).is_err());
     }
 
     #[test]
@@ -719,6 +834,15 @@ mod tests {
             .encode(fs::read(root.join("other.pub")).unwrap());
         let payload = fs::read(root.join("payload.NSIS")).unwrap();
 
+        let offer = signed_offer_with_trusted_key(
+            &manifest, &signature, &key,
+            TARGET_WINDOWS_NSIS, "0.3.9",
+        ).expect("the exact signed Windows metadata must authenticate")
+            .expect("newer Windows release expected");
+        assert_eq!(offer.version, "0.3.10");
+        assert_eq!(offer.size, payload.len() as u64);
+        assert_eq!(offer.sha256, digest_hex(&payload));
+
         let admitted = admit_with_trusted_key(
             &manifest, &signature, payload.clone(), &key,
             TARGET_WINDOWS_NSIS, "0.3.9",
@@ -726,6 +850,15 @@ mod tests {
         assert_eq!(admitted.bytes(), payload.as_slice());
         assert_eq!(admitted.version(), "0.3.10");
         assert_eq!(admitted.sha256(), digest_hex(&payload));
+
+        assert!(signed_offer_with_trusted_key(
+            &manifest, &signature, &wrong_key,
+            TARGET_WINDOWS_NSIS, "0.3.9",
+        ).unwrap_err().contains("authentication failed"));
+        assert!(signed_offer_with_trusted_key(
+            &manifest, &signature, &key,
+            TARGET_LINUX_APPIMAGE, "0.3.9",
+        ).is_err(), "Windows-only signed bytes must not authorize a Linux offer");
 
         let mut changed_bytes = payload.clone();
         changed_bytes[0] ^= 1;
