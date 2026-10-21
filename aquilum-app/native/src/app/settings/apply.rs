@@ -49,6 +49,8 @@ impl App {
                 }
                 Effect::Content
             }
+            #[cfg(feature = "yandex-owner-review-ui-preview")]
+            Action::ImportOwnerProposal | Action::CompareOwnerCode | Action::ClearOwnerProposal => Effect::None,
             Action::OpenUrl(url) => {
                 system::open_url(url);
                 Effect::None
