@@ -88,6 +88,8 @@ pub struct PublicSummary {
     pub requests: usize,
     pub counts: BTreeMap<String, usize>,
     pub links: usize,
+    /// Count edges by semantics without disclosing private target UUIDs or text.
+    pub link_counts: BTreeMap<String, usize>,
     pub unresolved_targets: usize,
     pub warnings: Vec<String>,
 }
@@ -99,6 +101,10 @@ impl SourcePreview {
         for obj in &self.objects {
             *counts.entry(obj.kind.clone()).or_insert(0) += 1;
         }
+        let mut link_counts = BTreeMap::new();
+        for link in &self.links {
+            *link_counts.entry(link.kind.clone()).or_insert(0) += 1;
+        }
         PublicSummary {
             format: self.format,
             api_version: self.api_version,
@@ -108,6 +114,7 @@ impl SourcePreview {
             requests: self.requests,
             counts,
             links: self.links.len(),
+            link_counts,
             unresolved_targets: self.unresolved_target_ids.len(),
             warnings: self.warnings.clone(),
         }
