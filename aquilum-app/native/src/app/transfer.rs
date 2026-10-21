@@ -4,17 +4,31 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use aquilum_core::sync::DeviceId;
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
 
 use super::{App, Outcome, Popup};
-use crate::i18n::t;
 use crate::ui::dialog::{self, DialogAnswer};
 use crate::ui::transfer::{self as transfer_ui, QueueAction};
 use crate::ui::widgets::Pressed;
 
 const MAX_DRAFTS: usize = 32;
+const MAX_DEVICE_ROWS: usize = 32;
+
+mod model;
+
+/// A display-only identity observation. The first-party owner registry still
+/// needs to supply a verified snapshot. No production path populates this
+/// collection, and neither this struct nor the UI authorizes File Gate writes.
+#[derive(Clone, Debug)]
+pub(super) struct TransferPeer {
+    pub(super) id: DeviceId,
+    pub(super) fingerprint: [u8; 32],
+    pub(super) name: String,
+    pub(super) status: transfer_ui::DeviceStatus,
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct Draft {
@@ -28,55 +42,8 @@ pub(super) struct TransferState {
     pub(super) drafts: Vec<Draft>,
     pub(super) choosing: bool,
     pub(super) error: Option<String>,
-}
-
-impl TransferState {
-    pub(super) fn stage(&mut self, paths: Vec<PathBuf>) {
-        self.error = None;
-        for path in paths {
-            if self.drafts.iter().any(|entry| entry.path == path) {
-                continue;
-            }
-            if self.drafts.len() >= MAX_DRAFTS {
-                self.error = Some(t("transfer.limit"));
-                break;
-            }
-            // Metadata only. Never read bytes, compute a digest, write a file,
-            // make a network call, follow symlinks or claim a verified transfer.
-            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
-                self.error = Some(t("transfer.invalidFile"));
-                continue;
-            };
-            if !metadata.file_type().is_file() || path.file_name().is_none() {
-                self.error = Some(t("transfer.invalidFile"));
-                continue;
-            }
-            self.drafts.push(Draft { path, bytes: metadata.len(), paused: false });
-        }
-    }
-
-    pub(super) fn toggle(&mut self, index: usize) {
-        if let Some(item) = self.drafts.get_mut(index) {
-            item.paused = !item.paused;
-        }
-    }
-
-    pub(super) fn remove(&mut self, index: usize) {
-        if index < self.drafts.len() {
-            self.drafts.remove(index);
-        }
-    }
-
-    fn rows(&self) -> Vec<transfer_ui::QueueRow> {
-        self.drafts.iter().enumerate().map(|(index, item)| {
-            let raw = item.path.file_name().unwrap_or_default().to_string_lossy();
-            let mut name: String = raw.chars().filter(|c| !c.is_control()).take(96).collect();
-            if raw.chars().count() > 96 {
-                name.push('…');
-            }
-            transfer_ui::QueueRow { index, name, bytes: item.bytes, paused: item.paused }
-        }).collect()
-    }
+    peers: Vec<TransferPeer>,
+    pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
 }
 
 impl App {
@@ -88,7 +55,10 @@ impl App {
     }
 
     fn show_transfers(&mut self, root: &mut RenderRoot) {
-        let (layer, dialog) = transfer_ui::dialog(&self.transfer.rows(), self.transfer.choosing, self.transfer.error.as_deref());
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            self.transfer.choosing, self.transfer.error.as_deref(),
+        );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
         self.popup = Some(Popup::Transfers(dialog));
@@ -148,6 +118,11 @@ impl App {
                 QueueAction::Toggle => self.transfer.toggle(*index),
                 QueueAction::Remove => self.transfer.remove(*index),
             }
+            refresh = true;
+        } else if pressed
+            && let Some((_, device_id, key)) = dialog.device_actions.iter().find(|(button, _, _)| *button == id)
+        {
+            self.transfer.choose_peer((*device_id, *key));
             refresh = true;
         }
         self.popup = Some(Popup::Transfers(dialog));

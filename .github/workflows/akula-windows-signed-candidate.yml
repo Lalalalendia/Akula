@@ -3,10 +3,15 @@
 # and metadata under the owner's key, verifies both independently. Publishing
 # requires a separate explicit owner opt-in and protected environment review.
 name: Akula Windows signed candidate (review only)
+run-name: Akula Windows v${{ inputs.release_version }} - ${{ inputs.publish_beta && 'PUBLISH' || 'VERIFY' }}
 
 on:
   workflow_dispatch:
     inputs:
+      release_version:
+        description: Exact Akula version from native Cargo.toml, for example 0.3.10
+        type: string
+        required: true
       publish_beta:
         description: Publish independently verified signed Akula Windows candidate to GitHub Releases
         type: boolean
@@ -30,11 +35,22 @@ jobs:
 
       - name: Verify pinned source and standalone identity
         shell: pwsh
+        env:
+          AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
         run: |
           $ErrorActionPreference = 'Stop'
           $actual = (git rev-parse HEAD).Trim()
           if ($actual -ne $env:GITHUB_SHA -or $env:GITHUB_REF -ne 'refs/heads/main') {
             throw 'Source checkout is not the approved main dispatch HEAD'
+          }
+          $requested = $env:AKULA_REQUESTED_VERSION
+          if ($requested -cnotmatch '^\d+\.\d+\.\d+$') {
+            throw 'Requested Akula release version must be a three-part numeric version'
+          }
+          $nativeToml = Get-Content -LiteralPath 'aquilum-app/native/Cargo.toml' -Raw
+          $nativeVersion = [regex]::Match($nativeToml, '(?m)^version\s*=\s*"([^"]+)"')
+          if (!$nativeVersion.Success -or $nativeVersion.Groups[1].Value -cne $requested) {
+            throw "Workflow display version $requested does not match the native Akula Cargo version"
           }
           node --test .github/scripts/windows-beta-identity.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Windows identity boundary failed' }
@@ -78,6 +94,7 @@ jobs:
         env:
           CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
           CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+          AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:CARGO_PACKAGER_SIGN_PRIVATE_KEY) -or
@@ -92,6 +109,9 @@ jobs:
           $versions = @($metadata.packages | Where-Object { $_.name -eq 'aquilum-native' })
           if ($versions.Count -ne 1) { throw 'Expected unique native Akula Cargo version' }
           $version = $versions[0].version
+          if ($version -cne $env:AKULA_REQUESTED_VERSION) {
+            throw 'The built Cargo version does not match the workflow run version'
+          }
           if ($package[0].Name -cne "Akula_${version}_x64-setup.exe") {
             throw 'Installer filename differs from source Cargo version'
           }
@@ -236,6 +256,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
@@ -251,6 +272,8 @@ jobs:
             throw Error('Wrong Akula signed publisher root');
           fs.writeFileSync(process.env.RUNNER_TEMP+'/akula-release.pub',pub,{mode:0o600});
           const m=JSON.parse(fs.readFileSync('dist/latest.json','utf8'));
+          if(m.version!==process.env.AKULA_REQUESTED_VERSION)
+            throw Error('Requested workflow version differs from publisher-signed manifest');
           if(m.schema!==1 || m.product!=='Akula' || m.source_commit!==process.env.GITHUB_SHA)
             throw Error('Unexpected signed product/source');
           if(!/^\d+\.\d+\.\d+$/.test(m.version)) throw Error('Invalid Akula version');

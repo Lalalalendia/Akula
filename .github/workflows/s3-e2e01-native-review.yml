@@ -5,14 +5,9 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/core/src/sync/s3_publication_dashboard.rs'
-      - 'aquilum-app/core/src/sync/recovery_dashboard.rs'
-      - 'aquilum-app/core/src/sync/mod.rs'
-      - 'aquilum-app/core/src/sync/s3_transport/core_stage_e2e01_tests.rs'
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/native/src/app/settings/mod.rs'
-      - 'aquilum-app/native/src/ui/settings/schema/**'
-      - 'aquilum-app/native/assets/locales/en.json'
-      - 'aquilum-app/native/assets/locales/ru.json'
+      - 'aquilum-app/native/src/app/settings/context.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context.rs'
       - '.github/workflows/s3-e2e01-native-review.yml'
       - 'docs/sync/S3-E2E-01-native-bound-review.md'
   workflow_dispatch:

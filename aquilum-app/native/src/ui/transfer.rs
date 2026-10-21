@@ -1,6 +1,7 @@
 //! Transfer preparation UI. No transport or file authorization is exposed here.
 //! Rows are in-memory drafts, never a claim that data was sent or verified.
 
+use aquilum_core::sync::DeviceId;
 use masonry::accesskit::Role;
 use masonry::core::{NewWidget, PropertySet, WidgetId};
 use masonry::kurbo::{Axis, Size};
@@ -31,11 +32,15 @@ pub enum QueueAction {
     Remove,
 }
 
+mod devices;
+pub use devices::{DeviceRow, DeviceStatus};
+
 pub struct TransferDialog {
     pub layer: WidgetId,
     pub close: WidgetId,
     pub choose: WidgetId,
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
+    pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
 }
 
 fn card_size(room: Size) -> Size {
@@ -66,7 +71,7 @@ fn display_size(bytes: u64) -> String {
 
 /// The only actionable controls modify local drafts or open the local picker.
 /// No button can reach QUIC, File Gate, YDB or any source of peer authority.
-pub fn dialog(rows: &[QueueRow], choosing: bool, error: Option<&str>) -> (NewWidget<Modal>, TransferDialog) {
+pub fn dialog(rows: &[QueueRow], devices: &[DeviceRow], choosing: bool, error: Option<&str>) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
     let choose = NewWidget::new(TextButton::new(
@@ -111,17 +116,7 @@ pub fn dialog(rows: &[QueueRow], choosing: bool, error: Option<&str>) -> (NewWid
         .with(Padding::all(Length::px(size::DIALOG_PADDING))));
     let queue = NewWidget::new(ScrollArea::new(queue));
 
-    let mut info = Flex::column()
-        .cross_axis_alignment(CrossAxisAlignment::Stretch)
-        .with_fixed(details(&t("transfer.devices")))
-        .with_fixed(hint(&t("transfer.noDevices")))
-        .with_fixed(hint(&t("transfer.offline")));
-    if let Some(error) = error {
-        info = info.with_fixed(hint(error));
-    }
-    let info = NewWidget::new(info).with_props(PropertySet::new()
-        .with(Gap::new(Length::px(size::SPACE_4)))
-        .with(Padding::all(Length::px(size::DIALOG_PADDING))));
+    let (info, device_actions) = devices::render(devices, error);
     let footer = NewWidget::new(Flex::row()
         .main_axis_alignment(MainAxisAlignment::End)
         .with_fixed(choose))
@@ -137,7 +132,7 @@ pub fn dialog(rows: &[QueueRow], choosing: bool, error: Option<&str>) -> (NewWid
         .with_fixed(footer));
     let layer = Modal::new(card, &t("transfer.title"), CardSize::Window(card_size), Role::Dialog, false);
     let layer_id = layer.id();
-    (layer, TransferDialog { layer: layer_id, close: close_id, choose: choose_id, actions })
+    (layer, TransferDialog { layer: layer_id, close: close_id, choose: choose_id, actions, device_actions })
 }
 
 #[cfg(test)]
