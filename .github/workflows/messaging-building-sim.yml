@@ -1,0 +1,49 @@
+name: Akula building messaging model (36 synthetic families)
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/messaging/**'
+      - 'docs/messaging/AK-MSG-SIM-2000.md'
+      - '.github/workflows/messaging-building-sim.yml'
+  push:
+    branches:
+      - experiment/akula-building-sim-36-20261022
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/messaging/**'
+      - '.github/workflows/messaging-building-sim.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-msg-sim-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  building-sim:
+    name: 36 synthetic Akula messaging scenarios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Run fixed-seed building and contact cases
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features messaging-sim-lab building_sim:: -- --nocapture
+      - name: Ensure ordinary Akula Core stays feature-off
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --no-default-features
