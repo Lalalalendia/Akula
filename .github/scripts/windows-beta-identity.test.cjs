@@ -178,3 +178,16 @@ test('CI candidate manifest records actual checkout and hashes after the GUI tes
   assert.doesNotMatch(provenance, /gh release create|Invoke-WebRequest|Start-Process/,
     'manifest must neither distribute a release nor run other executables');
 });
+
+test('Windows updater cannot execute a downloaded setup while signed rollback is HOLD', () => {
+  const apply = read('aquilum-app/native/src/updater/apply.rs');
+  const release = read('aquilum-app/native/src/updater/release.rs');
+  const windowsApply = apply.split('#[cfg(target_os = "windows")]')[1]
+    ?.split('#[cfg(target_os = "macos")]')[0];
+  assert.ok(windowsApply, 'Windows apply gate must exist');
+  assert.match(windowsApply, /Err\("HOLD: Windows Akula updater needs signed transactional install/);
+  assert.doesNotMatch(windowsApply, /ShellExecuteW|std::process::exit|std::fs::write|before_exit\(\)/,
+    'a release-channel mistake must never execute an unapproved Windows installer');
+  assert.match(release, /pub\(super\) const PUBLIC_KEY: &str = ""/);
+  assert.match(release, /pub\(super\) const fn channel_ready\(\) -> bool \{\s*false\s*\}/);
+});
