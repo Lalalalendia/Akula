@@ -26,6 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify scoped B0 trigger policy
+        run: node --test .github/scripts/ci-b0-path-guard.test.cjs
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
