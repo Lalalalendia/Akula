@@ -5,8 +5,8 @@
 #[cfg(windows)]
 use super::windows_store;
 mod contacts;
-pub use contacts::{list_peers, TransportPeerContact};
 use super::{load, IdentityError};
+pub use contacts::{list_peers, TransportPeerContact};
 use zeroize::Zeroizing;
 
 const PEER_RECORD_MAGIC: &[u8; 8] = b"AKPPIN01";

@@ -1,7 +1,7 @@
 //! Read-only OS-backed transport contact enumeration for UI presentation.
 //! Every snapshot is revalidated and fails as a whole if any entry is corrupt.
 //! These are public transport pins, NOT verified Vault memberships or grants.
-use super::{PeerState, IdentityError};
+use super::{IdentityError, PeerState};
 
 /// A display-only credential observation. It must never authorize a transfer.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,10 +13,7 @@ pub struct TransportPeerContact {
 const MAX_PEER_CONTACTS: usize = 32;
 
 #[cfg(windows)]
-fn list_named(
-    prefix: &str,
-    local: &[u8; 32],
-) -> Result<Vec<TransportPeerContact>, IdentityError> {
+fn list_named(prefix: &str, local: &[u8; 32]) -> Result<Vec<TransportPeerContact>, IdentityError> {
     use super::{hex_to_endpoint, status_named};
 
     let names = enumerate_names(prefix)?;
@@ -131,14 +128,17 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn no_plaintext_or_mocked_contact_list_when_store_is_unsupported() {
-        assert!(matches!(list_peers(), Err(IdentityError::UnsupportedPlatform)));
+        assert!(matches!(
+            list_peers(),
+            Err(IdentityError::UnsupportedPlatform)
+        ));
     }
 
     #[cfg(windows)]
     #[test]
     fn credential_enumeration_observes_revoke_and_refuses_malformed_entry() {
-        use super::super::{confirm_named, encode_record, endpoint_hex, revoke_named};
         use super::super::windows_store;
+        use super::super::{confirm_named, encode_record, endpoint_hex, revoke_named};
 
         struct Cleanup(Vec<String>);
         impl Drop for Cleanup {
@@ -174,7 +174,10 @@ mod tests {
             }]
         );
         revoke_named(&contact_target, &local, &remote).unwrap();
-        assert_eq!(list_named(&prefix, &local).unwrap()[0].state, PeerState::Revoked);
+        assert_eq!(
+            list_named(&prefix, &local).unwrap()[0].state,
+            PeerState::Revoked
+        );
 
         // A hostile or damaged entry prevents partial trusted presentation.
         let mut damaged = encode_record(&local, &remote, PeerState::Confirmed);
