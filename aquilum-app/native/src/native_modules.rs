@@ -68,6 +68,10 @@ mod ui;
 mod updater;
 mod window_state;
 mod yandex_credentials;
+#[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+mod s3_pair_session;
+#[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+mod s3_pair_password;
 // Inert coordinator in default builds; no network, auth or Sync on startup.
 #[allow(dead_code)]
 mod yandex_probe_session;
