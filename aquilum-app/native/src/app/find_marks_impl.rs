@@ -12,14 +12,16 @@ impl App {
         let scroll = ids.scroll;
         let body = ids.body;
         if self.find.is_none() {
-            self.find_mark_stamp = None;
-            scroll.edit(root, |mut area| crate::ui::scroll::ScrollArea::set_find_marks(&mut area, Vec::new()));
+            if self.find_mark_stamp.take().is_some() {
+                scroll.edit(root, |mut area| crate::ui::scroll::ScrollArea::set_find_marks(&mut area, Vec::new()));
+            }
             return;
         }
         let Some((viewport_y, editor_y, offset)) = self.scroll_geometry(root) else { return };
         let Some(source) = body.get(root).and_then(|b| b.inner().find_mark_stamp()) else {
-            self.find_mark_stamp = None;
-            scroll.edit(root, |mut area| crate::ui::scroll::ScrollArea::set_find_marks(&mut area, Vec::new()));
+            if self.find_mark_stamp.take().is_some() {
+                scroll.edit(root, |mut area| crate::ui::scroll::ScrollArea::set_find_marks(&mut area, Vec::new()));
+            }
             return;
         };
         let Some(height) = scroll.get(root).map(|area| area.inner().content_height()) else { return };
