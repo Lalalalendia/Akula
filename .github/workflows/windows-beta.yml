@@ -2,6 +2,7 @@
 # Isolation is mandatory: no migration from upstream Freaction/Aquilum.
 name: Akula Windows beta candidate
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
@@ -16,7 +17,7 @@ on:
       - 'aquilum-app/native/packaging/akula-windows.json'
       - 'aquilum-app/native/src/**'
       - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+
   workflow_dispatch:
     inputs:
       ref:
@@ -28,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: akula-windows-beta-${{ github.event.pull_request.number || github.ref }}
+  group: akula-windows-beta-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
