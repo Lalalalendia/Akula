@@ -3,6 +3,8 @@
 
 use std::fmt::{self, Write};
 
+pub mod scene;
+
 /// Жёсткий предел для исследовательского импортёра. Это не песочница ОС.
 pub const MAX_SWF_BYTES: usize = 8 * 1024 * 1024;
 const MAX_ACTIONS: usize = 16_384;
