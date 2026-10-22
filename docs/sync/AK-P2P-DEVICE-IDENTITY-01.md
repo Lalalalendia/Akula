@@ -1,6 +1,6 @@
 # AK-P2P-DEVICE-IDENTITY-01 — real OS-backed Iroh identity
 
-Status: opt-in Core + Native implementation, NOT enabled in release builds. This
+Status: opt-in Core implementation and separate diagnostic CLI; GUI unchanged. This
 is a reusable key-custody seam, not a separate network stack or File Gate permit.
 
 ## Product objective
@@ -24,10 +24,9 @@ regenerate the endpoint key or fall back to plaintext appdata.
   exposed. Secure random or OS store failures refuse, rather than switching keys.
 - with_secret_seed() can construct the existing Iroh SecretKey::from_bytes.
   There is no new network transport or second PKI.
-- Native optional debug commands: --p2p-device-init (explicit enrollment)
-  and --p2p-device-id (read-only public hex key). No secrets printed and no
-  network calls. GUI release binaries suppress the console, so a real first-
-  party pairing UI remains required before shipping this feature.
+- An optional Core CLI binary handles `--init` (explicit enrollment) and
+  `--id` (read-only public key). The ordinary Native GUI has no new module,
+  embedded CLI or transport. First-party pairing UI is still missing.
 - Linux returns UnsupportedPlatform until an OS Secret Service backend is
   correctly integrated; no environment, file or plaintext fallback exists.
 
@@ -37,8 +36,8 @@ regenerate the endpoint key or fall back to plaintext appdata.
    closes its object, reopens it from a *different operating-system process*,
    verifies the public key is identical and rejects a second enrollment.
    The disposable test credential is deleted after the test.
-2. Windows Native under feature must compile and Core strict module Clippy
-   and Rustfmt must pass. Linux build must reject unsupported storage.
+2. Windows optional Core CLI must compile and Core strict module Clippy and
+   Rustfmt must pass. Linux must reject unsupported storage.
 3. Next product gate: user-confirmed peer fingerprint and persistent pin/revoke;
    real QUIC remote_id() revalidation; Staya consent fence; private verified
    Bao stage and File Gate explicit create-new publication; two real installed

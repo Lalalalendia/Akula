@@ -17,14 +17,17 @@ pub mod text;
 pub mod ui_state;
 pub mod web_agent;
 pub mod wikixiv;
+
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
 #[cfg(feature = "server-bootstrap-b0-lab")]
 pub mod server_bootstrap_lab;
+
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b0-openssh-lab"))]
 pub mod server_bootstrap_ssh_lab;
 
 #[cfg(feature = "server-bootstrap-b1a-release-lab")]
 pub mod server_release_lab;
+
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b-custody-lab"))]
 pub mod server_staging_lab;
 
@@ -55,11 +58,8 @@ pub mod server_installer_durable_node;
 
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
-
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
-
-// Windows OS-backed Iroh key identity; not device-pairing authority.
 #[cfg(feature = "p2p-device-identity")]
 pub mod p2p_device_identity;

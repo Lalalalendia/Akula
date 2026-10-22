@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 macro_rules! report {
     ($($arg:tt)*) => {
         $crate::host::report(&format!($($arg)*))
     };
 }
+
 mod a11y;
 mod args;
 mod autostart;
@@ -26,10 +28,9 @@ mod links;
 mod history;
 mod host;
 mod metrics;
-#[cfg(feature = "p2p-device-identity")]
-mod p2p_device_identity_cli;
 #[cfg(feature = "memory-probe")]
 mod memory_probe;
+
 #[cfg(feature = "memory-probe")]
 #[global_allocator]
 static ALLOCATOR: memory_probe::Counting = memory_probe::Counting;
@@ -52,13 +53,16 @@ mod touchpad;
 #[cfg(not(target_os = "windows"))]
 mod touchpad {
     pub struct Touchpad;
+
     impl Touchpad {
         pub fn attach(_: &dyn winit::window::Window) -> Option<Self> {
             None
         }
+
         pub fn active(&self) -> bool {
             false
         }
+
         pub fn update(&self, _: std::time::Instant, _: f64) -> (f32, f32, f32) {
             (0.0, 0.0, 1.0)
         }
@@ -76,10 +80,6 @@ mod workspace;
 pub use args::Args;
 
 fn main() {
-    #[cfg(feature = "p2p-device-identity")]
-    if let Some(code) = p2p_device_identity_cli::dispatch() {
-        std::process::exit(code);
-    }
     #[cfg(target_os = "windows")]
     unsafe {
         #[link(name = "winmm")]
