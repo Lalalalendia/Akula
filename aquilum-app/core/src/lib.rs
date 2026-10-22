@@ -17,9 +17,7 @@ pub mod text;
 pub mod ui_state;
 pub mod web_agent;
 pub mod wikixiv;
-
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
-
 #[cfg(feature = "server-bootstrap-b0-lab")]
 pub mod server_bootstrap_lab;
 
@@ -54,6 +52,8 @@ pub mod server_installer_os_witness_lab;
 
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1c0-fixed-node-lab"))]
 pub mod server_installer_fixed_node_lab;
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1d0-durable-node"))]
+pub mod server_installer_durable_node;
 
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
@@ -61,7 +61,5 @@ pub mod node_catalog_lab;
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
-
-// Explicit receiver save-as-new of independently verified staged bytes only.
 #[cfg(feature = "p2p-inbox-lab")]
 pub mod p2p_inbox_lab;

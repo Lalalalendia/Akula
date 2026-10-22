@@ -29,8 +29,16 @@ jobs:
     timeout-minutes: 10
     outputs:
       mode: ${{ steps.scope.outputs.mode }}
+      perf_core_changed: ${{ steps.scope.outputs.perf_core_changed }}
       b1_shared_compat: ${{ steps.scope.outputs.b1_shared_compat }}
       node_shared_compat: ${{ steps.scope.outputs.node_shared_compat }}
+      shared_core_cargo_risky: ${{ steps.scope.outputs.shared_core_cargo_risky }}
+      shared_core_lib_risky: ${{ steps.scope.outputs.shared_core_lib_risky }}
+      shared_lock_risky: ${{ steps.scope.outputs.shared_lock_risky }}
+      shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
+      shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
+      installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
+      updater_security_required: ${{ steps.scope.outputs.updater_security_required }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -44,6 +52,16 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
+          # Respect the former perf path filter; ordinary CI-only / docs changes never launch benchmarks.
+          if git diff --quiet "$BASE_SHA" HEAD -- \
+            aquilum-app/core/ \
+            .github/workflows/core-perf.yml .github/workflows/core-perf-compare.yml; then
+            echo 'perf_core_changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'perf_core_changed=true' >> "$GITHUB_OUTPUT"
+          fi
           # A shared Cargo or Core boundary still gets both opt-in B1 tests
           # in the mandatory gate, without scheduling two duplicate workflows.
           if git diff --quiet "$BASE_SHA" HEAD -- \
@@ -132,10 +150,10 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true'
 
       - name: Security-test macOS updater TAR parser on Linux too
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.updater_security_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -144,13 +162,18 @@ jobs:
           "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
 
       - name: Test macOS updater transaction with shared installer lock and crash recovery
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.updater_security_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
           printf '#[path = "%s"] mod txn;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/macos_transaction.rs" > "$RUNNER_TEMP/akula_updater_txn_harness.rs"
           rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_updater_txn_harness.rs" -o "$RUNNER_TEMP/akula_updater_txn_tests"
-          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture
+          # This suite exercises shared filesystem custody and subprocess crash recovery.
+          # Serialize fixtures without weakening the independent-fd contention assertion.
+          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture --test-threads=1
+          for attempt in 1 2 3 4 5; do
+            "$RUNNER_TEMP/akula_updater_txn_tests" --exact txn::tests::fresh_user_install_has_one_shared_lock --test-threads=1 --quiet
+          done
 
 
       - name: Restore shared main Rust cache (read-only on PRs)
@@ -164,7 +187,7 @@ jobs:
           save-if: false
 
       - name: Install Linux dependencies
-        if: needs.classify.outputs.mode == 'workspace'
+        if: needs.classify.outputs.mode == 'workspace' || needs.classify.outputs.mode == 'native'
         shell: bash
         run: |
           sudo apt-get update
@@ -188,6 +211,28 @@ jobs:
           set -euo pipefail
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
+
+      - name: Run Native package tests for native-source changes
+        if: needs.classify.outputs.mode == 'native'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # aquilum-native builds and exercises aquilum-core as its dependency.
+          # Skip only independent Core unit tests on unmodified Core sources.
+          cargo test -p aquilum-native --locked -- --skip app::tests::perf::frames::
+
+      # A verified opt-in local package without existing dependency changes
+      # cannot alter the default Native graph. Exercise Core in both feature
+      # modes, plus the existing B1 and Node compatibility acceptance below.
+      - name: Run Core tests in both modes (safe manifest additions)
+        if: needs.classify.outputs.mode == 'manifest'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core
+          cargo test --locked -p aquilum-core --features sync-engine
 
       # Shared Cargo/lock/Core boundary changes retain exact B1a and B1b0
       # security tests under the existing required main gate. Direct source
@@ -395,7 +440,7 @@ jobs:
   native-frames:
     name: Native frame fidelity
     needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.mode == 'workspace'
+    if: github.event_name == 'pull_request' && (needs.classify.outputs.mode == 'workspace' || needs.classify.outputs.mode == 'native')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -427,12 +472,36 @@ jobs:
           cargo test --locked -p aquilum-native --bin aquilum-native -- app::tests::perf::frames::
           printf 'Required frame-fidelity lane: %s seconds\n' "$((SECONDS - start))" >> "$GITHUB_STEP_SUMMARY"
 
+  perf-opt-in:
+    name: Optional Core performance measurements
+    needs: classify
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.classify.outputs.perf_core_changed == 'true' &&
+      (startsWith(github.head_ref, 'perf/') ||
+       startsWith(github.event.pull_request.title, 'perf(') ||
+       startsWith(github.event.pull_request.title, 'perf:') ||
+       contains(github.event.pull_request.labels.*.name, 'perf-ci'))
+    uses: ./.github/workflows/core-perf.yml
+
+  shared-labs:
+    name: Required shared-manifest OS/security route
+    needs: classify
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
+    uses: ./.github/workflows/ci-shared-manifest-labs.yml
+    with:
+      core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
+      owner: ${{ needs.classify.outputs.installed_owner_owned == 'true' }}
+      lib: ${{ needs.classify.outputs.shared_core_lib_risky == 'true' }}
+      lock: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
+      root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
+
   checks:
     # The ONLY status required by Protect main. GitHub cannot report success
     # until every mandatory lane is green. Always run even on upstream failure.
     name: Main PR gate
     if: ${{ always() && github.event_name == 'pull_request' }}
-    needs: [classify, required-tests, native-frames]
+    needs: [classify, required-tests, native-frames, shared-labs]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -443,6 +512,8 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
+          ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail
           echo "Classification: $CLASSIFY_RESULT / $TEST_SCOPE"
@@ -452,13 +523,13 @@ jobs:
             exit 1
           fi
           case "$TEST_SCOPE" in
-            workspace)
+            workspace|native)
               if [ "$FRAMES_RESULT" != success ]; then
                 echo "::error::Native fidelity lane did not pass"
                 exit 1
               fi
               ;;
-            sync|none)
+            sync|none|manifest)
               if [ "$FRAMES_RESULT" != skipped ]; then
                 echo "::error::Unexpected native fidelity state for non-workspace PR"
                 exit 1
@@ -469,6 +540,17 @@ jobs:
               exit 1
               ;;
           esac
+          if [ "$SHARED_RISKY" = true ]; then
+            if [ "$ROUTED_SHARED_RESULT" != success ]; then
+              echo '::error::Required shared-manifest security/OS regressions did not pass'
+              exit 1
+            fi
+          else
+            if [ "$ROUTED_SHARED_RESULT" != skipped ]; then
+              echo '::error::Unexpected shared-manifest routing state'
+              exit 1
+            fi
+          fi
           echo "Required checks passed for $TEST_SCOPE scope" >> "$GITHUB_STEP_SUMMARY"
 
   seed-rust-cache:
@@ -513,3 +595,38 @@ jobs:
         run: |
           echo "Shared Rust cache exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
           echo "Only the main branch can save the shared cache; PRs restore but never upload." >> "$GITHUB_STEP_SUMMARY"
+
+      # Source archives only: no compiled target. Written exclusively in the
+      # existing main/push seed job. PRs only restore for measurement.
+      - name: Probe trusted registry-only cache
+        id: registry-cache-probe
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git
+          key: akula-registry-source-v1-${{ runner.os }}-${{ hashFiles('aquilum-app/Cargo.lock') }}
+          lookup-only: true
+      - name: Fetch locked source dependencies when registry cache is absent
+        if: steps.registry-cache-probe.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fetch --locked --manifest-path aquilum-app/Cargo.toml
+      - name: Save trusted registry-only cache for measurements
+        if: steps.registry-cache-probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git
+          key: akula-registry-source-v1-${{ runner.os }}-${{ hashFiles('aquilum-app/Cargo.lock') }}
+      - name: Registry-only cache observation
+        shell: bash
+        env:
+          REGISTRY_HIT: ${{ steps.registry-cache-probe.outputs.cache-hit }}
+        run: |
+          echo "Trusted registry-only source cache exact hit: ${REGISTRY_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Registry-only archive is seeded only from default-branch push; source dependencies are locked." >> "$GITHUB_STEP_SUMMARY"
