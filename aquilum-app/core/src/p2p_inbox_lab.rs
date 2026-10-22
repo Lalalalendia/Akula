@@ -157,7 +157,6 @@ pub fn save_verified_stage_as_new(
     })
 }
 
-
 /// A separate receiver publication route using Akula's EXISTING Core File Gate.
 /// This is the only path from this P2P lab intended for a managed Akula file.
 /// The expected manifest must come from independently authenticated, approved
@@ -379,10 +378,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app_data = dir.path().join("appdata");
         fs::create_dir(&app_data).unwrap();
-        let core = crate::Core::open(
-            &app_data,
-            std::sync::Arc::new(|_: crate::CoreEvent| {}),
-        );
+        let core = crate::Core::open(&app_data, std::sync::Arc::new(|_: crate::CoreEvent| {}));
         let bytes = b"actual verified stage data";
         let mut stage = opened(dir.path(), bytes);
         let root = *blake3::hash(bytes).as_bytes();
@@ -426,5 +422,4 @@ mod tests {
         assert!(!untouched.exists());
         core.shutdown();
     }
-
 }
