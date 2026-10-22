@@ -11,6 +11,8 @@ mod output;
 // Standalone fixed-tick game rules, without bringing them into Akula Base.
 #[path = "../../native-2d-lab/src/lib.rs"]
 mod game2d;
+#[path = "../../native-tetris-lab/src/lib.rs"]
+mod tetris;
 
 use output::{Area, Canvas};
 use std::cell::Cell;
@@ -28,6 +30,9 @@ const FRAME: Duration = Duration::from_nanos(16_666_667);
 const TICK: Duration = Duration::from_nanos(8_333_333);
 const MAX_STEPS: usize = 8;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode { Breakout, Tetris }
+
 fn p95(samples: &[f64]) -> f64 {
     if samples.is_empty() { return 0.0; }
     let mut sorted = samples.to_vec();
@@ -38,7 +43,9 @@ fn p95(samples: &[f64]) -> f64 {
 struct Lab {
     window: Option<Rc<dyn Window>>,
     output: Option<output::Output>,
+    mode: Mode,
     world: game2d::World,
+    tetris_world: tetris::Game,
     controls: game2d::Input,
     pending_start: bool,
     auto_frames: Option<u64>,
@@ -58,12 +65,14 @@ struct Lab {
 }
 
 impl Lab {
-    fn new(auto_frames: Option<u64>, completed: Rc<Cell<bool>>, failed: Rc<Cell<bool>>) -> Self {
+    fn new(mode: Mode, auto_frames: Option<u64>, completed: Rc<Cell<bool>>, failed: Rc<Cell<bool>>) -> Self {
         let now = Instant::now();
         Self {
             window: None,
             output: None,
+            mode,
             world: game2d::World::new(),
+            tetris_world: tetris::Game::new(2026),
             controls: game2d::Input::default(),
             pending_start: auto_frames.is_some(),
             auto_frames,
@@ -85,15 +94,16 @@ impl Lab {
 
     fn report_and_exit(&mut self, events: &dyn ActiveEventLoop) {
         let seconds = self.started.elapsed().as_secs_f64().max(0.001);
+        let (ticks, score, phase, hash) = match self.mode {
+            Mode::Breakout => (self.world.ticks, self.world.score, format!("{:?}", self.world.phase), self.world.fingerprint()),
+            Mode::Tetris => (self.tetris_world.ticks, self.tetris_world.score, format!("{:?}", self.tetris_world.phase), self.tetris_world.fingerprint()),
+        };
         println!(
-            "AKULA_GAME2D_WINDOW presented={} ticks={} score={} phase={:?} hash={:016x} \
+            "AKULA_GAME2D_WINDOW game={:?} presented={} ticks={} score={} phase={} hash={:016x} \
              actual_fps={:.2} sim_p95_ms={:.4} raster_p95_ms={:.4} \
              present_p95_ms={:.4} dropped_ticks={} output_present={} source=AkulaOutput",
-            self.presented,
-            self.world.ticks,
-            self.world.score,
-            self.world.phase,
-            self.world.fingerprint(),
+            self.mode,
+            self.presented, ticks, score, phase, hash,
             self.presented as f64 / seconds,
             p95(&self.simulation),
             p95(&self.raster),
@@ -121,9 +131,14 @@ impl Lab {
         self.accumulator += delta;
         let mut count = 0;
         while self.accumulator >= TICK && count < MAX_STEPS {
-            let mut input = self.controls;
-            input.start = std::mem::take(&mut self.pending_start);
-            self.world.step(input);
+            match self.mode {
+                Mode::Breakout => {
+                    let mut input = self.controls;
+                    input.start = std::mem::take(&mut self.pending_start);
+                    self.world.step(input);
+                }
+                Mode::Tetris => self.tetris_world.tick(),
+            }
             self.accumulator -= TICK;
             count += 1;
         }
@@ -149,16 +164,20 @@ impl Lab {
             self.failed(events, "unsupported canvas dimensions");
             return;
         }
-        let mut result = None;
+        let mut success = None;
         let begin = Instant::now();
-        let world = &self.world;
         output.with_target(&mut |target| {
-            result = Some(game2d::raster(
-                world, target.pixels, usize::from(target.width), size.width, size.height
-            ));
+            success = Some(match self.mode {
+                Mode::Breakout => game2d::raster(
+                    &self.world, target.pixels, usize::from(target.width), size.width, size.height
+                ).is_ok(),
+                Mode::Tetris => tetris::raster(
+                    &self.tetris_world, target.pixels, usize::from(target.width), size.width, size.height
+                ).is_ok(),
+            });
         });
-        if !matches!(result, Some(Ok(()))) {
-            self.failed(events, format!("canvas raster/map failed: {result:?}"));
+        if success != Some(true) {
+            self.failed(events, format!("canvas raster/map failed: {success:?}"));
             return;
         }
         if self.raster.len() < 60_000 {
@@ -182,8 +201,12 @@ impl Lab {
 
 impl ApplicationHandler for Lab {
     fn can_create_surfaces(&mut self, events: &dyn ActiveEventLoop) {
+        let title = match self.mode {
+            Mode::Breakout => "Akula 2D: Breakout (Arrows/A-D, Space, Esc)",
+            Mode::Tetris => "Akula 2D: Falling Blocks (Arrows, Z/X, Space, Enter, Esc)",
+        };
         let attributes = WindowAttributes::default()
-            .with_title("Akula Native 2D LAB (Arrows/A-D, Space, Esc)")
+            .with_title(title)
             .with_surface_size(PhysicalSize::new(960, 540));
         let window: Rc<dyn Window> = match events.create_window(attributes) {
             Ok(w) => Rc::from(w),
@@ -239,14 +262,33 @@ impl ApplicationHandler for Lab {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     let down = event.state == ElementState::Pressed;
-                    match code {
-                        KeyCode::ArrowLeft | KeyCode::KeyA => self.controls.left = down,
-                        KeyCode::ArrowRight | KeyCode::KeyD => self.controls.right = down,
-                        KeyCode::Space | KeyCode::Enter if down && !event.repeat => {
-                            self.pending_start = true;
+                    if code == KeyCode::Escape && down {
+                        self.report_and_exit(events);
+                        return;
+                    }
+                    match self.mode {
+                        Mode::Breakout => match code {
+                            KeyCode::ArrowLeft | KeyCode::KeyA => self.controls.left = down,
+                            KeyCode::ArrowRight | KeyCode::KeyD => self.controls.right = down,
+                            KeyCode::Space | KeyCode::Enter if down && !event.repeat =>
+                                self.pending_start = true,
+                            _ => {}
+                        },
+                        Mode::Tetris if down => {
+                            let action = match code {
+                                KeyCode::ArrowLeft | KeyCode::KeyA => Some(tetris::Action::Left),
+                                KeyCode::ArrowRight | KeyCode::KeyD => Some(tetris::Action::Right),
+                                KeyCode::ArrowDown | KeyCode::KeyS => Some(tetris::Action::SoftDrop),
+                                KeyCode::ArrowUp | KeyCode::KeyW | KeyCode::KeyX =>
+                                    Some(tetris::Action::RotateClockwise),
+                                KeyCode::KeyZ => Some(tetris::Action::RotateCounterClockwise),
+                                KeyCode::Space if !event.repeat => Some(tetris::Action::HardDrop),
+                                KeyCode::Enter if !event.repeat => Some(tetris::Action::Restart),
+                                _ => None,
+                            };
+                            if let Some(action) = action { self.tetris_world.press(action); }
                         }
-                        KeyCode::Escape if down => self.report_and_exit(events),
-                        _ => {}
+                        Mode::Tetris => {}
                     }
                 }
             }
@@ -255,28 +297,39 @@ impl ApplicationHandler for Lab {
     }
 }
 
-fn frames_arg() -> Result<Option<u64>, String> {
+fn parse_args() -> Result<(Mode, Option<u64>), String> {
     let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        None => Ok(None),
-        Some("--frames") => {
-            let s = args.next().ok_or("missing --frames value")?;
-            let n = s.parse::<u64>().map_err(|_| "bad --frames value")?;
-            if !(1..=1200).contains(&n) || args.next().is_some() {
-                return Err("--frames must be in 1..=1200".into());
+    let mut mode = Mode::Breakout;
+    let mut frames = None;
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--game" => {
+                mode = match args.next().as_deref() {
+                    Some("breakout") => Mode::Breakout,
+                    Some("tetris") => Mode::Tetris,
+                    _ => return Err("--game must be breakout or tetris".into()),
+                };
             }
-            Ok(Some(n))
+            "--frames" => {
+                let value = args.next().ok_or("missing --frames value")?;
+                let n = value.parse::<u64>().map_err(|_| "bad --frames value")?;
+                if !(1..=1200).contains(&n) || frames.is_some() {
+                    return Err("--frames must be in 1..=1200 and specified once".into());
+                }
+                frames = Some(n);
+            }
+            _ => return Err("use: --game breakout|tetris [--frames 240]".into()),
         }
-        _ => Err("use: game2d_window_lab [--frames 120]".into()),
     }
+    Ok((mode, frames))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let frames = frames_arg()?;
+    let (mode, frames) = parse_args()?;
     let completed = Rc::new(Cell::new(false));
     let failed = Rc::new(Cell::new(false));
     let mut event_loop = EventLoop::new()?;
-    event_loop.run_app_on_demand(Lab::new(frames, completed.clone(), failed.clone()))?;
+    event_loop.run_app_on_demand(Lab::new(mode, frames, completed.clone(), failed.clone()))?;
     if failed.get() || frames.is_some() && !completed.get() {
         return Err("Akula 2D native window witness incomplete or failed".into());
     }
