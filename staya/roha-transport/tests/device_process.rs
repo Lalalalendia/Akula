@@ -3,14 +3,14 @@
 use akula_roha_transport::{AllowedPeers, StayaTransport};
 use iroh::{EndpointAddr, SecretKey};
 use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
     env, fs,
     net::SocketAddr,
     path::{Path, PathBuf},
     process::{Child, Command},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
