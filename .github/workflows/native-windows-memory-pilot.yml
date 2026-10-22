@@ -1,0 +1,85 @@
+name: Akula M1 Windows native memory pilot (diagnostic only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/benchmarks/native_windows_memory_pilot.py'
+      - '.github/workflows/native-windows-memory-pilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-memory-pilot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-m1:
+    name: Win32 GUI memory B0/B1 12 clean processes
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify Windows API instrumentation and exact source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Expected Windows runner' }
+          git rev-parse HEAD
+          rustc --version
+          python --version
+          python -m py_compile scripts/benchmarks/native_windows_memory_pilot.py scripts/benchmarks/native_mipmap_window_ab.py scripts/benchmarks/native_scroll_window_ab.py
+          if ($LASTEXITCODE -ne 0) { throw 'Pilot Python syntax failed' }
+          python -c "import sys,os;sys.path.insert(0,'scripts/benchmarks');from native_windows_memory_pilot import sample; x=sample(os.getpid()); assert x['private_bytes']>0 and x['working_set_bytes']>0 and x['created_ticks']>0"
+          if ($LASTEXITCODE -ne 0) { throw 'Win32 process memory API not available' }
+      - name: Build product-mode Windows release executable without developer instrumentation
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Installed-feature binary build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'No Windows Akula release executable' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Collect native Win32 B0/B1 fresh and reused profile memory checkpoints
+        shell: pwsh
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'windows-memory-pilot'
+          $env:AKULA_PROBE_SOURCE_HEAD = (git rev-parse HEAD).Trim()
+          python scripts/benchmarks/native_windows_memory_pilot.py --binary $binary --out $out --trials 3 --seconds 32 --interval-ms 200
+          if ($LASTEXITCODE -ne 0) { throw 'Native Win32 M1/B0-B1 pilot failed; do not claim memory baseline' }
+          $report = Join-Path $out 'summary.md'
+          if (!(Test-Path -LiteralPath $report)) { throw 'Pilot summary missing' }
+          Get-Content -LiteralPath $report | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive all raw PID and Win32 evidence (no user files)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-m1-win32-memory-pilot-${{ github.sha }}
+          path: |
+            windows-memory-pilot/environment.json
+            windows-memory-pilot/results.json
+            windows-memory-pilot/summary.md
+            windows-memory-pilot/trial-*/**/samples.csv
+            windows-memory-pilot/trial-*/**/witness.json
+            windows-memory-pilot/trial-*/**/process.log
+          if-no-files-found: warn
+          retention-days: 14
