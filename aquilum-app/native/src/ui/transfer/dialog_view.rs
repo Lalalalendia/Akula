@@ -14,17 +14,7 @@ pub fn dialog(
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
-    let choose = NewWidget::new(
-        TextButton::new(
-            if choosing {
-                t("transfer.picking")
-            } else {
-                t("transfer.addFile")
-            },
-            Variant::Primary,
-        )
-        .with_icon(icons::UPLOAD),
-    );
+    let choose = dialog_button::render_choose(choosing);
     let choose_id = choose.id();
     let (queue, actions) = queue_view::render(rows);
     let (info, device_actions) = devices::render(devices, error);

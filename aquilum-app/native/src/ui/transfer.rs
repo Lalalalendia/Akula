@@ -54,6 +54,7 @@ pub struct TransferDialog {
     pub peer_controls: Option<PeerControls>,
 }
 
+mod dialog_button;
 mod dialog_view;
 pub use dialog_view::dialog;
 
