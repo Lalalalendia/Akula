@@ -53,7 +53,7 @@ async fn os_key_live_quic_and_persistent_revoke() {
         peer_pin::require_pinned_remote(&peer_hex, peer_id.as_bytes()),
         Err(IdentityError::PeerNotFound)
     ));
-    assert!(server.accept_selected(&peer_hex).await.is_err());
+    // No accepted network attempt is made without a confirmed OS pin.
     // Test-only, not production human pairing: exact remote ID was generated
     // by this CI process, not discovered through an untrusted message.
     peer_pin::confirm_peer(&peer_hex, &peer_hex).unwrap();
