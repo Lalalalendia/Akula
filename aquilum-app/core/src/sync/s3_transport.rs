@@ -13,7 +13,9 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 mod multipart;
 mod explicit_credentials;
 mod pair_upload;
+mod pair_receive;
 pub use explicit_credentials::S3PairAccess;
+pub use pair_receive::S3PairReceiveReport;
 pub use pair_upload::S3PairRemotePublication;
 mod manifest;
 mod principal;
@@ -47,7 +49,6 @@ mod coord_chain;
 pub use coord_chain::{S3CoordOfflineChainError, S3CoordOfflineChainPreview};
 mod coord_selective_packs;
 pub use coord_selective_packs::S3CoordSelectivePacksPreview;
-// Immutable V1-manifest-ID keyed advisory locator discovery; never S3 LIST.
 mod coord_locator;
 // V2 immutable packs/letter/locator prepublication; never mutable CAS.
 mod coord_immutable_publish;
