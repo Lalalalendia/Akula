@@ -117,6 +117,19 @@ impl AwsS3ProbeClient {
 }
 
 #[cfg(test)]
+impl AwsS3ProbeClient {
+    #[cfg(test)]
+    pub(crate) async fn test_ensure_minio_bucket(&self) -> Result<(), S3TransportError> {
+        match self.client.create_bucket().bucket(&self.bucket).send().await {
+            Ok(_) => Ok(()),
+            Err(error) if error.as_service_error()
+                .and_then(|service| service.code()) == Some("BucketAlreadyOwnedByYou") => Ok(()),
+            Err(_) => Err(S3TransportError::Unavailable),
+        }
+    }
+}
+ 
+#[cfg(test)]
 mod tests {
     use super::*;
 
