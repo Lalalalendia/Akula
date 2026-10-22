@@ -30,7 +30,6 @@ impl App {
             return self.keep(dialog, None, effect, root);
         }
 
-
         if let Some(picked) = action.downcast_ref::<Picked>() {
             let Some(menu) = menu else {
                 self.popup = Some(Popup::Settings { dialog, menu: None });
@@ -101,6 +100,7 @@ impl App {
         let closing = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
             || (id == dialog.close && action.downcast_ref::<Pressed>().is_some());
         if closing {
+            self.yandex_probe.settings_closed();
             crate::ui::dialog::close(root, dialog.layer);
             return Outcome::default();
         }

@@ -27,7 +27,6 @@ mod widths;
 mod workspaces;
 #[cfg(test)]
 mod tests;
-
 use std::collections::HashMap;
 use crate::ui::editor::TextEditor;
 use std::path::{Path, PathBuf};
@@ -138,6 +137,7 @@ pub struct App {
     panel_rx: Receiver<Listing>,
     panel_body: Option<Body>,
     retention_done: Arc<std::sync::atomic::AtomicBool>,
+    yandex_probe: crate::yandex_probe_session::ProbeSession,
     controls: Option<(WidgetId, Handle<WindowButton>)>,
     window: Size,
     resizing: Option<(crate::interface::Side, f64, f64)>,
