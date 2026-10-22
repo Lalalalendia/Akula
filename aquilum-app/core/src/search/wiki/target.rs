@@ -102,8 +102,12 @@ pub fn relative_target(root: &Path, path: &Path, path_style: bool) -> String {
 }
 
 pub fn select_candidate(root: &Path, source: &Path, paths: &[String]) -> Option<PathBuf> {
-    let borrowed = paths.iter().map(String::as_str).collect::<Vec<_>>();
-    pick_candidate(root, source, &borrowed).map(PathBuf::from)
+    let parent = source.parent();
+    paths
+        .iter()
+        .map(String::as_str)
+        .min_by_key(|&path| (candidate_rank(root, parent, path), path))
+        .map(PathBuf::from)
 }
 
 pub fn pick_candidate<'a>(
@@ -112,11 +116,10 @@ pub fn pick_candidate<'a>(
     paths: &[&'a str],
 ) -> Option<&'a str> {
     let parent = source.parent();
-    paths.iter().copied().min_by(|left, right| {
-        candidate_rank(root, parent, left)
-            .cmp(&candidate_rank(root, parent, right))
-            .then_with(|| left.cmp(right))
-    })
+    paths
+        .iter()
+        .copied()
+        .min_by_key(|&path| (candidate_rank(root, parent, path), path))
 }
 
 fn candidate_rank(root: &Path, parent: Option<&Path>, value: &str) -> (bool, usize) {
@@ -159,6 +162,31 @@ mod tests {
         assert_eq!(target_key("Заметка#Заголовок"), ("заметка".to_owned(), "name"));
         assert_eq!(target_key(r"Папка\Заметка.MD#h|x"), ("папка/заметка".to_owned(), "path"));
         assert_eq!(target_key("#Заголовок"), (String::new(), "name"));
+    }
+
+    #[test]
+    fn candidate_selection_keeps_parent_and_lexical_tiebreakers() {
+        use super::{pick_candidate, select_candidate};
+        use std::path::Path;
+
+        let root = Path::new("vault");
+        let source = root.join("notes/Source.md");
+        let nearby = root.join("notes/Note.md");
+        let remote = root.join("other/Note.md");
+        let alternatives = vec![
+            remote.to_string_lossy().into_owned(),
+            nearby.to_string_lossy().into_owned(),
+        ];
+        assert_eq!(
+            select_candidate(root, &source, &alternatives),
+            Some(nearby)
+        );
+
+        let ties = ["vault/notes/Beta.md", "vault/notes/Alpha.md"];
+        assert_eq!(
+            pick_candidate(root, &source, &ties),
+            Some("vault/notes/Alpha.md")
+        );
     }
 
     #[test]
