@@ -1,4 +1,4 @@
-name: One-shot Zig Rust RGBA research
+name: One-shot Zig Rust RGBA codegen research
 
 on:
   push:
@@ -22,20 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
-      - name: Run pinned Zig and Rust RGBA A/B
+      - name: Compare generic and native compiled RGBA kernels
         shell: bash
-        run: bash scripts/benchmarks/zig-rgba-ab/run.sh
-      - name: Save measurements and diagnostics
+        run: bash scripts/benchmarks/zig-rgba-ab/run-v2.sh
+      - name: Store byte parity timing and disassembly
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zig-rgba-one-shot
-          if-no-files-found: error
+          name: zig-rgba-codegen-study
+          if-no-files-found: warn
           include-hidden-files: true
           path: |
-            .rgba-comparison/results.json
-            .rgba-comparison/environment.txt
-            .rgba-comparison/*-build.txt
-            .rgba-comparison/library-sizes.txt
-            .rgba-comparison/bench.log
-            .rgba-comparison/rss.jsonl
+            .rgba-comparison-v2/**
