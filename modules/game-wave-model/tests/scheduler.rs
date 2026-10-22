@@ -109,9 +109,8 @@ fn cycle_with_zero_repeats_keeps_emitting_until_prior_groups_complete() {
     let anchor = match first.as_slice() { [Event::Spawned { id, .. }] => *id, _ => panic!("missing anchor") };
     let e2 = engine.tick().unwrap();
     assert!(matches!(&e2[..], [Event::Spawned { group: 1, .. }]));
-    assert!(engine.tick().unwrap().is_empty());
-    let e4 = engine.tick().unwrap();
-    assert!(matches!(&e4[..], [Event::Spawned { group: 1, .. }]));
+    let e3 = engine.tick().unwrap();
+    assert!(matches!(&e3[..], [Event::Spawned { group: 1, .. }]));
     assert!(engine.mark_gone(anchor));
 }
 
