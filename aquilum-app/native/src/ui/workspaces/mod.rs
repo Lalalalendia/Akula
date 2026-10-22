@@ -78,4 +78,3 @@ pub fn dialog(workspaces: &[(uuid::Uuid, String)], current: Option<&Path>, error
 fn card_size(room: Size) -> Size {
     Size::new(room.width.min(size::WORKSPACE_DIALOG_WIDTH), room.height.min(size::WORKSPACE_DIALOG_MAX_HEIGHT))
 }
-
