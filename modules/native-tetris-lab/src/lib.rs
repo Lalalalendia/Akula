@@ -414,7 +414,11 @@ mod tests {
     #[test]
     fn each_bag_has_seven_different_pieces() {
         let mut game = Game::new(45);
-        for _ in 0..3 {
+        let mut first = vec![game.active.kind, game.next];
+        first.extend((0..5).map(|_| game.draw_bag()));
+        first.sort();
+        assert_eq!(first, vec![0, 1, 2, 3, 4, 5, 6]);
+        for _ in 0..2 {
             let mut bag = (0..7).map(|_| game.draw_bag()).collect::<Vec<_>>();
             bag.sort();
             assert_eq!(bag, vec![0, 1, 2, 3, 4, 5, 6]);
