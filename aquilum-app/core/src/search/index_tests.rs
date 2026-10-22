@@ -231,6 +231,17 @@ fn a_quoted_phrase_requires_adjacent_words_in_order() {
 }
 
 #[test]
+fn a_quoted_phrase_jumps_to_the_phrase_not_an_earlier_separate_word() {
+    let body = "# Заголовок\\nКвантовая идея начинается здесь.\\n\\n## Раздел\\nНужна квантовая физика.\\n";
+    let (_guard, index) = indexed(&[("Документ.md", body)]);
+    let result = &search(&index, "\"квантовая физика\"")[0];
+    let at = body.find("квантовая физика").unwrap();
+    assert_eq!(result.match_offset, body[..at].encode_utf16().count());
+    assert_eq!(result.heading.as_deref(), Some("Раздел"));
+    assert!(result.snippet.contains("квантовая физика"));
+}
+
+#[test]
 fn a_quoted_single_word_is_not_a_prefix_search() {
     let (_guard, index) = indexed(&[
         ("Один.md", "прин"),
