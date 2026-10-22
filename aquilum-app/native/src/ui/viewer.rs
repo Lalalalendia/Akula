@@ -1,3 +1,5 @@
+mod page;
+pub use page::ImagePage;
 use masonry::accesskit::{Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
@@ -11,7 +13,6 @@ use masonry::peniko::ImageBrush;
 
 use super::menu::box_shadow;
 use super::theme;
-
 const MARGIN: f64 = 32.0;
 const RADIUS: f64 = 8.0;
 
@@ -31,7 +32,6 @@ impl Viewer {
 }
 
 impl Widget for Viewer {
-
     fn on_anim_frame(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, interval: u64) {
         if self.intro.advance(interval) {
             ctx.request_anim_frame();
