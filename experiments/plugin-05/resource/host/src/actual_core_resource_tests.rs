@@ -5,8 +5,9 @@ use super::*;
 use aquilum_core::{
     app_core::{Core, CoreEvent},
     plugins::{
-        Capability, GrantScope, HostContext, HostPluginVaultReader, NoteId,
-        PermissionBroker, PluginInstanceHandle, PluginManifest, ScopedNoteHandle, VaultId,
+        Capability, GrantScope, HostContext, HostPluginVaultReader, NoteId, NoteResource,
+        PermissionBroker, PluginInstanceHandle, PluginManifest, Resource as PermissionResource,
+        ScopedNoteHandle, VaultId,
     },
 };
 use std::{fs, path::PathBuf, sync::Arc};
@@ -63,6 +64,23 @@ impl Host for RealResourceHost {
         if self.bounded_read(self.instance, &self.selected_handle) < 0 {
             return Ok(None);
         }
+        // The host-selected indexed path is NOT supplied by the guest.
+        // Capture an immutable revision-bound lease in the owned WIT handle.
+        let Ok(target) = NoteResource::from_host_index(
+            self.vault,
+            self.selected_handle.host_note_id(),
+            "active.md",
+        ) else {
+            return Ok(None);
+        };
+        let Ok(lease) = self.broker.authorize(
+            self.instance,
+            self.context(),
+            Capability::NotesRead,
+            &PermissionResource::Note(target),
+        ) else {
+            return Ok(None);
+        };
         let entry = BoundNote {
             instance: self.instance_generation,
             vault: self.vault_generation,
@@ -71,6 +89,7 @@ impl Host for RealResourceHost {
                 instance: self.instance,
                 vault: self.vault,
                 note: self.selected_handle.clone(),
+                lease,
             }),
         };
         Ok(Some(self.table.push(entry)?))
@@ -94,7 +113,18 @@ impl HostNote for RealResourceHost {
         if binding.instance != self.instance || binding.vault != self.vault {
             return Ok(-1);
         }
-        Ok(self.bounded_read(binding.instance, &binding.note))
+        // This is the ORIGINAL authorization revision, not a fresh grant.
+        // Revocation invalidates old handles even after a re-grant, without
+        // any synthetic generation update in the host.
+        if self.broker.revalidate_lease(&binding.lease, self.context()).is_err() {
+            return Ok(-1);
+        }
+        let value = self.bounded_read(binding.instance, &binding.note);
+        // Recheck after the pinned read, before releasing even the first byte.
+        if self.broker.revalidate_lease(&binding.lease, self.context()).is_err() {
+            return Ok(-1);
+        }
+        Ok(value)
     }
 
     fn drop(&mut self, note: Resource<BoundNote>) -> wasmtime::Result<()> {
@@ -187,12 +217,14 @@ fn real_broker_controls_owned_wit_resource_and_revocation() -> LabResult<()> {
     f.broker.revoke_all_for_host(f.instance)?;
     assert_eq!(guest.call_read_held(&mut store)?, -1);
 
-    // A HOST-owned lifecycle generation must turn even a subsequently
-    // reapproved old resource into a stale handle. The lab increments the
-    // generation explicitly; production wiring must observe real broker revokes.
-    store.data_mut().handle_epoch += 1;
+    // No synthetic epoch increment: the real broker's stored lease revision
+    // must make the OLD guest resource permanently stale after re-grant.
     f.broker.grant_host_approved(f.instance, Capability::NotesRead, GrantScope::CurrentNote)?;
-    assert_eq!(guest.call_read_held(&mut store)?, -1);
+    assert_eq!(
+        guest.call_read_held(&mut store)?,
+        -1,
+        "re-grant must never resurrect the prior broker lease",
+    );
     guest.call_release(&mut store)?;
     assert_eq!(store.data().drops, 1);
     assert!(guest.call_acquire(&mut store)?);

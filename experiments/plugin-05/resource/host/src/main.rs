@@ -32,6 +32,8 @@ struct CoreBoundNote {
     instance: aquilum_core::plugins::PluginInstanceHandle,
     vault: aquilum_core::plugins::VaultId,
     note: aquilum_core::plugins::ScopedNoteHandle,
+    // The broker's original revision must survive all later revoke/regrant.
+    lease: aquilum_core::plugins::AuthorizationLease,
 }
 
 struct HostState {
