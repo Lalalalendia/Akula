@@ -157,3 +157,60 @@ fn animations_switch_turns_motion_off_and_on() {
     h.click(center.x, center.y);
     assert!(h.config().ui.animations && crate::ui::motion::on());
 }
+
+#[test]
+fn plugin_alpha_first_user_scenario_installs_counts_disables_and_survives_restart() {
+    let mut h = Harness::new();
+    let note = h.vault.path().join("a.md");
+    let original = std::fs::read(&note).unwrap();
+    h.app.open(&mut h.root, note.clone());
+    h.app.open_settings(&mut h.root);
+    h.settle();
+    h.open_section(Section::Plugins);
+
+    let install = h.binding("установка Word Count", |b| {
+        matches!(b, Binding::Button(Action::PluginDemoInstall))
+    });
+    h.act(install, crate::ui::widgets::Pressed);
+    assert!(h.config().plugin_alpha.installed && h.config().plugin_alpha.enabled);
+    let run = h.binding("одноразовое разрешение чтения", |b| {
+        matches!(b, Binding::Button(Action::PluginDemoRun))
+    });
+    h.act(run, crate::ui::widgets::Pressed);
+    assert_eq!(h.config().plugin_alpha.last_words, Some(1));
+    assert!(h.config().plugin_alpha.last_error.is_none());
+    assert_eq!(std::fs::read(&note).unwrap(), original);
+
+    let disable = h.binding("отключение локального расширения", |b| {
+        matches!(b, Binding::Button(Action::PluginDemoDisable))
+    });
+    h.act(disable, crate::ui::widgets::Pressed);
+    assert!(!h.config().plugin_alpha.enabled);
+    assert_eq!(h.config().plugin_alpha.last_words, None);
+    assert!(h.app.plugin_demo_run().is_err(), "disabled sample must not read");
+
+    h.escape();
+    let mut h = h.restarted(1.0);
+    assert!(h.config().plugin_alpha.installed);
+    assert!(!h.config().plugin_alpha.enabled);
+    h.app.open(&mut h.root, h.vault.path().join("a.md"));
+    h.app.open_settings(&mut h.root);
+    h.settle();
+    h.open_section(Section::Plugins);
+    let enable = h.binding("повторное включение", |b| {
+        matches!(b, Binding::Button(Action::PluginDemoEnable))
+    });
+    h.act(enable, crate::ui::widgets::Pressed);
+    let run = h.binding("подсчёт после перезапуска", |b| {
+        matches!(b, Binding::Button(Action::PluginDemoRun))
+    });
+    h.act(run, crate::ui::widgets::Pressed);
+    assert_eq!(h.config().plugin_alpha.last_words, Some(1));
+    let remove = h.binding("удаление образца", |b| {
+        matches!(b, Binding::Button(Action::PluginDemoRemove))
+    });
+    h.act(remove, crate::ui::widgets::Pressed);
+    assert!(!h.config().plugin_alpha.installed);
+    assert!(!h.config().plugin_alpha.enabled);
+    assert_eq!(h.config().plugin_alpha.last_words, None);
+}
