@@ -70,3 +70,33 @@ test('ordinary Core PRs schedule no independent perf workflows; opt-in routes re
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
     'performance measurements remain optional, never weaken Main PR gate');
 });
+
+test('beta packaging workflows do not build all three OS installers for any Native source edit',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const specs=[
+    ['linux-beta.yml','scripts/linux-beta-smoke.sh','aquilum-app/native/packaging/akula-linux-nfpm.yaml'],
+    ['windows-beta.yml','scripts/test-windows-beta.ps1','aquilum-app/native/packaging/akula-windows.json'],
+    ['appimage-beta.yml','scripts/appimage-beta-smoke.sh','aquilum-app/native/packaging/akula-linux.json'],
+  ];
+  for(const [filename,ownedScript,ownedManifest] of specs){
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',filename),'utf8');
+    const policy=parse(body);
+    assert.equal(policy.t,'paths',filename+' remains owned-path PR workflow');
+    assert.equal(matches(policy,'aquilum-app/native/src/app/tests/graph.rs'),false,filename);
+    assert.equal(matches(policy,'aquilum-app/native/src/updater/macos_transaction.rs'),false,filename);
+    assert.equal(matches(policy,'aquilum-app/native/src/main.rs'),false,filename);
+    for(const owned of [
+      '.github/workflows/'+filename,
+      'aquilum-app/native/Cargo.toml',ownedScript,ownedManifest,
+    ])assert.equal(matches(policy,owned),true,filename+' retains '+owned);
+    assert.match(body,/^  workflow_call:\s*$/m,filename+' still required via shared manifest');
+    assert.match(body,/^  workflow_dispatch:\s*$/m,filename+' supports manual release candidate');
+    assert.match(body,/^  pull_request:\s*$/m,filename+' watches packaging');
+    assert.match(body,/^  [a-z-]+:\n    /m,filename+' retains job');
+  }
+  const main=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(main,/Native frame fidelity/);
+  assert.match(main,/Run Native package tests for native-source changes/);
+  assert.match(main,/workspace\|native\)\n\s+if \[ "\$FRAMES_RESULT" != success \]/,
+    'a Native-only source PR is still blocked on full Native rendering tests');
+});
