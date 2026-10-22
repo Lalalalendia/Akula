@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
+      - 'aquilum-app/core/tests/aws_credentials_regression.rs'
       - 'aquilum-app/core/src/sync/yandex_readonly_probe.rs'
       - 'aquilum-app/core/src/sync/profile_binding.rs'
       - 'aquilum-app/core/src/sync/host_admission.rs'
@@ -90,6 +91,8 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features sync-s3 s3_transport::tests -- --skip live_minio_
+          # Exact opt-in AWS provider test: compiled SSO + isolated credential_process.
+          cargo test --locked -p aquilum-core --features sync-s3 --test aws_credentials_regression -- --test-threads=1
       - name: Validate Yandex read-only probe admission and error taxonomy
         shell: bash
         working-directory: aquilum-app
