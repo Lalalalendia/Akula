@@ -18,7 +18,8 @@ function changed(base,head='HEAD',cwd=process.cwd()) {
     throw Error('Invalid --base or --head');
   // NUL delimiters preserve arbitrary Git filenames. File deletions, renames
   // and type changes must all be considered for CI scope.
-  const raw=execFileSync('git',['diff','--name-only','-z','--find-renames',
+  // A move away from updater/ must still run its security gate: include source and destination.
+  const raw=execFileSync('git',['diff','--name-only','-z','--no-renames',
     base,head,'--'],{encoding:'utf8',maxBuffer:32*1024*1024,cwd});
   return raw.split('\0').filter(Boolean);
 }
@@ -41,6 +42,29 @@ function requiredMode(paths,base,head='HEAD'){
   return safeManifestOnly(paths,route)?'manifest':'workspace';
 }
 
+
+// Standalone macOS updater acceptance is independent of arbitrary Core/Native
+// edits. Keep every source and installer rule that can affect its trust boundary.
+const UPDATER_SOURCE_PREFIX='aquilum-app/native/src/updater/';
+const UPDATER_OWNERS=new Set([
+  'aquilum-app/native/Cargo.toml',
+  'scripts/install.sh',
+  'scripts/uninstall.sh',
+  'scripts/verify-macos-release.sh',
+  'scripts/test-install-scripts.sh',
+  'scripts/test-macos-release-verifier.sh',
+  '.github/workflows/macos-smoke.yml',
+  '.github/workflows/macos-updater-integration.yml',
+  '.github/workflows/app-checks.yml',
+  '.github/scripts/ci-rust-scope.cjs',
+]);
+function updaterSecurityAffected(paths){
+  // Invalid discovery must never turn security tests off.
+  if(!Array.isArray(paths))return true;
+  return paths.some(p=>typeof p!=='string' || !p || p.startsWith(UPDATER_SOURCE_PREFIX) ||
+    UPDATER_OWNERS.has(p));
+}
+
 function main(argv) {
   const args=Object.fromEntries(argv.map(part=>{
     const match=part.match(/^--(base|head)=([^\s]+)$/);
@@ -50,10 +74,10 @@ function main(argv) {
   if(!args.base) throw Error('--base is required');
   const paths=changed(args.base,args.head||'HEAD');
   const mode=requiredMode(paths,args.base,args.head||'HEAD');
-  process.stdout.write('mode='+mode+'\n');
+  process.stdout.write('mode='+mode+'\nupdater_security_required='+updaterSecurityAffected(paths)+'\n');
 }
 if(require.main===module) {
   try {main(process.argv.slice(2));}
   catch(err){console.error(err.message);process.exitCode=1;}
 }
-module.exports={classify,changed,safeManifestOnly,requiredMode,main};
+module.exports={classify,changed,safeManifestOnly,requiredMode,updaterSecurityAffected,main};

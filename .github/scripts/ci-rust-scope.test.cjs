@@ -5,7 +5,7 @@ const cp=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {classify,changed,safeManifestOnly}=require('./ci-rust-scope.cjs');
+const {classify,changed,safeManifestOnly,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
 
 test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
@@ -246,7 +246,7 @@ test('real git comment-only Cargo+lock change enters focused Core mode; risky ch
   const git=(...args)=>cp.execFileSync('git',args,{cwd:dir,encoding:'utf8'}).trim();
   const mode=base=>cp.execFileSync(process.execPath,
     [path.join(__dirname,'ci-rust-scope.cjs'),'--base='+base,'--head=HEAD'],
-    {cwd:dir,encoding:'utf8'}).trim();
+    {cwd:dir,encoding:'utf8'}).trim().split(/\r?\n/).find(line=>line.startsWith('mode='));
   const nl=String.fromCharCode(10);
   try{
     git('init','-q');git('config','user.name','CI');git('config','user.email','ci@example.invalid');
@@ -280,17 +280,69 @@ test('real git comment-only Cargo+lock change enters focused Core mode; risky ch
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
-test('additive manifest-only changes never rerun unrelated macOS updater security suites',()=>{
+test('updater security acceptance triggers for owned sources, installer scripts and policy edits',()=>{
+  const owned=[
+    'aquilum-app/native/src/updater/macos_transaction.rs',
+    'aquilum-app/native/src/updater/tar.rs',
+    'aquilum-app/native/src/updater/release/signed_candidate.rs',
+    'aquilum-app/native/Cargo.toml',
+    'scripts/install.sh','scripts/uninstall.sh',
+    'scripts/verify-macos-release.sh','scripts/test-install-scripts.sh',
+    'scripts/test-macos-release-verifier.sh',
+    '.github/workflows/macos-smoke.yml',
+    '.github/workflows/macos-updater-integration.yml',
+    '.github/workflows/app-checks.yml',
+    '.github/scripts/ci-rust-scope.cjs',
+  ];
+  for(const p of owned)assert.equal(updaterSecurityAffected([p]),true,p);
+  for(const unrelated of [
+    'aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
+    'aquilum-app/core/src/sync/guarded_note_write.rs',
+    'aquilum-app/native/src/app/tests/graph.rs',
+    'aquilum-app/native/src/main.rs',
+    '.github/scripts/ci-file-ratchet.cjs',
+  ]) assert.equal(updaterSecurityAffected([unrelated]),false,unrelated);
+  assert.equal(updaterSecurityAffected(['aquilum-app/native/src/main.rs',owned[0]]),true);
+  assert.equal(updaterSecurityAffected([]),false);
+  assert.equal(updaterSecurityAffected(null),true,'unknown file list fails closed');
+  assert.equal(updaterSecurityAffected(['']),true,'malformed path fails closed');
+});
+test('rename away from updater retains original path for fail-closed security coverage',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'akula-updater-rename-'));
+  const git=(...args)=>cp.execFileSync('git',args,{cwd:dir,encoding:'utf8'}).trim();
+  try{
+    git('init','-q');git('config','user.name','CI');
+    git('config','user.email','ci@example.invalid');
+    const before=path.join(dir,'aquilum-app/native/src/updater/macos_transaction.rs');
+    const after=path.join(dir,'aquilum-app/native/src/legacy/other.rs');
+    fs.mkdirSync(path.dirname(before),{recursive:true});
+    fs.writeFileSync(before,'pub fn proof() {}');
+    git('add','.');git('commit','-qm','before');
+    const base=git('rev-parse','HEAD');
+    fs.mkdirSync(path.dirname(after),{recursive:true});
+    fs.renameSync(before,after);
+    git('add','-A');git('commit','-qm','rename');
+    const paths=changed(base,'HEAD',dir);
+    assert.ok(paths.includes('aquilum-app/native/src/updater/macos_transaction.rs'));
+    assert.ok(paths.includes('aquilum-app/native/src/legacy/other.rs'));
+    assert.equal(updaterSecurityAffected(paths),true);
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('required macOS security suites use exact ownership and still test lock behavior',()=>{
   const yaml=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(yaml,/updater_security_required: \$\{\{ steps\.scope\.outputs\.updater_security_required \}\}/);
+  assert.match(yaml,/updater_security_required == 'true'/);
   for(const name of ['Security-test macOS updater TAR parser on Linux too',
       'Test macOS updater transaction with shared installer lock and crash recovery']){
     const marker='      - name: '+name+'\n';
     const i=yaml.indexOf(marker);
-    assert.ok(i>=0,name+' stays a protected runnable step');
-    const section=yaml.slice(i,i+350);
-    assert.match(section,/if: needs\.classify\.outputs\.mode != 'none' && needs\.classify\.outputs\.mode != 'manifest'/,
-      name+' runs for sync/workspace, skips additive manifest');
+    assert.ok(i>=0,name+' must remain an executable required test');
+    const section=yaml.slice(i,i+270);
+    assert.match(section,/if: needs\.classify\.outputs\.updater_security_required == 'true'/,
+      name+' executes for owned files, not unrelated workspace changes');
   }
+  assert.match(yaml,/akula_updater_txn_tests" --nocapture --test-threads=1/);
+  assert.match(yaml,/txn::tests::fresh_user_install_has_one_shared_lock/);
   assert.match(yaml,/Run Core tests in both modes \(safe manifest additions\)/);
   assert.match(yaml,/--features sync-engine/);
   assert.match(yaml,/B1a\/B1b0\/B1b1 release and approval compatibility/);

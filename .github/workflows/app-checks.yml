@@ -38,6 +38,7 @@ jobs:
       shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
       shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
       installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
+      updater_security_required: ${{ steps.scope.outputs.updater_security_required }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -149,10 +150,10 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_mac_tar_parity.py' -v
 
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.classify.outputs.mode != 'none'
+        if: needs.classify.outputs.mode != 'none' || needs.classify.outputs.updater_security_required == 'true'
 
       - name: Security-test macOS updater TAR parser on Linux too
-        if: needs.classify.outputs.mode != 'none' && needs.classify.outputs.mode != 'manifest'
+        if: needs.classify.outputs.updater_security_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -161,13 +162,18 @@ jobs:
           "$RUNNER_TEMP/akula_tar_security_tests" --nocapture
 
       - name: Test macOS updater transaction with shared installer lock and crash recovery
-        if: needs.classify.outputs.mode != 'none' && needs.classify.outputs.mode != 'manifest'
+        if: needs.classify.outputs.updater_security_required == 'true'
         shell: bash
         run: |
           set -euo pipefail
           printf '#[path = "%s"] mod txn;\n' "$GITHUB_WORKSPACE/aquilum-app/native/src/updater/macos_transaction.rs" > "$RUNNER_TEMP/akula_updater_txn_harness.rs"
           rustc --edition=2024 --test -D warnings "$RUNNER_TEMP/akula_updater_txn_harness.rs" -o "$RUNNER_TEMP/akula_updater_txn_tests"
-          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture
+          # This suite exercises shared filesystem custody and subprocess crash recovery.
+          # Serialize fixtures without weakening the independent-fd contention assertion.
+          "$RUNNER_TEMP/akula_updater_txn_tests" --nocapture --test-threads=1
+          for attempt in 1 2 3 4 5; do
+            "$RUNNER_TEMP/akula_updater_txn_tests" --exact txn::tests::fresh_user_install_has_one_shared_lock --test-threads=1 --quiet
+          done
 
 
       - name: Restore shared main Rust cache (read-only on PRs)
