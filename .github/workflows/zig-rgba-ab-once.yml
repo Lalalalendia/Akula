@@ -30,7 +30,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zig-rgba-one-shot
-          if-no-files-found: warn
+          if-no-files-found: error
+          include-hidden-files: true
           path: |
             .rgba-comparison/results.json
             .rgba-comparison/environment.txt

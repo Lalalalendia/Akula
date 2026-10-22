@@ -62,7 +62,7 @@ def invoke(fn, src_buffer, dst_buffer, w, h):
     return fn(src_buffer, dst_buffer, w, h)
 
 def prepare(src, w, h):
-    inp = (ctypes.c_uint8 * max(1, len(src))).from_buffer_copy(src)
+    inp = (ctypes.c_uint8 * max(1, len(src))).from_buffer_copy(src if src else b"\0")
     n = ((w + 1) // 2) * ((h + 1) // 2) * 4 if w and h and (w, h) != (1, 1) else 0
     out = (ctypes.c_uint8 * max(1, n))()
     return inp, out, n
