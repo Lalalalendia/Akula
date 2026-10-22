@@ -48,7 +48,7 @@ fn killed_objects_allow_wave_to_finish_after_transition_delay() {
     };
     assert!(engine.mark_gone(id));
     assert!(!engine.mark_gone(id));
-    for _ in 0..149 {
+    for _ in 0..150 {
         assert!(engine.tick().unwrap().is_empty());
     }
     let events = engine.tick().unwrap();
