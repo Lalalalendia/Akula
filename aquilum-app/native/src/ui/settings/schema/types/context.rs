@@ -15,6 +15,10 @@ pub struct Context {
     pub yandex_keys: Option<bool>,
     pub yandex_probe: crate::yandex_probe_session::ProbeView,
     pub yandex_probe_busy: bool,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    pub s3_pair_status: crate::s3_pair_session::PairStatus,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    pub s3_pair_busy: bool,
     pub yandex_notice: Option<String>,
     pub copied: Option<usize>,
     pub trash_page: usize,
