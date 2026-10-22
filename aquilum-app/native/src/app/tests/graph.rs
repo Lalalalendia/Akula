@@ -1,5 +1,5 @@
 use super::*;
-
+// CI-NATIVE-SMOKE: test-routing proof only; never merge this comment.
 #[test]
 fn graph_tab_loads_opens_notes_and_unloads() {
     let mut h = Harness::new();
