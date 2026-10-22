@@ -1,0 +1,28 @@
+name: Game2D native lab
+on:
+  pull_request:
+    paths:
+      - 'modules/game2d-lab/**'
+      - '.github/workflows/game2d-native-lab.yml'
+  workflow_dispatch:
+jobs:
+  game2d:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format
+        run: cargo fmt --manifest-path modules/game2d-lab/Cargo.toml --check
+      - name: Unit tests
+        run: cargo test --manifest-path modules/game2d-lab/Cargo.toml --locked
+      - name: Release simulation and raster probe
+        run: cargo run --release --manifest-path modules/game2d-lab/Cargo.toml --locked -- 1200 game2d-last-frame.ppm
+      - name: Upload raster witness
+        uses: actions/upload-artifact@v4
+        with:
+          name: game2d-${{ matrix.os }}-frame
+          path: game2d-last-frame.ppm
