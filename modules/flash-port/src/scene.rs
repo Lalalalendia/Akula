@@ -417,9 +417,7 @@ pub fn parse_scene(bytes: &[u8]) -> Result<Scene, PortError> {
             }
             4 | 26 => {
                 parse_placement(body, kind == 26, &mut display)?;
-                let id = display.values().last().map(|_| 0_u16);
-                let _ = id; // avoid exposing internal instance state
-                if display.len() > MAX_INSTANCES {
+                        if display.len() > MAX_INSTANCES {
                     return Err(PortError::Unsupported("too many placed objects"));
                 }
             }
@@ -698,8 +696,8 @@ mod tests {
         let mut broken = scene_swf();
         // First tag is SetBackgroundColor. Replace it with an unsupported DoAction.
         let header_len = 8 + rect(13, 0, 3000, 0, 2000).len() + 4;
-        broken[header_len] = (12 << 6) as u8;
-        broken[header_len + 1] = (12 << 6 >> 8) as u8;
+        let action_header = (12_u16 << 6) | 3;
+        broken[header_len..header_len + 2].copy_from_slice(&action_header.to_le_bytes());
         assert!(matches!(parse_scene(&broken), Err(PortError::Unsupported(_))));
     }
 
