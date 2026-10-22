@@ -35,7 +35,11 @@ pub struct Color {
 }
 
 impl Color {
-    const WHITE: Self = Self { r: 255, g: 255, b: 255 };
+    const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,7 +53,14 @@ pub struct Matrix {
 }
 
 impl Matrix {
-    pub const IDENTITY: Self = Self { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0, ty: 0 };
+    pub const IDENTITY: Self = Self {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        tx: 0,
+        ty: 0,
+    };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,7 +121,12 @@ impl<'a> Bits<'a> {
     }
 
     fn unsigned(&mut self, width: usize) -> Result<u32, PortError> {
-        if width > 32 || self.bit.checked_add(width).is_none_or(|end| end > self.input.len() * 8) {
+        if width > 32
+            || self
+                .bit
+                .checked_add(width)
+                .is_none_or(|end| end > self.input.len() * 8)
+        {
             return Err(PortError::Malformed("truncated bit field"));
         }
         let mut value = 0_u32;
@@ -188,19 +204,29 @@ impl<'a> Bits<'a> {
 }
 
 fn u16_at(data: &[u8], at: usize) -> Result<u16, PortError> {
-    let pair = data.get(at..at + 2).ok_or(PortError::Malformed("truncated u16"))?;
+    let pair = data
+        .get(at..at + 2)
+        .ok_or(PortError::Malformed("truncated u16"))?;
     Ok(u16::from_le_bytes([pair[0], pair[1]]))
 }
 
 fn u32_at(data: &[u8], at: usize) -> Result<u32, PortError> {
-    let quad = data.get(at..at + 4).ok_or(PortError::Malformed("truncated u32"))?;
+    let quad = data
+        .get(at..at + 4)
+        .ok_or(PortError::Malformed("truncated u32"))?;
     Ok(u32::from_le_bytes([quad[0], quad[1], quad[2], quad[3]]))
 }
 
 fn next_point(point: Point, dx: i32, dy: i32) -> Result<Point, PortError> {
     Ok(Point {
-        x: point.x.checked_add(dx).ok_or(PortError::Malformed("shape x overflow"))?,
-        y: point.y.checked_add(dy).ok_or(PortError::Malformed("shape y overflow"))?,
+        x: point
+            .x
+            .checked_add(dx)
+            .ok_or(PortError::Malformed("shape x overflow"))?,
+        y: point
+            .y
+            .checked_add(dy)
+            .ok_or(PortError::Malformed("shape y overflow"))?,
     })
 }
 
@@ -222,13 +248,21 @@ fn read_shape(body: &[u8]) -> Result<Shape, PortError> {
         if reader.u8()? != 0 {
             return Err(PortError::Unsupported("gradient or bitmap fill"));
         }
-        fills.push(Color { r: reader.u8()?, g: reader.u8()?, b: reader.u8()? });
+        fills.push(Color {
+            r: reader.u8()?,
+            g: reader.u8()?,
+            b: reader.u8()?,
+        });
     }
     let nline = reader.u8()? as usize;
     let mut lines = Vec::with_capacity(nline);
     for _ in 0..nline {
         let width = reader.u16()?;
-        let color = Color { r: reader.u8()?, g: reader.u8()?, b: reader.u8()? };
+        let color = Color {
+            r: reader.u8()?,
+            g: reader.u8()?,
+            b: reader.u8()?,
+        };
         lines.push(LineStyle { width, color });
     }
     let num_fill_bits = reader.unsigned(4)? as usize;
@@ -257,7 +291,12 @@ fn read_shape(body: &[u8]) -> Result<Shape, PortError> {
                 (Some(control), end)
             };
             edges.push(Edge {
-                from: position, control, to: end, fill_left: left, fill_right: right, line,
+                from: position,
+                control,
+                to: end,
+                fill_left: left,
+                fill_right: right,
+                line,
             });
             position = end;
         } else {
@@ -273,7 +312,10 @@ fn read_shape(body: &[u8]) -> Result<Shape, PortError> {
             }
             if flags & 0x01 != 0 {
                 let n = reader.unsigned(5)? as usize;
-                position = Point { x: reader.signed(n)?, y: reader.signed(n)? };
+                position = Point {
+                    x: reader.signed(n)?,
+                    y: reader.signed(n)?,
+                };
             }
             if flags & 0x02 != 0 {
                 left = reader.unsigned(num_fill_bits)? as u16;
@@ -293,27 +335,45 @@ fn read_shape(body: &[u8]) -> Result<Shape, PortError> {
         }
     }
     if !ended {
-        return Err(PortError::Malformed("shape lacks EndShapeRecord or has too many edges"));
+        return Err(PortError::Malformed(
+            "shape lacks EndShapeRecord or has too many edges",
+        ));
     }
     reader.align();
     if reader.pos() != body.len() - 2 {
         return Err(PortError::Malformed("unexpected bytes after shape"));
     }
-    Ok(Shape { id, bounds, fills, lines, edges })
+    Ok(Shape {
+        id,
+        bounds,
+        fills,
+        lines,
+        edges,
+    })
 }
 
-fn parse_placement(body: &[u8], is_v2: bool, display: &mut BTreeMap<u16, Instance>) -> Result<(), PortError> {
+fn parse_placement(
+    body: &[u8],
+    is_v2: bool,
+    display: &mut BTreeMap<u16, Instance>,
+) -> Result<(), PortError> {
     if is_v2 {
-        let flags = *body.first().ok_or(PortError::Malformed("short PlaceObject2"))?;
+        let flags = *body
+            .first()
+            .ok_or(PortError::Malformed("short PlaceObject2"))?;
         if flags & !0x07 != 0 {
-            return Err(PortError::Unsupported("PlaceObject2 extra flags (name, color, clip, ratio or actions)"));
+            return Err(PortError::Unsupported(
+                "PlaceObject2 extra flags (name, color, clip, ratio or actions)",
+            ));
         }
         let depth = u16_at(body, 1)?;
         let is_move = flags & 0x01 != 0;
         let has_character = flags & 0x02 != 0;
         let has_matrix = flags & 0x04 != 0;
         if !has_character && !is_move {
-            return Err(PortError::Malformed("PlaceObject2 has no character or move"));
+            return Err(PortError::Malformed(
+                "PlaceObject2 has no character or move",
+            ));
         }
         let mut offset = 3;
         let character_id = if has_character {
@@ -321,7 +381,10 @@ fn parse_placement(body: &[u8], is_v2: bool, display: &mut BTreeMap<u16, Instanc
             offset += 2;
             id
         } else {
-            display.get(&depth).ok_or(PortError::Malformed("modifying absent depth"))?.character_id
+            display
+                .get(&depth)
+                .ok_or(PortError::Malformed("modifying absent depth"))?
+                .character_id
         };
         let matrix = if has_matrix {
             let mut b = Bits::new(&body[offset..]);
@@ -329,7 +392,10 @@ fn parse_placement(body: &[u8], is_v2: bool, display: &mut BTreeMap<u16, Instanc
             offset += b.pos();
             matrix
         } else if is_move {
-            display.get(&depth).ok_or(PortError::Malformed("moving absent depth"))?.matrix
+            display
+                .get(&depth)
+                .ok_or(PortError::Malformed("moving absent depth"))?
+                .matrix
         } else {
             Matrix::IDENTITY
         };
@@ -339,7 +405,14 @@ fn parse_placement(body: &[u8], is_v2: bool, display: &mut BTreeMap<u16, Instanc
         if offset != body.len() {
             return Err(PortError::Malformed("unparsed PlaceObject2 tail"));
         }
-        display.insert(depth, Instance { character_id, depth, matrix });
+        display.insert(
+            depth,
+            Instance {
+                character_id,
+                depth,
+                matrix,
+            },
+        );
     } else {
         let character_id = u16_at(body, 0)?;
         let depth = u16_at(body, 2)?;
@@ -348,7 +421,14 @@ fn parse_placement(body: &[u8], is_v2: bool, display: &mut BTreeMap<u16, Instanc
         if b.pos() + 4 != body.len() {
             return Err(PortError::Unsupported("PlaceObject color transform"));
         }
-        display.insert(depth, Instance { character_id, depth, matrix });
+        display.insert(
+            depth,
+            Instance {
+                character_id,
+                depth,
+                matrix,
+            },
+        );
     }
     Ok(())
 }
@@ -360,7 +440,9 @@ pub fn parse_scene(bytes: &[u8]) -> Result<Scene, PortError> {
         return Err(PortError::Malformed("invalid or oversized SWF"));
     }
     if &bytes[..3] != b"FWS" || bytes[3] != 4 {
-        return Err(PortError::Unsupported("scene importer accepts only uncompressed SWF4"));
+        return Err(PortError::Unsupported(
+            "scene importer accepts only uncompressed SWF4",
+        ));
     }
     if u32_at(bytes, 4)? as usize != bytes.len() {
         return Err(PortError::Malformed("declared size does not match input"));
@@ -389,8 +471,12 @@ pub fn parse_scene(bytes: &[u8]) -> Result<Scene, PortError> {
             len = u32_at(bytes, pos)? as usize;
             pos += 4;
         }
-        let end = pos.checked_add(len).ok_or(PortError::Malformed("tag offset overflow"))?;
-        let body = bytes.get(pos..end).ok_or(PortError::Malformed("truncated scene tag"))?;
+        let end = pos
+            .checked_add(len)
+            .ok_or(PortError::Malformed("tag offset overflow"))?;
+        let body = bytes
+            .get(pos..end)
+            .ok_or(PortError::Malformed("truncated scene tag"))?;
         pos = end;
         match kind {
             0 => {
@@ -404,7 +490,10 @@ pub fn parse_scene(bytes: &[u8]) -> Result<Scene, PortError> {
                 if len != 0 || frames.len() >= declared_frames {
                     return Err(PortError::Malformed("invalid ShowFrame"));
                 }
-                frames.push(Frame { background, instances: display.values().cloned().collect() });
+                frames.push(Frame {
+                    background,
+                    instances: display.values().cloned().collect(),
+                });
             }
             2 => {
                 if shapes.len() >= MAX_SHAPES {
@@ -417,7 +506,7 @@ pub fn parse_scene(bytes: &[u8]) -> Result<Scene, PortError> {
             }
             4 | 26 => {
                 parse_placement(body, kind == 26, &mut display)?;
-                        if display.len() > MAX_INSTANCES {
+                if display.len() > MAX_INSTANCES {
                     return Err(PortError::Unsupported("too many placed objects"));
                 }
             }
@@ -441,23 +530,40 @@ pub fn parse_scene(bytes: &[u8]) -> Result<Scene, PortError> {
                 if body.len() != 3 {
                     return Err(PortError::Malformed("invalid background color"));
                 }
-                background = Color { r: body[0], g: body[1], b: body[2] };
+                background = Color {
+                    r: body[0],
+                    g: body[1],
+                    b: body[2],
+                };
             }
-            12 => return Err(PortError::Unsupported("scene ActionScript must be linked to Rust codegen")),
+            12 => {
+                return Err(PortError::Unsupported(
+                    "scene ActionScript must be linked to Rust codegen",
+                ));
+            }
             _ => return Err(PortError::UnsupportedTag(kind)),
         }
     }
     if !found_end || frames.len() != declared_frames {
-        return Err(PortError::Malformed("missing End or incorrect number of frames"));
+        return Err(PortError::Malformed(
+            "missing End or incorrect number of frames",
+        ));
     }
     for frame in &frames {
         for instance in &frame.instances {
             if !shapes.contains_key(&instance.character_id) {
-                return Err(PortError::Malformed("placed character has no shape definition"));
+                return Err(PortError::Malformed(
+                    "placed character has no shape definition",
+                ));
             }
         }
     }
-    Ok(Scene { stage, frame_rate, shapes, frames })
+    Ok(Scene {
+        stage,
+        frame_rate,
+        shapes,
+        frames,
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -474,7 +580,10 @@ fn color_hex(c: Color) -> String {
 /// Контрольный статический SVG конкретного кадра. Не является игровым
 /// проигрывателем; нужен для сопоставления геометрии перед Vello.
 pub fn emit_svg_frame(scene: &Scene, frame_index: usize) -> Result<String, PortError> {
-    let frame = scene.frames.get(frame_index).ok_or(PortError::Malformed("frame out of range"))?;
+    let frame = scene
+        .frames
+        .get(frame_index)
+        .ok_or(PortError::Malformed("frame out of range"))?;
     let stage = scene.stage;
     let width = stage.xmax - stage.xmin;
     let height = stage.ymax - stage.ymin;
@@ -485,26 +594,48 @@ pub fn emit_svg_frame(scene: &Scene, frame_index: usize) -> Result<String, PortE
     writeln!(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\">",
         f64::from(width) / 20.0, f64::from(height) / 20.0,
         stage.xmin, stage.ymin, width, height).expect("write String");
-    writeln!(svg, "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
-        stage.xmin, stage.ymin, width, height, color_hex(frame.background)).expect("write String");
+    writeln!(
+        svg,
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
+        stage.xmin,
+        stage.ymin,
+        width,
+        height,
+        color_hex(frame.background)
+    )
+    .expect("write String");
     for instance in &frame.instances {
-        let shape = scene.shapes.get(&instance.character_id)
+        let shape = scene
+            .shapes
+            .get(&instance.character_id)
             .ok_or(PortError::Malformed("missing shape for instance"))?;
         if !shape.lines.is_empty() {
             return Err(PortError::Unsupported("SVG line styles pending"));
         }
         let m = instance.matrix;
-        writeln!(svg, "<g data-depth=\"{}\" transform=\"matrix({} {} {} {} {} {})\">",
-            instance.depth, m.a, m.b, m.c, m.d, m.tx, m.ty).expect("write String");
+        writeln!(
+            svg,
+            "<g data-depth=\"{}\" transform=\"matrix({} {} {} {} {} {})\">",
+            instance.depth, m.a, m.b, m.c, m.d, m.tx, m.ty
+        )
+        .expect("write String");
         for (index, fill) in shape.fills.iter().enumerate() {
             let id = (index + 1) as u16;
             let mut pending = Vec::new();
             for edge in &shape.edges {
                 if edge.fill_left == id {
-                    pending.push(DirectedEdge { from: edge.to, control: edge.control, to: edge.from });
+                    pending.push(DirectedEdge {
+                        from: edge.to,
+                        control: edge.control,
+                        to: edge.from,
+                    });
                 }
                 if edge.fill_right == id {
-                    pending.push(DirectedEdge { from: edge.from, control: edge.control, to: edge.to });
+                    pending.push(DirectedEdge {
+                        from: edge.from,
+                        control: edge.control,
+                        to: edge.to,
+                    });
                 }
             }
             while !pending.is_empty() {
@@ -517,8 +648,12 @@ pub fn emit_svg_frame(scene: &Scene, frame_index: usize) -> Result<String, PortE
                     };
                     let edge = pending.remove(next);
                     if let Some(control) = edge.control {
-                        write!(path, " Q {} {} {} {}", control.x, control.y, edge.to.x, edge.to.y)
-                            .expect("write String");
+                        write!(
+                            path,
+                            " Q {} {} {} {}",
+                            control.x, control.y, edge.to.x, edge.to.y
+                        )
+                        .expect("write String");
                     } else {
                         write!(path, " L {} {}", edge.to.x, edge.to.y).expect("write String");
                     }
@@ -551,7 +686,10 @@ mod tests {
 
     impl BitsOut {
         fn new() -> Self {
-            Self { data: Vec::new(), len: 0 }
+            Self {
+                data: Vec::new(),
+                len: 0,
+            }
         }
 
         fn push(&mut self, bits: usize, value: i32) {
@@ -689,7 +827,10 @@ mod tests {
     fn malformed_or_unsupported_scene_fails_closed() {
         let mut broken = scene_swf();
         broken[0] = b'C';
-        assert!(matches!(parse_scene(&broken), Err(PortError::Unsupported(_))));
+        assert!(matches!(
+            parse_scene(&broken),
+            Err(PortError::Unsupported(_))
+        ));
         let mut broken = scene_swf();
         broken.pop();
         assert!(matches!(parse_scene(&broken), Err(PortError::Malformed(_))));
@@ -698,7 +839,10 @@ mod tests {
         let header_len = 8 + rect(13, 0, 3000, 0, 2000).len() + 4;
         let action_header = (12_u16 << 6) | 3;
         broken[header_len..header_len + 2].copy_from_slice(&action_header.to_le_bytes());
-        assert!(matches!(parse_scene(&broken), Err(PortError::Unsupported(_))));
+        assert!(matches!(
+            parse_scene(&broken),
+            Err(PortError::Unsupported(_))
+        ));
     }
 
     #[test]
