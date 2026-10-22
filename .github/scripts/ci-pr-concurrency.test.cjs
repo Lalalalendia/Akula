@@ -22,10 +22,23 @@ test('reject cross-workflow, cross-PR and missing cancellation protection',()=>{
     assert.match(policyErrors(good.replace(group,replacement),'lab.yml').join(','),/group must isolate/);
   }
   for(const replacement of ['  cancel-in-progress: true','  cancel-in-progress: false', '  cancel-in-progress: $'+'{{ github.event_name == "push" }}']){
-    assert.match(policyErrors(good.replace(cancel,replacement),'lab.yml').join(','),/pull_request only/);
+    assert.match(policyErrors(good.replace(cancel,replacement),'lab.yml').join(','),/PR triggers only/);
   }
   assert.match(policyErrors(good.replace('concurrency:\n'+group+'\n'+cancel,''],'lab.yml').join(','),/missing workflow-level/);
   assert.match(policyErrors(good.replace(cancel,cancel+'\n  queue: max'),'lab.yml').join(','),/queue: max/);
+});
+
+test('pull_request_target requires its own cancellation condition',()=>{
+  const targeted=good.replace('  pull_request:', '  pull_request_target:');
+  assert.ok(prTrigger(targeted));
+  assert.match(policyErrors(targeted,'target.yml').join(','),/PR triggers only/);
+  const targetCancel="  cancel-in-progress: $"+ "{{ github.event_name == 'pull_request_target' }}";
+  assert.deepEqual(policyErrors(targeted.replace(cancel,targetCancel),'target.yml'),[]);
+});
+
+test('comments cannot masquerade as an Actions expression',()=>{
+  const bad=good.replace(group, '  group: shared # github.workflow github.event.pull_request.number github.ref');
+  assert.match(policyErrors(bad,'comment.yml').join(','),/group must isolate/);
 });
 
 test('manual or reusable workflows do not require PR cancellation',()=>{
@@ -48,12 +61,15 @@ test('new PR workflows are guarded, and previously protected edited ones cannot 
     write('added.yml',good.replace(cancel,'  cancel-in-progress: true'));
     git('add','.');git('commit','-qm','bad new workflow');
     assert.deepEqual(changedWorkflows(base,'HEAD',cwd),[{status:'A',path:'.github/workflows/added.yml'}]);
-    assert.match(audit(base,'HEAD',cwd).errors.join(','),/pull_request only/);
+    assert.match(audit(base,'HEAD',cwd).errors.join(','),/PR triggers only/);
     write('added.yml',good); git('add','.');git('commit','-qm','fix new workflow');
     assert.deepEqual(audit(base,'HEAD',cwd).errors,[]);
     write('old.yml',good.replace('concurrency:\n'+group+'\n'+cancel+'\n',''));
     git('add','.');git('commit','-qm','remove old protection');
     assert.match(audit(base,'HEAD',cwd).errors.join(','),/removed existing PR concurrency/);
+    write('old.yml',good.replace(cancel,'  cancel-in-progress: false'));
+    git('add','.');git('commit','-qm','disable existing cancellation');
+    assert.match(audit(base,'HEAD',cwd).errors.join(','),/removed existing PR cancellation/);
   } finally {fs.rmSync(cwd,{recursive:true,force:true});}
 });
 
