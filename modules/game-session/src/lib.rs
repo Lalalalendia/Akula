@@ -5,6 +5,8 @@
 //! Room IDs and epochs must be issued and persisted by the future room owner.
 //! This crate performs no I/O, opens no sockets, and has no file or Akula access.
 
+pub mod transport;
+pub mod wire;
 pub const ROWS: usize = 6;
 pub const COLUMNS: usize = 7;
 pub type Board = [[Option<Player>; COLUMNS]; ROWS];
