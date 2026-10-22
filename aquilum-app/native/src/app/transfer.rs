@@ -20,6 +20,8 @@ const MAX_DEVICE_ROWS: usize = 32;
 mod model;
 #[cfg(feature = "p2p-device-ui")]
 mod local_identity;
+#[cfg(feature = "p2p-device-ui")]
+mod peer_pair;
 
 /// A display-only identity observation. The first-party owner registry still
 /// needs to supply a verified snapshot. No production path populates this
@@ -48,6 +50,8 @@ pub(super) struct TransferState {
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
+    #[cfg(feature = "p2p-device-ui")]
+    pub(super) peer_pair: peer_pair::PeerUi,
 }
 
 impl App {
@@ -65,9 +69,15 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
+        let peer_view = {
+            #[cfg(feature = "p2p-device-ui")]
+            { Some(&self.transfer.peer_pair.view) }
+            #[cfg(not(feature = "p2p-device-ui"))]
+            { None }
+        };
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
+            self.transfer.choosing, self.transfer.error.as_deref(), identity_view, peer_view,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
@@ -90,6 +100,10 @@ impl App {
         }
         #[cfg(feature = "p2p-device-ui")]
         if self.transfer.local_identity.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "p2p-device-ui")]
+        if self.transfer.peer_pair.poll() {
             changed = true;
         }
         if changed {
@@ -148,6 +162,14 @@ impl App {
                     *command, Arc::clone(&self.workspace.wake),
                 );
                 refresh = true;
+            }
+        }
+        #[cfg(feature = "p2p-device-ui")]
+        if !refresh {
+            if let Some(controls) = &dialog.peer_controls {
+                refresh = self.transfer.peer_pair.handle(
+                    controls, id, action, Arc::clone(&self.workspace.wake),
+                );
             }
         }
         self.popup = Some(Popup::Transfers(dialog));
