@@ -30,6 +30,7 @@ pub enum Error {
     Conflict,
     Expired,
     Missing,
+    MailboxFull,
 }
 impl From<rusqlite::Error> for Error {
     fn from(value: rusqlite::Error) -> Self {
@@ -91,7 +92,6 @@ pub fn verify_receipt(
     })
 }
 
-/// The same real signature verifier can drive CORE-01A's pure state projection.
 pub struct W4Verifier<'a, K: TrustedRecipientKeys> {
     pub keys: &'a K,
 }
@@ -149,9 +149,7 @@ impl W4Outbox {
         Ok(Self { db })
     }
 
-    /// Preconditions: caller already validated the encrypted WOW W3 envelope,
-    /// recipient/epoch authorization and the source of the virtual/real time.
-    /// This adapter validates length and BLAKE3 only; it CANNOT detect plaintext.
+    /// Caller validates W3, permissions and time; this only bounds and hashes ciphertext.
     pub fn enqueue(&mut self, d: Descriptor, packet: &[u8], now: u64) -> Result<Insert, Error> {
         if d.id == [0; 16]
             || d.policy_epoch == 0
@@ -238,8 +236,7 @@ impl W4Outbox {
         Ok(Some(ciphertext))
     }
 
-    /// A relay ACK CANNOT call this final acceptance method. Exact W4 signed
-    /// recipient receipt and current Akula trusted signing-key mapping required.
+    /// Only a recipient-signed W4 receipt and current key mapping permit final ACK.
     pub fn accept_receipt(
         &mut self,
         raw: &[u8],
@@ -306,6 +303,9 @@ impl W4Outbox {
 
 #[cfg(feature = "messaging-key-ledger-lab")]
 pub mod key_ledger;
+
+#[cfg(feature = "messaging-w4-inbox-lab")]
+pub mod inbox;
 
 #[cfg(test)]
 mod tests;

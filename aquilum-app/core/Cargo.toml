@@ -15,6 +15,9 @@ messaging-core-lab = []
 messaging-w4-lab = ["messaging-core-lab"]
 # Opt-in durable device-to-W4 receipt signer registry.
 messaging-key-ledger-lab = ["messaging-w4-lab"]
+# Durable W4 SQLite inbox and Blue cryptographic boundary are opt-in labs.
+messaging-w4-inbox-lab = ["messaging-w4-lab"]
+messaging-blue-w3-lab = ["messaging-w4-inbox-lab", "messaging-key-ledger-lab", "dep:akula-blue-w3", "dep:ed25519-dalek"]
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
@@ -110,6 +113,9 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+# Exact Blue revision validated by independent W3 and WOW CI.
+akula-blue-w3 = { git = "https://github.com/calex794/blue", rev = "76675f9fbb7e86c67a24d20dae60b0ce8227b1c3", optional = true }
+ed25519-dalek = { version = "2.2", optional = true }
 akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
 akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
