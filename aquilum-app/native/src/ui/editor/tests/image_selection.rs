@@ -1,5 +1,5 @@
 use super::images::editor_with_images;
-use super::support::{editor_id, focused, right_click, selected, text, TAG};
+use super::support::{editor_id, focused, right_click, selected, text, unfocused, TAG};
 use crate::ui::editor::TextEditor;
 
 #[test]
@@ -7,7 +7,7 @@ fn long_html_image_source_remains_visible_after_select_and_context_blur() {
     // The exact kind of long HTML tag reported by the user. FakeMedia uses
     // an in-memory image; this test needs no HTTP access to githubusercontent.
     let source = r#"<img width="647" src="https://user-images.githubusercontent.com/71256/29091486-fa38524c-7c37-11e7-895f-e7ec8e1039b6.png">"#;
-    let mut root = focused(editor_with_images(source), 440, 420);
+    let mut root = unfocused(editor_with_images(source), 440, 420);
     let id = editor_id(&root);
     let boxes = |root: &masonry::app::RenderRoot| {
         root.get_widget_with_tag(TAG).unwrap().inner().inline_boxes(0)
