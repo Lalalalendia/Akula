@@ -8,7 +8,7 @@ function New-Fixture([string]$file,[int]$count) {
   $dir=Split-Path -Parent $file
   if (Test-Path -LiteralPath $dir) { throw 'Vault already exists' }
   [System.IO.Directory]::CreateDirectory($dir) | Out-Null
-  $writer=New-Object System.IO.StreamWriter($file,$false,(New-Object System.Text.UTF8Encoding($false)))
+  $writer=[System.IO.StreamWriter]::new($file,$false,[System.Text.UTF8Encoding]::new($false))
   # Use the same LF newline convention as the Rust Markdown editor.
   $writer.NewLine=[string][char]10
   try {
@@ -150,7 +150,7 @@ function Run-Case([int]$count) {
     $null=Focus-Note $p
     $monitor=Start-Job -ArgumentList $p.Id,$samples,$stop -ScriptBlock {
       param([int]$TargetPid,[string]$Csv,[string]$StopFile)
-      $w=New-Object System.IO.StreamWriter($Csv,$false,(New-Object System.Text.UTF8Encoding($false)))
+      $w=[System.IO.StreamWriter]::new($Csv,$false,[System.Text.UTF8Encoding]::new($false))
       try {
         $w.WriteLine('unix_ms,pid,private_bytes,working_set_bytes,peak_working_set_bytes,cpu_ms,handles')
         while(!(Test-Path $StopFile)) {
@@ -218,8 +218,8 @@ function Run-Case([int]$count) {
   $copyAt=@($events | Where-Object name -eq 'clipboard_start')[0].time
   $valid=@($rows | Where-Object {[long]$_.unix_ms -lt [long]$copyAt})
   if($valid.Count -lt 12) { throw 'Insufficient pre-clipboard samples' }
-  $max=($valid | Measure-Object private_bytes -Maximum).Maximum
-  $peak=($valid | Measure-Object peak_working_set_bytes -Maximum).Maximum
+  $max=($valid | ForEach-Object {[long]$_.private_bytes} | Measure-Object -Maximum).Maximum
+  $peak=($valid | ForEach-Object {[long]$_.peak_working_set_bytes} | Measure-Object -Maximum).Maximum
   $result=[pscustomobject]@{
     lines=$count;bytes=$meta.bytes;original_sha256=$meta.sha
     observations=$rows.Count;pre_clipboard=$valid.Count
