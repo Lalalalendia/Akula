@@ -76,10 +76,7 @@ pub fn save_verified_stage_as_new(
     expected_root: [u8; 32],
     destination: &Path,
 ) -> Result<NewInboxFile, InboxError> {
-    if expected_bytes == 0
-        || expected_bytes > MAX_INBOX_ITEM_BYTES
-        || expected_root == [0; 32]
-    {
+    if expected_bytes == 0 || expected_bytes > MAX_INBOX_ITEM_BYTES || expected_root == [0; 32] {
         return Err(InboxError::InvalidManifest);
     }
     let Some(name) = destination.file_name() else {
@@ -133,7 +130,9 @@ pub fn save_verified_stage_as_new(
         if got == 0 {
             break;
         }
-        copied = copied.checked_add(got as u64).ok_or(InboxError::SizeMismatch)?;
+        copied = copied
+            .checked_add(got as u64)
+            .ok_or(InboxError::SizeMismatch)?;
         if copied > expected_bytes {
             return Err(InboxError::SizeMismatch);
         }
@@ -176,14 +175,16 @@ mod tests {
         let mut stage = opened(dir.path(), &bytes);
         let output = dir.path().join("user-chosen-name.bin");
         let expected = *blake3::hash(&bytes).as_bytes();
-        let receipt = save_verified_stage_as_new(
-            &mut stage, bytes.len() as u64, expected, &output
-        ).unwrap();
+        let receipt =
+            save_verified_stage_as_new(&mut stage, bytes.len() as u64, expected, &output).unwrap();
         assert_eq!(receipt.path, output);
         assert_eq!(receipt.bytes, bytes.len() as u64);
         assert_eq!(receipt.blake3_root, expected);
         assert_eq!(fs::read(&output).unwrap(), bytes);
-        assert_eq!(fs::read(dir.path().join("private-stage.bin")).unwrap(), bytes);
+        assert_eq!(
+            fs::read(dir.path().join("private-stage.bin")).unwrap(),
+            bytes
+        );
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 
@@ -194,7 +195,10 @@ mod tests {
         let output = dir.path().join("keep.bin");
         fs::write(&output, b"my existing document").unwrap();
         let outcome = save_verified_stage_as_new(
-            &mut stage, 14, *blake3::hash(b"selected bytes").as_bytes(), &output
+            &mut stage,
+            14,
+            *blake3::hash(b"selected bytes").as_bytes(),
+            &output,
         );
         assert!(matches!(outcome, Err(InboxError::AlreadyExists)));
         assert_eq!(fs::read(&output).unwrap(), b"my existing document");
@@ -252,7 +256,8 @@ mod tests {
             20,
             *blake3::hash(b"pinned original data").as_bytes(),
             &output,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(fs::read(&output).unwrap(), b"pinned original data");
     }
 
@@ -269,7 +274,10 @@ mod tests {
         let target = parent_link.join("unexpected.bin");
         assert!(matches!(
             save_verified_stage_as_new(
-                &mut stage, 7, *blake3::hash(b"trusted").as_bytes(), &target
+                &mut stage,
+                7,
+                *blake3::hash(b"trusted").as_bytes(),
+                &target
             ),
             Err(InboxError::InvalidDestination)
         ));
