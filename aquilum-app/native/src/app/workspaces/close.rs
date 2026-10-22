@@ -21,6 +21,8 @@ impl App {
         if let Some(session) = &mut self.session {
             session.save(&self.workspace.core, &mut self.tabs);
         }
+        // Stop the old folder watcher before entering no-vault mode.
+        self.workspace.core.watcher.stop();
         self.workspace.root = None;
         self.tree = FileTree::new(None, &self.workspace.data_dir, std::sync::Arc::clone(&self.workspace.wake));
         self.navigation = crate::navigation::Navigation::load(&self.workspace.data_dir, None);
