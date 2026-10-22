@@ -90,7 +90,8 @@ test('beta packaging workflows do not build all three OS installers for any Nati
       'aquilum-app/native/Cargo.toml',ownedScript,ownedManifest,
     ])assert.equal(matches(policy,owned),true,filename+' retains '+owned);
     assert.match(body,/^  workflow_call:\s*$/m,filename+' still required via shared manifest');
-    assert.match(body,/^  workflow_dispatch:\s*$/m,filename+' supports manual release candidate');
+    if(filename==='windows-beta.yml')assert.match(body,/^  workflow_dispatch:\s*$/m,'Windows retains established manual candidate');
+    else assert.doesNotMatch(body,/^  workflow_dispatch:\s*$/m,filename+' remains PR-only for unsigned release safety');
     assert.match(body,/^  pull_request:\s*$/m,filename+' watches packaging');
     assert.match(body,/^  [a-z-]+:\n    /m,filename+' retains job');
   }

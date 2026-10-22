@@ -15,7 +15,6 @@ on:
       - 'aquilum-app/native/packaging/akula-linux.json'
       - 'aquilum-app/native/packaging/Akula.desktop'
       - 'aquilum-app/native/Cargo.toml'
-  workflow_dispatch:
 
 permissions:
   contents: read
