@@ -42,7 +42,7 @@ fn read_trusted_pdf(vault: &Path, source: &Path) -> Result<(PathBuf, Vec<u8>), S
 }
 
 
-fn admit_pdf_source(core: &Core, vault: &Path, source: &Path) -> Result<PathBuf, String> {
+pub(in crate::app) fn admit_pdf_source(core: &Core, vault: &Path, source: &Path) -> Result<PathBuf, String> {
     let meta = fs::symlink_metadata(source).map_err(|e| e.to_string())?;
     if !meta.file_type().is_file() || meta.len() < 16 || meta.len() > MAX_PDF {
         return Err("PDF должен быть обычным файлом размером до 2 МиБ".into());

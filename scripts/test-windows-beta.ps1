@@ -51,6 +51,32 @@ $built = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\akula-
 if ((Get-FileHash $exe).Hash -ne (Get-FileHash $built).Hash) { throw 'Installed binary does not match built Akula' }
 Assert-LegacyUntouched
 
+# Verify the *installed* companion is the exact compiled pinned Shiva binary;
+# this is an integration test, not a downloadable or user-run converter script.
+$sidecar = Join-Path $akulaInstall 'shiva-pdf-preview.exe'
+$compiledSidecar = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\shiva-pdf-preview.exe'
+if (!(Test-Path -LiteralPath $sidecar -PathType Leaf)) {
+  throw 'Installed Akula is missing the required Shiva PDF sidecar'
+}
+if ((Get-FileHash -LiteralPath $sidecar).Hash -ne (Get-FileHash -LiteralPath $compiledSidecar).Hash) {
+  throw 'Installed Shiva PDF sidecar differs from compiled pinned source'
+}
+$probeDir = Join-Path $env:RUNNER_TEMP 'akula-pdf-smoke'
+New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+$sourcePdf = Join-Path $probeDir 'real-text.pdf'
+$extractedMd = Join-Path $probeDir 'text.md'
+python scripts/pdf-preview/generate-fixture.py --out $sourcePdf
+if ($LASTEXITCODE -ne 0) { throw 'Synthetic PDF generation failed' }
+& $sidecar $sourcePdf $extractedMd
+if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $extractedMd -PathType Leaf)) {
+  throw 'Installed Shiva PDF sidecar rejected valid digital-text PDF'
+}
+$extracted = Get-Content -LiteralPath $extractedMd -Raw -Encoding UTF8
+if (-not $extracted.Contains('AKULA_NATIVE_PDF_NEEDLE')) {
+  throw 'Installed Shiva PDF extraction lost native PDF text'
+}
+Write-Host 'AKULA_PDF_SIDECAR_INSTALLED=PASS;source=pinned-shiva;real_pdf=1;external_setup=0'
+
 $vault = Join-Path $env:RUNNER_TEMP 'akula-beta-vault'
 New-Item -ItemType Directory -Force -Path $vault | Out-Null
 $note = Join-Path $vault 'First note.md'
