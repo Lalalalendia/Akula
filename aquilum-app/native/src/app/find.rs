@@ -24,7 +24,7 @@ impl App {
         root.focus_on(field);
     }
 
-    fn close_find(&mut self, root: &mut RenderRoot) {
+    pub(super) fn close_find(&mut self, root: &mut RenderRoot) {
         let (Some(_), Some(ids)) = (self.find.take(), &self.note_ids) else { return };
         ids.find.edit(root, |mut slot| Slot::set_child(&mut slot, NewWidget::new(SizedBox::empty()).erased()));
         ids.body.edit(root, |mut body| TextEditor::find(&mut body, ""));
@@ -47,7 +47,7 @@ impl App {
         self.refresh_find_marks(root);
     }
 
-    fn find_step(&mut self, root: &mut RenderRoot, delta: isize) {
+    pub(super) fn find_step(&mut self, root: &mut RenderRoot, delta: isize) {
         let Some(ids) = &self.note_ids else { return };
         let Some((status, start)) = ids.body.edit(root, |mut body| TextEditor::find_step(&mut body, delta)) else { return };
         self.show_status(root, status);
