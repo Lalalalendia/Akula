@@ -105,10 +105,7 @@ impl OsPinnedEndpoint {
     }
 
     /// Admit one selected, OS-confirmed key; never trust the incoming claim.
-    pub async fn accept_selected(
-        &self,
-        selected: &str,
-    ) -> Result<VerifiedPeerConnection, String> {
+    pub async fn accept_selected(&self, selected: &str) -> Result<VerifiedPeerConnection, String> {
         check_selected(selected)?;
         let incoming = tokio::time::timeout(Duration::from_secs(60), self.endpoint.accept())
             .await
