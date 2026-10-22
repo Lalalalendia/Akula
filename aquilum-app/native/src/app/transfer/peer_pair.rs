@@ -10,6 +10,7 @@ use std::sync::{
 use aquilum_core::p2p_device_identity::peer_pin::{self, PeerState};
 use masonry::core::{ErasedAction, WidgetId};
 
+use crate::i18n::t;
 use crate::ui::editor::TextAction;
 use crate::ui::transfer::{PeerAction, PeerControls, PeerPhase, PeerView};
 use crate::ui::widgets::Pressed;
@@ -114,7 +115,7 @@ impl PeerUi {
                 };
                 if pending != &observed || observed != verified {
                     self.view.phase = PeerPhase::Error(
-                        "revocation requires the unchanged, independently verified full ID".into(),
+                        t("transfer.pairRevokeChanged"),
                     );
                     return true;
                 }
@@ -122,8 +123,7 @@ impl PeerUi {
             PeerAction::Confirm => {
                 if !valid_key(&observed) || !valid_key(&verified) || observed != verified {
                     self.view.phase = PeerPhase::Error(
-                        "enter two matching full lowercase IDs from independently checked sources"
-                            .into(),
+                        t("transfer.pairInvalidComparison"),
                     );
                     return true;
                 }
@@ -131,7 +131,7 @@ impl PeerUi {
             PeerAction::Inspect => {
                 if !valid_key(&observed) {
                     self.view.phase =
-                        PeerPhase::Error("enter a complete lowercase Iroh EndpointId".into());
+                        PeerPhase::Error(t("transfer.pairInvalidObserved"));
                     return true;
                 }
             }
