@@ -56,14 +56,22 @@ pub struct Movie {
 }
 
 fn le_u16(bytes: &[u8], offset: usize) -> Result<u16, PortError> {
-    let end = offset.checked_add(2).ok_or(PortError::Malformed("offset overflow"))?;
-    let b = bytes.get(offset..end).ok_or(PortError::Malformed("truncated u16"))?;
+    let end = offset
+        .checked_add(2)
+        .ok_or(PortError::Malformed("offset overflow"))?;
+    let b = bytes
+        .get(offset..end)
+        .ok_or(PortError::Malformed("truncated u16"))?;
     Ok(u16::from_le_bytes([b[0], b[1]]))
 }
 
 fn le_u32(bytes: &[u8], offset: usize) -> Result<u32, PortError> {
-    let end = offset.checked_add(4).ok_or(PortError::Malformed("offset overflow"))?;
-    let b = bytes.get(offset..end).ok_or(PortError::Malformed("truncated u32"))?;
+    let end = offset
+        .checked_add(4)
+        .ok_or(PortError::Malformed("offset overflow"))?;
+    let b = bytes
+        .get(offset..end)
+        .ok_or(PortError::Malformed("truncated u32"))?;
     Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
@@ -97,7 +105,9 @@ pub fn parse_swf(bytes: &[u8]) -> Result<Movie, PortError> {
     let frame_count = le_u16(bytes, pos)?;
     pos += 2;
     if frame_count != 1 {
-        return Err(PortError::Unsupported("only one-frame movies are supported"));
+        return Err(PortError::Unsupported(
+            "only one-frame movies are supported",
+        ));
     }
 
     let mut actions = Vec::new();
@@ -116,8 +126,12 @@ pub fn parse_swf(bytes: &[u8]) -> Result<Movie, PortError> {
             len = le_u32(bytes, pos)? as usize;
             pos += 4;
         }
-        let end = pos.checked_add(len).ok_or(PortError::Malformed("tag offset overflow"))?;
-        let body = bytes.get(pos..end).ok_or(PortError::Malformed("truncated tag"))?;
+        let end = pos
+            .checked_add(len)
+            .ok_or(PortError::Malformed("tag offset overflow"))?;
+        let body = bytes
+            .get(pos..end)
+            .ok_or(PortError::Malformed("truncated tag"))?;
         pos = end;
         match tag {
             0 => {
@@ -153,12 +167,19 @@ pub fn parse_swf(bytes: &[u8]) -> Result<Movie, PortError> {
         }
     }
     if !found_end {
-        return Err(PortError::Malformed("missing End tag or excessive tag count"));
+        return Err(PortError::Malformed(
+            "missing End tag or excessive tag count",
+        ));
     }
     if frames != 1 {
         return Err(PortError::Malformed("missing ShowFrame"));
     }
-    Ok(Movie { version, frame_rate, frame_count, actions })
+    Ok(Movie {
+        version,
+        frame_rate,
+        frame_count,
+        actions,
+    })
 }
 
 fn parse_actions(bytes: &[u8], result: &mut Vec<Action>) -> Result<(), PortError> {
@@ -175,8 +196,12 @@ fn parse_actions(bytes: &[u8], result: &mut Vec<Action>) -> Result<(), PortError
             len = usize::from(le_u16(bytes, pos)?);
             pos += 2;
         }
-        let end = pos.checked_add(len).ok_or(PortError::Malformed("action offset overflow"))?;
-        let body = bytes.get(pos..end).ok_or(PortError::Malformed("truncated AVM1 action"))?;
+        let end = pos
+            .checked_add(len)
+            .ok_or(PortError::Malformed("action offset overflow"))?;
+        let body = bytes
+            .get(pos..end)
+            .ok_or(PortError::Malformed("truncated AVM1 action"))?;
         pos = end;
         match code {
             0 => {
@@ -212,7 +237,9 @@ fn parse_push(bytes: &[u8], actions: &mut Vec<Action>) -> Result<(), PortError> 
         let value = match kind {
             0 => {
                 let tail = &bytes[pos..];
-                let count = tail.iter().position(|c| *c == 0)
+                let count = tail
+                    .iter()
+                    .position(|c| *c == 0)
                     .ok_or(PortError::Malformed("unterminated SWF string"))?;
                 let str_bytes = &tail[..count];
                 let value = std::str::from_utf8(str_bytes)
@@ -221,15 +248,21 @@ fn parse_push(bytes: &[u8], actions: &mut Vec<Action>) -> Result<(), PortError> 
                 LegacyValue::Text(value.to_owned())
             }
             1 => {
-                let end = pos.checked_add(4).ok_or(PortError::Malformed("float offset overflow"))?;
-                let b = bytes.get(pos..end).ok_or(PortError::Malformed("truncated float"))?;
+                let end = pos
+                    .checked_add(4)
+                    .ok_or(PortError::Malformed("float offset overflow"))?;
+                let b = bytes
+                    .get(pos..end)
+                    .ok_or(PortError::Malformed("truncated float"))?;
                 pos = end;
                 LegacyValue::Number(f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]])))
             }
             2 => LegacyValue::Null,
             3 => LegacyValue::Undefined,
             5 => {
-                let byte = *bytes.get(pos).ok_or(PortError::Malformed("truncated boolean"))?;
+                let byte = *bytes
+                    .get(pos)
+                    .ok_or(PortError::Malformed("truncated boolean"))?;
                 pos += 1;
                 LegacyValue::Boolean(byte != 0)
             }
@@ -293,9 +326,15 @@ pub fn emit_rust(movie: &Movie) -> Result<String, PortError> {
             Action::Push(value) => {
                 let literal = match value {
                     LegacyValue::Text(s) => format!("LegacyValue::Text({s:?})"),
-                    LegacyValue::Number(n) if n.is_nan() => "LegacyValue::Number(f64::NAN)".to_owned(),
-                    LegacyValue::Number(n) if *n == f64::INFINITY => "LegacyValue::Number(f64::INFINITY)".to_owned(),
-                    LegacyValue::Number(n) if *n == f64::NEG_INFINITY => "LegacyValue::Number(f64::NEG_INFINITY)".to_owned(),
+                    LegacyValue::Number(n) if n.is_nan() => {
+                        "LegacyValue::Number(f64::NAN)".to_owned()
+                    }
+                    LegacyValue::Number(n) if *n == f64::INFINITY => {
+                        "LegacyValue::Number(f64::INFINITY)".to_owned()
+                    }
+                    LegacyValue::Number(n) if *n == f64::NEG_INFINITY => {
+                        "LegacyValue::Number(f64::NEG_INFINITY)".to_owned()
+                    }
                     LegacyValue::Number(n) => format!("LegacyValue::Number({n:?})"),
                     LegacyValue::Boolean(b) => format!("LegacyValue::Boolean({b})"),
                     LegacyValue::Null => "LegacyValue::Null".to_owned(),
@@ -306,16 +345,23 @@ pub fn emit_rust(movie: &Movie) -> Result<String, PortError> {
                 next_var += 1;
             }
             Action::Add => {
-                let right = stack.pop().ok_or(PortError::Malformed("ADD stack underflow"))?;
-                let left = stack.pop().ok_or(PortError::Malformed("ADD stack underflow"))?;
+                let right = stack
+                    .pop()
+                    .ok_or(PortError::Malformed("ADD stack underflow"))?;
+                let left = stack
+                    .pop()
+                    .ok_or(PortError::Malformed("ADD stack underflow"))?;
                 writeln!(out, "    let v{next_var} = LegacyValue::Number(number(&v{left}) + number(&v{right}));")
                     .expect("writing to String");
                 stack.push(next_var);
                 next_var += 1;
             }
             Action::Trace => {
-                let value = stack.pop().ok_or(PortError::Malformed("TRACE stack underflow"))?;
-                writeln!(out, "    println!(\"{{}}\", trace(&v{value}));").expect("writing to String");
+                let value = stack
+                    .pop()
+                    .ok_or(PortError::Malformed("TRACE stack underflow"))?;
+                writeln!(out, "    println!(\"{{}}\", trace(&v{value}));")
+                    .expect("writing to String");
             }
         }
     }
@@ -426,31 +472,49 @@ mod tests {
         let mut normal = swf4(&trace_actions());
         let mut wrong_len = normal.clone();
         wrong_len[4] = 0;
-        assert!(matches!(parse_swf(&wrong_len), Err(PortError::Malformed(_))));
+        assert!(matches!(
+            parse_swf(&wrong_len),
+            Err(PortError::Malformed(_))
+        ));
 
         normal[0] = b'C';
-        assert_eq!(parse_swf(&normal), Err(PortError::Unsupported("compressed SWF")));
+        assert_eq!(
+            parse_swf(&normal),
+            Err(PortError::Unsupported("compressed SWF"))
+        );
 
         let mut unknown_tag = swf4(&trace_actions());
         let tag_start = 8 + 9 + 4;
         unknown_tag[tag_start] = 0xff;
-        assert!(matches!(parse_swf(&unknown_tag), Err(PortError::UnsupportedTag(_))));
+        assert!(matches!(
+            parse_swf(&unknown_tag),
+            Err(PortError::UnsupportedTag(_))
+        ));
 
         let mut unknown_action = trace_actions();
         let action_idx = unknown_action.len() - 2;
         unknown_action[action_idx] = 0x10; // intentionally unsupported JUMP
-        assert!(matches!(parse_swf(&swf4(&unknown_action)), Err(PortError::UnsupportedAction(0x10))));
+        assert!(matches!(
+            parse_swf(&swf4(&unknown_action)),
+            Err(PortError::UnsupportedAction(0x10))
+        ));
 
         let mut truncated = swf4(&trace_actions());
         truncated.pop();
-        assert!(matches!(parse_swf(&truncated), Err(PortError::Malformed(_))));
+        assert!(matches!(
+            parse_swf(&truncated),
+            Err(PortError::Malformed(_))
+        ));
     }
 
     #[test]
     fn stack_underflow_never_generates_a_fake_success() {
         let actions = [0x0a, 0]; // ADD with an empty stack
         let movie = parse_swf(&swf4(&actions)).unwrap();
-        assert_eq!(emit_rust(&movie), Err(PortError::Malformed("ADD stack underflow")));
+        assert_eq!(
+            emit_rust(&movie),
+            Err(PortError::Malformed("ADD stack underflow"))
+        );
     }
 
     #[test]
