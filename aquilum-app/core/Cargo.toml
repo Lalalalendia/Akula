@@ -9,12 +9,12 @@ workspace = ".."
 
 [features]
 default = []
-# Inert first-party internal task view; no new dependencies.
+# Experimental first-party read-only panel; no external plugin execution.
 extension-view-lab = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
-node-catalog-lab = []
+node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
@@ -106,6 +106,7 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
 akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
 akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
