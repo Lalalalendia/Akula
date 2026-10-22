@@ -1,0 +1,62 @@
+name: First PDF to Akula search preview E2E
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/pdf_preview/**'
+      - 'aquilum-app/core/examples/pdf_preview_search.rs'
+      - '.github/workflows/pdf-first-search-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  first-pdf-search:
+    name: One real PDF through existing Akula search
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-qa
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app
+      - name: Install PDF extraction reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends poppler-utils
+      - name: Importer no-clobber and trust tests
+        shell: bash
+        run: python3 -m unittest discover -s scripts/pdf_preview/tests -v
+      - name: Generate PDF and import it into a real vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/akula-vault"
+          python3 _shiva-qa/scripts/ci/generate-pdf-visual-truth.py --out "$RUNNER_TEMP/real-pdf"
+          python3 scripts/pdf_preview/import_pdf.py \
+            --pdf "$RUNNER_TEMP/real-pdf/healthy.pdf" \
+            --vault "$RUNNER_TEMP/akula-vault" \
+            --engine poppler --converter "$(command -v pdftotext)" \
+            --trusted-local-only
+          grep -Fl 'HELLO SHIVA' "$RUNNER_TEMP/akula-vault/PDF Search Preview/"*.md
+          cmp "$RUNNER_TEMP/real-pdf/healthy.pdf" "$RUNNER_TEMP/akula-vault/PDF Search Preview/"*.pdf
+      - name: Search the PDF text using real Akula Core Tantivy indexing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --manifest-path aquilum-app/Cargo.toml -p aquilum-core \
+            --example pdf_preview_search -- \
+            "$RUNNER_TEMP/akula-vault" "$RUNNER_TEMP/akula-index" HELLO
+          echo 'AKULA_PDF_SEARCH_E2E=PASS' >> "$GITHUB_STEP_SUMMARY"
