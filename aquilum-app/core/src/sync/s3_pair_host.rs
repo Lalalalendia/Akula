@@ -265,7 +265,8 @@ pub async fn sync_new_files_once(
             &mut cloud_journal,
         ).await {
             Ok(_) => report.uploaded_new += 1,
-            Err(S3PairUploadError::ExistingPath) => report.already_in_remote += 1,
+            Err(S3PairUploadError::AlreadyPublishedSame) => report.already_in_remote += 1,
+            Err(S3PairUploadError::ExistingPath) => report.needs_review += 1,
             Err(S3PairUploadError::Local(VaultPortError::DirtyEditorBuffer)) |
             Err(S3PairUploadError::ChangedLocalFile) => report.needs_review += 1,
             Err(error) => return Err(error.into()),
