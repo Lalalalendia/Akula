@@ -100,3 +100,27 @@ test('pure four-file Windows version bump avoids unrelated shared OS labs only',
   assert.equal(assess({paths:[CORE,LOCK,NATIVE,ROOT],versionOnly:true,
     coreDiff:'-version = "0.3.10"\n+version = "0.3.11"',lockBefore,lockAfter:bump(lockBefore)}).shared_any_risky,true);
 });
+
+
+test('Native package metadata is routed without duplicate direct OS workflows',()=>{
+  const pure=[CORE,LOCK,NATIVE,WINDOWS];
+  const direct=assess({paths:[NATIVE]});
+  assert.equal(direct.native_manifest_risky,true);
+  assert.equal(direct.installed_owner_owned,true);
+  const metadata=assess({paths:pure,versionOnly:true,
+    coreDiff:'-version = "0.3.10"\n+version = "0.3.11"',
+    lockBefore:before,lockAfter:after});
+  assert.equal(metadata.native_manifest_risky,false);
+  assert.equal(metadata.installed_owner_owned,false);
+  assert.equal(metadata.shared_any_risky,false);
+  const mixed=assess({paths:[...pure,'.github/workflows/app-checks.yml'],versionOnly:true,
+    coreDiff:'-version = "0.3.10"\n+version = "0.3.11"',
+    lockBefore:before,lockAfter:after});
+  assert.equal(mixed.native_manifest_risky,true);
+  assert.equal(mixed.installed_owner_owned,true);
+  assert.equal(mixed.shared_any_risky,true);
+  for(const p of [NATIVE,'aquilum-app/native/src/workspace.rs']){
+    const found=assess({paths:[p]});
+    assert.equal(found.native_manifest_risky,p===NATIVE);
+  }
+});

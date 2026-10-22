@@ -5,7 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
 const shared=fs.readFileSync(path.join(__dirname,'../workflows/ci-shared-manifest-labs.yml'),'utf8');
-const routeEntries=[["host-custody","sync-host-custody.yml",["core"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock"]],["s3-platform","sync-s3-platform.yml",["core","lock"]],["pinned-read","sync-pinned-read.yml",["core","lock"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]]];
+const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]]];
 
 test('26 owned workflows remain direct for own sources, called only by impacted shared-manifest route',()=>{
   assert.equal(routeEntries.length,26);
@@ -116,4 +116,33 @@ test('called OS/security workflows cannot mutually cancel through shared concurr
   assert.match(ipc,/^  cancel-in-progress: true$/m);
   const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
+
+
+test('Native Cargo metadata uses existing required S3 and host routes, never an independent duplicate',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const r=require('./ci-shared-manifest-route.cjs');
+  const native=r.NATIVE;
+  const changed=r.assess({paths:[native]});
+  assert.equal(changed.native_manifest_risky,true,'Native feature/dependency changes keep S3');
+  assert.equal(changed.installed_owner_owned,true,'Native feature/dependency changes keep host');
+  const pure=r.assess({paths:[r.CORE,r.LOCK,r.NATIVE,r.WINDOWS],versionOnly:true});
+  assert.equal(pure.native_manifest_risky,false,'pure bump exempts only validated dependency graph');
+  assert.equal(pure.installed_owner_owned,false);
+  for(const file of ['sync-host-custody.yml','sync-s3-platform.yml']){
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
+    const policy=parse(body);
+    assert.equal(matches(policy,native),false,file+' must not duplicate App checks route');
+    assert.equal(matches(policy,'.github/workflows/'+file),true,file+' self-edits trigger direct proof');
+    assert.equal(matches(policy,'aquilum-app/core/src/app_core.rs'),true,file+' direct source proof retained');
+    assert.match(body,/^  workflow_call:$/m,'required reusable invocation retained');
+  }
+  assert.match(core,/native_manifest_risky: \$\{\{ steps\.scope\.outputs\.native_manifest_risky \}\}/);
+  assert.match(core,/native: \$\{\{ needs\.classify\.outputs\.native_manifest_risky == 'true' \}\}/);
+  assert.match(core,/SHARED_RISKY: .*native_manifest_risky/);
+  assert.match(shared,/^      native:\n        required: true\n        type: boolean$/m);
+  assert.match(shared,/route-host-custody:\n    name: Impacted shared manifest \/ host-custody\n    if: \$\{\{ inputs\.core \|\| inputs\.native \}\}/);
+  assert.match(shared,/route-s3-platform:\n    name: Impacted shared manifest \/ s3-platform\n    if: \$\{\{ inputs\.core \|\| inputs\.lock \|\| inputs\.native \}\}/);
+  assert.match(shared,/route-host-custody",\["core","native"\]/);
+  assert.match(shared,/route-s3-platform",\["core","lock","native"\]/);
 });

@@ -145,9 +145,10 @@ function assess({paths,coreDiff='',lockBefore='',lockAfter='',libDiff='',version
   const libRisk=changed.has(LIB)&&!(changed.has(CORE)&&cargo.safe&&libAdditive(libDiff,cargo.features));
   const rootRisk=changed.has(ROOT);
   const installedOwnerOwned=!metadataOnly&&[...changed].some(p=>INSTALLED_OWNER_PATHS.has(p));
+  const native_manifest_risky=changed.has(NATIVE)&&!metadataOnly;
   return {shared_core_cargo_risky:coreRisk,shared_lock_risky:lockRisk,shared_core_lib_risky:libRisk,shared_root_cargo_risky:rootRisk,
     shared_any_risky:coreRisk||lockRisk||libRisk||rootRisk,
-    installed_owner_owned:installedOwnerOwned};
+    installed_owner_owned:installedOwnerOwned,native_manifest_risky};
 }
 function git(...args){return execFileSync('git',args,{encoding:'utf8',maxBuffer:16*1024*1024});}
 function compute(base,head){

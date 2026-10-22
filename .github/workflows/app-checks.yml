@@ -39,6 +39,7 @@ jobs:
       shared_root_cargo_risky: ${{ steps.scope.outputs.shared_root_cargo_risky }}
       shared_any_risky: ${{ steps.scope.outputs.shared_any_risky }}
       installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
+      native_manifest_risky: ${{ steps.scope.outputs.native_manifest_risky }}
       updater_security_required: ${{ steps.scope.outputs.updater_security_required }}
     steps:
       - uses: actions/checkout@v7
@@ -568,7 +569,7 @@ jobs:
   shared-labs:
     name: Required shared-manifest OS/security route
     needs: classify
-    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' }}
     uses: ./.github/workflows/ci-shared-manifest-labs.yml
     with:
       core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
@@ -576,6 +577,7 @@ jobs:
       lib: ${{ needs.classify.outputs.shared_core_lib_risky == 'true' }}
       lock: ${{ needs.classify.outputs.shared_lock_risky == 'true' }}
       root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
+      native: ${{ needs.classify.outputs.native_manifest_risky == 'true' }}
 
   checks:
     # The ONLY status required by Protect main. GitHub cannot report success
@@ -593,7 +595,7 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
-          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' }}
           ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail
