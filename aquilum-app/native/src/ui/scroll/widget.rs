@@ -4,7 +4,7 @@ use masonry::core::{
     UpdateCtx, Widget,
 };
 use masonry::imaging::Painter;
-use masonry::kurbo::{Axis, Point, Rect, Size};
+use masonry::kurbo::{Axis, Point, Size};
 use masonry::layout::{LayoutSize, LenReq, Length};
 
 use super::Scrolled;
@@ -134,30 +134,9 @@ impl<W: Widget> Widget for ScrollArea<W> {
         let span = self.span();
         crate::render::sprite::paint(&self.thumb, self.bar.color());
         painter.fill(self.bar.shape(&span), &self.thumb).draw();
+        self.paint_find_marks(ctx, painter, &span);
 
-        // Ticks are purely decorative and stay in the free inset to the right
-        // of the scrollbar thumb. No pointer behavior is changed.
-        if self.axis != Axis::Vertical || self.find_marks.is_empty() {
-            return;
-        }
-        let scale = ctx.scale_factor();
-        if !scale.is_finite() || scale <= 0.0 {
-            return;
-        }
-        let geometry = (span.track.height(), scale);
-        if self.find_raster != Some(geometry) {
-            self.find_rows = super::area::marker_rows(&self.find_marks, geometry.0, geometry.1);
-            self.find_raster = Some(geometry);
-        }
-        let left = (span.track.x1 - 3.0).max(span.track.x0);
-        let top = (span.track.y0 * scale).round() / scale;
-        let ink = crate::ui::theme::current().bg_accent;
-        for &row in &self.find_rows {
-            let y = top + row as f64 / scale;
-            if y + 1.0 / scale <= span.track.y1 + 0.5 / scale {
-                painter.fill(Rect::new(left, y, span.track.x1, y + 1.0 / scale), ink).draw();
-            }
-        }
+
     }
 
     fn accessibility_role(&self) -> Role {

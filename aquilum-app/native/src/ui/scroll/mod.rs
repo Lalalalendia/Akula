@@ -1,4 +1,4 @@
-mod area;
+mod area; mod find_marks; mod find_methods; mod find_paint;
 pub mod bar;
 mod glide;
 mod input;
