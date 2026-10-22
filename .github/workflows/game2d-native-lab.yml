@@ -2,7 +2,7 @@ name: Game2D native lab
 on:
   pull_request:
     paths:
-      - 'modules/game2d-lab/**'
+      - 'modules/native-2d-lab/**'
       - '.github/workflows/game2d-native-lab.yml'
   workflow_dispatch:
 jobs:
@@ -16,11 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Format isolated lab in CI workspace
-        run: cargo fmt --manifest-path modules/game2d-lab/Cargo.toml
+        run: cargo fmt --manifest-path modules/native-2d-lab/Cargo.toml
       - name: Unit tests
-        run: cargo test --manifest-path modules/game2d-lab/Cargo.toml
+        run: cargo test --manifest-path modules/native-2d-lab/Cargo.toml
       - name: Release simulation and raster probe
-        run: cargo run --release --manifest-path modules/game2d-lab/Cargo.toml -- 1200 game2d-last-frame.ppm
+        run: cargo run --release --manifest-path modules/native-2d-lab/Cargo.toml -- 1200 game2d-last-frame.ppm
       - name: Upload raster witness
         uses: actions/upload-artifact@v4
         with:
