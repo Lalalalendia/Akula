@@ -74,6 +74,9 @@ jobs:
           cat game2d-window.log
           grep 'output_present=PASS' game2d-window.log
           test -f game2d-window.png
+          # A saved PNG alone is not proof that the game was displayed.
+          scene_pixels=$(convert game2d-window.png -format %c histogram:info:- | awk 'tolower($0) ~ /#172335/ {gsub(":", "", $1); print $1; exit}')
+          test "${scene_pixels:-0}" -ge 1000 || { echo "Game background not present in screenshot"; exit 1; }
       - name: Windows actual window raster and present
         if: runner.os == 'Windows'
         shell: pwsh
@@ -86,6 +89,15 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
           [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
           $bmp.Save('game2d-window.png')
+          $scenePixels = 0
+          for ($y = 0; $y -lt $bmp.Height; $y += 10) {
+            for ($x = 0; $x -lt $bmp.Width; $x += 10) {
+              $color = $bmp.GetPixel($x, $y)
+              if ($color.R -eq 23 -and $color.G -eq 35 -and $color.B -eq 53) { $scenePixels++ }
+            }
+          }
+          $bmp.Dispose()
+          if ($scenePixels -lt 100) { throw 'Screenshot does not show game scene pixels' }
           if (-not $p.WaitForExit(60000)) {
             Stop-Process -Id $p.Id -Force
             throw 'Window test did not exit'
