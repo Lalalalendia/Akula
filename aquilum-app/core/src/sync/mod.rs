@@ -52,6 +52,10 @@ pub mod sealed_archive;
 pub mod s3_pair_invite;
 #[cfg(feature = "sync-s3")]
 pub mod s3_pair_bootstrap;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_profile;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_host;
 mod recovery_dashboard;
 #[cfg(feature = "sync-s3")]
 mod s3_publication_dashboard;
