@@ -8,7 +8,7 @@
 use std::{
     ffi::{c_void, OsString},
     fs, io,
-    os::windows::ffi::OsStringExt,
+    os::windows::{ffi::OsStringExt, fs::MetadataExt},
     path::PathBuf,
     ptr,
 };
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn known_folder_is_os_sourced_and_never_an_imported_config_path() {
         assert_eq!(ROOT_LEAF, "Akula-S3Pair-FileGate-V1");
-        assert!(!ROOT_LEAF.contains(['/', '\\', ':']));
+        assert!(!ROOT_LEAF.chars().any(|ch| ch == '/' || ch == '\\' || ch == ':'));
         assert!(!ROOT_LEAF.starts_with('.'));
     }
 }
