@@ -1,0 +1,11 @@
+[package]
+name = "akula-plugin05-extism-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "=1.4.1"

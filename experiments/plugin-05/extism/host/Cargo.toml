@@ -1,0 +1,11 @@
+[package]
+name = "akula-plugin05-extism-host"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# Rust Extism SDK wraps Wasmtime v49 (the 05A experiment currently uses v50).
+# No default built-in HTTP/filesystem registration. WASI explicitly disabled.
+extism = { version = "=1.41.0", default-features = false, features = ["wasmtime-default-features"] }
+wat = "1"

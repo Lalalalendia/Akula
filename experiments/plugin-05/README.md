@@ -55,3 +55,21 @@ vault grants or call production permission-checking code.
 
 CI: .github/workflows/plugin05-wasmtime-lab.yml is BRANCH-ONLY, opt-in
 and nonrelease; no new required status check or main application change.
+
+## 05B — Extism host and Rust PDK guest
+
+This candidate compiles a real Rust PDK guest to `wasm32-unknown-unknown`,
+and uses an independent Extism 1.41.0 host with `with_wasi(false)`,
+zero allowed hosts, a synthetic `scoped_note` callback, fuel and bounded
+Wasm pages. The host must decline network imports, looping code and over-limit
+guest allocations. It prints a separate JSON benchmark.
+
+    cargo build --release --target wasm32-unknown-unknown --manifest-path experiments/plugin-05/extism/guest/Cargo.toml
+    cargo test --manifest-path experiments/plugin-05/extism/host/Cargo.toml
+    cargo build --release --manifest-path experiments/plugin-05/extism/host/Cargo.toml
+
+**Comparability caveat:** Extism 1.41.0 depends on Wasmtime v49, while the
+direct 05A host pinned Wasmtime v50. They also use different guest ABI
+(raw WAT vs PDK). Do not subtract 05A/05B numbers to claim precise
+Extism framework overhead. Matching-engine control and identical guest ABI
+remain required for ADR selection.

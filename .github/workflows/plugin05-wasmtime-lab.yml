@@ -52,3 +52,41 @@ jobs:
           timeout 20s experiments/plugin-05/wasmtime/target/release/akula-plugin05-wasmtime | tee "$RUNNER_TEMP/plugin05a.json"
           cat "$RUNNER_TEMP/plugin05a.json" >> "$GITHUB_STEP_SUMMARY"
           echo 'Experimental host numbers. No installed Akula size or RSS claims.' >> "$GITHUB_STEP_SUMMARY"
+
+  probe-extism-linux:
+    name: Extism 1.41.0 standalone host and Rust PDK / Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: experiments/plugin-05/extism/host
+          save-if: false
+      - name: Build sandboxed guest with no WASI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --target wasm32-unknown-unknown --manifest-path experiments/plugin-05/extism/guest/Cargo.toml
+      - name: Verify host permissions, network denial and budget controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path experiments/plugin-05/extism/host/Cargo.toml
+      - name: Build independent release binary and measure Extism ABI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path experiments/plugin-05/extism/host/Cargo.toml
+          timeout 20s experiments/plugin-05/extism/host/target/release/akula-plugin05-extism-host | tee "$RUNNER_TEMP/plugin05b.json"
+          cat "$RUNNER_TEMP/plugin05b.json" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Different PDK/ABI and Wasmtime version; do not report as calibrated A/B.' >> "$GITHUB_STEP_SUMMARY"
