@@ -20,13 +20,17 @@ function topBlock(yaml, name) {
   return out;
 }
 
-function prTrigger(yaml) {
+function prEvents(yaml) {
   const on = topBlock(yaml, 'on');
-  if (on.length === 0) return false;
-  const first = on[0].replace(/^(['"]?on['"]?):\s*/, '');
-  if (/\bpull_request(?:_target)?\b/.test(first)) return true;
-  return on.slice(1).some(line => /^  ['"]?pull_request(?:_target)?['"]?:/.test(line));
+  if (on.length === 0) return [];
+  const inline = on[0].replace(/^(['"]?on['"]?):\s*/, '');
+  return ['pull_request', 'pull_request_target'].filter(event => {
+    const entry = new RegExp('^  [\\x27"]?' + event + '[\\x27"]?:');
+    const inlineName = new RegExp('\\b' + event + '\\b');
+    return inlineName.test(inline) || on.slice(1).some(line => entry.test(line));
+  });
 }
+function prTrigger(yaml) { return prEvents(yaml).length > 0; }
 
 function policyErrors(yaml, path) {
   if (!prTrigger(yaml)) return [];
@@ -34,15 +38,21 @@ function policyErrors(yaml, path) {
   if (!lines.length) return [path + ': missing workflow-level concurrency'];
   const group = lines.find(line => /^  group:/.test(line)) || '';
   const cancel = lines.find(line => /^  cancel-in-progress:/.test(line)) || '';
+  const clean = value => value.replace(/\s+#.*$/, '');
+  const groupValue = clean(group.replace(/^  group:\s*/, ''));
+  const cancelValue = clean(cancel.replace(/^  cancel-in-progress:\s*/, ''));
   const errors = [];
-  if (!/github\.workflow/.test(group) ||
-      !/github\.event\.pull_request\.number/.test(group) ||
-      !/github\.ref/.test(group)) {
+  // Match real Actions interpolation, not a descriptive YAML comment.
+  if (!/\$\{\{[^}]*github\.workflow[^}]*\}\}/.test(groupValue) ||
+      !/\$\{\{[^}]*github\.event\.pull_request\.number[^}]*github\.ref[^}]*\}\}/.test(groupValue)) {
     errors.push(path + ': group must isolate workflow and PR number, with ref fallback');
   }
   // Do not silently cancel workflow_dispatch, pushes or released artifacts.
-  if (!/github\.event_name\s*==\s*['"]pull_request['"]/.test(cancel)) {
-    errors.push(path + ': cancel-in-progress must be true for pull_request only');
+  const condition = cancelValue.match(/^\$\{\{\s*(.*?)\s*\}\}$/)?.[1] || '';
+  const covers = prEvents(yaml).every(event =>
+    new RegExp('github\\.event_name\\s*==\\s*[\\x27"]' + event + '[\\x27"]').test(condition));
+  if (!covers || /github\.event_name\s*==\s*['"](?:push|workflow_dispatch)['"]/.test(condition)) {
+    errors.push(path + ': cancel-in-progress must cover PR triggers only');
   }
   if (/^  queue:\s*max\b/m.test(lines.join('\n'))) {
     errors.push(path + ': queue: max defeats obsolete-run coalescing');
@@ -90,8 +100,18 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
         if (!prTrigger(text)) {
           // Required checks may depend on the PR trigger staying available.
           errors.push(record.path + ': removed existing pull_request trigger');
-        } else if (topBlock(text, 'concurrency').length === 0) {
-          errors.push(record.path + ': removed existing PR concurrency');
+        } else {
+          const newer = topBlock(text, 'concurrency');
+          if (newer.length === 0) {
+            errors.push(record.path + ': removed existing PR concurrency');
+          } else {
+            const prior = topBlock(before, 'concurrency');
+            const priorCancel = prior.find(line => /^  cancel-in-progress:/.test(line));
+            const currentCancel = newer.find(line => /^  cancel-in-progress:/.test(line));
+            if (priorCancel && (!currentCancel || /^  cancel-in-progress:\s*false(?:\s|$)/.test(currentCancel))) {
+              errors.push(record.path + ': removed existing PR cancellation');
+            }
+          }
         }
       }
     }
@@ -123,4 +143,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { topBlock, prTrigger, policyErrors, changedWorkflows, audit, main };
+module.exports = { topBlock, prEvents, prTrigger, policyErrors, changedWorkflows, audit, main };
