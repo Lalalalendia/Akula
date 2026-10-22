@@ -43,6 +43,7 @@ pub enum FixedNodeError {
     Fence(FenceError),
     Pin(PinError),
     ReadbackMismatch,
+    InjectedStop, // test-only crash boundary; NEVER a successful commit
 }
 impl From<std::io::Error> for FixedNodeError {
     fn from(v: std::io::Error) -> Self { Self::Io(v) }
@@ -166,9 +167,41 @@ pub fn commit_first_signed_node_in_ci(
     helper_challenge: [u8; 32],
     now_unix: u64,
 ) -> Result<FixedNodeReceipt, FixedNodeError> {
-    // Validate the immutable CI-only target BEFORE consuming owner consent.
     let dest = open_target()?;
     flock(&dest, FlockOperation::LockExclusive).map_err(os)?;
+    commit_signed_node_locked(
+        &dest, pinned, actor, signed_owner, trusted_owner, scope,
+        staged, proposed, expected_before, helper_challenge, now_unix,
+        CoreStop::Never,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CoreStop {
+    Never,
+    AfterCas,
+    AfterPendingSync,
+    AfterRename,
+}
+
+/// Shared transaction. Caller must hold a root-owned destination-directory
+/// lock across this operation and any additional persisted receipt write.
+/// This does not issue activation authority or choose any arbitrary path.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn commit_signed_node_locked(
+    dest: &File,
+    pinned: &RootVerifiedFd,
+    actor: &OsWitnessLab,
+    signed_owner: &SignedOwnerApproval,
+    trusted_owner: &TrustedOwnerApprover,
+    scope: ExternalApprovalScope,
+    staged: &StageReceipt,
+    proposed: ProposedFloor,
+    expected_before: WitnessCheckpoint,
+    helper_challenge: [u8; 32],
+    now_unix: u64,
+    stop: CoreStop,
+) -> Result<FixedNodeReceipt, FixedNodeError> {
     absent(&dest, FINAL_NAME)?;
     absent(&dest, PENDING_NAME)?;
     pinned.valid_at(now_unix).map_err(FixedNodeError::Pin)?;
@@ -193,6 +226,9 @@ pub fn commit_first_signed_node_in_ci(
         &witness, &actor.trusted_witness(), expected_before, after,
         helper_challenge, now_unix,
     ).map_err(FixedNodeError::Fence)?;
+    if stop == CoreStop::AfterCas {
+        return Err(FixedNodeError::InjectedStop);
+    }
 
     // CREATE|EXCL makes any existing crash partial file a hard refusal.
     let mut tmp = File::from(openat(
@@ -207,6 +243,9 @@ pub fn commit_first_signed_node_in_ci(
         .map_err(FixedNodeError::Pin)?;
     tmp.set_permissions(Permissions::from_mode(0o555))?;
     tmp.sync_all()?;
+    if stop == CoreStop::AfterPendingSync {
+        return Err(FixedNodeError::InjectedStop);
+    }
     drop(tmp);
     let mut candidate = File::from(openat(
         &dest, PENDING_NAME,
@@ -226,6 +265,9 @@ pub fn commit_first_signed_node_in_ci(
         RenameFlags::NOREPLACE,
     ).map_err(os)?;
     dest.sync_all()?;
+    if stop == CoreStop::AfterRename {
+        return Err(FixedNodeError::InjectedStop);
+    }
     // Read back the durable namespace entry after the rename.
     let mut final_file = File::from(openat(
         &dest, FINAL_NAME,

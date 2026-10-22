@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/core/src/bin/akula_node_lab.rs'
       - 'aquilum-app/core/tests/headless_node_d1.rs'
       - '.github/workflows/core-node-d1-loopback.yml'

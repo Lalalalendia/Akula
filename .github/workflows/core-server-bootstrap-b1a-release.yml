@@ -4,9 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
-      - "aquilum-app/core/src/server_release_lab.rs"
+      - "modules/bootstrap-b1a/**"
       - "aquilum-app/core/tests/server_bootstrap_b1a.rs"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1A.md"
       - ".github/workflows/core-server-bootstrap-b1a-release.yml"
@@ -33,6 +31,16 @@ jobs:
           workspaces: aquilum-app -> ../.artifacts/cargo-native
           shared-key: akula-b1a-release-proof-v1
           cache-workspace-crates: true
+      - name: Verify Core exposes the shared signed-release API
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx 'pub use akula_server_release_b1a::*;' aquilum-app/core/src/server_release_lab.rs
+      - name: Run shared B1a eight original security contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/bootstrap-b1a/Cargo.toml -- --nocapture
       - name: Verify Ed25519 release trust, rollback and exact signed bytes
         working-directory: aquilum-app
         shell: bash

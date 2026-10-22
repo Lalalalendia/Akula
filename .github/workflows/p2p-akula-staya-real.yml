@@ -1,0 +1,66 @@
+name: Akula P2P to real Staya QUIC two-process interoperability
+
+on:
+  pull_request:
+    branches:
+      - main
+      - experiment/akula-p2p-offer-contract-20261021
+    paths:
+      - 'interop/akula-staya/**'
+      - '.github/workflows/p2p-akula-staya-real.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-staya-real-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  real-interop:
+    name: Actual Akula decision plus Staya Iroh and Bao on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Staya source, not default branch
+        uses: actions/checkout@v4
+        with:
+          repository: Lalalalendia/staya-transfer
+          ref: fadb38a792126f6098df086fc56ce0dcae3ca3f1
+          path: .external/staya-transfer
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify actual Staya commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .external/staya-transfer rev-parse HEAD)" = "fadb38a792126f6098df086fc56ce0dcae3ca3f1"
+      - name: Rust formatting for standalone bridge crate
+        shell: bash
+        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
+      - name: Compile and test actual Akula and Staya queue linkage
+        shell: bash
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
+      - name: Lint actual integration crate
+        shell: bash
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --all-targets -- -D warnings
+      - name: Build actual pinned Staya direct batch preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path .external/staya-transfer/interop/release/Cargo.toml --locked --bin staya-direct-preview
+      - name: Live two-process direct QUIC plus independent physical Bao output
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/.external/staya-transfer/interop/release/target/debug/staya-direct-preview"
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="$BIN.exe"; fi
+          test -f "$BIN"
+          export STAYA_PREVIEW_BIN="$BIN"
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --test real_quic -- --nocapture

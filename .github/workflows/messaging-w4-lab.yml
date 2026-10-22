@@ -4,14 +4,21 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/core/src/messaging/**'
-      - 'docs/messaging/**'
+      - 'aquilum-app/core/src/messaging/w4/**'
+      - 'docs/messaging/AK-MSG-CORE-01BC-W4.md'
       - '.github/workflows/messaging-w4-lab.yml'
   push:
-    branches: ['feature/akula-messaging-w4-receipts-20261021']
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/messaging/w4/**'
+      - 'aquilum-app/core/Cargo.toml'
 
 permissions:
   contents: read
+
+concurrency:
+  group: akula-msg-w4-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   signed-w4:

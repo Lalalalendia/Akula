@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # New PR revisions supersede old ones; explicit manual runs remain independent.
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   isolated-codec:
     name: Pure Rust Zstd/full/splice/dictionary and hostile inputs
