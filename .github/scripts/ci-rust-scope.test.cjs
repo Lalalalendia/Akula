@@ -391,3 +391,26 @@ test('native-only lane runs all Native tests and still requires frame-fidelity M
   assert.match(yaml,/cargo test -p aquilum-core --features sync-engine --locked/);
   assert.match(yaml,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
 });
+
+test('Linux first-GUI ACK real-process security moved into the required owner fast lane',()=>{
+  const app=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  const beta=fs.readFileSync(path.join(__dirname,'../workflows/appimage-beta.yml'),'utf8');
+  const marker='      - name: Verify Linux updater first-GUI ACK IPC without AppImage build\n';
+  const start=app.indexOf(marker),end=app.indexOf('\n      - name: Restore shared main Rust cache',start);
+  assert.ok(start>0&&end>start,'must be a standalone required security step before any full Rust build');
+  const segment=app.slice(start,end);
+  assert.match(segment,/if: needs\.classify\.outputs\.updater_security_required == 'true'/);
+  assert.match(segment,/rustc --edition=2024 --test -D warnings/);
+  assert.match(segment,/aquilum-app\/native\/src\/updater\/linux_first_gui_ack\.rs/);
+  for(const proof of [
+    'real_inherited_stream_ack_has_child_pid_nonce_and_generation_digest',
+    'wrong_parent_cannot_emit_even_with_provided_nonce_and_fd',
+    'test result: ok. 5 passed; 0 failed;',
+    'AKULA_LINUX_FIRST_GUI_ACK_IPC_PASS',
+  ]){
+    assert.ok(segment.includes(proof),'required Linux ACK security proof: '+proof);
+    assert.ok(beta.includes(proof),'original independent AppImage proof remains: '+proof);
+  }
+  assert.match(app,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
+    'security stage continues to block Main PR gate on failure');
+});
