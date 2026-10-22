@@ -144,6 +144,9 @@ mod tests {
         });
         assert!(live.contains(&permitted));
         visible.store(false, std::sync::atomic::Ordering::Release);
-        assert!(!live.contains(&permitted), "no cached permission after revoke");
+        assert!(
+            !live.contains(&permitted),
+            "no cached permission after revoke"
+        );
     }
 }
