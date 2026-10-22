@@ -96,7 +96,7 @@ impl PairSession {
                 &bucket, |id, secret| {
                     let outcome = with_runtime(|rt| rt.block_on(create_first_pair_profile(
                         &core, &root, &appdata, &bucket, id, secret,
-                    )).map(|_| ()));
+                    )).map(|_| ()).map_err(|_| ()));
                     if outcome.is_ok()
                         && !yandex_credentials::still_matches(&bucket, id, secret)
                     {
