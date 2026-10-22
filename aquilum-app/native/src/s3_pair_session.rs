@@ -31,6 +31,14 @@ pub enum PairStatus {
     Failed,
 }
 
+/// UI-owned, non-secret observation of the one S3 pairing worker.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PairUiView {
+    pub status: PairStatus,
+    pub busy: bool,
+    pub configured: bool,
+}
+
 pub struct PairSession {
     rx: Receiver<PairStatus>,
     tx: Sender<PairStatus>,
