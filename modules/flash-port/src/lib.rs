@@ -437,7 +437,8 @@ mod tests {
         assert!(matches!(parse_swf(&unknown_tag), Err(PortError::UnsupportedTag(_))));
 
         let mut unknown_action = trace_actions();
-        unknown_action[unknown_action.len() - 2] = 0x10; // intentionally unsupported JUMP
+        let action_idx = unknown_action.len() - 2;
+        unknown_action[action_idx] = 0x10; // intentionally unsupported JUMP
         assert!(matches!(parse_swf(&swf4(&unknown_action)), Err(PortError::UnsupportedAction(0x10))));
 
         let mut truncated = swf4(&trace_actions());
