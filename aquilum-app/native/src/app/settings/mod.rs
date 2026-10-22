@@ -13,6 +13,8 @@ use super::{App, Outcome, Popup};
 
 mod action;
 mod apply;
+mod buttons;
+mod plugins;
 mod context;
 mod bindings;
 mod refresh;

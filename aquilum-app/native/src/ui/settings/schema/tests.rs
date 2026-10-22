@@ -60,7 +60,7 @@ fn templates_and_attachments_share_one_section_and_search_tuning_lives_with_bm25
         assert_eq!(Section::from_key(old), Some(Section::Data), "сохранённый раздел «{old}» открывает общий раздел");
     }
     assert_eq!(Section::from_key("search"), Some(Section::Analysis));
-    assert_eq!(Section::ALL.len(), 12);
+    assert_eq!(Section::ALL.len(), 13);
     assert_eq!(Section::from_key("server"), Some(Section::Server));
     assert_eq!(Section::from_key("sync"), Some(Section::Sync));
 
