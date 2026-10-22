@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use aquilum_core::mcp::McpStatus;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview};
-
 pub struct Context {
     pub workspace: Option<PathBuf>,
     pub scale: f64,
@@ -16,17 +15,12 @@ pub struct Context {
     pub yandex_probe: crate::yandex_probe_session::ProbeView,
     pub yandex_probe_busy: bool,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-    pub s3_pair_status: crate::s3_pair_session::PairStatus,
-    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-    pub s3_pair_busy: bool,
-    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-    pub s3_pair_configured: bool,
+    pub s3_pair: crate::s3_pair_session::PairUiView,
     pub yandex_notice: Option<String>,
     pub copied: Option<usize>,
     pub trash_page: usize,
     pub autostart: Option<bool>,
     pub update: Option<crate::updater::Status>,
 }
-
 #[cfg(test)]
 mod defaults;
