@@ -26,6 +26,10 @@ pub enum IdentityError {
     EntropyUnavailable,
     EnrollmentChanged,
     EnrollmentBusy,
+    InvalidPeerId,
+    PeerMismatch,
+    PeerNotFound,
+    PeerRevoked,
 }
 
 impl std::fmt::Display for IdentityError {
@@ -39,6 +43,10 @@ impl std::fmt::Display for IdentityError {
             Self::EntropyUnavailable => "secure randomness is unavailable",
             Self::EnrollmentChanged => "device identity changed during enrollment",
             Self::EnrollmentBusy => "another enrollment operation holds the device lock",
+            Self::InvalidPeerId => "invalid full Iroh EndpointId",
+            Self::PeerMismatch => "verified peer identity does not match selected peer",
+            Self::PeerNotFound => "peer is not confirmed",
+            Self::PeerRevoked => "peer has been revoked",
         };
         formatter.write_str(message)
     }
@@ -138,6 +146,8 @@ pub fn initialize() -> Result<DeviceIdentity, IdentityError> {
     }
 }
 
+pub mod peer_pin;
+
 #[cfg(windows)]
 mod windows_store {
     use super::*;
@@ -179,10 +189,10 @@ mod windows_store {
         }
     }
 
-    struct EnrollmentLock(HANDLE);
+    pub(super) struct EnrollmentLock(HANDLE);
 
     impl EnrollmentLock {
-        fn acquire() -> Result<Self, IdentityError> {
+        pub(super) fn acquire() -> Result<Self, IdentityError> {
             // A bounded per-logon-session mutex prevents two cooperating Akula
             // processes from racing to replace a newly enrolled credential.
             let handle =
@@ -208,7 +218,13 @@ mod windows_store {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    fn read_record(target: &str) -> Result<Zeroizing<[u8; RECORD_SIZE]>, IdentityError> {
+    /// Fixed binary credentials for both secret identity and durable peer pins.
+    pub(super) fn read_fixed<const N: usize>(
+        target: &str,
+    ) -> Result<Zeroizing<[u8; N]>, IdentityError> {
+        if N == 0 || N > 2560 {
+            return Err(IdentityError::StoreUnavailable);
+        }
         let target = wide(target);
         let mut raw: *mut CREDENTIALW = ptr::null_mut();
         match unsafe { CredReadW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None, &mut raw) } {
@@ -224,29 +240,43 @@ mod windows_store {
         let owned = CredentialBuffer(raw);
         let value = unsafe { &*owned.0 };
         if value.Type != CRED_TYPE_GENERIC
-            || value.CredentialBlobSize as usize != RECORD_SIZE
+            || value.CredentialBlobSize as usize != N
             || value.CredentialBlob.is_null()
         {
             return Err(IdentityError::CorruptCredential);
         }
-        let mut record = Zeroizing::new([0u8; RECORD_SIZE]);
-        let slice = unsafe { std::slice::from_raw_parts(value.CredentialBlob, RECORD_SIZE) };
+        let mut record = Zeroizing::new([0u8; N]);
+        let slice = unsafe { std::slice::from_raw_parts(value.CredentialBlob, N) };
         record.copy_from_slice(slice);
         Ok(record)
     }
 
-    fn write_record(target: &str, identity: &DeviceIdentity) -> Result<(), IdentityError> {
+    pub(super) fn write_fixed<const N: usize>(
+        target: &str,
+        record: &mut Zeroizing<[u8; N]>,
+    ) -> Result<(), IdentityError> {
+        if N == 0 || N > 2560 {
+            return Err(IdentityError::StoreUnavailable);
+        }
         let mut target = wide(target);
-        let mut record = encode(identity);
         let credential = CREDENTIALW {
             Type: CRED_TYPE_GENERIC,
             TargetName: PWSTR(target.as_mut_ptr()),
             CredentialBlob: record.as_mut_ptr(),
-            CredentialBlobSize: RECORD_SIZE as u32,
+            CredentialBlobSize: N as u32,
             Persist: CRED_PERSIST_LOCAL_MACHINE,
             ..CREDENTIALW::default()
         };
         unsafe { CredWriteW(&credential, 0) }.map_err(|_| IdentityError::StoreUnavailable)
+    }
+
+    fn read_record(target: &str) -> Result<Zeroizing<[u8; RECORD_SIZE]>, IdentityError> {
+        read_fixed::<RECORD_SIZE>(target)
+    }
+
+    fn write_record(target: &str, identity: &DeviceIdentity) -> Result<(), IdentityError> {
+        let mut record = encode(identity);
+        write_fixed(target, &mut record)
     }
 
     pub(super) fn load_named(target: &str) -> Result<DeviceIdentity, IdentityError> {
