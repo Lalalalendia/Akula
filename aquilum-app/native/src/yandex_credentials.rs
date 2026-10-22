@@ -2,12 +2,13 @@
 //!
 //! Never serialize S3 secrets to AppConfig, SQLite, a user's knowledge base,
 //! logs or clipboard. Windows input is through CredUI's masked password entry,
-//! followed by a separate CredWriteW with user-logon-scoped persistence.
-//! No network activity, S3 authorizations or trust decisions are performed.
 //! Other platforms intentionally fail closed until their own secure stores
-//! and modal secret-entry controls pass native CI.
 
 use aquilum_core::settings::models::YandexS3Onboarding;
+#[cfg(feature = "s3-pair-beta")]
+mod imported;
+#[cfg(feature = "s3-pair-beta")]
+pub(crate) use imported::save_imported_keys;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultError {
