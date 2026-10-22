@@ -243,11 +243,19 @@ def resolve_targets_with_readiness(cli, root, case, source, budget_seconds, posi
     latest = []
     while True:
         attempts += 1
-        response = cli.request("textDocument/definition", {
-            "textDocument": {"uri": (root / case["file"]).resolve().as_uri()},
-            "position": position_override if position_override is not None else location(case, source)
-        }, timeout=min(30, max(5, int(deadline - time.monotonic()) + 1)))
-        latest = paths_of_result(response, root)
+        try:
+            response = cli.request("textDocument/definition", {
+                "textDocument": {"uri": (root / case["file"]).resolve().as_uri()},
+                "position": position_override if position_override is not None else location(case, source)
+            }, timeout=min(30, max(5, int(deadline - time.monotonic()) + 1)))
+            latest = paths_of_result(response, root)
+        except RuntimeError as exc:
+            # rust-analyzer can reject requests while initial Cargo/semantic
+            # state changes. Only these two transient LSP error codes may be
+            # retried; every other error fails the CI oracle immediately.
+            if "'code': -32801" not in str(exc) and "'code': -32800" not in str(exc):
+                raise
+            latest = []
         if latest == [case["target"]]:
             return latest, attempts
         if time.monotonic() >= deadline:
