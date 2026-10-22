@@ -567,10 +567,59 @@ pub fn parse_scene(bytes: &[u8]) -> Result<Scene, PortError> {
 }
 
 #[derive(Clone, Copy)]
-struct DirectedEdge {
-    from: Point,
-    control: Option<Point>,
-    to: Point,
+pub(crate) struct DirectedEdge {
+    pub(crate) from: Point,
+    pub(crate) control: Option<Point>,
+    pub(crate) to: Point,
+}
+
+/// Resolve SWF fill sides into closed, oriented contours. The same logic is
+/// shared by reference SVG and the Chaptera path producer; neither may invent
+/// an edge ordering or silently drop an unclosed contour.
+pub(crate) fn contours_for_fill(
+    shape: &Shape,
+    fill_id: u16,
+) -> Result<Vec<Vec<DirectedEdge>>, PortError> {
+    let mut pending = Vec::new();
+    for edge in &shape.edges {
+        if edge.fill_left == fill_id {
+            pending.push(DirectedEdge {
+                from: edge.to,
+                control: edge.control,
+                to: edge.from,
+            });
+        }
+        if edge.fill_right == fill_id {
+            pending.push(DirectedEdge {
+                from: edge.from,
+                control: edge.control,
+                to: edge.to,
+            });
+        }
+    }
+    let mut contours = Vec::new();
+    while !pending.is_empty() {
+        let start = pending[0].from;
+        let mut cursor = start;
+        let mut contour = Vec::new();
+        loop {
+            let mut matches = pending.iter().enumerate().filter(|(_, e)| e.from == cursor);
+            let Some((next, _)) = matches.next() else {
+                return Err(PortError::Unsupported("unclosed fill contour"));
+            };
+            if matches.next().is_some() {
+                return Err(PortError::Unsupported("ambiguous fill contour junction"));
+            }
+            let edge = pending.remove(next);
+            cursor = edge.to;
+            contour.push(edge);
+            if cursor == start {
+                break;
+            }
+        }
+        contours.push(contour);
+    }
+    Ok(contours)
 }
 
 fn color_hex(c: Color) -> String {
@@ -621,32 +670,10 @@ pub fn emit_svg_frame(scene: &Scene, frame_index: usize) -> Result<String, PortE
         .expect("write String");
         for (index, fill) in shape.fills.iter().enumerate() {
             let id = (index + 1) as u16;
-            let mut pending = Vec::new();
-            for edge in &shape.edges {
-                if edge.fill_left == id {
-                    pending.push(DirectedEdge {
-                        from: edge.to,
-                        control: edge.control,
-                        to: edge.from,
-                    });
-                }
-                if edge.fill_right == id {
-                    pending.push(DirectedEdge {
-                        from: edge.from,
-                        control: edge.control,
-                        to: edge.to,
-                    });
-                }
-            }
-            while !pending.is_empty() {
-                let start = pending[0].from;
-                let mut cursor = start;
+            for contour in contours_for_fill(shape, id)? {
+                let start = contour[0].from;
                 let mut path = format!("M {} {}", start.x, start.y);
-                loop {
-                    let Some(next) = pending.iter().position(|e| e.from == cursor) else {
-                        return Err(PortError::Unsupported("unclosed fill contour"));
-                    };
-                    let edge = pending.remove(next);
+                for edge in contour {
                     if let Some(control) = edge.control {
                         write!(
                             path,
@@ -656,10 +683,6 @@ pub fn emit_svg_frame(scene: &Scene, frame_index: usize) -> Result<String, PortE
                         .expect("write String");
                     } else {
                         write!(path, " L {} {}", edge.to.x, edge.to.y).expect("write String");
-                    }
-                    cursor = edge.to;
-                    if cursor == start {
-                        break;
                     }
                 }
                 path.push_str(" Z");
