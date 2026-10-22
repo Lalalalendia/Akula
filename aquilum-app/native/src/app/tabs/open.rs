@@ -1,3 +1,5 @@
+mod readonly;
+
 use std::path::{Path, PathBuf};
 
 use aquilum_core::search::paths::{is_markdown, is_plain_text};
@@ -120,6 +122,14 @@ impl App {
             self.show_page(root, if self.tree.root().is_some() { 1 } else { 3 });
             return;
         };
+        if crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image) {
+            self.leave_note();
+            self.drop_note_page(root);
+            self.show_image_readonly(root, &path);
+            self.tree.set_active(root, Some(path));
+            self.show_page(root, 0);
+            return;
+        }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -189,47 +199,6 @@ impl App {
         self.show_page(root, 0);
         #[cfg(test)]
         record_stage(|s| s.tree = started.elapsed());
-    }
-
-    /// First-stage format view: no TextEditor and no save path for structured files.
-    /// Reopening always reparses from disk rather than reusing a stale tab cache.
-    fn show_structured_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
-        use aquilum_core::files::structured::{Format, StructuredDocument};
-        use masonry::core::NewWidget;
-        use masonry::widgets::Flex;
-        self.note = None;
-        self.note_ids = None;
-        self.embeds = None;
-        self.open_error = None;
-        self.open_error_ids = None;
-        let result = StructuredDocument::open(path).and_then(|doc| {
-            let header = match doc.format() {
-                Format::Canvas => {
-                    let canvas = doc.canvas()?;
-                    let nodes = canvas["nodes"].as_array().map_or(0, Vec::len);
-                    let edges = canvas["edges"].as_array().map_or(0, Vec::len);
-                    format!("JSON Canvas — {nodes} objects, {edges} connections")
-                }
-                Format::Base => "Obsidian Bases — YAML source".to_owned(),
-            };
-            Ok((header, doc.text().chars().take(2048).collect::<String>()))
-        });
-        match result {
-            Ok((heading, preview)) => {
-                let page = NewWidget::new(
-                    Flex::column()
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(
-                            "Read-only preview — editing is not available yet",
-                        )))
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&heading)))
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&preview))),
-                );
-                if let Some(chrome) = &self.chrome {
-                    chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
-                }
-            }
-            Err(error) => self.show_open_error(root, path, &error.to_string()),
-        }
     }
 
     pub(in crate::app) fn show_open_error(&mut self, root: &mut RenderRoot, path: &Path, error: &str) {
@@ -348,7 +317,9 @@ impl App {
     }
 
     pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
-        if !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
+        if !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path)
+            && crate::images::kind(&path.to_string_lossy()) != Some(crate::images::MediaKind::Image)
+        {
             return false;
         }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
