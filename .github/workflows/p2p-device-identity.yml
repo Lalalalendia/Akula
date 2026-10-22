@@ -5,12 +5,7 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/core/src/p2p_device_identity.rs'
-      - 'aquilum-app/core/src/lib.rs'
-      - 'aquilum-app/core/Cargo.toml'
       - 'aquilum-app/native/src/p2p_device_identity_cli.rs'
-      - 'aquilum-app/native/src/main.rs'
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
       - '.github/workflows/p2p-device-identity.yml'
   workflow_dispatch:
 
