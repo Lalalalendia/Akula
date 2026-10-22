@@ -6,13 +6,17 @@
 
 use super::{
     AwsS3ProbeClient, S3ConnectionProfile, S3Keyspace, S3PutCondition,
-    S3TransportError, S3TestIoCounters,
+    S3TransportError,
 };
 use crate::sync::OperationId;
 use aws_sdk_s3::config::Credentials;
+#[cfg(test)]
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use std::time::Duration;
 #[cfg(test)]
 use std::sync::Arc;
+#[cfg(test)]
+use super::S3TestIoCounters;
 
 /// A bounded, network-verified access observation, not a trust root, File
 /// Gate writer, durable remote receipt, or capability to replace any note.
@@ -153,7 +157,7 @@ mod tests {
         match client.client.create_bucket().bucket(&profile.bucket).send().await {
             Ok(_) => {}
             Err(error) if error.as_service_error()
-                .and_then(|service| aws_sdk_s3::error::ProvideErrorMetadata::code(service))
+                .and_then(|service| service.code())
                 == Some("BucketAlreadyOwnedByYou") => {}
             Err(error) => panic!("private MinIO bucket provisioning: {error}"),
         }
