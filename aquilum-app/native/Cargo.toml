@@ -37,6 +37,8 @@ p2p-device-ui = ["p2p-device-contacts-preview"]
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
 # Manual QA preview; no user write/sync capability yet.
 yandex-s3-connection-preview = ["aquilum-core/sync-s3", "dep:tokio"]
+# User-enabled S3 pairing BETA: no activation in default installer.
+s3-pair-beta = ["aquilum-core/sync-s3", "dep:tokio"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.
