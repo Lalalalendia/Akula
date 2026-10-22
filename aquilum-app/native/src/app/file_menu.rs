@@ -2,6 +2,8 @@ use super::*;
 use crate::ui::menu::{Submenu, Swatch};
 use crate::ui::palette;
 
+const MENU_PDF_PREVIEW: usize = 3;
+
 impl App {
     pub(super) fn open_file_menu(
         &mut self,
@@ -23,6 +25,8 @@ impl App {
         let mut labels = vec![(t("common.rename"), crate::ui::icons::PENCIL), (t("common.duplicate"), crate::ui::icons::COPY), (t("common.delete"), crate::ui::icons::TRASH)];
         if tab.is_some() {
             labels.push((t("tabs.close"), crate::ui::icons::X));
+        } else if !folder && targets.len() == 1 && pdf_preview::is_pdf_path(&clicked) {
+            labels.push(("Найти текст PDF в Akula".to_owned(), crate::ui::icons::FILE_SEARCH));
         }
         let colored = folder && tab.is_none();
         if colored {
@@ -100,7 +104,7 @@ impl App {
                     return Outcome::default();
                 };
                 if let MenuChoice::Hover(index) = choice {
-                    root.edit_widget(layer, |mut menu| Menu::show_sub(&mut menu.downcast(), *index == MENU_COLOR));
+                    root.edit_widget(layer, |mut menu| Menu::show_sub(&mut menu.downcast(), clicked.is_dir() && *index == MENU_COLOR));
                     self.popup = Some(Popup::FileMenu { layer, targets, clicked, tab });
                     return Outcome::default();
                 }
@@ -111,6 +115,10 @@ impl App {
                     MenuChoice::Sub(index) => {
                         let folders: Vec<PathBuf> = targets.into_iter().filter(|path| path.is_dir()).collect();
                         self.tree.set_color(root, &folders, index.checked_sub(1).and_then(|at| palette::NAMES.get(at).copied()));
+                    }
+                    MenuChoice::Item(MENU_PDF_PREVIEW) if tab.is_none()
+                        && targets.len() == 1 && pdf_preview::is_pdf_path(&clicked) => {
+                        self.prompt_pdf_preview(root, clicked);
                     }
                     MenuChoice::Item(MENU_DUPLICATE) => file_ops::duplicate_all(&self.workspace.core, targets),
                     MenuChoice::Item(MENU_DELETE) => self.confirm_delete(root, targets),
@@ -124,6 +132,15 @@ impl App {
                     MenuChoice::Item(_) | MenuChoice::Dismissed | MenuChoice::Hover(_) => {}
                 }
             }
+            Some(Popup::PdfImport { dialog, source }) => match dialog.answer(id, action) {
+                Some(answer) => {
+                    crate::ui::dialog::close(root, dialog.layer);
+                    if answer == DialogAnswer::Confirm {
+                        self.start_pdf_preview(source);
+                    }
+                }
+                None => self.popup = Some(Popup::PdfImport { dialog, source }),
+            },
             Some(Popup::Delete { dialog, targets }) => match dialog.answer(id, action) {
                 Some(answer) => {
                     crate::ui::dialog::close(root, dialog.layer);

@@ -12,6 +12,7 @@ mod home;
 mod init;
 mod lifecycle;
 mod media;
+mod pdf_preview;
 mod note_page;
 mod panel;
 #[cfg(feature = "memory-probe")]
@@ -74,6 +75,7 @@ enum Popup {
     SortMenu { layer: WidgetId, button: WidgetId },
     TabsMenu { layer: WidgetId, button: WidgetId },
     Viewer { layer: WidgetId },
+    PdfImport { dialog: DialogIds, source: PathBuf },
     Reader(Box<reader::ReaderState>),
     Search(search::SearchState),
     Templates(templates::TemplatesState),
