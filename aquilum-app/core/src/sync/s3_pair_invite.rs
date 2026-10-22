@@ -153,7 +153,7 @@ pub fn seal_s3_pair_invite(
     cipher(&key)?.seal_in_place_append_tag(
         Nonce::assume_unique_for_key(nonce),
         Aad::from(header.as_slice()),
-        &mut body,
+        &mut *body,
     ).map_err(|_| PairInviteError::CipherUnavailable)?;
     header.extend_from_slice(&body);
     Ok(header)
@@ -191,7 +191,7 @@ pub fn open_s3_pair_invite(
     let length = cipher(&key)?.open_in_place(
         Nonce::assume_unique_for_key(nonce),
         Aad::from(&encrypted[..HEADER_LEN]),
-        &mut body,
+        &mut *body,
     ).map_err(|_| PairInviteError::AuthenticationFailed)?.len();
     body.truncate(length);
     let result: S3PairInvite = serde_json::from_slice(&body)
