@@ -117,7 +117,7 @@ jobs:
           node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
           node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           # Respect the former perf path filter; ordinary CI-only / docs changes never launch benchmarks.
-          if git diff --quiet "$BASE_SHA" HEAD -- \
+          if git -C .. diff --quiet "$BASE_SHA" HEAD -- \
             aquilum-app/core/ \
             .github/workflows/core-perf.yml .github/workflows/core-perf-compare.yml; then
             echo 'perf_core_changed=false' >> "$GITHUB_OUTPUT"
