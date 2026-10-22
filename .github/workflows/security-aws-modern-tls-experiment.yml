@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: rustsec-aws-tls-experiment-${{ github.ref }}
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          persist-credentials: false
+          persist-credentials: true
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned cargo-audit
         uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
@@ -51,6 +51,24 @@ jobs:
           cargo check --locked -p aquilum-core --features sync-s3
           cargo audit --no-yanked --file Cargo.lock
           cargo audit --no-yanked --no-fetch --file host-broker-lab/Cargo.lock
+      - name: Save verified Cargo.lock only to the research branch
+        if: github.ref == 'refs/heads/security/akula-rustsec-modern-http-20261022' && github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = 'security/akula-rustsec-modern-http-20261022'
+          # The cargo check and two unignored audits must succeed above.
+          # Do not commit any generated file other than the Cargo.lock.
+          git add -- aquilum-app/Cargo.lock
+          if git diff --cached --quiet; then
+            echo 'No Cargo.lock changes after successful RustSec checks.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'security: lock audited modern Rustls and AWS HTTPS dependencies'
+            git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+            echo 'Committed the RustSec-validated Cargo.lock on the experiment branch only.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Export Cargo-produced lockfile and dependency report even on failure
         if: always()
         shell: bash
