@@ -54,3 +54,6 @@ jobs:
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui app::transfer::local_identity::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui ui::transfer::peer_pair::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui app::transfer::peer_pair::tests -- --nocapture
+      - name: Prove protected peer pins and revocations persist across Windows OS processes
+        shell: bash
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity p2p_device_identity::peer_pin::tests -- --nocapture
