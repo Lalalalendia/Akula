@@ -7,7 +7,6 @@ use masonry::properties::{Collapsible, Gap};
 use masonry::widgets::{Flex, ScrollBar};
 
 use crate::ui::tokens::{self, Theme};
-
 static CURRENT: RwLock<Option<Arc<Theme>>> = RwLock::new(None);
 static DARK: AtomicBool = AtomicBool::new(false);
 static GENERATION: AtomicUsize = AtomicUsize::new(0);
@@ -53,6 +52,7 @@ fn recolored(dark: bool, rgb: [u8; 3]) -> Arc<Theme> {
     let darker = [r * 0.78, g * 0.78, b * 0.78, 1.0];
     let mut theme = if dark { tokens::DARK } else { tokens::LIGHT };
     tokens::recolor(&mut theme, dark, [main, main, darker]);
+    theme.text_on_accent = super::contrast::text_on(theme.bg_accent);
     let theme = Arc::new(theme);
     if cache.len() >= RECOLORED_KEPT {
         cache.remove(0);
