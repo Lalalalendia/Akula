@@ -19,6 +19,43 @@ fn agrees(doc: &Document, text: &str) {
 }
 
 #[test]
+fn undo_of_large_replacement_remounts_a_bounded_window_before_layout() {
+    let original = lines(30_000);
+    let replacement = "replacement";
+    let mut doc = windowed(replacement);
+    assert_eq!(doc.loaded_range(), (0, replacement.len()));
+
+    // Undo a select-all paste: the single-line mounted window must not
+    // become a 30,000-line synchronous layout workload.
+    doc.replace(0..replacement.len(), &original);
+    agrees(&doc, &original);
+    let (start, end) = doc.loaded_range();
+    assert!(start > 0, "large undo must remount near the insertion end");
+    assert_eq!(end, original.len(), "restored tail remains in the mounted window");
+    assert!(doc.line_count() < 2_000, "unbounded restored GUI window: {} lines", doc.line_count());
+
+    // Complete content must remain available through the persistent Rope,
+    // including the originally unloaded first line.
+    assert_eq!(doc.copy(0..original.find('\n').unwrap()), "строка 0");
+    doc.include(0);
+    assert_eq!(doc.loaded().0, 0);
+    agrees(&doc, &original);
+}
+
+#[test]
+fn large_few_line_replacement_is_bounded_by_bytes_too() {
+    // Long unbroken lines are indivisible by design. Use ordinary lines
+    // where the 512 KiB byte limit, rather than the line count, decides.
+    let original = ("X".repeat(700) + "\n").repeat(1_000);
+    let mut doc = windowed("tiny");
+    doc.replace(0..4, &original);
+    agrees(&doc, &original);
+    assert!(doc.loaded().0 > 0, "byte-bounded window was not remounted");
+    assert!(doc.loaded().1.len() <= super::window::SPAN_BYTES + 1_000,
+        "large insertion expanded the mounted source beyond the byte budget");
+}
+
+#[test]
 fn a_far_position_moves_the_window_instead_of_stretching_it() {
     let text = lines(50_000);
     let mut doc = windowed(&text);

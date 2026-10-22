@@ -12,6 +12,7 @@ on:
       - 'scripts/build-windows-update-fixture.ps1'
       - 'scripts/test-windows-beta-upgrade.ps1'
       - 'scripts/windows-beta-gui-input.ps1'
+      - 'scripts/windows-beta-replace-all.ps1'
       - 'scripts/windows-beta-candidate-manifest.ps1'
       - 'scripts/windows-accesskit-uia.ps1'
       - 'aquilum-app/native/packaging/akula-windows.json'

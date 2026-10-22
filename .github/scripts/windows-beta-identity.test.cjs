@@ -12,6 +12,7 @@ const config = JSON.parse(read('aquilum-app/native/packaging/akula-windows.json'
 const workflow = read('.github/workflows/windows-beta.yml');
 const script = read('scripts/test-windows-beta.ps1');
 const guiInput = read('scripts/windows-beta-gui-input.ps1');
+const replaceAll = read('scripts/windows-beta-replace-all.ps1');
 const workspace = read('aquilum-app/native/src/workspace.rs');
 const autostart = read('aquilum-app/native/src/autostart.rs');
 const instance = read('aquilum-app/native/src/instance.rs');
@@ -161,11 +162,11 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
   }
   for (const token of [
     'PressCtrlShortcut(',
-    "ValidateSet('SelectAll', 'Copy')",
+    "ValidateSet('SelectAll', 'Copy', 'Paste', 'Undo')",
     'GetWindowThreadProcessId',
     'GetForegroundWindow',
     'Refusing shortcut on nonforeground window',
-    'Only selection/copy shortcuts are authorized',
+    'Only selection/copy/paste/undo shortcuts are authorized',
     'VK_CONTROL',
     'KEYEVENTF_KEYUP',
   ]) {
@@ -174,6 +175,28 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
   const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
   assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
     'UI readback must never simulate success by writing to the note');
+});
+
+test('real Windows Ctrl+A/Ctrl+V/Ctrl+Z regression uses an isolated long document', () => {
+  assert.ok(workflow.includes('scripts/windows-beta-replace-all.ps1'));
+  assert.ok(script.includes("Test-AkulaBetaReplaceAll -Executable $exe -Vault $vault -DataDir $akulaData"));
+  for (const s of [
+    "RUNNER_ENVIRONMENT -ne 'github-hosted'",
+    "RUNNER_OS -ne 'Windows'",
+    "Large paste proof.md",
+    "Start-Process -FilePath $Executable",
+    "Send-AkulaBetaShortcut -Process $app -Action SelectAll -ExpectedNoteTitle 'Large paste proof'",
+    "Send-AkulaBetaShortcut -Process $app -Action Paste -ExpectedNoteTitle 'Large paste proof'",
+    "Send-AkulaBetaShortcut -Process $app -Action Undo -ExpectedNoteTitle 'Large paste proof'",
+    "AKULA_WINDOWS_REPLACE_ALL_PASS",
+    "Get-FileHash -LiteralPath $note",
+    "CloseMainWindow()",
+  ]) {
+    assert.ok(replaceAll.includes(s), 'missing full-replacement OS acceptance assertion: ' + s);
+  }
+  assert.doesNotMatch(replaceAll, /gh release|Invoke-WebRequest|Remove-Item .*Aquilum/);
+  assert.match(replaceAll, /Set-Clipboard -Value \$replacement/);
+  assert.match(guiInput, /key != 0x41 && key != 0x43 && key != 0x56 && key != 0x5a/);
 });
 
 test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
