@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/scripts/summarize-vello-natural-stages.py'
       - 'aquilum-app/native/src/app/tests/perf/vello_natural_stages.rs'
+      - '.github/workflows/native-vello-natural-stages.yml'
   workflow_dispatch:
 
 permissions:

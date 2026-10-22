@@ -10,6 +10,7 @@ on:
       - 'aquilum-app/native/src/render/paint/runs.rs'
       - 'aquilum-app/native/src/render/damage/glyphs.rs'
       - '.github/scripts/summarize-vello-profile.py'
+      - '.github/workflows/native-vello-release-profile.yml'
   workflow_dispatch:
 
 permissions:

@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/scripts/summarize-vello-dual-route.py'
       - 'aquilum-app/native/src/app/tests/perf/worker_router.rs'
+      - '.github/workflows/native-vello-dual-route.yml'
   workflow_dispatch:
 
 permissions:

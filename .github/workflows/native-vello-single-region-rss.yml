@@ -6,6 +6,7 @@ on:
     paths:
       - 'aquilum-app/native/src/app/tests/perf/worker_router.rs'
       - '.github/scripts/summarize-vello-single-region-rss.py'
+      - '.github/workflows/native-vello-single-region-rss.yml'
   workflow_dispatch:
 
 permissions:

@@ -69,6 +69,8 @@ test('Vello profiling workflows do not fan out on generic renderer/pass or DXGI 
     return [n,ratchet.parse(body)];
   });
   const consumers=p=>entries.filter(([,policy])=>ratchet.matches(policy,p)).map(([name])=>name);
+  for(const [name,policy] of entries)assert.equal(ratchet.matches(policy,'.github/workflows/'+name),true,
+    'changed diagnostic workflows still self-test: '+name);
   for(const source of [
     'aquilum-app/native/src/render/renderer/pass.rs',
     'aquilum-app/native/src/output/dxgi.rs',
