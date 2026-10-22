@@ -33,3 +33,15 @@ test('only expected production dependencies and security policy require PR resca
   assert.equal(mustScanLocally(['.github/workflows/app-checks.yml']), true);
   assert.equal(mustScanLocally(['.github/scripts/dependency-security-gate.cjs']), true);
 });
+
+test('one-time security bootstrap allowlist cannot absorb application changes', () => {
+  const { BOOTSTRAP_FILES } = require('./dependency-security-gate.cjs');
+  assert.deepEqual([...BOOTSTRAP_FILES].sort(), [
+    '.github/scripts/dependency-security-gate.cjs',
+    '.github/scripts/dependency-security-gate.test.cjs',
+    '.github/workflows/app-checks.yml',
+    '.github/workflows/dependency-security.yml',
+  ].sort());
+  assert.equal(BOOTSTRAP_FILES.has('aquilum-app/Cargo.lock'), false);
+  assert.equal(BOOTSTRAP_FILES.has('aquilum-app/native/src/main.rs'), false);
+});

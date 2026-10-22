@@ -15,6 +15,9 @@ const LOCAL_SCAN_PATHS = new Set([
   '.github/scripts/dependency-security-gate.cjs',
   '.github/scripts/dependency-security-gate.test.cjs',
 ]);
+// A bootstrap may introduce ONLY the security gate itself. It cannot add
+// unrelated product changes while bypassing the already-failing baseline.
+const BOOTSTRAP_FILES = new Set(LOCAL_SCAN_PATHS);
 
 function mustScanLocally(paths) {
   return paths.some(p =>
@@ -104,14 +107,21 @@ async function main() {
   const base = baseArg.slice(7), head = headArg.slice(7);
   const changed = git('diff', '--name-only', base, head).split('\n').filter(Boolean);
   let local = mustScanLocally(changed);
+  let bootstrap = false;
   if (missingFromBase(base)) {
     // The one-time bootstrap PR cannot inspect a workflow not yet in main.
     // Require an actual full local audit; never mark an absent remote PASS.
     if (!fs.existsSync(WORKFLOW) || !changed.includes(WORKFLOW)) {
       throw new Error('watchdog missing from base and not introduced by this PR');
     }
+    if (changed.some(path => !BOOTSTRAP_FILES.has(path))) {
+      throw new Error('bootstrap PR contains non-security files: refuse initial gate exemption');
+    }
+    bootstrap = true;
     local = true;
-    console.error('BOOTSTRAP: full local cargo audit required before first watchdog merge');
+    // The one-time installation is allowed ONLY after both real scans record
+    // existing findings or prove clean. Transient/network errors remain fatal.
+    console.error('BOOTSTRAP: install fail-closed watchdog while recording existing RustSec findings');
   } else {
     const repo = process.env.GITHUB_REPOSITORY;
     const token = process.env.GH_TOKEN;
@@ -130,6 +140,7 @@ async function main() {
     }
   }
   process.stdout.write('scan_required=' + (local ? 'true' : 'false') + '\n');
+  process.stdout.write('bootstrap_mode=' + (bootstrap ? 'true' : 'false') + '\n');
 }
 
 if (require.main === module) {
@@ -139,4 +150,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { mustScanLocally, verdict, MAX_AGE_MS };
+module.exports = { mustScanLocally, verdict, MAX_AGE_MS, BOOTSTRAP_FILES };

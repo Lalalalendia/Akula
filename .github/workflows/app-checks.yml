@@ -53,13 +53,49 @@ jobs:
         uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
         with:
           tool: cargo-audit@0.22.2
-      - name: RustSec audit of changed or bootstrapped dependencies
-        if: steps.dependency_security.outputs.scan_required == 'true'
+      - name: RustSec audit of changed dependencies (blocking)
+        if: steps.dependency_security.outputs.scan_required == 'true' && steps.dependency_security.outputs.bootstrap_mode != 'true'
         shell: bash
         run: |
           set -euo pipefail
           cargo audit --no-yanked --file aquilum-app/Cargo.lock
           cargo audit --no-yanked --no-fetch --file aquilum-app/host-broker-lab/Cargo.lock
+
+      # Precisely once: when installing this workflow into a base WITHOUT
+      # the security watchdog. Existing findings remain visible and unwaived;
+      # future PRs immediately HOLD until RustSec passes.
+      - name: Bootstrap security watchdog - verify and record existing findings
+        if: steps.dependency_security.outputs.bootstrap_mode == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s aquilum-app/Cargo.lock
+          test -s aquilum-app/host-broker-lab/Cargo.lock
+          for pair in main:aquilum-app/Cargo.lock host-broker:aquilum-app/host-broker-lab/Cargo.lock; do
+            label="${pair%%:*}"
+            lockfile="${pair#*:}"
+            log="$RUNNER_TEMP/rustsec-bootstrap-$label.log"
+            set +e
+            if [ "$label" = main ]; then
+              cargo audit --no-yanked --file "$lockfile" > "$log" 2>&1
+            else
+              cargo audit --no-yanked --no-fetch --file "$lockfile" > "$log" 2>&1
+            fi
+            result=$?
+            set -e
+            cat "$log"
+            if [ "$result" -eq 0 ]; then
+              echo "$label lockfile: clean RustSec scan" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$result" -eq 1 ] && grep -Eq '^error: [0-9]+ vulnerabilities found!' "$log"; then
+              count="$(grep -Eo '^error: [0-9]+ vulnerabilities found!' "$log" | tail -1)"
+              echo "::warning title=Security bootstrap existing vulnerabilities::$label lockfile: $count"
+              echo "$label lockfile: **HOLD** ($count). Existing issue not waived; future PRs are blocked." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=Unverified RustSec bootstrap::$label scan exited $result without validated vulnerability report"
+              exit 1
+            fi
+          done
+          echo 'Security bootstrap allows ONLY the policy-only installation PR; no runtime dependency vulnerabilities are declared safe.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Classify Rust test scope (fail closed)
         id: scope
