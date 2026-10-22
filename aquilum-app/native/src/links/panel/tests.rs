@@ -67,6 +67,12 @@ fn task_view_rejects_foreign_hidden_and_missing_documents() {
     ]);
     let other = crate::test_dir::tempdir();
     std::fs::write(other.path().join("foreign.md"), "- [ ] private\n").unwrap();
+    let workspace = vault.path().to_string_lossy().into_owned();
+    let missing = vault.path().join("never-created.md");
+    assert!(
+        core.search.task_preview_for_document(&workspace, &missing).is_err(),
+        "a non-existent note must not retrieve stale indexed tasks"
+    );
 
     for path in [
         other.path().join("foreign.md"),

@@ -39,6 +39,7 @@ impl SearchService {
             if strip_root(&index.root, &document).is_none()
                 || !is_markdown(&document)
                 || is_hidden(&index.root, &document)
+                || !document.is_file()
             {
                 return Err(SearchError::invalid_workspace("Document outside the indexed note scope"));
             }
