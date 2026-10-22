@@ -230,7 +230,7 @@ def paths_of_result(result, root):
     return sorted(set(paths))
 
 
-def resolve_targets_with_readiness(cli, root, case, source, budget_seconds):
+def resolve_targets_with_readiness(cli, root, case, source, budget_seconds, position_override=None):
     """Wait for asynchronous workspace load before trusting a definition result.
 
     rust-analyzer may return None immediately after initialized/didOpen while
@@ -245,7 +245,7 @@ def resolve_targets_with_readiness(cli, root, case, source, budget_seconds):
         attempts += 1
         response = cli.request("textDocument/definition", {
             "textDocument": {"uri": (root / case["file"]).resolve().as_uri()},
-            "position": location(case, source)
+            "position": position_override if position_override is not None else location(case, source)
         }, timeout=min(30, max(5, int(deadline - time.monotonic()) + 1)))
         latest = paths_of_result(response, root)
         if latest == [case["target"]]:
@@ -309,8 +309,16 @@ def lsp_oracle(root, result_dir):
         # Choose the FIRST occurrence: it used to call misc::same.
         # The second occurrence already called storage::same before didChange,
         # so testing the second one would be a false positive.
+        # After the edit two identical storage::same call expressions exist.
+        # The first one is the old misc::same site that we must retarget.
+        modified_line = next(i for i, line in enumerate(new_ui.splitlines())
+                             if "crate::storage::same();" in line)
+        modified_text = new_ui.splitlines()[modified_line]
+        modified_position = {"line": modified_line,
+                             "character": modified_text.index("same") + 1}
         dirty_targets, dirty_attempts = resolve_targets_with_readiness(
-            cli, root, modified, new_ui, budget_seconds=30)
+            cli, root, modified, new_ui, budget_seconds=30,
+            position_override=modified_position)
         disk_unchanged = (root / "src/ui.rs").read_text(encoding="utf-8") == FILES["src/ui.rs"]
         overlay = {"expected":"src/storage.rs",
                    "targets":dirty_targets,
