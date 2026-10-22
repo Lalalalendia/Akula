@@ -62,11 +62,11 @@ fn first_party_task_view_is_scoped_and_read_only() {
 #[test]
 fn task_view_rejects_foreign_hidden_and_missing_documents() {
     let (vault, _data, core) = indexed(&[
-        ("visible.md", "- [ ] public\\n"),
-        (".hidden.md", "- [ ] hidden\\n"),
+        ("visible.md", "- [ ] public\n"),
+        (".hidden.md", "- [ ] hidden\n"),
     ]);
     let other = crate::test_dir::tempdir();
-    std::fs::write(other.path().join("foreign.md"), "- [ ] private\\n").unwrap();
+    std::fs::write(other.path().join("foreign.md"), "- [ ] private\n").unwrap();
 
     for path in [
         other.path().join("foreign.md"),
@@ -92,7 +92,7 @@ fn task_view_caps_results_and_reports_truncation() {
     let body = (0..80)
         .map(|n| format!("- [ ] task {n}"))
         .collect::<Vec<_>>()
-        .join("\\n");
+        .join("\n");
     let (vault, _data, core) = indexed(&[("many.md", &body)]);
     let listing = run(&core, &request(vault.path(), "many.md", Mode::Tasks));
     assert_eq!(listing.items.len(), 64);
