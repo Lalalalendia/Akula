@@ -6,9 +6,9 @@ use super::*;
 use crate::s3_pair_session::PairStatus;
 
 pub(super) fn rows(ctx: &Context, setup_ready: bool) -> Vec<Row> {
-    let available = !ctx.s3_pair_busy;
-    let status = ctx.s3_pair_status;
-    let has_profile = ctx.s3_pair_configured;
+    let available = !ctx.s3_pair.busy;
+    let status = ctx.s3_pair.status;
+    let has_profile = ctx.s3_pair.configured;
     let (message, tone) = match status {
         PairStatus::Idle if has_profile =>
             (t("settings.yandex.pairConfigured"), Tone::Secondary),
@@ -96,10 +96,10 @@ pub(super) fn compact(
             Some(t("settings.yandex.manageKeysHint")),
             Control::Buttons(vec![
                 Button::new(t("settings.yandex.addKeys"), Action::StoreYandexKeys)
-                    .enabled(view.supported && view.bucket_ready && !ctx.s3_pair_busy),
+                    .enabled(view.supported && view.bucket_ready && !ctx.s3_pair.busy),
                 Button::new(t("settings.yandex.removeKeys"), Action::RemoveYandexKeys)
                     .enabled(view.supported && view.bucket_ready
-                        && ctx.yandex_keys == Some(true) && !ctx.s3_pair_busy),
+                        && ctx.yandex_keys == Some(true) && !ctx.s3_pair.busy),
             ]),
         ),
     ];
