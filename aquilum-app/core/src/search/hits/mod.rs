@@ -23,11 +23,18 @@ pub fn results(
     searcher: &Searcher,
     fields: SearchFields,
     terms: &[String],
+    quoted: &[String],
     addresses: &[DocAddress],
     cancel: &Cancel,
 ) -> Result<Vec<SearchResult>, SearchError> {
     let counts = count::body_counts(searcher, fields.body, terms, addresses)?;
     let matcher = query_matcher(terms);
+    // Quoted phrases are a stricter search than isolated terms. Prefer an
+    // actual literal sequence for the jump position and result excerpt.
+    // Indexed stemming may match another spelling; keep the term fallback.
+    let quoted_matcher = (!quoted.is_empty()).then(|| {
+        Matcher::any(quoted, Options { mode: Mode::WholeWord, ..QUERY_MATCH })
+    });
     // These are query-scoped, not file-scoped: avoid allocating a matcher for
     // each term of every search result when checking the filename.
     let term_matchers: Vec<_> = terms
@@ -46,12 +53,18 @@ pub fn results(
         let title = stored_text(&document, fields.title).unwrap_or_default();
         let file = Path::new(&path);
         let has_body_match = body.iter().any(|&count| count > 0);
-        let window = match match_and_read_through(
+        let preferred = match (has_body_match, quoted_matcher.as_ref()) {
+            (true, Some(phrase)) => match_and_read_through(
+                file, Some(phrase), CHARS_AFTER_MATCH * 4, cancel,
+            ).ok().filter(|window| window.first.is_some()),
+            _ => None,
+        };
+        let window = match preferred.map(Ok::<MatchWindow, std::io::Error>).unwrap_or_else(|| match_and_read_through(
             file,
             has_body_match.then_some(&matcher),
             CHARS_AFTER_MATCH * 4,
             cancel,
-        ) {
+        )) {
             Ok(window) => window,
             Err(_) if has_body_match && !cancel.is_cancelled() => {
                 // Match scan errors previously fell back to an opening snippet
