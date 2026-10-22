@@ -6,7 +6,6 @@ use std::sync::Arc;
 use aquilum_core::sync::DeviceId;
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
-use masonry::kurbo::Point;
 
 use super::{App, Outcome, Popup};
 use crate::ui::dialog::{self, DialogAnswer};
@@ -61,7 +60,7 @@ impl App {
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(),
         );
-        root.add_layer(layer, Point::ORIGIN);
+        root.add_layer(layer, masonry::kurbo::Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
         self.popup = Some(Popup::Transfers(dialog));
     }

@@ -37,7 +37,7 @@ pub use devices::{DeviceRow, DeviceStatus};
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contact_preview;
 #[cfg(feature = "p2p-device-contacts-preview")]
-pub use contact_preview::TransportContactView;
+pub use contact_preview::{TransportContactRow, TransportContactView};
 
 pub struct TransferDialog {
     pub layer: WidgetId,
