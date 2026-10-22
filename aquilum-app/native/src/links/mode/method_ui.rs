@@ -2,6 +2,21 @@ use super::Method;
 use crate::i18n::t;
 
 impl Method {
+    pub const ORDER: [Method; 3] = [Method::Bm25f, Method::AdamicAdar, Method::Wikixiv];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Method::Bm25f => "bm25f",
+            Method::AdamicAdar => "adamicAdar",
+            Method::Wikixiv => "wixiv",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Method> {
+        Method::ORDER.into_iter().find(|m| m.key() == key)
+    }
+
+impl Method {
     pub fn label(self) -> String {
         t(&format!("analysis.methods.{}", self.key()))
     }

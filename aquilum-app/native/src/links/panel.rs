@@ -24,7 +24,7 @@ pub fn run(core: &Core, request: &Request) -> Listing {
     let notice = |key: &str| Listing { generation: request.generation, items: Vec::new(), notice: Some(t(key)) };
     match (request.mode, request.method) {
         (Mode::History, _) => listing(Vec::new(), "history.empty"),
-            #[cfg(feature = "extension-view-lab")]
+        #[cfg(feature = "extension-view-lab")]
         (Mode::Tasks, _) => task_view_lab::run(core, request),
         (Mode::Backlinks, _) => {
             let items = core.search.backlinks(&workspace, &document).unwrap_or_default();

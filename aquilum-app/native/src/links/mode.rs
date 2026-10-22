@@ -24,9 +24,15 @@ impl Mode {
 
     pub fn from_key(key: &str) -> Option<Mode> {
         [
-            Mode::Backlinks, Mode::Outgoing, Mode::Analysis, Mode::History,
-            #[cfg(feature = "extension-view-lab")] Mode::Tasks,
-        ].into_iter().find(|m| m.key() == key)
+            Mode::Backlinks,
+            Mode::Outgoing,
+            Mode::Analysis,
+            Mode::History,
+            #[cfg(feature = "extension-view-lab")]
+            Mode::Tasks,
+        ]
+        .into_iter()
+        .find(|mode| mode.key() == key)
     }
 }
 
@@ -35,22 +41,4 @@ pub enum Method {
     Bm25f,
     AdamicAdar,
     Wikixiv,
-}
-
-impl Method {
-    pub const ORDER: [Method; 3] = [Method::Bm25f, Method::AdamicAdar, Method::Wikixiv];
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Method::Bm25f => "bm25f",
-            Method::AdamicAdar => "adamicAdar",
-            Method::Wikixiv => "wixiv",
-        }
-    }
-
-    pub fn from_key(key: &str) -> Option<Method> {
-        Method::ORDER.into_iter().find(|m| m.key() == key)
-    }
-
-
 }

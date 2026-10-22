@@ -7,18 +7,16 @@ use masonry::widgets::{Flex, SizedBox};
 
 use crate::i18n::t;
 use crate::links::Mode;
-use crate::ui::handle::Handle;
-use crate::ui::controls_width;
-use crate::ui::scroll::HScroll;
-use crate::ui::titlebar::DragArea;
-use crate::ui::tokens::size;
+use crate::ui::{controls_width, handle::Handle, scroll::HScroll, titlebar::DragArea, tokens::size};
 use crate::ui::widgets::{Collapse, Edge, Edged, IconButton, Rule, Sash, Slot};
 use crate::ui::{icons, style, theme};
+
 pub struct Panel {
     pub modes: Vec<(Handle<IconButton>, Mode)>,
     pub body: Handle<Slot>,
     pub sash: WidgetId,
 }
+
 pub fn panel(mode: Mode, has_analysis: bool, width: f64, open: bool, from: bool) -> (NewWidget<Collapse>, Handle<Collapse>, Panel) {
     let mut buttons = Flex::row().cross_axis_alignment(CrossAxisAlignment::Center);
     let mut modes = Vec::new();

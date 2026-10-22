@@ -8,13 +8,13 @@ use super::{heading_label, heading_row, notice};
 use crate::i18n::t;
 use crate::links::{Listing, Method, Mode, Target};
 use crate::ui::scroll::{HScroll, ScrollArea};
-use crate::ui::style;
-use crate::ui::tokens::size;
-use crate::ui::widgets::{Caption, Chip, DocumentItem};
+use crate::ui::{style, tokens::size, widgets::{Caption, Chip, DocumentItem}};
+
 pub struct Body {
     pub items: Vec<(WidgetId, Target, Vec<String>)>,
     pub chips: Vec<(WidgetId, Method)>,
 }
+
 pub fn body(mode: Mode, methods: &[Method], method: Method, listing: Option<&Listing>) -> (NewWidget<dyn Widget>, Body) {
     let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);
     let mut chips = Vec::new();
