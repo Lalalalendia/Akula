@@ -8,11 +8,11 @@
 //! and a real single-use challenge fence. The lab supplies these manually.
 
 use aquilum_core::node_replica_auth_lab::{
-    read_with_device_proof, signed_grant_digest, DeviceReadProof, IndependentReadTrust,
-    OwnerReadGrant,
+    DeviceReadProof, IndependentReadTrust, OwnerReadGrant, read_with_device_proof,
+    signed_grant_digest,
 };
 use aquilum_core::sync::device_roster_lab::{
-    inspect_signed_roster, IndependentlyPinnedOwner, OwnerSignedRoster, RosterStatus,
+    IndependentlyPinnedOwner, OwnerSignedRoster, RosterStatus, inspect_signed_roster,
 };
 use iroh::endpoint::Connection;
 use std::path::Path;
@@ -21,12 +21,8 @@ use std::path::Path;
 /// A freshly allocated permissive implementation is NOT a replay fence.
 pub trait OneUseChallengeFence {
     /// Atomically consume this exact grant/challenge/QUIC-peer tuple once.
-    fn consume_once(
-        &mut self,
-        peer: [u8; 32],
-        grant_digest: [u8; 32],
-        challenge: [u8; 32],
-    ) -> bool;
+    fn consume_once(&mut self, peer: [u8; 32], grant_digest: [u8; 32], challenge: [u8; 32])
+    -> bool;
 }
 
 /// All failures have the same public shape, with no metadata disclosure.
@@ -94,6 +90,5 @@ pub fn read_from_live_iroh_peer(
     ) {
         return Err(NodeReadDenied);
     }
-    read_with_device_proof(node_state, grant, grant_pin, device_proof)
-        .map_err(|_| NodeReadDenied)
+    read_with_device_proof(node_state, grant, grant_pin, device_proof).map_err(|_| NodeReadDenied)
 }

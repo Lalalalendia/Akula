@@ -3,20 +3,18 @@
 #![cfg(all(target_os = "linux", feature = "node-live-read-lab"))]
 
 use akula_staya_integration::node_live_read::{
-    read_from_live_iroh_peer, NodeReadDenied, OneUseChallengeFence,
+    NodeReadDenied, OneUseChallengeFence, read_from_live_iroh_peer,
 };
 use aquilum_core::node_replica_auth_lab::{
-    device_challenge_claim, owner_claim, signed_grant_digest, DeviceReadProof,
-    IndependentReadTrust, OwnerReadGrant,
+    DeviceReadProof, IndependentReadTrust, OwnerReadGrant, device_challenge_claim, owner_claim,
+    signed_grant_digest,
 };
-use aquilum_core::node_replica_lab::{
-    stage_operator_fixture, OperatorFixtureAdmission,
-};
+use aquilum_core::node_replica_lab::{OperatorFixtureAdmission, stage_operator_fixture};
 use aquilum_core::sync::device_roster_lab::{
     ClaimedDevice, IndependentlyPinnedOwner, OwnerSignedRoster, RosterStatus,
 };
 use aquilum_core::sync::{DeviceId, DocumentId, RevisionId, VaultId};
-use iroh::endpoint::{presets, Connection, Endpoint};
+use iroh::endpoint::{Connection, Endpoint, presets};
 use iroh::{RelayMode, SecretKey};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use std::collections::HashSet;
@@ -31,12 +29,7 @@ const ALPN: &[u8] = b"akula-node-live-id-lab/v1";
 struct TestFence(HashSet<([u8; 32], [u8; 32], [u8; 32])>);
 
 impl OneUseChallengeFence for TestFence {
-    fn consume_once(
-        &mut self,
-        peer: [u8; 32],
-        grant: [u8; 32],
-        challenge: [u8; 32],
-    ) -> bool {
+    fn consume_once(&mut self, peer: [u8; 32], grant: [u8; 32], challenge: [u8; 32]) -> bool {
         challenge != [0; 32] && self.0.insert((peer, grant, challenge))
     }
 }
@@ -50,20 +43,16 @@ fn sign_roster(mut roster: OwnerSignedRoster, owner: &Ed25519KeyPair) -> OwnerSi
     roster
 }
 
-async fn establish(
-    server: &Endpoint,
-    secret: SecretKey,
-) -> (Endpoint, Connection, Connection) {
+async fn establish(server: &Endpoint, secret: SecretKey) -> (Endpoint, Connection, Connection) {
     let client = Endpoint::builder(presets::Minimal)
         .secret_key(secret)
         .relay_mode(RelayMode::Disabled)
         .bind()
         .await
         .unwrap();
-    let (dialed, inbound) = tokio::join!(
-        client.connect(server.addr(), ALPN),
-        async { server.accept().await.unwrap().await },
-    );
+    let (dialed, inbound) = tokio::join!(client.connect(server.addr(), ALPN), async {
+        server.accept().await.unwrap().await
+    },);
     (client, dialed.unwrap(), inbound.unwrap())
 }
 
@@ -192,15 +181,27 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     let mut fence = TestFence::default();
     assert_eq!(
         read_from_live_iroh_peer(
-            &inbound, &roster, &roster_pin, &grant, &grant_pin, &proof,
-            &mut fence, &state,
+            &inbound,
+            &roster,
+            &roster_pin,
+            &grant,
+            &grant_pin,
+            &proof,
+            &mut fence,
+            &state,
         ),
         Ok(original),
     );
     assert_eq!(
         read_from_live_iroh_peer(
-            &inbound, &roster, &roster_pin, &grant, &grant_pin, &proof,
-            &mut fence, &state,
+            &inbound,
+            &roster,
+            &roster_pin,
+            &grant,
+            &grant_pin,
+            &proof,
+            &mut fence,
+            &state,
         ),
         Err(NodeReadDenied),
         "same authenticated connection and challenge must never replay"
@@ -213,8 +214,14 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     assert_ne!(rogue_connection.remote_id(), inbound.remote_id());
     assert_eq!(
         read_from_live_iroh_peer(
-            &rogue_connection, &roster, &roster_pin, &grant, &grant_pin,
-            &proof, &mut TestFence::default(), &state,
+            &rogue_connection,
+            &roster,
+            &roster_pin,
+            &grant,
+            &grant_pin,
+            &proof,
+            &mut TestFence::default(),
+            &state,
         ),
         Err(NodeReadDenied)
     );
@@ -228,8 +235,14 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     revoked_pin.witnessed_epoch_digest = Some(revoked.claim_digest().unwrap());
     assert_eq!(
         read_from_live_iroh_peer(
-            &inbound, &revoked, &revoked_pin, &grant, &grant_pin, &proof,
-            &mut TestFence::default(), &state,
+            &inbound,
+            &revoked,
+            &revoked_pin,
+            &grant,
+            &grant_pin,
+            &proof,
+            &mut TestFence::default(),
+            &state,
         ),
         Err(NodeReadDenied)
     );
@@ -238,8 +251,14 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     stale.witnessed_min_epoch = 8;
     assert_eq!(
         read_from_live_iroh_peer(
-            &inbound, &roster, &stale, &grant, &grant_pin, &proof,
-            &mut TestFence::default(), &state,
+            &inbound,
+            &roster,
+            &stale,
+            &grant,
+            &grant_pin,
+            &proof,
+            &mut TestFence::default(),
+            &state,
         ),
         Err(NodeReadDenied),
         "older valid roster cannot restore access"
@@ -249,8 +268,14 @@ async fn authenticated_live_quic_remote_id_then_roster_then_exact_replica() {
     wrong_revision.revision_id = RevisionId::new();
     assert_eq!(
         read_from_live_iroh_peer(
-            &inbound, &roster, &roster_pin, &wrong_revision, &grant_pin,
-            &proof, &mut TestFence::default(), &state,
+            &inbound,
+            &roster,
+            &roster_pin,
+            &wrong_revision,
+            &grant_pin,
+            &proof,
+            &mut TestFence::default(),
+            &state,
         ),
         Err(NodeReadDenied),
         "a different revision never inherits a signed read grant"
