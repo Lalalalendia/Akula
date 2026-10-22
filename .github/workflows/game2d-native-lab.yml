@@ -3,8 +3,14 @@ on:
   pull_request:
     paths:
       - 'modules/native-2d-lab/**'
+      - 'aquilum-app/native/examples/game2d_window_lab.rs'
+      - 'aquilum-app/native/Cargo.toml'
       - '.github/workflows/game2d-native-lab.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   game2d:
     runs-on: ${{ matrix.os }}
@@ -15,8 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Format isolated lab in CI workspace
-        run: cargo fmt --manifest-path modules/native-2d-lab/Cargo.toml
+        with:
+          components: rustfmt
+      - name: Format check
+        run: cargo fmt --manifest-path modules/native-2d-lab/Cargo.toml --check
       - name: Unit tests
         run: cargo test --manifest-path modules/native-2d-lab/Cargo.toml
       - name: Release simulation and raster probe
@@ -26,3 +34,71 @@ jobs:
         with:
           name: game2d-${{ matrix.os }}-frame
           path: game2d-last-frame.ppm
+
+  window:
+    # This is the real Akula Output/Canvas code, not a second rendering backend.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: game2d-window-lab
+      - name: Linux GUI and media dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libunwind-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev librsvg2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev xvfb xauth imagemagick
+      - name: Build separate opt-in game window
+        working-directory: aquilum-app
+        run: cargo build -p aquilum-native --features game2d-window-lab --example game2d_window_lab
+      - name: Linux actual window raster and present
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          xvfb-run -a bash -c '
+            .artifacts/cargo-native/debug/examples/game2d_window_lab --frames 240 > game2d-window.log 2>&1 &
+            pid=$!
+            sleep 1
+            import -window root game2d-window.png || true
+            wait "$pid"
+          '
+          cat game2d-window.log
+          grep 'output_present=PASS' game2d-window.log
+          test -f game2d-window.png
+      - name: Windows actual window raster and present
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path '.artifacts/cargo-native/debug/examples/game2d_window_lab.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList @('--frames','240') -PassThru -RedirectStandardOutput game2d-window.log -RedirectStandardError game2d-window.err
+          Start-Sleep -Seconds 1
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $bmp.Save('game2d-window.png')
+          if (-not $p.WaitForExit(60000)) {
+            Stop-Process -Id $p.Id -Force
+            throw 'Window test did not exit'
+          }
+          Get-Content game2d-window.log
+          Get-Content game2d-window.err
+          if ($p.ExitCode -ne 0) { throw "Window exited $($p.ExitCode)" }
+          if (-not (Select-String -Path game2d-window.log -Pattern 'output_present=PASS' -Quiet)) { throw 'No successful present witness' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: game2d-window-${{ matrix.os }}
+          path: |
+            game2d-window.png
+            game2d-window.log
+            game2d-window.err
