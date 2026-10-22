@@ -1,0 +1,30 @@
+name: Akula S3 pairing smoke
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/s3-pair-onepass-ci.yml'
+      - 'aquilum-app/core/src/sync/s3_pair_*.rs'
+      - 'aquilum-app/native/src/s3_pair_*.rs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Core pairing compile
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --features sync-s3
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Native pairing beta compile
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-native --features installed,s3-pair-beta
