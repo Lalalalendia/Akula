@@ -8,3 +8,8 @@ publish = false
 # Deliberately outside aquilum-app; never linked into shipped Akula.
 wasmtime = { version = "=50.0.0", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
 wit-component = "=0.261.0"
+
+[dev-dependencies]
+# Laboratory-only real Core PermissionBroker bridge; no installed runtime.
+aquilum-core = { path = "../../../../aquilum-app/core", default-features = false }
+tempfile = "3"

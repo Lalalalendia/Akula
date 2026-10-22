@@ -151,3 +151,6 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod core_bridge_tests;
