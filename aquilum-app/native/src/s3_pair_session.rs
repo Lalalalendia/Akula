@@ -17,6 +17,9 @@ use aquilum_core::sync::s3_pair_profile::S3PairProfile;
 use crate::yandex_credentials;
 use zeroize::Zeroizing;
 
+#[cfg(target_os = "windows")]
+mod custody;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PairStatus {
     #[default]
@@ -97,11 +100,16 @@ impl PairSession {
                     let outcome = with_runtime(|rt| rt.block_on(create_first_pair_profile(
                         &core, &root, &appdata, &bucket, id, secret,
                     )).map(|_| ()).map_err(|_| ()));
-                    if outcome.is_ok()
-                        && !yandex_credentials::still_matches(&bucket, id, secret)
+                    if outcome.is_err()
+                        || !yandex_credentials::still_matches(&bucket, id, secret)
                     {
-                        Err(())
-                    } else { outcome }
+                        return Err(());
+                    }
+                    let base = custody::prepare_host_base().map_err(|_| ())?;
+                    s3_pair_host::provision_cooperative_s3_pair_custody(
+                        &core, &root, &appdata, &base,
+                    ).map_err(|_| ())?;
+                    Ok(())
                 },
             );
             if matches!(result, Ok(Ok(()))) {
@@ -168,6 +176,10 @@ impl PairSession {
                     &core, &destination_root, &appdata, &profile,
                     &invite.access_key_id, &invite.secret_access_key,
                 )).map_err(|_| ()))?;
+                let base = custody::prepare_host_base().map_err(|_| ())?;
+                s3_pair_host::provision_cooperative_s3_pair_custody(
+                    &core, &destination_root, &appdata, &base,
+                ).map_err(|_| ())?;
                 yandex_credentials::save_imported_keys(
                     &profile.bucket, &invite.access_key_id, &invite.secret_access_key,
                 ).map_err(|_| ())?;
@@ -195,10 +207,18 @@ impl PairSession {
             let result = (|| -> Result<PairStatus, ()> {
                 let profile = s3_pair_host::read_pair_profile(&root, &appdata)
                     .map_err(|_| ())?.ok_or(())?;
+                // No implicit creation on SyncNow: the exact registered
+                // physical root, stored cloud binding and external OS lock
+                // must still match their first explicit Configure/Import.
+                let host_base = custody::existing_host_base().map_err(|_| ())?;
+                let scope = s3_pair_host::open_existing_cooperative_s3_pair_custody(
+                    &core, &root, &appdata, &host_base,
+                ).map_err(|_| ())?;
                 let outcome = yandex_credentials::with_stored_keys(
                     &profile.bucket, |id, secret| {
                         with_runtime(|rt| rt.block_on(sync_new_files_once(
-                            &core, &root, &appdata, None, &profile, id, secret,
+                            &core, &root, &appdata, Some(&scope), &profile,
+                            id, secret,
                         )).map_err(|_| ()))
                     },
                 ).map_err(|_| ())??;
