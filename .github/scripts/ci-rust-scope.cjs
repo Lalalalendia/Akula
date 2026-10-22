@@ -1,14 +1,17 @@
 'use strict';
 const { execFileSync } = require('node:child_process');
 
-// Keep the fast lane deliberately narrow. A change to the root workspace,
-// build configuration, native UI, or any other core component still receives
-// the entire Rust test suite. Documentation-only PRs don't need Rust at all.
+// Root manifests, vendor changes and mixed Core/Native edits retain all tests.
+// Native source-only changes test the native crate (which builds Core as a dependency)
+// and still require the full frame-fidelity lane, without re-running Core unit tests.
 function classify(changedPaths) {
   // CI scripts and workflow definitions are validated by Node/policy checks.
   // They are not Rust source changes and must not schedule an entire workspace build.
   const relevant=changedPaths.filter(p=>p.startsWith('aquilum-app/'));
   if(relevant.length===0) return 'none';
+  const nativeOnly=relevant.every(p=>p.startsWith('aquilum-app/native/src/')
+    ||p.startsWith('aquilum-app/native/tests/'));
+  if(nativeOnly) return 'native';
   const syncOnly=relevant.every(p=>p.startsWith('aquilum-app/core/src/sync/')
     ||p==='aquilum-app/core/tests/sync_contract.rs');
   return syncOnly?'sync':'workspace';

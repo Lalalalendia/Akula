@@ -19,14 +19,36 @@ test('CI-only workflow and routing script changes do not compile unrelated Rust'
     ['.github/workflows/ci-shared-manifest-labs.yml','.github/scripts/ci-shared-routing-contract.test.cjs'],
     ['.github/workflows/app-checks.yml','docs/ci.md']
   ]) assert.equal(classify(onlyCi),'none',onlyCi.join(','));
-  // Any actual Rust/Cargo change, even alongside CI changes, keeps the full gate.
+  // Cargo/Core changes must still get the full dependency graph even alongside CI changes.
   for(const rust of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
-    'aquilum-app/native/src/main.rs','aquilum-app/core/src/files/gate/write.rs']){
+    'aquilum-app/core/src/files/gate/write.rs']){
     assert.equal(classify([rust,'.github/workflows/app-checks.yml']),'workspace',rust);
   }
+  assert.equal(classify(['aquilum-app/native/src/main.rs',
+    '.github/workflows/app-checks.yml']),'native');
   assert.equal(classify(['.github/workflows/app-checks.yml',
     'aquilum-app/core/src/sync/guarded_note_write.rs']),'sync');
 });
+test('Native source-only PRs run native package tests, never re-run Core unit suites',()=>{
+  for(const paths of [
+    ['aquilum-app/native/src/main.rs'],
+    ['aquilum-app/native/src/app/tests/graph.rs','README.md'],
+    ['aquilum-app/native/tests/desktop_integration.rs'],
+    ['aquilum-app/native/src/updater/macos_transaction.rs',
+     '.github/workflows/app-checks.yml'],
+    ['aquilum-app/native/src/ui/editor.rs','aquilum-app/native/src/app.rs'],
+  ]) assert.equal(classify(paths),'native',paths.join(','));
+  for(const risky of [
+    'aquilum-app/native/Cargo.toml',
+    'aquilum-app/Cargo.lock',
+    'aquilum-app/Cargo.toml',
+    'aquilum-app/native/build.rs',
+    'aquilum-app/native/vendor/krilla/src/lib.rs',
+    'aquilum-app/core/src/lib.rs',
+    'aquilum-app/core/src/sync/journal.rs',
+  ]) assert.equal(classify(['aquilum-app/native/src/main.rs',risky]),'workspace',risky);
+});
+
 test('only sync implementation and its contract tests use focused lane',()=>{
   assert.equal(classify(['aquilum-app/core/src/sync/pinned_windows.rs',
     'aquilum-app/core/src/sync/journal.rs',
@@ -347,5 +369,25 @@ test('required macOS security suites use exact ownership and still test lock beh
   assert.match(yaml,/--features sync-engine/);
   assert.match(yaml,/B1a\/B1b0\/B1b1 release and approval compatibility/);
   assert.match(yaml,/Node D1\/D1\.5\/D2 scoped read and loopback compatibility/);
+  assert.match(yaml,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
+
+test('native-only lane runs all Native tests and still requires frame-fidelity Main PR gate',()=>{
+  const yaml=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(yaml,/name: Run Native package tests for native-source changes/);
+  assert.match(yaml,/if: needs\.classify\.outputs\.mode == 'native'/);
+  assert.match(yaml,/cargo test -p aquilum-native --locked -- --skip app::tests::perf::frames::/);
+  assert.match(yaml,/if: needs\.classify\.outputs\.mode == 'workspace' \|\| needs\.classify\.outputs\.mode == 'native'/,
+    'Native-only still installs Linux build dependencies');
+  assert.match(yaml,/mode == 'workspace' \|\| needs\.classify\.outputs\.mode == 'native'\)/,
+    'Native frame-fidelity must run for Native-only changes');
+  assert.match(yaml,/workspace\|native\)\n\s+if \[ "\$FRAMES_RESULT" != success \]/,
+    'protected Main PR gate requires success for Native fidelity');
+  assert.match(yaml,/sync\|none\|manifest\)\n\s+if \[ "\$FRAMES_RESULT" != skipped \]/,
+    'scopes with unchanged Native keep separate fidelity skipped');
+  assert.match(yaml,/if: needs\.classify\.outputs\.mode == 'workspace'\n\s+working-directory: aquilum-app/,
+    'mixed/Core/root changes retain full workspace');
+  assert.match(yaml,/cargo test --workspace --locked/);
+  assert.match(yaml,/cargo test -p aquilum-core --features sync-engine --locked/);
   assert.match(yaml,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
 });
