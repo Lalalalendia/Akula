@@ -356,7 +356,8 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
             manifest.size,
             manifest.id.0,
             &inbox_target,
-        ).expect("explicit create-new after cold stage authentication");
+        )
+        .expect("explicit create-new after cold stage authentication");
         assert_eq!(saved.bytes, manifest.size);
         assert_eq!(saved.blake3_root, manifest.id.0);
         let accepted_bytes = fs::read(&inbox_target).expect("read real created inbox file");
@@ -365,7 +366,10 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         // Reusing the valid stage is not permission to replace user bytes.
         assert!(matches!(
             aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
-                &mut pinned_stage, manifest.size, manifest.id.0, &inbox_target
+                &mut pinned_stage,
+                manifest.size,
+                manifest.id.0,
+                &inbox_target
             ),
             Err(aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists),
         ));
