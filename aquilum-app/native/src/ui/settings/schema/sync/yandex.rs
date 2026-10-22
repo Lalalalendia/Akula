@@ -5,9 +5,7 @@ mod controls;
 #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
 mod pairing;
 
-/// YC-S3-T01, UI stage only. A validated draft is NOT authorization, remote
-/// account identity proof, a live S3 HEAD, or permission to start syncing.
-/// Explicitly no field accepts a secret: native TextEditor fields are plaintext.
+/// S3 setup accepts public metadata only; secrets stay in the OS credential store.
 pub(in crate::ui::settings::schema) fn yandex_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.s3_onboarding;
     let bucket_ready = !draft.bucket.is_empty() && YandexS3Onboarding::valid_bucket(&draft.bucket);
