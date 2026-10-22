@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   # New PR revisions supersede old ones; explicit manual runs remain independent.
-  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: akula-b1b4b1-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
