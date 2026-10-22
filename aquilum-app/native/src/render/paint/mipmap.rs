@@ -292,6 +292,8 @@ mod tests {
             (1, 1), (1, 2), (2, 1), (1, 33), (33, 1),
             (2, 2), (3, 3), (3, 5), (5, 3), (17, 19),
             (128, 127), (511, 257), (1280, 884), (1281, 885),
+            // Extreme u16 width/height with small total allocation.
+            (65535, 1), (1, 65535),
         ];
         for width in 1..=9 {
             for height in 1..=9 {
@@ -311,6 +313,91 @@ mod tests {
                             "RGBA byte mismatch {w}x{h} seed={seed} opaque={opaque}");
                         assert_eq!(actual.may_have_transparency(), expected.may_have_transparency(),
                             "metadata mismatch {w}x{h} seed={seed} opaque={opaque}");
+                    }
+                }
+            }
+        }
+    }
+
+    // Uses the actual Markdown city-cover PNG, odd dimensions, alpha crop,
+    // full Vello CPU raster, two worker settings and two filter qualities.
+    #[test]
+    fn row_reducer_photo_alpha_odd_size_vello_pixels_match_scalar() {
+        const W: u16 = 257;
+        const H: u16 = 193;
+        let photo = image::load_from_memory(include_bytes!("../../../assets/city-cover.png"))
+            .expect("pinned Akula PNG").to_rgba8();
+        let pixels = image::imageops::resize(
+            &photo, u32::from(W), u32::from(H),
+            image::imageops::FilterType::Lanczos3,
+        ).into_raw();
+
+        fn render_photo(mip: &Pixmap, ratio: u16, level: u8, quality: ImageQuality, workers: u16) -> Pixmap {
+            let (out_w, out_h) = (W.div_ceil(ratio), H.div_ceil(ratio));
+            let mut ctx = RenderContext::new_with(
+                out_w, out_h,
+                RenderSettings { num_threads: workers, ..RenderSettings::default() },
+            );
+            ctx.set_transform(Affine::scale(1.0 / f64::from(ratio)));
+            ctx.set_paint_transform(Affine::scale(f64::from(1_u16 << level)));
+            ctx.set_paint(Brush::Image(Image {
+                image: ImageSource::Pixmap(Arc::new(Pixmap::from_parts(
+                    mip.data_as_u8_slice().to_vec(), mip.width(), mip.height(),
+                    PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, mip.may_have_transparency()),
+                ))),
+                sampler: ImageSampler {
+                    x_extend: Extend::Pad, y_extend: Extend::Pad, quality, alpha: 1.0,
+                },
+            }));
+            ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(W), f64::from(H)));
+            ctx.flush();
+            let mut out = Pixmap::new(out_w, out_h);
+            ctx.render_with(
+                &mut out, &mut Resources::default(),
+                RasterizerSettings {
+                    target_init: TargetInit::Clear(WHITE),
+                    ..RasterizerSettings::default()
+                },
+            );
+            out
+        }
+
+        for opaque in [true, false] {
+            let mut premul = pixels.clone();
+            for (i, rgba) in premul.chunks_exact_mut(4).enumerate() {
+                let a = if opaque { 255 } else {
+                    [0_u8, 64, 128, 192, 255][(i / 11 + i / usize::from(W)) % 5]
+                };
+                for rgb in &mut rgba[..3] {
+                    *rgb = ((u16::from(*rgb) * u16::from(a) + 127) / 255) as u8;
+                }
+                rgba[3] = a;
+            }
+            for ratio in [4_u16, 8, 16] {
+                let level = level_for_transform(Affine::scale(1.0 / f64::from(ratio)));
+                assert!(level > 0);
+                let mut scalar = Pixmap::from_parts(
+                    premul.clone(), W, H,
+                    PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, !opaque),
+                );
+                let mut row = Pixmap::from_parts(
+                    premul.clone(), W, H,
+                    PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, !opaque),
+                );
+                for _ in 0..level {
+                    scalar = half(&scalar).expect("photo supports LOD");
+                    row = half_row(&row).expect("row photo supports LOD");
+                    assert_eq!(scalar.data_as_u8_slice(), row.data_as_u8_slice(),
+                        "RGBA mismatch ratio={ratio} opaque={opaque}");
+                    assert_eq!(scalar.may_have_transparency(), row.may_have_transparency());
+                }
+                for workers in [0, 2] {
+                    for quality in [ImageQuality::Medium, ImageQuality::High] {
+                        let expected = render_photo(&scalar, ratio, level, quality, workers);
+                        let actual = render_photo(&row, ratio, level, quality, workers);
+                        assert!(!actual.data_as_u8_slice().is_empty());
+                        assert_eq!(expected.data_as_u8_slice(), actual.data_as_u8_slice(),
+                            "Vello sampled-pixel mismatch ratio={ratio} opaque={opaque} workers={workers} quality={quality:?}");
                     }
                 }
             }

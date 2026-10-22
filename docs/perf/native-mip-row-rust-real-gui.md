@@ -33,3 +33,13 @@ No production rollout, feature default, policy gate or main workflow change.
 No PR should be opened just because the diagnostic passes. The target
 metric is a genuine improvement of full editor workloads and cold build,
 not merely isolated kernel speed. Cached-image replay may show no speedup.
+
+## 22 Oct — Windows city-cover Vello and multi-image test
+
+A Windows-only branch-scoped push now runs byte parity over 65535x1 and 1x65535
+pixel limits, actual city-cover PNG resized to 257x193 with premultiplied opaque
+and alpha-cropped imagery, full Vello output under three downscale ratios and
+two sampler/worker settings, and 1/10/100 separate image-ID L1/L2 cache budget
+and direct L2 equivalence. Existing rounded-corner, alpha-crop and fractional
+pixel tests also run under Windows. These are test-only changes; no installed
+binary, production default, Linux-tested algorithm or main CI was modified.

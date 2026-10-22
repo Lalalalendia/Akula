@@ -106,6 +106,23 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Windows native release photo/alpha/Vello & 1-10-100 cache QA
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # One compiled release test executable reused by all targeted filters.
+          $filters = @(
+            'row_reducer',
+            'render::paint::convert::image_scene_tests',
+            'render::paint::convert::fractional_odd_quality_tests',
+            'render::paint::convert::mipmap_crop_alpha_edge_tests',
+            'render::paint::convert::mipmap_rounded_coverage_tests'
+          )
+          foreach ($filter in $filters) {
+            cargo test --release --locked -p aquilum-native --bin aquilum-native $filter -- --nocapture --test-threads=1
+            if ($LASTEXITCODE -ne 0) { throw "Windows pixel QA failed: $filter" }
+          }
       - name: Compile one developer release executable
         working-directory: aquilum-app
         shell: pwsh

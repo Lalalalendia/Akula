@@ -144,6 +144,50 @@ fn selective_cache_handles_one_ten_and_hundred_distinct_sources() {
 }
 
 #[test]
+fn row_reducer_one_ten_hundred_sources_keep_cache_budget_and_exact_l2() {
+    // 1, 10, 100 distinct decoded RGBA blobs. Scalar eager and direct L2
+    // cache paths must agree with two sequential row reductions.
+    for count in [1usize, 10, 100] {
+        let mut eager = Images::default();
+        let mut selective = Images::default();
+        for n in 0..count {
+            let id = n as u64 + 1000;
+            let input = source(id);
+            let ImageSource::Pixmap(ref base) = input else { unreachable!() };
+            let scalar_l1 = mipmap::half(base).unwrap();
+            let row_l1 = mipmap::half_row(base).unwrap();
+            assert_eq!(scalar_l1.data_as_u8_slice(), row_l1.data_as_u8_slice(),
+                "L1 differs for image={id}, count={count}");
+            assert_eq!(scalar_l1.may_have_transparency(), row_l1.may_have_transparency());
+            let scalar_l2 = mipmap::half(&scalar_l1).unwrap();
+            let row_l2 = mipmap::half_row(&row_l1).unwrap();
+            assert_eq!(scalar_l2.data_as_u8_slice(), row_l2.data_as_u8_slice(),
+                "L2 differs for image={id}, count={count}");
+            eager.next_frame_with_mip_lifetime(EXPERIMENTAL_MIP_LINGER_FRAMES);
+            selective.next_frame_with_mip_lifetime(EXPERIMENTAL_MIP_LINGER_FRAMES);
+            let eager_l2 = request(&mut eager, id, &input, 2, TIGHT_BUDGET, false).unwrap();
+            let direct_l2 = request(&mut selective, id, &input, 2, TIGHT_BUDGET, true).unwrap();
+            for actual in [eager_l2, direct_l2] {
+                assert_eq!(actual.data_as_u8_slice(), row_l2.data_as_u8_slice(),
+                    "cache L2 differs for image={id}, count={count}");
+                assert_eq!(actual.may_have_transparency(), row_l2.may_have_transparency());
+            }
+            assert!(used_bytes(&eager) <= TIGHT_BUDGET);
+            assert!(used_bytes(&selective) <= TIGHT_BUDGET);
+        }
+        let last = count as u64 + 999;
+        let input = source(last);
+        let ImageSource::Pixmap(ref base) = input else { unreachable!() };
+        let l1 = request(&mut selective, last, &input, 1, TIGHT_BUDGET, true).unwrap();
+        let expected = mipmap::half_row(base).unwrap();
+        assert_eq!(l1.data_as_u8_slice(), expected.data_as_u8_slice(),
+            "late zoom-in L1 mismatch after count={count}");
+        assert!(used_bytes(&selective) <= TIGHT_BUDGET);
+        println!("AKULA_ROW_MIP_MULTI count={count} exact=true budget_ok=true");
+    }
+}
+
+#[test]
 #[ignore = "non-gating release cache economics; not user FPS"]
 fn adaptive_lod_multi_image_microbench_diagnostic() {
     for count in [1usize, 10, 100] {
