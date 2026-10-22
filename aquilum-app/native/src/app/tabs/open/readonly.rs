@@ -53,7 +53,7 @@ impl App {
                 chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page));
             }
         } else {
-            self.show_open_error(root, path, "Cannot preview image (invalid, unsafe or too large)");
+            self.show_open_error(root, path, &crate::i18n::t("fileTree.imageOpenFailed"));
         }
     }
 }
