@@ -98,5 +98,7 @@ pub(super) fn build(config: &AppConfig, ctx: &Context, view: ViewState) -> Block
         rows.push(info(t("settings.yandex.keyActionResult"), None,
             Control::Status { text: notice.clone(), tone: Tone::Secondary }));
     }
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    rows.extend(super::pairing::rows(ctx, supported && bucket_ready));
     Block { title: t("settings.yandex.title"), rows }
 }
