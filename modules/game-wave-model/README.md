@@ -18,13 +18,13 @@ allocation at construction and contains no unsafe code.
 ## Scope and fidelity
 
 - One `tick()` is one logical game update, **not** one millisecond.
-- Batch item frequency and pause duration use strict `>` comparisons.
+- The first item in each batch appears immediately; subsequent items use a strict `>` frequency comparison. Pauses use a strict `>` threshold.
 - Groups advance when their spawn slots are issued, not when enemies die.
 - Wave completion waits for spawned objects unless a positive timeout expires
   after all groups are issued.
 - Transition between waves is modelled as a 150-update gap.
-- The host reports object removal via `mark_gone(id)`.
-- A provided index chooser permits reproducible shuffle tests without claiming
+- The host reports object removal via `mark_gone(id)`. Reusing a cyclic spawn slot does not erase earlier objects from the host's live set.
+- Global configuration and live-object budgets limit resource use; exceeding the live-object limit halts ticks with an explicit error.\n- A provided index chooser permits reproducible shuffle tests without claiming
   parity with Flash Player's `Math.random()`.
 - Optional cycling preserves the source-like rest/count mechanics but is not
   yet verified against a running reference SWF.
@@ -40,7 +40,7 @@ No files, data or ActionScript from that repository were copied into this
 crate. The third-party game's CC BY-NC-SA terms require separate license review
 before redistributing original game assets.
 
-This is an **original testable approximation**. In particular: random
+This is an **original testable approximation**. Static review uncovered and fixed two model divergences (initial batch timing and live cyclic objects); compilation and runtime tests remain pending. In particular: random
 sequences, exact transition timing, removal/respawn identity, empty-group
 handling and cycling must be validated with original runtime traces before
 claiming behavioral equivalence. The unit tests test internal contracts, not
