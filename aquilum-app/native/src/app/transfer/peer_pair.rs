@@ -114,24 +114,19 @@ impl PeerUi {
                     return false;
                 };
                 if pending != &observed || observed != verified {
-                    self.view.phase = PeerPhase::Error(
-                        t("transfer.pairRevokeChanged"),
-                    );
+                    self.view.phase = PeerPhase::Error(t("transfer.pairRevokeChanged"));
                     return true;
                 }
             }
             PeerAction::Confirm => {
                 if !valid_key(&observed) || !valid_key(&verified) || observed != verified {
-                    self.view.phase = PeerPhase::Error(
-                        t("transfer.pairInvalidComparison"),
-                    );
+                    self.view.phase = PeerPhase::Error(t("transfer.pairInvalidComparison"));
                     return true;
                 }
             }
             PeerAction::Inspect => {
                 if !valid_key(&observed) {
-                    self.view.phase =
-                        PeerPhase::Error(t("transfer.pairInvalidObserved"));
+                    self.view.phase = PeerPhase::Error(t("transfer.pairInvalidObserved"));
                     return true;
                 }
             }
