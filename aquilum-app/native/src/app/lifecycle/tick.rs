@@ -10,6 +10,13 @@ impl App {
         {
             self.refresh_settings(root);
         }
+        #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+        if self.s3_pair.poll()
+            && matches!(&self.popup, Some(Popup::Settings { dialog, .. })
+                if dialog.section == crate::ui::settings::schema::Section::Sync)
+        {
+            self.refresh_settings(root);
+        }
         if self.view_due.is_some_and(|t| t <= now) {
             self.flush_view();
         }
