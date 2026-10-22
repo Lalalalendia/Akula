@@ -54,6 +54,8 @@ pub mod server_installer_os_witness_lab;
 
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1c0-fixed-node-lab"))]
 pub mod server_installer_fixed_node_lab;
+#[cfg(all(target_os = "linux", feature = "server-bootstrap-b1d0-durable-node"))]
+pub mod server_installer_durable_node;
 
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
