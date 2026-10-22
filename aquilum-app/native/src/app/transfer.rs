@@ -18,10 +18,13 @@ const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
 mod model;
-#[cfg(feature = "p2p-device-ui")]
-mod local_identity;
+mod picker;
 #[cfg(feature = "p2p-device-ui")]
 mod peer_pair;
+#[cfg(feature = "p2p-device-contacts-preview")]
+mod contacts;
+#[cfg(feature = "p2p-device-ui")]
+mod local_identity;
 
 /// A display-only identity observation. The first-party owner registry still
 /// needs to supply a verified snapshot. No production path populates this
@@ -47,6 +50,8 @@ pub(super) struct TransferState {
     pub(super) choosing: bool,
     pub(super) error: Option<String>,
     peers: Vec<TransferPeer>,
+    #[cfg(feature = "p2p-device-contacts-preview")]
+    transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
@@ -59,6 +64,8 @@ impl App {
         if self.popup.is_some() {
             return;
         }
+        #[cfg(feature = "p2p-device-contacts-preview")]
+        self.transfer.refresh_transport_contacts();
         self.show_transfers(root);
     }
 
@@ -81,6 +88,13 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
+        #[cfg(feature = "p2p-device-contacts-preview")]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            &self.transfer.transport_contacts, self.transfer.choosing,
+            self.transfer.error.as_deref(), identity_view, peer_view,
+        );
+        #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(), identity_view, peer_view,
@@ -117,20 +131,6 @@ impl App {
         }
     }
 
-    fn choose_transfer_files(&mut self) {
-        if self.transfer.choosing {
-            return;
-        }
-        self.transfer.choosing = true;
-        let tx = self.transfer_tx.clone();
-        let wake = Arc::clone(&self.workspace.wake);
-        std::thread::spawn(move || {
-            let picked = rfd::FileDialog::new().pick_files().unwrap_or_default();
-            if tx.send(picked).is_ok() {
-                wake();
-            }
-        });
-    }
 
     pub(super) fn on_transfer_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
         let Some(Popup::Transfers(dialog)) = self.popup.take() else { return Outcome::default() };
