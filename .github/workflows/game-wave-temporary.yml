@@ -1,0 +1,17 @@
+name: Temporary isolated game wave tests
+on:
+  pull_request:
+    paths:
+      - 'modules/game-wave-model/**'
+      - '.github/workflows/game-wave-temporary.yml'
+permissions:
+  contents: read
+jobs:
+  wave:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run targeted Rust tests
+        run: cargo test --manifest-path modules/game-wave-model/Cargo.toml -- --nocapture
