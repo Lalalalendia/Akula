@@ -11,8 +11,10 @@ workspace = ".."
 default = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
+# Explicit opt-in OS-backed transport identity, no network grant.
+p2p-device-identity = ["dep:windows"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
-node-catalog-lab = []
+node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
@@ -54,8 +56,6 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
-# Explicit, opt-in device identity via OS credentials; no network grants.
-p2p-device-identity = ["dep:windows"]
 # Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
 sync-text-delta = ["dep:zstd"]
 # Separately selected packaged build: force every default Core::open through
@@ -106,6 +106,7 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
 akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
 akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
@@ -145,5 +146,4 @@ tempfile = "3"
 rustix = { version = "=0.38.44", features = ["fs", "process"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Reuse windows 0.62 already locked for the native app; no new crate.
 windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_System_Threading"] }

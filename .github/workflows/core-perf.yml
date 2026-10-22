@@ -1,8 +1,15 @@
 name: Core performance baseline
 
 on:
+  workflow_call:
+    inputs:
+      documents:
+        description: "Deterministic vault sizes for manual and called baseline"
+        required: false
+        type: string
+        default: "1000"
   pull_request:
-    types: [opened, synchronize, reopened, labeled, edited]
+    types: [labeled, edited]
     paths:
       - "aquilum-app/core/**"
       - ".github/workflows/core-perf.yml"
@@ -129,3 +136,13 @@ jobs:
             save.txt
             editor.txt
           retention-days: 30
+
+  paired:
+    name: Opt-in paired Core benchmark
+    if: >-
+      github.event_name == 'pull_request' &&
+      (startsWith(github.head_ref, 'perf/') ||
+       startsWith(github.event.pull_request.title, 'perf(') ||
+       startsWith(github.event.pull_request.title, 'perf:') ||
+       contains(github.event.pull_request.labels.*.name, 'perf-ci'))
+    uses: ./.github/workflows/core-perf-compare.yml
