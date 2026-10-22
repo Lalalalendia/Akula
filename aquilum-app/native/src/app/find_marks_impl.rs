@@ -21,7 +21,7 @@ impl App {
         };
         let Some(height) = scroll.get(root).map(|area| area.inner().content_height()) else { return };
         let origin = editor_y - viewport_y + offset;
-        let stamp = MarkStamp { source, body_origin: origin, scroll_height: height };
+        let stamp = super::find_marks::MarkStamp { source, body_origin: origin, scroll_height: height };
         if self.find_mark_stamp.is_some_and(|old| {
             old.source == stamp.source
                 && old.scroll_height == stamp.scroll_height

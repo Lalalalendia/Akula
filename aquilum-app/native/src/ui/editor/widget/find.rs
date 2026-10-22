@@ -12,12 +12,12 @@ pub type Status = (usize, usize, bool);
 
 #[derive(Default)]
 pub(super) struct Find {
-    query: String,
-    matches: Vec<Range<usize>>,
+    pub(super) query: String,
+    pub(super) matches: Vec<Range<usize>>,
     active: usize,
     only_active: bool,
-    generation: Generation,
-    pending: Option<Receiver<Vec<Range<usize>>>>,
+    pub(super) generation: Generation,
+    pub(super) pending: Option<Receiver<Vec<Range<usize>>>>,
 }
 
 impl TextEditor {
