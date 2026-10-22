@@ -101,3 +101,32 @@ test('beta packaging workflows do not build all three OS installers for any Nati
   assert.match(main,/workspace\|native\)\n\s+if \[ "\$FRAMES_RESULT" != success \]/,
     'a Native-only source PR is still blocked on full Native rendering tests');
 });
+
+
+test('reusable OS/security workflows use unique concurrency namespaces',()=>{
+  const perFile=new Map([
+    ['core-server-bootstrap-b1b4a-cas-fence.yml','akula-b1b4a'],
+    ['core-server-bootstrap-b1b4b-os-witness.yml','akula-b1b4b'],
+    ['core-server-bootstrap-b1b4b1-witness-ipc.yml','akula-b1b4b1'],
+    ['core-server-bootstrap-b1c0-fixed-node.yml','akula-b1c0'],
+    ['sync-text-delta-rust.yml','akula-sync-text-delta'],
+    ['sync-installed-os-owner-witness.yml','akula-installed-owner'],
+  ]);
+  const groups=new Set();
+  for(const [name,prefix] of perFile){
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',name),'utf8');
+    const group=body.match(/^  group: (.+)$/m)?.[1];
+    assert.ok(group,name+' must have a concurrency group');
+    assert.ok(group.startsWith(prefix+'-'),name+' must have its own namespace');
+    assert.ok(group.includes('github.workflow'),name+' preserves caller workflow routing');
+    assert.ok(group.includes('github.event.pull_request.number || github.run_id'),
+      name+' retains PR revision replacement and independent manual runs');
+    assert.match(body,/^  cancel-in-progress: true$/m);
+    assert.ok(!groups.has(group),'colliding reusable concurrency group: '+name);
+    groups.add(group);
+  }
+  const main=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  const routed=fs.readFileSync(path.join(__dirname,'../workflows/ci-shared-manifest-labs.yml'),'utf8');
+  assert.match(main,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+  assert.match(routed,/SHARED_BOUNDARY_FAIL_CLOSED/);
+});
