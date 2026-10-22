@@ -52,6 +52,13 @@ impl App {
             s3_pair_status: self.s3_pair.status(),
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             s3_pair_busy: self.s3_pair.busy(),
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            s3_pair_configured: if section == Section::Sync {
+                workspace.as_deref()
+                    .and_then(|root| aquilum_core::sync::s3_pair_host::read_pair_profile(
+                        root, &self.workspace.data_dir,
+                    ).ok().flatten()).is_some()
+            } else { false },
             yandex_notice: None,
             sync_selected: None,
             sync_notice: None,
