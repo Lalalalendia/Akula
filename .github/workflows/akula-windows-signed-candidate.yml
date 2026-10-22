@@ -54,6 +54,8 @@ jobs:
           }
           node --test .github/scripts/windows-beta-identity.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Windows identity boundary failed' }
+          node scripts/akula-version.cjs check
+          if ($LASTEXITCODE -ne 0) { throw 'Akula Windows version contract failed' }
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
@@ -307,6 +309,26 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_ENV"
           echo "file=$package" >> "$GITHUB_ENV"
+      - name: Prove newer release version and generate exact-tag change notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq ".tag_name")"
+          node scripts/akula-version.cjs assert-newer "$previous"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="v${version}" -f target_commitish="$GITHUB_SHA" \
+            -f previous_tag_name="$previous" --jq ".body" > "$RUNNER_TEMP/akula-release-notes.md"
+          test -s "$RUNNER_TEMP/akula-release-notes.md"
+          cat >> "$RUNNER_TEMP/akula-release-notes.md" <<'NOTES'
+
+          ---
+          Signed Akula Windows NSIS beta. Automatic NSIS crash rollback is
+          not provided: reinstall the previous signed Akula version if needed.
+          Akula is a separate product from Aquilum; Linux/macOS are not
+          authorized by this Windows-only release.
+          NOTES
       - name: Publish manually approved signed Windows beta as latest Akula release
         shell: bash
         env:
@@ -317,5 +339,5 @@ jobs:
             "dist/${file}" "dist/${file}.sig" dist/latest.json dist/latest.json.sig \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Akula v${version} (Windows beta)" --latest \
-            --notes "Signed Windows NSIS beta. Contains no automatic rollback: reinstall the previous signed version if NSIS fails. This Akula release is independent of Aquilum."
+            --notes-file "$RUNNER_TEMP/akula-release-notes.md"
           echo "AKULA_SIGNED_WINDOWS_BETA_PUBLISHED version=${version} source=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
