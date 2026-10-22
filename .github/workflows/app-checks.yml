@@ -319,8 +319,8 @@ jobs:
             aquilum-app/core/Cargo.toml; then
             echo 'Extension view unaffected'
           else
-            cargo test --locked -p aquilum-core --features extension-view-lab search::tasks::repository::view_lab::tests::read_only_preview_is_bounded
-            cargo test --locked -p aquilum-native --features extension-view-lab links::panel::tests::first_party_task_view
+            cargo test --locked -p aquilum-core --features extension-view-lab search::tasks::repository::view_lab::tests
+            cargo test --locked -p aquilum-native --features extension-view-lab links::panel::tests
           fi
 
       # A verified opt-in local package without existing dependency changes
