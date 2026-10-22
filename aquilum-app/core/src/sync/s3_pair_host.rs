@@ -272,3 +272,6 @@ pub async fn sync_new_files_once(
     report.needs_review += incoming.needs_review;
     Ok(report)
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests;
