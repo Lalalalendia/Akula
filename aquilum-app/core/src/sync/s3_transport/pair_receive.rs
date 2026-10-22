@@ -71,6 +71,8 @@ impl From<std::io::Error> for S3PairReceiveError {
 pub struct S3PairReceiveReport {
     /// Real local files published, but NOT durably ACKed.
     pub created_unconfirmed: usize,
+    /// Already-local files with exact verified hash are not a collision.
+    pub already_present_identical: usize,
     /// Includes collisions, unsupported nested files and historical changes.
     pub needs_review: usize,
     pub observed_remote_revisions: usize,
@@ -146,7 +148,16 @@ impl AwsS3ProbeClient {
             let target = registered_root.join(path.as_str());
             match fs::symlink_metadata(&target) {
                 Ok(_) => {
-                    report.needs_review += 1;
+                    // A device's own newly uploaded note is already present.
+                    // Treat it as identical only via registered CLOSED pinned
+                    // read; a symlink, dirty note or hash mismatch stays HOLD.
+                    let identical = admission.read_closed_preflight(path, MAX_NOTE_BYTES)
+                        .is_ok_and(|local| local.content_hash == *blob_hash);
+                    if identical {
+                        report.already_present_identical += 1;
+                    } else {
+                        report.needs_review += 1;
+                    }
                     continue;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -187,7 +198,8 @@ mod tests {
     #[test]
     fn initial_new_file_receive_report_is_not_a_baseline_receipt() {
         let report = S3PairReceiveReport {
-            created_unconfirmed: 1, needs_review: 0, observed_remote_revisions: 1,
+            created_unconfirmed: 1, already_present_identical: 0,
+            needs_review: 0, observed_remote_revisions: 1,
         };
         assert_ne!(report.created_unconfirmed, report.needs_review);
         assert_eq!(report.observed_remote_revisions, 1);
