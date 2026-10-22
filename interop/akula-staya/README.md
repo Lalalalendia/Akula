@@ -182,3 +182,75 @@ trust grant. This CLI is not shipped with Akula. Profile CI **only compiles**
 this Windows-oriented tool on Linux/Windows; no physical two-PC acceptance
 can be claimed from CI. Linux refuses missing protected OS credentials at
 runtime.
+
+## Two Windows PCs on DIFFERENT internet connections (explicit opt-in)
+
+The **same** default-off `akula-p2p-lan` operator utility also supports
+`internet-listen` and `internet-connect`. This is NOT an installed Akula
+file-transfer feature. It only proves that the actual OS-persisted private
+Iroh key and the independently confirmed peer pin work over a real internet
+QUIC session.
+
+These subcommands **explicitly opt into external n0-operated DNS/Pkarr
+discovery and encrypted relay fallback**. An n0 relay may observe addresses,
+connection timing and packet sizes; it cannot decrypt the QUIC content.
+Iroh first tries a direct UDP path (including hole punching) and, if that
+fails, can continue over the encrypted relay. We do not silently enable this
+on ordinary LAN modes, import user files, or configure routers/firewalls.
+Availability depends on n0 infrastructure and local outbound access.
+
+You do NOT need two devices on the same LAN. To begin, download the
+**test-only, unsigned Windows diagnostic bundle** from the successful
+`Akula P2P to real Staya QUIC two-process interoperability` GitHub Actions
+run for your exact selected PR commit. The Windows artifact includes
+`akula-p2p-identity.exe`, `akula-p2p-lan.exe`,
+`SHA256SUMS.txt`, this README and an explicit NOT-RELEASE note.
+This is not the signed Akula installer. Only use the artifact from our
+own GitHub repository, check the SHA-256 hashes and isolate test accounts.
+
+On Windows computer A and computer B, each in its own terminal:
+
+```powershell
+.\akula-p2p-identity.exe --init
+.\akula-p2p-identity.exe --id
+```
+
+Only run `--init` if that Windows account has not enrolled. If it
+already has an identity, use only `--id`. Exchange ONLY the full 64-hex
+public EndpointIds; compare them independently (for example by voice).
+Then both computers run:
+
+```powershell
+.\akula-p2p-identity.exe --peer-confirm OTHER_ENDPOINT_ID
+```
+
+Each person must **retype** the complete other EndpointId after checking
+it independently. The command never creates any file-reading permission.
+
+On computer A (start this first and leave it running):
+
+```powershell
+.\akula-p2p-lan.exe internet-listen OTHER_ENDPOINT_ID
+```
+
+On computer B, from a completely different network, cellular tethering
+or another household:
+
+```powershell
+.\akula-p2p-lan.exe internet-connect OTHER_ENDPOINT_ID
+```
+
+No LAN IP, public IP or manually opened UDP port is required for this
+internet mode, but outbound DNS/HTTPS/UDP access and reachable n0
+infrastructure are required; restrictive networks may still fail. The
+result `OS_PINNED_QUIC_OK=true ROUTE_MODE=INTERNET_N0` proves only
+a mutual authenticated QUIC **HELLO/OK**, not direct-vs-relay selection,
+file delivery, safe file storage, File Gate or automatic Sync. Full root
+authorization, a trusted Core→Staya host channel and two-PC file acceptance
+remain future gates.
+
+If you cannot or do not want to use n0 infrastructure, use direct
+`listen`/`connect` with a reachable numeric IP:port or a separately
+configured private overlay/VPN. In that case the normal direct-only CLI
+will not use any n0 discovery/relay.
+
