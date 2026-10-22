@@ -39,15 +39,9 @@ jobs:
           shared-key: akula-main-gate-v1
           cache-workspace-crates: true
           save-if: false
-      - name: Resolve and print canonical Blue dependency lock (one-time)
+      - name: Verify pinned Blue dependency lock
         working-directory: aquilum-app
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo metadata --format-version 1 > /dev/null
-          echo AKULA_BLUE_LOCK_BEGIN
-          cat Cargo.lock
-          echo AKULA_BLUE_LOCK_END
+        run: cargo metadata --locked --format-version 1 > /dev/null
       - name: Format W3 adapter, inbox and focused tests
         run: |
           rustfmt --edition 2021 --check aquilum-app/core/src/messaging/w4/inbox.rs

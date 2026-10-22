@@ -144,15 +144,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "akula-server-release-b1a"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "ring",
- "serde",
-]
-
-[[package]]
 name = "akula-server-bootstrap-b0"
 version = "0.1.0"
 dependencies = [
@@ -161,6 +152,15 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "akula-server-release-b1a"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "ring",
+ "serde",
 ]
 
 [[package]]
@@ -7846,6 +7846,9 @@ name = "zeroize"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+dependencies = [
+ "zeroize_derive",
+]
 
 [[package]]
 name = "zeroize_derive"
@@ -7996,3 +7999,4 @@ dependencies = [
  "syn 3.0.6",
  "winnow",
 ]
+
