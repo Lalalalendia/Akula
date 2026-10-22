@@ -11,6 +11,12 @@ pub fn classify(result: notify::Result<Event>, root: &Path) -> Option<WatchBatch
     if matches!(event.kind, EventKind::Access(_)) {
         return None;
     }
+    // Internal history, trash and sync-stage writes must not reach the index.
+    let paths = event.paths.into_iter().filter(|path| !is_hidden(root, path)).collect::<Vec<_>>();
+    if paths.is_empty() {
+        return None;
+    }
+    let event = Event { paths, ..event };
     if needs_directory_rescan(&event) {
         return Some(WatchBatch::new(event.paths, WatchScope::Rescan));
     }
@@ -121,6 +127,17 @@ mod tests {
         assert_eq!(batch.scope, WatchScope::Content);
         let created = classify(event(EventKind::Create(CreateKind::File), &["/база/заметка.txt"]), Path::new("/база")).unwrap();
         assert_eq!(created.scope, WatchScope::Structure);
+    }
+
+    #[test]
+    fn service_file_changes_are_ignored_but_user_dot_notes_are_delivered() {
+        let root = Path::new("/vault");
+        for path in ["/vault/.trash/old.md", "/vault/.aquilum/history/a.md", "/vault/.akula-sync-stage-temp.md", "/vault/.git/config.md"] {
+            assert!(classify(written(&[path]), root).is_none(), "{path}");
+        }
+        let batch = classify(written(&["/vault/.заметки/Идея.md"]), root).unwrap();
+        assert_eq!(batch.scope, WatchScope::Content);
+        assert_eq!(batch.paths, vec![PathBuf::from("/vault/.заметки/Идея.md")]);
     }
 
     #[test]
