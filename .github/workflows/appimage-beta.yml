@@ -14,7 +14,6 @@ on:
       - 'scripts/appimage-real-upgrade-helper.rs'
       - 'aquilum-app/native/packaging/akula-linux.json'
       - 'aquilum-app/native/packaging/Akula.desktop'
-      - 'aquilum-app/native/src/**'
       - 'aquilum-app/native/Cargo.toml'
 
 permissions:

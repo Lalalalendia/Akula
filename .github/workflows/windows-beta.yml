@@ -15,7 +15,6 @@ on:
       - 'scripts/windows-beta-candidate-manifest.ps1'
       - 'scripts/windows-accesskit-uia.ps1'
       - 'aquilum-app/native/packaging/akula-windows.json'
-      - 'aquilum-app/native/src/**'
       - 'aquilum-app/native/Cargo.toml'
 
   workflow_dispatch:
