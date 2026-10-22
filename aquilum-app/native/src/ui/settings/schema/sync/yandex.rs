@@ -47,7 +47,7 @@ pub(in crate::ui::settings::schema) fn yandex_setup(config: &AppConfig, ctx: &Co
     // A preview feature may only be enabled in an isolated Windows QA build.
     // The normal installed Akula binary has this permanently disabled.
     let preview = cfg!(all(target_os = "windows", feature = "yandex-s3-connection-preview"));
-    controls::build(config, ctx, controls::ViewState {
+    let view = controls::ViewState {
         supported,
         bucket_ready,
         preview,
@@ -55,5 +55,13 @@ pub(in crate::ui::settings::schema) fn yandex_setup(config: &AppConfig, ctx: &Co
         key_tone,
         probe_status,
         probe_tone,
-    })
+    };
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    {
+        return pairing::compact(config, ctx, view);
+    }
+    #[cfg(not(all(target_os = "windows", feature = "s3-pair-beta")))]
+    {
+        controls::build(config, ctx, view)
+    }
 }
