@@ -78,6 +78,7 @@ impl App {
 
     pub(in crate::app) fn render_note(&mut self, root: &mut RenderRoot) {
         self.find = None;
+        self.find_mark_stamp = None;
         let page = self.note_widget();
         // The new page already contains an empty save-error slot. Handles
         // from the previous page are invalid after its tree is replaced.

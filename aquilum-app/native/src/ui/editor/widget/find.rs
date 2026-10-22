@@ -3,7 +3,7 @@ use std::sync::mpsc::{Receiver, channel};
 use aquilum_core::text::cancel::Generation;
 use aquilum_core::text::matcher::Matcher;
 
-use super::matching::{FIND, find_in};
+use super::matching::{FIND, find_in, find_terms};
 use super::*;
 use crate::ui::editor::change::{self, Change};
 
@@ -25,10 +25,52 @@ impl TextEditor {
         (if total == 0 { 0 } else { self.find.active + 1 }, total, total == FIND.limit)
     }
 
+    /// Cheap search and layout signature for the scrollbar markers.
+    pub fn find_mark_stamp(&self) -> Option<(u64, usize, bool, (usize, usize), f64, f64)> {
+        if self.find.query.is_empty() {
+            return None;
+        }
+        Some((
+            self.find.generation.current(),
+            self.find.matches.len(),
+            self.find.pending.is_some(),
+            self.doc.loaded_range(),
+            self.width,
+            self.doc.height(),
+        ))
+    }
+
+    /// Y coordinates within the text widget (not the whole scrollable page).
+    pub fn find_mark_positions(&self) -> Vec<f64> {
+        if self.find.pending.is_some() {
+            return Vec::new();
+        }
+        let (loaded_start, loaded_end) = self.doc.loaded_range();
+        self.find.matches.iter().map(|range| {
+            let byte = range.start;
+            if byte < loaded_start || byte >= loaded_end {
+                return self.doc.y_of(byte);
+            }
+            let line = self.doc.at_offset(byte);
+            let paragraph = self.doc.paragraph(line);
+            if let Some(layout) = paragraph.laid() {
+                let local = (byte - paragraph.start).min(paragraph.len as usize);
+                let caret = Cursor::from_byte_index(layout, local, Affinity::Downstream).geometry(layout, 0.0);
+                let y = self.doc.origin(line).y + caret.y0;
+                if y.is_finite() {
+                    return y;
+                }
+            }
+            let top = self.doc.top(line);
+            let fraction = (byte - paragraph.start) as f64 / f64::from(paragraph.len.max(1));
+            top + (self.doc.bottom(line) - top).max(0.0) * fraction
+        }).collect()
+    }
+
     fn search(&mut self) {
         let cancel = self.find.generation.next();
         self.find.pending = None;
-        let matcher = Matcher::new(&self.find.query, FIND);
+        let matcher = Matcher::any(&find_terms(&self.find.query), FIND);
         let (base, end) = self.doc.loaded_range();
         if matcher.is_empty() || base == 0 && end == self.doc.len() {
             self.find.matches = self.doc.search(|text| matcher.find_all(text));
@@ -106,7 +148,7 @@ impl TextEditor {
         if total > 0 {
             let find = &mut this.widget.find;
             find.active = crate::ui::keymap::cycle(find.active, total, delta > 0);
-            find.only_active = true;
+            find.only_active = false; // Keep every match visible after next/previous.
             this.ctx.request_render();
         }
         let start = this.widget.find.matches.get(this.widget.find.active).map(|m| m.start);

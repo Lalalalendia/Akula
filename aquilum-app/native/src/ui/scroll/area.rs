@@ -4,6 +4,25 @@ use masonry::layout::{LenDef, Length, SizeDef};
 
 use super::bar::{Scrollbar, Span};
 
+/// One passive horizontal tick per occupied physical track row.
+pub(super) fn marker_rows(fractions: &[f64], height: f64, scale: f64) -> Vec<usize> {
+    if !height.is_finite() || !scale.is_finite() || height <= 0.0 || scale <= 0.0 {
+        return Vec::new();
+    }
+    let rows = (height * scale).ceil().min(65_536.0) as usize;
+    if rows == 0 {
+        return Vec::new();
+    }
+    let mut occupied = vec![false; rows];
+    for &fraction in fractions {
+        if fraction.is_finite() {
+            let row = (fraction.clamp(0.0, 1.0) * (rows - 1) as f64).round() as usize;
+            occupied[row] = true;
+        }
+    }
+    occupied.into_iter().enumerate().filter_map(|(row, marked)| marked.then_some(row)).collect()
+}
+
 pub struct ScrollArea<W: Widget> {
     pub(super) child: WidgetPod<W>,
     pub(super) axis: Axis,
@@ -17,6 +36,9 @@ pub struct ScrollArea<W: Widget> {
     pub(super) bar: Scrollbar,
     pub(super) published: Option<u64>,
     pub(super) thumb: masonry::peniko::ImageBrush,
+    pub(super) find_marks: Vec<f64>,
+    pub(super) find_rows: Vec<usize>,
+    pub(super) find_raster: Option<(f64, f64)>,
 }
 
 impl<W: Widget> Drop for ScrollArea<W> {
@@ -51,6 +73,21 @@ impl<W: Widget> ScrollArea<W> {
             bar: Scrollbar::new(axis),
             published: None,
             thumb: crate::render::sprite::marker(),
+            find_marks: Vec::new(),
+            find_rows: Vec::new(),
+            find_raster: None,
+        }
+    }
+
+    pub fn content_height(&self) -> f64 {
+        self.content
+    }
+
+    pub fn set_find_marks(this: &mut WidgetMut<'_, Self>, marks: Vec<f64>) {
+        if this.widget.find_marks != marks {
+            this.widget.find_marks = marks;
+            this.widget.find_raster = None;
+            this.ctx.request_post_paint();
         }
     }
 

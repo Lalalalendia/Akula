@@ -9,11 +9,56 @@ use masonry::widgets::SizedBox;
 use crate::ui::editor::TextAction;
 
 use super::App;
+
+/// A cached source/layout identity; ordinary scrolling must not rescan matches.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct MarkStamp {
+    source: (u64, usize, bool, (usize, usize), f64, f64),
+    body_origin: f64,
+    scroll_height: f64,
+}
 use crate::ui::editor::TextEditor;
 use crate::ui::search::Placeholder;
 use crate::ui::widgets::{Pressed, Slot};
 
 impl App {
+    pub(super) fn refresh_find_marks(&mut self, root: &mut RenderRoot) {
+        let Some(ids) = &self.note_ids else {
+            self.find_mark_stamp = None;
+            return;
+        };
+        let scroll = ids.scroll;
+        let body = ids.body;
+        if self.find.is_none() {
+            self.find_mark_stamp = None;
+            scroll.edit(root, |mut area| crate::ui::scroll::ScrollArea::set_find_marks(&mut area, Vec::new()));
+            return;
+        }
+        let Some((viewport_y, editor_y, offset)) = self.scroll_geometry(root) else { return };
+        let Some(source) = body.get(root).and_then(|b| b.inner().find_mark_stamp()) else {
+            self.find_mark_stamp = None;
+            scroll.edit(root, |mut area| crate::ui::scroll::ScrollArea::set_find_marks(&mut area, Vec::new()));
+            return;
+        };
+        let Some(height) = scroll.get(root).map(|area| area.inner().content_height()) else { return };
+        let origin = editor_y - viewport_y + offset;
+        let stamp = MarkStamp { source, body_origin: origin, scroll_height: height };
+        if self.find_mark_stamp.is_some_and(|old| {
+            old.source == stamp.source
+                && old.scroll_height == stamp.scroll_height
+                && (old.body_origin - stamp.body_origin).abs() < 1.0
+        }) {
+            return;
+        }
+        let positions = body.get(root).map(|b| b.inner().find_mark_positions()).unwrap_or_default();
+        let marks = positions.into_iter().filter_map(|y| {
+            let fraction = (origin + y) / height;
+            fraction.is_finite().then_some(fraction.clamp(0.0, 1.0))
+        }).collect();
+        scroll.edit(root, |mut area| crate::ui::scroll::ScrollArea::set_find_marks(&mut area, marks));
+        self.find_mark_stamp = Some(stamp);
+    }
+
     pub fn open_find(&mut self, root: &mut RenderRoot) {
         let Some(ids) = &self.note_ids else { return };
         if self.find.is_none() {
@@ -30,6 +75,7 @@ impl App {
         ids.find.edit(root, |mut slot| Slot::set_child(&mut slot, NewWidget::new(SizedBox::empty()).erased()));
         ids.body.edit(root, |mut body| TextEditor::find(&mut body, ""));
         root.focus_on(Some(ids.body.id()));
+        self.refresh_find_marks(root);
     }
 
     fn show_status(&self, root: &mut RenderRoot, (current, total, more): crate::ui::editor::Status) {
@@ -44,6 +90,7 @@ impl App {
         if let Some(status) = ids.body.edit(root, |mut body| TextEditor::poll_find(&mut body)).flatten() {
             self.show_status(root, status);
         }
+        self.refresh_find_marks(root);
     }
 
     fn find_step(&mut self, root: &mut RenderRoot, delta: isize) {
@@ -65,6 +112,7 @@ impl App {
                 let status = ids.body.edit(root, |mut body| TextEditor::find(&mut body, query)).unwrap_or_default();
                 placeholder.edit(root, |mut p| Placeholder::set_empty(&mut p, query.is_empty()));
                 self.show_status(root, status);
+                self.refresh_find_marks(root);
             }
             return true;
         }

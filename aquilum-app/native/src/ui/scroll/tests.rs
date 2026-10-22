@@ -179,3 +179,12 @@ fn nonfinite_scroll_input_is_rejected_before_reaching_nested_offsets() {
         assert_eq!(super::sideways(masonry::kurbo::Vec2::new(value, 0.0), false), 0.0);
     }
 }
+
+#[test]
+fn find_marker_rows_are_deduplicated_and_scale_aware() {
+    let ticks = super::area::marker_rows(&[0.0, 0.25, 0.251, 1.0, f64::NAN], 100.0, 1.0);
+    assert_eq!(ticks, [0, 25, 99]);
+    assert_eq!(super::area::marker_rows(&[0.0, 1.0], 100.0, 2.0), [0, 199]);
+    assert!(super::area::marker_rows(&[0.5], 0.0, 1.0).is_empty());
+    assert!(super::area::marker_rows(&[0.5], 100.0, f64::NAN).is_empty());
+}

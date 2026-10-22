@@ -28,6 +28,7 @@ impl App {
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,
+            find_mark_stamp: None,
             note: None,
             text: crop::Rope::from(initial_text),
             inactive_notes: Vec::new(),

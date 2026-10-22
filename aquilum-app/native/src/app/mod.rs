@@ -115,6 +115,7 @@ pub struct App {
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,
     find: Option<crate::ui::find::FindBar>,
+    find_mark_stamp: Option<find::MarkStamp>,
     note: Option<Note>,
     text: crop::Rope,
     // At most two clean, hash-verified Rope snapshots from inactive tabs.
