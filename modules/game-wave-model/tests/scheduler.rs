@@ -10,12 +10,10 @@ fn empty_config_is_rejected() {
 }
 
 #[test]
-fn frequency_is_a_strict_greater_than_comparison() {
+fn first_spawn_is_immediate_then_frequency_is_strict() {
     let mut engine = Scheduler::new(vec![wave("first", vec![
         Group::Batch { frequency: 2, items: vec![Spawn::enemy("basic"), Spawn::power_up("health")] },
     ])]).unwrap();
-    assert!(engine.tick().unwrap().is_empty());
-    assert!(engine.tick().unwrap().is_empty());
     let first = engine.tick().unwrap();
     assert!(matches!(&first[..], [Event::Spawned { id: 1, item, .. }] if item.archetype == "basic"));
     assert!(engine.tick().unwrap().is_empty());
@@ -115,4 +113,25 @@ fn cycle_with_zero_repeats_keeps_emitting_until_prior_groups_complete() {
     let e4 = engine.tick().unwrap();
     assert!(matches!(&e4[..], [Event::Spawned { group: 1, .. }]));
     assert!(engine.mark_gone(anchor));
+}
+
+#[test]
+fn earlier_cycled_objects_remain_live_when_slot_is_reused() {
+    let mut engine = Scheduler::new(vec![wave("cycle", vec![
+        Group::Batch { frequency: 0, items: vec![Spawn::enemy("anchor")] },
+        Group::Cycle { frequency: 0, rest: 0, repeats: 0, items: vec![Spawn::enemy("repeat")] },
+    ])]).unwrap();
+    engine.tick().unwrap();
+    engine.tick().unwrap();
+    engine.tick().unwrap();
+    engine.tick().unwrap();
+    assert_eq!(engine.active_count(), 3);
+    assert!(engine.mark_gone(2));
+    assert_eq!(engine.active_count(), 2);
+}
+
+#[test]
+fn aggregate_group_budget_rejects_many_small_waves() {
+    let many = (0..5).map(|_| wave("x", (0..900).map(|_| Group::Pause { ticks: 0 }).collect())).collect();
+    assert!(matches!(Scheduler::new(many), Err(ConfigError::TooManyTotalGroups)));
 }
