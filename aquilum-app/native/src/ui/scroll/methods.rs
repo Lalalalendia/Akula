@@ -1,6 +1,21 @@
 use masonry::core::{Widget, WidgetMut};
 use super::area::ScrollArea;
+
 impl<W: Widget> ScrollArea<W> {
+    pub fn offset(&self) -> f64 {
+        self.offset
+    }
+
+    pub fn at(mut self, offset: f64) -> Self {
+        self.offset = offset.max(0.0);
+        self
+    }
+
+    pub fn fill(mut self, fill: bool) -> Self {
+        self.fill = fill;
+        self
+    }
+
     pub fn content_height(&self) -> f64 {
         self.content
     }

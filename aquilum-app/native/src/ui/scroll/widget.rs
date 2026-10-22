@@ -11,15 +11,6 @@ use super::Scrolled;
 use super::area::ScrollArea;
 use crate::ui::tokens::size;
 
-impl<W: Widget> ScrollArea<W> {
-    fn measure_cross(&mut self, ctx: &mut MeasureCtx<'_>, cross: Option<Length>) -> Length {
-        let content = ctx.compute_length(&mut self.child, LenReq::MaxContent.into(), LayoutSize::NONE, Axis::Horizontal, None);
-        let height = ctx.compute_length(&mut self.child, LenReq::MaxContent.into(), LayoutSize::NONE, Axis::Vertical, Some(content));
-        let overflow = cross.is_some_and(|width| content.get() > width.get() + 0.5);
-        Length::px(height.get() + if overflow { size::SCROLLBAR_WIDTH } else { 0.0 })
-    }
-}
-
 impl<W: Widget> Widget for ScrollArea<W> {
     type Action = Scrolled;
 

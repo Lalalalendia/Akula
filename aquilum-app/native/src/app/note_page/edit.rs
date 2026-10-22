@@ -1,5 +1,4 @@
 use std::time::Duration;
-
 use masonry::app::RenderRoot;
 
 use super::super::App;

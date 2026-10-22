@@ -4,8 +4,7 @@ use aquilum_core::text::cancel::Generation;
 use aquilum_core::text::matcher::Matcher;
 
 use super::matching::{FIND, find_in};
-use super::find_terms::find_terms;
-use super::*;
+use super::find_terms::find_terms;use super::*;
 use crate::ui::editor::change::{self, Change};
 
 pub type Status = (usize, usize, bool);

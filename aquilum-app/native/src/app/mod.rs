@@ -4,7 +4,7 @@ mod book;
 mod core_events;
 mod embeds;
 mod file_menu;
-mod find; mod find_marks; mod find_marks_impl;
+mod find; mod find_keys; mod find_marks; mod find_marks_impl;
 mod editor_requests;
 mod graph_page;
 mod history;
@@ -27,7 +27,6 @@ mod widths;
 mod workspaces;
 #[cfg(test)]
 mod tests;
-
 use std::collections::HashMap;
 use crate::ui::editor::TextEditor;
 use std::path::{Path, PathBuf};

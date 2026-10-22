@@ -6,7 +6,6 @@ pub mod menu;
 pub mod text;
 pub mod view;
 pub mod wide;
-
 use std::path::Path;
 
 use masonry::app::RenderRoot;

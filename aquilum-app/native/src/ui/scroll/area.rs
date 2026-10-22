@@ -60,20 +60,6 @@ impl<W: Widget> ScrollArea<W> {
         }
     }
 
-    pub fn offset(&self) -> f64 {
-        self.offset
-    }
-
-    pub fn at(mut self, offset: f64) -> Self {
-        self.offset = offset.max(0.0);
-        self
-    }
-
-    pub fn fill(mut self, fill: bool) -> Self {
-        self.fill = fill;
-        self
-    }
-
     pub fn set_child(this: &mut WidgetMut<'_, Self>, child: NewWidget<W>) {
         this.ctx.remove_child(std::mem::replace(&mut this.widget.child, child.to_pod()));
         this.ctx.children_changed();
