@@ -24,7 +24,7 @@ pub(super) fn run(core: &Core, request: &Request) -> Listing {
                 notice: if more {
                     Some(t("extensionLab.tasksTruncated"))
                 } else {
-                    None
+                    items.is_empty().then(|| t("extensionLab.tasksEmpty"))
                 },
                 items,
             }

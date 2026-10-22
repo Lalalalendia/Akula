@@ -11,12 +11,10 @@ use crate::ui::scroll::{HScroll, ScrollArea};
 use crate::ui::style;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{Caption, Chip, DocumentItem};
-
 pub struct Body {
     pub items: Vec<(WidgetId, Target, Vec<String>)>,
     pub chips: Vec<(WidgetId, Method)>,
 }
-
 pub fn body(mode: Mode, methods: &[Method], method: Method, listing: Option<&Listing>) -> (NewWidget<dyn Widget>, Body) {
     let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);
     let mut chips = Vec::new();
