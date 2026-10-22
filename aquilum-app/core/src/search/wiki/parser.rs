@@ -31,8 +31,18 @@ fn scan_candidates(source: &str) -> Vec<WikiLink> {
     let mut found = Vec::new();
     let mut cursor = 0;
     let mut excluded_at = 0;
+    // Search directly for the two-byte opener instead of branching on each
+    // byte of prose. Keep the old overlap handling for escaped openers.
+    let opener = memchr::memmem::Finder::new(b"[[");
     while cursor + 3 < bytes.len() {
-        if bytes[cursor] != b'[' || bytes[cursor + 1] != b'[' || escaped(bytes, cursor) {
+        let Some(next) = opener.find(&bytes[cursor..]) else {
+            break;
+        };
+        cursor += next;
+        if cursor + 3 >= bytes.len() {
+            break;
+        }
+        if escaped(bytes, cursor) {
             cursor += 1;
             continue;
         }
@@ -174,6 +184,25 @@ mod tests {
 
     fn targets(source: &str) -> Vec<String> {
         extract(source).into_iter().map(|link| link.target).collect()
+    }
+
+    #[test]
+    fn sparse_unicode_openers_keep_original_offsets() {
+        let prefix = "[regular markdown] 🦈 ".repeat(2_000);
+        let source = format!("{prefix}`[[ignored]]` [[Цель#Заголовок|подпись]]");
+        let links = extract(&source);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "Цель#Заголовок");
+        assert_eq!(
+            links[0].offset_utf16,
+            format!("{prefix}`[[ignored]]` ").encode_utf16().count()
+        );
+        assert_eq!(&source[links[0].note_range.clone()], "Цель");
+    }
+
+    #[test]
+    fn escaped_overlapping_opener_can_still_be_found() {
+        assert_eq!(targets(r"\[[[Note]]"), ["Note"]);
     }
 
     #[test]
