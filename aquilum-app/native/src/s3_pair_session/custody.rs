@@ -57,7 +57,7 @@ fn initialize_worker_com() -> io::Result<Option<ScopedComInitialization>> {
     let hr = unsafe { CoInitializeEx(ptr::null_mut(), 0) };
     if hr >= 0 {
         Ok(Some(ScopedComInitialization))
-    } else if hr == -2_147_418_506 { // RPC_E_CHANGED_MODE (0x80010106)
+    } else if hr == -2_147_417_850 { // RPC_E_CHANGED_MODE (0x80010106)
         Ok(None) // Already initialized to another apartment, no uninit.
     } else {
         Err(io::Error::new(io::ErrorKind::PermissionDenied,
