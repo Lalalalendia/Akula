@@ -3,7 +3,7 @@
 //! No raw errors, passwords, AWS SDK objects or credentials enter UI state.
 
 use std::{
-    fs::{self, OpenOptions}, io::Write, path::{Path, PathBuf},
+    fs::{self, OpenOptions}, io::Write, path::PathBuf,
     sync::{mpsc::{self, Receiver, Sender}, Arc}, thread,
 };
 use aquilum_core::Core;
