@@ -173,9 +173,15 @@ fn read_u64(data: &[u8]) -> u64 {
 fn status_byte(status: Status) -> u8 {
     match status {
         Status::InProgress { next: Player::Red } => 0,
-        Status::InProgress { next: Player::Yellow } => 1,
-        Status::Won { winner: Player::Red } => 2,
-        Status::Won { winner: Player::Yellow } => 3,
+        Status::InProgress {
+            next: Player::Yellow,
+        } => 1,
+        Status::Won {
+            winner: Player::Red,
+        } => 2,
+        Status::Won {
+            winner: Player::Yellow,
+        } => 3,
         Status::Draw => 4,
     }
 }
@@ -210,10 +216,7 @@ fn validate_state(state: &GameState) -> Result<(), WireError> {
             }
         }
     }
-    if state.revision != (red + yellow) as u64
-        || red < yellow
-        || red > yellow + 1
-    {
+    if state.revision != (red + yellow) as u64 || red < yellow || red > yellow + 1 {
         return Err(WireError::InvalidState);
     }
     for col in 0..COLUMNS {
