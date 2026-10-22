@@ -62,6 +62,8 @@ pub mod node_catalog_lab;
 
 #[cfg(all(target_os = "linux", feature = "node-replica-lab"))]
 pub mod node_replica_lab;
+#[cfg(all(target_os = "linux", feature = "node-replica-auth-lab"))]
+pub mod node_replica_auth_lab;
 
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]

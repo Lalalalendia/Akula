@@ -55,3 +55,17 @@ Existing D1/D1.5/D2 feature tests continue in the same profile workflow. Read-on
 **Release gate:** real signed akula-node, sealed production custody, B1 owner-approved install, health after reboot, actual VPS acceptance. QEMU/Linux lab PASS is only a necessary precursor.
 
 **Source:** [Sync DAG store](https://github.com/Lalalalendia/Akula/blob/main/aquilum-app/core/src/sync/dag_store.rs), [Node read catalog](https://github.com/Lalalalendia/Akula/blob/main/aquilum-app/core/src/node_catalog_lab.rs), [D2 original test](https://github.com/Lalalalendia/Akula/blob/main/aquilum-app/core/tests/headless_node_d2.rs).
+
+
+## 22.10.2026 — NODE-E2E-01b (additional signed read laboratory, exact-HOLD)
+
+This increment adds `node-replica-auth-lab`, a separate opt-in Linux module with **no network endpoint** and **no new storage engine**. [Source](https://github.com/Lalalalendia/Akula/blob/research/akula-node-e2e-01a-local-durable-replica/aquilum-app/core/src/node_replica_auth_lab.rs).
+
+**Two independently verified elements, both mandatory:**
+- **Owner grant:** a detached Ed25519 signature over a fixed canonical claim containing VaultId, DocumentId, RevisionId, raw BLAKE3, filename, stable Node identity, DeviceId/public key and grant epoch. An independently supplied owner public key MUST verify the signature.
+- **Device possession:** the particular device signs a second domain-separated claim binding the *already signed* owner grant hash, the same Node identity and a newly issued challenge. The verifier checks this signature with the key from the owner-signed claim.
+- **Separate external revocation/equivocation fence:** the host supplies current epoch and independently pinned **exact signed-grant digest**. Equal epoch with a different owner-signed grant must not silently pass. Any stale epoch, revoked/changed digest, foreign Node, wrong device, wrong owner, modified challenge, wrong scope or invalid blob leads to one opaque ReadDenied, without bytes or object metadata.
+
+**Not implemented:** owner key provisioning/backup; witnessed epoch persistence, secure external clock, single-use challenge tracking, actual Windows Credential Manager/Iroh pairing, STY-DEVICE-01a roster acceptance ([draft #531](https://github.com/Lalalalendia/Akula/pull/531)), authenticated remote wire adapter, public Node HTTP, encryption and right-to-replicate. The test harness provisions fake keys and trusted context directly; nothing here grants live File Gate or Sync authorizations. Do not confuse proof-of-possession of a lab device key with a live authenticated QUIC session.
+
+**Test:** `cargo test --locked -p aquilum-core --features node-replica-auth-lab --test headless_node_replica_auth -- --nocapture`. Positive: signed reader *in another OS process* after original source is offline. Negatives: changed owner key/signature, rogue device proof, wrong/zero nonce, wrong node/vault, stale epoch, same-epoch changed signed grant, unknown revision, corrupted SQLite blob. Existing D1/D1.5/D2/01a regression paths remain. **No claim of product NODE-E2E-01b PASS until the profile workflow succeeds on exact SHA.** Global Application CI will remain blocked by pre-existing RustSec watchdog on main until independently gated [security PR #595](https://github.com/Lalalalendia/Akula/pull/595) is accepted; no audit bypass.

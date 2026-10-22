@@ -16,6 +16,8 @@ node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
 # Offline, operator-only replica evidence reuses SqliteDagStore; NO network writer.
 node-replica-lab = ["node-catalog-lab"]
+# Ephemeral signed read grant and live device proof ONLY; no production pairing.
+node-replica-auth-lab = ["node-replica-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.

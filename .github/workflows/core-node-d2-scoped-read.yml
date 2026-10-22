@@ -6,6 +6,8 @@ on:
     paths:
       - 'aquilum-app/core/src/node_catalog_lab.rs'
       - 'aquilum-app/core/src/node_replica_lab.rs'
+      - 'aquilum-app/core/src/node_replica_auth_lab.rs'
+      - 'aquilum-app/core/tests/headless_node_replica_auth.rs'
       - 'aquilum-app/core/tests/headless_node_replica.rs'
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
@@ -67,6 +69,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p aquilum-core --features node-replica-lab --test headless_node_replica -- --nocapture
+      - name: NODE-E2E-01b owner-signed grant and independent device proof
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features node-replica-auth-lab --test headless_node_replica_auth -- --nocapture
       - name: Verify ordinary GUI-free Core without experimental features
         working-directory: aquilum-app
         shell: bash
