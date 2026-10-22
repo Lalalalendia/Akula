@@ -148,3 +148,37 @@ library, long-running server, or background Sync is enabled. A future host
 integration MUST source real device identity from OS Core, bind Vault/file
 rights and current epoch to the selected root, and provide authenticated
 local process control before any real user-file GET.
+
+## OS-pinned two-Windows-PC direct QUIC — manual bounded LAN probe
+
+The opt-in executable `akula-p2p-lan` uses the **same** #625
+`with_protected_iroh_secret` and `require_pinned_live_peer` APIs.
+It never creates credentials implicitly; it never prints secrets, reads
+user files, offers a Staya root, issues a Vault/File Gate grant or starts Sync.
+
+On EACH Windows computer, run the **existing** `akula-p2p-identity`
+operator utility explicitly (`--init` only once if missing, then `--id`).
+Independently compare the 64-character public IDs out of band.
+On both computers, confirm the OTHER complete ID with
+`--peer-confirm OTHER_ENDPOINT_ID` and type the same independently verified
+ID when prompted. Once both pins are confirmed, start the listener:
+
+```powershell
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan -- listen OTHER_ENDPOINT_ID
+```
+
+Use the actual LAN IPv4 of the listener and its printed UDP port:
+
+```powershell
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan -- connect OTHER_ENDPOINT_ID 192.168.1.10:UDP_PORT
+```
+
+The listener rejects an unconfirmed, wrong or newly revoked live TLS peer,
+and the initiator verifies the authenticated remote key too. Only bounded
+`AKULA_HELLO_V1` and `AKULA_OK_V1` are sent. Routing is **direct LAN
+only**, without a relay, discovery, NAT traversal, UPnP or automatic firewall
+configuration. An IP/UDP port from another source is a route hint, never a
+trust grant. This CLI is not shipped with Akula. Profile CI **only compiles**
+this Windows-oriented tool on Linux/Windows; no physical two-PC acceptance
+can be claimed from CI. Linux refuses missing protected OS credentials at
+runtime.
