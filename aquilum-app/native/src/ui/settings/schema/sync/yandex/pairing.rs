@@ -8,7 +8,10 @@ use crate::s3_pair_session::PairStatus;
 pub(super) fn rows(ctx: &Context, setup_ready: bool) -> Vec<Row> {
     let available = !ctx.s3_pair_busy;
     let status = ctx.s3_pair_status;
+    let has_profile = ctx.s3_pair_configured;
     let (message, tone) = match status {
+        PairStatus::Idle if has_profile =>
+            (t("settings.yandex.pairConfigured"), Tone::Secondary),
         PairStatus::Idle => (t("settings.yandex.pairInactive"), Tone::Secondary),
         PairStatus::Working => (t("settings.yandex.pairWorking"), Tone::Secondary),
         PairStatus::Configured => (t("settings.yandex.pairConfigured"), Tone::Secondary),
@@ -37,7 +40,7 @@ pub(super) fn rows(ctx: &Context, setup_ready: bool) -> Vec<Row> {
             Control::Status { text: message, tone },
         ),
     ];
-    if matches!(status, PairStatus::Configured | PairStatus::Imported |
+    if has_profile || matches!(status, PairStatus::Configured | PairStatus::Imported |
         PairStatus::Exported | PairStatus::Transferred { .. })
     {
         output.push(info(
