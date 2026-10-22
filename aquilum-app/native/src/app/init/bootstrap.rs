@@ -55,6 +55,8 @@ impl App {
             panel_body: None,
             retention_done: Arc::default(),
             yandex_probe,
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            s3_pair: crate::s3_pair_session::PairSession::new(Arc::clone(&workspace_wake)),
             controls: None,
             window: Size::ZERO,
             resizing: None,
