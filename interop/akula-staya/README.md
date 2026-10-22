@@ -80,3 +80,36 @@ controller and ephemeral device identities. It is not a real Akula installed
 UI, trusted device enrollment, remote-signed user decision, authenticated
 host IPC, File Gate publish permission, or durable application receipt.
 Do not enable shipping P2P from this result.
+
+## OS-backed Akula identity → Staya QUIC transport (opt-in)
+
+The opt-in `os_peer::OsPinnedEndpoint` is a new admission bridge over the
+**existing Iroh transport dependency**, not another synchronization engine.
+On Windows it loads the long-lived private key from Windows Credential Manager
+and checks the user-selected complete EndpointId against the authenticated
+QUIC `remote_id()` and the current OS-protected peer pin. It repeats the
+persistent confirmation/revocation check before each NEW logical operation.
+No implicit first-run enrollment, discovery, key export, File Gate grant,
+file access, durable ACK, background Sync, or installed UI is added.
+
+For a manual first LAN handshake, on BOTH Windows hosts initialize the existing
+opt-in `akula-p2p-identity` tool, print each `--id`, then enter the OTHER full
+EndpointId with interactive `--peer-confirm`. From the repository root run:
+
+```powershell
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-peer --bin akula-p2p-ping -- listen OTHER_ENDPOINT_ID
+```
+
+On the other host, take the listening host's actual LAN IPv4 and printed UDP
+port (not a `0.0.0.0` wildcard) and run:
+
+```powershell
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-peer --bin akula-p2p-ping -- connect OTHER_ENDPOINT_ID 192.168.1.10:PORT
+```
+
+This exchanges bounded `AKULA_HELLO_V1` / `AKULA_OK_V1` only. No WAN relay,
+file transfer or user-facing sync is claimed. The CI extension runs real
+QUIC on disposable loopback with Windows OS-held identity and a synthetic
+test key, checks missing pin, authenticated ID, and durable revoke on an
+existing session; Linux proves unsupported OS storage fails closed.
+Human two-device pairing and Akula File Gate are still separate gates.
