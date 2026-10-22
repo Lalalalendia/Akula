@@ -49,9 +49,16 @@ function policyErrors(yaml, path) {
   }
   // Do not silently cancel workflow_dispatch, pushes or released artifacts.
   const condition = cancelValue.match(/^\$\{\{\s*(.*?)\s*\}\}$/)?.[1] || '';
-  const covers = prEvents(yaml).every(event =>
-    new RegExp('github\\.event_name\\s*==\\s*[\\x27"]' + event + '[\\x27"]').test(condition));
-  if (!covers || /github\.event_name\s*==\s*['"](?:push|workflow_dispatch)['"]/.test(condition)) {
+  // Allow only explicit PR event equalities. Substring matching would accept
+  // "github.event_name == 'pull_request' || true", cancelling manual/releases.
+  const normalized = condition.replace(/\s+/g, '').replace(/"/g, "'");
+  const expected = prEvents(yaml).map(event => "github.event_name=='" + event + "'");
+  const options = expected.length === 1
+    ? [expected[0]]
+    : [expected.join('||'), expected.slice().reverse().join('||')];
+  const actual = normalized.startsWith('(') && normalized.endsWith(')')
+    ? normalized.slice(1,-1) : normalized;
+  if (!options.includes(actual)) {
     errors.push(path + ': cancel-in-progress must cover PR triggers only');
   }
   if (/^  queue:\s*max\b/m.test(lines.join('\n'))) {

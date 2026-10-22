@@ -78,3 +78,21 @@ test('malformed git revision fails closed',()=>{
   assert.throws(()=>changedWorkflows('--bad','HEAD'),/Untrusted Git/);
   assert.throws(()=>changedWorkflows('not-a-valid-ref','HEAD'));
 });
+
+
+test('cancellation expression cannot widen or disable PR-only coalescing',()=>{
+  for(const expr of [
+    "github.event_name == 'pull_request' || true",
+    "true || github.event_name == 'pull_request'",
+    "github.event_name == 'pull_request' && false",
+    "github.event_name == 'pull_request' || github.event_name != 'schedule'",
+    "github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'",
+  ]){
+    const candidate=good.replace(cancel,'  cancel-in-progress: $'+'{{ '+expr+' }}');
+    assert.match(policyErrors(candidate,'unsafe.yml').join(','),/PR triggers only/,expr);
+  }
+  const both=good.replace('  workflow_dispatch:','  pull_request_target:\n  workflow_dispatch:');
+  const combined='  cancel-in-progress: $'+"{{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}";
+  assert.deepEqual(policyErrors(both.replace(cancel,combined),'both.yml'),[]);
+  assert.match(policyErrors(both,'both.yml').join(','),/PR triggers only/);
+});
