@@ -11,13 +11,13 @@ use super::s3::S3Keyspace;
 use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
+mod explicit_credentials;
+pub use explicit_credentials::S3PairAccess;
 mod manifest;
 mod principal;
 pub use principal::{S3AwsAccountProofError, S3AwsVerifiedAccountScope};
 mod v2_readonly;
 pub use v2_readonly::{S3PinnedV2ReadError, S3PinnedV2ReadPreview};
-// Bounded, opt-in read-only pack verifier. The sender/builder stays
-// test-only; no new remote writer or local file apply is enabled.
 mod pack_probe;
 // Pure bounded pack encoder for future host-admitted sender; no S3 writer.
 mod coord_pack_encode;
