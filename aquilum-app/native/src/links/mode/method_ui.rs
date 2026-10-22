@@ -16,7 +16,6 @@ impl Method {
         Method::ORDER.into_iter().find(|m| m.key() == key)
     }
 
-impl Method {
     pub fn label(self) -> String {
         t(&format!("analysis.methods.{}", self.key()))
     }
