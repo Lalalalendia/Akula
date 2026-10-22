@@ -14,6 +14,8 @@ p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
+# Opt-in, read-only Notion API diagnostic; no vault/Sync mutation.
+notion-api-probe = []
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
@@ -142,3 +144,13 @@ tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=0.38.44", features = ["fs", "process"] }
+
+[[bin]]
+name = "akula-notion-api-probe"
+path = "src/bin/akula_notion_api_probe.rs"
+required-features = ["notion-api-probe"]
+
+[[bin]]
+name = "akula-notion-import-lab"
+path = "src/bin/akula_notion_import_lab.rs"
+required-features = ["notion-api-probe"]
