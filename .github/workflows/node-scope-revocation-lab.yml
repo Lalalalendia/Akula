@@ -1,0 +1,27 @@
+name: Akula Node signed anti-meme 3-process lab
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - 'aquilum-app/core/src/node_scope_revocation_lab.rs'
+      - 'aquilum-app/core/src/bin/akula_node_policy_lab.rs'
+      - 'aquilum-app/core/tests/node_scope_revocation_lab.rs'
+      - 'docs/platforms/AK-DATA-CTRL-01D-LAB.md'
+      - '.github/workflows/node-scope-revocation-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: akula-node-anti-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-processes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check 3 isolated Node processes, signed anti-memes and unchanged user bytes
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features node-scope-revocation-lab --test node_scope_revocation_lab -- --nocapture
