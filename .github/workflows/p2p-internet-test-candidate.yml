@@ -1,0 +1,110 @@
+# Limited branch-only Windows candidate. No release/signing or production
+# enablement, and no extra PR matrix fanout. Never trusts upstream Aquilum.
+name: Akula P2P internet test candidate (unsigned, review only)
+on:
+  push:
+    branches:
+      - test/p2p-cross-internet-windows-candidate-20261023
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-p2p-internet-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-candidate:
+    if: github.ref == 'refs/heads/test/p2p-cross-internet-windows-candidate-20261023'
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: p2p-crossnet-test-candidate-v1
+      - name: Assert standalone Akula installer identity and exact source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) {
+            throw 'Unsigned candidate checkout differs from requested source'
+          }
+          node --test .github/scripts/windows-beta-identity.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Akula standalone installer identity failed' }
+      - name: Validate Rust formatting of P2P integration
+        shell: bash
+        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
+      - name: Compile and check local pairing GUI with opt-in installed flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui app::transfer::peer_pair -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui ui::transfer::peer_pair -- --nocapture
+      - name: Install pinned NSIS packager (no release signing)
+        shell: bash
+        run: cargo install cargo-packager --version 0.11.8 --locked
+      - name: Build actual installed Akula with manual P2P peer UI
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed,p2p-device-ui
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Akula P2P peer UI build failed' }
+          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          Copy-Item -LiteralPath (Join-Path $release 'aquilum-native.exe') -Destination (Join-Path $release 'akula-app.exe') -Force
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --out-dir $dist
+          if ($LASTEXITCODE -ne 0) { throw 'Akula P2P NSIS test candidate packaging failed' }
+          $installers = @(Get-ChildItem -LiteralPath $dist -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1 -or $installers[0].Name -notmatch '^(Akula|akula-app)_0[.]3[.]11_x64-setup[.]exe$') {
+            throw 'Missing Akula standalone NSIS test candidate'
+          }
+          if ($installers[0].Name.StartsWith('akula-app_')) {
+            Rename-Item -LiteralPath $installers[0].FullName -NewName ($installers[0].Name -replace '^akula-app_', 'Akula_')
+          }
+      - name: Install, open UI, edit and reopen real Windows Akula
+        shell: pwsh
+        run: ./scripts/test-windows-beta.ps1
+      - name: Record exact source provenance only after installed GUI passes
+        shell: pwsh
+        run: ./scripts/windows-beta-candidate-manifest.ps1
+      - name: Build cross-network OS-key / n0 relay diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan
+          cargo build --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity
+          test -f interop/akula-staya/target/debug/akula-p2p-lan.exe
+          test -f .artifacts/cargo-native/debug/akula-p2p-identity.exe
+      - name: Collect unsigned installer plus test-only tools and SHA-256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:GITHUB_WORKSPACE '.artifacts/p2p-internet-candidate'
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'dist/Akula_0.3.11_x64-setup.exe') -Destination $bundle
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'dist/candidate-manifest.json') -Destination $bundle
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'interop/akula-staya/target/debug/akula-p2p-lan.exe') -Destination $bundle
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/akula-p2p-identity.exe') -Destination $bundle
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'docs/sync/AK-P2P-INTERNET-TEST-CANDIDATE.md') -Destination (Join-Path $bundle 'README-FIRST.md')
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'interop/akula-staya/README.md') -Destination (Join-Path $bundle 'TECHNICAL-NOTES.md')
+          $files = Get-ChildItem -LiteralPath $bundle -File -Filter '*.exe'
+          if ($files.Count -ne 3) { throw 'Expected installer and exactly two diagnostic executables' }
+          $sum = @($files | ForEach-Object { "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) *$($_.Name)" })
+          [IO.File]::WriteAllLines((Join-Path $bundle 'SHA256SUMS.txt'), $sum)
+      - name: Upload unsigned test candidate (NOT a release or working file Sync)
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-p2p-internet-test-candidate-win64-${{ github.sha }}
+          path: .artifacts/p2p-internet-candidate/
+          if-no-files-found: error
+          retention-days: 7

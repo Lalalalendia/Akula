@@ -4,12 +4,17 @@ on:
     branches:
       - main
       - feature/ak-p2p-os-device-identity-20261022
+      - feature/akula-p2p-local-id-ui-20261022
     paths:
       - 'aquilum-app/native/src/ui/transfer/identity.rs'
       - 'aquilum-app/native/src/ui/transfer/layout.rs'
-      - 'aquilum-app/native/src/ui/transfer/queue_view.rs'
       - 'aquilum-app/native/src/app/transfer/local_identity.rs'
       - 'aquilum-app/native/src/app/transfer/tests.rs'
+      - 'aquilum-app/native/src/ui/transfer/peer_pair.rs'
+      - 'aquilum-app/native/src/app/transfer/peer_pair.rs'
+      - 'aquilum-app/native/src/app/transfer/actions.rs'
+      - 'aquilum-app/native/src/ui/transfer/queue_view.rs'
+      - 'aquilum-app/native/src/ui/transfer/tests.rs'
       - '.github/workflows/p2p-local-id-ui.yml'
   workflow_dispatch:
 permissions:
@@ -36,9 +41,13 @@ jobs:
           rustfmt --edition 2024 --check \
             aquilum-app/native/src/ui/transfer/identity.rs \
             aquilum-app/native/src/ui/transfer/layout.rs \
-            aquilum-app/native/src/ui/transfer/queue_view.rs \
             aquilum-app/native/src/app/transfer/local_identity.rs \
-            aquilum-app/native/src/app/transfer/tests.rs
+            aquilum-app/native/src/app/transfer/tests.rs \
+            aquilum-app/native/src/ui/transfer/peer_pair.rs \
+            aquilum-app/native/src/app/transfer/peer_pair.rs \
+            aquilum-app/native/src/app/transfer/actions.rs \
+            aquilum-app/native/src/ui/transfer/queue_view.rs \
+            aquilum-app/native/src/ui/transfer/tests.rs
       - name: Compile actual native File transfers with opt-in identity
         shell: bash
         run: cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui
@@ -47,3 +56,8 @@ jobs:
         run: |
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui ui::transfer::identity::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui app::transfer::local_identity::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui ui::transfer::peer_pair::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-device-ui app::transfer::peer_pair::tests -- --nocapture
+      - name: Prove protected peer pins and revocations persist across Windows OS processes
+        shell: bash
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity p2p_device_identity::peer_pin::tests -- --nocapture
