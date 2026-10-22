@@ -4,8 +4,6 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
-      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
-      - 'aquilum-app/native/src/render/renderer/pass.rs'
       - '.github/scripts/summarize-vello-worker-crossover.py'
       - '.github/workflows/native-vello-worker-crossover.yml'
   workflow_dispatch:
