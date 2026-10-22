@@ -1,0 +1,12 @@
+[package]
+name = "akula-game-session"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Standalone deterministic two-player Connect Four session, without transport or Akula file access"
+
+# Do not pull this laboratory crate into aquilum-app's expensive workspace.
+[workspace]
+
+[dependencies]
