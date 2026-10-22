@@ -28,4 +28,8 @@ impl<W: Widget> ScrollArea<W> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn find_marker_fractions(&self) -> &[f64] {
+        &self.find_marks
+    }
 }
