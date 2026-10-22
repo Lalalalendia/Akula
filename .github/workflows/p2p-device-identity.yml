@@ -6,6 +6,10 @@ on:
     paths:
       - 'aquilum-app/core/src/p2p_device_identity.rs'
       - 'aquilum-app/core/src/p2p_device_identity/peer_pin.rs'
+      - 'aquilum-app/core/src/p2p_device_identity/peer_pin/contacts.rs'
+      - 'aquilum-app/native/src/app/transfer/contacts.rs'
+      - 'aquilum-app/native/src/ui/transfer/contact_preview.rs'
+      - 'aquilum-app/native/src/ui/transfer/dialog_view.rs'
       - 'aquilum-app/core/src/bin/akula_p2p_identity.rs'
       - '.github/workflows/p2p-device-identity.yml'
   workflow_dispatch:
@@ -37,6 +41,7 @@ jobs:
         run: |
           rustfmt --edition 2021 --check core/src/p2p_device_identity.rs
           rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin.rs
+          rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin/contacts.rs
           rustfmt --edition 2021 --check core/src/bin/akula_p2p_identity.rs
       - name: Prove Windows credential survives separate OS process
         working-directory: aquilum-app
@@ -47,6 +52,17 @@ jobs:
         working-directory: aquilum-app
         shell: bash
         run: cargo clippy --locked -p aquilum-core --lib --features p2p-device-identity -- -W clippy::all
+      - name: Format opt-in native contacts preview
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          rustfmt --edition 2024 --check native/src/app/transfer/contacts.rs
+          rustfmt --edition 2024 --check native/src/ui/transfer/contact_preview.rs
+          rustfmt --edition 2024 --check native/src/ui/transfer/dialog_view.rs
+      - name: Compile Native opt-in contacts read-only view
+        working-directory: aquilum-app
+        shell: bash
+        run: cargo check --locked -p aquilum-native --features p2p-device-contacts-preview
       - name: Compile opt-in diagnostic executable without native GUI
         working-directory: aquilum-app
         shell: bash
@@ -66,6 +82,7 @@ jobs:
         run: |
           rustfmt --edition 2021 --check core/src/p2p_device_identity.rs
           rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin.rs
+          rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin/contacts.rs
       - name: Test explicit unsupported-platform refusal
         working-directory: aquilum-app
         run: |

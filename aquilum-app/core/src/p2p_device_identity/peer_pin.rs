@@ -4,6 +4,8 @@
 
 #[cfg(windows)]
 use super::windows_store;
+mod contacts;
+pub use contacts::{list_peers, TransportPeerContact};
 use super::{load, IdentityError};
 use zeroize::Zeroizing;
 
