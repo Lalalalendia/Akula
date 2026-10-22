@@ -54,13 +54,13 @@ impl App {
         });
     }
 
-    fn set_book_busy(&self, root: &mut RenderRoot, busy: bool) {
+    pub(super) fn set_book_busy(&self, root: &mut RenderRoot, busy: bool) {
         if let Some(button) = self.note_ids.as_ref().and_then(|n| n.hero.as_ref()).and_then(|(_, ids)| ids.book_button) {
             button.edit(root, |mut b| TextButton::set_disabled(&mut b, busy));
         }
     }
 
-    fn import_book(&mut self, root: &mut RenderRoot, file: &Path) {
+    pub(super) fn import_book(&mut self, root: &mut RenderRoot, file: &Path) {
         let Some(workspace) = self.tree.root().map(Path::to_path_buf) else { return };
         match vault_files::import(&self.workspace.core, &workspace, Source::Path(file), "book", "epub") {
             Ok(relative) => {
@@ -87,37 +87,8 @@ impl App {
         });
     }
 
-    pub(in crate::app) fn on_picked(&mut self, root: &mut RenderRoot, picked: Picked) -> bool {
-        let current = |note: &PathBuf| self.note.as_ref().is_some_and(|n| n.is(note));
-        match picked {
-            Picked::Workspace(path) => return self.switch_workspace(root, path).title,
-            Picked::PdfIndexed(Ok(note)) => {
-                self.tree.paths_changed(root, std::slice::from_ref(&note));
-                return self.open(root, note);
-            }
-            Picked::PdfIndexed(Err(error)) => report!("PDF не добавлен в поиск: {error}"),
-            Picked::PageCover(note, file) if current(&note) => {
-                if let Some(relative) = self.import_cover(Source::Path(&file)) {
-                    self.set_fields(root, &[(COVER, "true".into()), (PAGE_COVER, relative), (PAGE_COVER_POSITION, String::new())]);
-                }
-            }
-            Picked::BookCover(note, file) if current(&note) => {
-                if let Some(relative) = self.import_cover(Source::Path(&file)) {
-                    self.set_fields(root, &[(BOOK_COVER, relative)]);
-                }
-            }
-            Picked::Book(note, file) => {
-                self.set_book_busy(root, false);
-                if let Some(file) = file.filter(|_| current(&note)) {
-                    self.import_book(root, &file);
-                }
-            }
-            Picked::PageCover(..) | Picked::BookCover(..) => {}
-        }
-        false
-    }
 
-    fn import_cover(&self, source: Source<'_>) -> Option<String> {
+    pub(super) fn import_cover(&self, source: Source<'_>) -> Option<String> {
         let workspace = self.tree.root()?.to_path_buf();
         let fallback = match source {
             Source::Path(_) => "jpg",

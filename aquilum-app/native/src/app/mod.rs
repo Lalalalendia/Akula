@@ -35,14 +35,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
-
 use aquilum_core::CoreEvent;
 use aquilum_core::mcp::bridge::{Disposition, Navigation};
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, NewWidget, Widget, WidgetId};
 use masonry::kurbo::{Point, Size};
 use crate::ui::editor::TextAction;
-
 use crate::i18n::{self, t, t_with};
 use crate::ui::dialog::{ConfirmDialog, DialogAnswer, DialogIds};
 use crate::ui::file_tree::{FileTree, TreeAction};
@@ -63,7 +61,6 @@ use crate::session::Session;
 use crate::tabs::Tabs;
 use crate::workspace::Workspace;
 use uuid::Uuid;
-
 enum Popup {
     FileMenu { layer: WidgetId, targets: Vec<PathBuf>, clicked: PathBuf, tab: Option<Uuid> },
     Delete { dialog: DialogIds, targets: Vec<PathBuf> },
