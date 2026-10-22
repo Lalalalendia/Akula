@@ -3,6 +3,13 @@ use crate::ui::scroll::ScrollArea;
 use crate::ui::widgets::ItemButton;
 
 impl App {
+    pub(super) fn open_settings(&mut self, root: &mut RenderRoot) {
+        // A reopened dialog must never reuse a previous bucket/auth probe result.
+        self.yandex_probe.settings_closed();
+        let section = self.interface.settings_section().and_then(Section::from_key).unwrap_or(Section::Ui);
+        self.show_settings(root, section);
+    }
+
     pub(super) fn select_section(&mut self, root: &mut RenderRoot, dialog: &mut SettingsDialog, section: Section) {
         if dialog.section == section {
             return;

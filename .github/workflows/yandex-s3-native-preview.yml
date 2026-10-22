@@ -17,10 +17,11 @@ on:
       - 'aquilum-app/native/src/app/init/bootstrap.rs'
       - 'aquilum-app/native/src/app/lifecycle/tick.rs'
       - 'aquilum-app/native/src/app/settings/press.rs'
-      - 'aquilum-app/native/src/app/settings/context.rs'
       - 'aquilum-app/native/src/app/settings/section.rs'
-      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex.rs'
-      - 'aquilum-app/native/src/ui/settings/schema/types/context.rs'
+      - 'aquilum-app/native/src/app/settings/context/build.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex/controls.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context/defaults.rs'
       - 'scripts/test-yandex-credui-cancel.ps1'
   workflow_dispatch:
 
