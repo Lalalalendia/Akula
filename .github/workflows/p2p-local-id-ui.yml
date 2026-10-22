@@ -12,6 +12,8 @@ on:
       - 'aquilum-app/native/src/app/transfer/tests.rs'
       - 'aquilum-app/native/src/ui/transfer/peer_pair.rs'
       - 'aquilum-app/native/src/app/transfer/peer_pair.rs'
+      - 'aquilum-app/native/src/app/transfer/actions.rs'
+      - 'aquilum-app/native/src/ui/transfer/queue_view.rs'
       - 'aquilum-app/native/src/ui/transfer/tests.rs'
       - '.github/workflows/p2p-local-id-ui.yml'
   workflow_dispatch:
@@ -43,6 +45,8 @@ jobs:
             aquilum-app/native/src/app/transfer/tests.rs \
             aquilum-app/native/src/ui/transfer/peer_pair.rs \
             aquilum-app/native/src/app/transfer/peer_pair.rs \
+            aquilum-app/native/src/app/transfer/actions.rs \
+            aquilum-app/native/src/ui/transfer/queue_view.rs \
             aquilum-app/native/src/ui/transfer/tests.rs
       - name: Compile actual native File transfers with opt-in identity
         shell: bash
