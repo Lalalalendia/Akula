@@ -79,6 +79,8 @@ public static class AkulaCredUiQaWindow {
         return found.ToArray();
     }
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool IsChild(IntPtr parent, IntPtr possibleChild);
     [DllImport("user32.dll", SetLastError = true)]
@@ -295,8 +297,22 @@ try {
     if (-not $proc.WaitForExit(30000)) {
         throw 'The genuine Windows CredUI Cancel did not return to the native test'
     }
-    if ($proc.ExitCode -ne 0) {
-        throw "Windows CredUI Cancel/persistence assertions failed, code=$($proc.ExitCode)"
+    # Start-Process -PassThru may expose a null ExitCode in Windows
+    # PowerShell 5.1 even after WaitForExit(). Query the SAME kernel process
+    # handle directly; never treat a missing managed exit code as success.
+    $proc.Refresh()
+    [uint32]$nativeExitCode = 259
+    if (-not [AkulaCredUiQaWindow]::GetExitCodeProcess(
+        $proc.Handle, [ref]$nativeExitCode)) {
+        throw 'CredUI isolated test OS exit status could not be obtained'
+    }
+    if ($nativeExitCode -ne 0) {
+        # Only fixed-category diagnostics; do not print raw stdout/stderr,
+        # credential payloads, dialogs, window titles or panic traces.
+        $testOutput = [System.IO.File]::ReadAllText($stdout)
+        $exactFailed = $testOutput.Contains("test $testFilter ... FAILED")
+        $summaryFailed = $testOutput.Contains('test result: FAILED')
+        throw "CredUI genuine test refused: os_exit=$nativeExitCode exact_failed=$exactFailed summary_failed=$summaryFailed"
     }
     # The Rust harness must have actually executed the requested test.
     # Do not upload or print raw GUI logs, even for synthetic credentials.

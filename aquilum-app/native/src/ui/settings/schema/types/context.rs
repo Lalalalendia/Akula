@@ -27,4 +27,3 @@ impl Context {
         Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, yandex_keys: None, yandex_probe: crate::yandex_probe_session::ProbeView::NotChecked, yandex_probe_busy: false, yandex_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
     }
 }
-
