@@ -48,6 +48,10 @@ impl App {
             yandex_keys,
             yandex_probe: self.yandex_probe.view_for(&bucket),
             yandex_probe_busy: self.yandex_probe.busy(),
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            s3_pair_status: self.s3_pair.status(),
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            s3_pair_busy: self.s3_pair.busy(),
             yandex_notice: None,
             sync_selected: None,
             sync_notice: None,
