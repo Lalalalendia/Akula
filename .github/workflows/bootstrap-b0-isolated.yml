@@ -1,0 +1,25 @@
+name: Bootstrap B0 isolated crate parity
+
+on:
+  pull_request:
+    paths:
+      - 'modules/bootstrap-b0/**'
+      - '.github/workflows/bootstrap-b0-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: b0-isolated-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  b0-isolated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: B0 standalone original compatibility suite
+        run: cargo test --manifest-path modules/bootstrap-b0/Cargo.toml

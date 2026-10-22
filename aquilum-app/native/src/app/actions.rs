@@ -127,7 +127,7 @@ impl App {
     /// Действие в основном окне; `true` — сменилась открытая заметка (и заголовок окна).
     pub(super) fn on_main_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction, window: Size) -> bool {
         match self.tree.on_action(root, id, action) {
-            Some(TreeAction::Open { path, new_tab }) => return self.open_in(root, path, new_tab),
+            Some(TreeAction::Open { path, new_tab }) => return self.open_tree_file(root, path, new_tab),
             Some(TreeAction::Rename { from, to }) => {
                 self.rename_file(root, from, to);
                 return false;

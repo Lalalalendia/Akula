@@ -1,6 +1,4 @@
-//! Experimental W4 receipt verifier and SQLite outbox inside Akula Core.
-//! Wire format follows calex794/wow/src/receipt_w4.rs (v1, 137 bytes).
-//! NOT an encryption module, remote key enrolment service, inbox or chat UI.
+//! WOW W4 v1 (137 bytes): experimental signed receipts/SQLite outbox, not transport or trust.
 
 use ring::signature::{UnparsedPublicKey, ED25519};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -15,8 +13,7 @@ const SIGNED_LEN: usize = 73;
 pub const RECEIPT_LEN: usize = 137;
 pub const MAX_ENVELOPE: usize = 16_384;
 
-/// ONLY an independently authorized Akula device registry may implement this.
-/// A network-observed signing key MUST NEVER automatically become trusted.
+/// Only independently approved device keys are trusted; never network-observed keys.
 pub trait TrustedRecipientKeys {
     fn key_for(&self, recipient: DeviceId, epoch: u64) -> Option<[u8; 32]>;
 }
@@ -95,7 +92,6 @@ pub fn verify_receipt(
     })
 }
 
-/// The same real signature verifier can drive CORE-01A's pure state projection.
 pub struct W4Verifier<'a, K: TrustedRecipientKeys> {
     pub keys: &'a K,
 }
@@ -153,9 +149,7 @@ impl W4Outbox {
         Ok(Self { db })
     }
 
-    /// Preconditions: caller already validated the encrypted WOW W3 envelope,
-    /// recipient/epoch authorization and the source of the virtual/real time.
-    /// This adapter validates length and BLAKE3 only; it CANNOT detect plaintext.
+    /// Caller validates W3, permissions and time; this only bounds and hashes ciphertext.
     pub fn enqueue(&mut self, d: Descriptor, packet: &[u8], now: u64) -> Result<Insert, Error> {
         if d.id == [0; 16]
             || d.policy_epoch == 0
@@ -242,8 +236,7 @@ impl W4Outbox {
         Ok(Some(ciphertext))
     }
 
-    /// A relay ACK CANNOT call this final acceptance method. Exact W4 signed
-    /// recipient receipt and current Akula trusted signing-key mapping required.
+    /// Only a recipient-signed W4 receipt and current key mapping permit final ACK.
     pub fn accept_receipt(
         &mut self,
         raw: &[u8],

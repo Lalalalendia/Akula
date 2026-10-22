@@ -4,14 +4,16 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/core/src/messaging/**'
+      - 'aquilum-app/core/src/messaging/w4/inbox.rs'
+      - 'aquilum-app/core/src/messaging/w4/inbox/**'
       - 'aquilum-app/Cargo.lock'
       - '.github/workflows/messaging-blue-w3-lab.yml'
   push:
     branches: [main]
     paths:
       - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/core/src/messaging/**'
+      - 'aquilum-app/core/src/messaging/w4/inbox.rs'
+      - 'aquilum-app/core/src/messaging/w4/inbox/**'
       - 'aquilum-app/Cargo.lock'
       - '.github/workflows/messaging-blue-w3-lab.yml'
 

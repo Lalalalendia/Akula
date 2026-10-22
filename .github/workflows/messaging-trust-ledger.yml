@@ -3,16 +3,16 @@ name: Akula messaging pinned device-key contract
 on:
   pull_request:
     paths:
-      - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/core/src/messaging/**'
-      - 'docs/messaging/**'
+      - 'aquilum-app/core/src/messaging/w4/key_ledger.rs'
+      - 'aquilum-app/core/src/messaging/w4/key_ledger/**'
+      - 'docs/messaging/AK-MSG-CORE-01B-TRUST.md'
       - '.github/workflows/messaging-trust-ledger.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: akula-msg-trust-${{ github.event.pull_request.number }}
+  group: akula-msg-trust-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

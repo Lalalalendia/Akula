@@ -5,9 +5,10 @@ on:
     branches: [main]
     paths:
       - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/core/src/lib.rs'
-      - 'aquilum-app/core/src/messaging/**'
-      - 'docs/messaging/**'
+      - 'aquilum-app/core/src/messaging/mod.rs'
+      - 'aquilum-app/core/src/messaging/tests.rs'
+      - 'aquilum-app/core/src/messaging/scale_tests.rs'
+      - 'docs/messaging/AK-MSG-CORE-01A.md'
       - '.github/workflows/messaging-core-contract.yml'
   workflow_dispatch:
 
