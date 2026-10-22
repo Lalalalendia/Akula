@@ -1,0 +1,12 @@
+[package]
+name = "akula-plugin05-component-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Real Rust guest, no WASI adapter / no WASI imports.
+wit-bindgen = "=0.58.0"

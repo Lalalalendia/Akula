@@ -1,0 +1,9 @@
+package akula:plugin-lab@0.1.0;
+
+/// Deny-first proof: host owns the only imported operation.
+world lab {
+    import read-scoped: func(token: u32) -> s32;
+
+    export hello: func() -> u32;
+    export read: func(token: u32) -> s32;
+}

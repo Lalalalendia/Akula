@@ -1,0 +1,10 @@
+[package]
+name = "akula-plugin05-component-host"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# Deliberately outside aquilum-app; never linked into shipped Akula.
+wasmtime = { version = "=50.0.0", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
+wit-component = "=0.261.0"
