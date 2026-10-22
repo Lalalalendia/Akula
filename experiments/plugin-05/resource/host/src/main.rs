@@ -22,6 +22,16 @@ pub struct BoundNote {
     instance: u64,
     vault: u64,
     epoch: u64,
+    // Lab-only real plugin Core bridge; compiled out of release host.
+    #[cfg(test)]
+    actual: Option<CoreBoundNote>,
+}
+
+#[cfg(test)]
+struct CoreBoundNote {
+    instance: aquilum_core::plugins::PluginInstanceHandle,
+    vault: aquilum_core::plugins::VaultId,
+    note: aquilum_core::plugins::ScopedNoteHandle,
 }
 
 struct HostState {
@@ -57,6 +67,8 @@ impl Host for HostState {
             instance: self.instance,
             vault: self.vault,
             epoch: self.epoch,
+            #[cfg(test)]
+            actual: None,
         })?;
         Ok(Some(note))
     }
@@ -196,3 +208,6 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod actual_core_resource_tests;
