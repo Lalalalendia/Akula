@@ -165,10 +165,9 @@ impl TextEditor {
             Ime::Disabled => self.compose = None,
             Ime::Preedit(text, _) if text.is_empty() => self.compose = None,
             Ime::Preedit(text, cursor) => {
-                if !self.selection().is_empty() {
-                    self.insert("", Kind::Other);
-                    edited = true;
-                }
+                // Preedit is a transient visual preview. Do not replace the
+                // selection, update Undo, or emit an edited/save action until
+                // the IME confirms the replacement with Commit.
                 self.compose = Some((text.clone(), *cursor));
             }
             Ime::Commit(text) => {
