@@ -92,8 +92,11 @@ def lsp_position(source, invocation):
     if len(locations) != 1:
         raise ValueError("ambiguous golden callsite: " + invocation)
     line_number, line = locations[0]
+    # Position the cursor on the CALLEE identifier, not the initial 'crate'.
     # ASCII-only fixture means LSP UTF-16/UTF-8 column positions coincide.
-    return {"line": line_number, "character": line.index(invocation) + 1}
+    callee = invocation.rsplit("::", 1)[-1].split("(")[0]
+    return {"line": line_number,
+            "character": line.index(invocation) + invocation.rfind(callee) + 1}
 
 
 def verdict(source, checked_hash, resolved_targets, proposed_policy=None):
