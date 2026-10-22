@@ -156,7 +156,7 @@ pub async fn create_first_pair_profile(
     let connection = profile.connection()?;
     let ns = profile.keyspace()?;
     let client = AwsS3ProbeClient::connect_with_explicit_credentials(
-        connection, ns.clone(), access_id, access_secret,
+        connection.clone(), ns.clone(), access_id, access_secret,
     ).await?;
     if client.probe_pair_read_write().await? != S3PairAccess::ReadWrite {
         return Err(S3PairHostError::Connect(super::S3TransportError::PermissionDenied));
@@ -166,6 +166,18 @@ pub async fn create_first_pair_profile(
     let accepted = S3PairProfile::yandex_first_device(
         bucket, trusted.cloud_vault_id, trusted.genesis_fingerprint,
     );
+    // First and second PCs must be bound to the same cloud VaultId while
+    // retaining distinct local workspace UUIDs and independent SQLite DBs.
+    let verified = verify_invited_genesis(
+        &client, &ns, &accepted.genesis_fingerprint,
+    ).await?;
+    let admission = RegisteredReadAdmission::open(core, root)?;
+    let mut bindings = super::profile_binding::SqliteRegisteredS3Bindings::open(
+        &admission, &appdata.join("s3-profiles.sqlite"),
+    )?;
+    bindings.bind_existing_verified_s3(
+        &admission, "akula-pair-v1", &connection, &ns, &verified,
+    )?;
     store_new_pair_profile(root, appdata, &accepted)?;
     Ok(accepted)
 }
