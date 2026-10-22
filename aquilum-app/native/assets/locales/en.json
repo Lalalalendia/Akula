@@ -46,7 +46,10 @@
     "pairRevoked": "Peer public key is permanently revoked for future transfers.",
     "pairConfirm": "Confirm and pin expected peer key",
     "pairInspect": "Check stored peer status",
-    "pairRequestRevoke": "Review permanent revocation"
+    "pairRequestRevoke": "Review permanent revocation",
+    "pairRevokeChanged": "Revocation cancelled: the peer ID changed or independent verification is missing.",
+    "pairInvalidComparison": "Enter two matching, complete, lowercase EndpointIds from independently verified sources.",
+    "pairInvalidObserved": "Enter a complete, lowercase 64-character Iroh EndpointId."
   },
   "editor": {
     "resetUiStateWarning": "The reset forgets open tabs, the list of knowledge bases, home pages and book reading positions; notes, history and settings stay.",
