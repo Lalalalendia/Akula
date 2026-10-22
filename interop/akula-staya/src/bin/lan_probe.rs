@@ -86,6 +86,15 @@ async fn run() -> Result<(), String> {
                 .map_err(|error| format!("write bounded reply: {error}"))?;
             tx.finish()
                 .map_err(|error| format!("finish bounded reply: {error}"))?;
+            // QUIC finish alone does not guarantee delivery before close.
+            if tx
+                .stopped()
+                .await
+                .map_err(|error| format!("reply delivery not confirmed: {error}"))?
+                .is_some()
+            {
+                return Err("peer stopped the reply stream".to_owned());
+            }
             Ok::<(), String>(())
         })
         .await
@@ -120,6 +129,16 @@ async fn run() -> Result<(), String> {
                 .map_err(|error| format!("read bounded reply: {error}"))?;
             if reply != b"AKULA_OK_V1" {
                 return Err("unexpected authenticated reply".to_owned());
+            }
+            // Preserve the session until the already-sent greeting is
+            // acknowledged; otherwise immediate connection close may drop it.
+            if tx
+                .stopped()
+                .await
+                .map_err(|error| format!("greeting delivery not confirmed: {error}"))?
+                .is_some()
+            {
+                return Err("peer stopped the greeting stream".to_owned());
             }
             Ok::<(), String>(())
         })
