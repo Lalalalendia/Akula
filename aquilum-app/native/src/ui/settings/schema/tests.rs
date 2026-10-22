@@ -286,3 +286,53 @@ fn system_about_section_links_to_project_telegram_channel() {
     assert_eq!(buttons[0].label, "https://t.me/AkulaHubl");
     assert_eq!(buttons[0].action, Action::OpenUrl("https://t.me/AkulaHubl"));
 }
+
+/// S3-E2E-01: remote VaultId is visible only in a separate, opt-in
+/// diagnostic surface. A real pending file must never become a Restore,
+/// ConfirmedBaseline or blind retry button.
+#[cfg(feature = "s3-e2e01-review-preview")]
+#[test]
+fn s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button() {
+    use aquilum_core::sync::{NativeRecoveryExample, NativeRecoveryOverview};
+    let config = AppConfig::default();
+    let mut ctx = Context::new(1.0);
+    ctx.sync_recovery = Some(NativeRecoveryOverview::NoLocalPublicationClaims);
+    ctx.s3_bound_publications = Some(NativeRecoveryOverview::RequiresReview {
+        total_claims: 1,
+        examples: vec![NativeRecoveryExample {
+            operation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+            historical_path: "notes/received-over-s3.md".into(),
+        }],
+    });
+    let sections = blocks(Section::Sync, &config, &ctx);
+    let panel = sections.iter()
+        .find(|block| block.title == t("settings.sync.title"))
+        .unwrap();
+    let unconfirmed = panel.rows.iter()
+        .find(|row| row.label == "notes/received-over-s3.md")
+        .unwrap();
+    assert!(unconfirmed.setter.is_none());
+    assert!(matches!(
+        &unconfirmed.control,
+        Control::Status { tone: Tone::Danger, .. }
+    ));
+    assert!(panel.rows.iter().any(|row| {
+        row.label == t("settings.sync.s3BoundCount")
+            && row.description.as_ref() == Some(&t("settings.sync.s3BoundNoAck"))
+    }));
+    assert!(!panel.rows.iter().any(|row| {
+        matches!(&row.control, Control::Buttons(_))
+            && row.label == t("settings.sync.s3BoundTitle")
+    }));
+
+    ctx.s3_bound_publications = Some(NativeRecoveryOverview::InspectionUnavailable);
+    let blocked = blocks(Section::Sync, &config, &ctx);
+    let panel = blocked.iter().find(|b| b.title == t("settings.sync.title")).unwrap();
+    assert!(panel.rows.iter().any(|row| {
+        row.label == t("settings.sync.s3BoundTitle")
+            && matches!(&row.control, Control::Status { tone: Tone::Danger, .. })
+    }));
+    assert!(!panel.rows.iter().any(|row| {
+        row.label == "notes/received-over-s3.md"
+    }));
+}
