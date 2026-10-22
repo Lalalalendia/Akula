@@ -60,7 +60,8 @@ fn templates_and_attachments_share_one_section_and_search_tuning_lives_with_bm25
         assert_eq!(Section::from_key(old), Some(Section::Data), "сохранённый раздел «{old}» открывает общий раздел");
     }
     assert_eq!(Section::from_key("search"), Some(Section::Analysis));
-    assert_eq!(Section::ALL.len(), 11);
+    assert_eq!(Section::ALL.len(), 12);
+    assert_eq!(Section::from_key("server"), Some(Section::Server));
     assert_eq!(Section::from_key("sync"), Some(Section::Sync));
 
     let rows = |config: &AppConfig| blocks(Section::Analysis, config, &ctx).into_iter().flat_map(|b| b.rows).map(|r| r.label).collect::<Vec<_>>();
@@ -232,4 +233,106 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     let english = blocks(Section::Sync, &config, &ctx);
     assert_eq!(english[0].title, t("settings.yandex.title"));
     assert!(english[0].rows.iter().any(|row| row.label == t("settings.yandex.credentialSafety")));
+}
+
+
+#[test]
+fn b1d0_native_server_settings_are_nonsecret_and_never_offer_an_install_grant() {
+    let mut config = AppConfig::default();
+    let ctx = Context::new(1.0);
+    i18n::set_language("ru");
+    let sections = blocks(Section::Server, &config, &ctx);
+    assert_eq!(sections.len(),1);
+    let page = &sections[0];
+    assert_eq!(page.title, t("settings.server.title"));
+    let writable: Vec<_> = page.rows.iter().filter(|r| r.setter.is_some()).collect();
+    assert_eq!(writable.len(), 5);
+    assert!(writable.iter().all(|row| matches!(
+        &row.control, Control::Text { commit:true,.. }|Control::Number(_)
+    )));
+    let mut blocked_actions=0;
+    for row in &page.rows {
+        if let Control::Buttons(buttons)= &row.control {
+            for button in buttons {
+                assert!(!button.enabled, "no SSH verification/install without OS trust");
+                blocked_actions+=1;
+            }
+        }
+    }
+    assert_eq!(blocked_actions,2);
+    // Attempt to paste a secret as an OpenSSH *public* host key.
+    let key_row=writable.iter().find(|r|
+        r.label==t("settings.server.publicKey")).unwrap();
+    let Some(Setter::Config(set))=key_row.setter else { panic!("expected setter") };
+    set(&mut config, &Value::Text("-----BEGIN OPENSSH PRIVATE KEY-----".into()));
+    assert!(config.server_setup.host_public_key.is_empty());
+    i18n::set_language("en");
+}
+
+#[test]
+fn system_about_section_links_to_project_telegram_channel() {
+    let sections = blocks(Section::System, &AppConfig::default(), &Context::new(1.0));
+    let about = sections.last().expect("About section should be present");
+    assert_eq!(about.rows.len(), 2, "project channel and app version");
+    let telegram = &about.rows[0];
+    assert_eq!(telegram.label, t("settings.system.projectTelegram"));
+    let hint = t("settings.system.projectTelegramHint");
+    assert_eq!(telegram.description.as_deref(), Some(hint.as_str()));
+    assert!(telegram.setter.is_none());
+    let Control::Buttons(buttons) = &telegram.control else {
+        panic!("project Telegram channel must be a clickable link");
+    };
+    assert_eq!(buttons.len(), 1);
+    assert_eq!(buttons[0].label, "https://t.me/AkulaHubl");
+    assert_eq!(buttons[0].action, Action::OpenUrl("https://t.me/AkulaHubl"));
+}
+
+/// S3-E2E-01: remote VaultId is visible only in a separate, opt-in
+/// diagnostic surface. A real pending file must never become a Restore,
+/// ConfirmedBaseline or blind retry button.
+#[cfg(feature = "s3-e2e01-review-preview")]
+#[test]
+fn s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button() {
+    use aquilum_core::sync::{NativeRecoveryExample, NativeRecoveryOverview};
+    let config = AppConfig::default();
+    let mut ctx = Context::new(1.0);
+    ctx.sync_recovery = Some(NativeRecoveryOverview::NoLocalPublicationClaims);
+    ctx.s3_bound_publications = Some(NativeRecoveryOverview::RequiresReview {
+        total_claims: 1,
+        examples: vec![NativeRecoveryExample {
+            operation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+            historical_path: "notes/received-over-s3.md".into(),
+        }],
+    });
+    let sections = blocks(Section::Sync, &config, &ctx);
+    let panel = sections.iter()
+        .find(|block| block.title == t("settings.sync.title"))
+        .unwrap();
+    let unconfirmed = panel.rows.iter()
+        .find(|row| row.label == "notes/received-over-s3.md")
+        .unwrap();
+    assert!(unconfirmed.setter.is_none());
+    assert!(matches!(
+        &unconfirmed.control,
+        Control::Status { tone: Tone::Danger, .. }
+    ));
+    assert!(panel.rows.iter().any(|row| {
+        row.label == t("settings.sync.s3BoundCount")
+            && row.description.as_ref() == Some(&t("settings.sync.s3BoundNoAck"))
+    }));
+    assert!(!panel.rows.iter().any(|row| {
+        matches!(&row.control, Control::Buttons(_))
+            && row.label == t("settings.sync.s3BoundTitle")
+    }));
+
+    ctx.s3_bound_publications = Some(NativeRecoveryOverview::InspectionUnavailable);
+    let blocked = blocks(Section::Sync, &config, &ctx);
+    let panel = blocked.iter().find(|b| b.title == t("settings.sync.title")).unwrap();
+    assert!(panel.rows.iter().any(|row| {
+        row.label == t("settings.sync.s3BoundTitle")
+            && matches!(&row.control, Control::Status { tone: Tone::Danger, .. })
+    }));
+    assert!(!panel.rows.iter().any(|row| {
+        row.label == "notes/received-over-s3.md"
+    }));
 }

@@ -1,0 +1,87 @@
+name: S3 E2E-01 Native bound receive review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/sync/s3_publication_dashboard.rs'
+      - 'aquilum-app/native/src/app/settings/context.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context.rs'
+      - '.github/workflows/s3-e2e01-native-review.yml'
+      - 'docs/sync/S3-E2E-01-native-bound-review.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Avoid running obsolete Linux/Windows builds for each intermediate change.
+concurrency:
+  group: s3-e2e01-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-s3-hold:
+    name: Cross-platform S3 VaultId native review without apply
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native UI build libraries (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libglib2.0-dev libgtk-3-dev libpango1.0-dev \
+            libatk1.0-dev libcairo2-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libxkbcommon-dev libxkbcommon-x11-0
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Verify exact Core and Native test identities exist
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 -- --list > core-e2e01-tests.txt
+          grep -F 'sync::s3_publication_dashboard::tests::s3_e2e01_registered_remote_claim_is_visible_only_through_bound_read_only_view: test' core-e2e01-tests.txt
+          grep -F 'sync::s3_publication_dashboard::tests::s3_e2e01_foreign_scope_and_profile_do_not_leak_claim_or_clear_hold: test' core-e2e01-tests.txt
+          cargo test --locked -p aquilum-native --features s3-e2e01-review-preview -- --list > native-e2e01-tests.txt
+          grep -F 'ui::settings::schema::tests::s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button: test' native-e2e01-tests.txt
+      - name: Prove cloud VaultId-to-local workspace read-only boundary
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-core --features sync-s3 s3_publication_dashboard::tests -- --test-threads=1
+          cargo test --locked -p aquilum-native --features s3-e2e01-review-preview \
+            s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button -- --test-threads=1
+      - name: Ensure ordinary installed Akula still has no S3 review feature
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-native --features installed
+          if sed -n '/^\[features\]/,/^\[dependencies\]/p' native/Cargo.toml \
+            | grep -E '^(default|installed|sync-installed-host) *=' \
+            | grep -q 's3-e2e01-review-preview'; then
+            echo 'S3 E2E-01 review preview must not ship by default'
+            exit 1
+          fi

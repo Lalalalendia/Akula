@@ -9,12 +9,12 @@ workspace = ".."
 
 [features]
 default = []
-# Inert signed roster verifier, no owner enrollment or production adapter.
+# Read-only owner-signed registry; no pairing, grants or live peers.
 device-roster-lab = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
-node-catalog-lab = []
+node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
@@ -46,6 +46,9 @@ server-bootstrap-b1b4b1-witness-ipc-lab = ["server-bootstrap-b1b4b-os-witness-la
 # Test-only signed FD -> fixed root-owned Node file transaction after owner/CAS.
 # Does not launch Node or expose install IPC to Akula application.
 server-bootstrap-b1c0-fixed-node-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
+# Fixed /opt first-install file commit with a root-owned durable receipt and
+# conservative HOLD on startup or crash. No public installer RPC or auto-start.
+server-bootstrap-b1d0-durable-node = ["server-bootstrap-b1c0-fixed-node-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
@@ -103,6 +106,7 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [dependencies]
+akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
 akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
 akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
