@@ -12,7 +12,9 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod explicit_credentials;
+mod pair_upload;
 pub use explicit_credentials::S3PairAccess;
+pub use pair_upload::S3PairRemotePublication;
 mod manifest;
 mod principal;
 pub use principal::{S3AwsAccountProofError, S3AwsVerifiedAccountScope};
@@ -69,7 +71,6 @@ use std::time::Duration;
 
 #[cfg(test)]
 use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
-
 /// Test-only S3 method-attempt instrumentation. These count Akula SDK
 /// HEAD/GET attempts and fully read payload bytes, not TCP bytes, retries
 /// inside the AWS SDK, TLS frames or server-side network traffic.
