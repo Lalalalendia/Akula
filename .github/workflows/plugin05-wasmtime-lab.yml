@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: akula-plugin05a-${{ github.ref }}
+  group: akula-plugin05a-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -129,3 +129,30 @@ jobs:
         shell: bash
         run: |
           echo 'Research-only sandbox controls passed on ${{ matrix.os }}; no installed-app benchmark.' >> "$GITHUB_STEP_SUMMARY"
+
+  probe-component-linux:
+    name: Typed WIT Component deny/revoke / Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Build typed Rust guest
+        shell: bash
+        run: cargo build --release --target wasm32-unknown-unknown --manifest-path experiments/plugin-05/component/guest/Cargo.toml
+      - name: Validate typed Component and revoke
+        shell: bash
+        run: cargo test --manifest-path experiments/plugin-05/component/host/Cargo.toml
+      - name: Compile host and measure overhead
+        shell: bash
+        run: |
+          cargo build --release --manifest-path experiments/plugin-05/component/host/Cargo.toml
+          timeout 20s experiments/plugin-05/component/host/target/release/akula-plugin05-component-host
