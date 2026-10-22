@@ -723,7 +723,7 @@ mod tests {
                     serde_json::json!({
                         "schema": "akula-delta-text-04-real-git-v1",
                         "claim": "isolated-real-git-versions-not-production-sync",
-                        "mode": mode,
+                        "mode": mode.as_str(),
                         "actual_frame_mode": chosen_mode.unwrap(),
                         "path": path,
                         "from_commit": &older[..12],
