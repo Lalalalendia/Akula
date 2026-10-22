@@ -641,10 +641,11 @@ pub(crate) fn inspect_cold_s3_replace_with_history_classified(
     // Bracket the independent history read with the same full cold V7/V8,
     // protected original, profile and pinned-file checks. This is a two-pass
     // consistency check, not a global transaction or a durable receipt.
-    let after = inspect_cold_s3_replace_hold(
+    let after = inspect_cold_s3_replace_hold_classified(
         admission, bindings, journal, protected, operation,
-    ).map_err(|error| ColdReviewFailure::new(
-        ColdReviewFailureReason::PostHistoryEvidenceRejected, error,
+    ).map_err(|failure| ColdReviewFailure::new(
+        ColdReviewFailureReason::PostHistoryEvidenceRejected,
+        failure.into_original_error(),
     ))?;
     if initial != after
         || journal.read_existing_replace_receipt_candidate(operation)
