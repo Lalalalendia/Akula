@@ -41,7 +41,8 @@ jobs:
       - name: Prove Windows credential survives separate OS process
         working-directory: aquilum-app
         shell: bash
-        run: cargo test --locked -p aquilum-core --features p2p-device-identity p2p_device_identity:: -- --nocapture
+        run: |
+          cargo test --locked -p aquilum-core --features p2p-device-identity p2p_device_identity:: -- --nocapture
       - name: Strict lint of new Core identity module
         working-directory: aquilum-app
         shell: bash
@@ -67,4 +68,5 @@ jobs:
           rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin.rs
       - name: Test explicit unsupported-platform refusal
         working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-core --features p2p-device-identity p2p_device_identity:: -- --nocapture
+        run: |
+          cargo test --locked -p aquilum-core --features p2p-device-identity p2p_device_identity:: -- --nocapture
