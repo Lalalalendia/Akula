@@ -56,3 +56,53 @@ pub(super) fn rows(ctx: &Context, setup_ready: bool) -> Vec<Row> {
     }
     output
 }
+
+/// Production-shaped compact layout for the opt-in Windows pairing beta.
+/// Users see the provider preset, bucket, protected key status and two
+/// primary actions, not developer-facing AWS CLI/tutorial steps.
+pub(super) fn compact(
+    config: &AppConfig,
+    ctx: &Context,
+    view: super::controls::ViewState,
+) -> Block {
+    let draft = &config.s3_onboarding;
+    let mut fields = vec![
+        info(
+            t("settings.yandex.pairProvider"),
+            Some(t("settings.yandex.pairProviderHint")),
+            Control::Status {
+                text: "Yandex Object Storage".into(),
+                tone: Tone::Secondary,
+            },
+        ),
+        row(
+            t("settings.yandex.bucket"),
+            Some(t("settings.yandex.bucketHint")),
+            Control::Text { value: draft.bucket.clone(), commit: true },
+            |c, v| {
+                let name = text(v);
+                if YandexS3Onboarding::valid_bucket(&name) {
+                    c.s3_onboarding.bucket = name;
+                }
+            },
+        ),
+        info(
+            t("settings.yandex.keyStatus"),
+            Some(t("settings.yandex.credentialSafetyHint")),
+            Control::Status { text: view.key_status, tone: view.key_tone },
+        ),
+        info(
+            t("settings.yandex.manageKeys"),
+            Some(t("settings.yandex.manageKeysHint")),
+            Control::Buttons(vec![
+                Button::new(t("settings.yandex.addKeys"), Action::StoreYandexKeys)
+                    .enabled(view.supported && view.bucket_ready && !ctx.s3_pair_busy),
+                Button::new(t("settings.yandex.removeKeys"), Action::RemoveYandexKeys)
+                    .enabled(view.supported && view.bucket_ready
+                        && ctx.yandex_keys == Some(true) && !ctx.s3_pair_busy),
+            ]),
+        ),
+    ];
+    fields.extend(rows(ctx, view.supported && view.bucket_ready));
+    Block { title: t("settings.yandex.pairEntry"), rows: fields }
+}
