@@ -26,7 +26,7 @@ impl App {
         if tab.is_some() {
             labels.push((t("tabs.close"), crate::ui::icons::X));
         } else if !folder && targets.len() == 1 && pdf_preview::is_pdf_path(&clicked) {
-            labels.push(("Найти текст PDF в Akula".to_owned(), crate::ui::icons::FILE_SEARCH));
+            labels.push(("Найти текст PDF в Akula".to_owned(), crate::ui::icons::SEARCH));
         }
         let colored = folder && tab.is_none();
         if colored {
