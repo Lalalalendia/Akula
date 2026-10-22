@@ -204,6 +204,8 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/release-source-contract.test.cjs
           node .github/scripts/release-source-contract.cjs
+          node --test .github/scripts/akula-version.test.cjs
+          node scripts/akula-version.cjs check
 
       - name: macOS updater TAR and signed-DMG content parity (read-only)
         shell: bash
