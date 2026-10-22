@@ -50,6 +50,8 @@ mod recovery_review;
 pub mod sealed_archive;
 #[cfg(feature = "sync-s3")]
 pub mod s3_pair_invite;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_bootstrap;
 mod recovery_dashboard;
 #[cfg(feature = "sync-s3")]
 mod s3_publication_dashboard;
@@ -120,7 +122,6 @@ pub use protocol::{
     decode_identity_for_write, IdentityEnvelope, IdentityRecord, ProtocolCompatibility,
     ProtocolError, ProtocolVersion, SyncConfig, SyncProvider, WireEnvelope,
 };
-
 pub use fake::FakeRemoteStore;
 pub use fake_vault::FakeVaultPort;
 pub use provider::{
@@ -192,7 +193,6 @@ pub use s3_transport::{
     S3VerifiedHintsError, S3VerifiedHintsJournal,
     plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError,
 };
-
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
