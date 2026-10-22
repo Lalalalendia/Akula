@@ -71,8 +71,7 @@ fn normalized_path(commands: Vec<PathCommand>) -> Result<PathGeometryV1, PortErr
         extend_points(cmd, &mut points);
     }
     let first = *points.first().ok_or(PortError::Malformed("empty path"))?;
-    let (mut min_x, mut max_x, mut min_y, mut max_y) =
-        (first.0, first.0, first.1, first.1);
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.0, first.0, first.1, first.1);
     for (x, y) in points {
         min_x = min_x.min(x);
         max_x = max_x.max(x);
@@ -111,16 +110,22 @@ pub fn shape_fill_paths(shape: &Shape) -> Result<Vec<ShapeFillPath>, PortError> 
         let mut commands = Vec::new();
         for contour in contours {
             let Point { x, y } = contour[0].from;
-            commands.push(PathCommand::MoveTo { x: emu(x), y: emu(y) });
+            commands.push(PathCommand::MoveTo {
+                x: emu(x),
+                y: emu(y),
+            });
             for edge in contour {
                 if let Some(Point { x: cx, y: cy }) = edge.control {
                     commands.push(PathCommand::QuadTo {
-                        cx: emu(cx), cy: emu(cy),
-                        x: emu(edge.to.x), y: emu(edge.to.y),
+                        cx: emu(cx),
+                        cy: emu(cy),
+                        x: emu(edge.to.x),
+                        y: emu(edge.to.y),
                     });
                 } else {
                     commands.push(PathCommand::LineTo {
-                        x: emu(edge.to.x), y: emu(edge.to.y),
+                        x: emu(edge.to.x),
+                        y: emu(edge.to.y),
                     });
                 }
             }
@@ -150,11 +155,15 @@ pub fn frame_path_instances(
     scene: &Scene,
     frame_index: usize,
 ) -> Result<Vec<FramePathInstance>, PortError> {
-    let frame = scene.frames.get(frame_index)
+    let frame = scene
+        .frames
+        .get(frame_index)
         .ok_or(PortError::Malformed("frame out of range"))?;
     let mut out = Vec::new();
     for instance in &frame.instances {
-        let shape = scene.shapes.get(&instance.character_id)
+        let shape = scene
+            .shapes
+            .get(&instance.character_id)
             .ok_or(PortError::Malformed("missing placed character"))?;
         for path in shape_fill_paths(shape)? {
             out.push(FramePathInstance {
@@ -172,24 +181,38 @@ pub fn frame_path_instances(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::{Edge, LineStyle, Matrix, Point, Rect, Frame, Instance};
+    use crate::scene::{Edge, Frame, Instance, LineStyle, Matrix, Point, Rect};
     use std::collections::BTreeMap;
 
     fn rectangle() -> Shape {
         let points = [
-            Point { x: 0, y: 0 }, Point { x: 400, y: 0 },
-            Point { x: 400, y: 200 }, Point { x: 0, y: 200 },
+            Point { x: 0, y: 0 },
+            Point { x: 400, y: 0 },
+            Point { x: 400, y: 200 },
+            Point { x: 0, y: 200 },
             Point { x: 0, y: 0 },
         ];
         Shape {
             id: 7,
-            bounds: Rect { xmin: 0, xmax: 400, ymin: 0, ymax: 200 },
+            bounds: Rect {
+                xmin: 0,
+                xmax: 400,
+                ymin: 0,
+                ymax: 200,
+            },
             fills: vec![Color { r: 255, g: 0, b: 0 }],
             lines: vec![],
-            edges: points.windows(2).map(|p| Edge {
-                from: p[0], control: None, to: p[1],
-                fill_left: 0, fill_right: 1, line: 0,
-            }).collect(),
+            edges: points
+                .windows(2)
+                .map(|p| Edge {
+                    from: p[0],
+                    control: None,
+                    to: p[1],
+                    fill_left: 0,
+                    fill_right: 1,
+                    line: 0,
+                })
+                .collect(),
         }
     }
 
@@ -199,57 +222,120 @@ mod tests {
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].geometry.schema, PATH_SCHEMA);
         assert_eq!(paths[0].geometry.fill_rule, "nonzero");
-        assert_eq!(paths[0].geometry.bounds,
-            BoundsEmu { x: 0, y: 0, width: 254000, height: 127000 });
-        assert_eq!(paths[0].geometry.commands, vec![
-            PathCommand::MoveTo { x: 0, y: 0 },
-            PathCommand::LineTo { x: 254000, y: 0 },
-            PathCommand::LineTo { x: 254000, y: 127000 },
-            PathCommand::LineTo { x: 0, y: 127000 },
-            PathCommand::LineTo { x: 0, y: 0 },
-            PathCommand::Close,
-        ]);
+        assert_eq!(
+            paths[0].geometry.bounds,
+            BoundsEmu {
+                x: 0,
+                y: 0,
+                width: 254000,
+                height: 127000
+            }
+        );
+        assert_eq!(
+            paths[0].geometry.commands,
+            vec![
+                PathCommand::MoveTo { x: 0, y: 0 },
+                PathCommand::LineTo { x: 254000, y: 0 },
+                PathCommand::LineTo {
+                    x: 254000,
+                    y: 127000
+                },
+                PathCommand::LineTo { x: 0, y: 127000 },
+                PathCommand::LineTo { x: 0, y: 0 },
+                PathCommand::Close,
+            ]
+        );
     }
 
     #[test]
     fn three_frames_reuse_one_shape_but_move_instance() {
         let shape = rectangle();
-        let first = Instance { character_id: 7, depth: 1,
-            matrix: Matrix { tx: 600, ty: 400, ..Matrix::IDENTITY } };
-        let second = Instance { character_id: 7, depth: 1,
-            matrix: Matrix { tx: 1000, ty: 800, ..Matrix::IDENTITY } };
+        let first = Instance {
+            character_id: 7,
+            depth: 1,
+            matrix: Matrix {
+                tx: 600,
+                ty: 400,
+                ..Matrix::IDENTITY
+            },
+        };
+        let second = Instance {
+            character_id: 7,
+            depth: 1,
+            matrix: Matrix {
+                tx: 1000,
+                ty: 800,
+                ..Matrix::IDENTITY
+            },
+        };
         let mut shapes = BTreeMap::new();
         shapes.insert(7, shape);
-        let frame = |instances| Frame { background: Color {r:230,g:230,b:230}, instances };
-        let scene = Scene { stage: Rect { xmin:0,xmax:3000,ymin:0,ymax:2000 },
-            frame_rate:24.0, shapes,
-            frames:vec![frame(vec![first]),frame(vec![second]),frame(vec![])] };
+        let frame = |instances| Frame {
+            background: Color {
+                r: 230,
+                g: 230,
+                b: 230,
+            },
+            instances,
+        };
+        let scene = Scene {
+            stage: Rect {
+                xmin: 0,
+                xmax: 3000,
+                ymin: 0,
+                ymax: 2000,
+            },
+            frame_rate: 24.0,
+            shapes,
+            frames: vec![frame(vec![first]), frame(vec![second]), frame(vec![])],
+        };
         assert_eq!(scene_paths(&scene).unwrap().len(), 1);
-        assert_eq!(frame_path_instances(&scene,0).unwrap()[0].tx_emu,381000);
-        assert_eq!(frame_path_instances(&scene,1).unwrap()[0].tx_emu,635000);
-        assert!(frame_path_instances(&scene,2).unwrap().is_empty());
+        assert_eq!(frame_path_instances(&scene, 0).unwrap()[0].tx_emu, 381000);
+        assert_eq!(frame_path_instances(&scene, 1).unwrap()[0].tx_emu, 635000);
+        assert!(frame_path_instances(&scene, 2).unwrap().is_empty());
     }
 
     #[test]
     fn unsupported_strokes_fail_closed() {
         let mut shape = rectangle();
-        shape.lines.push(LineStyle { width: 10, color: Color {r:0,g:0,b:0} });
-        assert!(matches!(shape_fill_paths(&shape),Err(PortError::Unsupported(_))));
+        shape.lines.push(LineStyle {
+            width: 10,
+            color: Color { r: 0, g: 0, b: 0 },
+        });
+        assert!(matches!(
+            shape_fill_paths(&shape),
+            Err(PortError::Unsupported(_))
+        ));
     }
 
     #[test]
     fn quadratic_control_point_survives_and_is_bounded() {
         let mut shape = rectangle();
         shape.edges = vec![
-            Edge {from:Point{x:0,y:0},control:Some(Point{x:200,y:400}),
-                to:Point{x:400,y:0},fill_left:0,fill_right:1,line:0},
-            Edge {from:Point{x:400,y:0},control:None,
-                to:Point{x:0,y:0},fill_left:0,fill_right:1,line:0},
+            Edge {
+                from: Point { x: 0, y: 0 },
+                control: Some(Point { x: 200, y: 400 }),
+                to: Point { x: 400, y: 0 },
+                fill_left: 0,
+                fill_right: 1,
+                line: 0,
+            },
+            Edge {
+                from: Point { x: 400, y: 0 },
+                control: None,
+                to: Point { x: 0, y: 0 },
+                fill_left: 0,
+                fill_right: 1,
+                line: 0,
+            },
         ];
         let path = shape_fill_paths(&shape).unwrap().pop().unwrap().geometry;
         assert!(path.commands.contains(&PathCommand::QuadTo {
-            cx:127000,cy:254000,x:254000,y:0
+            cx: 127000,
+            cy: 254000,
+            x: 254000,
+            y: 0
         }));
-        assert_eq!(path.bounds.height,254000);
+        assert_eq!(path.bounds.height, 254000);
     }
 }
