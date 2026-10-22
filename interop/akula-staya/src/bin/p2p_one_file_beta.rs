@@ -29,8 +29,15 @@ const USAGE: &str = "usage: akula-p2p-one-file-beta send PEER_ID ABSOLUTE_SOURCE
 
 #[derive(Debug, PartialEq, Eq)]
 enum Mode {
-    Send { peer: String, source: PathBuf },
-    Receive { peer: String, address: SocketAddr, destination: PathBuf },
+    Send {
+        peer: String,
+        source: PathBuf,
+    },
+    Receive {
+        peer: String,
+        address: SocketAddr,
+        destination: PathBuf,
+    },
 }
 
 fn parse_peer(value: &str) -> Result<EndpointId, String> {
@@ -102,8 +109,8 @@ fn source_frame(path: &Path) -> Result<Vec<u8>, String> {
     if !path.is_absolute() {
         return Err("source must be absolute".into());
     }
-    let path_info = fs::symlink_metadata(path)
-        .map_err(|error| format!("source metadata: {error}"))?;
+    let path_info =
+        fs::symlink_metadata(path).map_err(|error| format!("source metadata: {error}"))?;
     if !path_info.is_file() || path_info.file_type().is_symlink() {
         return Err("source must be one normal file, never a link or directory".into());
     }
@@ -146,9 +153,7 @@ fn decode_frame(frame: &[u8]) -> Result<(u64, [u8; 32], &[u8]), String> {
         return Err("wrong or incomplete one-file message".into());
     }
     let size = u64::from_be_bytes(frame[8..16].try_into().expect("checked header"));
-    if !(1..=MAX_INBOX_ITEM_BYTES).contains(&size)
-        || frame.len() != HEADER_BYTES + size as usize
-    {
+    if !(1..=MAX_INBOX_ITEM_BYTES).contains(&size) || frame.len() != HEADER_BYTES + size as usize {
         return Err("truncated, oversized or extra file data".into());
     }
     let digest: [u8; 32] = frame[16..48].try_into().expect("checked header");
@@ -178,8 +183,8 @@ fn save_received(frame: &[u8], destination: &Path) -> Result<(), String> {
     let parent = destination
         .parent()
         .ok_or("destination must have a parent directory")?;
-    let metadata = fs::symlink_metadata(parent)
-        .map_err(|error| format!("destination directory: {error}"))?;
+    let metadata =
+        fs::symlink_metadata(parent).map_err(|error| format!("destination directory: {error}"))?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err("destination parent cannot be a symlink".into());
     }
@@ -237,7 +242,8 @@ async fn send_one(
     tx.write_all(&frame)
         .await
         .map_err(|error| format!("write bounded file: {error}"))?;
-    tx.finish().map_err(|error| format!("finish file stream: {error}"))?;
+    tx.finish()
+        .map_err(|error| format!("finish file stream: {error}"))?;
     let mut receipt = connection
         .accept_uni()
         .await
@@ -267,7 +273,8 @@ async fn receive_one(
     tx.write_all(REQUEST)
         .await
         .map_err(|error| format!("request exactly one file: {error}"))?;
-    tx.finish().map_err(|error| format!("finish request: {error}"))?;
+    tx.finish()
+        .map_err(|error| format!("finish request: {error}"))?;
     let mut stream = connection
         .accept_uni()
         .await
@@ -344,13 +351,11 @@ async fn run() -> Result<(), String> {
             destination,
         } => {
             let addr = EndpointAddr::new(expected).with_ip_addr(address);
-            let connection = tokio::time::timeout(
-                Duration::from_secs(20),
-                endpoint.connect(addr, ALPN),
-            )
-            .await
-            .map_err(|_| "direct LAN connection timed out")?
-            .map_err(|error| format!("authenticated QUIC connection: {error}"))?;
+            let connection =
+                tokio::time::timeout(Duration::from_secs(20), endpoint.connect(addr, ALPN))
+                    .await
+                    .map_err(|_| "direct LAN connection timed out")?
+                    .map_err(|error| format!("authenticated QUIC connection: {error}"))?;
             live_peer(&connection, &peer)?;
             let outcome = tokio::time::timeout(
                 Duration::from_secs(120),
@@ -396,8 +401,24 @@ mod tests {
         assert!(parse_mode(["send".into(), "f".repeat(63), path.clone()]).is_err());
         assert!(parse_mode(["send".into(), "0".repeat(64), path.clone()]).is_err());
         assert!(parse_mode(["receive".into(), id.clone(), "host:5".into(), path.clone()]).is_err());
-        assert!(parse_mode(["receive".into(), id.clone(), "127.0.0.1:0".into(), path.clone()]).is_err());
-        assert!(parse_mode(["receive".into(), id.clone(), "127.0.0.1:1024".into(), "relative".into()]).is_err());
+        assert!(
+            parse_mode([
+                "receive".into(),
+                id.clone(),
+                "127.0.0.1:0".into(),
+                path.clone()
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_mode([
+                "receive".into(),
+                id.clone(),
+                "127.0.0.1:1024".into(),
+                "relative".into()
+            ])
+            .is_err()
+        );
         assert!(parse_mode(["send".into(), id, path, "extra".into()]).is_err());
     }
 
@@ -497,13 +518,11 @@ mod tests {
             sender.close().await;
         });
 
-        let connection = tokio::time::timeout(
-            Duration::from_secs(25),
-            receiver.connect(direct, ALPN),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let connection =
+            tokio::time::timeout(Duration::from_secs(25), receiver.connect(direct, ALPN))
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(connection.remote_id(), sender_id);
         tokio::time::timeout(
             Duration::from_secs(25),
@@ -519,5 +538,4 @@ mod tests {
         assert_eq!(fs::read(&output).unwrap(), bytes);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
     }
-
 }
