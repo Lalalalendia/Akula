@@ -177,7 +177,7 @@ fn memory_pairs_reject_fake_identity_and_destinations() {
         InMemoryTransport::pair(HOST, PeerId([0; 32])).unwrap_err(),
         TransportError::InvalidPeers
     );
-    let (mut host, mut guest) = InMemoryTransport::pair(HOST, GUEST).unwrap();
+    let (host, mut guest) = InMemoryTransport::pair(HOST, GUEST).unwrap();
     assert_eq!(host.local_peer(), HOST);
     assert_eq!(guest.local_peer(), GUEST);
     assert_eq!(
@@ -302,7 +302,7 @@ fn twenty_turns_traverse_transport_and_both_players_see_the_same_revision() {
         guest_state = Some(received);
     }
     let local = game.snapshot_for(HOST).unwrap();
-    assert_eq!(guest_state, Some(local.state));
+    assert_eq!(guest_state.as_ref(), Some(&local.state));
     assert_eq!(local.state.revision, 20);
     assert_eq!(local.state.status, Status::InProgress { next: Player::Red });
     assert_eq!(host.queued_frames(), Ok(0));
