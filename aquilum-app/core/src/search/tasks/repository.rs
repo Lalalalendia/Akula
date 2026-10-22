@@ -3,7 +3,8 @@ use crate::search::error::SearchError;
 use rusqlite::{params, Connection, Transaction};
 use std::collections::HashMap;
 use std::path::Path;
-
+#[cfg(feature = "extension-view-lab")]
+mod view_lab;
 pub fn open_schema(connection: &Connection) -> Result<(), SearchError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS note_tasks (
@@ -52,20 +53,6 @@ pub fn remove_document(transaction: &Transaction<'_>, path: &Path) -> Result<(),
     )?;
     Ok(())
 }
-
-/// Bounded read-only first-party task panel data (not a guest plugin API).
-pub fn read_preview(connection: &Connection, path: &str) -> Result<Vec<Task>, SearchError> {
-    let mut statement = connection.prepare(
-        "SELECT line, done, text FROM note_tasks WHERE path=?1 ORDER BY ordinal LIMIT 65",
-    )?;
-    let rows = statement.query_map([path], |row| Ok(Task {
-        line: row.get::<_, i64>(0)? as usize,
-        done: row.get::<_, i64>(1)? != 0,
-        text: row.get::<_, String>(2)?,
-    }))?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
-}
-
 const CHUNK: usize = 400;
 
 pub fn read(
@@ -99,7 +86,7 @@ pub fn read(
 
 #[cfg(test)]
 mod tests {
-    use super::{index_document, open_schema, read, read_preview, remove_document};
+    use super::{index_document, open_schema, read, remove_document};
     use rusqlite::Connection;
     use std::path::Path;
 
@@ -121,15 +108,6 @@ mod tests {
         assert_eq!(tasks[0].text, "написать");
         assert!(!tasks[0].done);
         assert!(tasks[1].done);
-    }
-
-    #[test]
-    fn read_only_preview_is_scoped_bounded_and_does_not_mutate_tasks() {
-        let text = (0..80).map(|i| format!("- [ ] task {i}")).collect::<Vec<_>>().join("\n");
-        let connection = store(&text);
-        assert_eq!(read_preview(&connection, "C:/vault/Дела.md").unwrap().len(), 65);
-        assert!(read_preview(&connection, "C:/another/Дела.md").unwrap().is_empty());
-        assert_eq!(read(&connection, &["C:/vault/Дела.md".to_owned()]).unwrap()["C:/vault/Дела.md"].len(), 80);
     }
 
     #[test]
