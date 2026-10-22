@@ -1,4 +1,4 @@
-use super::{analyzed_query_terms, searchable_fields};
+use super::negative::searchable_fields;
 use crate::search::analyzer::indexing_tokenizer;
 use crate::search::error::SearchError;
 use crate::search::index::SearchIndex;
@@ -7,28 +7,6 @@ use tantivy::query::{BooleanQuery, Occur, PhraseQuery, Query, TermQuery, TermSet
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::TokenStream;
 use tantivy::{Searcher, Term};
-
-/// A leading '-' on a whitespace-delimited word excludes its indexed stem.
-/// Ordinary multi-word queries keep their existing partial-match behavior.
-pub(super) fn search_terms(input: &str) -> (Vec<String>, Vec<String>) {
-    let mut positive = String::new();
-    let mut excluded = Vec::new();
-    for word in input.split_whitespace() {
-        if let Some(word) = word.strip_prefix('-').filter(|word| !word.is_empty()) {
-            excluded.extend(analyzed_query_terms(word));
-        } else {
-            if !positive.is_empty() {
-                positive.push(' ');
-            }
-            positive.push_str(word);
-        }
-    }
-    excluded.sort();
-    excluded.dedup();
-    // Preserve the legacy analyzer for queries without an exclusion.
-    let positive = if excluded.is_empty() { input } else { &positive };
-    (analyzed_query_terms(positive), excluded)
-}
 
 /// Extract complete double-quoted sequences in the same order as the index.
 /// The analyzer may remove stop words, so this is an indexed word sequence,
@@ -76,7 +54,6 @@ pub(super) fn folder_query(searcher: &Searcher, id: Field, folder: &Path) -> Res
 pub(super) fn extra_clauses(
     index: &SearchIndex,
     phrases: &[(String, Vec<String>)],
-    excluded: &[String],
 ) -> Vec<(Occur, Box<dyn Query>)> {
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
     // Apply phrase constraints within Tantivy, before taking the top N results,
@@ -98,16 +75,6 @@ pub(super) fn extra_clauses(
             })
             .collect();
         clauses.push((Occur::Must, Box::new(BooleanQuery::new(fields))));
-    }
-    for word in excluded {
-        let fields: Vec<(Occur, Box<dyn Query>)> = searchable_fields(index)
-            .into_iter()
-            .map(|field| {
-                let term = Term::from_field_text(field, word);
-                (Occur::Should, Box::new(TermQuery::new(term, IndexRecordOption::Basic)) as Box<dyn Query>)
-            })
-            .collect();
-        clauses.push((Occur::MustNot, Box::new(BooleanQuery::new(fields))));
     }
     clauses
 }

@@ -5,7 +5,6 @@ on:
   pull_request:
     paths:
 
-      - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/core/src/app_core.rs'
       - 'aquilum-app/core/src/app_core_installed_host_tests.rs'
       - 'aquilum-app/core/src/files/gate/write.rs'

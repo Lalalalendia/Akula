@@ -1,5 +1,5 @@
+mod negative;
 mod filters;
-
 use super::analyzer::indexing_tokenizer;
 use super::error::SearchError;
 use super::hits;
@@ -11,7 +11,7 @@ use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, Query, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::TokenStream;
-use tantivy::{Searcher, Term};
+use tantivy::Term;
 
 const MIN_FUZZY_CHARS: usize = 5;
 const DEFAULT_LIMIT: usize = 50;
@@ -49,7 +49,7 @@ pub fn analyzed_query_terms(input: &str) -> Vec<String> {
 }
 
 pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchError> {
-    let (terms, excluded) = filters::search_terms(request.text);
+    let (terms, excluded) = negative::search_terms(request.text);
     let phrases = filters::quoted_phrases(request.text);
     if terms.is_empty() {
         return Ok(Found { terms, results: Vec::new(), has_more: false });
@@ -60,7 +60,8 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     if let Some(folder) = request.folder {
         clauses.push((Occur::Must, Box::new(filters::folder_query(&searcher, index.fields.id, folder)?)));
     }
-    clauses.extend(filters::extra_clauses(index, &phrases, &excluded));
+    clauses.extend(filters::extra_clauses(index, &phrases));
+    negative::add_exclusions(index, &excluded, &mut clauses);
     let top = searcher.search(&BooleanQuery::new(clauses), &TopDocs::with_limit(limit + 1).order_by_score())?;
     if request.cancel.is_cancelled() {
         return Err(SearchError::Cancelled);
@@ -72,17 +73,13 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     Ok(Found { terms, results, has_more })
 }
 
-fn searchable_fields(index: &SearchIndex) -> [Field; 3] {
-    [index.fields.title, index.fields.path, index.fields.body]
-}
-
 fn combined_query(index: &SearchIndex, terms: &[String]) -> BooleanQuery {
     let mut term_clauses = Vec::<(Occur, Box<dyn Query>)>::with_capacity(terms.len());
     let mut exact_clauses = Vec::<(Occur, Box<dyn Query>)>::new();
 
     for text in terms {
         let mut field_matches = Vec::<(Occur, Box<dyn Query>)>::with_capacity(3);
-        for field in searchable_fields(index) {
+        for field in negative::searchable_fields(index) {
             let term = Term::from_field_text(field, text);
             let boost = field_boost(index, field);
             field_matches.push((

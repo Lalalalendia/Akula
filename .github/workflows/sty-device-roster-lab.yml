@@ -1,0 +1,47 @@
+name: Akula owner-signed device roster laboratory
+
+on:
+  workflow_call:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/sync/device_roster_lab.rs'
+      - '.github/workflows/sty-device-roster-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-roster-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verified-roster:
+    name: Owner-signed roster (Linux and Windows)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-sty-device-roster-v1
+      - name: Rustfmt (exact feature module)
+        working-directory: aquilum-app
+        run: rustfmt --edition 2021 --check core/src/sync/device_roster_lab.rs
+      - name: Test synthetic signed enrollment and rollback rejections
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features device-roster-lab device_roster_lab::tests -- --nocapture
+      # Legacy Core has unrelated Clippy style debt. The roster module itself
+      # carries #![deny(clippy::all)], so its own diagnostics still fail this job.
+      - name: Strict lint of roster module; show inherited Core warnings
+        working-directory: aquilum-app
+        run: cargo clippy --locked -p aquilum-core --lib --features device-roster-lab -- -W clippy::all
