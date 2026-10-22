@@ -58,17 +58,15 @@ impl Widget for WorkspaceRow {
     fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
         let bounds = ctx.content_box();
         if let PointerEvent::Move(update) = event {
-            let over = !self.current && self.forget_rect(bounds).contains(ctx.local_position(update.current.position));
+            let over = self.forget_rect(bounds).contains(ctx.local_position(update.current.position));
             if over != self.forget_hovered {
                 self.forget_hovered = over;
                 ctx.request_paint_only();
             }
         }
-        if let Some(e) = self.press.click(ctx, event)
-            && !self.current
-        {
+        if let Some(e) = self.press.click(ctx, event) {
             let forget = self.forget_rect(bounds).contains(ctx.local_position(e.state.position));
-            ctx.submit_action::<RowAction>(if forget { RowAction::Forget } else { RowAction::Open });
+            if forget || !self.current { ctx.submit_action::<RowAction>(if forget { RowAction::Forget } else { RowAction::Open }); }
         }
     }
 
@@ -130,7 +128,7 @@ impl Widget for WorkspaceRow {
             icons::CHECK.draw(painter, Point::new(bounds.x0 + gutter, bounds.center().y - icon / 2.0), icon, 1.2, t.icon_primary);
         }
         let text_x = bounds.x0 + gutter + icon + size::SPACE_8;
-        let right = if self.current { bounds.x1 - gutter } else { bounds.x1 - size::SPACE_8 - FORGET - size::SPACE_4 };
+        let right = bounds.x1 - size::SPACE_8 - FORGET - size::SPACE_4;
         let width = (right - text_x).max(0.0);
         let style = text::Style::ui(size::SIZE_20);
         let top = bounds.center().y - size::SIZE_20;
@@ -139,7 +137,7 @@ impl Widget for WorkspaceRow {
         let path = self.path_line.layout(ctx, &self.path, width, style);
         render_text(painter, Affine::translate((text_x, top + size::SIZE_20)), path, &[t.text_tertiary.into()], true);
         let alpha = self.forget.value() as f32;
-        if alpha > 0.0 && !self.current {
+        if alpha > 0.0 {
             paint_close(painter, self.forget_rect(bounds), self.forget_hovered, alpha);
         }
     }
