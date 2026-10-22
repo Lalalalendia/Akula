@@ -39,10 +39,34 @@ unsafe extern "system" {
 }
 #[link(name = "ole32")]
 unsafe extern "system" {
+    fn CoInitializeEx(reserved: *mut c_void, flags: u32) -> i32;
+    fn CoUninitialize();
     fn CoTaskMemFree(value: *mut c_void);
+}
+struct ScopedComInitialization;
+impl Drop for ScopedComInitialization {
+    fn drop(&mut self) {
+        // SAFETY: successful CoInitializeEx on this same worker thread
+        // must be paired with one CoUninitialize even for S_FALSE.
+        unsafe { CoUninitialize(); }
+    }
+}
+fn initialize_worker_com() -> io::Result<Option<ScopedComInitialization>> {
+    // COINIT_MULTITHREADED = 0. The pairing operation runs in a dedicated
+    // worker thread and never accesses the GUI COM apartment.
+    let hr = unsafe { CoInitializeEx(ptr::null_mut(), 0) };
+    if hr >= 0 {
+        Ok(Some(ScopedComInitialization))
+    } else if hr == -2_147_418_506 { // RPC_E_CHANGED_MODE (0x80010106)
+        Ok(None) // Already initialized to another apartment, no uninit.
+    } else {
+        Err(io::Error::new(io::ErrorKind::PermissionDenied,
+            "Windows COM worker initialization failed"))
+    }
 }
 
 fn known_local_appdata() -> io::Result<PathBuf> {
+    let _com = initialize_worker_com()?;
     let mut ptr: *mut u16 = ptr::null_mut();
     // SAFETY: GUID shape/ABI matches KNOWNFOLDERID. Windows allocates a
     // null-terminated UTF-16 buffer with CoTaskMemAlloc.
