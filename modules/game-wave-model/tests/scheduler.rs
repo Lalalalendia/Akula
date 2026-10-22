@@ -46,7 +46,9 @@ fn killed_objects_allow_wave_to_finish_after_transition_delay() {
     };
     assert!(engine.mark_gone(id));
     assert!(!engine.mark_gone(id));
-    for _ in 0..150 {
+    // The source consumes one update to advance past the last group,
+    // then starts its 0..150 transition counter on a later update.
+    for _ in 0..151 {
         assert!(engine.tick().unwrap().is_empty());
     }
     let events = engine.tick().unwrap();
@@ -134,4 +136,43 @@ fn earlier_cycled_objects_remain_live_when_slot_is_reused() {
 fn aggregate_group_budget_rejects_many_small_waves() {
     let many = (0..5).map(|_| wave("x", (0..900).map(|_| Group::Pause { ticks: 0 }).collect())).collect();
     assert!(matches!(Scheduler::new(many), Err(ConfigError::TooManyTotalGroups)));
+}
+
+#[test]
+fn empty_wave_ends_after_150_transition_updates() {
+    let mut engine = Scheduler::new(vec![wave("empty", vec![])]).unwrap();
+    for _ in 0..150 {
+        assert!(engine.tick().unwrap().is_empty());
+        assert!(!engine.is_finished());
+    }
+    assert_eq!(engine.tick().unwrap(), vec![Event::Finished]);
+    assert!(engine.is_finished());
+    assert!(engine.tick().unwrap().is_empty());
+}
+
+#[test]
+fn no_active_object_is_removed_by_unknown_or_repeated_removal() {
+    let mut engine = Scheduler::new(vec![wave("group", vec![
+        Group::Batch { frequency: 0, items: vec![Spawn::enemy("x")] },
+    ])]).unwrap();
+    let id = match engine.tick().unwrap().as_slice() {
+        [Event::Spawned { id, .. }] => *id,
+        _ => panic!("expected object"),
+    };
+    assert!(!engine.mark_gone(id + 1));
+    assert_eq!(engine.active_count(), 1);
+    assert!(engine.mark_gone(id));
+    assert!(!engine.mark_gone(id));
+    assert_eq!(engine.active_count(), 0);
+}
+
+#[test]
+fn finished_state_emits_final_event_only_once() {
+    let mut engine = Scheduler::new(vec![wave("empty", vec![])]).unwrap();
+    let mut finishes = 0;
+    for _ in 0..500 {
+        finishes += engine.tick().unwrap().iter()
+            .filter(|event| matches!(event, Event::Finished)).count();
+    }
+    assert_eq!(finishes, 1);
 }
