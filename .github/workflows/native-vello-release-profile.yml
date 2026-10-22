@@ -9,8 +9,6 @@ on:
       - 'aquilum-app/native/vendor/glifo/src/glyph.rs'
       - 'aquilum-app/native/src/render/paint/runs.rs'
       - 'aquilum-app/native/src/render/damage/glyphs.rs'
-      - 'aquilum-app/native/src/render/renderer/pass.rs'
-      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
       - '.github/scripts/summarize-vello-profile.py'
       - '.github/workflows/native-vello-release-profile.yml'
   workflow_dispatch:

@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { mustScanLocally, verdict, MAX_AGE_MS } = require('./dependency-security-gate.cjs');
+const { mustScanLocally, verdict, watchdogRuns, MAX_AGE_MS } = require('./dependency-security-gate.cjs');
 
 const now = Date.UTC(2026, 9, 22, 12);
 const run = (conclusion = 'success', status = 'completed') => ({
@@ -44,4 +44,29 @@ test('one-time security bootstrap allowlist cannot absorb application changes', 
   ].sort());
   assert.equal(BOOTSTRAP_FILES.has('aquilum-app/Cargo.lock'), false);
   assert.equal(BOOTSTRAP_FILES.has('aquilum-app/native/src/main.rs'), false);
+});
+
+test('repo-wide main listing admits only the exact watchdog workflow path', () => {
+  const target = '.github/workflows/dependency-security.yml';
+  const runs = [
+    { id: 9, name: 'Akula dependency security watchdog', path: '.github/workflows/lookalike.yml', event: 'push', head_branch: 'main' },
+    { id: 8, path: target, event: 'pull_request', head_branch: 'main' },
+    { id: 7, path: target, event: 'push', head_branch: 'feature' },
+    { id: 6, path: target, event: 'push', head_branch: 'main' },
+    { id: 5, path: target, event: 'schedule', head_branch: 'main' },
+  ];
+  assert.deepEqual(watchdogRuns(runs).map(x => x.id), [6, 5]);
+  assert.deepEqual(watchdogRuns([{ id: 4, event: 'push', head_branch: 'main' }]), []);
+  assert.deepEqual(watchdogRuns([]), []);
+  assert.throws(() => watchdogRuns(null), /missing workflow_runs/);
+});
+
+test('newest failed watchdog stays a HOLD in exact-path-filtered runs', () => {
+  const target = '.github/workflows/dependency-security.yml';
+  const runs = watchdogRuns([
+    { ...run('failure'), id: 12, path: target, event: 'push' },
+    { ...run(), id: 11, path: target, event: 'push' },
+  ]);
+  assert.deepEqual(runs.map(r => r.id), [12, 11]);
+  assert.equal(verdict(runs[0], [job('failure')], now).kind, 'deny');
 });
