@@ -71,7 +71,13 @@ impl App {
         };
         let peer_view = {
             #[cfg(feature = "p2p-device-ui")]
-            { Some(&self.transfer.peer_pair.view) }
+            {
+                if matches!(self.transfer.local_identity.view.phase, transfer_ui::IdentityPhase::Ready(_)) {
+                    Some(&self.transfer.peer_pair.view)
+                } else {
+                    None
+                }
+            }
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
