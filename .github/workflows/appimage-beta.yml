@@ -4,17 +4,7 @@ name: Akula AppImage beta candidate
 
 on:
   workflow_call:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/appimage-beta.yml'
-      - '.github/scripts/appimage-beta-identity.test.cjs'
-      - 'scripts/appimage-beta-smoke.sh'
-      - 'scripts/appimage-real-upgrade-accept.py'
-      - 'scripts/appimage-real-upgrade-helper.rs'
-      - 'aquilum-app/native/packaging/akula-linux.json'
-      - 'aquilum-app/native/packaging/Akula.desktop'
-      - 'aquilum-app/native/Cargo.toml'
+  # PR path owners are enforced in required central route.
 
 permissions:
   contents: read

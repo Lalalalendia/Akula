@@ -148,7 +148,7 @@ function assess({paths,coreDiff='',lockBefore='',lockAfter='',libDiff='',version
   const native_manifest_risky=changed.has(NATIVE)&&!metadataOnly;
   return {shared_core_cargo_risky:coreRisk,shared_lock_risky:lockRisk,shared_core_lib_risky:libRisk,shared_root_cargo_risky:rootRisk,
     shared_any_risky:coreRisk||lockRisk||libRisk||rootRisk,
-    installed_owner_owned:installedOwnerOwned,native_manifest_risky};
+    installed_owner_owned:installedOwnerOwned,native_manifest_risky,...ownedRoutes(paths)};
 }
 function git(...args){return execFileSync('git',args,{encoding:'utf8',maxBuffer:16*1024*1024});}
 function compute(base,head){
@@ -180,4 +180,4 @@ if(require.main===module){
     process.stderr.write('CI_SHARED_MANIFEST_ROUTE '+JSON.stringify(r)+'\n');
   }catch(e){console.error('CI_SHARED_MANIFEST_ROUTE_FAIL_CLOSED '+e.message);process.exitCode=1;}
 }
-module.exports={cargoAdditive,lockAdditive,libAdditive,versionBumpOnly,assess,compute,CORE,LOCK,LIB,ROOT,NATIVE,WINDOWS};
+module.exports={OWNED_SUITES,ownedRoutes,cargoAdditive,lockAdditive,libAdditive,versionBumpOnly,assess,compute,CORE,LOCK,LIB,ROOT,NATIVE,WINDOWS};
