@@ -6,7 +6,7 @@ use super::models::SearchResult;
 use crate::text::cancel::Cancel;
 use std::path::Path;
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, Query, TermQuery, TermSetQuery};
+use tantivy::query::{BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, PhraseQuery, Query, TermQuery, TermSetQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::TokenStream;
 use tantivy::{Searcher, Term};
@@ -68,6 +68,33 @@ fn search_terms(input: &str) -> (Vec<String>, Vec<String>) {
     (analyzed_query_terms(positive), excluded)
 }
 
+/// Extract complete double-quoted sequences in the same order as the index.
+/// The analyzer may remove stop words, so this is an indexed word sequence,
+/// not a byte-for-byte comparison of punctuation or spelling.
+fn quoted_phrases(input: &str) -> Vec<Vec<String>> {
+    let mut phrases = Vec::new();
+    let mut rest = input;
+    while let Some(begin) = rest.find('"') {
+        let quoted = &rest[begin + 1..];
+        let Some(end) = quoted.find('"') else {
+            break;
+        };
+        if !rest[..begin].ends_with('-') {
+            let mut words = Vec::new();
+            indexing_tokenizer().token_stream(&quoted[..end]).process(&mut |token| {
+                if !token.text.is_empty() {
+                    words.push(token.text.clone());
+                }
+            });
+            if !words.is_empty() {
+                phrases.push(words);
+            }
+        }
+        rest = &quoted[end + 1..];
+    }
+    phrases
+}
+
 pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchError> {
     let (terms, excluded) = search_terms(request.text);
     if terms.is_empty() {
@@ -78,6 +105,26 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, Box::new(combined_query(index, &terms)))];
     if let Some(folder) = request.folder {
         clauses.push((Occur::Must, Box::new(folder_query(&searcher, index.fields.id, folder)?)));
+    }
+    // Apply phrase constraints within Tantivy, before taking the top N results,
+    // so filtering cannot silently drop valid matches beyond the first page.
+    for words in quoted_phrases(request.text) {
+        let fields: Vec<(Occur, Box<dyn Query>)> = searchable_fields(index)
+            .into_iter()
+            .map(|field| {
+                let terms: Vec<Term> = words
+                    .iter()
+                    .map(|word| Term::from_field_text(field, word))
+                    .collect();
+                let matcher: Box<dyn Query> = if terms.len() == 1 {
+                    Box::new(TermQuery::new(terms[0].clone(), IndexRecordOption::Basic))
+                } else {
+                    Box::new(PhraseQuery::new(terms))
+                };
+                (Occur::Should, matcher)
+            })
+            .collect();
+        clauses.push((Occur::Must, Box::new(BooleanQuery::new(fields))));
     }
     for word in &excluded {
         let fields: Vec<(Occur, Box<dyn Query>)> = searchable_fields(index)
