@@ -60,6 +60,9 @@ pub mod server_installer_durable_node;
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
 
+#[cfg(all(target_os = "linux", feature = "node-replica-lab"))]
+pub mod node_replica_lab;
+
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
