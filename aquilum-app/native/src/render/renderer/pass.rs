@@ -110,6 +110,35 @@ impl Renderer {
         let bounds = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let layers = self.tracker.live.iter().filter_map(|&(id, rect, transform, shape)| Some(Layer { id, area: area_of(rect, bounds)?, transform, shape })).collect();
         self.refresh_live(layers, &mut damage, full, seconds);
+        // WAC-02: distinguish pixels physically moved by CPU copy_within
+        // from the full scroll rectangle handed to the Windows copy path.
+        // These are *candidate* savings, not bytes proven safe to omit from
+        // a three-buffer DXGI flip chain.
+        #[cfg(not(feature = "installed"))]
+        if !damage.moves.is_empty() {
+            static WAC02: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *WAC02.get_or_init(|| {
+                matches!(
+                    std::env::var("AKULA_EXPERIMENTAL_WAC02_COPY").ok().as_deref(),
+                    Some("measure" | "disjoint")
+                )
+            }) {
+                let (mut cpu_shift_bytes, mut exposed_strip_bytes) = (0_u64, 0_u64);
+                for m in &damage.moves {
+                    let exposed_rows = u32::from(m.h).min(m.dy.unsigned_abs());
+                    cpu_shift_bytes += u64::from(m.w) * u64::from(u32::from(m.h) - exposed_rows) * 4;
+                    exposed_strip_bytes += u64::from(m.w) * u64::from(exposed_rows) * 4;
+                }
+                let full_scroll_rect_bytes = cpu_shift_bytes + exposed_strip_bytes;
+                eprintln!(
+                    "AKULA_WAC02_SCROLL moves={} cpu_shift_bytes={} exposed_strip_bytes={} full_scroll_rect_bytes={}",
+                    damage.moves.len(),
+                    cpu_shift_bytes,
+                    exposed_strip_bytes,
+                    full_scroll_rect_bytes,
+                );
+            }
+        }
         #[cfg(not(feature = "installed"))]
         if stage_on {
             // Damage can contain overlapping rectangles. Count scheduled

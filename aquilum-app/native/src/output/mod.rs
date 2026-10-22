@@ -4,6 +4,8 @@ mod device;
 mod dxgi;
 #[cfg(not(target_os = "windows"))]
 mod soft;
+#[cfg(any(test, all(target_os = "windows", not(feature = "installed"))))]
+mod transfer;
 
 #[cfg(target_os = "windows")]
 pub use dxgi::Output;
