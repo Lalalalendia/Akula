@@ -5,12 +5,10 @@ mod dxgi;
 #[cfg(not(target_os = "windows"))]
 mod soft;
 #[cfg(any(test, all(target_os = "windows", not(feature = "installed"))))]
-mod transfer;
+pub(crate) mod transfer;
 
-#[cfg(target_os = "windows")]
-pub use dxgi::Output;
-#[cfg(not(target_os = "windows"))]
-pub use soft::Output;
+#[cfg(target_os = "windows")] pub use dxgi::Output;
+#[cfg(not(target_os = "windows"))] pub use soft::Output;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Area {

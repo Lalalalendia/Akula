@@ -10,26 +10,6 @@ use winit::window::Window;
 use super::device::{capacity, create, rect, region, texture, Gpu, GROWTH};
 use super::{Area, Canvas, Target};
 
-
-#[cfg(not(feature = "installed"))]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Wac02Mode {
-    Off,
-    Measure,
-    Disjoint,
-}
-
-// Developer-only. Never changes the signed/installed output path.
-#[cfg(not(feature = "installed"))]
-fn wac02_mode() -> Wac02Mode {
-    static MODE: std::sync::OnceLock<Wac02Mode> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("AKULA_EXPERIMENTAL_WAC02_COPY").ok().as_deref() {
-        Some("measure") => Wac02Mode::Measure,
-        Some("disjoint") => Wac02Mode::Disjoint,
-        _ => Wac02Mode::Off,
-    })
-}
-
 pub struct Output {
     hwnd: HWND,
     gpu: Option<Gpu>,
@@ -107,7 +87,6 @@ impl Output {
         self.fresh
     }
 
-
     pub fn present(&mut self, dirty: &[Area]) {
         let _zone = aq_trace::zone("вывод");
         let Some(gpu) = &mut self.gpu else { return };
@@ -119,33 +98,7 @@ impl Output {
         if copy.is_empty() {
             return;
         }
-        // Compare the actual submitted regions with a non-overlapping plan.
-        // The union of pixels is unchanged. The alternative may issue more D3D
-        // calls, so it is enabled only in a developer experiment.
-        #[cfg(not(feature = "installed"))]
-        let copy = match wac02_mode() {
-            Wac02Mode::Off => copy,
-            mode => {
-                let candidate = super::transfer::disjoint_copy_plan(&copy);
-                let original_pixels = super::transfer::copied_pixels(&copy);
-                let disjoint_pixels = super::transfer::copied_pixels(&candidate);
-                let requested_pixels = super::transfer::copied_pixels(dirty);
-                let applied = mode == Wac02Mode::Disjoint;
-                eprintln!(
-                    "AKULA_WAC02_COPY mode={} requested_dirty_pixels={} original_copy_pixels={} disjoint_copy_pixels={} overlapping_copy_pixels={} original_calls={} disjoint_calls={} buffer_index={} buffers={}",
-                    if applied { "disjoint" } else { "measure" },
-                    requested_pixels,
-                    original_pixels,
-                    disjoint_pixels,
-                    original_pixels - disjoint_pixels,
-                    copy.len(),
-                    candidate.len(),
-                    gpu.back,
-                    gpu.stale.len(),
-                );
-                if applied { candidate } else { copy }
-            }
-        };
+        #[cfg(not(feature = "installed"))] let copy = super::transfer::wac02_copy(copy, dirty, gpu.back, gpu.stale.len());
         gpu.back = (gpu.back + 1) % gpu.stale.len();
         let mut rects: Vec<_> = copy.iter().map(|a| rect(*a)).collect();
         let result = unsafe {
