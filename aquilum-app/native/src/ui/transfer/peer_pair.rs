@@ -51,8 +51,7 @@ pub struct PeerControls {
 
 fn input(value: &str, disabled: bool) -> NewWidget<TextEditor> {
     NewWidget::new(
-        TextEditor::single_line(value)
-            .styled(|| style::ui_text(size::INPUT_CONTENT_HEIGHT as f32)),
+        TextEditor::single_line(value).styled(|| style::ui_text(size::INPUT_CONTENT_HEIGHT as f32)),
     )
     .with_class(style::FIELD)
     .disabled(disabled)
@@ -166,18 +165,28 @@ mod tests {
             phase: PeerPhase::Confirmed,
             ..PeerView::default()
         });
-        assert!(requested.actions.iter().any(|(_, action)| {
-            *action == PeerAction::RequestRevoke
-        }));
+        assert!(
+            requested
+                .actions
+                .iter()
+                .any(|(_, action)| { *action == PeerAction::RequestRevoke })
+        );
         let (_, confirm) = render(&PeerView {
             phase: PeerPhase::ConfirmRevoke("4".repeat(64)),
             ..PeerView::default()
         });
         assert_eq!(confirm.actions.len(), 2);
-        assert!(confirm.actions.iter().any(|(_, action)| *action == PeerAction::Revoke));
-        assert!(confirm.actions.iter().all(|(_, action)| {
-            !matches!(action, PeerAction::Confirm | PeerAction::Inspect)
-        }));
+        assert!(
+            confirm
+                .actions
+                .iter()
+                .any(|(_, action)| *action == PeerAction::Revoke)
+        );
+        assert!(
+            confirm.actions.iter().all(|(_, action)| {
+                !matches!(action, PeerAction::Confirm | PeerAction::Inspect)
+            })
+        );
     }
 
     #[test]
