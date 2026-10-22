@@ -80,3 +80,13 @@ controller and ephemeral device identities. It is not a real Akula installed
 UI, trusted device enrollment, remote-signed user decision, authenticated
 host IPC, File Gate publish permission, or durable application receipt.
 Do not enable shipping P2P from this result.
+
+## NODE-E2E-02a — reuse Node's durable replica as Staya source (feature gated)
+
+The **existing** `interop/akula-staya` crate now has the explicit opt-in `node-replica-transport-lab` feature. Linux-only integration test `tests/node_replica_real_quic.rs` builds on NODE-E2E-01a/01b from [Akula PR #607](https://github.com/Lalalalendia/Akula/pull/607) without inventing a parallel writer, queue format or network transport.
+
+One operator-allowlisted Markdown fixture is staged by Core `SqliteDagStore`, and the original source is removed. Next, a synthetic owner-signed exact VaultId/DocumentId/RevisionId/BLAKE3/NodeId/DeviceId read grant and live test device-key signature pass `read_with_device_proof`. Wrong grant epoch and a different test device are denied **before plaintext is exported**. The test materializes the admitted bytes in an isolated disposable file because the current Staya *preview binary* accepts file paths, not NodeStore streams. It then uses the already merged real Akula OfferSession → QueueSelection adapter, launches actual Staya sender/receiver via Iroh QUIC/Bao, proves pre-arm GET denial and an unrelated Iroh peer denial, transfers exactly the approved root, verifies independent staged bytes after the source file is absent, and leaves File Gate/APPLIED untouched.
+
+**Not production:** ephemeral owner/device keys, operator-provisioned trust and a manually chosen receiver EndpointId; **no cryptographic proof that the signed DeviceId is the same key as the live Iroh EndpointId**, and no STY-DEVICE-01a enrollment (#531), persistent challenge replay protection, TLS/QUIC broker or OS-owned epoch store. This is an end-to-end **lab transport proof**, not a licensed/paired user client or read authority. The temporary plaintext materialization must be replaced with bounded private NodeStore streaming/FS custody before shipping.
+
+The new test is invoked only on Linux in the existing pinned-Staya workflow after the ordinary real two-process test. The ordinary Windows integration remains enabled; no production feature or UI is changed. NODE-E2E-02 / NODE-E2E-07 remain **NOT ACCEPTED** until real independent peer enrollment, current revoke witness, and an actual VPS test are proven.

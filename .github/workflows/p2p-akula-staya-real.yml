@@ -64,3 +64,13 @@ jobs:
           test -f "$BIN"
           export STAYA_PREVIEW_BIN="$BIN"
           cargo test --manifest-path interop/akula-staya/Cargo.toml --test real_quic -- --nocapture
+
+      - name: NODE-E2E-02a approved offline Node replica over actual Staya Iroh/Bao
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/.external/staya-transfer/interop/release/target/debug/staya-direct-preview"
+          test -f "$BIN"
+          export STAYA_PREVIEW_BIN="$BIN"
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-replica-transport-lab --test node_replica_real_quic -- --nocapture
