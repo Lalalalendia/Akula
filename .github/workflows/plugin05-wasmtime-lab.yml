@@ -1,0 +1,54 @@
+name: PLUGIN-05A isolated Wasmtime runtime experiment
+
+# Branch-only research, not a required CI lane or product dependency.
+on:
+  push:
+    branches:
+      - experiment/plugin-05-wasmtime-20261022
+    paths:
+      - 'experiments/plugin-05/**'
+      - '.github/workflows/plugin05-wasmtime-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-plugin05a-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe-linux:
+    name: Standalone deny-first Wasmtime host / Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: experiments/plugin-05/wasmtime
+          save-if: false
+      - name: Positive/negative scoped-read, no-WASI, trap, growth
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path experiments/plugin-05/wasmtime/Cargo.toml
+      - name: Build isolated benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path experiments/plugin-05/wasmtime/Cargo.toml
+      - name: Record bounded process metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 20s experiments/plugin-05/wasmtime/target/release/akula-plugin05-wasmtime | tee "$RUNNER_TEMP/plugin05a.json"
+          cat "$RUNNER_TEMP/plugin05a.json" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Experimental host numbers. No installed Akula size or RSS claims.' >> "$GITHUB_STEP_SUMMARY"
