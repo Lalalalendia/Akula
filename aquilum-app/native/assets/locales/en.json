@@ -312,6 +312,8 @@
       "probeRegion": "S3 region or endpoint is incorrect.",
       "probeTimeout": "Connection check timed out. Retry manually.",
       "probeNetwork": "Network failure or TLS error.",
+      "pairProvider": "Cloud service",
+      "pairProviderHint": "Yandex S3 preset includes endpoint and region; no extra fields are required.",
       "pairEntry": "Akula synchronization",
       "pairEntryHint": "Configure S3 once, or import an encrypted setup from another computer.",
       "pairConfigure": "Configure cloud",
