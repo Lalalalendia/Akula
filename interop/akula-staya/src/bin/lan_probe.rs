@@ -1,5 +1,6 @@
-//! Explicit operator-only first two-Windows-PC Akula OS-key QUIC proof.
-//! Bounded HELLO/OK only: NO Staya GET, Vault, File Gate, or user files.
+//! Explicit operator-only OS-key QUIC proof for two independent Windows PCs.
+//! Direct IP or separately selected internet N0 discovery/relay, HELLO/OK only.
+//! NO Staya GET, Vault, File Gate, user-file reads or background Sync.
 //! Reuses the ONE merged live_identity seam; does not add a second transport.
 
 use akula_staya_integration::live_identity::{
@@ -13,7 +14,7 @@ const ALPN: &[u8] = b"akula/p2p-os-lan-proof/1";
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn usage() -> String {
-    "usage: akula-p2p-lan listen PEER_ENDPOINT_ID | connect PEER_ENDPOINT_ID LAN_IP:UDP_PORT".into()
+    "usage: akula-p2p-lan listen PEER_ID | connect PEER_ID LAN_IP:UDP_PORT | internet-listen PEER_ID | internet-connect PEER_ID".into()
 }
 
 async fn run() -> Result<(), String> {
@@ -21,10 +22,14 @@ async fn run() -> Result<(), String> {
     let mode = args.next().ok_or_else(usage)?;
     let selected = args.next().ok_or_else(usage)?;
     let socket_text = args.next();
+    let internet = matches!(mode.as_str(), "internet-listen" | "internet-connect");
+    let listen = matches!(mode.as_str(), "listen" | "internet-listen");
+    let connect = matches!(mode.as_str(), "connect" | "internet-connect");
     if args.next().is_some()
-        || !matches!(mode.as_str(), "listen" | "connect")
-        || (mode == "listen" && socket_text.is_some())
+        || (!listen && !connect)
+        || (listen && socket_text.is_some())
         || (mode == "connect" && socket_text.is_none())
+        || (mode == "internet-connect" && socket_text.is_some())
     {
         return Err(usage());
     }
@@ -40,20 +45,38 @@ async fn run() -> Result<(), String> {
     // environment variables, YAML, plaintext files, or stdout.
     let secret = with_protected_iroh_secret(|secret| secret)
         .map_err(|error| format!("protected local Iroh key unavailable: {error}"))?;
-    let endpoint = Endpoint::builder(presets::Minimal)
+    // The explicit internet-* modes are the ONLY ones that enable N0
+    // infrastructure. Ordinary listen/connect remain direct with no relay,
+    // discovery, NAT mapping or network metadata sent to a third party.
+    let builder = if internet {
+        Endpoint::builder(presets::N0)
+    } else {
+        Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled)
+    };
+    if internet {
+        eprintln!(
+            "INTERNET_OPT_IN=1: uses third-party n0 DNS/Pkarr discovery and              encrypted relay fallback; relay operators may see IP/timing metadata."
+        );
+    }
+    let endpoint = builder
         .secret_key(secret)
         .alpns(vec![ALPN.to_vec()])
-        .relay_mode(RelayMode::Disabled)
         .bind()
         .await
-        .map_err(|error| format!("direct QUIC bind: {error}"))?;
-
+        .map_err(|error| format!("QUIC bind: {error}"))?;
     println!("LOCAL_ENDPOINT_ID={}", endpoint.id());
-    for socket in endpoint.bound_sockets() {
-        println!("LISTEN_UDP={socket} (use actual reachable LAN IP, not wildcard)");
+    if internet {
+        tokio::time::timeout(Duration::from_secs(60), endpoint.online())
+            .await
+            .map_err(|_| "no n0 relay/discovery connectivity within 60 seconds".to_owned())?;
+        println!("INTERNET_DISCOVERY_READY=true PEER_ID_ONLY=true");
+    } else {
+        for socket in endpoint.bound_sockets() {
+            println!("LISTEN_UDP={socket} (use actual reachable LAN IP, not wildcard)");
+        }
     }
-    let result = if mode == "listen" {
-        let incoming = tokio::time::timeout(Duration::from_secs(120), endpoint.accept())
+    let result = if listen {
+        let incoming = tokio::time::timeout(Duration::from_secs(300), endpoint.accept())
             .await
             .map_err(|_| "waiting for the selected peer timed out".to_owned())?
             .ok_or_else(|| "local endpoint closed".to_owned())?;
@@ -99,12 +122,23 @@ async fn run() -> Result<(), String> {
         connection.close(0u8.into(), b"probe complete");
         exchange
     } else {
-        let socket: SocketAddr = socket_text
-            .expect("validated connect address")
-            .parse()
-            .map_err(|_| "expected a numeric LAN_IP:UDP_PORT".to_owned())?;
-        let address = EndpointAddr::new(peer_id).with_ip_addr(socket);
-        let connection = tokio::time::timeout(MESSAGE_TIMEOUT, endpoint.connect(address, ALPN))
+        let address = if internet {
+            // N0 address lookup resolves this already OS-confirmed EndpointId;
+            // an untrusted DNS/Pkarr answer cannot change live QUIC identity.
+            EndpointAddr::new(peer_id)
+        } else {
+            let socket: SocketAddr = socket_text
+                .expect("validated connect address")
+                .parse()
+                .map_err(|_| "expected a numeric LAN_IP:UDP_PORT".to_owned())?;
+            EndpointAddr::new(peer_id).with_ip_addr(socket)
+        };
+        let connect_timeout = if internet {
+            Duration::from_secs(90)
+        } else {
+            MESSAGE_TIMEOUT
+        };
+        let connection = tokio::time::timeout(connect_timeout, endpoint.connect(address, ALPN))
             .await
             .map_err(|_| "direct QUIC connection timed out".to_owned())?
             .map_err(|error| format!("direct QUIC connection: {error}"))?;
@@ -144,7 +178,10 @@ async fn run() -> Result<(), String> {
 
     endpoint.close().await;
     result?;
-    println!("OS_PINNED_LAN_QUIC_OK=true FILE_TRANSFER=false SYNC=false");
+    println!(
+        "OS_PINNED_QUIC_OK=true ROUTE_MODE={} FILE_TRANSFER=false SYNC=false",
+        if internet { "INTERNET_N0" } else { "DIRECT_IP" }
+    );
     Ok(())
 }
 
