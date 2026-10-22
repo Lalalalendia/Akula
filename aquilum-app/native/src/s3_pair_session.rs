@@ -86,9 +86,14 @@ impl PairSession {
         self.run(move || {
             let result = yandex_credentials::with_stored_keys(
                 &bucket, |id, secret| {
-                    with_runtime(|rt| rt.block_on(create_first_pair_profile(
+                    let outcome = with_runtime(|rt| rt.block_on(create_first_pair_profile(
                         &core, &root, &appdata, &bucket, id, secret,
-                    )).map(|_| ()))
+                    )).map(|_| ()));
+                    if outcome.is_ok()
+                        && !yandex_credentials::still_matches(&bucket, id, secret)
+                    {
+                        Err(())
+                    } else { outcome }
                 },
             );
             if matches!(result, Ok(Ok(()))) {
@@ -158,6 +163,12 @@ impl PairSession {
                 yandex_credentials::save_imported_keys(
                     &profile.bucket, &invite.access_key_id, &invite.secret_access_key,
                 ).map_err(|_| ())?;
+                // Only the non-secret selected bucket is reflected in Native
+                // settings. Password, profile keys and SQLite state are never
+                // serialized into AppConfig or copied to the UI.
+                let mut settings = core.settings.get_config();
+                settings.s3_onboarding.bucket = profile.bucket.clone();
+                core.settings.update_config(settings).map_err(|_| ())?;
                 Ok(())
             })();
             if result.is_ok() {
