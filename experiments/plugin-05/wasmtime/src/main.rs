@@ -23,8 +23,17 @@ fn new_engine() -> LabResult<Engine> {
 }
 
 fn new_store(engine: &Engine, granted: bool, fuel: u64) -> LabResult<Store<Host>> {
+    new_store_with_memory(engine, granted, fuel, MAX_GUEST_MEMORY)
+}
+
+fn new_store_with_memory(
+    engine: &Engine,
+    granted: bool,
+    fuel: u64,
+    memory_ceiling_bytes: usize,
+) -> LabResult<Store<Host>> {
     let limits = StoreLimitsBuilder::new()
-        .memory_size(MAX_GUEST_MEMORY)
+        .memory_size(memory_ceiling_bytes)
         .memories(1)
         .tables(0)
         .instances(1)
@@ -180,7 +189,19 @@ mod tests {
         let mut store = new_store(&engine, false, FUEL)?;
         let instance = instantiate(&new_linker(&engine)?, &mut store, &module)?;
         let grow = instance.get_typed_func::<(), i32>(&mut store, "grow")?;
-        assert_eq!(grow.call(&mut store, ())?, -1);
+        assert_eq!(grow.call(&mut store, ())?, -1, "1-MiB ceiling rejects same guest");
+
+        // Identical WASM module and fuel; changing only the memory ceiling
+        // must make the 101-page memory available (the previous size is 1).
+        let mut expanded = new_store_with_memory(
+            &engine,
+            false,
+            FUEL,
+            8 * MAX_GUEST_MEMORY,
+        )?;
+        let expanded_instance = instantiate(&new_linker(&engine)?, &mut expanded, &module)?;
+        let expanded_grow = expanded_instance.get_typed_func::<(), i32>(&mut expanded, "grow")?;
+        assert_eq!(expanded_grow.call(&mut expanded, ())?, 1);
         Ok(())
     }
 }

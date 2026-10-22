@@ -25,10 +25,20 @@ fn guest_bytes() -> LabResult<Vec<u8>> {
 }
 
 fn new_plugin_with_grant(guest: &[u8], grant: Arc<AtomicBool>, fuel: u64) -> LabResult<Plugin> {
+    new_plugin_with_limits(guest, grant, fuel, 128, Duration::from_millis(500))
+}
+
+fn new_plugin_with_limits(
+    guest: &[u8],
+    grant: Arc<AtomicBool>,
+    fuel: u64,
+    memory_ceiling_pages: u32,
+    timeout: Duration,
+) -> LabResult<Plugin> {
     let manifest = Manifest::new([Wasm::data(guest.to_vec())])
         .disallow_all_hosts()
-        .with_memory_max(128)
-        .with_timeout(Duration::from_millis(500));
+        .with_memory_max(memory_ceiling_pages)
+        .with_timeout(timeout);
     Ok(PluginBuilder::new(manifest)
         .with_wasi(false)
         .with_fuel_limit(fuel)
@@ -144,9 +154,32 @@ mod tests {
     #[test]
     fn guest_growth_beyond_memory_max_is_rejected() -> LabResult<()> {
         let guest = guest_bytes()?;
-        let mut plugin = new_plugin(&guest, false, 30_000_000)?;
-        let error = plugin.call::<&str, &str>("grow", "").expect_err("must reject growth");
-        eprintln!("PLUGIN05B_GROW_TRAP: {error:#}");
+        // Same guest, fuel budget, timeout and revoked synthetic grant.
+        // Change only max WebAssembly pages: 128 pages = 8 MiB; 2048 = 128 MiB.
+        const FUEL: u64 = 1_000_000_000;
+        let timeout = Duration::from_secs(10);
+        let grant = Arc::new(AtomicBool::new(false));
+        let mut small = new_plugin_with_limits(
+            &guest,
+            Arc::clone(&grant),
+            FUEL,
+            128,
+            timeout,
+        )?;
+        let error = small.call::<&str, &str>("grow", "").expect_err("8-MiB quota must reject 64-MiB buffer");
+        let cause = format!("{error:#}").to_ascii_lowercase();
+        assert!(cause.contains("oom"), "expected OOM, got: {cause}");
+        eprintln!("PLUGIN05B_GROW_TRAP: {cause}");
+
+        // Under a 128-MiB Wasm ceiling the identical 64-MiB guest allocation
+        // must finish. Otherwise low-quota OOM might be a false attribution.
+        let mut large = new_plugin_with_limits(&guest, grant, FUEL, 2048, timeout)?;
+        assert_eq!(
+            large.call::<&str, &str>("grow", "")?,
+            (64 * 1024 * 1024).to_string(),
+            "only the allowed memory ceiling changed",
+        );
+        eprintln!("PLUGIN05B_GROW_OK: 67108864 bytes under 2048-page ceiling");
         Ok(())
     }
 }
