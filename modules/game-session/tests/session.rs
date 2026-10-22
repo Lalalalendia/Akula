@@ -35,8 +35,8 @@ fn play(session: &mut GameSession, columns: &[u8]) -> Vec<ApplyResult> {
 
 // A legal game: all 42 cells are filled without any win.
 const DRAW_GAME: [u8; 42] = [
-    3, 4, 6, 1, 0, 1, 0, 0, 3, 3, 3, 0, 5, 5, 5, 2, 1, 3, 2, 3, 4, 2, 6, 1, 4, 4, 2, 4, 6, 0, 0,
-    4, 2, 6, 1, 6, 2, 5, 6, 1, 5, 5,
+    3, 4, 6, 1, 0, 1, 0, 0, 3, 3, 3, 0, 5, 5, 5, 2, 1, 3, 2, 3, 4, 2, 6, 1, 4, 4, 2, 4, 6, 0, 0, 4,
+    2, 6, 1, 6, 2, 5, 6, 1, 5, 5,
 ];
 
 // Twenty moves do not terminate; the last move (21) forms a diagonal.
@@ -60,7 +60,15 @@ fn new_session_has_two_seats_and_an_empty_board() {
     assert_eq!(host.state, guest.state);
     assert_eq!(host.state.revision, 0);
     assert_eq!(host.state.status, Status::InProgress { next: Player::Red });
-    assert_eq!(host.state.board.iter().flatten().filter(|p| p.is_some()).count(), 0);
+    assert_eq!(
+        host.state
+            .board
+            .iter()
+            .flatten()
+            .filter(|p| p.is_some())
+            .count(),
+        0
+    );
 }
 
 #[test]
@@ -91,7 +99,10 @@ fn new_session_rejects_invalid_ids_and_epoch() {
 fn unknown_peers_cannot_play_or_read_snapshots() {
     let mut game = session();
     assert_eq!(game.snapshot_for(OUTSIDER), Err(GameError::NotParticipant));
-    assert_eq!(game.apply(OUTSIDER, command(1, 0)), Err(GameError::NotParticipant));
+    assert_eq!(
+        game.apply(OUTSIDER, command(1, 0)),
+        Err(GameError::NotParticipant)
+    );
     assert_eq!(game.snapshot_for(HOST).unwrap().state.revision, 0);
 }
 
@@ -106,12 +117,18 @@ fn commands_are_bound_to_room_and_epoch() {
     wrong.epoch = EPOCH - 1;
     assert_eq!(
         game.apply(HOST, wrong),
-        Err(GameError::WrongEpoch { expected: EPOCH, received: EPOCH - 1 })
+        Err(GameError::WrongEpoch {
+            expected: EPOCH,
+            received: EPOCH - 1
+        })
     );
     wrong.epoch = EPOCH + 1;
     assert_eq!(
         game.apply(HOST, wrong),
-        Err(GameError::WrongEpoch { expected: EPOCH, received: EPOCH + 1 })
+        Err(GameError::WrongEpoch {
+            expected: EPOCH,
+            received: EPOCH + 1
+        })
     );
     assert_eq!(game.snapshot_for(HOST).unwrap(), before);
 }
@@ -123,7 +140,10 @@ fn a_previous_epochs_command_cannot_replay_in_new_room_incarnation() {
     let mut next = GameSession::new(ROOM, EPOCH + 1, HOST, GUEST).unwrap();
     assert_eq!(
         next.apply(HOST, command(1, 0)),
-        Err(GameError::WrongEpoch { expected: EPOCH + 1, received: EPOCH })
+        Err(GameError::WrongEpoch {
+            expected: EPOCH + 1,
+            received: EPOCH
+        })
     );
     assert_eq!(next.snapshot_for(HOST).unwrap().state.revision, 0);
 }
@@ -132,7 +152,10 @@ fn a_previous_epochs_command_cannot_replay_in_new_room_incarnation() {
 fn wrong_turn_does_not_consume_sequence_or_mutate_state() {
     let mut game = session();
     let before = game.snapshot_for(GUEST).unwrap();
-    assert_eq!(game.apply(GUEST, command(1, 0)), Err(GameError::NotYourTurn));
+    assert_eq!(
+        game.apply(GUEST, command(1, 0)),
+        Err(GameError::NotYourTurn)
+    );
     assert_eq!(game.snapshot_for(GUEST).unwrap(), before);
     game.apply(HOST, command(1, 0)).unwrap();
     assert_eq!(game.apply(HOST, command(2, 1)), Err(GameError::NotYourTurn));
@@ -151,7 +174,9 @@ fn a_valid_move_lands_in_the_lowest_free_cell() {
             revision: 1,
             row: 5,
             column: 0,
-            status: Status::InProgress { next: Player::Yellow },
+            status: Status::InProgress {
+                next: Player::Yellow
+            },
         })
     );
     assert_eq!(
@@ -172,8 +197,14 @@ fn a_valid_move_lands_in_the_lowest_free_cell() {
 fn out_of_range_column_does_not_consume_sequence() {
     let mut game = session();
     let before = game.snapshot_for(HOST).unwrap();
-    assert_eq!(game.apply(HOST, command(1, COLUMNS as u8)), Err(GameError::ColumnOutOfRange));
-    assert_eq!(game.apply(HOST, command(1, u8::MAX)), Err(GameError::ColumnOutOfRange));
+    assert_eq!(
+        game.apply(HOST, command(1, COLUMNS as u8)),
+        Err(GameError::ColumnOutOfRange)
+    );
+    assert_eq!(
+        game.apply(HOST, command(1, u8::MAX)),
+        Err(GameError::ColumnOutOfRange)
+    );
     assert_eq!(game.snapshot_for(HOST).unwrap(), before);
     game.apply(HOST, command(1, 6)).unwrap();
 }
@@ -197,14 +228,18 @@ fn the_last_accepted_command_can_be_retried_idempotently() {
     let before = game.snapshot_for(HOST).unwrap();
     assert_eq!(
         game.apply(HOST, first),
-        Ok(ApplyResult::Duplicate { original_revision: 1 })
+        Ok(ApplyResult::Duplicate {
+            original_revision: 1
+        })
     );
     assert_eq!(game.snapshot_for(HOST).unwrap(), before);
     game.apply(GUEST, command(1, 6)).unwrap();
     let before = game.snapshot_for(HOST).unwrap();
     assert_eq!(
         game.apply(HOST, first),
-        Ok(ApplyResult::Duplicate { original_revision: 1 })
+        Ok(ApplyResult::Duplicate {
+            original_revision: 1
+        })
     );
     assert_eq!(game.snapshot_for(HOST).unwrap(), before);
 }
@@ -214,7 +249,10 @@ fn changing_the_column_at_same_sequence_is_rejected() {
     let mut game = session();
     game.apply(HOST, command(1, 2)).unwrap();
     let before = game.snapshot_for(HOST).unwrap();
-    assert_eq!(game.apply(HOST, command(1, 4)), Err(GameError::SequenceConflict));
+    assert_eq!(
+        game.apply(HOST, command(1, 4)),
+        Err(GameError::SequenceConflict)
+    );
     assert_eq!(game.snapshot_for(HOST).unwrap(), before);
 }
 
@@ -223,20 +261,32 @@ fn stale_and_future_sequences_are_rejected() {
     let mut game = session();
     assert_eq!(
         game.apply(HOST, command(0, 0)),
-        Err(GameError::StaleSequence { expected: 1, received: 0 })
+        Err(GameError::StaleSequence {
+            expected: 1,
+            received: 0
+        })
     );
     assert_eq!(
         game.apply(HOST, command(3, 0)),
-        Err(GameError::FutureSequence { expected: 1, received: 3 })
+        Err(GameError::FutureSequence {
+            expected: 1,
+            received: 3
+        })
     );
     play(&mut game, &[0, 1, 2]);
     assert_eq!(
         game.apply(HOST, command(1, 0)),
-        Err(GameError::StaleSequence { expected: 3, received: 1 })
+        Err(GameError::StaleSequence {
+            expected: 3,
+            received: 1
+        })
     );
     assert_eq!(
         game.apply(HOST, command(4, 3)),
-        Err(GameError::FutureSequence { expected: 3, received: 4 })
+        Err(GameError::FutureSequence {
+            expected: 3,
+            received: 4
+        })
     );
     assert_eq!(game.snapshot_for(HOST).unwrap().state.revision, 3);
 }
@@ -251,14 +301,21 @@ fn horizontal_win_stops_the_game_without_allowing_extra_moves() {
             revision: 7,
             row: 5,
             column: 3,
-            status: Status::Won { winner: Player::Red },
+            status: Status::Won {
+                winner: Player::Red
+            },
         })
     );
-    assert_eq!(game.apply(GUEST, command(4, 4)), Err(GameError::GameFinished));
+    assert_eq!(
+        game.apply(GUEST, command(4, 4)),
+        Err(GameError::GameFinished)
+    );
     assert_eq!(game.snapshot_for(HOST).unwrap().state.revision, 7);
     assert_eq!(
         game.apply(HOST, command(4, 3)),
-        Ok(ApplyResult::Duplicate { original_revision: 7 })
+        Ok(ApplyResult::Duplicate {
+            original_revision: 7
+        })
     );
 }
 
@@ -266,14 +323,24 @@ fn horizontal_win_stops_the_game_without_allowing_extra_moves() {
 fn vertical_red_win_is_detected() {
     let mut game = session();
     play(&mut game, &[0, 1, 0, 1, 0, 2, 0]);
-    assert_eq!(game.snapshot_for(HOST).unwrap().state.status, Status::Won { winner: Player::Red });
+    assert_eq!(
+        game.snapshot_for(HOST).unwrap().state.status,
+        Status::Won {
+            winner: Player::Red
+        }
+    );
 }
 
 #[test]
 fn vertical_yellow_win_is_detected() {
     let mut game = session();
     play(&mut game, &[1, 0, 1, 0, 2, 0, 2, 0]);
-    assert_eq!(game.snapshot_for(GUEST).unwrap().state.status, Status::Won { winner: Player::Yellow });
+    assert_eq!(
+        game.snapshot_for(GUEST).unwrap().state.status,
+        Status::Won {
+            winner: Player::Yellow
+        }
+    );
 }
 
 #[test]
@@ -283,8 +350,18 @@ fn diagonal_win_is_detected_in_both_directions() {
     play(&mut normal, &DIAGONAL_WIN);
     let mirror = DIAGONAL_WIN.map(|c| 6 - c);
     play(&mut mirrored, &mirror);
-    assert_eq!(normal.snapshot_for(HOST).unwrap().state.status, Status::Won { winner: Player::Red });
-    assert_eq!(mirrored.snapshot_for(HOST).unwrap().state.status, Status::Won { winner: Player::Red });
+    assert_eq!(
+        normal.snapshot_for(HOST).unwrap().state.status,
+        Status::Won {
+            winner: Player::Red
+        }
+    );
+    assert_eq!(
+        mirrored.snapshot_for(HOST).unwrap().state.status,
+        Status::Won {
+            winner: Player::Red
+        }
+    );
     assert_eq!(normal.snapshot_for(HOST).unwrap().state.revision, 21);
     assert_eq!(mirrored.snapshot_for(HOST).unwrap().state.revision, 21);
 }
@@ -301,7 +378,16 @@ fn twenty_turns_keep_both_players_in_the_same_state() {
     assert_eq!(first.next_sequence, 11);
     assert_eq!(second.next_sequence, 11);
     assert_eq!(first.state.status, Status::InProgress { next: Player::Red });
-    assert_eq!(first.state.board.iter().flatten().filter(|p| p.is_some()).count(), 20);
+    assert_eq!(
+        first
+            .state
+            .board
+            .iter()
+            .flatten()
+            .filter(|p| p.is_some())
+            .count(),
+        20
+    );
 }
 
 #[test]
@@ -312,8 +398,20 @@ fn forty_two_legal_moves_end_in_a_draw() {
     let snapshot = game.snapshot_for(HOST).unwrap();
     assert_eq!(snapshot.state.status, Status::Draw);
     assert_eq!(snapshot.state.revision, 42);
-    assert_eq!(snapshot.state.board.iter().flatten().filter(|p| p.is_some()).count(), 42);
-    assert_eq!(game.apply(HOST, command(22, 0)), Err(GameError::GameFinished));
+    assert_eq!(
+        snapshot
+            .state
+            .board
+            .iter()
+            .flatten()
+            .filter(|p| p.is_some())
+            .count(),
+        42
+    );
+    assert_eq!(
+        game.apply(HOST, command(22, 0)),
+        Err(GameError::GameFinished)
+    );
 }
 
 #[test]
@@ -349,7 +447,10 @@ fn a_move_rejected_for_turn_order_can_be_retried_when_it_becomes_legal() {
     let early = command(1, 4);
     assert_eq!(game.apply(GUEST, early), Err(GameError::NotYourTurn));
     game.apply(HOST, command(1, 3)).unwrap();
-    assert!(matches!(game.apply(GUEST, early), Ok(ApplyResult::Applied { revision: 2, .. })));
+    assert!(matches!(
+        game.apply(GUEST, early),
+        Ok(ApplyResult::Applied { revision: 2, .. })
+    ));
 }
 
 #[test]

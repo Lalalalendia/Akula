@@ -122,12 +122,7 @@ pub struct GameSession {
 
 impl GameSession {
     /// Host always plays Red; the invited guest plays Yellow in GNET-01.
-    pub fn new(
-        room: RoomId,
-        epoch: u64,
-        host: PeerId,
-        guest: PeerId,
-    ) -> Result<Self, GameError> {
+    pub fn new(room: RoomId, epoch: u64, host: PeerId, guest: PeerId) -> Result<Self, GameError> {
         if room.0 == [0; 16] {
             return Err(GameError::EmptyRoomId);
         }
