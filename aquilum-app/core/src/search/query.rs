@@ -71,7 +71,7 @@ fn search_terms(input: &str) -> (Vec<String>, Vec<String>) {
 /// Extract complete double-quoted sequences in the same order as the index.
 /// The analyzer may remove stop words, so this is an indexed word sequence,
 /// not a byte-for-byte comparison of punctuation or spelling.
-fn quoted_phrases(input: &str) -> Vec<Vec<String>> {
+fn quoted_phrases(input: &str) -> Vec<(String, Vec<String>)> {
     let mut phrases = Vec::new();
     let mut rest = input;
     while let Some(begin) = rest.find('"') {
@@ -87,7 +87,7 @@ fn quoted_phrases(input: &str) -> Vec<Vec<String>> {
                 }
             });
             if !words.is_empty() {
-                phrases.push(words);
+                phrases.push((quoted[..end].to_owned(), words));
             }
         }
         rest = &quoted[end + 1..];
@@ -97,6 +97,7 @@ fn quoted_phrases(input: &str) -> Vec<Vec<String>> {
 
 pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchError> {
     let (terms, excluded) = search_terms(request.text);
+    let phrases = quoted_phrases(request.text);
     if terms.is_empty() {
         return Ok(Found { terms, results: Vec::new(), has_more: false });
     }
@@ -108,7 +109,7 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     }
     // Apply phrase constraints within Tantivy, before taking the top N results,
     // so filtering cannot silently drop valid matches beyond the first page.
-    for words in quoted_phrases(request.text) {
+    for (_, words) in &phrases {
         let fields: Vec<(Occur, Box<dyn Query>)> = searchable_fields(index)
             .into_iter()
             .map(|field| {
@@ -142,7 +143,8 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     }
     let has_more = top.len() > limit;
     let addresses = top.into_iter().take(limit).map(|(_, address)| address).collect::<Vec<_>>();
-    let results = hits::results(&searcher, index.fields, &terms, &addresses, &request.cancel)?;
+    let quoted: Vec<String> = phrases.into_iter().map(|(text, _)| text).collect();
+    let results = hits::results(&searcher, index.fields, &terms, &quoted, &addresses, &request.cancel)?;
     Ok(Found { terms, results, has_more })
 }
 
