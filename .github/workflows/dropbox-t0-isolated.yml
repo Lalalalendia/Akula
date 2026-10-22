@@ -1,0 +1,25 @@
+name: Dropbox T0 isolated contract
+
+on:
+  pull_request:
+    paths:
+      - 'modules/dropbox-t0/**'
+      - '.github/workflows/dropbox-t0-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dropbox-t0-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Offline Dropbox contract tests (no credentials)
+        run: cargo test --manifest-path modules/dropbox-t0/Cargo.toml -- --nocapture
