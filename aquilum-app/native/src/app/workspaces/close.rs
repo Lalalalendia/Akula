@@ -22,7 +22,7 @@ impl App {
             session.save(&self.workspace.core, &mut self.tabs);
         }
         self.workspace.root = None;
-        self.tree = FileTree::new(None, &self.workspace.data_dir, Arc::clone(&self.workspace.wake));
+        self.tree = FileTree::new(None, &self.workspace.data_dir, std::sync::Arc::clone(&self.workspace.wake));
         self.navigation = crate::navigation::Navigation::load(&self.workspace.data_dir, None);
         self.session = None;
         self.tabs = Tabs::default();
