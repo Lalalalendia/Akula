@@ -1,9 +1,9 @@
 //! Explicit opt-in UI observation of OS-pinned Iroh contacts. No network send.
 use super::{App, Popup, TransferState};
 use crate::ui::transfer::{self as transfer_ui, TransportContactRow, TransportContactView};
+use aquilum_core::p2p_device_identity::peer_pin::{PeerState, TransportPeerContact, list_peers};
 use masonry::app::RenderRoot;
 use masonry::kurbo::Point;
-use aquilum_core::p2p_device_identity::peer_pin::{list_peers, PeerState, TransportPeerContact};
 
 fn map_rows(contacts: Vec<TransportPeerContact>) -> Vec<TransportContactRow> {
     contacts
