@@ -1,3 +1,6 @@
+pub mod transport;
+pub mod wire;
+
 //! GNET-01: a deterministic, transport-independent Connect Four game session.
 //!
 //! The caller MUST pass the identity authenticated by its transport to apply.
