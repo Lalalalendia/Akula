@@ -40,7 +40,9 @@ impl Default for PeerUi {
 
 fn valid_key(id: &str) -> bool {
     id.len() == 64
-        && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         && id.bytes().any(|b| b != b'0')
 }
 
@@ -79,21 +81,13 @@ impl PeerUi {
         if event.downcast_ref::<Pressed>().is_none() {
             return false;
         }
-        let Some((_, action)) = controls
-            .actions
-            .iter()
-            .find(|(button, _)| *button == id)
-        else {
+        let Some((_, action)) = controls.actions.iter().find(|(button, _)| *button == id) else {
             return false;
         };
         self.act(*action, wake)
     }
 
-    fn act(
-        &mut self,
-        action: PeerAction,
-        wake: Arc<dyn Fn() + Send + Sync>,
-    ) -> bool {
+    fn act(&mut self, action: PeerAction, wake: Arc<dyn Fn() + Send + Sync>) -> bool {
         if self.view.phase == PeerPhase::Working {
             return false;
         }
@@ -120,17 +114,13 @@ impl PeerUi {
                 };
                 if pending != &observed || observed != verified {
                     self.view.phase = PeerPhase::Error(
-                        "revocation requires the unchanged, independently verified full ID"
-                            .into(),
+                        "revocation requires the unchanged, independently verified full ID".into(),
                     );
                     return true;
                 }
             }
             PeerAction::Confirm => {
-                if !valid_key(&observed)
-                    || !valid_key(&verified)
-                    || observed != verified
-                {
+                if !valid_key(&observed) || !valid_key(&verified) || observed != verified {
                     self.view.phase = PeerPhase::Error(
                         "enter two matching full lowercase IDs from independently checked sources"
                             .into(),
@@ -157,14 +147,11 @@ impl PeerUi {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = match action {
-                PeerAction::Confirm => {
-                    peer_pin::confirm_peer(&observed, &verified)
-                        .and_then(|_| peer_pin::peer_state(&observed))
-                }
+                PeerAction::Confirm => peer_pin::confirm_peer(&observed, &verified)
+                    .and_then(|_| peer_pin::peer_state(&observed)),
                 PeerAction::Inspect => peer_pin::peer_state(&observed),
                 PeerAction::Revoke => {
-                    peer_pin::revoke_peer(&observed)
-                        .and_then(|_| peer_pin::peer_state(&observed))
+                    peer_pin::revoke_peer(&observed).and_then(|_| peer_pin::peer_state(&observed))
                 }
                 PeerAction::RequestRevoke | PeerAction::CancelRevoke => unreachable!(),
             }
