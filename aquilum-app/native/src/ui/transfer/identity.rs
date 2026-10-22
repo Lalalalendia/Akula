@@ -53,37 +53,51 @@ pub(super) fn render(view: &IdentityView) -> (NewWidget<Flex>, Vec<(WidgetId, Id
         .with_fixed(hint(&t("transfer.localIdentityNoGrant")));
     match &view.phase {
         IdentityPhase::Unchecked => {
-            card = card.with_fixed(hint(&t("transfer.localIdentityUnchecked")))
+            card = card
+                .with_fixed(hint(&t("transfer.localIdentityUnchecked")))
                 .with_fixed(action_button(
-                    &mut actions, t("transfer.localIdentityLoad"), IdentityAction::Load,
+                    &mut actions,
+                    t("transfer.localIdentityLoad"),
+                    IdentityAction::Load,
                 ));
         }
         IdentityPhase::Working => {
             card = card.with_fixed(hint(&t("transfer.localIdentityWorking")));
         }
         IdentityPhase::Missing => {
-            card = card.with_fixed(hint(&t("transfer.localIdentityMissing")))
+            card = card
+                .with_fixed(hint(&t("transfer.localIdentityMissing")))
                 .with_fixed(action_button(
-                    &mut actions, t("transfer.localIdentityCreate"), IdentityAction::Initialize,
+                    &mut actions,
+                    t("transfer.localIdentityCreate"),
+                    IdentityAction::Initialize,
                 ))
                 .with_fixed(action_button(
-                    &mut actions, t("transfer.localIdentityLoad"), IdentityAction::Load,
+                    &mut actions,
+                    t("transfer.localIdentityLoad"),
+                    IdentityAction::Load,
                 ));
         }
         IdentityPhase::Ready(endpoint) => {
-            card = card.with_fixed(details(endpoint))
+            card = card
+                .with_fixed(details(endpoint))
                 .with_fixed(action_button(
-                    &mut actions, t("transfer.localIdentityCopy"), IdentityAction::CopyPublic,
+                    &mut actions,
+                    t("transfer.localIdentityCopy"),
+                    IdentityAction::CopyPublic,
                 ))
                 .with_fixed(action_button(
-                    &mut actions, t("transfer.localIdentityLoad"), IdentityAction::Load,
+                    &mut actions,
+                    t("transfer.localIdentityLoad"),
+                    IdentityAction::Load,
                 ));
         }
         IdentityPhase::Error(error) => {
-            card = card.with_fixed(hint(error))
-                .with_fixed(action_button(
-                    &mut actions, t("transfer.localIdentityLoad"), IdentityAction::Load,
-                ));
+            card = card.with_fixed(hint(error)).with_fixed(action_button(
+                &mut actions,
+                t("transfer.localIdentityLoad"),
+                IdentityAction::Load,
+            ));
         }
     }
     if let Some(notice) = &view.notice {
@@ -104,21 +118,33 @@ mod tests {
     #[test]
     fn missing_key_offers_explicit_creation_but_never_network_send() {
         let (_, actions) = render(&IdentityView {
-            phase: IdentityPhase::Missing, notice: None,
+            phase: IdentityPhase::Missing,
+            notice: None,
         });
         assert_eq!(actions.len(), 2);
-        assert!(actions.iter().any(|(_, a)| *a == IdentityAction::Initialize));
-        assert!(actions.iter().all(|(_, a)| *a != IdentityAction::CopyPublic));
+        assert!(
+            actions
+                .iter()
+                .any(|(_, a)| *a == IdentityAction::Initialize)
+        );
+        assert!(
+            actions
+                .iter()
+                .all(|(_, a)| *a != IdentityAction::CopyPublic)
+        );
     }
 
     #[test]
     fn ready_key_can_only_be_read_or_copied() {
         let (_, actions) = render(&IdentityView {
-            phase: IdentityPhase::Ready("a".repeat(64)), notice: None,
+            phase: IdentityPhase::Ready("a".repeat(64)),
+            notice: None,
         });
         assert_eq!(actions.len(), 2);
-        assert!(actions.iter().all(|(_, a)| {
-            matches!(a, IdentityAction::Load | IdentityAction::CopyPublic)
-        }));
+        assert!(
+            actions
+                .iter()
+                .all(|(_, a)| { matches!(a, IdentityAction::Load | IdentityAction::CopyPublic) })
+        );
     }
 }
