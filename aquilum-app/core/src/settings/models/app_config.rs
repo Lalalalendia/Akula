@@ -27,4 +27,5 @@ pub struct PluginAlphaSettings {
     pub enabled: bool,
     /// Only the last count is persisted. No note contents are stored.
     pub last_words: Option<u64>,
+    pub last_error: Option<String>,
 }

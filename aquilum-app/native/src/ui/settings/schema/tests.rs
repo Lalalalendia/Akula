@@ -336,3 +336,12 @@ fn s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button() {
         row.label == "notes/received-over-s3.md"
     }));
 }
+
+#[test]
+fn plugin_alpha_is_off_by_default_and_can_show_sample_controls() {
+    let config = AppConfig::default();
+    let ctx = Context::new(1.0);
+    assert_eq!(Section::from_key("plugins"), Some(Section::Plugins));
+    assert_eq!(blocks(Section::Plugins, &config, &ctx).len(), 1);
+    assert!(!config.plugin_alpha.installed);
+}

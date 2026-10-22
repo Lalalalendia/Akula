@@ -55,23 +55,26 @@ impl App {
                         p.installed = true;
                         p.enabled = true;
                         p.last_words = None;
+                        p.last_error = None;
                     }),
-                    Err(error) => { report!("plugin demo install failed: {error}"); Effect::None }
+                    Err(error) => self.plugin_demo_update(|p| { p.last_words = None; p.last_error = Some(error); }),
                 }
             }
             Action::PluginDemoRun => {
                 match self.plugin_demo_run() {
-                    Ok(words) => self.plugin_demo_update(|p| p.last_words = Some(words as u64)),
-                    Err(error) => { report!("plugin demo read denied: {error}"); Effect::None }
+                    Ok(words) => self.plugin_demo_update(|p| { p.last_words = Some(words as u64); p.last_error = None; }),
+                    Err(error) => self.plugin_demo_update(|p| { p.last_words = None; p.last_error = Some(error); }),
                 }
             }
             Action::PluginDemoDisable => self.plugin_demo_update(|p| {
                 p.enabled = false;
                 p.last_words = None;
+                        p.last_error = None;
             }),
             Action::PluginDemoEnable => self.plugin_demo_update(|p| {
                 p.enabled = true;
                 p.last_words = None;
+                        p.last_error = None;
             }),
             Action::PluginDemoRemove => {
                 match plugins::uninstall(&self.workspace.data_dir) {
@@ -79,8 +82,9 @@ impl App {
                         p.installed = false;
                         p.enabled = false;
                         p.last_words = None;
+                        p.last_error = None;
                     }),
-                    Err(error) => { report!("plugin demo uninstall failed: {error}"); Effect::None }
+                    Err(error) => self.plugin_demo_update(|p| { p.last_words = None; p.last_error = Some(error); }),
                 }
             }
             Action::OpenUrl(url) => {
