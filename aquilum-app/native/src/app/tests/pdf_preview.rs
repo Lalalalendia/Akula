@@ -50,7 +50,7 @@ fn selected_external_pdf_copies_via_existing_core_file_gate() {
     let pdf = external.path().join("shared.pdf");
     let data = b"%PDF-1.4\nThis is a test PDF for File Gate";
     fs::write(&pdf, data).unwrap();
-    let imported = super::pdf_preview::admit_pdf_source(
+    let imported = crate::app::pdf_preview::admit_pdf_source(
         &h.app.workspace.core, h.vault.path(), &pdf,
     ).expect("the user's file should be imported with File Gate");
     assert!(imported.starts_with(h.vault.path()));

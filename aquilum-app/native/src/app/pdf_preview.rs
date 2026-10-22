@@ -143,6 +143,14 @@ fn preview_body(filename: &str, digest: &str, text: &str) -> String {
         }
     }
     let fence = char::from(96).to_string().repeat(longest.saturating_add(1).max(3));
+    // The filename is also untrusted Markdown input, even for a trusted PDF.
+    let safe_filename: String = filename.chars().map(|c| match c {
+        '\n' | '\r' => " ".to_owned(),
+        '\\' | '*' | '_' | '[' | ']' | '(' | ')' | '`' | '#' | '!' | '<' | '>' | '|' =>
+            format!("\\{c}"),
+        _ => c.to_string(),
+    }).collect();
+    let filename = safe_filename;
     format!(
         "# PDF: {filename}\n\n\
          > **Needs review.** Текст PDF извлечён автоматически и визуально не проверен.\n\n\
