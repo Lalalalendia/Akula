@@ -187,7 +187,7 @@ jobs:
           save-if: false
 
       - name: Install Linux dependencies
-        if: needs.classify.outputs.mode == 'workspace'
+        if: needs.classify.outputs.mode == 'workspace' || needs.classify.outputs.mode == 'native'
         shell: bash
         run: |
           sudo apt-get update
@@ -211,6 +211,16 @@ jobs:
           set -euo pipefail
           cargo test --workspace --locked -- --skip app::tests::perf::frames::
           cargo test -p aquilum-core --features sync-engine --locked
+
+      - name: Run Native package tests for native-source changes
+        if: needs.classify.outputs.mode == 'native'
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # aquilum-native builds and exercises aquilum-core as its dependency.
+          # Skip only independent Core unit tests on unmodified Core sources.
+          cargo test -p aquilum-native --locked -- --skip app::tests::perf::frames::
 
       # A verified opt-in local package without existing dependency changes
       # cannot alter the default Native graph. Exercise Core in both feature
@@ -430,7 +440,7 @@ jobs:
   native-frames:
     name: Native frame fidelity
     needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.mode == 'workspace'
+    if: github.event_name == 'pull_request' && (needs.classify.outputs.mode == 'workspace' || needs.classify.outputs.mode == 'native')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -513,7 +523,7 @@ jobs:
             exit 1
           fi
           case "$TEST_SCOPE" in
-            workspace)
+            workspace|native)
               if [ "$FRAMES_RESULT" != success ]; then
                 echo "::error::Native fidelity lane did not pass"
                 exit 1
