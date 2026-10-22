@@ -181,6 +181,10 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/ci-file-ratchet.test.cjs
           node .github/scripts/ci-file-ratchet.cjs --base="$BASE_SHA" --head=HEAD
+          # Zero extra runners: prohibit new PR workflows without a stale-run
+          # cancellation group, and prevent removal of existing protection.
+          node --test .github/scripts/ci-pr-concurrency.test.cjs
+          node .github/scripts/ci-pr-concurrency.cjs --base="$BASE_SHA" --head=HEAD
 
       # PLUGIN-00: documentation/source-boundary inventory only; no runtime or new status check.
       - name: Plugin architecture contract
