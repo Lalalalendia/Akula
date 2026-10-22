@@ -25,6 +25,12 @@ pub fn plan_for_rename(
 ) -> Result<Vec<LinkRewrite>, SearchError> {
     let mut rewrites = Vec::new();
     let mut resolver = LinkResolver::new(connection)?;
+    // Values below are independent of the referencing document. Compute
+    // them once for a bulk rename, not once per matching wiki link.
+    let old_relative_key = relative_key(root, old_path);
+    let old_title_key = title_key(old_path);
+    let new_relative_target = relative_target(root, new_path, true);
+    let new_title_target = relative_target(root, new_path, false);
     for stored_path in sources {
         let source_path = if same_path(&stored_path, old_path) {
             new_path
@@ -34,6 +40,11 @@ pub fn plan_for_rename(
         let Ok(original) = fs::read_to_string(source_path) else {
             continue;
         };
+        // Without an opener extract() cannot return any links. Avoid a
+        // second copy, line-ending normalization, and Markdown parsing.
+        if !original.contains("[[") {
+            continue;
+        }
         let text = normalize_line_endings(original.clone());
         let mut changes = Vec::new();
         for link in extract(&text) {
@@ -43,14 +54,20 @@ pub fn plan_for_rename(
                 &stored_path,
                 &link.target,
                 old_path,
+                &old_relative_key,
+                &old_title_key,
                 fallback_candidates,
             )? {
                 let path_style = text[link.note_range.clone()]
-                    .replace('\\', "/")
-                    .contains('/');
+                    .bytes()
+                    .any(|byte| byte == b'/' || byte == b'\\');
                 changes.push((
                     link.note_range,
-                    relative_target(root, new_path, path_style),
+                    if path_style {
+                        new_relative_target.clone()
+                    } else {
+                        new_title_target.clone()
+                    },
                 ));
             }
         }
@@ -78,14 +95,16 @@ fn targets_path(
     source: &Path,
     target: &str,
     old_path: &Path,
+    old_relative_key: &str,
+    old_title_key: &str,
     fallback_candidates: Option<&[String]>,
 ) -> Result<bool, SearchError> {
     let (key, kind) = target_key(target);
     if let Some(candidates) = fallback_candidates {
         return Ok(if kind == "path" {
-            key == relative_key(root, old_path)
+            key == old_relative_key
         } else {
-            key == title_key(old_path)
+            key == old_title_key
                 && select_candidate(root, source, candidates)
                     .is_some_and(|path| same_path(&path, old_path))
         });
@@ -94,8 +113,8 @@ fn targets_path(
         return Ok(same_path(&path, old_path));
     }
     Ok(if kind == "path" {
-        key == relative_key(root, old_path)
+        key == old_relative_key
     } else {
-        key == title_key(old_path)
+        key == old_title_key
     })
 }
