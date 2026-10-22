@@ -1,7 +1,5 @@
-//! PR 00: inert cloud-sync contracts, types and deterministic fake provider.
-//!
-//! The existing local note history is not the distributed revision graph.
-//! Later stages must use the File Gate for writes and protect dirty editor buffers.
+//! Inert cloud-sync contracts and deterministic fake provider.
+//! Local history is not a distributed DAG; File Gate protects dirty editor buffers.
 
 mod core_scan;
 mod dag;
@@ -38,7 +36,6 @@ pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
 #[cfg(test)]
 mod fault_matrix;
-// Inert owner-signed roster verifier; no production pairing, grant or UI hook.
 #[cfg(feature = "device-roster-lab")]
 pub mod device_roster_lab;
 mod identity;
