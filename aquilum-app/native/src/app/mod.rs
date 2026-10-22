@@ -73,6 +73,7 @@ enum Popup {
     TabsMenu { layer: WidgetId, button: WidgetId },
     Viewer { layer: WidgetId },
     PdfImport { dialog: DialogIds, source: PathBuf },
+    PdfNotice { dialog: DialogIds },
     Reader(Box<reader::ReaderState>),
     Search(search::SearchState),
     Templates(templates::TemplatesState),
@@ -102,7 +103,6 @@ const MENU_CLOSE: usize = 3;
 const MENU_COLOR: usize = 3;
 const MENU_MARGIN: f64 = 8.0;
 const HOLD: std::time::Duration = std::time::Duration::from_millis(500);
-
 pub struct App {
     workspace: Workspace,
     tree: FileTree,

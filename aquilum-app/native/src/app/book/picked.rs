@@ -9,11 +9,15 @@ impl App {
         let current = |note: &PathBuf| self.note.as_ref().is_some_and(|n| n.is(note));
         match picked {
             Picked::Workspace(path) => return self.switch_workspace(root, path).title,
+            Picked::PdfChosen(file) => self.prompt_pdf_preview(root, file),
             Picked::PdfIndexed(Ok(note)) => {
                 self.tree.paths_changed(root, std::slice::from_ref(&note));
                 return self.open(root, note);
             }
-            Picked::PdfIndexed(Err(error)) => report!("PDF не добавлен в поиск: {error}"),
+            Picked::PdfIndexed(Err(error)) => {
+                report!("PDF не добавлен в поиск: {error}");
+                self.show_pdf_notice(root, &error);
+            }
             Picked::PageCover(note, file) if current(&note) => {
                 if let Some(relative) = self.import_cover(Source::Path(&file)) {
                     self.set_fields(root, &[(COVER, "true".into()), (PAGE_COVER, relative), (PAGE_COVER_POSITION, String::new())]);

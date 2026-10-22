@@ -21,6 +21,9 @@ impl App {
                         let folders: Vec<PathBuf> = targets.into_iter().filter(|path| path.is_dir()).collect();
                         self.tree.set_color(root, &folders, index.checked_sub(1).and_then(|at| palette::NAMES.get(at).copied()));
                     }
+                    MenuChoice::Item(MENU_PDF_PICK) if tab.is_none() && clicked.is_dir() => {
+                        self.pick_pdf_file();
+                    }
                     MenuChoice::Item(MENU_PDF_PREVIEW) if tab.is_none()
                         && targets.len() == 1 && pdf_preview::is_pdf_path(&clicked) => {
                         self.prompt_pdf_preview(root, clicked);
@@ -45,6 +48,10 @@ impl App {
                     }
                 }
                 None => self.popup = Some(Popup::PdfImport { dialog, source }),
+            },
+            Some(Popup::PdfNotice { dialog }) => match dialog.answer(id, action) {
+                Some(_) => crate::ui::dialog::close(root, dialog.layer),
+                None => self.popup = Some(Popup::PdfNotice { dialog }),
             },
             Some(Popup::Delete { dialog, targets }) => match dialog.answer(id, action) {
                 Some(answer) => {

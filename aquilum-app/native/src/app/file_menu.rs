@@ -5,6 +5,7 @@ use crate::ui::menu::{Submenu, Swatch};
 use crate::ui::palette;
 
 const MENU_PDF_PREVIEW: usize = 3;
+const MENU_PDF_PICK: usize = 4;
 
 impl App {
     pub(super) fn open_file_menu(
@@ -33,6 +34,7 @@ impl App {
         let colored = folder && tab.is_none();
         if colored {
             labels.push((t("palette.color"), crate::ui::icons::PALETTE));
+            labels.push(("Импортировать PDF в Akula".to_owned(), crate::ui::icons::UPLOAD));
         }
         let items: Vec<crate::ui::menu::Entry<'_>> = labels.iter().map(|(label, icon)| crate::ui::menu::Entry { label, icon: Some(*icon), disabled: false }).collect();
         let names: Vec<String> = std::iter::once(t("palette.none")).chain(palette::NAMES.iter().map(|name| palette::label(name))).collect();

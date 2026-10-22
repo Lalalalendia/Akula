@@ -12,6 +12,7 @@ use crate::vault_files::{self, Source};
 pub(in crate::app) enum Picked {
     Workspace(PathBuf),
     PdfIndexed(Result<PathBuf, String>),
+    PdfChosen(PathBuf),
     PageCover(PathBuf, PathBuf),
     BookCover(PathBuf, PathBuf),
     Book(PathBuf, Option<PathBuf>),
