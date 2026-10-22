@@ -1,4 +1,5 @@
-//! Transfer drafts only: no network, File Gate rights, or delivery receipts.
+//! Local transfer drafts only. The network service, peer discovery, File Gate,
+//! delivery receipts and verified progress remain unavailable in this UI.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -6,6 +7,7 @@ use std::sync::Arc;
 use aquilum_core::sync::DeviceId;
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
+use masonry::kurbo::Point;
 
 use super::{App, Outcome, Popup};
 use crate::ui::dialog::{self, DialogAnswer};
@@ -14,10 +16,16 @@ use crate::ui::widgets::Pressed;
 
 const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
+
 mod model;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
-/// Display-only owner registry placeholder; never a transfer grant.
+#[cfg(feature = "p2p-device-ui")]
+mod local_identity;
+
+/// A display-only identity observation. The first-party owner registry still
+/// needs to supply a verified snapshot. No production path populates this
+/// collection, and neither this struct nor the UI authorizes File Gate writes.
 #[derive(Clone, Debug)]
 pub(super) struct TransferPeer {
     pub(super) id: DeviceId,
@@ -42,6 +50,8 @@ pub(super) struct TransferState {
     #[cfg(feature = "p2p-device-contacts-preview")]
     transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
+    #[cfg(feature = "p2p-device-ui")]
+    pub(super) local_identity: local_identity::LocalIdentityUi,
 }
 
 impl App {
@@ -54,16 +64,29 @@ impl App {
         self.show_transfers(root);
     }
 
-    #[cfg(not(feature = "p2p-device-contacts-preview"))]
     fn show_transfers(&mut self, root: &mut RenderRoot) {
+        let identity_view = {
+            #[cfg(feature = "p2p-device-ui")]
+            { Some(&self.transfer.local_identity.view) }
+            #[cfg(not(feature = "p2p-device-ui"))]
+            { None }
+        };
+        #[cfg(feature = "p2p-device-contacts-preview")]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(),
+            &self.transfer.transport_contacts, self.transfer.choosing,
+            self.transfer.error.as_deref(), identity_view,
         );
-        root.add_layer(layer, masonry::kurbo::Point::ORIGIN);
+        #[cfg(not(feature = "p2p-device-contacts-preview"))]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
+        );
+        root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
         self.popup = Some(Popup::Transfers(dialog));
     }
+
     fn refresh_transfers(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Transfers(dialog)) = self.popup.take() {
             root.remove_layer(dialog.layer);
@@ -76,6 +99,10 @@ impl App {
         while let Ok(paths) = self.transfer_rx.try_recv() {
             self.transfer.choosing = false;
             self.transfer.stage(paths);
+            changed = true;
+        }
+        #[cfg(feature = "p2p-device-ui")]
+        if self.transfer.local_identity.poll() {
             changed = true;
         }
         if changed {
@@ -125,6 +152,17 @@ impl App {
             self.transfer.choose_peer((*device_id, *key));
             refresh = true;
         }
+        #[cfg(feature = "p2p-device-ui")]
+        if pressed && !refresh {
+            if let Some((_, command)) = dialog.identity_actions.iter()
+                .find(|(button, _)| *button == id)
+            {
+                self.transfer.local_identity.action(
+                    *command, Arc::clone(&self.workspace.wake),
+                );
+                refresh = true;
+            }
+        }
         self.popup = Some(Popup::Transfers(dialog));
         if refresh {
             self.refresh_transfers(root);
@@ -132,63 +170,6 @@ impl App {
         Outcome::default()
     }
 }
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn drafts_are_metadata_only_and_cannot_start_transfer() {
-        let root = tempfile::tempdir().unwrap();
-        let file = root.path().join("archive.bin");
-        std::fs::write(&file, b"hello").unwrap();
-        let mut queue = TransferState::default();
-        queue.stage(vec![file.clone(), file]);
-        assert_eq!(queue.drafts.len(), 1);
-        assert_eq!(queue.drafts[0].bytes, 5);
-        assert!(!queue.drafts[0].paused);
-        queue.toggle(0);
-        assert!(queue.drafts[0].paused);
-        queue.toggle(0);
-        assert!(!queue.drafts[0].paused);
-        queue.remove(0);
-        assert!(queue.drafts.is_empty());
-    }
-
-    #[test]
-    fn directories_and_missing_files_are_not_staged() {
-        let root = tempfile::tempdir().unwrap();
-        let missing = root.path().join("missing.bin");
-        let mut queue = TransferState::default();
-        queue.stage(vec![root.path().to_path_buf(), missing]);
-        assert!(queue.drafts.is_empty());
-        assert!(queue.error.is_some());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn symlink_is_never_staged() {
-        use std::os::unix::fs::symlink;
-        let root = tempfile::tempdir().unwrap();
-        let file = root.path().join("real.bin");
-        let link = root.path().join("link.bin");
-        std::fs::write(&file, b"hello").unwrap();
-        symlink(&file, &link).unwrap();
-        let mut queue = TransferState::default();
-        queue.stage(vec![link]);
-        assert!(queue.drafts.is_empty());
-    }
-
-    #[test]
-    fn drafts_are_bounded() {
-        let root = tempfile::tempdir().unwrap();
-        let paths: Vec<PathBuf> = (0..MAX_DRAFTS + 2).map(|n| {
-            let p = root.path().join(format!("{n}.bin"));
-            std::fs::write(&p, b"x").unwrap();
-            p
-        }).collect();
-        let mut queue = TransferState::default();
-        queue.stage(paths);
-        assert_eq!(queue.drafts.len(), MAX_DRAFTS);
-        assert!(queue.error.is_some());
-    }
-}
+mod tests;

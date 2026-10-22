@@ -15,12 +15,14 @@ use aquilum_core::sync::device_roster_lab::{
 };
 use aquilum_core::sync::{DeviceId, DocumentId, RevisionId, VaultId};
 use iroh::endpoint::{Connection, Endpoint, presets};
-use iroh::{RelayMode, SecretKey};
+use iroh::{EndpointAddr, RelayMode, SecretKey};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use std::collections::HashSet;
 use std::fs;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use uuid::Uuid;
 
 const ALPN: &[u8] = b"akula-node-live-id-lab/v1";
@@ -50,10 +52,31 @@ async fn establish(server: &Endpoint, secret: SecretKey) -> (Endpoint, Connectio
         .bind()
         .await
         .unwrap();
-    let (dialed, inbound) = tokio::join!(client.connect(server.addr(), ALPN), async {
-        server.accept().await.unwrap().await
-    },);
-    (client, dialed.unwrap(), inbound.unwrap())
+    let socket = server
+        .bound_sockets()
+        .into_iter()
+        .find(|socket| socket.is_ipv4())
+        .or_else(|| server.bound_sockets().into_iter().next())
+        .expect("bound Iroh QUIC UDP socket");
+    let ip = match socket {
+        SocketAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        SocketAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+    };
+    let target = EndpointAddr::new(server.id()).with_ip_addr(SocketAddr::new(ip, socket.port()));
+    let (dialed, inbound) = tokio::join!(
+        tokio::time::timeout(Duration::from_secs(20), client.connect(target, ALPN)),
+        async {
+            let incoming = tokio::time::timeout(Duration::from_secs(20), server.accept())
+                .await
+                .expect("incoming QUIC deadline")
+                .expect("incoming QUIC connection");
+            let handshake = incoming.accept().expect("TLS handshake");
+            tokio::time::timeout(Duration::from_secs(20), handshake)
+                .await
+                .expect("TLS handshake deadline")
+        },
+    );
+    (client, dialed.unwrap().unwrap(), inbound.unwrap())
 }
 
 fn state_and_grants(
@@ -98,7 +121,7 @@ fn state_and_grants(
 
     let device_key = Ed25519KeyPair::from_seed_unchecked(&device_seed).unwrap();
     let endpoint = *SecretKey::from_bytes(&device_seed).public().as_bytes();
-    assert_eq!(device_key.public_key().as_ref(), endpoint);
+    assert_eq!(device_key.public_key().as_ref(), endpoint.as_slice());
 
     let roster = sign_roster(
         OwnerSignedRoster {

@@ -11,12 +11,14 @@ workspace = ".."
 default = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
+# Opt-in verified receiver staged-file create-new, no Vault apply.
+p2p-inbox-lab = ["p2p-offer-lab"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
-# Offline, operator-only replica evidence reuses SqliteDagStore; NO network writer.
+# Offline Node replica lab over the existing Sync DAG; no live writer.
 node-replica-lab = ["node-catalog-lab"]
-# Ephemeral signed read grant and live device proof ONLY; no production pairing.
+# Authenticated local read lab; no production pairing.
 node-replica-auth-lab = ["node-replica-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
@@ -60,7 +62,7 @@ sync-engine = []
 host-custody = []
 # OS-protected transport key, no peer grants.
 p2p-device-identity = ["dep:windows"]
-# Owner-signed device roster observation only; never a Vault read grant.
+# Owner-signed read-only roster lab; not pairing, identity or Vault grants.
 device-roster-lab = []
 # Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
 sync-text-delta = ["dep:zstd"]
