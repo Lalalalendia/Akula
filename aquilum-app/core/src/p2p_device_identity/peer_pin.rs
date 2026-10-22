@@ -2,9 +2,9 @@
 //! Transport MUST supply independently authenticated remote EndpointId bytes;
 //! passing a value from an untrusted peer's message is not authentication.
 
-use super::{load, IdentityError};
 #[cfg(windows)]
 use super::windows_store;
+use super::{load, IdentityError};
 use zeroize::Zeroizing;
 
 const PEER_RECORD_MAGIC: &[u8; 8] = b"AKPPIN01";
@@ -20,7 +20,11 @@ pub enum PeerState {
 }
 
 fn hex_to_endpoint(text: &str) -> Result<[u8; 32], IdentityError> {
-    if text.len() != 64 || !text.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) {
+    if text.len() != 64
+        || !text
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    {
         return Err(IdentityError::InvalidPeerId);
     }
     let mut public = [0u8; 32];
@@ -43,7 +47,11 @@ fn peer_target(remote: &[u8; 32]) -> String {
     format!("{PEER_TARGET_PREFIX}{}", endpoint_hex(remote))
 }
 
-fn encode_record(local: &[u8; 32], remote: &[u8; 32], state: PeerState) -> Zeroizing<[u8; PEER_RECORD_BYTES]> {
+fn encode_record(
+    local: &[u8; 32],
+    remote: &[u8; 32],
+    state: PeerState,
+) -> Zeroizing<[u8; PEER_RECORD_BYTES]> {
     let mut record = Zeroizing::new([0u8; PEER_RECORD_BYTES]);
     record[..8].copy_from_slice(PEER_RECORD_MAGIC);
     record[8..40].copy_from_slice(local);
@@ -89,11 +97,7 @@ fn status_named(
 }
 
 #[cfg(windows)]
-fn confirm_named(
-    target: &str,
-    local: &[u8; 32],
-    remote: &[u8; 32],
-) -> Result<(), IdentityError> {
+fn confirm_named(target: &str, local: &[u8; 32], remote: &[u8; 32]) -> Result<(), IdentityError> {
     let _lock = windows_store::EnrollmentLock::acquire()?;
     match status_named(target, local, remote)? {
         PeerState::NotFound => {}
@@ -109,11 +113,7 @@ fn confirm_named(
 }
 
 #[cfg(windows)]
-fn revoke_named(
-    target: &str,
-    local: &[u8; 32],
-    remote: &[u8; 32],
-) -> Result<(), IdentityError> {
+fn revoke_named(target: &str, local: &[u8; 32], remote: &[u8; 32]) -> Result<(), IdentityError> {
     let _lock = windows_store::EnrollmentLock::acquire()?;
     match status_named(target, local, remote)? {
         PeerState::NotFound => return Err(IdentityError::PeerNotFound),
@@ -132,10 +132,7 @@ fn revoke_named(
 /// UI must collect the second value from a truly independent human confirmation,
 /// not auto-fill it from the discovered peer or from the same network message.
 /// A revoked pin cannot silently re-enroll.
-pub fn confirm_peer(
-    discovered_id: &str,
-    human_verified_id: &str,
-) -> Result<(), IdentityError> {
+pub fn confirm_peer(discovered_id: &str, human_verified_id: &str) -> Result<(), IdentityError> {
     let remote = hex_to_endpoint(discovered_id)?;
     let confirmed = hex_to_endpoint(human_verified_id)?;
     if remote != confirmed {
@@ -213,35 +210,65 @@ mod tests {
     fn accepts_only_exact_full_lowercase_ids() {
         let valid = endpoint_hex(&[0x23; 32]);
         assert_eq!(hex_to_endpoint(&valid).unwrap(), [0x23; 32]);
-        for bad in ["".to_string(), "abc".to_string(), "A".repeat(64), "0".repeat(64), "g".repeat(64)] {
+        for bad in [
+            "".to_string(),
+            "abc".to_string(),
+            "A".repeat(64),
+            "0".repeat(64),
+            "g".repeat(64),
+        ] {
             assert!(hex_to_endpoint(&bad).is_err());
         }
         let local = [9; 32];
         let remote = [8; 32];
         let record = encode_record(&local, &remote, PeerState::Confirmed);
-        assert_eq!(decode_record(&record[..], &local, &remote), Ok(PeerState::Confirmed));
-        assert_eq!(decode_record(&record[..], &remote, &local), Err(IdentityError::CorruptCredential));
+        assert_eq!(
+            decode_record(&record[..], &local, &remote),
+            Ok(PeerState::Confirmed)
+        );
+        assert_eq!(
+            decode_record(&record[..], &remote, &local),
+            Err(IdentityError::CorruptCredential)
+        );
         let revoked = encode_record(&local, &remote, PeerState::Revoked);
-        assert_eq!(decode_record(&revoked[..], &local, &remote), Ok(PeerState::Revoked));
+        assert_eq!(
+            decode_record(&revoked[..], &local, &remote),
+            Ok(PeerState::Revoked)
+        );
         let mut corrupted = revoked.clone();
         corrupted[72] = 0;
-        assert!(matches!(decode_record(&corrupted[..], &local, &remote), Err(IdentityError::CorruptCredential)));
+        assert!(matches!(
+            decode_record(&corrupted[..], &local, &remote),
+            Err(IdentityError::CorruptCredential)
+        ));
     }
 
     #[test]
     fn false_manual_confirmation_has_no_store_side_effects() {
         let a = endpoint_hex(&[13; 32]);
         let b = endpoint_hex(&[14; 32]);
-        assert!(matches!(confirm_peer(&a, &b), Err(IdentityError::PeerMismatch)));
+        assert!(matches!(
+            confirm_peer(&a, &b),
+            Err(IdentityError::PeerMismatch)
+        ));
     }
 
     #[cfg(not(windows))]
     #[test]
     fn unsupported_backend_cannot_enroll_or_revoke() {
         let id = endpoint_hex(&[18; 32]);
-        assert!(matches!(confirm_peer(&id, &id), Err(IdentityError::UnsupportedPlatform)));
-        assert!(matches!(revoke_peer(&id), Err(IdentityError::UnsupportedPlatform)));
-        assert!(matches!(peer_state(&id), Err(IdentityError::UnsupportedPlatform)));
+        assert!(matches!(
+            confirm_peer(&id, &id),
+            Err(IdentityError::UnsupportedPlatform)
+        ));
+        assert!(matches!(
+            revoke_peer(&id),
+            Err(IdentityError::UnsupportedPlatform)
+        ));
+        assert!(matches!(
+            peer_state(&id),
+            Err(IdentityError::UnsupportedPlatform)
+        ));
         assert!(require_pinned_remote(&id, &[18; 32]).is_err());
     }
 
@@ -259,11 +286,19 @@ mod tests {
         let local_target = format!("Lalalalendia/Akula/P2P/test/{scope}/local");
         let peer_target = format!("Lalalalendia/Akula/P2P/test/{scope}/peer");
         let _cleanup = Cleanup(local_target.clone(), peer_target.clone());
-        let local = windows_store::initialize_named(&local_target).unwrap().endpoint_public_bytes();
+        let local = windows_store::initialize_named(&local_target)
+            .unwrap()
+            .endpoint_public_bytes();
         let remote = [21; 32];
-        assert_eq!(status_named(&peer_target, &local, &remote), Ok(PeerState::NotFound));
+        assert_eq!(
+            status_named(&peer_target, &local, &remote),
+            Ok(PeerState::NotFound)
+        );
         confirm_named(&peer_target, &local, &remote).unwrap();
-        assert!(matches!(confirm_named(&peer_target, &local, &remote), Err(IdentityError::AlreadyInitialized)));
+        assert!(matches!(
+            confirm_named(&peer_target, &local, &remote),
+            Err(IdentityError::AlreadyInitialized)
+        ));
         let check_child = |state: &str| {
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .arg("--exact")
@@ -274,12 +309,21 @@ mod tests {
                 .env("AKULA_P2P_TEST_PEER_STATE", state)
                 .output()
                 .unwrap();
-            assert!(result.status.success(), "second process could not read persisted peer state");
+            assert!(
+                result.status.success(),
+                "second process could not read persisted peer state"
+            );
         };
         check_child("confirmed");
         revoke_named(&peer_target, &local, &remote).unwrap();
-        assert_eq!(status_named(&peer_target, &local, &remote), Ok(PeerState::Revoked));
-        assert!(matches!(confirm_named(&peer_target, &local, &remote), Err(IdentityError::PeerRevoked)));
+        assert_eq!(
+            status_named(&peer_target, &local, &remote),
+            Ok(PeerState::Revoked)
+        );
+        assert!(matches!(
+            confirm_named(&peer_target, &local, &remote),
+            Err(IdentityError::PeerRevoked)
+        ));
         check_child("revoked");
     }
 
@@ -291,9 +335,18 @@ mod tests {
         };
         let peer_target = std::env::var("AKULA_P2P_TEST_PEER_TARGET").unwrap();
         let expected = std::env::var("AKULA_P2P_TEST_PEER_STATE").unwrap();
-        let local = windows_store::load_named(&local_target).unwrap().endpoint_public_bytes();
+        let local = windows_store::load_named(&local_target)
+            .unwrap()
+            .endpoint_public_bytes();
         let remote = [21; 32];
         let state = status_named(&peer_target, &local, &remote).unwrap();
-        assert_eq!(state, if expected == "confirmed" { PeerState::Confirmed } else { PeerState::Revoked });
+        assert_eq!(
+            state,
+            if expected == "confirmed" {
+                PeerState::Confirmed
+            } else {
+                PeerState::Revoked
+            }
+        );
     }
 }
