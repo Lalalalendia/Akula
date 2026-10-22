@@ -90,3 +90,42 @@ jobs:
           timeout 20s experiments/plugin-05/extism/host/target/release/akula-plugin05-extism-host | tee "$RUNNER_TEMP/plugin05b.json"
           cat "$RUNNER_TEMP/plugin05b.json" >> "$GITHUB_STEP_SUMMARY"
           echo 'Different PDK/ABI and Wasmtime version; do not report as calibrated A/B.' >> "$GITHUB_STEP_SUMMARY"
+
+  probe-cross-os:
+    name: Sandbox deny controls / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 95
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Direct Wasmtime no-WASI grant/fuel/memory smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path experiments/plugin-05/wasmtime/Cargo.toml
+      - name: Build Extism Rust PDK guest without WASI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --target wasm32-unknown-unknown --manifest-path experiments/plugin-05/extism/guest/Cargo.toml
+      - name: Extism host grant/revoke/fuel/memory smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path experiments/plugin-05/extism/host/Cargo.toml -- --nocapture
+      - name: Record cross-OS scope
+        shell: bash
+        run: |
+          echo 'Research-only sandbox controls passed on ${{ matrix.os }}; no installed-app benchmark.' >> "$GITHUB_STEP_SUMMARY"
