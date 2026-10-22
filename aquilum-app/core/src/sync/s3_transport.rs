@@ -12,8 +12,8 @@ use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
 mod explicit_credentials;
-mod pair_upload;
-mod pair_receive;
+pub(crate) mod pair_upload;
+pub(crate) mod pair_receive;
 pub use explicit_credentials::S3PairAccess;
 pub use pair_receive::S3PairReceiveReport;
 pub use pair_upload::S3PairRemotePublication;
