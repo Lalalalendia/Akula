@@ -14,6 +14,7 @@ use crate::sync::{S3ConnectionProfile, S3Keyspace};
 use std::sync::Arc;
 
 #[tokio::test]
+#[ignore = "requires disposable MinIO integration server"]
 async fn live_minio_pair_two_local_cores_encrypted_invite_new_files_both_directions() {
     let Ok(endpoint) = std::env::var("AQ_S3_TEST_ENDPOINT") else { return; };
     assert!(endpoint.starts_with("http://127.0.0.1:")
