@@ -177,16 +177,16 @@ impl GameSession {
             });
         }
 
-        if let Some(last) = self.last_accepted[index] {
-            if command.sequence == last.sequence {
-                return if command.column == last.column {
-                    Ok(ApplyResult::Duplicate {
-                        original_revision: last.revision,
-                    })
-                } else {
-                    Err(GameError::SequenceConflict)
-                };
-            }
+        if let Some(last) = self.last_accepted[index]
+            && command.sequence == last.sequence
+        {
+            return if command.column == last.column {
+                Ok(ApplyResult::Duplicate {
+                    original_revision: last.revision,
+                })
+            } else {
+                Err(GameError::SequenceConflict)
+            };
         }
         let expected = self.next_sequences[index];
         if command.sequence < expected {
