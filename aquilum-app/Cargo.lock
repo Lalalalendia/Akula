@@ -244,6 +244,7 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
+ "windows",
  "yrs",
  "zeroize",
  "zstd",
