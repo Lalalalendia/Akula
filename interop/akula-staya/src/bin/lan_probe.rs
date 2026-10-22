@@ -87,13 +87,10 @@ async fn run() -> Result<(), String> {
             tx.finish()
                 .map_err(|error| format!("finish bounded reply: {error}"))?;
             // QUIC finish alone does not guarantee delivery before close.
-            if tx
-                .stopped()
-                .await
-                .map_err(|error| format!("reply delivery not confirmed: {error}"))?
-                .is_some()
-            {
-                return Err("peer stopped the reply stream".to_owned());
+            match tx.stopped().await {
+                Ok(None) => {}
+                Ok(Some(_)) => return Err("peer stopped the reply stream".to_owned()),
+                Err(error) => return Err(format!("reply delivery not confirmed: {error}")),
             }
             Ok::<(), String>(())
         })
@@ -132,13 +129,10 @@ async fn run() -> Result<(), String> {
             }
             // Preserve the session until the already-sent greeting is
             // acknowledged; otherwise immediate connection close may drop it.
-            if tx
-                .stopped()
-                .await
-                .map_err(|error| format!("greeting delivery not confirmed: {error}"))?
-                .is_some()
-            {
-                return Err("peer stopped the greeting stream".to_owned());
+            match tx.stopped().await {
+                Ok(None) => {}
+                Ok(Some(_)) => return Err("peer stopped the greeting stream".to_owned()),
+                Err(error) => return Err(format!("greeting delivery not confirmed: {error}")),
             }
             Ok::<(), String>(())
         })
