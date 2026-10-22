@@ -58,6 +58,50 @@ fn first_party_task_view_is_scoped_and_read_only() {
     core.shutdown();
 }
 
+#[cfg(feature = "extension-view-lab")]
+#[test]
+fn task_view_rejects_foreign_hidden_and_missing_documents() {
+    let (vault, _data, core) = indexed(&[
+        ("visible.md", "- [ ] public\\n"),
+        (".hidden.md", "- [ ] hidden\\n"),
+    ]);
+    let other = crate::test_dir::tempdir();
+    std::fs::write(other.path().join("foreign.md"), "- [ ] private\\n").unwrap();
+
+    for path in [
+        other.path().join("foreign.md"),
+        vault.path().join(".hidden.md"),
+        vault.path().join("missing.md"),
+    ] {
+        let mut req = request(vault.path(), "visible.md", Mode::Tasks);
+        req.document = path;
+        let blocked = run(&core, &req);
+        assert!(blocked.items.is_empty(), "unexpected task data outside approved note");
+        assert!(blocked.notice.is_some(), "missing denial reason");
+    }
+
+    let allowed = run(&core, &request(vault.path(), "visible.md", Mode::Tasks));
+    assert_eq!(allowed.items.len(), 1);
+    assert_eq!(allowed.items[0].title, "[ ] public");
+    core.shutdown();
+}
+
+#[cfg(feature = "extension-view-lab")]
+#[test]
+fn task_view_caps_results_and_reports_truncation() {
+    let body = (0..80)
+        .map(|n| format!("- [ ] task {n}"))
+        .collect::<Vec<_>>()
+        .join("\\n");
+    let (vault, _data, core) = indexed(&[("many.md", &body)]);
+    let listing = run(&core, &request(vault.path(), "many.md", Mode::Tasks));
+    assert_eq!(listing.items.len(), 64);
+    assert_eq!(listing.items[0].title, "[ ] task 0");
+    assert_eq!(listing.items[63].title, "[ ] task 63");
+    assert!(listing.notice.is_some(), "64-row cap should be explained");
+    core.shutdown();
+}
+
 #[test]
 fn anchors_stay_in_the_target_and_attachments_are_not_listed() {
     let (vault, _data, core) = indexed(&[("a.md", "[[b#Раздел]] ![[pic.png|200]] [[#Тут]] [[Нет#Раздел]]"), ("b.md", "# Раздел")]);
