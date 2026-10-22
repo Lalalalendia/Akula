@@ -6,7 +6,9 @@ use akula_flash_port::{MAX_SWF_BYTES, emit_rust, parse_swf};
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1);
-    let first = args.next().ok_or("usage: akula-flash-port [--scene-svg FRAME] <input.swf> <output>")?;
+    let first = args
+        .next()
+        .ok_or("usage: akula-flash-port [--scene-svg FRAME] <input.swf> <output>")?;
     let (scene_frame, input_arg) = if first == "--scene-svg" {
         let index = args
             .next()
