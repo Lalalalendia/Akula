@@ -3,8 +3,6 @@
 //! This crate is deliberately isolated from Akula's Sync Core and File Gate.
 //! An authenticated QUIC peer is not automatically authorized to see files.
 
-use std::collections::BTreeSet;
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::presets};
@@ -14,56 +12,8 @@ pub const STAYA_ALPN: &[u8] = b"akula/staya/transport/0";
 
 pub mod transfer;
 
-/// Network admission only: neither a Vault grant nor production pairing.
-/// All clones share revocations; poisoned locks fail closed. A live verifier
-/// may re-read Akula's protected peer pins for each authenticated operation.
-#[derive(Clone, Default)]
-pub struct AllowedPeers {
-    peers: Arc<RwLock<BTreeSet<EndpointId>>>,
-    live_check: Option<Arc<dyn Fn(&EndpointId) -> bool + Send + Sync>>,
-}
-
-impl std::fmt::Debug for AllowedPeers {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AllowedPeers")
-            .field("has_live_check", &self.live_check.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-impl AllowedPeers {
-    pub fn new(peers: impl IntoIterator<Item = EndpointId>) -> Self {
-        Self {
-            peers: Arc::new(RwLock::new(peers.into_iter().collect())),
-            live_check: None,
-        }
-    }
-
-    /// Install a fail-closed, freshly evaluated *host-owned* peer admission
-    /// check. Akula must supply a closure that calls
-    /// p2p_device_identity::peer_pin::require_pinned_remote with this REAL
-    /// connection's remote_id(). Never trust a key copied from a wire payload,
-    /// contact row or invitation. This is transport admission, not a file grant.
-    pub fn with_live_check(
-        mut self,
-        check: impl Fn(&EndpointId) -> bool + Send + Sync + 'static,
-    ) -> Self {
-        self.live_check = Some(Arc::new(check));
-        self
-    }
-
-    pub fn contains(&self, id: &EndpointId) -> bool {
-        if !self.peers.read().is_ok_and(|peers| peers.contains(id)) {
-            return false;
-        }
-        self.live_check.as_ref().is_none_or(|check| check(id))
-    }
-
-    /// Revokes admission in this process. No durable or distributed policy.
-    pub fn revoke(&self, id: &EndpointId) -> bool {
-        self.peers.write().is_ok_and(|mut peers| peers.remove(id))
-    }
-}
+mod admission;
+pub use admission::AllowedPeers;
 
 /// A network endpoint without implicit n0 relay or DNS publication.
 #[derive(Debug)]
@@ -187,9 +137,9 @@ mod tests {
         assert!(policy.contains(&permitted));
         assert!(!policy.contains(&other));
         assert!(!AllowedPeers::default().contains(&permitted));
-        let visible = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let visible = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let live = AllowedPeers::new([permitted]).with_live_check({
-            let visible = Arc::clone(&visible);
+            let visible = std::sync::Arc::clone(&visible);
             move |key| key == &permitted && visible.load(std::sync::atomic::Ordering::Acquire)
         });
         assert!(live.contains(&permitted));
