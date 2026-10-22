@@ -10,6 +10,9 @@ use std::collections::HashSet;
 const MAX_WAVES: usize = 1_024;
 const MAX_GROUPS: usize = 4_096;
 const MAX_ENTRIES: usize = 16_384;
+const MAX_TOTAL_GROUPS: usize = 4_096;
+const MAX_TOTAL_ENTRIES: usize = 65_536;
+const MAX_ALIVE: usize = 65_536;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SpawnKind {
@@ -58,6 +61,8 @@ pub enum ConfigError {
     TooManyWaves,
     TooManyGroups { wave: usize },
     TooManyEntries { wave: usize, group: usize },
+    TooManyTotalGroups,
+    TooManyTotalEntries,
     EmptyArchetype { wave: usize, group: usize },
     BadShuffleIndex { upper: usize, chosen: usize },
 }
@@ -72,6 +77,7 @@ pub enum Event {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TickError {
     IdsExhausted,
+    LiveBudgetExceeded,
 }
 
 #[derive(Debug)]
@@ -123,7 +129,14 @@ impl RunningGroup {
             items.swap(i, j);
         }
         let last_ids = vec![None; items.len()];
-        Ok(Self { mode, items, position: 0, clock: 0, last_ids })
+        // Historical Group constructor sets timer=frequency. The first
+        // item is therefore emitted on the very first update, regardless
+        // of the interval between later items.
+        let initial_clock = match mode {
+            Mode::Pause { .. } => 0,
+            Mode::Batch { frequency } | Mode::Cycle { frequency, .. } => frequency,
+        };
+        Ok(Self { mode, items, position: 0, clock: initial_clock, last_ids })
     }
 
     fn can_advance(&self) -> bool {
@@ -247,12 +260,28 @@ impl Scheduler {
             return Err(ConfigError::TooManyWaves);
         }
         let mut parsed = Vec::with_capacity(waves.len());
+        let mut total_groups = 0usize;
+        let mut total_entries = 0usize;
         for (wi, wave) in waves.into_iter().enumerate() {
             if wave.groups.len() > MAX_GROUPS {
                 return Err(ConfigError::TooManyGroups { wave: wi });
             }
+            total_groups = total_groups.checked_add(wave.groups.len())
+                .ok_or(ConfigError::TooManyTotalGroups)?;
+            if total_groups > MAX_TOTAL_GROUPS {
+                return Err(ConfigError::TooManyTotalGroups);
+            }
             let mut groups = Vec::with_capacity(wave.groups.len());
             for (gi, group) in wave.groups.into_iter().enumerate() {
+                let n = match &group {
+                    Group::Pause { .. } => 0,
+                    Group::Batch { items, .. } | Group::Cycle { items, .. } => items.len(),
+                };
+                total_entries = total_entries.checked_add(n)
+                    .ok_or(ConfigError::TooManyTotalEntries)?;
+                if total_entries > MAX_TOTAL_ENTRIES {
+                    return Err(ConfigError::TooManyTotalEntries);
+                }
                 groups.push(RunningGroup::new(group, wi, gi, &mut choose)?);
             }
             parsed.push(RunningWave {
@@ -268,6 +297,11 @@ impl Scheduler {
     pub fn tick(&mut self) -> Result<Vec<Event>, TickError> {
         if self.finished {
             return Ok(Vec::new());
+        }
+        // A cycling group can spawn indefinitely without the host marking
+        // objects gone. Halt without advancing the scheduler at the limit.
+        if self.alive.len() >= MAX_ALIVE {
+            return Err(TickError::LiveBudgetExceeded);
         }
         let mut events = Vec::new();
         if self.waves[self.current].completed(&self.alive)
@@ -295,11 +329,10 @@ impl Scheduler {
             if let Some((group, slot, item)) = self.waves[self.current].update(&self.alive) {
                 let id = self.next_id;
                 self.next_id = self.next_id.checked_add(1).ok_or(TickError::IdsExhausted)?;
-                if let Some(old) =
-                    self.waves[self.current].groups[group].last_ids[slot].replace(id)
-                {
-                    self.alive.remove(&old);
-                }
+                // Older objects can still be alive in the game world even
+                // after the original spawn slot is overwritten by a cycle.
+                // Only completion checks the latest handle for each slot.
+                self.waves[self.current].groups[group].last_ids[slot] = Some(id);
                 self.alive.insert(id);
                 events.push(Event::Spawned { wave: self.current, group, id, item });
             }
