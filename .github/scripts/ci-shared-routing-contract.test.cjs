@@ -101,3 +101,19 @@ test('beta packaging workflows do not build all three OS installers for any Nati
   assert.match(main,/workspace\|native\)\n\s+if \[ "\$FRAMES_RESULT" != success \]/,
     'a Native-only source PR is still blocked on full Native rendering tests');
 });
+
+test('called OS/security workflows cannot mutually cancel through shared concurrency',()=>{
+  const groups=new Map();
+  for(const [,filename] of routeEntries){
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',filename),'utf8');
+    const group=body.match(/^  group: (.+)$/m)?.[1];
+    if(!group)continue;
+    assert.ok(!groups.has(group),filename+' collides with '+groups.get(group));
+    groups.set(group,filename);
+  }
+  const ipc=fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b1b4b1-witness-ipc.yml'),'utf8');
+  assert.match(ipc,/^  group: akula-b1b4b1-\$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}$/m);
+  assert.match(ipc,/^  cancel-in-progress: true$/m);
+  const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
