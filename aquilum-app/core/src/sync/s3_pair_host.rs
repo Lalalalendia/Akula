@@ -18,6 +18,13 @@ use super::s3_transport::pair_upload::S3PairUploadError;
 use super::s3_transport::pair_receive::S3PairReceiveError;
 use crate::app_core::Core;
 
+mod custody;
+pub use custody::{
+    open_existing_cooperative_s3_pair_custody,
+    provision_cooperative_s3_pair_custody,
+    S3PairCustodyError,
+};
+
 pub const PAIR_PROFILE_FILENAME: &str = "s3-pair-profile-v1.json";
 const MAX_PROFILE_BYTES: u64 = 4096;
 const MAX_SYNC_FILES: usize = 128;
