@@ -132,9 +132,9 @@ impl RunningGroup {
         // Historical Group constructor sets timer=frequency. The first
         // item is therefore emitted on the very first update, regardless
         // of the interval between later items.
-        let initial_clock = match mode {
+        let initial_clock = match &mode {
             Mode::Pause { .. } => 0,
-            Mode::Batch { frequency } | Mode::Cycle { frequency, .. } => frequency,
+            Mode::Batch { frequency } | Mode::Cycle { frequency, .. } => *frequency,
         };
         Ok(Self { mode, items, position: 0, clock: initial_clock, last_ids })
     }
