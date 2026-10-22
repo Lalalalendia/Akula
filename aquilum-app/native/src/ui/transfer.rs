@@ -33,9 +33,11 @@ pub enum QueueAction {
 mod devices;
 mod identity;
 mod layout;
+mod peer_pair;
 use layout::{card_size, details, display_size, hint, rule};
 pub use devices::{DeviceRow, DeviceStatus};
 pub use identity::{IdentityAction, IdentityPhase, IdentityView};
+pub use peer_pair::{PeerAction, PeerControls, PeerPhase, PeerView};
 
 pub struct TransferDialog {
     pub layer: WidgetId,
@@ -44,6 +46,7 @@ pub struct TransferDialog {
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
+    pub peer_controls: Option<PeerControls>,
 }
 
 /// The only actionable controls modify local drafts or open the local picker.
@@ -54,6 +57,7 @@ pub fn dialog(
     choosing: bool,
     error: Option<&str>,
     identity: Option<&IdentityView>,
+    peer: Option<&PeerView>,
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
@@ -101,6 +105,7 @@ pub fn dialog(
 
     let (info, device_actions) = devices::render(devices, error);
     let mut identity_actions = Vec::new();
+    let mut peer_controls = None;
     let footer = NewWidget::new(Flex::row()
         .main_axis_alignment(MainAxisAlignment::End)
         .with_fixed(choose))
@@ -116,6 +121,11 @@ pub fn dialog(
         identity_actions = actions;
         content = content.with_fixed(panel).with_fixed(rule());
     }
+    if let Some(peer) = peer {
+        let (panel, controls) = peer_pair::render(peer);
+        peer_controls = Some(controls);
+        content = content.with_fixed(panel).with_fixed(rule());
+    }
     let card = NewWidget::new(content
         .with(queue, 1.0)
         .with_fixed(rule())
@@ -129,17 +139,9 @@ pub fn dialog(
         actions,
         device_actions,
         identity_actions,
+        peer_controls,
     })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn byte_size_always_refers_to_source_metadata_not_network_progress() {
-        assert_eq!(display_size(0), "0 B");
-        assert_eq!(display_size(1024), "1.0 KiB");
-        assert_eq!(display_size(1_048_576), "1.0 MiB");
-    }
-}
+mod tests;
