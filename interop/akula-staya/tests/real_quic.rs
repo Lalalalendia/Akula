@@ -2,9 +2,9 @@
 //! decision and the actual Staya QueueSelection. Only disposable test files.
 //! This is not proof of trusted long-lived Device enrollment or File Gate.
 
-use akula_staya_integration::{prepare_staya_batch, verify_staya_invitation};
 #[cfg(feature = "sender-arm-lab")]
 use akula_staya_integration::sender_arm_lab::{LabArmError, LabSenderFence};
+use akula_staya_integration::{prepare_staya_batch, verify_staya_invitation};
 use aquilum_core::{
     p2p_offer_lab::{DecisionAction, OfferV1, OfferedFile, PeerBinding, SCHEMA},
     sync::DeviceId,

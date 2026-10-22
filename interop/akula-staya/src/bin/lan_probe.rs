@@ -13,8 +13,7 @@ const ALPN: &[u8] = b"akula/p2p-os-lan-proof/1";
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn usage() -> String {
-    "usage: akula-p2p-lan listen PEER_ENDPOINT_ID | connect PEER_ENDPOINT_ID LAN_IP:UDP_PORT"
-        .into()
+    "usage: akula-p2p-lan listen PEER_ENDPOINT_ID | connect PEER_ENDPOINT_ID LAN_IP:UDP_PORT".into()
 }
 
 async fn run() -> Result<(), String> {
@@ -99,13 +98,10 @@ async fn run() -> Result<(), String> {
             .parse()
             .map_err(|_| "expected a numeric LAN_IP:UDP_PORT".to_owned())?;
         let address = EndpointAddr::new(peer_id).with_ip_addr(socket);
-        let connection = tokio::time::timeout(
-            MESSAGE_TIMEOUT,
-            endpoint.connect(address, ALPN),
-        )
-        .await
-        .map_err(|_| "direct QUIC connection timed out".to_owned())?
-        .map_err(|error| format!("direct QUIC connection: {error}"))?;
+        let connection = tokio::time::timeout(MESSAGE_TIMEOUT, endpoint.connect(address, ALPN))
+            .await
+            .map_err(|_| "direct QUIC connection timed out".to_owned())?
+            .map_err(|error| format!("direct QUIC connection: {error}"))?;
         require_pinned_live_peer(&connection, &selected)
             .map_err(|error| format!("authenticated outgoing peer denied: {error}"))?;
         let exchange = tokio::time::timeout(MESSAGE_TIMEOUT, async {
