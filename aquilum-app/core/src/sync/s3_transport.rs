@@ -15,8 +15,6 @@ mod explicit_credentials;
 pub(crate) mod pair_upload;
 pub(crate) mod pair_receive;
 pub use explicit_credentials::S3PairAccess;
-pub use pair_receive::S3PairReceiveReport;
-pub use pair_upload::S3PairRemotePublication;
 mod manifest;
 mod principal;
 pub use principal::{S3AwsAccountProofError, S3AwsVerifiedAccountScope};
