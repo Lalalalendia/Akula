@@ -1,5 +1,7 @@
 //! UI-only transfer dispatch. Never creates a QUIC connection or file grant.
 use super::*;
+use crate::app::Outcome;
+use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
 use crate::ui::dialog::{self, DialogAnswer};
 use crate::ui::transfer::QueueAction;
