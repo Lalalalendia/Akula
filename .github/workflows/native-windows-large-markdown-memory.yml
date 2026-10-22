@@ -1,0 +1,83 @@
+name: Akula M3a Windows large Markdown memory pilot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/benchmarks/native_windows_large_markdown_memory.py'
+      - '.github/workflows/native-windows-large-markdown-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-m3a-native-memory-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  large-markdown:
+    name: Win32 editor 30k and 100k Markdown open/OS wheel diagnostic
+    runs-on: windows-2025
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check script syntax and fixture immutability
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m py_compile scripts/benchmarks/native_windows_large_markdown_memory.py scripts/benchmarks/native_windows_memory_pilot.py scripts/benchmarks/native_mipmap_window_ab.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax failed' }
+          python scripts/benchmarks/native_windows_large_markdown_memory.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture integrity test failed' }
+          python -c "import os,sys;sys.path.insert(0,'scripts/benchmarks');from native_windows_memory_pilot import sample;s=sample(os.getpid());assert s['private_bytes']>0 and s['working_set_bytes']>0"
+          if ($LASTEXITCODE -ne 0) { throw 'PSAPI process memory unavailable' }
+      - name: Build unpackaged product-mode native Windows Release
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Release build failed' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Native Akula executable not found' }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $binary | Format-List
+      - name: Observe PID-owned native large editor, OS wheel and process memory
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'Disposable hosted Windows runner is required' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'windows-m3a-large-markdown'
+          $env:AKULA_PROBE_SOURCE_HEAD = (git rev-parse HEAD).Trim()
+          python scripts/benchmarks/native_windows_large_markdown_memory.py --binary $binary --out $out
+          if ($LASTEXITCODE -ne 0) { throw 'M3a diagnostic failed; do not claim successful scrolling or RAM baseline' }
+          if (!(Test-Path (Join-Path $out 'summary.md'))) { throw 'Missing summary' }
+          Get-Content (Join-Path $out 'summary.md') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive memory, PID, HWND and OS-input witnesses only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-m3a-windows-large-markdown-${{ github.sha }}
+          path: |
+            windows-m3a-large-markdown/environment.json
+            windows-m3a-large-markdown/results.json
+            windows-m3a-large-markdown/summary.md
+            windows-m3a-large-markdown/runs/*/samples.csv
+            windows-m3a-large-markdown/runs/*/witness.json
+            windows-m3a-large-markdown/runs/*/process.log
+          if-no-files-found: warn
+          retention-days: 14
