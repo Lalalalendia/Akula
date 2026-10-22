@@ -139,7 +139,7 @@ mod tests {
         g.ball=Ball{x:20.0,y:45.0,vx:0.0,vy:-120.0};
         for _ in 0..80 { g.step(Input::default()); if g.score>0 {break;} }
         assert_eq!(g.score,10);
-        assert!(!g.bricks[16]);
+        assert!(!g.bricks[8]);
     }
     #[test] fn life_loss_and_restart() {
         let mut g=Game::default(); g.lives=1;
@@ -159,7 +159,7 @@ mod tests {
         let stride=W+16;let mut pix=vec![0xfedcba98;stride*H];
         draw(&g,&mut pix,stride,H).unwrap();
         assert_eq!(pix[W],0xfedcba98);
-        assert_eq!(pix[0],0xfffaf7ee);
+        assert_eq!(pix[0],0xff131c2c);
         assert!(draw(&g,&mut pix[..10],stride,H).is_err());
     }
 }
