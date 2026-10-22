@@ -14,6 +14,14 @@ pub enum Action {
     StoreYandexKeys,
     RemoveYandexKeys,
     CheckYandexConnection,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    ConfigureS3Pair,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    ExportS3Pair,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    ImportS3Pair,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    SyncS3PairOnce,
     CheckUpdates,
     InstallUpdate,
 }
