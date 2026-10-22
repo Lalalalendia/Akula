@@ -1,4 +1,5 @@
 use super::*;
+mod tick;
 
 impl App {
     pub fn title(&self) -> String {
@@ -11,21 +12,6 @@ impl App {
 
     pub fn deadline(&self) -> Option<Instant> {
         [self.note.as_ref().and_then(Note::deadline), self.view_due, self.hold].into_iter().flatten().min()
-    }
-
-    pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
-        if self.view_due.is_some_and(|t| t <= now) {
-            self.flush_view();
-        }
-        if let Some(note) = self.note.as_mut()
-            && note.tick(&self.workspace.core, &self.text, now)
-        {
-            self.refresh_save_error(root);
-        }
-        if let Some(text) = self.note.as_mut().and_then(crate::note::Note::take_replaced) {
-            self.set_text(root, text);
-            self.refresh_save_error(root);
-        }
     }
 
     pub fn scale(&self) -> f64 {
