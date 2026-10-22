@@ -92,4 +92,3 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-live-read-lab --test node_live_identity -- --nocapture
-
