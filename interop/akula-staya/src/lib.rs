@@ -5,6 +5,9 @@
 //! Callers MUST independently authenticate Iroh remote_id and Akula enrollment.
 //! The returned queue contains roots and sizes only: no paths or write rights.
 
+#[cfg(all(target_os = "linux", feature = "node-live-read-lab"))]
+pub mod node_live_read;
+
 use aquilum_core::p2p_offer_lab::{
     DecisionV1, OfferError, OfferSession, OfferV1, Outcome, PeerBinding,
 };

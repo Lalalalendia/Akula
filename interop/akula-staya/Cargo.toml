@@ -16,10 +16,13 @@ default = []
 # Real Staya lab reads an existing signed, checked Sync DAG replica.
 # This NEVER enables a shipping Akula runtime or public network writer.
 node-replica-transport-lab = ["aquilum-core/node-replica-auth-lab"]
+# Composite established-QUIC identity + owner roster + exact read authorization.
+node-live-read-lab = ["node-replica-transport-lab", "aquilum-core/device-roster-lab"]
 
 [dev-dependencies]
 ring = "=0.17.14"
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [dependencies]
 aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-offer-lab"] }
