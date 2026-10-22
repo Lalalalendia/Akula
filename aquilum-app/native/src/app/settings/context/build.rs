@@ -41,7 +41,7 @@ impl App {
         };
         let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
         Context {
-            workspace,
+            workspace: workspace.clone(),
             sync_recovery,
             #[cfg(feature = "s3-e2e01-review-preview")]
             s3_bound_publications,
