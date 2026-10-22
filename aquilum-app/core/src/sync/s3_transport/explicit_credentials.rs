@@ -128,7 +128,7 @@ impl AwsS3ProbeClient {
         }
     }
 }
- 
+
 #[cfg(test)]
 mod tests {
     use super::*;
