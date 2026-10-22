@@ -1,3 +1,4 @@
+mod negative;
 use super::analyzer::indexing_tokenizer;
 use super::error::SearchError;
 use super::hits;
@@ -46,30 +47,8 @@ pub fn analyzed_query_terms(input: &str) -> Vec<String> {
     terms
 }
 
-/// A leading '-' on a whitespace-delimited word excludes its indexed stem.
-/// Ordinary multi-word queries keep their existing partial-match behavior.
-fn search_terms(input: &str) -> (Vec<String>, Vec<String>) {
-    let mut positive = String::new();
-    let mut excluded = Vec::new();
-    for word in input.split_whitespace() {
-        if let Some(word) = word.strip_prefix('-').filter(|word| !word.is_empty()) {
-            excluded.extend(analyzed_query_terms(word));
-        } else {
-            if !positive.is_empty() {
-                positive.push(' ');
-            }
-            positive.push_str(word);
-        }
-    }
-    excluded.sort();
-    excluded.dedup();
-    // Preserve the legacy analyzer for queries without an exclusion.
-    let positive = if excluded.is_empty() { input } else { &positive };
-    (analyzed_query_terms(positive), excluded)
-}
-
 pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchError> {
-    let (terms, excluded) = search_terms(request.text);
+    let (terms, excluded) = negative::search_terms(request.text);
     if terms.is_empty() {
         return Ok(Found { terms, results: Vec::new(), has_more: false });
     }
@@ -79,16 +58,7 @@ pub fn search(index: &SearchIndex, request: &Request) -> Result<Found, SearchErr
     if let Some(folder) = request.folder {
         clauses.push((Occur::Must, Box::new(folder_query(&searcher, index.fields.id, folder)?)));
     }
-    for word in &excluded {
-        let fields: Vec<(Occur, Box<dyn Query>)> = searchable_fields(index)
-            .into_iter()
-            .map(|field| {
-                let term = Term::from_field_text(field, word);
-                (Occur::Should, Box::new(TermQuery::new(term, IndexRecordOption::Basic)) as Box<dyn Query>)
-            })
-            .collect();
-        clauses.push((Occur::MustNot, Box::new(BooleanQuery::new(fields))));
-    }
+    negative::add_exclusions(index, &excluded, &mut clauses);
     let top = searcher.search(&BooleanQuery::new(clauses), &TopDocs::with_limit(limit + 1).order_by_score())?;
     if request.cancel.is_cancelled() {
         return Err(SearchError::Cancelled);
@@ -115,17 +85,13 @@ fn folder_query(searcher: &Searcher, id: Field, folder: &Path) -> Result<TermSet
     Ok(TermSetQuery::new(inside))
 }
 
-fn searchable_fields(index: &SearchIndex) -> [Field; 3] {
-    [index.fields.title, index.fields.path, index.fields.body]
-}
-
 fn combined_query(index: &SearchIndex, terms: &[String]) -> BooleanQuery {
     let mut term_clauses = Vec::<(Occur, Box<dyn Query>)>::with_capacity(terms.len());
     let mut exact_clauses = Vec::<(Occur, Box<dyn Query>)>::new();
 
     for text in terms {
         let mut field_matches = Vec::<(Occur, Box<dyn Query>)>::with_capacity(3);
-        for field in searchable_fields(index) {
+        for field in negative::searchable_fields(index) {
             let term = Term::from_field_text(field, text);
             let boost = field_boost(index, field);
             field_matches.push((
