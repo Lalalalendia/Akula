@@ -21,7 +21,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         (None, Some(first))
     };
     let input = input_arg
-        .next()
         .map(PathBuf::from)
         .ok_or("usage: akula-flash-port <input.swf> <output.rs>")?;
     let output = args
