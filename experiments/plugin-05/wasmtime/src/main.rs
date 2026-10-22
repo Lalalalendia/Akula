@@ -135,6 +135,20 @@ mod tests {
     }
 
     #[test]
+    fn revoke_prevents_next_hostcall_in_same_running_instance() -> LabResult<()> {
+        let engine = new_engine()?;
+        let module = Module::new(&engine, HOSTCALL_WAT)?;
+        let mut store = new_store(&engine, true, FUEL)?;
+        let instance = instantiate(&new_linker(&engine)?, &mut store, &module)?;
+        let read = instance.get_typed_func::<i32, i32>(&mut store, "read")?;
+        assert_eq!(read.call(&mut store, 7)?, 17);
+        store.data_mut().granted = false;
+        assert_eq!(read.call(&mut store, 7)?, -1);
+        assert_eq!(read.call(&mut store, 8)?, -1);
+        Ok(())
+    }
+
+    #[test]
     fn rejects_undeclared_wasi_network_capability() -> LabResult<()> {
         let engine = new_engine()?;
         let module = Module::new(&engine, NETWORK_WAT)?;

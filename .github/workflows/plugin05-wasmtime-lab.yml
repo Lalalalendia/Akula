@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --manifest-path experiments/plugin-05/extism/host/Cargo.toml
+          cargo test --manifest-path experiments/plugin-05/extism/host/Cargo.toml -- --nocapture
       - name: Build independent release binary and measure Extism ABI
         shell: bash
         run: |
