@@ -33,6 +33,7 @@ pub enum QueueAction {
 mod devices;
 mod identity;
 mod layout;
+mod queue_view;
 use layout::{card_size, details, display_size, hint, rule};
 pub use devices::{DeviceRow, DeviceStatus};
 pub use identity::{IdentityAction, IdentityPhase, IdentityView};

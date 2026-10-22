@@ -7,6 +7,7 @@ on:
     paths:
       - 'aquilum-app/native/src/ui/transfer/identity.rs'
       - 'aquilum-app/native/src/ui/transfer/layout.rs'
+      - 'aquilum-app/native/src/ui/transfer/queue_view.rs'
       - 'aquilum-app/native/src/app/transfer/local_identity.rs'
       - 'aquilum-app/native/src/app/transfer/tests.rs'
       - '.github/workflows/p2p-local-id-ui.yml'
@@ -35,6 +36,7 @@ jobs:
           rustfmt --edition 2024 --check \
             aquilum-app/native/src/ui/transfer/identity.rs \
             aquilum-app/native/src/ui/transfer/layout.rs \
+            aquilum-app/native/src/ui/transfer/queue_view.rs \
             aquilum-app/native/src/app/transfer/local_identity.rs \
             aquilum-app/native/src/app/transfer/tests.rs
       - name: Compile actual native File transfers with opt-in identity
