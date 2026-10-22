@@ -55,7 +55,7 @@ pub struct DeviceIdentity {
 
 impl DeviceIdentity {
     fn from_seed(seed: Zeroizing<[u8; 32]>) -> Result<Self, IdentityError> {
-        let key = Ed25519KeyPair::from_seed_unchecked(&seed)
+        let key = Ed25519KeyPair::from_seed_unchecked(&seed[..])
             .map_err(|_| IdentityError::CorruptCredential)?;
         let mut endpoint_public = [0; 32];
         endpoint_public.copy_from_slice(key.public_key().as_ref());
@@ -250,7 +250,8 @@ mod windows_store {
     }
 
     pub(super) fn load_named(target: &str) -> Result<DeviceIdentity, IdentityError> {
-        decode(&read_record(target)?)
+        let record = read_record(target)?;
+        decode(&record[..])
     }
 
     pub(super) fn initialize_named(target: &str) -> Result<DeviceIdentity, IdentityError> {
