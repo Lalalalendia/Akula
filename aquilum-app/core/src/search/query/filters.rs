@@ -81,7 +81,7 @@ pub(super) fn extra_clauses(
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
     // Apply phrase constraints within Tantivy, before taking the top N results,
     // so filtering cannot silently drop valid matches beyond the first page.
-    for (_, words) in &phrases {
+    for (_, words) in phrases {
         let fields: Vec<(Occur, Box<dyn Query>)> = searchable_fields(index)
             .into_iter()
             .map(|field| {
@@ -99,7 +99,7 @@ pub(super) fn extra_clauses(
             .collect();
         clauses.push((Occur::Must, Box::new(BooleanQuery::new(fields))));
     }
-    for word in &excluded {
+    for word in excluded {
         let fields: Vec<(Occur, Box<dyn Query>)> = searchable_fields(index)
             .into_iter()
             .map(|field| {
