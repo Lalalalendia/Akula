@@ -25,7 +25,13 @@ signingIdentity = "-"
 [package.metadata.packager.appimage]
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
+[[example]]
+name = "game2d_window_lab"
+path = "examples/game2d_window_lab.rs"
+required-features = ["game2d-window-lab"]
+
 [features]
+game2d-window-lab = []
 installed = []
 memory-probe = []
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
