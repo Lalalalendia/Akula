@@ -28,6 +28,7 @@ pub enum S3PairUploadError {
     Trust(S3PairBootstrapError),
     ForeignScope,
     ExistingPath,
+    AlreadyPublishedSame,
     ChangedLocalFile,
     DataMismatch,
     Serialization,
@@ -97,15 +98,32 @@ impl AwsS3ProbeClient {
             MAX_REVISION_METADATA,
         ).await?.ok_or(S3PairUploadError::ForeignScope)?;
         let mut references = Vec::new();
+        let mut previously_published = false;
         for (reference, json) in verified.verified_entries() {
             let known: RevisionRecord = serde_json::from_slice(json)
                 .map_err(|_| S3PairUploadError::Serialization)?;
             if touches_path(&known, &relative) {
-                // Even a remote tombstone or previously renamed path remains
-                // reserved in the initial create-only product.
-                return Err(S3PairUploadError::ExistingPath);
+                // Existing exact content is idempotent. A case alias,
+                // conflicting revision, tombstone, rename or edited content
+                // must HOLD rather than silently claim the file was sent.
+                let same = matches!(&known.operation,
+                    RevisionOperation::Content { path, blob_hash }
+                        if path == &relative && blob_hash == &first.content_hash
+                            && known.parents.is_empty());
+                if previously_published || !same {
+                    return Err(S3PairUploadError::ExistingPath);
+                }
+                previously_published = true;
+                continue;
             }
             references.push(reference.clone());
+        }
+        if previously_published {
+            let second = admission.read_closed_preflight(&relative, MAX_NEW_FILE_BYTES)?;
+            if second.bytes != first.bytes || second.content_hash != first.content_hash {
+                return Err(S3PairUploadError::ChangedLocalFile);
+            }
+            return Err(S3PairUploadError::AlreadyPublishedSame);
         }
         // Every remote immutable blob name is a SHA-256-style-looking BLAKE3
         // content address with exact readback, never a user-controlled path.
