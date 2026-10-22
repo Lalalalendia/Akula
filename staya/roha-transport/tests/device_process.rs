@@ -3,6 +3,10 @@
 use akula_roha_transport::{AllowedPeers, StayaTransport};
 use iroh::{EndpointAddr, SecretKey};
 use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     env, fs,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -41,7 +45,13 @@ fn remote_address(dir: &Path) -> EndpointAddr {
 
 async fn server(dir: &Path) {
     let expected = read_key(&dir.join("client.key")).public();
-    let policy = AllowedPeers::new([expected]);
+    let external_authorized = Arc::new(AtomicBool::new(true));
+    let policy = AllowedPeers::new([expected]).with_live_check({
+        let external_authorized = Arc::clone(&external_authorized);
+        move |authenticated| {
+            authenticated == &expected && external_authorized.load(Ordering::Acquire)
+        }
+    });
     let transport =
         StayaTransport::bind_loopback_lab(read_key(&dir.join("server.key")), policy.clone())
             .await
@@ -64,13 +74,17 @@ async fn server(dir: &Path) {
     tx.write_all(b"ACK").await.unwrap();
     tx.finish().unwrap();
     wait_signal(&dir.join("ack-seen")).await;
-    // Revoke while the very same QUIC connection remains alive.
-    assert!(policy.revoke(&expected));
+    // Emulate a protected OS pin being revoked in a separate authority.
+    // The Roha session remains alive and the in-memory peer is still listed;
+    // only a FRESH live check denies the second logical operation.
+    external_authorized.store(false, Ordering::Release);
     assert!(!policy.contains(&expected));
     assert_eq!(
         transport.authorize_new_operation(&conn),
         Err("peer not admitted for new operation".to_owned())
     );
+    // The original process-local kill switch remains valid independently.
+    assert!(policy.revoke(&expected));
     fs::write(dir.join("revoked"), b"1").unwrap();
     let (_tx2, _rx2) = tokio::time::timeout(Duration::from_secs(10), conn.accept_bi())
         .await
