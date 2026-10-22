@@ -90,6 +90,7 @@ impl S3PairInvite {
             || !(3..=128).contains(&self.access_key_id.len())
             || !self.access_key_id.bytes().all(|b| b.is_ascii_alphanumeric()
                 || b == b'-' || b == b'_')
+            || self.key_expires_at_ms != 0
             || !(8..=255).contains(&self.secret_access_key.len())
             || !self.secret_access_key.bytes().all(|b| b.is_ascii_graphic())
         {
