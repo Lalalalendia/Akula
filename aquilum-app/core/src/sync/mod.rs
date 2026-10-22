@@ -48,6 +48,8 @@ mod local_recovery;
 mod recovery_review;
 /// Crypto envelope contract only: no production key custody or archive writer yet.
 pub mod sealed_archive;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_invite;
 mod recovery_dashboard;
 #[cfg(feature = "sync-s3")]
 mod s3_publication_dashboard;
@@ -92,7 +94,6 @@ mod s3_transport;
 mod yandex_readonly_probe;
 mod upload;
 mod vault;
-
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
@@ -175,7 +176,7 @@ pub use s3_head_probe::{
 pub use yandex_readonly_probe::{probe_yandex_s3_read_only, YandexS3ProbeError};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
-    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
+    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage, S3PairAccess,
     S3AwsAccountProofError, S3AwsVerifiedAccountScope,
     S3ObservedObject, S3PutCondition, S3TransportError,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
