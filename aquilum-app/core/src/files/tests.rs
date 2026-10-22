@@ -147,6 +147,7 @@ fn workspace_filters_and_sorts_entries() {
         names,
         vec![
             "Folder",
+            ".hidden",
             "alpha",
             "Beta",
             "doc.pdf",
