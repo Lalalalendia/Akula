@@ -34,7 +34,10 @@ fn aws_credential_process_is_selected_by_default_chain() {
                 .load()
                 .await;
             let provider = sdk.credentials_provider().expect("credential chain");
-            provider.provide_credentials().await.expect("process credentials")
+            provider
+                .provide_credentials()
+                .await
+                .expect("process credentials")
         });
         assert_eq!(creds.access_key_id(), ACCESS);
         assert_eq!(creds.secret_access_key(), SECRET);
@@ -53,9 +56,7 @@ fn aws_credential_process_is_selected_by_default_chain() {
     let script = root.join("credentials.sh");
     let config = root.join("config");
     let empty = root.join("credentials");
-    let json = format!(
-        r#"{{"Version":1,"AccessKeyId":"{ACCESS}","SecretAccessKey":"{SECRET}"}}"#
-    );
+    let json = format!(r#"{{"Version":1,"AccessKeyId":"{ACCESS}","SecretAccessKey":"{SECRET}"}}"#);
     fs::write(&script, format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", json))
         .expect("write synthetic process output");
     fs::set_permissions(&script, fs::Permissions::from_mode(0o700))
@@ -72,7 +73,11 @@ fn aws_credential_process_is_selected_by_default_chain() {
 
     // Independent child avoids mutating global env while other tests run.
     let output = Command::new(std::env::current_exe().expect("test executable"))
-        .args(["--exact", "aws_credential_process_is_selected_by_default_chain", "--nocapture"])
+        .args([
+            "--exact",
+            "aws_credential_process_is_selected_by_default_chain",
+            "--nocapture",
+        ])
         .env(CHILD, "1")
         .env("AWS_PROFILE", "akula-process-proof")
         .env("AWS_CONFIG_FILE", &config)
