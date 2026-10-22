@@ -1,0 +1,135 @@
+name: Akula opt-in mip row real-GUI research
+
+on:
+  push:
+    branches: [research/akula-mip-row-real-gui-20261022]
+    paths:
+      - 'aquilum-app/native/src/render/paint/mipmap.rs'
+      - 'aquilum-app/native/src/render/paint/convert.rs'
+      - 'scripts/benchmarks/native_mip_row_gui_ab.py'
+      - '.github/workflows/native-mip-row-research.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-mip-row-research
+  cancel-in-progress: true
+
+jobs:
+  linux-real-window:
+    name: Linux Xvfb/Vello pixels and real GUI, two reducer modes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          add-job-id-key: false
+          cache-workspace-crates: true
+          save-if: false
+      - name: Linux GUI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            xvfb openbox
+      - name: Test exact RGBA bytes and true Vello raster pixels
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            row_reducer -- --nocapture --test-threads=1
+      - name: Check installed feature does not compile experimental route
+        working-directory: aquilum-app
+        shell: bash
+        run: cargo check --release --locked -p aquilum-native --features installed
+      - name: Build one uninstalled native executable
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p aquilum-native
+          test -x ../.artifacts/cargo-native/release/aquilum-native
+      - name: Three paired real Linux/Winit GUI trials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/benchmarks/native_mip_row_gui_ab.py
+          export AKULA_BINARY="$PWD/.artifacts/cargo-native/release/aquilum-native"
+          export AKULA_OUT="$PWD/mip-row-results-linux"
+          xvfb-run -a -s "-screen 0 1920x1200x24" bash -c '
+            set -euo pipefail
+            openbox >/dev/null 2>&1 &
+            sleep 1
+            python3 scripts/benchmarks/native_mip_row_gui_ab.py \
+              --binary "$AKULA_BINARY" --out "$AKULA_OUT" --timeout 50
+          '
+          cat mip-row-results-linux/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive original Linux real-editor evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mip-row-linux-real-gui
+          if-no-files-found: warn
+          path: |
+            mip-row-results-linux/summary.md
+            mip-row-results-linux/matrix.json
+            mip-row-results-linux/**/sample.json
+            mip-row-results-linux/**/process.log
+            mip-row-results-linux/**/metrics.json
+            mip-row-results-linux/**/replay.json
+
+  windows-real-window:
+    name: Windows Win32 native GUI, three paired mip row trials
+    runs-on: windows-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-image-mip-ab-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Compile one developer release executable
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Windows native release compilation failed' }
+      - name: Three paired real Win32 GUI processes per variant
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m py_compile scripts/benchmarks/native_mip_row_gui_ab.py
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid benchmark script' }
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'mip-row-results-windows'
+          python scripts/benchmarks/native_mip_row_gui_ab.py --binary $binary --out $out --timeout 60
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid Win32 real-editor A/B' }
+          Get-Content -LiteralPath (Join-Path $out 'summary.md') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Archive original Windows HWND and real-editor evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mip-row-windows-real-gui
+          if-no-files-found: warn
+          path: |
+            mip-row-results-windows/summary.md
+            mip-row-results-windows/matrix.json
+            mip-row-results-windows/**/sample.json
+            mip-row-results-windows/**/process.log
+            mip-row-results-windows/**/metrics.json
+            mip-row-results-windows/**/replay.json

@@ -51,6 +51,69 @@ pub fn half(source: &Pixmap) -> Option<Pixmap> {
     ))
 }
 
+/// Diagnostic-only row-oriented packed RGBA reducer. Both source and
+/// destination are contiguous RGBA8, using the identical rounding and edge
+/// clamping as half(). No allocation/cache policy change in installed builds.
+#[cfg(any(test, not(feature = "installed")))]
+pub fn half_row(source: &Pixmap) -> Option<Pixmap> {
+    let (w, h) = (source.width(), source.height());
+    if w == 0 || h == 0 || (w == 1 && h == 1) {
+        return None;
+    }
+    let (width, height) = (usize::from(w), usize::from(h));
+    let src = source.data_as_u8_slice();
+    // Verify the full read envelope BEFORE using any raw pointer arithmetic.
+    let src_len = width.checked_mul(height)?.checked_mul(4)?;
+    if src.len() != src_len {
+        return None;
+    }
+    let (dst_w, dst_h) = (width.div_ceil(2), height.div_ceil(2));
+    let out_len = dst_w.checked_mul(dst_h)?.checked_mul(4)?;
+    let mut out = vec![0_u8; out_len];
+    let (src_ptr, dst_ptr) = (src.as_ptr(), out.as_mut_ptr());
+    let src_stride = width * 4;
+    let dst_stride = dst_w * 4;
+    let mut transparent = false;
+    for y in 0..dst_h {
+        let src_row0 = (2 * y) * src_stride;
+        let src_row1 = (2 * y + 1).min(height - 1) * src_stride;
+        let dst_row = y * dst_stride;
+        for x in 0..dst_w {
+            let col0 = (2 * x) * 4;
+            let col1 = (2 * x + 1).min(width - 1) * 4;
+            // SAFETY: src is exactly width*height*4 bytes, rows/columns
+            // are clamped to valid pixel coordinates, so each complete
+            // 4-byte unaligned load is in-bounds. A separate owned Vec
+            // with out_len initialized bytes provides the disjoint output;
+            // the 4-byte write offset is in-bounds for every dst pixel.
+            let reduced = unsafe {
+                let read = |row: usize, col: usize| {
+                    u32::from_le(src_ptr.add(row + col).cast::<u32>().read_unaligned())
+                };
+                packed_average4(
+                    read(src_row0, col0),
+                    read(src_row0, col1),
+                    read(src_row1, col0),
+                    read(src_row1, col1),
+                )
+            };
+            transparent |= (reduced >> 24) != 255;
+            unsafe {
+                dst_ptr
+                    .add(dst_row + x * 4)
+                    .cast::<u32>()
+                    .write_unaligned(reduced.to_le());
+            }
+        }
+    }
+    Some(Pixmap::from_parts(
+        out,
+        dst_w as u16,
+        dst_h as u16,
+        PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, transparent),
+    ))
+}
+
 /// B2: direct L2 without allocating/materializing L1, preserving the
 /// **two separate roundings** of half(half(src)). Test-only.
 #[cfg(any(test, not(feature = "installed")))]
@@ -163,14 +226,17 @@ mod tests {
         )
     }
 
-    fn render(ratio: u16, phase: usize, quality: ImageQuality, workers: u16) -> Pixmap {
+    fn render_with_reducer(
+        ratio: u16, phase: usize, quality: ImageQuality, workers: u16,
+        reducer: fn(&Pixmap) -> Option<Pixmap>,
+    ) -> Pixmap {
         let base = stripes(phase);
         let original = Affine::scale(1.0 / f64::from(ratio));
         let levels = level_for_transform(original);
         assert!(levels > 0, "these fixtures deliberately downscale by >2x");
         let mut mip = base;
         for _ in 0..levels {
-            mip = half(&mip).expect("128px test image allows each mipmap");
+            mip = reducer(&mip).expect("128px test image allows each mipmap");
         }
         let mut ctx = RenderContext::new_with(
             128 / ratio, 128 / ratio,
@@ -198,6 +264,57 @@ mod tests {
             },
         );
         out
+    }
+
+    fn render(ratio: u16, phase: usize, quality: ImageQuality, workers: u16) -> Pixmap {
+        render_with_reducer(ratio, phase, quality, workers, half)
+    }
+
+    #[test]
+    fn row_reducer_vello_raster_pixels_match_scalar() {
+        for workers in [0, 2] {
+            for ratio in [4_u16, 8, 16] {
+                for phase in [0, 1, 3] {
+                    for quality in [ImageQuality::Medium, ImageQuality::High] {
+                        let reference = render(ratio, phase, quality, workers);
+                        let row = render_with_reducer(ratio, phase, quality, workers, half_row);
+                        assert_eq!(reference.data_as_u8_slice(), row.data_as_u8_slice(),
+                            "rendered pixel mismatch: workers={workers} ratio={ratio} phase={phase} quality={quality:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn row_reducer_byte_parity_odd_edges_and_alpha() {
+        let mut sizes = vec![
+            (1, 1), (1, 2), (2, 1), (1, 33), (33, 1),
+            (2, 2), (3, 3), (3, 5), (5, 3), (17, 19),
+            (128, 127), (511, 257), (1280, 884), (1281, 885),
+        ];
+        for width in 1..=9 {
+            for height in 1..=9 {
+                sizes.push((width, height));
+            }
+        }
+        for (w, h) in sizes {
+            for seed in [0_u32, 0x1234_5678] {
+                for opaque in [false, true] {
+                    let src = packed_test_source(w, h, seed, opaque);
+                    let baseline = half(&src);
+                    let candidate = half_row(&src);
+                    assert_eq!(baseline.is_some(), candidate.is_some(), "None mismatch {w}x{h}");
+                    if let (Some(expected), Some(actual)) = (baseline, candidate) {
+                        assert_eq!((actual.width(), actual.height()), (expected.width(), expected.height()));
+                        assert_eq!(actual.data_as_u8_slice(), expected.data_as_u8_slice(),
+                            "RGBA byte mismatch {w}x{h} seed={seed} opaque={opaque}");
+                        assert_eq!(actual.may_have_transparency(), expected.may_have_transparency(),
+                            "metadata mismatch {w}x{h} seed={seed} opaque={opaque}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

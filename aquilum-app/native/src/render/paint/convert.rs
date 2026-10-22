@@ -72,6 +72,18 @@ fn mip_direct_l2_enabled() -> bool {
     })
 }
 
+// Developer-only row reducer for the EXISTING opt-in image mip route.
+// The installed feature never compiles a reducer selector or reads this env.
+#[cfg(any(test, not(feature = "installed")))]
+fn mip_half_row_enabled() -> bool {
+    static ROW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ROW.get_or_init(|| {
+        !cfg!(feature = "installed")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP").ok().as_deref() == Some("1")
+            && std::env::var("AKULA_EXPERIMENTAL_IMAGE_MIP_HALF_ROW").ok().as_deref() == Some("1")
+    })
+}
+
 // Counters are local to an opt-in developer renderer, with no logging in the
 // per-image hot path. Installed builds do not compile these fields.
 #[cfg(not(feature = "installed"))]
@@ -290,7 +302,19 @@ impl Images {
             }
             #[cfg(not(feature = "installed"))]
             let started = std::time::Instant::now();
-            let next = Arc::new(mipmap::half(&previous)?);
+            let next = if mip_half_row_enabled() {
+                let reduced = mipmap::half_row(&previous)?;
+                #[cfg(not(feature = "installed"))]
+                {
+                    static FIRST_ROW: std::sync::Once = std::sync::Once::new();
+                    FIRST_ROW.call_once(|| {
+                        eprintln!("AKULA_MIP_HALF_ROW_USED level={current}");
+                    });
+                }
+                Arc::new(reduced)
+            } else {
+                Arc::new(mipmap::half(&previous)?)
+            };
             #[cfg(not(feature = "installed"))]
             {
                 self.diag.generated += 1;
