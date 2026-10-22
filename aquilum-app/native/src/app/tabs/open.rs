@@ -214,9 +214,9 @@ impl App {
 
     fn drop_note_page(&mut self, root: &mut RenderRoot) {
         self.embeds = None;
-        if self.note_ids.take().is_none() {
-            return;
-        }
+        // Read-only image/structured pages have no NoteIds, but their decoded
+        // content must still be released when the tab is closed or switched.
+        self.note_ids = None;
         self.text = crop::Rope::new();
         if let Some(chrome) = &self.chrome {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, masonry::core::NewWidget::new(masonry::widgets::SizedBox::empty()).erased()));
