@@ -3,6 +3,7 @@
 
 use std::fmt::{self, Write};
 
+pub mod chaptera_path;
 pub mod scene;
 
 /// Жёсткий предел для исследовательского импортёра. Это не песочница ОС.
