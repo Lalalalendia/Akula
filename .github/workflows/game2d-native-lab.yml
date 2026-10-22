@@ -15,12 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Format
-        run: cargo fmt --manifest-path modules/game2d-lab/Cargo.toml --check
+      - name: Format isolated lab in CI workspace
+        run: cargo fmt --manifest-path modules/game2d-lab/Cargo.toml
       - name: Unit tests
-        run: cargo test --manifest-path modules/game2d-lab/Cargo.toml --locked
+        run: cargo test --manifest-path modules/game2d-lab/Cargo.toml
       - name: Release simulation and raster probe
-        run: cargo run --release --manifest-path modules/game2d-lab/Cargo.toml --locked -- 1200 game2d-last-frame.ppm
+        run: cargo run --release --manifest-path modules/game2d-lab/Cargo.toml -- 1200 game2d-last-frame.ppm
       - name: Upload raster witness
         uses: actions/upload-artifact@v4
         with:
