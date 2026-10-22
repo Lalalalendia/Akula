@@ -1,0 +1,70 @@
+name: RustSec AWS modern TLS remediation experiment
+
+# Temporary narrow experiment. Does not alter Main PR gate or security watchdog.
+on:
+  push:
+    branches:
+      - security/akula-rustsec-modern-http-20261022
+    paths:
+      - 'aquilum-app/core/Cargo.toml'
+      - '.github/workflows/security-aws-modern-tls-experiment.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustsec-aws-tls-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Resolve modern TLS and perform actual RustSec scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned cargo-audit
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        with:
+          tool: cargo-audit@0.22.2
+      - name: Refresh compatible TLS crates via Cargo, never edit Cargo.lock by hand
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo update -p rustls@0.23.43
+          cargo update -p rustls-webpki@0.103.13
+          cargo update -p webpki-roots@1.0.9
+          cargo metadata --format-version 1 --locked --features sync-s3 --no-deps >/dev/null
+          cargo tree --locked --features sync-s3 -p aquilum-core -i aws-smithy-http-client
+          cargo tree --locked --features sync-s3 -p aquilum-core -i rustls@0.21.12 || true
+      - name: Compile all S3 feature paths and check advisory status
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p aquilum-core --features sync-s3
+          cargo audit --no-yanked --file Cargo.lock
+          cargo audit --no-yanked --no-fetch --file host-broker-lab/Cargo.lock
+      - name: Export Cargo-produced lockfile and dependency report even on failure
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -s aquilum-app/Cargo.lock; then
+            cp aquilum-app/Cargo.lock "$RUNNER_TEMP/akula-cargo.lock"
+            git diff -- aquilum-app/Cargo.lock > "$RUNNER_TEMP/akula-cargo-lock.diff"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustsec-modern-http-lock-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/akula-cargo.lock
+            ${{ runner.temp }}/akula-cargo-lock.diff
+          if-no-files-found: warn
+          retention-days: 7
