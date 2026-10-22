@@ -20,7 +20,6 @@ impl TextEditor {
         ctx.request_layout();
         ctx.request_render();
     }
-
     pub(super) fn ensure_layout(&mut self, fcx: &mut masonry::parley::FontContext, lcx: &mut masonry::parley::LayoutContext<BrushIndex>, width: f64) {
         let _zone = aq_trace::zone("редактор: вёрстка");
         self.width = width;
@@ -34,6 +33,7 @@ impl TextEditor {
         if self.single_line {
             self.doc.keep = (f64::NEG_INFINITY, f64::INFINITY);
         }
+        self.doc.selection = (self.anchor != self.focus).then(|| self.selection());
         self.doc.pins = [self.anchor, self.focus].into_iter().chain(self.extra_cursors.iter().flat_map(|&(a, f)| [a, f])).collect();
         self.doc.layout(fcx, lcx, &self.styles, wrap, compose, self.focused.then_some(self.focus));
         self.refresh_code_window_opener();

@@ -7,7 +7,7 @@ use super::super::markdown::{self, Block, Decor, Fonts};
 use super::super::highlight::Lang;
 use super::{Document, text};
 
-pub(super) static PLAIN: Decor = Decor { x: 0.0, inset: 0.0, pad: (0.0, 0.0), hang: None, codes: Vec::new(), marks: Vec::new(), tags: Vec::new(), links: Vec::new(), caret: None, boxes: Vec::new(), pictures: Vec::new() };
+pub(super) static PLAIN: Decor = Decor { x: 0.0, inset: 0.0, pad: (0.0, 0.0), hang: None, codes: Vec::new(), marks: Vec::new(), tags: Vec::new(), links: Vec::new(), caret: None, source_selection: None, boxes: Vec::new(), pictures: Vec::new() };
 
 pub(super) struct Laid {
     pub(super) layout: Layout<BrushIndex>,
@@ -32,8 +32,8 @@ impl Document {
         }
     }
 
-    pub(super) fn context<'a>(&'a self, fonts: &'a Fonts) -> markdown::Context<'a> {
-        markdown::Context { fonts, unresolved: &self.unresolved.0, resolver: self.resolver.as_deref() }
+    pub(super) fn context<'a>(&'a self, fonts: &'a Fonts, line: Option<usize>) -> markdown::Context<'a> {
+        markdown::Context { fonts, unresolved: &self.unresolved.0, resolver: self.resolver.as_deref(), source_selection: line.and_then(|i| self.local_selection(i)) }
     }
 
     pub(super) fn local_caret(&self, line: usize, caret: Option<usize>) -> Option<usize> {
@@ -51,7 +51,7 @@ impl Document {
             }
             None => (Cow::Borrowed(source), None),
         };
-        let context = self.markdown.as_ref().map(|fonts| self.context(fonts));
+        let context = self.markdown.as_ref().map(|fonts| self.context(fonts, Some(line)));
         let markdown = context.as_ref().map(|context| (context, self.blocks.get(line), self.local_caret(line, caret)));
         // Native fenced code has one horizontal visual line; math keeps its
         // existing layout. The editor separately clips unwrapped code text.

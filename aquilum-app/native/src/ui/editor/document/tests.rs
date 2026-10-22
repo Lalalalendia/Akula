@@ -114,7 +114,7 @@ fn typing_markdown_never_breaks_layout() {
     let styles = StyleSet::new(16.0);
     let fonts = Fonts { size: 16.0, mono: crate::ui::theme::editor_font("iA Writer Mono"), ch: 8.0, callouts: true, tags: true };
     let unresolved = HashSet::new();
-    let context = markdown::Context { fonts: &fonts, unresolved: &unresolved, resolver: None };
+    let context = markdown::Context { fonts: &fonts, unresolved: &unresolved, resolver: None, source_selection: None };
     for line in TYPED.lines() {
         for end in line.char_indices().map(|(i, _)| i).chain([line.len()]) {
             let text = &line[..end];

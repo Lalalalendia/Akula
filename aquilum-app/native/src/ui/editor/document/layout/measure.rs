@@ -5,7 +5,6 @@ use masonry::parley::{Alignment, AlignmentOptions, FontContext, LayoutContext};
 
 use crate::ui::editor::markdown::Block;
 use super::super::Document;
-use super::super::laid::PLAIN;
 
 impl Document {
     #[allow(clippy::too_many_arguments)]
@@ -31,7 +30,7 @@ impl Document {
             let near = self.placed && self.heights.near(i, keep) || pinned.contains(&i);
             let range = self.span(i);
             let composing = compose.filter(|(at, _)| range.contains(at) || *at == range.end);
-            let moved = self.markdown.is_some() && self.local_caret(i, caret) != self.laid.get(i).map_or(&PLAIN, |laid| &laid.decor).caret;
+            let moved = self.markdown.is_some() && self.presentation_changed(i, caret);
             let current = composing.is_none() && !moved;
             match self.laid.get_mut(i).filter(|_| current) {
                 Some(laid) => {
