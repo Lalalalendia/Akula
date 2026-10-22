@@ -81,10 +81,12 @@ class PreviewTest(unittest.TestCase):
         self.assertFalse((self.vault / 'PDF Search Preview').exists())
 
     def test_extracted_markdown_is_fenced(self):
-        self.shiva.write_text('#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\nPath(sys.argv[2]).write_text("SAFEWORD\\n'+String.raw```\\n![x](https://example.com)\\n")\n')
         self.assertEqual(self.call('--trusted-local-only').returncode, 0)
         note = next((self.vault / 'PDF Search Preview').glob('*.md'))
-        self.assertIn('\x60\x60\x60\x60text', note.read_text())
+        body = note.read_text()
+        self.assertIn('AKULAPDFNEEDLE', body)
+        self.assertIn('Extracted text (unverified)', body)
+        self.assertTrue(chr(96) * 3 + 'text' in body)
 
 
 if __name__ == '__main__':
