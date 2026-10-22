@@ -306,12 +306,7 @@ pub fn read_version(dir: &Path, version: &VersionFile) -> Option<String> {
 
 pub fn has_text(dir: &Path, version: &VersionFile, text: &str) -> bool {
     let path = dir.join(&version.id);
-    let raw_len = match fs::metadata(&path) { Ok(meta) => meta.len(), Err(_) => return false };
-    let text_len = text.len() as u64;
-    // CRLF has one extra raw byte per normalized newline. Retain the cheap
-    // size rejection without rejecting valid CRLF snapshots before read_text.
-    (raw_len == text_len || (raw_len > text_len
-        && raw_len - text_len <= text.bytes().filter(|&b| b == b'\n').count() as u64))
+    fs::metadata(&path).is_ok_and(|m| m.len() <= (text.len() + text.lines().count()) as u64)
         && read_text(&path).is_ok_and(|stored| stored == text)
 }
 
