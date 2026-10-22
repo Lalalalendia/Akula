@@ -35,7 +35,10 @@ async fn run() -> Result<(), String> {
                 .accept_bi()
                 .await
                 .map_err(|error| format!("accept stream: {error}"))?;
-            if rx.read_to_end(32).await.map_err(|error| error.to_string())?
+            if rx
+                .read_to_end(32)
+                .await
+                .map_err(|error| error.to_string())?
                 != b"AKULA_HELLO_V1"
             {
                 return Err("unexpected greeting".to_owned());
@@ -56,10 +59,7 @@ async fn run() -> Result<(), String> {
             .parse()
             .map_err(|_| "invalid IP:UDP_PORT".to_owned())?;
         let session = endpoint
-            .connect_selected(
-                &selected,
-                EndpointAddr::new(remote_id).with_ip_addr(socket),
-            )
+            .connect_selected(&selected, EndpointAddr::new(remote_id).with_ip_addr(socket)
             .await?;
         tokio::time::timeout(Duration::from_secs(20), async {
             let (mut tx, mut rx) = session
