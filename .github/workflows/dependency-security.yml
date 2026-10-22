@@ -1,0 +1,72 @@
+name: Akula dependency security watchdog
+
+# Daily trigger, but a real RustSec scan runs every third UTC day.
+# A monthly */3 cron silently changes spacing at month boundaries.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'aquilum-app/**/Cargo.lock'
+      - 'aquilum-app/**/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
+      - 'aquilum-app/Cargo.toml'
+      - '.github/workflows/dependency-security.yml'
+      - '.github/scripts/dependency-security-gate.cjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-rustsec-watchdog
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: Select three-day UTC scan window
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      scan: ${{ steps.due.outputs.scan }}
+    steps:
+      - name: Run on every third UTC day, or immediately on dispatch/dependency change
+        id: due
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          epoch_day=$(( $(date -u +%s) / 86400 ))
+          if [[ "$EVENT_NAME" != schedule ]] || (( epoch_day % 3 == 0 )); then
+            echo 'scan=true' >> "$GITHUB_OUTPUT"
+            echo 'RustSec scan selected' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'scan=false' >> "$GITHUB_OUTPUT"
+            echo 'Non-due day: no advisory scan (not security PASS).' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  audit:
+    name: RustSec dependency audit
+    needs: decide
+    if: needs.decide.outputs.scan == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install pinned cargo-audit binary
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        with:
+          tool: cargo-audit@0.22.2
+      - name: Scan locked Rust crates, fail on vulnerabilities or advisory-db errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s aquilum-app/Cargo.lock
+          test -s aquilum-app/host-broker-lab/Cargo.lock
+          cargo audit --no-yanked --file aquilum-app/Cargo.lock
+          cargo audit --no-yanked --no-fetch --file aquilum-app/host-broker-lab/Cargo.lock
+          echo 'Both Cargo.lock audits PASSED (RustSec)' >> "$GITHUB_STEP_SUMMARY"
