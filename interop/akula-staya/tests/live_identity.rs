@@ -4,7 +4,7 @@ use akula_staya_integration::live_identity::{
     require_pinned_live_peer, with_protected_iroh_secret,
 };
 use aquilum_core::p2p_device_identity::IdentityError;
-use iroh::{endpoint::presets, Endpoint, EndpointAddr, RelayMode, SecretKey};
+use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, endpoint::presets};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     time::Duration,
