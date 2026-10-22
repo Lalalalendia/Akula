@@ -62,6 +62,70 @@ pub fn remove_document(transaction: &Transaction<'_>, path: &Path) -> Result<(),
     Ok(())
 }
 
+
+#[cfg(test)]
+pub(crate) fn index_document_batched(
+    transaction: &Transaction<'_>,
+    path: &Path,
+    body: &str,
+) -> Result<(), SearchError> {
+    use rusqlite::{params_from_iter, ToSql};
+
+    // Research-only implementation. The production index_document stays unchanged.
+    // 32 * 8 = 256 parameters, below the older SQLite 999-parameter limit.
+    const BATCH: usize = 32;
+    const ROW: &str = "(?, ?, ?, ?, ?, ?, ?, ?)";
+
+    struct Stored<'a> {
+        field: &'a super::value::Field,
+        ordinal: i64,
+        kind: i64,
+        lowered_key: String,
+        lowered_text: String,
+        items: Option<String>,
+    }
+
+    remove_document(transaction, path)?;
+    let found = indexed_fields(body);
+    let path_text = path.to_string_lossy().into_owned();
+    for (chunk_index, chunk) in found.chunks(BATCH).enumerate() {
+        let sql = format!(
+            "INSERT INTO note_fields(path, ordinal, key, key_lower, kind, text, text_lower, items) VALUES {}",
+            vec![ROW; chunk.len()].join(", ")
+        );
+        let stored = chunk
+            .iter()
+            .enumerate()
+            .map(|(slot, field)| Stored {
+                field,
+                ordinal: (chunk_index * BATCH + slot) as i64,
+                kind: field.kind.stored(),
+                lowered_key: key_lower(&field.key),
+                lowered_text: value_lower(&field.text),
+                items: (field.kind == FieldKind::List)
+                    .then(|| serde_json::to_string(&field.items).unwrap_or_else(|_| "[]".to_owned())),
+            })
+            .collect::<Vec<_>>();
+        let mut bindings: Vec<&dyn ToSql> = Vec::with_capacity(stored.len() * 8);
+        for row in &stored {
+            bindings.extend_from_slice(&[
+                &path_text,
+                &row.ordinal,
+                &row.field.key,
+                &row.lowered_key,
+                &row.kind,
+                &row.field.text,
+                &row.lowered_text,
+                &row.items,
+            ]);
+        }
+        // Cache the larger prepared statement within the existing transaction.
+        let mut statement = transaction.prepare_cached(&sql)?;
+        statement.execute(params_from_iter(bindings))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{index_document, open_schema, remove_document};
@@ -152,4 +216,66 @@ mod tests {
             "пустое значение не считается заполненным"
         );
     }
+
+    #[test]
+    fn batched_fields_match_baseline_through_replacement_and_unicode() {
+        use super::index_document_batched;
+
+        type StoredRow = (String, i64, String, String, i64, String, String, Option<String>);
+        fn snapshot(connection: &Connection) -> Vec<StoredRow> {
+            let mut statement = connection
+                .prepare(
+                    "SELECT path, ordinal, key, key_lower, kind, text, text_lower, items
+                     FROM note_fields ORDER BY path, ordinal",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        }
+
+        let mut baseline = Connection::open_in_memory().unwrap();
+        let mut batched = Connection::open_in_memory().unwrap();
+        open_schema(&baseline).unwrap();
+        open_schema(&batched).unwrap();
+        for count in [0usize, 1, 3, 31, 32, 33, 64, 65, 100] {
+            let mut body = "---\nТеги: [один, второй]\nОценка: 8\n---\n".to_owned();
+            for slot in 0..count {
+                body.push_str(&format!("Field{slot:03}:: Значение {slot} Straße 中文\n"));
+            }
+            body.push_str("Завершено:: true\nПустое:: \n");
+            let path = Path::new("C:/vault/Заметка.md");
+            let transaction = baseline.transaction().unwrap();
+            index_document(&transaction, path, &body).unwrap();
+            transaction.commit().unwrap();
+            let transaction = batched.transaction().unwrap();
+            index_document_batched(&transaction, path, &body).unwrap();
+            transaction.commit().unwrap();
+            assert_eq!(snapshot(&baseline), snapshot(&batched), "field count {count}");
+        }
+
+        let path = Path::new("C:/vault/Заметка.md");
+        let transaction = baseline.transaction().unwrap();
+        index_document(&transaction, path, "").unwrap();
+        transaction.commit().unwrap();
+        let transaction = batched.transaction().unwrap();
+        index_document_batched(&transaction, path, "").unwrap();
+        transaction.commit().unwrap();
+        assert_eq!(snapshot(&baseline), snapshot(&batched));
+        assert!(snapshot(&baseline).is_empty());
+    }
+
 }
