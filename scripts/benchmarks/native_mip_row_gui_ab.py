@@ -51,6 +51,13 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=50.0)
     args = parser.parse_args()
 
+    # This benchmark explicitly requires the *whole-process* first-frame
+    # stage stream, unlike the general-purpose image-window harness.
+    # The shared run_one() wrapper already enables FRAME_SAMPLES; stage
+    # diagnostics need a separate flag in Renderer::stages_enabled().
+    # Each run_one() child inherits this for both AB/BA modes equally.
+    os.environ["AKULA_EXPERIMENTAL_FRAME_STAGES"] = "1"
+
     binary = args.binary.resolve(strict=True)
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -93,7 +100,7 @@ def main() -> int:
                 raise ValueError(f"{name} trial={trial}: no installed-window-independent mip witness")
             if row["image_sha256"] != fixture_sha:
                 raise ValueError("Different fixture bytes between modes")
-            if row["note_sha256"] != rows[0]["note_sha256"] if rows else False:
+            if rows and row["note_sha256"] != rows[0]["note_sha256"]:
                 raise ValueError("Note bytes changed between trials")
             entry = {
                 "mode": name, "trial": trial,
