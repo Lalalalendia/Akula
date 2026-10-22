@@ -1,0 +1,42 @@
+name: Game LAN Roha isolated laboratory
+
+on:
+  pull_request:
+    paths:
+      - 'modules/game-lan-roha/**'
+      - '.github/workflows/game-lan-roha-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: game-lan-roha-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  roha-lan-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: modules/game-lan-roha -> target
+          shared-key: gnet03-roha-lan-pinned
+          cache-workspace-crates: true
+      - name: Verify independent repository and pinned Roha source
+        run: |
+          set -euo pipefail
+          grep -Fqx '[workspace]' modules/game-lan-roha/Cargo.toml
+          grep -Fq 'rev = "1e4ce8aa9dcacd3d79d37d2a1ff803530d278b5d"' modules/game-lan-roha/Cargo.toml
+          ! grep -Fq 'akula-game-lan-roha' aquilum-app/Cargo.toml
+      - name: Check format
+        run: cargo fmt --manifest-path modules/game-lan-roha/Cargo.toml --all -- --check
+      - name: Compile and run offline loopback proof
+        run: cargo test --manifest-path modules/game-lan-roha/Cargo.toml --all-targets -- --nocapture
+      - name: Clippy without warnings
+        run: cargo clippy --manifest-path modules/game-lan-roha/Cargo.toml --all-targets -- -D warnings

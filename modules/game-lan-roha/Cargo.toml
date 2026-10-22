@@ -1,0 +1,17 @@
+[package]
+name = "akula-game-lan-roha"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Opt-in Roha QUIC LAN transport laboratory for Akula's game session"
+
+# Keep heavy Roha/noq outside the main Akula Rust workspace and lockfile.
+[workspace]
+
+[dependencies]
+akula-game-session = { path = "../game-session" }
+iroh = { git = "https://github.com/calex794/roha", rev = "1e4ce8aa9dcacd3d79d37d2a1ff803530d278b5d", default-features = false, features = ["tls-ring"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync"] }
+rand = "0.10"
+anyhow = "1"
