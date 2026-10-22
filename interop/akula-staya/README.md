@@ -126,3 +126,25 @@ this seam yet. No DeviceId/Vault/object authorization, sender consent, local
 IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
 The existing receiver create-new and OS identity code stay opt-in. This work
 cannot enable network file access.
+
+## AK-P2P-SENDER-ARM-LAB-01 — bounded local consent handoff (default off)
+
+The opt-in `sender-arm-lab` feature adds `LabSenderFence`: the parent test
+controller must revalidate the **same** Akula OfferV1 / DecisionV1, exact Staya
+queue contents and actual sender EndpointAddr ticket before it is permitted to
+emit the existing provider's `AUTHORIZE <queue-commitment> <receiver-ID>`
+line. An altered queue, wrong receiver, expired offer, second issuance or
+repeat consumption denies without arming. A maximum of 128 local issuances
+prevents indefinite process-memory growth. This code is covered by unit
+tests and the **same** existing Linux/Windows real two-process QUIC/Bao test.
+
+**Security boundary:** this is a test-controller fence, *NOT* trusted Core
+authorization. The Staya preview still uses disposable private keys and
+its private parent-owned stdin channel, not production host IPC. Its current
+caller-supplied DeviceIds and timestamps have no independent OS/Vault proof.
+This per-process fence is NOT durable, cross-process replay-proof, or a peer
+revocation witness. No File Gate/Vault grant, shipping feature, new network
+library, long-running server, or background Sync is enabled. A future host
+integration MUST source real device identity from OS Core, bind Vault/file
+rights and current epoch to the selected root, and provide authenticated
+local process control before any real user-file GET.

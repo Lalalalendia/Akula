@@ -48,7 +48,7 @@ jobs:
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
-        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab --lib -- --nocapture
       - name: Rust formatting for exact opt-in inbox Core
         shell: bash
         run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
@@ -62,7 +62,7 @@ jobs:
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
       - name: Lint actual integration crate
         shell: bash
-        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --all-targets -- -D warnings
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity,sender-arm-lab --all-targets -- -D warnings
       - name: Build actual pinned Staya direct batch preview
         shell: bash
         run: |
@@ -76,4 +76,4 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="$BIN.exe"; fi
           test -f "$BIN"
           export STAYA_PREVIEW_BIN="$BIN"
-          cargo test --manifest-path interop/akula-staya/Cargo.toml --test real_quic -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab --test real_quic -- --nocapture

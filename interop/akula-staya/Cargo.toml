@@ -15,6 +15,8 @@ resolver = "3"
 default = []
 # Isolated, default-off live Iroh Connection -> fresh Windows peer-pin check.
 p2p-live-identity = ["aquilum-core/p2p-device-identity"]
+# Non-shipping one-shot Akula consent to Staya local test-operator handoff.
+sender-arm-lab = []
 
 [dependencies]
 aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
