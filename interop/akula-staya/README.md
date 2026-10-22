@@ -126,3 +126,59 @@ this seam yet. No DeviceId/Vault/object authorization, sender consent, local
 IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
 The existing receiver create-new and OS identity code stay opt-in. This work
 cannot enable network file access.
+
+## AK-P2P-BETA-01 — narrow direct-LAN one-file prototype
+
+This is the first release-first vertical path, **not yet installed GUI or
+shipped/signed software**. It is behind the default-off Cargo feature
+`p2p-one-file-lan-beta` and intentionally lives outside Akula's default
+binary. It reuses #625's real OS-protected Iroh key and fresh peer pin,
+and #571's atomic create-new verified disk stage. It does not introduce
+a different identity authority, turn on Vault sync, or claim File Gate
+APPLIED/durable ACK.
+
+**Boundary:** Windows OS-backed keys, one explicit regular source file of
+1 to 8 MiB, one selected verified receiver, numeric direct LAN UDP address,
+one manually selected absolute NEW destination. Sender explicitly invokes
+`send` and receiver explicitly invokes `receive`; unknown or revoked peers
+are rejected before reading/saving. Sender transfers only that one selected
+file. The network format contains no file paths or extra metadata.
+
+Run the existing Core diagnostic tool on each Windows device to explicitly
+create/read identity and confirm the other device's entire verified key:
+
+```sh
+cargo run --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity -- --init
+cargo run --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity -- --id
+cargo run --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity -- --peer-confirm OTHER_FULL_ENDPOINT_ID
+```
+
+On A, intentionally send the one selected absolute file. This prints the
+actual Iroh bound UDP port; ensure B can reach A at its numeric LAN IP:
+
+```sh
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta -- send PEER_B_FULL_ID C:\Users\Owner\Documents\selected.pdf
+```
+
+On B, explicitly select the trusted sender, its numeric LAN address/port,
+and an absolute destination filename that does not yet exist:
+
+```sh
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta -- receive PEER_A_FULL_ID 192.168.1.10:PORT C:\Users\Owner\Downloads\received.pdf
+```
+
+The tool uses real authenticated Iroh QUIC, cold OS pin reads before each
+new operation, BLAKE3, bounded 8 MiB frame size, disk staging and the
+existing `save_verified_stage_as_new` create-no-replace helper. No sender
+permission is inferred solely from a peer pin: the local send command
+is the one-file sender consent. The receiver's local receive command
+authorizes only the chosen NEW filename. A verification receipt is **not**
+a power-loss durable, File Gate or Vault ACK.
+
+**Not in first beta:** internet/NAT relay, CGNAT, resumption/WAL, background
+discovery, large files, directory trees, sync, multiple peers, or automatic
+write access to Akula Vault. Protected ancestor-directory custody is still
+a product hardening limitation; use only trusted local destination folders.
+CI compile/unit tests do not replace physical two-Windows-PC acceptance.
+Integrate with the installed File transfers UI and signed Windows packaging
+before marking this feature released to users.

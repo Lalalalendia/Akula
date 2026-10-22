@@ -1,0 +1,49 @@
+name: Akula P2P one-file LAN beta vertical path
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'interop/akula-staya/**'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/p2p_device_identity/**'
+      - '.github/workflows/p2p-one-file-beta.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-p2p-beta-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  one-file:
+    name: Compile and verify Windows/LAN beta boundary on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Validate formatting of exact beta source
+        shell: bash
+        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
+      - name: Compile actual opt-in one-file beta
+        shell: bash
+        run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta
+      - name: Strict isolated beta tests
+        shell: bash
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta -- --nocapture
+      - name: Exact Core atomic create-new regression tests
+        shell: bash
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+      - name: Strict Clippy for opt-in beta and bridge
+        shell: bash
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --all-targets -- -D warnings
