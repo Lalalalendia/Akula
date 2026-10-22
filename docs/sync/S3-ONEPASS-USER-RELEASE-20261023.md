@@ -1,7 +1,7 @@
 # Akula S3: one-pass user release branch (2026-10-23)
 
-**Canonical product UX**: [Notion AKULA-S3-PAIR-UX-01](https://app.notion.com/p/40132a84beec818b8672e88facc489f4).  
-**Source**: current `main@a2875a19f173d8a8bfec21e7106d5bdc92fbf722`.  
+**Canonical product UX**: [Notion AKULA-S3-PAIR-UX-01](https://app.notion.com/p/40132a84beec818b8672e88facc489f4).
+**Source**: current `main@a2875a19f173d8a8bfec21e7106d5bdc92fbf722`.
 **Target branch**: `sync/s3-one-pass-user-flow-20261023`.
 
 ## Workflow change
