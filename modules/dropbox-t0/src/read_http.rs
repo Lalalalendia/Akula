@@ -132,9 +132,17 @@ impl DropboxReadOnly {
         Ok(file)
     }
 
-    /// Pinned revision download, limited to 8 MiB and checked against a
-    /// caller-supplied trusted BLAKE3. This never applies bytes to a vault.
-    pub fn download_verified(
+    /// Lookup happens inside the verified account and vault scope. Caller
+    /// cannot supply an unrelated Dropbox file reference or revision.
+    pub fn read_key_verified(
+        &self, key: &ObjectKey, expected_hash: &TrustedBlake3,
+    ) -> Result<VerifiedRead, ReadError> {
+        let metadata = self.metadata(key)?;
+        self.download_verified(&metadata, expected_hash)
+    }
+
+    /// Internally pinned revision download, never an apply permission.
+    fn download_verified(
         &self, file: &DropboxFileRef, expected_hash: &TrustedBlake3,
     ) -> Result<VerifiedRead, ReadError> {
         if file.byte_length > MAX_READ_BYTES as u64 {
@@ -304,6 +312,18 @@ mod tests {
         let result = client.download_verified(&file, &trusted);
         assert_eq!(result, Err(ReadError::Verify(VerifyError::TrustedHashMismatch)));
         thread.join().unwrap();
+    }
+
+    #[test]
+    fn public_read_key_cannot_bypass_scoped_metadata_lookup() {
+        let payload = b"protected-by-trusted-anchor".to_vec();
+        let (endpoints, server) = server(payload.clone(), false, false);
+        let client = connect_test(endpoints);
+        let trusted = TrustedBlake3::parse(
+            &blake3::hash(&payload).to_hex().to_string()).unwrap();
+        let verified = client.read_key_verified(&ObjectKey::head(), &trusted).unwrap();
+        assert_eq!(verified.bytes, payload);
+        server.join().unwrap();
     }
 
     #[test]
