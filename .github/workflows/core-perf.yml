@@ -32,11 +32,12 @@ jobs:
     # Skip routine core/sync PRs. Opt in via a perf/* branch, perf: / perf(...) title,
     # or the perf-ci PR label. workflow_dispatch stays available for manual baselines.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      !startsWith(github.event.pull_request.title, 'perf(sqlite-cache-lab)') &&
+      (github.event_name == 'workflow_dispatch' ||
       startsWith(github.head_ref, 'perf/') ||
       startsWith(github.event.pull_request.title, 'perf(') ||
       startsWith(github.event.pull_request.title, 'perf:') ||
-      contains(github.event.pull_request.labels.*.name, 'perf-ci')
+      contains(github.event.pull_request.labels.*.name, 'perf-ci'))
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -137,10 +138,67 @@ jobs:
             editor.txt
           retention-days: 30
 
+  sqlite-cache-lab:
+    name: SQLite cache ABBA
+    if: github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, 'perf(sqlite-cache-lab)')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: sqlite-cache-research
+      - name: ABBA three sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aquilum-app
+          for size in 1000 10000 50000; do
+            index=0
+            for mode in default cache16 cache16 default; do
+              index=$((index+1))
+              /usr/bin/time -v env AQUILUM_CACHE_BENCH_MODE="$mode" AQUILUM_CACHE_BENCH_SIZE="$size" cargo test --locked --release -p aquilum-core benchmark_sqlite_cache_scan -- --ignored --nocapture --test-threads=1 2>&1 | tee "../sqlite-cache-${size}-${index}-${mode}.txt"
+            done
+          done
+      - name: Verify hash and report
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, statistics, os
+          for n in [1000,10000,50000]:
+              obs={'default':[],'cache16':[]}
+              hashes=set()
+              for p in pathlib.Path('.').glob(f'sqlite-cache-{n}-*.txt'):
+                  t=p.read_text()
+                  m=re.search(r'BENCH-CACHE documents=(\d+) mode=(default|cache16) configured_cache_kib=(-?\d+) wall_ms=([\d.]+) sqlite_commit_ms=([\d.]+) digest=([0-9a-f]+) db_bytes=(\d+) wal_bytes=(\d+) integrity=ok',t)
+                  rss=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',t)
+                  assert m and rss, p
+                  assert int(m[1])==n
+                  if m[2]=='cache16': assert int(m[3])==-16384
+                  hashes.add((m[6],m[7]))
+                  obs[m[2]].append((float(m[4]),int(rss[1])))
+              assert len(hashes)==1 and all(len(v)==2 for v in obs.values()),(n,hashes,obs)
+              a=statistics.median(x[0] for x in obs['default'])
+              b=statistics.median(x[0] for x in obs['cache16'])
+              output=f'BENCH-CACHE-COMPARE notes={n} baseline_ms={a:.2f} cache16_ms={b:.2f} delta_pct={(b/a-1)*100:+.1f}'
+              print(output)
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as o:o.write(output+'\n')
+          PY
+      - name: Upload raw measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-cache-lab
+          path: sqlite-cache-*.txt
+          retention-days: 30
+
   paired:
     name: Opt-in paired Core benchmark
     if: >-
       github.event_name == 'pull_request' &&
+      !startsWith(github.event.pull_request.title, 'perf(sqlite-cache-lab)') &&
       (startsWith(github.head_ref, 'perf/') ||
        startsWith(github.event.pull_request.title, 'perf(') ||
        startsWith(github.event.pull_request.title, 'perf:') ||
