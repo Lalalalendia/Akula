@@ -2,6 +2,8 @@ use super::*;
 use aquilum_core::settings::models::YandexS3Onboarding;
 use crate::yandex_probe_session::{ProbeFailure, ProbeView};
 mod controls;
+#[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+mod pairing;
 
 /// YC-S3-T01, UI stage only. A validated draft is NOT authorization, remote
 /// account identity proof, a live S3 HEAD, or permission to start syncing.
