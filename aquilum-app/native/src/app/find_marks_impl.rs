@@ -1,7 +1,10 @@
 use masonry::app::RenderRoot;
 use super::App;
 impl App {
-    pub(super) fn refresh_find_marks(&mut self, root: &mut RenderRoot) {
+    pub(crate) fn refresh_find_marks(&mut self, root: &mut RenderRoot) {
+        if self.find.is_none() && self.find_mark_stamp.is_none() {
+            return;
+        }
         let Some(ids) = &self.note_ids else {
             self.find_mark_stamp = None;
             return;

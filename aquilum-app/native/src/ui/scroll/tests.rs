@@ -188,3 +188,10 @@ fn find_marker_rows_are_deduplicated_and_scale_aware() {
     assert!(super::find_marks::marker_rows(&[0.5], 0.0, 1.0).is_empty());
     assert!(super::find_marks::marker_rows(&[0.5], 100.0, f64::NAN).is_empty());
 }
+
+#[test]
+fn find_marker_rows_are_bounded_even_for_huge_documents() {
+    let marks = super::find_marks::marker_rows(&[0.0, 0.5, 1.0, f64::INFINITY, f64::NEG_INFINITY], 1e12, 3.0);
+    assert_eq!(marks, [0, 32768, 65535]);
+    assert!(super::find_marks::marker_rows(&[], 1e12, 3.0).is_empty());
+}
