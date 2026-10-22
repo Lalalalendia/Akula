@@ -111,7 +111,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python scripts/benchmarks/test_native_mip_row_gui_ab.py -v
+          python ../scripts/benchmarks/test_native_mip_row_gui_ab.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Preflight image A/B script test failed' }
           cargo build --release --locked -p aquilum-native
           if ($LASTEXITCODE -ne 0) { throw 'Windows native release compilation failed' }
