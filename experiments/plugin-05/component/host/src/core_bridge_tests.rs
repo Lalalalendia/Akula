@@ -63,10 +63,12 @@ fn real_plugin_broker_grants_one_note_then_denies_revoked_guest() -> LabResult<(
     core.ui_state.resolve_workspace(
         vault_root.to_str().ok_or("vault path not UTF-8")?,
         1,
-    )?;
+    ).expect("test vault must register");
     let broker = Arc::new(PermissionBroker::new());
-    let reader = HostPluginVaultReader::open_registered(&core, &broker, &vault_root)?;
-    let note = reader.bind_host_note("allowed.md")?;
+    let reader = HostPluginVaultReader::open_registered(&core, &broker, &vault_root)
+        .expect("test vault admission must succeed");
+    let note = reader.bind_host_note("allowed.md")
+        .expect("host-selected note must pin");
     let vault = reader.host_vault_id();
     let id = note.host_note_id();
     let manifest = PluginManifest::parse_json(MANIFEST)?;
