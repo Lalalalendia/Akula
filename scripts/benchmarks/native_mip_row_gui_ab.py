@@ -43,6 +43,18 @@ def measured(row: dict) -> dict:
         "replay_frames": len(live),
     }
 
+def validate_fixture_hashes(row: dict, fixture_sha: str,
+                            previous_note_sha: str | None) -> str:
+    """Fail closed on mismatched image or Markdown input between A/B processes."""
+    if row.get("image_sha256") != fixture_sha:
+        raise ValueError("Different fixture PNG bytes between modes")
+    note_sha = row.get("note_sha256")
+    if not isinstance(note_sha, str) or len(note_sha) != 64:
+        raise ValueError("Missing/invalid Markdown fixture SHA256")
+    if previous_note_sha is not None and note_sha != previous_note_sha:
+        raise ValueError("Note bytes changed between paired trials")
+    return note_sha
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -73,6 +85,7 @@ def main() -> int:
     binary_sha = hashlib.sha256(binary.read_bytes()).hexdigest()
 
     rows = []
+    note_sha = None
     for trial in TRIALS:
         order = MODES if trial % 2 else tuple(reversed(MODES))
         for name in order:
@@ -96,16 +109,14 @@ def main() -> int:
             marker = "AKULA_MIP_HALF_ROW_USED level=" in log
             if marker != (name == "row"):
                 raise ValueError(f"{name} trial={trial}: missing/extra row-code witness")
-            if not row["applied"] or not row["window_witness"] and os.name == "nt":
+            if not row["applied"] or (os.name == "nt" and not row["window_witness"]):
                 raise ValueError(f"{name} trial={trial}: no installed-window-independent mip witness")
-            if row["image_sha256"] != fixture_sha:
-                raise ValueError("Different fixture bytes between modes")
-            if rows and row["note_sha256"] != rows[0]["note_sha256"]:
-                raise ValueError("Note bytes changed between trials")
+            note_sha = validate_fixture_hashes(row, fixture_sha, note_sha)
             entry = {
                 "mode": name, "trial": trial,
                 "scenario": scene, "viewport": viewport,
                 "input_image_sha256": fixture_sha,
+                "note_sha256": note_sha,
                 "binary_sha256": binary_sha,
                 "row_code_witness": marker,
                 "metrics": measured(row),
