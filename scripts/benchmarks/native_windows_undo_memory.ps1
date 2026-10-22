@@ -9,6 +9,8 @@ function New-Fixture([string]$file,[int]$count) {
   if (Test-Path -LiteralPath $dir) { throw 'Vault already exists' }
   [System.IO.Directory]::CreateDirectory($dir) | Out-Null
   $writer=New-Object System.IO.StreamWriter($file,$false,(New-Object System.Text.UTF8Encoding($false)))
+  # Use the same LF newline convention as the Rust Markdown editor.
+  $writer.NewLine=[string][char]10
   try {
     for($i=0;$i -lt $count;$i++) {
       if($i -eq 0) { $line="# Akula M3b test $count" }
