@@ -1,0 +1,88 @@
+name: Akula IDE agent harness policy golden lab
+
+on:
+  push:
+    branches:
+      - lab/ide-agent-harness-20261022
+    paths:
+      - .github/workflows/akula-ide-harness-preflight.yml
+      - .github/ide-graph/harness_preflight_probe.py
+      - .github/ide-graph/edge_accuracy_probe.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-ide-harness-policy-lab
+  cancel-in-progress: true
+
+jobs:
+  rust-fixture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    env:
+      CARGO_NET_OFFLINE: "true"
+      DO_NOT_TRACK: "1"
+    steps:
+      - name: Checkout independent harness lab only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Test harness Python syntax and available Rust tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/ide-graph/edge_accuracy_probe.py
+          python3 -m py_compile .github/ide-graph/harness_preflight_probe.py
+          cargo --version
+          rustc --version
+          rustup component add rust-analyzer
+          rust-analyzer --version
+          mkdir -p _ide_harness_results
+          cargo --version > _ide_harness_results/cargo-version.txt
+          rustc --version > _ide_harness_results/rustc-version.txt
+          rust-analyzer --version > _ide_harness_results/rust-analyzer-version.txt
+
+      - name: Real Rust source overlay and architecture gate
+        shell: bash
+        timeout-minutes: 7
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/ide-harness-rust-target"
+          /usr/bin/time -v -o _ide_harness_results/harness-run-time.txt \
+            timeout 380 python3 .github/ide-graph/harness_preflight_probe.py \
+              --fixture "$RUNNER_TEMP/ide-agent-harness-fixture" \
+              --results "$GITHUB_WORKSPACE/_ide_harness_results" \
+              > _ide_harness_results/harness-run.log 2>&1 || {
+            cat _ide_harness_results/harness-run.log
+            exit 1
+          }
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path("_ide_harness_results/harness-report.json").read_text())
+          assert d["status"] == "PASS", d
+          assert [x["verdict"]["status"] for x in d["cases"]] == [
+              "PASS", "FAIL", "PASS"], d
+          assert all(x["compile_pass"] for x in d["compiler_checks"]), d
+          assert all(x["pass"] for x in d["negative_checks"]), d
+          print(json.dumps({
+              "status": d["status"],
+              "semantic_case_targets": [x["actual_targets"] for x in d["cases"]],
+              "policy_verdicts": [x["verdict"]["status"] for x in d["cases"]],
+              "negative_checks": len(d["negative_checks"]),
+              "elapsed_seconds": d["elapsed_seconds"]
+          }, indent=2))
+          PY
+
+      - name: Always upload honest proof and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-ide-harness-policy-golden-linux
+          path: _ide_harness_results
+          if-no-files-found: warn
+          retention-days: 14
