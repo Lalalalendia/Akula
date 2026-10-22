@@ -1,6 +1,5 @@
 //! Inert sync contracts, types and deterministic fake provider.
 //! Local history is not distributed; File Gate protects dirty editor buffers.
-
 mod core_scan;
 mod dag;
 mod delta;
@@ -46,7 +45,6 @@ mod native_existing_replace_probe;
 mod native_windows_replace_probe;
 mod local_recovery;
 mod recovery_review;
-/// Crypto envelope contract only: no production key custody or archive writer yet.
 pub mod sealed_archive;
 #[cfg(feature = "sync-s3")]
 pub mod s3_pair_invite;
@@ -79,7 +77,6 @@ mod protocol;
 mod provider;
 mod s3;
 mod s3_manifest;
-// Inert V2 contract only: no S3 pack writer, reader or auto-sync activation.
 mod s3_pack_index;
 mod s3_manifest_delta;
 mod s3_coord_v2;
@@ -89,7 +86,6 @@ mod s3_anchored_delta;
 mod s3_delta_walker;
 #[cfg(feature = "sync-s3")]
 mod s3_remote_anchor;
-// App-data V2 trust anchor is not a per-document or write baseline.
 #[cfg(feature = "sync-s3")]
 mod s3_v2_trust_anchor;
 #[cfg(feature = "sync-s3")]
@@ -204,7 +200,6 @@ pub use vault::{
 };
 
 /// No sync scheduler or external I/O is started by importing these contracts.
-/// Runtime activation/UI remain out of scope until the S3 slice is validated.
 pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
