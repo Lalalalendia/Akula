@@ -21,7 +21,13 @@
     "deviceRevoked": "Revoked (blocked)",
     "selectDevice": "Choose draft recipient",
     "deviceSelected": "Selected for draft",
-    "deviceSelectionOnly": "Choosing a device never grants file access or starts transfer."
+    "deviceSelectionOnly": "Choosing a device never grants file access or starts transfer.",
+    "transportContacts": "Iroh transport contacts (not file permissions)",
+    "noTransportContacts": "No locally confirmed transport identities.",
+    "transportContactConfirmed": "Locally confirmed key. Connection and file permissions not verified.",
+    "transportContactRevoked": "Revoked. Blocked for future operations.",
+    "transportContactsUnavailable": "Protected contact store unavailable",
+    "transportContactsOnly": "Read-only contacts. Pair or revoke explicitly; file sending remains disabled."
   },
   "editor": {
     "resetUiStateWarning": "The reset forgets open tabs, the list of knowledge bases, home pages and book reading positions; notes, history and settings stay.",
