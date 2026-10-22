@@ -1,11 +1,11 @@
 name: Native installed-host positive two-process acceptance
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - 'aquilum-app/native/src/workspace.rs'
       - 'aquilum-app/native/src/workspace_host_positive_tests.rs'
-      - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/core/src/app_core.rs'
       - 'aquilum-app/core/src/files/gate/write.rs'
       - 'aquilum-app/core/src/sync/host_custody_registry.rs'
@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: p0-host-native-positive-${{ github.ref }}
-  cancel-in-progress: true
+  group: p0-host-native-positive-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   positive-native:
