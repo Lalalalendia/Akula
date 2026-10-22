@@ -1,5 +1,4 @@
-//! Local transfer drafts only. The network service, peer discovery, File Gate,
-//! delivery receipts and verified progress remain unavailable in this UI.
+//! Transfer drafts only: no network, File Gate rights, or delivery receipts.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,7 +6,6 @@ use std::sync::Arc;
 use aquilum_core::sync::DeviceId;
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, WidgetId};
-use masonry::kurbo::Point;
 
 use super::{App, Outcome, Popup};
 use crate::ui::dialog::{self, DialogAnswer};
@@ -16,12 +14,10 @@ use crate::ui::widgets::Pressed;
 
 const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
-
 mod model;
-
-/// A display-only identity observation. The first-party owner registry still
-/// needs to supply a verified snapshot. No production path populates this
-/// collection, and neither this struct nor the UI authorizes File Gate writes.
+#[cfg(feature = "p2p-device-contacts-preview")]
+mod contacts;
+/// Display-only owner registry placeholder; never a transfer grant.
 #[derive(Clone, Debug)]
 pub(super) struct TransferPeer {
     pub(super) id: DeviceId,
@@ -43,6 +39,8 @@ pub(super) struct TransferState {
     pub(super) choosing: bool,
     pub(super) error: Option<String>,
     peers: Vec<TransferPeer>,
+    #[cfg(feature = "p2p-device-contacts-preview")]
+    transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
 }
 
@@ -51,19 +49,21 @@ impl App {
         if self.popup.is_some() {
             return;
         }
+        #[cfg(feature = "p2p-device-contacts-preview")]
+        self.transfer.refresh_transport_contacts();
         self.show_transfers(root);
     }
 
+    #[cfg(not(feature = "p2p-device-contacts-preview"))]
     fn show_transfers(&mut self, root: &mut RenderRoot) {
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(),
         );
-        root.add_layer(layer, Point::ORIGIN);
+        root.add_layer(layer, masonry::kurbo::Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
         self.popup = Some(Popup::Transfers(dialog));
     }
-
     fn refresh_transfers(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Transfers(dialog)) = self.popup.take() {
             root.remove_layer(dialog.layer);
@@ -132,7 +132,6 @@ impl App {
         Outcome::default()
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
