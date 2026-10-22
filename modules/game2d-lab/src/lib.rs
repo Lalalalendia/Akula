@@ -143,7 +143,7 @@ mod tests {
     }
     #[test] fn life_loss_and_restart() {
         let mut g=Game::default(); g.lives=1;
-        g.ball=Ball{x:40.0,y:182.0,vx:0.0,vy:120.0};
+        g.ball=Ball{x:40.0,y:190.0,vx:0.0,vy:120.0};
         g.step(Input::default());
         assert_eq!(g.phase,Phase::Lost);
         g.restart(); assert_eq!(g.phase,Phase::Playing); assert_eq!(g.score,0);
