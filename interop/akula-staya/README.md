@@ -81,12 +81,54 @@ UI, trusted device enrollment, remote-signed user decision, authenticated
 host IPC, File Gate publish permission, or durable application receipt.
 Do not enable shipping P2P from this result.
 
-## NODE-E2E-02a — reuse Node's durable replica as Staya source (feature gated)
+## Receiver create-new inbox (Akula P2P INBOX-01)
 
-The **existing** `interop/akula-staya` crate now has the explicit opt-in `node-replica-transport-lab` feature. Linux-only integration test `tests/node_replica_real_quic.rs` builds on NODE-E2E-01a/01b from [Akula PR #607](https://github.com/Lalalalendia/Akula/pull/607) without inventing a parallel writer, queue format or network transport.
+After an actual Staya QUIC/Bao transfer produces a private staged file,
+`aquilum_core::p2p_inbox_lab::save_verified_stage_as_new` accepts its
+**already opened File handle** plus the root/length from independently
+approved Akula OfferSession. It copies through a 64 KiB buffer into a fresh
+sibling candidate, cold checks source size and BLAKE3, flushes the candidate
+and uses a **same-directory no-clobber hard link** to publish the
+user-selected NEW destination. Existing files/symlinks, changed stage sizes,
+wrong roots, and unsupported hard-link filesystems fail closed; no rename
+fallback. A wrong digest never makes partial destination bytes visible.
 
-One operator-allowlisted Markdown fixture is staged by Core `SqliteDagStore`, and the original source is removed. Next, a synthetic owner-signed exact VaultId/DocumentId/RevisionId/BLAKE3/NodeId/DeviceId read grant and live test device-key signature pass `read_with_device_proof`. Wrong grant epoch and a different test device are denied **before plaintext is exported**. The test materializes the admitted bytes in an isolated disposable file because the current Staya *preview binary* accepts file paths, not NodeStore streams. It then uses the already merged real Akula OfferSession → QueueSelection adapter, launches actual Staya sender/receiver via Iroh QUIC/Bao, proves pre-arm GET denial and an unrelated Iroh peer denial, transfers exactly the approved root, verifies independent staged bytes after the source file is absent, and leaves File Gate/APPLIED untouched.
+This is now exercised with the actual Staya staged bytes in the Windows/Linux
+two-process E2E and also through portable Core unit tests. The verified stage
+remains separate from the user destination; a second attempted save to that
+destination is rejected without mutation.
 
-**Not production:** ephemeral owner/device keys, operator-provisioned trust and a manually chosen receiver EndpointId; **no cryptographic proof that the signed DeviceId is the same key as the live Iroh EndpointId**, and no STY-DEVICE-01a enrollment (#531), persistent challenge replay protection, TLS/QUIC broker or OS-owned epoch store. This is an end-to-end **lab transport proof**, not a licensed/paired user client or read authority. The temporary plaintext materialization must be replaced with bounded private NodeStore streaming/FS custody before shipping.
+**Important limits:** this is a Core opt-in feature / test path, not yet a
+button in installed Akula; neither the receiver's selected destination nor
+the sender's QUIC identity is currently driven by the real File transfers
+window. The API cannot prove the provenance of caller-supplied expected
+BLAKE3 roots; the caller MUST use an authenticated accepted OfferSession.
+It does not protect all ancestor path races or guarantee directory metadata
+durability after power loss. A successful copy is not File Gate APPLIED,
+Vault synchronization, or a durable revision ACK.
 
-The new test is invoked only on Linux in the existing pinned-Staya workflow after the ordinary real two-process test. The ordinary Windows integration remains enabled; no production feature or UI is changed. NODE-E2E-02 / NODE-E2E-07 remain **NOT ACCEPTED** until real independent peer enrollment, current revoke witness, and an actual VPS test are proven.
+## AK-P2P-LIVE-ID-01 — live Iroh key and fresh protected peer pin (opt-in)
+
+The standalone `p2p-live-identity` feature derives the actual Iroh
+`SecretKey` from Akula's existing OS-backed `DeviceIdentity`, checking
+the resulting public ID. It exposes `require_pinned_live_peer(connection,
+selected_id)`: this reads cryptographically authenticated Iroh
+`Connection::remote_id()` and delegates to Core's OS-persisted
+`peer_pin::require_pinned_remote` on **every new operation**. No claimed
+network ID or invitation-derived key is accepted as proof.
+
+Linux/Windows tests establish a genuine loopback QUIC connection and prove
+wrong selected IDs and a fresh unconfirmed peer fail closed. Test code does
+not initialize, replace, delete, or leak any user's canonical credentials.
+
+**Not installed:** neither native File transfers nor the Staya provider calls
+this seam yet. No DeviceId/Vault/object authorization, sender consent, local
+IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
+The existing receiver create-new and OS identity code stay opt-in. This work
+cannot enable network file access.
+
+## NODE-E2E-02a — offline verified Node replica via Staya (lab)
+
+The opt-in `node-replica-transport-lab` test persists one allowlisted Markdown fixture through the existing Sync DAG. After its original source is removed, a signed exact read grant and synthetic device proof allow a one-time disposable export. Actual Staya Iroh QUIC/Bao transfers verified bytes to a separate process. The provider refuses pre-arm GET and an unlisted Iroh peer.
+
+This does **not** enroll a real user device, grant File Gate rights, provide a server Node daemon or remove the temporary plaintext path. Existing `p2p-live-identity` and `p2p-inbox-lab` retain their separate validation gates. Product NODE-E2E-02/07 remain unaccepted; see [AKULA-NODE-E2E-01A](../../docs/platforms/AKULA-NODE-E2E-01A.md).

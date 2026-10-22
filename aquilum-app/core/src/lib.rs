@@ -21,7 +21,6 @@ pub mod wikixiv;
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
 #[cfg(feature = "server-bootstrap-b0-lab")]
 pub mod server_bootstrap_lab;
-
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b0-openssh-lab"))]
 pub mod server_bootstrap_ssh_lab;
 #[cfg(feature = "server-bootstrap-b1a-release-lab")]
@@ -32,10 +31,8 @@ pub mod server_staging_lab;
 pub mod server_release_floor_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1b-approval-lab"))]
 pub mod server_owner_approval_lab;
-
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1c-witness-lab"))]
 pub mod server_witness_lab;
-
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b3a-helper-ipc-lab"))]
 pub mod server_installer_ipc_lab;
 #[cfg(all(target_os = "linux",feature = "server-bootstrap-b1b3c-pinned-fd-lab"))]
@@ -61,5 +58,7 @@ pub mod node_replica_auth_lab;
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;
+#[cfg(feature = "p2p-inbox-lab")]
+pub mod p2p_inbox_lab;
 #[cfg(feature = "p2p-device-identity")]
 pub mod p2p_device_identity;
