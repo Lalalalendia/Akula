@@ -437,4 +437,87 @@ mod tests {
         assert!(!other.exists());
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_iroh_quic_one_file_roundtrip_without_user_credentials() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("selected-source.txt");
+        let output = dir.path().join("receiver-selected-name.txt");
+        let bytes = b"Akula P2P one-file LAN beta real QUIC payload";
+        fs::write(&source, bytes).unwrap();
+
+        // These disposable TLS keys are test-only. Real production CLI always
+        // loads protected OS credentials and checks durable peer pins first.
+        let sender = Endpoint::builder(presets::Minimal)
+            .secret_key(iroh::SecretKey::generate())
+            .alpns(vec![ALPN.to_vec()])
+            .relay_mode(RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+        let sender_id = sender.id();
+        let socket = sender
+            .bound_sockets()
+            .into_iter()
+            .find(|socket| socket.is_ipv4())
+            .expect("IPv4 loopback is required on Windows/Linux CI");
+        let direct = EndpointAddr::new(sender_id).with_ip_addr(SocketAddr::new(
+            match socket {
+                SocketAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                SocketAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            },
+            socket.port(),
+        ));
+        let receiver = Endpoint::builder(presets::Minimal)
+            .secret_key(iroh::SecretKey::generate())
+            .alpns(vec![ALPN.to_vec()])
+            .relay_mode(RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+        let receiver_id = receiver.id();
+
+        let sender_task = tokio::spawn(async move {
+            let incoming = tokio::time::timeout(Duration::from_secs(25), sender.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let connection = incoming.accept().unwrap().await.unwrap();
+            assert_eq!(connection.remote_id(), receiver_id);
+            tokio::time::timeout(
+                Duration::from_secs(25),
+                send_one(&connection, &source, || Ok(())),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            connection.close(0u8.into(), b"test transfer finished");
+            sender.close().await;
+        });
+
+        let connection = tokio::time::timeout(
+            Duration::from_secs(25),
+            receiver.connect(direct, ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(connection.remote_id(), sender_id);
+        tokio::time::timeout(
+            Duration::from_secs(25),
+            receive_one(&connection, &output, || Ok(())),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        connection.close(0u8.into(), b"test complete");
+        receiver.close().await;
+        sender_task.await.unwrap();
+        assert_eq!(fs::read(&output).unwrap(), bytes);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
 }
