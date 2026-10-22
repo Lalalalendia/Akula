@@ -1,6 +1,3 @@
-pub mod transport;
-pub mod wire;
-
 //! GNET-01: a deterministic, transport-independent Connect Four game session.
 //!
 //! The caller MUST pass the identity authenticated by its transport to apply.
@@ -8,6 +5,9 @@ pub mod wire;
 //! Room IDs and epochs must be issued and persisted by the future room owner.
 //! This crate performs no I/O, opens no sockets, and has no file or Akula access.
 
+
+pub mod transport;
+pub mod wire;
 pub const ROWS: usize = 6;
 pub const COLUMNS: usize = 7;
 pub type Board = [[Option<Player>; COLUMNS]; ROWS];
@@ -180,16 +180,16 @@ impl GameSession {
             });
         }
 
-        if let Some(last) = self.last_accepted[index] {
-            if command.sequence == last.sequence {
-                return if command.column == last.column {
-                    Ok(ApplyResult::Duplicate {
-                        original_revision: last.revision,
-                    })
-                } else {
-                    Err(GameError::SequenceConflict)
-                };
-            }
+        if let Some(last) = self.last_accepted[index]
+            && command.sequence == last.sequence
+        {
+            return if command.column == last.column {
+                Ok(ApplyResult::Duplicate {
+                    original_revision: last.revision,
+                })
+            } else {
+                Err(GameError::SequenceConflict)
+            };
         }
         let expected = self.next_sequences[index];
         if command.sequence < expected {

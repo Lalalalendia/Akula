@@ -1,6 +1,8 @@
 use akula_game_session::{
     Command, GameSession, PeerId, Player, RoomId, Status,
-    transport::{GameTransport, InMemoryTransport, MAX_FRAME_BYTES, MAX_QUEUED_FRAMES, TransportError},
+    transport::{
+        GameTransport, InMemoryTransport, MAX_FRAME_BYTES, MAX_QUEUED_FRAMES, TransportError,
+    },
     wire::{COMMAND_BYTES, SNAPSHOT_BYTES, WIRE_VERSION, WireError, WireMessage},
 };
 
@@ -10,9 +12,7 @@ const GUEST: PeerId = PeerId([2; 32]);
 const STRANGER: PeerId = PeerId([3; 32]);
 const EPOCH: u64 = 11;
 
-const TWENTY_TURNS: [u8; 20] = [
-    3, 4, 6, 1, 0, 1, 0, 0, 3, 3, 3, 0, 5, 5, 5, 2, 1, 3, 2, 3,
-];
+const TWENTY_TURNS: [u8; 20] = [3, 4, 6, 1, 0, 1, 0, 0, 3, 3, 3, 0, 5, 5, 5, 2, 1, 3, 2, 3];
 
 fn command(sequence: u64, column: u8) -> Command {
     Command {
@@ -62,9 +62,15 @@ fn complete_wins_and_draws_have_valid_snapshots() {
     let columns = [0, 6, 1, 6, 2, 5, 3];
     for (index, &col) in columns.iter().enumerate() {
         let peer = if index % 2 == 0 { HOST } else { GUEST };
-        game.apply(peer, command((index / 2 + 1) as u64, col)).unwrap();
+        game.apply(peer, command((index / 2 + 1) as u64, col))
+            .unwrap();
     }
-    assert_eq!(game.snapshot_for(HOST).unwrap().state.status, Status::Won { winner: Player::Red });
+    assert_eq!(
+        game.snapshot_for(HOST).unwrap().state.status,
+        Status::Won {
+            winner: Player::Red
+        }
+    );
     let message = snapshot(&game);
     assert_eq!(WireMessage::decode(&message.encode().unwrap()), Ok(message));
 }
@@ -78,19 +84,31 @@ fn header_version_and_lengths_fail_closed() {
     assert_eq!(WireMessage::decode(&bad), Err(WireError::BadMagic));
     bad = good.clone();
     bad[2] = WIRE_VERSION + 1;
-    assert_eq!(WireMessage::decode(&bad), Err(WireError::UnsupportedVersion(WIRE_VERSION + 1)));
+    assert_eq!(
+        WireMessage::decode(&bad),
+        Err(WireError::UnsupportedVersion(WIRE_VERSION + 1))
+    );
     bad = good.clone();
     bad[3] = 55;
-    assert_eq!(WireMessage::decode(&bad), Err(WireError::UnknownMessage(55)));
+    assert_eq!(
+        WireMessage::decode(&bad),
+        Err(WireError::UnknownMessage(55))
+    );
     assert_eq!(
         WireMessage::decode(&good[..COMMAND_BYTES - 1]),
-        Err(WireError::WrongLength { expected: COMMAND_BYTES, actual: COMMAND_BYTES - 1 })
+        Err(WireError::WrongLength {
+            expected: COMMAND_BYTES,
+            actual: COMMAND_BYTES - 1
+        })
     );
     bad = good;
     bad.push(0);
     assert_eq!(
         WireMessage::decode(&bad),
-        Err(WireError::WrongLength { expected: COMMAND_BYTES, actual: COMMAND_BYTES + 1 })
+        Err(WireError::WrongLength {
+            expected: COMMAND_BYTES,
+            actual: COMMAND_BYTES + 1
+        })
     );
 }
 
@@ -151,12 +169,21 @@ fn gravity_parity_and_winner_checks_reject_bogus_snapshots() {
 
 #[test]
 fn memory_pairs_reject_fake_identity_and_destinations() {
-    assert_eq!(InMemoryTransport::pair(HOST, HOST).unwrap_err(), TransportError::InvalidPeers);
-    assert_eq!(InMemoryTransport::pair(HOST, PeerId([0; 32])).unwrap_err(), TransportError::InvalidPeers);
+    assert_eq!(
+        InMemoryTransport::pair(HOST, HOST).unwrap_err(),
+        TransportError::InvalidPeers
+    );
+    assert_eq!(
+        InMemoryTransport::pair(HOST, PeerId([0; 32])).unwrap_err(),
+        TransportError::InvalidPeers
+    );
     let (mut host, mut guest) = InMemoryTransport::pair(HOST, GUEST).unwrap();
     assert_eq!(host.local_peer(), HOST);
     assert_eq!(guest.local_peer(), GUEST);
-    assert_eq!(guest.send(STRANGER, b"x"), Err(TransportError::WrongDestination));
+    assert_eq!(
+        guest.send(STRANGER, b"x"),
+        Err(TransportError::WrongDestination)
+    );
     assert_eq!(guest.send(HOST, b""), Err(TransportError::EmptyFrame));
     assert_eq!(host.queued_frames(), Ok(0));
 }
@@ -174,7 +201,10 @@ fn frame_sender_is_bound_to_the_endpoint_not_the_payload() {
 #[test]
 fn in_memory_link_limits_frame_size_and_buffer_depth() {
     let (mut host, mut guest) = InMemoryTransport::pair(HOST, GUEST).unwrap();
-    assert_eq!(guest.send(HOST, &vec![0; MAX_FRAME_BYTES + 1]), Err(TransportError::OversizedFrame));
+    assert_eq!(
+        guest.send(HOST, &vec![0; MAX_FRAME_BYTES + 1]),
+        Err(TransportError::OversizedFrame)
+    );
     assert_eq!(host.queued_frames(), Ok(0));
     for _ in 0..MAX_QUEUED_FRAMES {
         guest.send(HOST, b"x").unwrap();
@@ -215,9 +245,17 @@ fn delayed_and_repeated_wire_commands_cannot_change_state_twice() {
         };
         let result = game.apply(received.from, cmd).unwrap();
         if index == 0 {
-            assert!(matches!(result, akula_game_session::ApplyResult::Applied { revision: 2, .. }));
+            assert!(matches!(
+                result,
+                akula_game_session::ApplyResult::Applied { revision: 2, .. }
+            ));
         } else {
-            assert_eq!(result, akula_game_session::ApplyResult::Duplicate { original_revision: 2 });
+            assert_eq!(
+                result,
+                akula_game_session::ApplyResult::Duplicate {
+                    original_revision: 2
+                }
+            );
         }
     }
     assert_eq!(game.snapshot_for(HOST).unwrap().state.revision, 2);
@@ -233,23 +271,31 @@ fn twenty_turns_traverse_transport_and_both_players_see_the_same_revision() {
         if index % 2 == 0 {
             game.apply(HOST, command(sequence, column)).unwrap();
         } else {
-            let bytes = WireMessage::Command(command(sequence, column)).encode().unwrap();
+            let bytes = WireMessage::Command(command(sequence, column))
+                .encode()
+                .unwrap();
             guest.send(HOST, &bytes).unwrap();
             let packet = host.try_recv().unwrap().unwrap();
             assert_eq!(packet.from, GUEST);
-            let WireMessage::Command(request) = WireMessage::decode(&packet.payload).unwrap() else {
+            let WireMessage::Command(request) = WireMessage::decode(&packet.payload).unwrap()
+            else {
                 panic!("expected move");
             };
             game.apply(packet.from, request).unwrap();
         }
         let state = game.snapshot_for(HOST).unwrap().state;
-        host.send(GUEST, &snapshot(&game).encode().unwrap()).unwrap();
+        host.send(GUEST, &snapshot(&game).encode().unwrap())
+            .unwrap();
         let frame = guest.try_recv().unwrap().unwrap();
         assert_eq!(frame.from, HOST);
-        let WireMessage::Snapshot { room, epoch, state: received } =
-            WireMessage::decode(&frame.payload).unwrap() else {
-                panic!("expected snapshot");
-            };
+        let WireMessage::Snapshot {
+            room,
+            epoch,
+            state: received,
+        } = WireMessage::decode(&frame.payload).unwrap()
+        else {
+            panic!("expected snapshot");
+        };
         assert_eq!(room, ROOM);
         assert_eq!(epoch, EPOCH);
         assert_eq!(received, state);
