@@ -149,6 +149,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires disposable MinIO integration server"]
     async fn probe_private_minio_requires_explicit_credential_and_readback() {
         let Ok(endpoint) = std::env::var("AQ_S3_TEST_ENDPOINT") else { return };
         assert!(endpoint.starts_with("http://localhost:")
