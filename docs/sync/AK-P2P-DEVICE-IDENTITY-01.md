@@ -81,3 +81,37 @@ cross-session CAS security boundary. Linux remains unsupported, fail closed.
 New exact-head CI must prove confirmed → fresh OS process → revoked → fresh OS
 process → denied re-confirmation, plus invalid fingerprints, Linux refusal,
 strict module Clippy and Rustfmt. Installed UI and two-PC runtime remain HOLD.
+
+## AK-P2P-CONTACTS-UI-01 — opt-in read-only device contact panel
+
+- **Core:** `peer_pin::list_peers()` uses the current Windows user's
+  `CredEnumerateW` with an exact per-application prefix and no
+  `CRED_ENUMERATE_ALL_CREDENTIALS`. It re-reads and decodes each stored
+  record against the currently persisted local EndpointId. The whole
+  snapshot fails closed on malformed IDs, changed identity, duplicate
+  entries, inaccessible storage or more than 32 contacts; no partial
+  contact list is shown. Both Confirmed and Revoked records are visible.
+  Enumerated allocation is freed by Windows CredFree. No additional
+  crate, index file, key copy, background service or network connection.
+- **Native:** `p2p-device-contacts-preview` explicitly enables the
+  opt-in Core key feature and a separate read-only panel in
+  the *existing* transfers dialog. Data refreshes on opening
+  the dialog; errors appear as errors, not an empty trusted list.
+  Labels exist in English and Russian.
+- **Separation:** the peer pin is a full 32-byte Iroh transport key.
+  It is NOT a `sync::DeviceId`, Vault membership, online presence,
+  File Gate grant or proof a remote endpoint can connect.
+  No synthetic DeviceId is generated. The existing signed-owner row
+  model remains empty until its own authority is supplied. The new
+  panel has **no Select, Send, Accept or transfer action**.
+- **Shipping:** the feature is off in all default installed builds.
+  Confirm/revoke still require the standalone interactive CLI. There
+  is no GUI write to Windows Credential Manager or transfer worker.
+- **Evidence required:** Linux fail-closed and Windows contact
+  enumeration, revoked and malformed-entry tests; Windows Native
+  feature compile; regular Native compile without the feature;
+  source no-growth and security gates. No claim of release
+  acceptance until exact-head checks finish. Full product completion
+  additionally requires OS pairing UI, authenticated QUIC
+  `remote_id()` per new operation, sender consent, verified private
+  receiver staging, the ONE official Core File Gate, and two installed PCs.

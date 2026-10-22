@@ -18,6 +18,8 @@ const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
 mod model;
+#[cfg(feature = "p2p-device-contacts-preview")]
+mod contacts;
 #[cfg(feature = "p2p-device-ui")]
 mod local_identity;
 
@@ -45,6 +47,8 @@ pub(super) struct TransferState {
     pub(super) choosing: bool,
     pub(super) error: Option<String>,
     peers: Vec<TransferPeer>,
+    #[cfg(feature = "p2p-device-contacts-preview")]
+    transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
@@ -55,6 +59,8 @@ impl App {
         if self.popup.is_some() {
             return;
         }
+        #[cfg(feature = "p2p-device-contacts-preview")]
+        self.transfer.refresh_transport_contacts();
         self.show_transfers(root);
     }
 
@@ -65,6 +71,13 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
+        #[cfg(feature = "p2p-device-contacts-preview")]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            &self.transfer.transport_contacts, self.transfer.choosing,
+            self.transfer.error.as_deref(), identity_view,
+        );
+        #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
