@@ -3,7 +3,6 @@
 //! This crate is deliberately isolated from Akula's Sync Core and File Gate.
 //! An authenticated QUIC peer is not automatically authorized to see files.
 
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, endpoint::presets};
@@ -13,19 +12,8 @@ pub const STAYA_ALPN: &[u8] = b"akula/staya/transport/0";
 
 pub mod transfer;
 
-/// Explicitly authorized endpoint keys. The pairing workflow owns this list.
-#[derive(Debug, Default, Clone)]
-pub struct AllowedPeers(BTreeSet<EndpointId>);
-
-impl AllowedPeers {
-    pub fn new(peers: impl IntoIterator<Item = EndpointId>) -> Self {
-        Self(peers.into_iter().collect())
-    }
-
-    pub fn contains(&self, id: &EndpointId) -> bool {
-        self.0.contains(id)
-    }
-}
+mod admission;
+pub use admission::AllowedPeers;
 
 /// A network endpoint without implicit n0 relay or DNS publication.
 #[derive(Debug)]
@@ -61,13 +49,19 @@ impl StayaTransport {
         if !self.peers.contains(&addr.id) {
             return Err("peer not admitted".into());
         }
-        tokio::time::timeout(
+        let expected = addr.id;
+        let conn = tokio::time::timeout(
             Duration::from_secs(15),
             self.endpoint.connect(addr, STAYA_ALPN),
         )
         .await
         .map_err(|_| "connect timeout".to_owned())?
-        .map_err(|err| format!("connect: {err}"))
+        .map_err(|err| format!("connect: {err}"))?;
+        if conn.remote_id() != expected || !self.peers.contains(&conn.remote_id()) {
+            conn.close(403u32.into(), b"peer revoked during handshake");
+            return Err("peer revoked during handshake".into());
+        }
+        Ok(conn)
     }
 
     /// Wait for one authorized incoming connection. Unknown keys are closed.
@@ -87,6 +81,45 @@ impl StayaTransport {
         }
     }
 
+    /// A fresh network-admission check for each NEW logical operation on
+    /// an already-authenticated QUIC session. It does NOT grant file access.
+    pub fn authorize_new_operation(
+        &self,
+        connection: &iroh::endpoint::Connection,
+    ) -> Result<(), String> {
+        if self.peers.contains(&connection.remote_id()) {
+            Ok(())
+        } else {
+            Err("peer not admitted for new operation".into())
+        }
+    }
+
+    #[cfg(feature = "process-lab")]
+    pub async fn bind_loopback_lab(secret: SecretKey, peers: AllowedPeers) -> Result<Self, String> {
+        let endpoint = Endpoint::builder(presets::Minimal)
+            .secret_key(secret)
+            .alpns(vec![STAYA_ALPN.to_vec()])
+            .relay_mode(RelayMode::Disabled)
+            .clear_ip_transports()
+            .bind_addr("127.0.0.1:0")
+            .map_err(|err| format!("loopback address: {err}"))?
+            .bind()
+            .await
+            .map_err(|err| format!("loopback bind: {err}"))?;
+        Ok(Self { endpoint, peers })
+    }
+
+    #[cfg(feature = "process-lab")]
+    pub fn loopback_address_lab(&self) -> Result<EndpointAddr, String> {
+        let addr = self
+            .endpoint
+            .bound_sockets()
+            .into_iter()
+            .find(|socket| socket.is_ipv4() && socket.ip().is_loopback())
+            .ok_or_else(|| "no loopback UDP address".to_owned())?;
+        Ok(EndpointAddr::new(self.id()).with_ip_addr(addr))
+    }
+
     pub async fn close(&self) {
         self.endpoint.close().await;
     }
@@ -104,5 +137,16 @@ mod tests {
         assert!(policy.contains(&permitted));
         assert!(!policy.contains(&other));
         assert!(!AllowedPeers::default().contains(&permitted));
+        let visible = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let live = AllowedPeers::new([permitted]).with_live_check({
+            let visible = std::sync::Arc::clone(&visible);
+            move |key| key == &permitted && visible.load(std::sync::atomic::Ordering::Acquire)
+        });
+        assert!(live.contains(&permitted));
+        visible.store(false, std::sync::atomic::Ordering::Release);
+        assert!(
+            !live.contains(&permitted),
+            "no cached permission after revoke"
+        );
     }
 }

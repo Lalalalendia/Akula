@@ -9,6 +9,11 @@ license = "AGPL-3.0-only"
 [workspace]
 resolver = "2"
 
+[features]
+default = []
+# Test-only process adapter, separate from the Akula desktop workspace.
+process-lab = []
+
 [dependencies]
 iroh = { git = "https://github.com/calex794/roha", rev = "554d5202b63e32b8a79156f7da2807d0f4859e4b", default-features = false, features = ["tls-ring"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
