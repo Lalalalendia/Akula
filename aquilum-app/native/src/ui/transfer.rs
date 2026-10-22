@@ -33,7 +33,9 @@ pub enum QueueAction {
 }
 
 mod devices;
+mod identity;
 pub use devices::{DeviceRow, DeviceStatus};
+pub use identity::{IdentityAction, IdentityPhase, IdentityView};
 
 pub struct TransferDialog {
     pub layer: WidgetId,
@@ -41,6 +43,7 @@ pub struct TransferDialog {
     pub choose: WidgetId,
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
+    pub identity_actions: Vec<(WidgetId, IdentityAction)>,
 }
 
 fn card_size(room: Size) -> Size {
@@ -71,7 +74,13 @@ fn display_size(bytes: u64) -> String {
 
 /// The only actionable controls modify local drafts or open the local picker.
 /// No button can reach QUIC, File Gate, YDB or any source of peer authority.
-pub fn dialog(rows: &[QueueRow], devices: &[DeviceRow], choosing: bool, error: Option<&str>) -> (NewWidget<Modal>, TransferDialog) {
+pub fn dialog(
+    rows: &[QueueRow],
+    devices: &[DeviceRow],
+    choosing: bool,
+    error: Option<&str>,
+    identity: Option<&IdentityView>,
+) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
     let choose = NewWidget::new(TextButton::new(
@@ -117,22 +126,36 @@ pub fn dialog(rows: &[QueueRow], devices: &[DeviceRow], choosing: bool, error: O
     let queue = NewWidget::new(ScrollArea::new(queue));
 
     let (info, device_actions) = devices::render(devices, error);
+    let mut identity_actions = Vec::new();
     let footer = NewWidget::new(Flex::row()
         .main_axis_alignment(MainAxisAlignment::End)
         .with_fixed(choose))
         .with_props(PropertySet::new().with(Padding::all(Length::px(size::DIALOG_PADDING))));
-    let card = NewWidget::new(Flex::column()
+    let mut content = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(header(&t("transfer.title"), Some(close)))
         .with_fixed(rule())
         .with_fixed(info)
-        .with_fixed(rule())
+        .with_fixed(rule());
+    if let Some(identity) = identity {
+        let (panel, actions) = identity::render(identity);
+        identity_actions = actions;
+        content = content.with_fixed(panel).with_fixed(rule());
+    }
+    let card = NewWidget::new(content
         .with(queue, 1.0)
         .with_fixed(rule())
         .with_fixed(footer));
     let layer = Modal::new(card, &t("transfer.title"), CardSize::Window(card_size), Role::Dialog, false);
     let layer_id = layer.id();
-    (layer, TransferDialog { layer: layer_id, close: close_id, choose: choose_id, actions, device_actions })
+    (layer, TransferDialog {
+        layer: layer_id,
+        close: close_id,
+        choose: choose_id,
+        actions,
+        device_actions,
+        identity_actions,
+    })
 }
 
 #[cfg(test)]
