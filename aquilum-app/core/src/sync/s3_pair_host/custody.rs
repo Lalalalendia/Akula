@@ -25,8 +25,8 @@ use crate::sync::{
 #[derive(Debug)]
 pub enum S3PairCustodyError {
     Admission(VaultPortError),
-    Binding(S3BindingError),
-    Identity(CustodyBindingError),
+    BindingFailed,
+    IdentityMismatch,
     Io(io::Error),
     InvalidHostNamespace,
     NotProvisioned,
@@ -35,10 +35,10 @@ impl From<VaultPortError> for S3PairCustodyError {
     fn from(error: VaultPortError) -> Self { Self::Admission(error) }
 }
 impl From<S3BindingError> for S3PairCustodyError {
-    fn from(error: S3BindingError) -> Self { Self::Binding(error) }
+    fn from(_error: S3BindingError) -> Self { Self::BindingFailed }
 }
 impl From<CustodyBindingError> for S3PairCustodyError {
-    fn from(error: CustodyBindingError) -> Self { Self::Identity(error) }
+    fn from(_error: CustodyBindingError) -> Self { Self::IdentityMismatch }
 }
 impl From<io::Error> for S3PairCustodyError {
     fn from(error: io::Error) -> Self { Self::Io(error) }
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn provision_once_then_reopen_preserves_identity_and_denies_replaced_lock() {
         use std::sync::Arc;
-        use crate::CoreEvent;
+        use crate::app_core::CoreEvent;
         use crate::sync::{
             OperationId, S3ConnectionProfile, S3HeadPointerV1, S3Keyspace,
             S3ManifestV1, S3VerifiedHead, VaultId,
