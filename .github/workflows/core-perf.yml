@@ -32,11 +32,12 @@ jobs:
     # Skip routine core/sync PRs. Opt in via a perf/* branch, perf: / perf(...) title,
     # or the perf-ci PR label. workflow_dispatch stays available for manual baselines.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.head_ref, 'perf/') ||
-      startsWith(github.event.pull_request.title, 'perf(') ||
-      startsWith(github.event.pull_request.title, 'perf:') ||
-      contains(github.event.pull_request.labels.*.name, 'perf-ci')
+      (github.event_name == 'workflow_dispatch' ||
+       startsWith(github.head_ref, 'perf/') ||
+       startsWith(github.event.pull_request.title, 'perf(') ||
+       startsWith(github.event.pull_request.title, 'perf:') ||
+       contains(github.event.pull_request.labels.*.name, 'perf-ci')) &&
+      !startsWith(github.event.pull_request.title, 'perf(fields-sqlite-batch)')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -137,10 +138,87 @@ jobs:
             editor.txt
           retention-days: 30
 
+  fields-sqlite-batch:
+    name: Fields SQLite ABBA research
+    if: >-
+      github.event_name == 'pull_request' &&
+      startsWith(github.event.pull_request.title, 'perf(fields-sqlite-batch)')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: sqlite-fields-abba
+      - name: Check equivalence of all stored columns and replacement
+        working-directory: aquilum-app
+        run: cargo test --locked --release -p aquilum-core batched_fields_match_baseline_through_replacement_and_unicode -- --test-threads=1
+      - name: Run ABBA for 1k, 10k and 50k rich notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aquilum-app
+          for size in 1000 10000 50000; do
+            sample=0
+            for mode in baseline batch batch baseline; do
+              sample=$((sample + 1))
+              /usr/bin/time -v env AQUILUM_FIELD_BENCH_MODE="$mode" AQUILUM_FIELD_BENCH_SIZE="$size" \
+                cargo test --locked --release -p aquilum-core benchmark_fields_sqlite_batch \
+                -- --ignored --nocapture --test-threads=1 2>&1 | tee "../fields-${size}-${sample}-${mode}.log"
+            done
+          done
+      - name: Compare elapsed, RSS and full-row hashes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import statistics
+          lines = ["## Same-runner SQLite fields ABBA", "", "| Notes | Baseline | Batch | Change | Base RSS | Batch RSS |", "|---|---:|---:|---:|---:|---:|"]
+          metric = re.compile(r"BENCH-FIELDS documents=(\d+) mode=(baseline|batch) rows=(\d+) wall_ms=([\d.]+) digest=([0-9a-f]+)")
+          memory = re.compile(r"Maximum resident set size \(kbytes\):\s*(\d+)")
+          for size in (1000, 10000, 50000):
+              data = {"baseline": [], "batch": []}
+              checks = set()
+              for path in pathlib.Path(".").glob(f"fields-{size}-*.log"):
+                  log = path.read_text()
+                  found = metric.search(log)
+                  rss = memory.search(log)
+                  if found is None or rss is None:
+                      raise RuntimeError(f"Missing measured output: {path}")
+                  n, mode, rows, ms, digest = found.groups()
+                  if int(n) != size or int(rows) != size * 32:
+                      raise RuntimeError(f"Bad result count: {path}")
+                  checks.add(digest)
+                  data[mode].append((float(ms), int(rss.group(1))))
+              if len(data["baseline"]) != 2 or len(data["batch"]) != 2 or len(checks) != 1:
+                  raise RuntimeError(f"Modes differ or ABBA incomplete at {size}: {checks}")
+              base = statistics.median(x[0] for x in data["baseline"])
+              batch = statistics.median(x[0] for x in data["batch"])
+              a = statistics.median(x[1] for x in data["baseline"]) / 1024
+              b = statistics.median(x[1] for x in data["batch"]) / 1024
+              lines.append(f"| {size:,} | {base:.2f} ms | {batch:.2f} ms | {(batch / base - 1) * 100:+.1f}% | {a:.1f} MiB | {b:.1f} MiB |")
+          report = "\n".join(lines) + "\n"
+          print(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(report)
+          PY
+      - name: Archive raw measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fields-abba-${{ github.sha }}
+          path: fields-*.log
+          retention-days: 30
+
   paired:
     name: Opt-in paired Core benchmark
     if: >-
       github.event_name == 'pull_request' &&
+      !startsWith(github.event.pull_request.title, 'perf(fields-sqlite-batch)') &&
       (startsWith(github.head_ref, 'perf/') ||
        startsWith(github.event.pull_request.title, 'perf(') ||
        startsWith(github.event.pull_request.title, 'perf:') ||
