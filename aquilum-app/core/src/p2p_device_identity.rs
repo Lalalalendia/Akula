@@ -117,7 +117,7 @@ fn decode(bytes: &[u8]) -> Result<DeviceIdentity, IdentityError> {
 pub fn load() -> Result<DeviceIdentity, IdentityError> {
     #[cfg(windows)]
     {
-        return windows_store::load_named(TARGET);
+        windows_store::load_named(TARGET)
     }
     #[cfg(not(windows))]
     {
@@ -130,7 +130,7 @@ pub fn load() -> Result<DeviceIdentity, IdentityError> {
 pub fn initialize() -> Result<DeviceIdentity, IdentityError> {
     #[cfg(windows)]
     {
-        return windows_store::initialize_named(TARGET);
+        windows_store::initialize_named(TARGET)
     }
     #[cfg(not(windows))]
     {
@@ -238,7 +238,7 @@ mod windows_store {
     fn write_record(target: &str, identity: &DeviceIdentity) -> Result<(), IdentityError> {
         let mut target = wide(target);
         let mut record = encode(identity);
-        let mut credential = CREDENTIALW {
+        let credential = CREDENTIALW {
             Type: CRED_TYPE_GENERIC,
             TargetName: PWSTR(target.as_mut_ptr()),
             CredentialBlob: record.as_mut_ptr(),
@@ -246,7 +246,7 @@ mod windows_store {
             Persist: CRED_PERSIST_LOCAL_MACHINE,
             ..CREDENTIALW::default()
         };
-        unsafe { CredWriteW(&mut credential, 0) }.map_err(|_| IdentityError::StoreUnavailable)
+        unsafe { CredWriteW(&credential, 0) }.map_err(|_| IdentityError::StoreUnavailable)
     }
 
     pub(super) fn load_named(target: &str) -> Result<DeviceIdentity, IdentityError> {
