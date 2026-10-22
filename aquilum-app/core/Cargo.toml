@@ -60,6 +60,8 @@ sync-engine = []
 host-custody = []
 # OS-protected transport key, no peer grants.
 p2p-device-identity = ["dep:windows"]
+# Owner-signed read-only roster lab; not pairing, identity or Vault grants.
+device-roster-lab = []
 # Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
 sync-text-delta = ["dep:zstd"]
 # Separately selected packaged build: force every default Core::open through
