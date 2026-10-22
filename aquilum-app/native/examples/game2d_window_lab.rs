@@ -2,16 +2,16 @@
 //! cargo run --manifest-path aquilum-app/Cargo.toml -p aquilum-native \
 //!   --features game2d-window-lab --example game2d_window_lab -- --frames 180
 
+macro_rules! report {
+    ($($arg:tt)*) => { eprintln!($($arg)*); };
+}
+
 // Include the exact Akula Canvas/Output implementation, without editing Base.
 #[path = "../src/output/mod.rs"]
 mod output;
 // Standalone fixed-tick game rules, without bringing them into Akula Base.
 #[path = "../../../modules/native-2d-lab/src/lib.rs"]
 mod game2d;
-
-macro_rules! report {
-    ($($arg:tt)*) => { eprintln!($($arg)*); };
-}
 
 use output::{Area, Canvas};
 use std::cell::Cell;
@@ -232,7 +232,7 @@ impl ApplicationHandler for Lab {
             WindowEvent::Focused(state) => {
                 self.focused = state;
                 self.last_tick = Instant::now();
-                if !state {
+                if !state && self.auto_frames.is_none() {
                     self.controls = game2d::Input::default();
                     self.pending_start = false;
                 }
