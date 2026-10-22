@@ -45,11 +45,13 @@ fn symlink_is_never_staged() {
 #[test]
 fn drafts_are_bounded() {
     let root = tempfile::tempdir().unwrap();
-    let paths: Vec<PathBuf> = (0..MAX_DRAFTS + 2).map(|n| {
-        let p = root.path().join(format!("{n}.bin"));
-        std::fs::write(&p, b"x").unwrap();
-        p
-    }).collect();
+    let paths: Vec<PathBuf> = (0..MAX_DRAFTS + 2)
+        .map(|n| {
+            let p = root.path().join(format!("{n}.bin"));
+            std::fs::write(&p, b"x").unwrap();
+            p
+        })
+        .collect();
     let mut queue = TransferState::default();
     queue.stage(paths);
     assert_eq!(queue.drafts.len(), MAX_DRAFTS);
