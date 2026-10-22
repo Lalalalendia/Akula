@@ -1,5 +1,7 @@
 //! Explicit opt-in native window experiment. This is not part of installed Akula.
-//! cargo run --manifest-path modules/native-2d-window-lab/Cargo.toml -- --frames 180
+//! cargo run --manifest-path modules/native-2d-window-lab/Cargo.toml -- --game tetris
+// Avoid Windows Terminal obscuring the actual game window in desktop CI.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 macro_rules! report {
     ($($arg:tt)*) => { eprintln!($($arg)*); };
