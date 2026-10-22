@@ -5,12 +5,50 @@ const cp=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {classify,changed}=require('./ci-rust-scope.cjs');
+const {classify,changed,safeManifestOnly,updaterSecurityAffected}=require('./ci-rust-scope.cjs');
 
 test('pure documentation and CI telemetry do not compile Rust',()=>{
   assert.equal(classify(['README.md','docs/engineering-budgets.md',
     '.github/scripts/ci-run-budget.cjs']), 'none');
 });
+
+test('CI-only workflow and routing script changes do not compile unrelated Rust',()=>{
+  for(const onlyCi of [
+    ['.github/workflows/app-checks.yml'],
+    ['.github/workflows/app-checks.yml','.github/scripts/ci-rust-scope.cjs'],
+    ['.github/workflows/ci-shared-manifest-labs.yml','.github/scripts/ci-shared-routing-contract.test.cjs'],
+    ['.github/workflows/app-checks.yml','docs/ci.md']
+  ]) assert.equal(classify(onlyCi),'none',onlyCi.join(','));
+  // Cargo/Core changes must still get the full dependency graph even alongside CI changes.
+  for(const rust of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
+    'aquilum-app/core/src/files/gate/write.rs']){
+    assert.equal(classify([rust,'.github/workflows/app-checks.yml']),'workspace',rust);
+  }
+  assert.equal(classify(['aquilum-app/native/src/main.rs',
+    '.github/workflows/app-checks.yml']),'native');
+  assert.equal(classify(['.github/workflows/app-checks.yml',
+    'aquilum-app/core/src/sync/guarded_note_write.rs']),'sync');
+});
+test('Native source-only PRs run native package tests, never re-run Core unit suites',()=>{
+  for(const paths of [
+    ['aquilum-app/native/src/main.rs'],
+    ['aquilum-app/native/src/app/tests/graph.rs','README.md'],
+    ['aquilum-app/native/tests/desktop_integration.rs'],
+    ['aquilum-app/native/src/updater/macos_transaction.rs',
+     '.github/workflows/app-checks.yml'],
+    ['aquilum-app/native/src/ui/editor.rs','aquilum-app/native/src/app.rs'],
+  ]) assert.equal(classify(paths),'native',paths.join(','));
+  for(const risky of [
+    'aquilum-app/native/Cargo.toml',
+    'aquilum-app/Cargo.lock',
+    'aquilum-app/Cargo.toml',
+    'aquilum-app/native/build.rs',
+    'aquilum-app/native/vendor/krilla/src/lib.rs',
+    'aquilum-app/core/src/lib.rs',
+    'aquilum-app/core/src/sync/journal.rs',
+  ]) assert.equal(classify(['aquilum-app/native/src/main.rs',risky]),'workspace',risky);
+});
+
 test('only sync implementation and its contract tests use focused lane',()=>{
   assert.equal(classify(['aquilum-app/core/src/sync/pinned_windows.rs',
     'aquilum-app/core/src/sync/journal.rs',
@@ -22,8 +60,7 @@ test('any native, core outside sync, Cargo config or gate change requires all te
     'aquilum-app/native/src/ui/editor.rs',
     'aquilum-app/Cargo.lock',
     'aquilum-app/core/Cargo.toml',
-    'aquilum-app/native/vendor/ratex-parser/src/parser.rs',
-    '.github/workflows/app-checks.yml'
+    'aquilum-app/native/vendor/ratex-parser/src/parser.rs'
   ]) assert.equal(classify([name,'aquilum-app/core/src/sync/identity.rs']),'workspace',name);
 });
 test('deleted/renamed files also select the appropriate scope using real Git',()=>{
@@ -212,4 +249,145 @@ test('main-only registry source archive retains immutable PR cache safety',()=>{
   assert.match(seed,/~\/\.cargo\/registry\/index/);
   assert.match(seed,/~\/\.cargo\/git/);
   assert.equal((code.match(/\n  seed-rust-cache:\n/g)||[]).length,1,'do not add new seed jobs');
+});
+
+test('safe isolated Cargo feature routes only Core, never unrelated Native/OS tests',()=>{
+  const core='aquilum-app/core/Cargo.toml',lock='aquilum-app/Cargo.lock';
+  const safe={shared_any_risky:false};
+  const risky={shared_any_risky:true};
+  assert.equal(safeManifestOnly([core,lock],safe),true);
+  assert.equal(safeManifestOnly([core],safe),true);
+  assert.equal(safeManifestOnly([core,lock,'aquilum-app/core/src/node_catalog_lab.rs'],safe),false);
+  assert.equal(safeManifestOnly([lock],safe),false,'standalone lock edit remains full suite');
+  assert.equal(safeManifestOnly([core,lock],risky),false,'existing dependency changes remain full suite');
+  assert.equal(safeManifestOnly([core,lock],null),false,'missing classification never skips coverage');
+  assert.equal(safeManifestOnly([],safe),false);
+});
+test('real git comment-only Cargo+lock change enters focused Core mode; risky changes stay full',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'akula-manifest-mode-'));
+  const git=(...args)=>cp.execFileSync('git',args,{cwd:dir,encoding:'utf8'}).trim();
+  const mode=base=>cp.execFileSync(process.execPath,
+    [path.join(__dirname,'ci-rust-scope.cjs'),'--base='+base,'--head=HEAD'],
+    {cwd:dir,encoding:'utf8'}).trim().split(/\r?\n/).find(line=>line.startsWith('mode='));
+  const nl=String.fromCharCode(10);
+  try{
+    git('init','-q');git('config','user.name','CI');git('config','user.email','ci@example.invalid');
+    const core=path.join(dir,'aquilum-app/core/Cargo.toml');
+    const lock=path.join(dir,'aquilum-app/Cargo.lock');
+    fs.mkdirSync(path.dirname(core),{recursive:true});
+    fs.writeFileSync(core,[
+      '[package]','name = "aquilum-core"','version = "0.3.10"',
+      '[features]','default = []',''
+    ].join(nl));
+    const before=[
+      '# Cargo lock','version = 4','',
+      '[[package]]','name = "aquilum-core"','version = "0.3.10"',
+      'dependencies = [',' "serde",',']','',
+      '[[package]]','name = "serde"','version = "1.0.0"',
+      'source = "registry+https://example.invalid/index"',
+      'checksum = "fixture"',''
+    ].join(nl);
+    fs.writeFileSync(lock,before);
+    git('add','.');git('commit','-qm','baseline');
+    const base=git('rev-parse','HEAD');
+    fs.appendFileSync(core,['# CI comment',''].join(nl));
+    fs.writeFileSync(lock,before.replace('# Cargo lock'+nl,
+      '# Cargo lock'+nl+'# CI header comment'+nl));
+    git('add','.');git('commit','-qm','safe-comment');
+    assert.equal(mode(base),'mode=manifest');
+    // The original baseline comparison must see the changed existing checksum.
+    fs.writeFileSync(lock,fs.readFileSync(lock,'utf8').replace('checksum = "fixture"','checksum = "changed"'));
+    git('add','.');git('commit','-qm','unsafe-dependency-change');
+    assert.equal(mode(base),'mode=workspace');
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('updater security acceptance triggers for owned sources, installer scripts and policy edits',()=>{
+  const owned=[
+    'aquilum-app/native/src/updater/macos_transaction.rs',
+    'aquilum-app/native/src/updater/tar.rs',
+    'aquilum-app/native/src/updater/release/signed_candidate.rs',
+    'aquilum-app/native/Cargo.toml',
+    'scripts/install.sh','scripts/uninstall.sh',
+    'scripts/verify-macos-release.sh','scripts/test-install-scripts.sh',
+    'scripts/test-macos-release-verifier.sh',
+    '.github/workflows/macos-smoke.yml',
+    '.github/workflows/macos-updater-integration.yml',
+    '.github/workflows/app-checks.yml',
+    '.github/scripts/ci-rust-scope.cjs',
+  ];
+  for(const p of owned)assert.equal(updaterSecurityAffected([p]),true,p);
+  for(const unrelated of [
+    'aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock',
+    'aquilum-app/core/src/sync/guarded_note_write.rs',
+    'aquilum-app/native/src/app/tests/graph.rs',
+    'aquilum-app/native/src/main.rs',
+    '.github/scripts/ci-file-ratchet.cjs',
+  ]) assert.equal(updaterSecurityAffected([unrelated]),false,unrelated);
+  assert.equal(updaterSecurityAffected(['aquilum-app/native/src/main.rs',owned[0]]),true);
+  assert.equal(updaterSecurityAffected([]),false);
+  assert.equal(updaterSecurityAffected(null),true,'unknown file list fails closed');
+  assert.equal(updaterSecurityAffected(['']),true,'malformed path fails closed');
+});
+test('rename away from updater retains original path for fail-closed security coverage',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'akula-updater-rename-'));
+  const git=(...args)=>cp.execFileSync('git',args,{cwd:dir,encoding:'utf8'}).trim();
+  try{
+    git('init','-q');git('config','user.name','CI');
+    git('config','user.email','ci@example.invalid');
+    const before=path.join(dir,'aquilum-app/native/src/updater/macos_transaction.rs');
+    const after=path.join(dir,'aquilum-app/native/src/legacy/other.rs');
+    fs.mkdirSync(path.dirname(before),{recursive:true});
+    fs.writeFileSync(before,'pub fn proof() {}');
+    git('add','.');git('commit','-qm','before');
+    const base=git('rev-parse','HEAD');
+    fs.mkdirSync(path.dirname(after),{recursive:true});
+    fs.renameSync(before,after);
+    git('add','-A');git('commit','-qm','rename');
+    const paths=changed(base,'HEAD',dir);
+    assert.ok(paths.includes('aquilum-app/native/src/updater/macos_transaction.rs'));
+    assert.ok(paths.includes('aquilum-app/native/src/legacy/other.rs'));
+    assert.equal(updaterSecurityAffected(paths),true);
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('required macOS security suites use exact ownership and still test lock behavior',()=>{
+  const yaml=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(yaml,/updater_security_required: \$\{\{ steps\.scope\.outputs\.updater_security_required \}\}/);
+  assert.match(yaml,/updater_security_required == 'true'/);
+  for(const name of ['Security-test macOS updater TAR parser on Linux too',
+      'Test macOS updater transaction with shared installer lock and crash recovery']){
+    const marker='      - name: '+name+'\n';
+    const i=yaml.indexOf(marker);
+    assert.ok(i>=0,name+' must remain an executable required test');
+    const section=yaml.slice(i,i+270);
+    assert.match(section,/if: needs\.classify\.outputs\.updater_security_required == 'true'/,
+      name+' executes for owned files, not unrelated workspace changes');
+  }
+  assert.match(yaml,/akula_updater_txn_tests" --nocapture --test-threads=1/);
+  assert.match(yaml,/txn::tests::fresh_user_install_has_one_shared_lock/);
+  assert.match(yaml,/Run Core tests in both modes \(safe manifest additions\)/);
+  assert.match(yaml,/--features sync-engine/);
+  assert.match(yaml,/B1a\/B1b0\/B1b1 release and approval compatibility/);
+  assert.match(yaml,/Node D1\/D1\.5\/D2 scoped read and loopback compatibility/);
+  assert.match(yaml,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
+
+test('native-only lane runs all Native tests and still requires frame-fidelity Main PR gate',()=>{
+  const yaml=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(yaml,/name: Run Native package tests for native-source changes/);
+  assert.match(yaml,/if: needs\.classify\.outputs\.mode == 'native'/);
+  assert.match(yaml,/cargo test -p aquilum-native --locked -- --skip app::tests::perf::frames::/);
+  assert.match(yaml,/if: needs\.classify\.outputs\.mode == 'workspace' \|\| needs\.classify\.outputs\.mode == 'native'/,
+    'Native-only still installs Linux build dependencies');
+  assert.match(yaml,/mode == 'workspace' \|\| needs\.classify\.outputs\.mode == 'native'\)/,
+    'Native frame-fidelity must run for Native-only changes');
+  assert.match(yaml,/workspace\|native\)\n\s+if \[ "\$FRAMES_RESULT" != success \]/,
+    'protected Main PR gate requires success for Native fidelity');
+  assert.match(yaml,/sync\|none\|manifest\)\n\s+if \[ "\$FRAMES_RESULT" != skipped \]/,
+    'scopes with unchanged Native keep separate fidelity skipped');
+  assert.match(yaml,/if: needs\.classify\.outputs\.mode == 'workspace'\n\s+working-directory: aquilum-app/,
+    'mixed/Core/root changes retain full workspace');
+  assert.match(yaml,/cargo test --workspace --locked/);
+  assert.match(yaml,/cargo test -p aquilum-core --features sync-engine --locked/);
+  assert.match(yaml,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
 });

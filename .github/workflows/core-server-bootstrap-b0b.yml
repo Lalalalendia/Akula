@@ -1,11 +1,11 @@
 name: Akula Bootstrap B0b real pinned SSH signed KEX lab
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/core/src/lib.rs"
+
       - "aquilum-app/core/src/server_bootstrap_lab.rs"
       - "aquilum-app/core/src/server_bootstrap_ssh_lab.rs"
       - "aquilum-app/core/tests/server_bootstrap_b0b.rs"
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: akula-b0b-${{ github.event.pull_request.number || github.ref }}
+  group: akula-b0b-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
