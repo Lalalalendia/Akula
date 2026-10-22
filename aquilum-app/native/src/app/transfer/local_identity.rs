@@ -4,9 +4,9 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use aquilum_core::p2p_device_identity::{self, IdentityError};
 use crate::i18n::t;
 use crate::ui::transfer::{IdentityAction, IdentityPhase, IdentityView};
+use aquilum_core::p2p_device_identity::{self, IdentityError};
 
 enum Loaded {
     Missing,
@@ -34,11 +34,7 @@ impl Default for LocalIdentityUi {
 }
 
 impl LocalIdentityUi {
-    pub(super) fn action(
-        &mut self,
-        action: IdentityAction,
-        wake: Arc<dyn Fn() + Send + Sync>,
-    ) {
+    pub(super) fn action(&mut self, action: IdentityAction, wake: Arc<dyn Fn() + Send + Sync>) {
         if matches!(self.view.phase, IdentityPhase::Working) {
             return;
         }
