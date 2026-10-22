@@ -232,7 +232,7 @@ fn a_quoted_phrase_requires_adjacent_words_in_order() {
 
 #[test]
 fn a_quoted_phrase_jumps_to_the_phrase_not_an_earlier_separate_word() {
-    let body = "# Заголовок\\nКвантовая идея начинается здесь.\\n\\n## Раздел\\nНужна квантовая физика.\\n";
+    let body = "# Заголовок\nКвантовая идея начинается здесь.\n\n## Раздел\nНужна квантовая физика.\n";
     let (_guard, index) = indexed(&[("Документ.md", body)]);
     let result = &search(&index, "\"квантовая физика\"")[0];
     let at = body.find("квантовая физика").unwrap();
