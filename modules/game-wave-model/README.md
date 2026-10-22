@@ -24,7 +24,8 @@ allocation at construction and contains no unsafe code.
   after all groups are issued.
 - Transition between waves is modelled as a 150-update gap.
 - The host reports object removal via `mark_gone(id)`. Reusing a cyclic spawn slot does not erase earlier objects from the host's live set.
-- Global configuration and live-object budgets limit resource use; exceeding the live-object limit halts ticks with an explicit error.\n- A provided index chooser permits reproducible shuffle tests without claiming
+- Global configuration and live-object budgets limit resource use; exceeding the live-object limit halts ticks with an explicit error.
+- A provided index chooser permits reproducible shuffle tests without claiming
   parity with Flash Player's `Math.random()`.
 - Optional cycling preserves the source-like rest/count mechanics but is not
   yet verified against a running reference SWF.
@@ -40,7 +41,7 @@ No files, data or ActionScript from that repository were copied into this
 crate. The third-party game's CC BY-NC-SA terms require separate license review
 before redistributing original game assets.
 
-This is an **original testable approximation**. Static review uncovered and fixed two model divergences (initial batch timing and live cyclic objects); compilation and runtime tests remain pending. In particular: random
+This is an **original testable approximation**. Static review uncovered and fixed two model divergences (initial batch timing and live cyclic objects); 14 targeted Rust integration tests passed on GitHub Actions run 39780150505 with rustc 1.99.1. This is not proof of parity with Flash. In particular: random
 sequences, exact transition timing, removal/respawn identity, empty-group
 handling and cycling must be validated with original runtime traces before
 claiming behavioral equivalence. The unit tests test internal contracts, not
@@ -58,7 +59,7 @@ machine (command above) is a separate acceptance requirement.
 
 ## Follow-up acceptance
 
-1. Run `cargo test` on a machine with a current stable Rust toolchain.
+1. Completed: `cargo test --manifest-path modules/game-wave-model/Cargo.toml` on GitHub Actions run 39780150505 (14 passed, 0 failed). The temporary workflow was removed afterwards.
 2. Add reference traces for pause, spawn, cycle and next-wave transitions.
 3. Investigate precise live-object slot semantics and scripted resource joins.
 4. Add a narrow, shared test lane only after the baseline is measured and
