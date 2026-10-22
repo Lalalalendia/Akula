@@ -24,7 +24,7 @@ test('reject cross-workflow, cross-PR and missing cancellation protection',()=>{
   for(const replacement of ['  cancel-in-progress: true','  cancel-in-progress: false', '  cancel-in-progress: $'+'{{ github.event_name == "push" }}']){
     assert.match(policyErrors(good.replace(cancel,replacement),'lab.yml').join(','),/PR triggers only/);
   }
-  assert.match(policyErrors(good.replace('concurrency:\n'+group+'\n'+cancel,''],'lab.yml').join(','),/missing workflow-level/);
+  assert.match(policyErrors(good.replace('concurrency:\n'+group+'\n'+cancel,''),'lab.yml').join(','),/missing workflow-level/);
   assert.match(policyErrors(good.replace(cancel,cancel+'\n  queue: max'),'lab.yml').join(','),/queue: max/);
 });
 
