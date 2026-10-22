@@ -1,6 +1,6 @@
 //! Live Iroh QUIC identity + fresh Core OS peer pin. No file grants.
-use aquilum_core::p2p_device_identity::{self, peer_pin, IdentityError};
-use iroh::{endpoint::Connection, SecretKey};
+use aquilum_core::p2p_device_identity::{self, IdentityError, peer_pin};
+use iroh::{SecretKey, endpoint::Connection};
 
 /// Use the real OS-protected Akula seed. Never accept a key from a ticket,
 /// plaintext settings, a file path, or a UI field.
@@ -25,8 +25,5 @@ pub fn require_pinned_live_peer(
     connection: &Connection,
     selected_full_endpoint_id: &str,
 ) -> Result<(), IdentityError> {
-    peer_pin::require_pinned_remote(
-        selected_full_endpoint_id,
-        connection.remote_id().as_bytes(),
-    )
+    peer_pin::require_pinned_remote(selected_full_endpoint_id, connection.remote_id().as_bytes())
 }
