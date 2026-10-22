@@ -89,6 +89,11 @@ fn verify_bound_scope(
     let bindings = SqliteRegisteredS3Bindings::open(
         admission, &appdata.join("s3-profiles.sqlite"),
     )?;
+    // Cold SyncNow may never recreate a missing custody DB. Unlike the
+    // user-initiated bootstrap this path must be strictly open-existing.
+    if !bind_if_missing && !appdata.join("s3-custody.sqlite").is_file() {
+        return Err(S3PairCustodyError::NotProvisioned);
+    }
     let mut observed = SqliteCustodyIdentityStore::open(
         admission, &appdata.join("s3-custody.sqlite"),
     )?;
@@ -118,7 +123,20 @@ pub fn provision_cooperative_s3_pair_custody(
     let admission = RegisteredReadAdmission::open(core, registered_root)?;
     let base = host_base_for_registered(&admission, appdata, os_known_host_base)?;
     let scope = scope_for_registered(&admission, &base)?;
-    match fs::create_dir(&scope) {
+    let created = {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut dir = fs::DirBuilder::new();
+            dir.mode(0o700);
+            dir.create(&scope)
+        }
+        #[cfg(not(unix))]
+        {
+            fs::create_dir(&scope)
+        }
+    };
+    match created {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
@@ -128,7 +146,14 @@ pub fn provision_cooperative_s3_pair_custody(
     // an existing file, directory, link or reparse object is never followed
     // for creation, and never overwritten or silently reinitialized.
     let leaf = scope.join(LOCK_NAME);
-    match OpenOptions::new().read(true).write(true).create_new(true).open(&leaf) {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(&leaf) {
         Ok(file) => file.sync_all()?,
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
@@ -170,6 +195,76 @@ mod tests {
         assert_ne!(first, scoped_leaf((0x12, 0x1235)));
         assert_ne!(first, scoped_leaf((0x13, 0x1234)));
         assert!(!first.contains('/'));
+    }
+
+    #[test]
+    fn provision_once_then_reopen_preserves_identity_and_denies_replaced_lock() {
+        use std::sync::Arc;
+        use crate::CoreEvent;
+        use crate::sync::{
+            OperationId, S3ConnectionProfile, S3HeadPointerV1, S3Keyspace,
+            S3ManifestV1, S3VerifiedHead, VaultId,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("notes");
+        let appdata = tmp.path().join("appdata");
+        let host = tmp.path().join("external-custody");
+        for path in [&root, &appdata, &host] { fs::create_dir(path).unwrap(); }
+        let core = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        core.ui_state.resolve_workspace(root.to_str().unwrap(), 1).unwrap();
+        let namespace = S3Keyspace::new("akula/pair-custody", VaultId::new()).unwrap();
+        let profile = S3ConnectionProfile {
+            bucket: "akula-test-custody".into(), region: "us-east-1".into(),
+            endpoint: Some("http://127.0.0.1:9000".into()),
+            force_path_style: true,
+        };
+        let manifest = S3ManifestV1::new(
+            &namespace, OperationId::new(), 1, None, vec![],
+        ).unwrap();
+        let pointer = S3HeadPointerV1::new(
+            &namespace, 1, manifest.manifest_id,
+            &manifest.digest(&namespace).unwrap(), None,
+        ).unwrap();
+        let verified = S3VerifiedHead {
+            pointer, etag: "synthetic-test".into(), manifest,
+        };
+        let admission = RegisteredReadAdmission::open(&core, &root).unwrap();
+        let mut profiles = SqliteRegisteredS3Bindings::open(
+            &admission, &appdata.join("s3-profiles.sqlite"),
+        ).unwrap();
+        profiles.bind_existing_verified_s3(
+            &admission, "pair", &profile, &namespace, &verified,
+        ).unwrap();
+        drop(profiles);
+        drop(admission);
+        let scope = provision_cooperative_s3_pair_custody(
+            &core, &root, &appdata, &host,
+        ).unwrap();
+        assert!(scope.starts_with(&host));
+        assert_eq!(provision_cooperative_s3_pair_custody(
+            &core, &root, &appdata, &host,
+        ).unwrap(), scope);
+        let lock = scope.join(LOCK_NAME);
+        assert!(lock.is_file());
+        drop(core);
+
+        let cold = Core::open(&appdata, Arc::new(|_: CoreEvent| {}));
+        assert_eq!(open_existing_cooperative_s3_pair_custody(
+            &cold, &root, &appdata, &host,
+        ).unwrap(), scope);
+
+        let moved = scope.join("retained-original");
+        fs::rename(&lock, &moved).unwrap();
+        fs::write(&lock, b"independently-lockable replacement").unwrap();
+        assert!(open_existing_cooperative_s3_pair_custody(
+            &cold, &root, &appdata, &host,
+        ).is_err());
+        fs::remove_file(&lock).unwrap();
+        fs::rename(&moved, &lock).unwrap();
+        assert_eq!(open_existing_cooperative_s3_pair_custody(
+            &cold, &root, &appdata, &host,
+        ).unwrap(), scope);
     }
 
     #[test]
