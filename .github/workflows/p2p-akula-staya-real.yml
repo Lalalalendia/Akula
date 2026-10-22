@@ -9,8 +9,6 @@ on:
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
-      - 'aquilum-app/core/src/lib.rs'
-      - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
 
