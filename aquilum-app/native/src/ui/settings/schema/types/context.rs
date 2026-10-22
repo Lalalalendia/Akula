@@ -19,6 +19,8 @@ pub struct Context {
     pub s3_pair_status: crate::s3_pair_session::PairStatus,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
     pub s3_pair_busy: bool,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    pub s3_pair_configured: bool,
     pub yandex_notice: Option<String>,
     pub copied: Option<usize>,
     pub trash_page: usize,
