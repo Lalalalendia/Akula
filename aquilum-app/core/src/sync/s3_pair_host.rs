@@ -92,7 +92,7 @@ pub fn read_pair_profile(
 ) -> Result<Option<S3PairProfile>, S3PairHostError> {
     safe_appdata(root, appdata)?;
     let path = appdata.join(PAIR_PROFILE_FILENAME);
-    let mut file = match OpenOptions::new().read(true).open(&path) {
+    let file = match OpenOptions::new().read(true).open(&path) {
         Ok(f) => f,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -148,7 +148,7 @@ pub async fn create_first_pair_profile(
 ) -> Result<S3PairProfile, S3PairHostError> {
     safe_appdata(root, appdata)?;
     RegisteredReadAdmission::open(core, root)?;
-    if let Some(existing) = read_pair_profile(root, appdata)? {
+    if read_pair_profile(root, appdata)?.is_some() {
         return Err(S3PairHostError::ExistingDifferentProfile);
     }
     let vault = VaultId::new();
