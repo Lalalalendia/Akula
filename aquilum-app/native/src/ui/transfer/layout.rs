@@ -2,8 +2,6 @@
 
 use masonry::core::NewWidget;
 use masonry::kurbo::{Axis, Size};
-use masonry::properties::types::MainAxisAlignment;
-use masonry::widgets::Flex;
 
 use crate::ui::text::selectable;
 use crate::ui::tokens::size;
