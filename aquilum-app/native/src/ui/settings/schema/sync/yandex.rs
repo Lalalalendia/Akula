@@ -121,4 +121,3 @@ pub(in crate::ui::settings::schema) fn yandex_setup(config: &AppConfig, ctx: &Co
     }
     Block { title: t("settings.yandex.title"), rows }
 }
-

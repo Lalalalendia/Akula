@@ -79,8 +79,14 @@ public static class AkulaCredUiQaWindow {
         return found.ToArray();
     }
 
+    // Hold an independent OS handle from launch until exit status is read.
+    // Start-Process -PassThru can discard its managed Process.Handle on PS 5.1.
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr process);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool IsChild(IntPtr parent, IntPtr possibleChild);
     [DllImport("user32.dll", SetLastError = true)]
@@ -185,8 +191,15 @@ if (-not (@($list) | Where-Object { $_ -eq "$($testFilter): test" })) {
 }
 Write-Host 'AKULA_CREDUI_IGNORED_TEST_DISCOVERY_PASS: exact_test_present=True'
 $proc = $null
+$processExitHandle = [IntPtr]::Zero
 try {
     $proc = Start-Process -FilePath $testExe -ArgumentList $testArgs -WorkingDirectory $cargoWorkdir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    # PROCESS_QUERY_LIMITED_INFORMATION (0x1000); never open unrelated PIDs.
+    # Keep this reference while the OS dialog is active, across process exit.
+    $processExitHandle = [AkulaCredUiQaWindow]::OpenProcess(0x1000, $false, [uint32]$proc.Id)
+    if ($processExitHandle -eq [IntPtr]::Zero) {
+        throw 'Could not retain isolated CredUI test process exit handle'
+    }
     $editType = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Edit
@@ -297,13 +310,11 @@ try {
     if (-not $proc.WaitForExit(30000)) {
         throw 'The genuine Windows CredUI Cancel did not return to the native test'
     }
-    # Start-Process -PassThru may expose a null ExitCode in Windows
-    # PowerShell 5.1 even after WaitForExit(). Query the SAME kernel process
-    # handle directly; never treat a missing managed exit code as success.
-    $proc.Refresh()
+    # Query the pinned kernel process handle, not the nullable managed
+    # Process.Handle/ExitCode properties after Start-Process -PassThru.
     [uint32]$nativeExitCode = 259
     if (-not [AkulaCredUiQaWindow]::GetExitCodeProcess(
-        $proc.Handle, [ref]$nativeExitCode)) {
+        $processExitHandle, [ref]$nativeExitCode)) {
         throw 'CredUI isolated test OS exit status could not be obtained'
     }
     if ($nativeExitCode -ne 0) {
@@ -326,6 +337,9 @@ try {
     Write-Host "AKULA_YANDEX_CREDUI_CANCEL_PASS: native_modal=True masked_password_fields=$masked mask_proof=$maskProof cancel_activation=$activation no_keys_persisted=True"
 }
 finally {
+    if ($processExitHandle -ne [IntPtr]::Zero) {
+        [AkulaCredUiQaWindow]::CloseHandle($processExitHandle) | Out-Null
+    }
     if ($null -ne $proc) {
         $proc.Refresh()
         if (-not $proc.HasExited) {

@@ -111,6 +111,48 @@ pub(super) fn sync_recovery(ctx: &Context) -> Vec<Block> {
             ));
         }
     }
+    // S3-E2E-01: separate cloud-VaultId visibility gate. The ordinary
+    // local-workspace dashboard must NOT equate workspace UUID and cloud ID.
+    // This preview is strictly observational: no action buttons, receipts,
+    // File Gate grants, S3 ACK or baseline promotion.
+    #[cfg(feature = "s3-e2e01-review-preview")]
+    if let Some(s3_status) = ctx.s3_bound_publications.as_ref() {
+        let (value, tone) = match s3_status {
+            NativeRecoveryOverview::JournalNotConfigured =>
+                (t("settings.sync.s3BoundNotConfigured"), Tone::Muted),
+            NativeRecoveryOverview::NoLocalPublicationClaims =>
+                (t("settings.sync.s3BoundNoClaims"), Tone::Secondary),
+            NativeRecoveryOverview::RequiresReview { .. } =>
+                (t("settings.sync.s3BoundHold"), Tone::Danger),
+            NativeRecoveryOverview::InspectionUnavailable =>
+                (t("settings.sync.s3BoundUnavailable"), Tone::Danger),
+        };
+        rows.push(info(
+            t("settings.sync.s3BoundTitle"),
+            Some(t("settings.sync.s3BoundHint")),
+            Control::Status { text: value, tone },
+        ));
+        if let NativeRecoveryOverview::RequiresReview { total_claims, examples } =
+            s3_status
+        {
+            rows.push(info(
+                t("settings.sync.s3BoundCount"),
+                Some(t("settings.sync.s3BoundNoAck")),
+                Control::Status {
+                    text: total_claims.to_string(),
+                    tone: Tone::Danger,
+                },
+            ));
+            rows.extend(examples.iter().map(|case| info(
+                case.historical_path.clone(),
+                Some(t("settings.sync.s3BoundHistoricalPath")),
+                Control::Status {
+                    text: t("settings.sync.s3BoundHold"),
+                    tone: Tone::Danger,
+                },
+            )));
+        }
+    }
     if let Some(notice) = &ctx.sync_notice {
         rows.push(info(t("settings.sync.reviewResult"), None,
             Control::Status { text: notice.clone(), tone: Tone::Secondary }));

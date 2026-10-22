@@ -1,7 +1,5 @@
 use aquilum_core::settings::models::AppConfig;
 use aquilum_core::sync::NativeRecoveryDecision;
-mod context;
-pub use context::Context;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -18,6 +16,9 @@ pub enum Setter {
     HomePage,
     Autostart,
 }
+
+mod context;
+pub use context::Context;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {

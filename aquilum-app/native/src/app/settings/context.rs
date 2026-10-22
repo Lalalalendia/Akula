@@ -23,6 +23,16 @@ impl App {
         } else {
             None
         };
+        #[cfg(feature = "s3-e2e01-review-preview")]
+        let s3_bound_publications = if section == Section::Sync {
+            workspace.as_deref().map(|root| {
+                aquilum_core::sync::native_s3_bound_publication_overview(
+                    &self.workspace.core, &self.workspace.data_dir, root,
+                )
+            })
+        } else {
+            None
+        };
         let yandex_keys = if section == Section::Sync {
             let bucket = self.workspace.core.settings.get_config().s3_onboarding.bucket;
             crate::yandex_credentials::present(&bucket).ok()
@@ -33,6 +43,8 @@ impl App {
         Context {
             workspace,
             sync_recovery,
+            #[cfg(feature = "s3-e2e01-review-preview")]
+            s3_bound_publications,
             yandex_keys,
             yandex_probe: self.yandex_probe.view_for(&bucket),
             yandex_probe_busy: self.yandex_probe.busy(),
@@ -48,5 +60,4 @@ impl App {
             update: crate::updater::available().then(|| self.updater.status()),
         }
     }
-
 }

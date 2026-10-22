@@ -44,7 +44,7 @@ pub(super) enum Effect {
 
 impl App {
     pub(super) fn open_settings(&mut self, root: &mut RenderRoot) {
-        // A reopened dialog must never inherit a previous bucket/auth success.
+        // A reopened dialog must never reuse a previous bucket/auth probe result.
         self.yandex_probe.settings_closed();
         let section = self.interface.settings_section().and_then(Section::from_key).unwrap_or(Section::Ui);
         self.show_settings(root, section);

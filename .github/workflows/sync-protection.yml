@@ -1,12 +1,12 @@
 name: Sync durable preimage protection
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - "aquilum-app/core/src/sync/protection_store.rs"
       - "aquilum-app/core/src/sync/mod.rs"
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/Cargo.lock"
+
       - ".github/workflows/sync-protection.yml"
   workflow_dispatch:
 
@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sync-protection-${{ github.ref }}
+  group: sync-protection-${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

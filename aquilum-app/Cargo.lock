@@ -123,6 +123,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "akula-node-catalog"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rustix 0.38.44",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "akula-server-release-b1a"
 version = "0.1.0"
 dependencies = [
@@ -208,6 +218,7 @@ version = "0.1.0"
 name = "aquilum-core"
 version = "0.3.10"
 dependencies = [
+ "akula-node-catalog",
  "akula-server-bootstrap-b0",
  "akula-server-release-b1a",
  "atomic-write-file",
