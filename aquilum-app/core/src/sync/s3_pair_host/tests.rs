@@ -51,13 +51,7 @@ async fn live_minio_pair_two_local_cores_encrypted_invite_new_files_both_directi
     let network = AwsS3ProbeClient::connect_with_explicit_credentials(
         profile_s3.clone(), ns.clone(), &id, &secret,
     ).await.unwrap();
-    match network.client.create_bucket().bucket(&profile_s3.bucket).send().await {
-        Ok(_) => {}
-        Err(error) if error.as_service_error()
-            .and_then(|e| aws_sdk_s3::error::ProvideErrorMetadata::code(e))
-                == Some("BucketAlreadyOwnedByYou") => {}
-        Err(error) => panic!("ephemeral MinIO bucket setup failed: {error}"),
-    }
+    network.test_ensure_minio_bucket().await.unwrap();
     assert_eq!(network.probe_pair_read_write().await.unwrap(), S3PairAccess::ReadWrite);
     let mut j = S3HeadJournal::open(&app_a.join("s3-head.sqlite")).unwrap();
     let genesis = bootstrap_new_remote_vault(&network, &ns, &mut j).await.unwrap();
