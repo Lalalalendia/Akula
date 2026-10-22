@@ -8,7 +8,7 @@ use super::support::{click, drag, focused, named, press, selected, text, typing,
 use crate::ui::editor::resolve::{Book, Fetch, Grid, Media, Request, Resolver};
 use crate::ui::editor::TextEditor;
 
-struct FakeMedia;
+pub(super) struct FakeMedia;
 
 impl Resolver for FakeMedia {
     fn dataview(&self, _query: &str) -> (Fetch<Grid>, u64) {
@@ -30,7 +30,7 @@ impl Resolver for FakeMedia {
     fn request(&self, _request: Request) {}
 }
 
-fn editor_with_images(text: &str) -> TextEditor {
+pub(super) fn editor_with_images(text: &str) -> TextEditor {
     TextEditor::new(text).markdown().with_resolver(Some(Arc::new(FakeMedia)))
 }
 

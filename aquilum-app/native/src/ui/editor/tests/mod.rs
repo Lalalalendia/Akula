@@ -6,6 +6,7 @@ mod code_scroll;
 mod code_scroll_acceptance;
 mod code_accessibility;
 mod images;
+mod image_selection;
 mod input;
 mod keys;
 mod lists;
