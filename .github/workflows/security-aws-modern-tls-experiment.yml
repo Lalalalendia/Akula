@@ -37,7 +37,8 @@ jobs:
         run: |
           set -euo pipefail
           cargo update -p rustls@0.23.43
-          cargo update -p rustls-webpki@0.103.13
+          # Updating rustls also refreshes its webpki dependency and removes
+          # the obsolete version; a second --precise old ID would fail.
           cargo update -p webpki-roots@1.0.9
           cargo metadata --format-version 1 --locked --features sync-s3 --no-deps >/dev/null
           cargo tree --locked --features sync-s3 -p aquilum-core -i aws-smithy-http-client
