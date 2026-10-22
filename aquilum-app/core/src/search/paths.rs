@@ -1,4 +1,5 @@
 use super::error::SearchError;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
@@ -83,8 +84,20 @@ fn normalize_extended_prefix(path: PathBuf) -> PathBuf {
     path
 }
 
+// Only reserved application/system entries are hidden. Other dot folders are user data.
+// Use ASCII case folding so service directories stay protected on Windows/macOS.
+pub fn is_hidden_name(name: &OsStr) -> bool {
+    let folded = name.to_string_lossy().to_ascii_lowercase();
+    matches!(
+        folded.as_str(),
+        ".git" | ".obsidian" | ".aquilum" | ".trash" | ".quantum" | ".ds_store" | ".akula"
+    ) || folded.starts_with("._")
+        || folded.starts_with(".akula-")
+        || folded.starts_with(".aquilum-")
+}
+
 pub fn is_visible_entry(entry: &DirEntry) -> bool {
-    entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
+    entry.depth() == 0 || !is_hidden_name(entry.file_name())
 }
 
 pub fn markdown_files(root: &Path) -> impl Iterator<Item = PathBuf> {
@@ -115,7 +128,7 @@ pub fn is_plain_text(path: &Path) -> bool {
 pub fn is_hidden(root: &Path, path: &Path) -> bool {
     path.strip_prefix(root).is_ok_and(|relative| {
         relative.components().any(|component| match component {
-            Component::Normal(value) => value.to_string_lossy().starts_with('.'),
+            Component::Normal(value) => is_hidden_name(value),
             _ => false,
         })
     })
@@ -156,10 +169,54 @@ mod tests {
     }
 
     #[test]
-    fn excludes_hidden_workspace_segments() {
+    fn only_service_folders_and_internal_staging_are_hidden() {
         let root = Path::new("C:/vault");
-        assert!(is_hidden(root, Path::new("C:/vault/.trash/note.md")));
-        assert!(!is_hidden(root, Path::new("C:/vault/notes/note.md")));
+        for relative in [
+            ".trash/note.md",
+            ".aquilum/history/note.md",
+            ".quantum/history/note.md",
+            ".git/config",
+            ".Git/objects/ab",
+            ".obsidian/app.json",
+            ".DS_Store",
+            "notes/._metadata.md",
+            ".AKULA-SYNC-STAGE-1111.md",
+            ".aquilum-temp/partial.md",
+            ".akula/data.md",
+        ] {
+            assert!(is_hidden(root, &root.join(relative)), "{relative}");
+        }
+        for relative in [
+            "notes/note.md",
+            ".заметки/Идея.md",
+            "Проекты/.архив/Старая.md",
+            ".hidden.md",
+        ] {
+            assert!(!is_hidden(root, &root.join(relative)), "{relative}");
+        }
+    }
+
+    #[test]
+    fn the_markdown_walker_enters_user_dot_folders_not_internal_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            ".заметки/Идея.md",
+            ".git/SECRET.md",
+            ".obsidian/Плагин.md",
+            ".trash/Старая.md",
+            ".quantum/Старая.md",
+            ".akula-sync-stage-partial.md",
+            "Проекты/.архив/Дело.md",
+        ] {
+            let path = dir.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"fixture").unwrap();
+        }
+        let mut found = super::markdown_files(dir.path())
+            .map(|path| relative_slash_path(dir.path(), &path))
+            .collect::<Vec<_>>();
+        found.sort();
+        assert_eq!(found, [".заметки/Идея.md", "Проекты/.архив/Дело.md"]);
     }
 
     #[test]
