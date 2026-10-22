@@ -57,6 +57,8 @@ jobs:
         run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
       - name: Authenticate real QUIC remote_id against fresh OS peer pin
         shell: bash
+        env:
+          AKULA_P2P_OS_PIN_CI: '1'
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
       - name: Lint actual integration crate
         shell: bash
