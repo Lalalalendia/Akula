@@ -9,8 +9,6 @@ on:
       - 'aquilum-app/core/src/node_replica_auth_lab.rs'
       - 'aquilum-app/core/tests/headless_node_replica_auth.rs'
       - 'aquilum-app/core/tests/headless_node_replica.rs'
-      - 'aquilum-app/core/src/lib.rs'
-      - 'aquilum-app/core/Cargo.toml'
       - 'docs/platforms/AKULA-NODE-E2E-01A.md'
       - 'aquilum-app/core/src/bin/akula_node_lab.rs'
       - 'aquilum-app/core/tests/headless_node_d1.rs'
