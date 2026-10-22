@@ -1,0 +1,11 @@
+[package]
+name = "akula-plugin05-resource-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "=0.58.0"

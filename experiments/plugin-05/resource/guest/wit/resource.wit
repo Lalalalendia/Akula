@@ -1,0 +1,18 @@
+package akula:plugin-resource;
+
+interface notes {
+    /// Owned handle to a host-bound note, not a path or UUID.
+    resource note {
+        read-first: func() -> s32;
+    }
+
+    /// The host chooses the active note; guests cannot choose a path.
+    open-active: func() -> option<note>;
+}
+
+world resource-lab {
+    import notes;
+    export acquire: func() -> bool;
+    export read-held: func() -> s32;
+    export release: func();
+}
