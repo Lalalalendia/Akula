@@ -158,6 +158,22 @@ impl IndexSynchronizer {
                 // a redundant 10+ ms durable Tantivy commit.
                 continue;
             }
+            // File watchers can report the same completed write repeatedly.
+            // A known, unchanged document needs neither a Tantivy writer nor
+            // a SQLite transaction update. Missing paths still reach apply_path
+            // so indexed deletions and interrupted commits remain recoverable.
+            if let Ok(file) = path.metadata() {
+                if file.is_file()
+                    && metadata::current(&transaction, &path.to_string_lossy())?.is_some_and(
+                        |stored| {
+                            stored.analyzer_version == crate::search::ANALYZER_VERSION
+                                && stored.fingerprint == metadata::fingerprint(&file)
+                        },
+                    )
+                {
+                    continue;
+                }
+            }
             let writer = ensure_writer(&mut self.writer, &self.index)?;
             changed |= apply_path(&self.root, &self.index, writer, &transaction, &path)?;
         }
@@ -336,6 +352,34 @@ mod tests {
         assert!(!synchronizer.apply_paths(HashSet::from([deleted])).unwrap());
         assert!(!synchronizer.holds_writer(), "untracked deletion needs no writer");
         assert_eq!(index.document_count(), 0);
+    }
+
+    #[test]
+    fn duplicate_file_notification_does_not_acquire_index_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = directory.path().join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let note = vault.join("Повтор.md");
+        fs::write(&note, "Первый текст").unwrap();
+        let index = Arc::new(SearchIndex::open(&directory.path().join("index")).unwrap());
+        let mut sync = IndexSynchronizer::new(
+            vault,
+            Arc::clone(&index),
+            &directory.path().join("documents.sqlite3"),
+            Arc::new(IndexProgress::new(0, 1)),
+        )
+        .unwrap();
+
+        assert!(sync.apply_paths(HashSet::from([note.clone()])).unwrap());
+        sync.release_writer().unwrap();
+        assert!(!sync.holds_writer());
+        assert!(!sync.apply_paths(HashSet::from([note.clone()])).unwrap());
+        assert!(!sync.holds_writer(), "an identical notification should not allocate a writer");
+        assert_eq!(index.document_count(), 1);
+
+        fs::write(&note, "Первый текст с новым окончанием").unwrap();
+        assert!(sync.apply_paths(HashSet::from([note])).unwrap());
+        assert_eq!(index.document_count(), 1);
     }
 
     #[test]
