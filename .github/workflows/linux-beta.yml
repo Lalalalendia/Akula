@@ -10,7 +10,6 @@ on:
       - 'scripts/linux-beta-smoke.sh'
       - 'aquilum-app/native/packaging/akula-linux-nfpm.yaml'
       - 'aquilum-app/native/packaging/Akula.desktop'
-      - 'aquilum-app/native/src/**'
       - 'aquilum-app/native/Cargo.toml'
 
 permissions:
