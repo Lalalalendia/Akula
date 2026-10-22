@@ -14,7 +14,7 @@ permissions:
 # Cancel obsolete PR-head laboratory runs; never affect other PRs or manual checks.
 # Prefix with workflow identity to avoid collisions with mandatory Application checks.
 concurrency:
-  group: game2d-native-lab-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
