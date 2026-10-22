@@ -243,3 +243,16 @@ fn structured_extensions_are_discovered_but_not_markdown_notes() {
     assert!(!crate::search::paths::is_note(&directory.path().join("Board.canvas")));
     assert!(!crate::search::paths::is_note(&directory.path().join("Tasks.BASE")));
 }
+
+#[test]
+fn user_dot_folders_are_listed_but_application_folders_remain_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    for folder in [".заметки", ".git", ".aquilum", ".trash", ".quantum", ".obsidian", ".akula-sync-stage-temp"] {
+        fs::create_dir(dir.path().join(folder)).unwrap();
+    }
+    fs::write(dir.path().join(".hidden.md"), b"visible user note").unwrap();
+    fs::write(dir.path().join("._mac.md"), b"hidden metadata").unwrap();
+    let items = read_directory_impl(dir.path()).unwrap();
+    let names: Vec<_> = items.iter().map(|item| item.name.as_str()).collect();
+    assert_eq!(names, vec![".заметки", ".hidden"]);
+}
