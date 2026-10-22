@@ -1,7 +1,7 @@
 use masonry::app::RenderRoot;
 use super::App;
 impl App {
-    pub(crate) fn refresh_find_marks(&mut self, root: &mut RenderRoot) {
+    pub(super) fn refresh_find_marks(&mut self, root: &mut RenderRoot) {
         if self.find.is_none() && self.find_mark_stamp.is_none() {
             return;
         }

@@ -1,4 +1,5 @@
 use super::*;
+
 impl Host {
     pub(super) fn redraw(&mut self) {
         let _zone = aq_trace::zone("кадр");
@@ -17,7 +18,6 @@ impl Host {
         let (layers, access_update) = {
             let _zone = aq_trace::zone("сцена");
             root.run_rewrite_passes();
-            self.app.refresh_find_marks(root);
             self.app.restore_view(root);
             let painted = root.redraw();
             self.signals.borrow_mut().retain(|signal| !matches!(signal, RenderRootSignal::RequestRedraw));
