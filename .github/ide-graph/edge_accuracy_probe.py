@@ -230,6 +230,31 @@ def paths_of_result(result, root):
     return sorted(set(paths))
 
 
+def resolve_targets_with_readiness(cli, root, case, source, budget_seconds):
+    """Wait for asynchronous workspace load before trusting a definition result.
+
+    rust-analyzer may return None immediately after initialized/didOpen while
+    Cargo metadata and the semantic database are still loading. This retries
+    a concrete, independently annotated target and reports a failure rather
+    than turning missing evidence into a passing (empty) graph.
+    """
+    deadline = time.monotonic() + budget_seconds
+    attempts = 0
+    latest = []
+    while True:
+        attempts += 1
+        response = cli.request("textDocument/definition", {
+            "textDocument": {"uri": (root / case["file"]).resolve().as_uri()},
+            "position": location(case, source)
+        }, timeout=min(30, max(5, int(deadline - time.monotonic()) + 1)))
+        latest = paths_of_result(response, root)
+        if latest == [case["target"]]:
+            return latest, attempts
+        if time.monotonic() >= deadline:
+            return latest, attempts
+        time.sleep(0.4)
+
+
 def lsp_oracle(root, result_dir):
     start = time.monotonic()
     cli = LspClient(root)
@@ -261,16 +286,15 @@ def lsp_oracle(root, result_dir):
                     "languageId":"rust", "version":1, "text":FILES[name]
                 }
             })
-        for case in CASES:
-            result = cli.request("textDocument/definition", {
-                "textDocument":{"uri":(root/case["file"]).resolve().as_uri()},
-                "position":location(case, FILES[case["file"]])
-            }, timeout=120)
-            targets = paths_of_result(result, root)
+        for index, case in enumerate(CASES):
+            targets, attempts = resolve_targets_with_readiness(
+                cli, root, case, FILES[case["file"]],
+                budget_seconds=95 if index == 0 else 12)
             results.append({
                 **case,
                 "targets":targets,
-                "matched_expected":case["target"] in targets
+                "attempts":attempts,
+                "matched_expected":targets == [case["target"]]
             })
         # Unsaved-buffer correctness: the same call site must retarget
         # from misc::same to storage::same without any disk write.
@@ -282,18 +306,17 @@ def lsp_oracle(root, result_dir):
         })
         modified = dict(file="src/ui.rs", needle="    crate::storage::same();",
                         symbol="same", target="src/storage.rs")
-        # Search first occurrence, which is the modified (previous misc) site.
-        new_result = cli.request("textDocument/definition", {
-            "textDocument":{"uri":(root/"src/ui.rs").resolve().as_uri()},
-            "position":location(modified, new_ui) if new_ui.count(modified["needle"]) == 1
-                 else {"line":next(i for i,s in enumerate(new_ui.splitlines())
-                                       if "crate::storage::same();" in s),
-                       "character":next(s.index("same")+1 for s in new_ui.splitlines()
-                                        if "crate::storage::same();" in s)}
-        }, timeout=120)
+        # Choose the FIRST occurrence: it used to call misc::same.
+        # The second occurrence already called storage::same before didChange,
+        # so testing the second one would be a false positive.
+        dirty_targets, dirty_attempts = resolve_targets_with_readiness(
+            cli, root, modified, new_ui, budget_seconds=30)
+        disk_unchanged = (root / "src/ui.rs").read_text(encoding="utf-8") == FILES["src/ui.rs"]
         overlay = {"expected":"src/storage.rs",
-                   "targets":paths_of_result(new_result, root)}
-        overlay["matched_expected"] = overlay["expected"] in overlay["targets"]
+                   "targets":dirty_targets,
+                   "attempts":dirty_attempts,
+                   "disk_unchanged":disk_unchanged}
+        overlay["matched_expected"] = dirty_targets == [overlay["expected"]] and disk_unchanged
         data = {"initialized":True, "server_capabilities":sorted(list((init_result or {}).get("capabilities", {}))),
                 "cases":results, "matched":sum(x["matched_expected"] for x in results),
                 "total":len(results), "dirty_buffer_retarget":overlay}
@@ -309,6 +332,10 @@ def lsp_oracle(root, result_dir):
         (result_dir/"ra-lsp-oracle.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
         print(json.dumps({k:data.get(k) for k in ("initialized","matched","total","elapsed_seconds",
                                                    "ra_child_ru_maxrss_kib","dirty_buffer_retarget","error")}, indent=2))
+    # A green Actions job MUST mean every annotated definition and the dirty
+    # buffer overlay passed. The saved JSON is still uploaded on failure.
+    if data.get("matched") != len(CASES) or not data.get("dirty_buffer_retarget", {}).get("matched_expected"):
+        raise SystemExit("FAIL: Rust LSP golden call targets or dirty-buffer overlay are not verified")
 
 
 def evaluate(result_dir):
