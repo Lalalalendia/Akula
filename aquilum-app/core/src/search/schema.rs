@@ -62,7 +62,7 @@ pub fn reader(index: &Index) -> Result<IndexReader, SearchError> {
 fn text_options(stored: bool) -> TextOptions {
     let indexing = TextFieldIndexing::default()
         .set_tokenizer(TOKENIZER_NAME)
-        .set_index_option(IndexRecordOption::WithFreqs);
+        .set_index_option(IndexRecordOption::WithFreqsAndPositions);
     let options = TextOptions::default().set_indexing_options(indexing);
     if stored {
         options.set_stored()
