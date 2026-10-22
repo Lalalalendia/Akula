@@ -125,6 +125,85 @@ impl App {
                 }));
                 Effect::Content
             }
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            Action::ConfigureS3Pair if dialog.section == Section::Sync => {
+                if let Some(root) = workspace {
+                    let bucket = core.settings.get_config().s3_onboarding.bucket;
+                    let started = self.s3_pair.start_first_device(
+                        std::sync::Arc::clone(core), root,
+                        self.workspace.data_dir.clone(), bucket,
+                    );
+                    dialog.yandex_notice = Some(t(if started {
+                        "settings.yandex.pairQueued"
+                    } else { "settings.yandex.pairBusy" }));
+                }
+                Effect::Content
+            }
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            Action::ExportS3Pair if dialog.section == Section::Sync => {
+                let Some(root) = workspace else { return Effect::None };
+                let pass = match crate::s3_pair_password::ask_export_password() {
+                    Ok(Some(pass)) => pass,
+                    _ => return Effect::None,
+                };
+                let destination = rfd::FileDialog::new()
+                    .add_filter("Akula S3", &["akula-sync"])
+                    .set_file_name("Akula.akula-sync")
+                    .save_file();
+                if let Some(file) = destination {
+                    let started = self.s3_pair.start_export(
+                        root, self.workspace.data_dir.clone(), file, pass,
+                    );
+                    dialog.yandex_notice = Some(t(if started {
+                        "settings.yandex.pairQueued"
+                    } else { "settings.yandex.pairBusy" }));
+                }
+                Effect::Content
+            }
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            Action::ImportS3Pair if dialog.section == Section::Sync => {
+                let source = rfd::FileDialog::new()
+                    .add_filter("Akula S3", &["akula-sync"])
+                    .pick_file();
+                let Some(source) = source else { return Effect::None };
+                let password = match crate::s3_pair_password::ask_import_password() {
+                    Ok(Some(pass)) => pass,
+                    _ => return Effect::None,
+                };
+                // Require an empty, explicitly selected destination. Never
+                // copy a cloud profile over existing local notes.
+                let destination = rfd::FileDialog::new().pick_folder();
+                if let Some(root) = destination {
+                    let channel = self.picked_tx.clone();
+                    let wake = std::sync::Arc::clone(&self.workspace.wake);
+                    let started = self.s3_pair.start_import(
+                        std::sync::Arc::clone(core),
+                        self.workspace.data_dir.clone(), root, source, password,
+                        move |new_root| {
+                            if channel.send(crate::app::book::Picked::Workspace(new_root)).is_ok() {
+                                wake();
+                            }
+                        },
+                    );
+                    dialog.yandex_notice = Some(t(if started {
+                        "settings.yandex.pairQueued"
+                    } else { "settings.yandex.pairBusy" }));
+                }
+                Effect::Content
+            }
+            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+            Action::SyncS3PairOnce if dialog.section == Section::Sync => {
+                if let Some(root) = workspace {
+                    let started = self.s3_pair.start_sync_once(
+                        std::sync::Arc::clone(core), root,
+                        self.workspace.data_dir.clone(),
+                    );
+                    dialog.yandex_notice = Some(t(if started {
+                        "settings.yandex.pairQueued"
+                    } else { "settings.yandex.pairBusy" }));
+                }
+                Effect::Content
+            }
             Action::StoreYandexKeys | Action::RemoveYandexKeys |
                 Action::CheckYandexConnection => Effect::None,
         }
