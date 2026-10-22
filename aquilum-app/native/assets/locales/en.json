@@ -21,7 +21,17 @@
     "deviceRevoked": "Revoked (blocked)",
     "selectDevice": "Choose draft recipient",
     "deviceSelected": "Selected for draft",
-    "deviceSelectionOnly": "Choosing a device never grants file access or starts transfer."
+    "deviceSelectionOnly": "Choosing a device never grants file access or starts transfer.",
+    "localIdentity": "This device: Iroh EndpointId",
+    "localIdentityNoGrant": "Public key only. This does not enroll or authorize another device or send files.",
+    "localIdentityUnchecked": "Protected device identity has not been checked.",
+    "localIdentityLoad": "Read this device ID",
+    "localIdentityWorking": "Checking protected device identity...",
+    "localIdentityMissing": "No protected Iroh identity exists. Creating one requires an explicit action.",
+    "localIdentityCreate": "Create device identity",
+    "localIdentityCopy": "Copy public ID",
+    "localIdentityCopied": "Public device ID copied.",
+    "localIdentityCopyFail": "Could not copy the public device ID."
   },
   "editor": {
     "resetUiStateWarning": "The reset forgets open tabs, the list of knowledge bases, home pages and book reading positions; notes, history and settings stay.",
