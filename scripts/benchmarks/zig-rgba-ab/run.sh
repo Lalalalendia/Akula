@@ -33,7 +33,7 @@ ZIG_LIB="$REPORT/libzig_rgba.so"
   "$SRC/rgba.rs" -o "$RUST_LIB"
 /usr/bin/time -f 'zig_build_wall_s=%e\nzig_build_max_rss_kib=%M' \
   -o "$REPORT/zig-build.txt" \
-  "$ZIG" build-lib "$SRC/rgba.zig" -dynamic -O fast \
+  "$ZIG" build-lib "$SRC/rgba.zig" -dynamic -O ReleaseFast \
   -target x86_64-linux-gnu -femit-bin="$ZIG_LIB"
 stat -c 'rust_shared_object_bytes=%s' "$RUST_LIB" > "$REPORT/library-sizes.txt"
 stat -c 'zig_shared_object_bytes=%s' "$ZIG_LIB" >> "$REPORT/library-sizes.txt"
