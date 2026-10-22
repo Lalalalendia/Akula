@@ -311,6 +311,13 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     // Real QUIC/Bao transfer begins only after verified Akula consent and
     // provider-side arming, using the original receiver key across attempts.
     receiver.send("CONTINUE");
+    // Real Core File Gate receiver, not the separate preview publisher.
+    let gate_data = sources.0.join("file-gate-appdata");
+    fs::create_dir(&gate_data).expect("create private disposable appdata");
+    let receiving_core = aquilum_core::Core::open(
+        &gate_data,
+        std::sync::Arc::new(|_: aquilum_core::CoreEvent| {}),
+    );
     let mut staged_directories = Vec::new();
     for (slot, expected) in [&first[..], &last[..]].iter().enumerate() {
         let report = receiver.line();
@@ -374,6 +381,27 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
             Err(aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists),
         ));
         assert_eq!(fs::read(&inbox_target).unwrap().as_slice(), *expected);
+        let gate_target = sources.0.join(format!("file-gate-received-{slot:02}.bin"));
+        let saved_gate = aquilum_core::p2p_inbox_lab::save_verified_stage_through_file_gate(
+            &receiving_core,
+            &mut pinned_stage,
+            manifest.size,
+            manifest.id.0,
+            &gate_target,
+        )
+        .expect("real Akula File Gate create-new from actual Staya stage");
+        assert_eq!(saved_gate.blake3_root, manifest.id.0);
+        assert_eq!(fs::read(&gate_target).unwrap().as_slice(), *expected);
+        assert!(matches!(
+            aquilum_core::p2p_inbox_lab::save_verified_stage_through_file_gate(
+                &receiving_core,
+                &mut pinned_stage,
+                manifest.size,
+                manifest.id.0,
+                &gate_target,
+            ),
+            Err(aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists),
+        ));
         staged_directories.push(parent.to_path_buf());
     }
     assert_eq!(receiver.line(), "STY_G1K_UNLISTED_GET_DENIED=true");
@@ -391,6 +419,7 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     for directory in staged_directories {
         fs::remove_dir_all(directory).expect("clean only process-generated private stages");
     }
+    receiving_core.shutdown();
     println!(
         "AKULA_STAYA_REAL_QUIC=true two_os_processes=true selected=2 rejected=1 \
          prearm_denied=true provider_armed=true outsider_denied=true \
