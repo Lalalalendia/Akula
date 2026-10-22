@@ -25,17 +25,17 @@ impl App {
     pub(in crate::app) fn request_server_probe(&mut self) -> Effect {
         let draft = self.workspace.core.settings.get_config().server_setup;
         if !draft.valid_offline_pin() {
-            self.server_probe = Some((draft, ServerProbeView::Failed));
+            self.server_probe.observation = Some((draft, ServerProbeView::Failed));
             return Effect::Content;
         }
-        if self.server_probe.as_ref().is_some_and(|(current, status)| {
+        if self.server_probe.observation.as_ref().is_some_and(|(current, status)| {
             current == &draft && matches!(status, ServerProbeView::Checking)
         }) {
             return Effect::None;
         }
         // A second click cannot start a duplicate probe for the same draft.
-        self.server_probe = Some((draft.clone(), ServerProbeView::Checking));
-        let sender = self.server_probe_tx.clone();
+        self.server_probe.observation = Some((draft.clone(), ServerProbeView::Checking));
+        let sender = self.server_probe.sender.clone();
         let wake = Arc::clone(&self.workspace.wake);
         std::thread::spawn(move || {
             let view = (|| {
@@ -81,20 +81,20 @@ impl App {
 
     pub(in crate::app) fn on_server_probe(&mut self, root: &mut RenderRoot) {
         let mut changed = false;
-        while let Ok(result) = self.server_probe_rx.try_recv() {
+        while let Ok(result) = self.server_probe.receiver.try_recv() {
             // A changed host, user, port, public key or SHA-256 makes the
             // previous observation stale, including if a reply was delayed.
             let current = self.workspace.core.settings.get_config().server_setup;
             if result.draft != current {
                 continue;
             }
-            let pending = self.server_probe.as_ref().is_some_and(|(draft, state)| {
+            let pending = self.server_probe.observation.as_ref().is_some_and(|(draft, state)| {
                 draft == &current && matches!(state, ServerProbeView::Checking)
             });
             if !pending {
                 continue;
             }
-            self.server_probe = Some((result.draft, result.view));
+            self.server_probe.observation = Some((result.draft, result.view));
             changed = true;
         }
         if changed && matches!(

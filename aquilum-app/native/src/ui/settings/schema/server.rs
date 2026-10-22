@@ -1,6 +1,6 @@
 use super::*;
+mod server_status;
 use aquilum_core::settings::models::ServerBootstrapDraft;
-
 /// Native first-stage owner-server setup: *public* draft only.
 /// No SSH private key, password, sudo credential or token is accepted.
 /// Matching public host identity is NOT permission to connect or install.
@@ -9,21 +9,8 @@ pub(super) fn server_setup(config: &AppConfig, ctx: &Context) -> Block {
     let pin_matches = draft.valid_offline_pin();
     let probe = ctx.server_probe.as_ref();
     let probing = matches!(probe, Some(ServerProbeView::Checking));
-    let state_key = match probe {
-        Some(ServerProbeView::Checking) => "settings.server.probing",
-        Some(ServerProbeView::Observed { .. }) => "settings.server.verifiedReadOnly",
-        Some(ServerProbeView::Unsupported { .. }) => "settings.server.unsupported",
-        Some(ServerProbeView::Failed) => "settings.server.verificationFailed",
-        None => "settings.server.notConnected",
-    };
     let mut rows = vec![
-            info(t("settings.server.state"), Some(t("settings.server.stateHint")),
-                Control::Status {
-                    text: t(state_key),
-                    tone: if matches!(probe, Some(ServerProbeView::Observed { .. })) {
-                        Tone::Secondary
-                    } else { Tone::Danger },
-                }),
+            server_status::status_row(probe),
             row(t("settings.server.host"), Some(t("settings.server.hostHint")),
                 Control::Text { value: draft.host.clone(), commit: true },
                 |c, v| {
@@ -97,19 +84,6 @@ pub(super) fn server_setup(config: &AppConfig, ctx: &Context) -> Block {
                         .enabled(false),
                 ])),
     ];
-    if let Some(ServerProbeView::Observed { facts }
-        | ServerProbeView::Unsupported { facts }) = probe
-    {
-        // Only normalized, bounded typed host facts; never SSH stderr,
-        // shell output, credentials or an installation-success claim.
-        rows.push(info(
-            t("settings.server.observedFacts"),
-            Some(t("settings.server.observedFactsHint")),
-            Control::Status {
-                text: facts.clone(),
-                tone: Tone::Secondary,
-            },
-        ));
-    }
+    server_status::append_facts(&mut rows, probe);
     Block { title: t("settings.server.title"), rows }
 }

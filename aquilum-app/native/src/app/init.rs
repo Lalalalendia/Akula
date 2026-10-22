@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     pub fn new(workspace: Workspace, initial_text: String) -> Self {
         let tree = FileTree::new(workspace.root.clone(), &workspace.data_dir, Arc::clone(&workspace.wake));
@@ -15,8 +14,6 @@ impl App {
         let (transfer_tx, transfer_rx) = channel();
         let (home_tx, home_rx) = channel();
         let (titles_tx, titles_rx) = channel();
-        #[cfg(all(windows, feature = "server-readonly-preflight"))]
-        let (server_probe_tx, server_probe_rx) = channel();
         let workspace_wake = Arc::clone(&workspace.wake);
         let auto_update = workspace.core.settings.get_config().updates.auto;
         let mut app = App {
@@ -26,11 +23,7 @@ impl App {
             interface,
             popup: None,
             typing: None,
-            server_probe: None,
-            #[cfg(all(windows, feature = "server-readonly-preflight"))]
-            server_probe_tx,
-            #[cfg(all(windows, feature = "server-readonly-preflight"))]
-            server_probe_rx,
+            server_probe: settings::server_state::ServerProbeState::default(),
             graph: graph_page::GraphState::default(),
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
