@@ -106,9 +106,27 @@ fn installed_shiva_pdf_is_searchable_and_opens_from_native_result() {
     assert_eq!(duplicate, note);
     assert_eq!(fs::read_to_string(&note).unwrap(), contents);
 
-    // The same native App search popup and result click as the real user.
-    h.app.workspace.core.search.prepare(&vault.to_string_lossy())
+    // The search worker builds its initial Tantivy index asynchronously.
+    // A query sent before its first commit can return zero hits once and
+    // remain empty even after indexing finishes. Wait for the actual commit
+    // rather than masking an indexing failure with repeated UI queries.
+    let workspace = vault.to_string_lossy();
+    h.app.workspace.core.search.prepare(&workspace)
         .expect("search service must initialize");
+    let started = std::time::Instant::now();
+    loop {
+        let status = h.app.workspace.core.search.status(Some(&workspace));
+        assert!(status.error.is_none(), "PDF search index failed: {status:?}");
+        if !status.updating && status.indexed_documents >= 2 {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "PDF preview was not indexed before the native query: {status:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Now exercise the unchanged native search field, result and Enter path.
     assert!(h.app.open(&mut h.root, note.clone()), "preview must open as a native tab");
     assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
     // Do not leave the PDF preview active: otherwise Enter could be a no-op
