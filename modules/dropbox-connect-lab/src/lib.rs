@@ -1,12 +1,8 @@
 #![forbid(unsafe_code)]
-//! Lab-only Dropbox onboarding: system browser PKCE -> one-use token exchange
-//! -> exact account/root verification -> bounded pinned read -> OS refresh
-//! secret readback. NO cloud writes, local file writes, Sync Core admission,
-//! baseline changes, File Gate or automatic trust in a Dropbox publisher.
-//!
-//! Callers must supply an independently obtained head digest. Even a matching
-//! BLAKE3 is NOT a cryptographic publisher signature, and this module returns
-//! a read-only candidate, never a trusted/active Vault Sync connection.
+//! Explicit read-only Dropbox onboarding and restart verification.
+//! Only independently pinned head bytes; no publisher trust or file mutation.
+
+pub mod resume;
 
 use akula_dropbox_auth_lab::{
     callback::{BoundLogin, CallbackError},
