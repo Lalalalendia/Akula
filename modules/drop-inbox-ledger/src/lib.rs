@@ -15,7 +15,7 @@
 //! higher-level host must handle OS-owned root custody, ACLs, Windows reparse
 //! points, installation, backup, and crash/power-loss acceptance separately.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::{
     fs::{self, File},
     io::{self, Read},
@@ -131,6 +131,50 @@ impl InboxLedger {
              );",
         )?;
         Ok(Self { db, objects })
+    }
+
+    /// Open an already-existing Inbox without creating an empty SQLite file or
+    /// allowing application SQL writes. Reader may inspect only checked bytes.
+    pub fn open_existing(root: &Path) -> Result<Option<Self>, LedgerError> {
+        match fs::symlink_metadata(root) {
+            Ok(meta) if !meta.file_type().is_dir() => return Err(LedgerError::UnsafeRoot),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
+        let objects = root.join("objects");
+        if !regular_directory(&objects)? {
+            return Err(LedgerError::UnsafeRoot);
+        }
+        let db_path = root.join("received-inbox.sqlite3");
+        match fs::symlink_metadata(&db_path) {
+            Ok(meta) if !meta.file_type().is_file() => return Err(LedgerError::UnsafeRoot),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
+        let db = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        db.pragma_update(None, "query_only", "ON")?;
+        Ok(Some(Self { db, objects }))
+    }
+
+    /// The newest bounded page by local SQLite insertion order, not a
+    /// provider-controlled timestamp. Every row is independently rehashed.
+    pub fn list_recent(&self, max_items: usize) -> Result<Vec<(ExpectedTransfer, LocalStatus)>, LedgerError> {
+        if max_items == 0 || max_items > 64 {
+            return Err(LedgerError::InvalidIntent);
+        }
+        let mut stmt = self.db.prepare(
+            "SELECT transfer_id FROM received_inbox ORDER BY rowid DESC LIMIT ?1",
+        )?;
+        let ids = stmt.query_map([max_items as i64], |row| row.get::<_, String>(0))?;
+        let mut result = Vec::new();
+        for id in ids {
+            let id = Uuid::parse_str(&id?).map_err(|_| LedgerError::CorruptDatabaseRecord)?;
+            let record = self.get(id)?.ok_or(LedgerError::CorruptDatabaseRecord)?;
+            result.push((record.expected, self.status(id)?));
+        }
+        Ok(result)
     }
 
     /// Internal transfer ID only. Remote filenames are never used as paths.
@@ -361,6 +405,25 @@ impl InboxLedger {
         }
         Ok(read == expected.bytes && *digest.finalize().as_bytes() == expected.blake3)
     }
+}
+
+/// Canonical per-user Inbox location shared by the one-file receiver and
+/// experimental native UI; never accepts a provider or sender path.
+pub fn user_inbox_root() -> Result<PathBuf, LedgerError> {
+    #[cfg(windows)]
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .ok_or(LedgerError::UnsafeRoot)?;
+    #[cfg(not(windows))]
+    let base = match std::env::var_os("XDG_DATA_HOME") {
+        Some(value) => PathBuf::from(value),
+        None => PathBuf::from(std::env::var_os("HOME").ok_or(LedgerError::UnsafeRoot)?)
+            .join(".local/share"),
+    };
+    if !base.is_absolute() {
+        return Err(LedgerError::UnsafeRoot);
+    }
+    Ok(base.join("Akula").join("received-inbox"))
 }
 
 struct Record {
@@ -731,6 +794,44 @@ mod tests {
         ));
         assert_eq!(ledger.status(v.id).unwrap(), LocalStatus::NeedsReview);
         assert_eq!(ledger.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn read_only_preview_does_not_create_a_missing_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("does-not-exist");
+        assert!(InboxLedger::open_existing(&root).unwrap().is_none());
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn read_only_preview_bounded_and_rechecks_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let (first, first_bytes) = intent(Transport::P2p);
+        let (last, last_bytes) = intent(Transport::Dropbox);
+        {
+            let mut writer = InboxLedger::open(root).unwrap();
+            for (v, data) in [(&first, &first_bytes), (&last, &last_bytes)] {
+                writer.reserve(v).unwrap();
+                publish_fixture(&writer, v, data);
+                assert_eq!(writer.confirm(v).unwrap(), LocalStatus::VerifiedLocal);
+            }
+        }
+        let reader = InboxLedger::open_existing(root).unwrap().unwrap();
+        assert_eq!(reader.count().unwrap(), 2);
+        let recent = reader.list_recent(1).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].0.id, last.id);
+        assert_eq!(recent[0].1, LocalStatus::VerifiedLocal);
+        assert!(matches!(reader.list_recent(0), Err(LedgerError::InvalidIntent)));
+        assert!(matches!(reader.list_recent(65), Err(LedgerError::InvalidIntent)));
+        fs::write(reader.object_path(last.id), b"tampered").unwrap();
+        assert_eq!(reader.list_recent(1).unwrap()[0].1, LocalStatus::NeedsReview);
+        // An SQL read-only handle cannot append a fake received item.
+        assert!(reader.db.execute(
+            "UPDATE received_inbox SET state = 0", []
+        ).is_err());
     }
 
     #[test]
