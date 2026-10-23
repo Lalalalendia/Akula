@@ -291,7 +291,8 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
 fn s3_compact_setup_requires_keys_and_explicit_configure_before_sync() {
     let config = AppConfig::default();
     let mut ctx = Context::new(1.0);
-    let setup = &blocks(Section::Sync, &config, &ctx)[0];
+    let sections = blocks(Section::Sync, &config, &ctx);
+    let setup = &sections[0];
     assert_eq!(setup.title, t("settings.yandex.pairEntry"));
     let buttons = setup.rows.iter().flat_map(|row| match &row.control {
         Control::Buttons(items) => items.as_slice(), _ => &[],
