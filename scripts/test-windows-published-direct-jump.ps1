@@ -103,8 +103,8 @@ function Assert-UserData {
     throw 'NSIS modified user or upstream files'
   }
 }
-function Invoke-NSIS([string]$setup, [string[]]$args) {
-  $p = Start-Process -FilePath $setup -ArgumentList $args -PassThru
+function Invoke-NSIS([string]$setup, [string[]]$flags) {
+  $p = Start-Process -FilePath $setup -ArgumentList $flags -PassThru
   if (!$p.WaitForExit(180000)) {
     Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
     throw "NSIS timeout: $setup"
