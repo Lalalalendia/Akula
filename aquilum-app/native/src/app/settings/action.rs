@@ -74,7 +74,8 @@ impl App {
                     dialog.cloud_popup = Some(cloud);
                     return self.keep(dialog, None, Effect::Content, root);
                 }
-                let mut proposal = self.workspace.core.settings.get_config();
+                let before = self.workspace.core.settings.get_config();
+                let mut proposal = before.clone();
                 for (setter, text) in &texts {
                     if let crate::ui::settings::schema::Setter::Config(apply) = setter {
                         apply(&mut proposal, &Value::Text(text.clone()));
@@ -87,8 +88,18 @@ impl App {
                     dialog.cloud_popup = Some(cloud);
                     return self.keep(dialog, None, Effect::Content, root);
                 }
-                for (setter, text) in texts {
-                    self.apply(setter, Value::Text(text));
+                let saved_bucket = proposal.s3_onboarding.bucket.clone();
+                // This is one atomic settings transaction, not a series of
+                // per-field saves which could leave partial configuration.
+                if self.workspace.core.settings.update_config(proposal).is_err() {
+                    dialog.yandex_notice = Some(crate::i18n::t("settings.cloud.saveFailed"));
+                    dialog.cloud_popup = Some(cloud);
+                    return self.keep(dialog, None, Effect::Content, root);
+                }
+                if before.s3_onboarding.bucket != saved_bucket {
+                    self.yandex_probe.set_bucket(&saved_bucket);
+                    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+                    self.s3_pair.invalidate_verification();
                 }
                 crate::ui::dialog::close(root, cloud.layer);
                 root.focus_on(Some(dialog.layer));
@@ -122,9 +133,26 @@ impl App {
                         }
                         if uses_bucket && bucket != stored {
                             if matches!(button, Action::StoreYandexKeys) {
-                                // Explicit credential setup may save the
-                                // public bucket name before opening WinCred.
-                                self.apply(setter, Value::Text(bucket));
+                                // The explicit OS credential dialog must never
+                                // open with the *previous* bucket on failed
+                                // settings persistence.
+                                let before = self.workspace.core.settings.get_config();
+                                let mut next = before.clone();
+                                if let crate::ui::settings::schema::Setter::Config(apply) = setter {
+                                    apply(&mut next, &Value::Text(bucket.clone()));
+                                }
+                                if next.s3_onboarding.bucket != bucket {
+                                    dialog.yandex_notice = Some(crate::i18n::t("settings.yandex.keysNeedBucket"));
+                                    dialog.cloud_popup = Some(cloud);
+                                    return self.keep(dialog, None, Effect::Content, root);
+                                }
+                                if self.workspace.core.settings.update_config(next).is_err() {
+                                    dialog.yandex_notice = Some(crate::i18n::t("settings.cloud.saveFailed"));
+                                    dialog.cloud_popup = Some(cloud);
+                                    return self.keep(dialog, None, Effect::Content, root);
+                                }
+                                self.yandex_probe.set_bucket(&bucket);
+                                self.s3_pair.invalidate_verification();
                             } else {
                                 dialog.yandex_notice = Some(crate::i18n::t("settings.cloud.saveBeforeAction"));
                                 dialog.cloud_popup = Some(cloud);
