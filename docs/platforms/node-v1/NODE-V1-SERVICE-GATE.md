@@ -55,6 +55,20 @@ This does **not** authorize enrollment by itself. The signed/root-witnessed
 package approval, pinned host identity, durable CAS and actual installer
 invocation are still unconnected; this binary is not yet installed on a VPS.
 
+## Disposable Ubuntu systemd proof (not production installation)
+
+The branch-only smoke workflow builds both opt-in service/enrollment ELFs
+and runs `scripts/ci/akula-node-v1-systemd-host.sh` on a disposable GitHub
+Actions Ubuntu runner. The test proves real non-root static UID, isolated
+StateDirectory, one-shot keys, synthetic root-pinned policy v3, immutable
+root-owned service binary, systemd start, fixed UDP listener, SIGKILL restart
+and preservation of private identities. The CI policy is synthetic and has
+no matching owner signing key or authorized grants; a systemd localhost
+network restriction prevents use as a public server.
+
+The test does not prove a signed root-helper installation, independent owner
+approval, real VPS reboot, Windows setup or receiver File Gate import.
+
 ## Installation blockers — do not bypass
 
 1. The existing signed/root-witnessed installer prototype must provision the

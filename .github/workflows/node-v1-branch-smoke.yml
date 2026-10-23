@@ -9,6 +9,7 @@ on:
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
       - 'interop/akula-staya/**'
+      - 'scripts/ci/akula-node-v1-systemd-host.sh'
 permissions:
   contents: read
 concurrency:
@@ -39,3 +40,10 @@ jobs:
       - name: Reject re-enrollment and pre-existing root policy
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --lib enrollment::tests -- --nocapture
+      - name: Build exact Node service and one-shot enrollment ELFs
+        run: |
+          cargo build --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --bin akula-node-v1-service --bin akula-node-v1-enroll
+      - name: Validate disposable host-only systemd proof syntax
+        run: bash -n scripts/ci/akula-node-v1-systemd-host.sh
+      - name: Real non-root systemd start and SIGKILL restart (disposable CI)
+        run: bash scripts/ci/akula-node-v1-systemd-host.sh
