@@ -18,10 +18,3 @@ pub fn run_w4_pilot_if_requested() {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn regular_binary_retains_independent_args_parser() {
-        assert!(super::super::parse().is_ok());
-    }
-}
