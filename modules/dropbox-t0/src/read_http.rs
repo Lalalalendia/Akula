@@ -132,6 +132,38 @@ impl DropboxReadOnly {
         Ok(file)
     }
 
+    /// Fetch an existing Vault listing or cursor delta without creating
+    /// remote folders or applying changes to local files.
+    pub fn list_delta(&self, cursor: Option<&str>) -> Result<crate::DropboxDeltaPage, ReadError> {
+        let (route, body) = match cursor {
+            Some(value) => {
+                if value.is_empty() || value.len() > 4096
+                    || value.chars().any(char::is_control)
+                { return Err(ReadError::Protocol(crate::Error::InvalidCursor)); }
+                (crate::CONTINUE_ROUTE, json!({"cursor":value}).to_string())
+            }
+            None => (crate::LIST_ROUTE, crate::prepare_list(&self.scope)
+                .map_err(ReadError::Protocol)?),
+        };
+        let url = format!("{}{}", self.endpoints.api, route);
+        let response = self.agent.post(&url)
+            .set("Authorization", &self.token.bearer())
+            .set("Content-Type", "application/json")
+            .send_string(&body).map_err(|error| {
+                match error {
+                    ureq::Error::Status(409, response) if cursor.is_some() => {
+                        let bytes = bounded(response, 4096).unwrap_or_default();
+                        let err = classify_http(Operation::Continue, 409, &bytes, None)
+                            .err().unwrap_or(crate::Error::UnexpectedResponse);
+                        ReadError::Protocol(err)
+                    }
+                    other => Self::from_ureq(other),
+                }
+            })?;
+        let bytes = bounded(response, 8 * 1024 * 1024)?;
+        crate::parse_delta_page(&self.scope, &bytes).map_err(ReadError::Metadata)
+    }
+
     /// Lookup happens inside the verified account and vault scope. Caller
     /// cannot supply an unrelated Dropbox file reference or revision.
     pub fn read_key_verified(
