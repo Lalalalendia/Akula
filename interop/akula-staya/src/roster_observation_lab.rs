@@ -109,9 +109,7 @@ mod tests {
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
 
-    fn signed_fixture(
-        status: RosterStatus,
-    ) -> (VerifiedRosterObservation, VaultId, DeviceId) {
+    fn signed_fixture(status: RosterStatus) -> (VerifiedRosterObservation, VaultId, DeviceId) {
         let owner = Ed25519KeyPair::from_seed_unchecked(&[11; 32]).unwrap();
         let vault_id = VaultId::new();
         let device_id = DeviceId::new();
@@ -126,7 +124,9 @@ mod tests {
             }],
             signature: [0; 64],
         };
-        roster.signature.copy_from_slice(owner.sign(&roster.canonical_claim().unwrap()).as_ref());
+        roster
+            .signature
+            .copy_from_slice(owner.sign(&roster.canonical_claim().unwrap()).as_ref());
         let trusted_owner = IndependentlyPinnedOwner {
             vault_id,
             owner_public_key: owner.public_key().as_ref().try_into().unwrap(),
@@ -178,13 +178,18 @@ mod tests {
             devices: vec![],
             signature: [0; 64],
         };
-        signed.signature.copy_from_slice(owner.sign(&signed.canonical_claim().unwrap()).as_ref());
+        signed
+            .signature
+            .copy_from_slice(owner.sign(&signed.canonical_claim().unwrap()).as_ref());
         let too_new = IndependentlyPinnedOwner {
             vault_id,
             owner_public_key: owner.public_key().as_ref().try_into().unwrap(),
             witnessed_min_epoch: 3,
             witnessed_epoch_digest: None,
         };
-        assert_eq!(inspect_signed_roster(&signed, &too_new), Err(RosterError::Rollback));
+        assert_eq!(
+            inspect_signed_roster(&signed, &too_new),
+            Err(RosterError::Rollback)
+        );
     }
 }
