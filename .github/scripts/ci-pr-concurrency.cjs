@@ -78,6 +78,65 @@ function policyErrors(yaml, path) {
   return errors;
 }
 
+function allowedWindowsBetaMigration(before, after, read) {
+  // Only the byte-preserving Windows beta PR -> required callable route change.
+  const owned = [
+    '.github/workflows/windows-beta.yml',
+    '.github/scripts/windows-beta-identity.test.cjs',
+    'scripts/test-windows-beta.ps1',
+    'scripts/build-windows-update-fixture.ps1',
+    'scripts/test-windows-beta-upgrade.ps1',
+    'scripts/windows-beta-gui-input.ps1',
+    'scripts/windows-beta-candidate-manifest.ps1',
+    'scripts/windows-accesskit-uia.ps1',
+    'aquilum-app/native/packaging/akula-windows.json',
+    'aquilum-app/native/Cargo.toml',
+  ];
+  const oldHeader = 'on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n'
+    + owned.map(path => "      - '" + path + "'\n").join('')
+    + '\n  workflow_dispatch:\n';
+  const newHeader = 'on:\n  workflow_call:\n'
+    + '  # Source ownership is enforced by the required Main PR gate.\n'
+    + '  workflow_dispatch:\n';
+  if (before.split(oldHeader).length !== 2 || after !== before.replace(oldHeader, newHeader) ||
+      !after.includes('  workflow_dispatch:\n    inputs:\n      ref:\n')) return false;
+  let routes, app, shared;
+  try {
+    routes = read('.github/scripts/ci-shared-manifest-route.cjs');
+    app = read('.github/workflows/app-checks.yml');
+    shared = read('.github/workflows/ci-shared-manifest-labs.yml');
+  } catch { return false; }
+  if (![routes, app, shared].every(x => typeof x === 'string')) return false;
+  const list = routes.match(/^  "owned_windows_beta": (\[[\s\S]*?^  \])/m)?.[1];
+  let actual;
+  try { actual = JSON.parse(list); } catch { return false; }
+  if (JSON.stringify(actual) !== JSON.stringify(owned) ||
+      !routes.includes('function ownedRoutes(paths){\n  const changed=new Set(paths);') ||
+      !routes.includes('...ownedRoutes(paths)') ||
+      !routes.includes('module.exports={OWNED_SUITES,ownedRoutes,')) return false;
+  const classification = app.split('  required-tests:\n')[0];
+  const sharedJob = app.split('  shared-labs:\n')[1]?.split('  checks:\n')[0] || '';
+  const mainGate = app.split('  checks:\n')[1] || '';
+  if (!classification.includes('      owned_windows_beta: ${{ steps.scope.outputs.owned_windows_beta }}') ||
+      !classification.includes('node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"') ||
+      !sharedJob.includes("needs.classify.outputs.owned_windows_beta == 'true'") ||
+      !sharedJob.includes("      owned_windows_beta: ${{ needs.classify.outputs.owned_windows_beta == 'true' }}") ||
+      !sharedJob.includes('uses: ./.github/workflows/ci-shared-manifest-labs.yml') ||
+      !mainGate.includes('    name: Main PR gate') ||
+      !mainGate.includes("    if: ${{ always() && github.event_name == 'pull_request' }}") ||
+      !mainGate.includes('    needs: [classify, required-tests, native-frames, shared-labs]') ||
+      !mainGate.includes('          SHARED_RISKY: ${{') ||
+      !mainGate.includes("needs.classify.outputs.owned_windows_beta == 'true'") ||
+      !mainGate.includes('          ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}') ||
+      !mainGate.includes('if [ "$SHARED_RISKY" = true ]; then') ||
+      !mainGate.includes('if [ "$ROUTED_SHARED_RESULT" != success ]; then')) return false;
+  if (!shared.includes('      owned_windows_beta:\n        required: true\n        type: boolean') ||
+      !shared.includes('  route-windows-beta:\n    name: Impacted shared manifest / windows-beta\n    if: ${{ inputs.lock || inputs.owned_windows_beta }}\n    uses: ./.github/workflows/windows-beta.yml') ||
+      !/^    needs: \[[^\n]*route-windows-beta[^\n]*\]$/m.test(shared) ||
+      !shared.includes('"route-windows-beta",["lock","owned_windows_beta"]')) return false;
+  return true;
+}
+
 function git(cwd, ...args) {
   return cp.execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 }
@@ -126,8 +185,11 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
       if (prTrigger(before) && topBlock(before, 'concurrency').length > 0) {
         protectedModified++;
         if (!prTrigger(text)) {
-          // Required checks may depend on the PR trigger staying available.
-          errors.push(record.path + ': removed existing pull_request trigger');
+          // Permit only the proven Windows beta -> mandatory PR gate migration.
+          // Every unrelated deletion of a protected trigger still fails closed.
+          const routed = record.path === '.github/workflows/windows-beta.yml' &&
+            allowedWindowsBetaMigration(before, text, path => git(cwd, 'show', head + ':' + path));
+          if (!routed) errors.push(record.path + ': removed existing pull_request trigger');
         } else {
           const newer = topBlock(text, 'concurrency');
           if (newer.length === 0) {
@@ -171,4 +233,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { topBlock, prEvents, prTrigger, policyErrors, changedWorkflows, audit, main };
+module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, changedWorkflows, audit, main };
