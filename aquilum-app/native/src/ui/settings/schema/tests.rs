@@ -173,6 +173,7 @@ fn m1de_native_review_only_offers_explicit_nondestructive_intents() {
     }), "forged selection cannot expose even a confirmation action");
 }
 
+#[cfg(not(all(target_os = "windows", feature = "s3-pair-beta")))]
 #[test]
 fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     let ctx = Context::new(1.0);
@@ -284,6 +285,33 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     assert!(english[0].rows.iter().any(|row| row.label == t("settings.yandex.credentialSafety")));
 }
 
+
+#[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+#[test]
+fn s3_compact_setup_requires_keys_and_explicit_configure_before_sync() {
+    let config = AppConfig::default();
+    let mut ctx = Context::new(1.0);
+    let setup = &blocks(Section::Sync, &config, &ctx)[0];
+    assert_eq!(setup.title, t("settings.yandex.pairEntry"));
+    let buttons = setup.rows.iter().flat_map(|row| match &row.control {
+        Control::Buttons(items) => items.as_slice(), _ => &[],
+    }).collect::<Vec<_>>();
+    assert!(buttons.iter().find(|b| b.action == Action::StoreYandexKeys)
+        .expect("native system keys button").enabled,
+        "public bucket is captured and validated by the modal before WinCred opens");
+    assert!(!buttons.iter().find(|b| b.action == Action::ConfigureS3Pair)
+        .expect("configure after verified credential").enabled);
+    assert!(!buttons.iter().any(|b| b.action == Action::SyncS3PairOnce),
+        "Sync must not exist for an unregistered cloud profile");
+
+    ctx.yandex_keys = Some(true);
+    let buttons = blocks(Section::Sync, &config, &ctx)[0].rows.iter()
+        .flat_map(|row| match &row.control {
+            Control::Buttons(items) => items.as_slice(), _ => &[],
+        }).map(|b| (b.action.clone(), b.enabled)).collect::<Vec<_>>();
+    assert!(!buttons.iter().any(|(a, enabled)|
+        *a == Action::ConfigureS3Pair && *enabled));
+}
 
 #[test]
 fn b1d0_native_server_settings_are_nonsecret_and_never_offer_an_install_grant() {
