@@ -4,13 +4,13 @@
 //! one-file QUIC reception. No sender-chosen names or Vault paths are accepted.
 
 use akula_inbox_ledger_lab::{ExpectedTransfer, InboxLedger, LedgerError, LocalStatus, Transport};
-use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(windows)]
 use aquilum_core::p2p_inbox_lab::create_pinned_windows_inbox_stage;
-#[cfg(not(windows))]
-use std::fs::OpenOptions;
+use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(not(windows))]
 use std::ffi::OsString;
+#[cfg(not(windows))]
+use std::fs::OpenOptions;
 use std::{
     fs::{self, File},
     io::{self, Seek, SeekFrom, Write},

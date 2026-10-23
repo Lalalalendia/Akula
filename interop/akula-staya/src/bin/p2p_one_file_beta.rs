@@ -392,14 +392,28 @@ pub fn validate_direct_lan_address(address: SocketAddr) -> Result<(), String> {
 pub async fn native_receive_one(peer: String, address: SocketAddr) -> Result<(), String> {
     parse_peer(&peer)?;
     validate_direct_lan_address(address)?;
-    run_mode(Mode::ReceiveInbox { peer, address: Some(address) }, |_| {}).await
+    run_mode(
+        Mode::ReceiveInbox {
+            peer,
+            address: Some(address),
+        },
+        |_| {},
+    )
+    .await
 }
 
 /// Internet/N0 is a separate explicit UI action. No clipboard addresses,
 /// no automatic discovery at application launch, no change to LAN-only mode.
 pub async fn native_receive_internet_one(peer: String) -> Result<(), String> {
     parse_peer(&peer)?;
-    run_mode(Mode::ReceiveInbox { peer, address: None }, |_| {}).await
+    run_mode(
+        Mode::ReceiveInbox {
+            peer,
+            address: None,
+        },
+        |_| {},
+    )
+    .await
 }
 
 /// Explicit, one-shot native send. The UI must select exactly one local
@@ -632,10 +646,7 @@ mod tests {
             peer: id,
             address: None,
         };
-        assert!(!matches!(
-            legacy,
-            Mode::ReceiveInbox { address: None, .. }
-        ));
+        assert!(!matches!(legacy, Mode::ReceiveInbox { address: None, .. }));
         assert!(matches!(
             explicitly_internet,
             Mode::ReceiveInbox { address: None, .. }
