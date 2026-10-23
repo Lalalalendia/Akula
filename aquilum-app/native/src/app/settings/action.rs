@@ -4,6 +4,7 @@ use masonry::core::{ErasedAction, WidgetId};
 use super::bindings::same_setter;
 use super::{App, Effect, Outcome, Popup};
 use crate::ui::dialog::DialogAnswer;
+use crate::ui::editor::TextEditor;
 use crate::ui::menu::MenuChoice;
 use crate::ui::settings::Binding;
 use crate::ui::settings::controls::{Changed, DropdownButton, Picked};
