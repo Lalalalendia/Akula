@@ -33,6 +33,9 @@ on:
       owned_appimage:
         required: true
         type: boolean
+      owned_windows_beta:
+        required: true
+        type: boolean
 
 permissions:
   contents: read
@@ -150,7 +153,7 @@ jobs:
 
   route-windows-beta:
     name: Impacted shared manifest / windows-beta
-    if: ${{ inputs.lock }}
+    if: ${{ inputs.lock || inputs.owned_windows_beta }}
     uses: ./.github/workflows/windows-beta.yml
 
   route-vello-half-tie:
@@ -222,7 +225,7 @@ jobs:
           node <<'JS'
           const needs=JSON.parse(process.env.NEEDS_JSON);
           const flags=JSON.parse(process.env.INPUTS_JSON);
-          const cases=[["route-b1b3a-ipc",["core","lib"]],["route-p2p-offer",["core","lib"]],["route-s3-minio",["core","lock"]],["route-s3-platform",["core","lock","native"]],["route-pinned-read",["core","lock"]],["route-s3-reservation",["core","lock"]],["route-sync-protection",["owned_sync_protection","core","lock"]],["route-sync-transaction",["core","lock"]],["route-text-delta",["owned_text_delta","core","lock"]],["route-appimage-beta",["owned_appimage","lock"]],["route-windows-beta",["lock"]],["route-vello-half-tie",["root","lock"]],["route-linux-beta",["lock"]],["route-installed-owner",["core","owner"]],["route-device-roster",["core"]],["route-native-positive",["native"]]];
+          const cases=[["route-b1b3a-ipc",["core","lib"]],["route-p2p-offer",["core","lib"]],["route-s3-minio",["core","lock"]],["route-s3-platform",["core","lock","native"]],["route-pinned-read",["core","lock"]],["route-s3-reservation",["core","lock"]],["route-sync-protection",["owned_sync_protection","core","lock"]],["route-sync-transaction",["core","lock"]],["route-text-delta",["owned_text_delta","core","lock"]],["route-appimage-beta",["owned_appimage","lock"]],["route-windows-beta",["lock","owned_windows_beta"]],["route-vello-half-tie",["root","lock"]],["route-linux-beta",["lock"]],["route-installed-owner",["core","owner"]],["route-device-roster",["core"]],["route-native-positive",["native"]]];
           const errors=[];
           for(const [job,keys] of cases){
             const expected=keys.some(k=>flags[k]===true);
