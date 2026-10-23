@@ -1,5 +1,13 @@
 {
   "transfer": {
+    "nativeReceiveTitle": "Receive one file · LAN beta",
+    "nativeReceiveInstruction": "Copy the sender's numeric LAN address 192.168.x.x:PORT to your clipboard. Select the verified device.",
+    "nativeReceiveButton": "Receive to Inbox",
+    "nativeReceiveCancel": "Cancel receive",
+    "nativeReceiveWorking": "Authenticating, receiving and verifying one file…",
+    "nativeReceiveSuccess": "Verified file stored in Received Inbox.",
+    "nativeReceiveFailure": "Receive failed",
+    "nativeReceiveNone": "No verified senders available.",
     "nativeSendTitle": "One-file send · LAN beta",
     "nativeSendCancel": "Cancel transfer",
     "nativeSendButton": "Send selected file",

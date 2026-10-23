@@ -1,5 +1,13 @@
 {
   "transfer": {
+    "nativeReceiveTitle": "Получить файл · LAN-бета",
+    "nativeReceiveInstruction": "Скопируйте числовой адрес отправителя 192.168.x.x:PORT в буфер обмена. Выберите подтверждённое устройство.",
+    "nativeReceiveButton": "Получить во Входящие",
+    "nativeReceiveCancel": "Отменить получение",
+    "nativeReceiveWorking": "Идёт защищённое получение и проверка файла…",
+    "nativeReceiveSuccess": "Файл проверен и записан во Входящие.",
+    "nativeReceiveFailure": "Получение не завершено",
+    "nativeReceiveNone": "Нет подтверждённых отправителей.",
     "nativeSendTitle": "Отправка одного файла · LAN-бета",
     "nativeSendCancel": "Отменить отправку",
     "nativeSendButton": "Отправить выбранный файл",

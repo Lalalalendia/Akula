@@ -36,6 +36,8 @@ p2p-device-ui = ["p2p-device-contacts-preview"]
 p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
 # Explicit Native one-file LAN send. Never enabled in installed builds.
 p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-contacts-preview", "dep:akula-staya-integration", "dep:tokio"]
+# Native receiver: explicitly request from an OS-pinned peer and store only in Inbox.
+p2p-native-receive-beta = ["p2p-native-send-beta"]
 # S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
 # Does not expose S3 writes, apply, file mutation or baseline actions.
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]

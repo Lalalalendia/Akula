@@ -37,6 +37,13 @@ pub enum NativeSendAction {
     Cancel,
 }
 
+#[cfg(feature = "p2p-native-receive-beta")]
+#[derive(Clone, Debug)]
+pub enum NativeReceiveAction {
+    Start(String),
+    Cancel,
+}
+
 /// Read-only view model; only the opt-in receiver-side worker populates rows.
 /// Display labels never become filesystem paths.
 #[derive(Clone, Debug)]
@@ -67,6 +74,15 @@ pub struct NativeSendView {
     pub success: bool,
 }
 
+#[cfg(feature = "p2p-native-receive-beta")]
+#[derive(Clone, Debug, Default)]
+pub struct NativeReceiveView {
+    pub busy: bool,
+    pub canceling: bool,
+    pub success: bool,
+    pub message: Option<String>,
+}
+
 mod devices;
 mod identity;
 mod layout;
@@ -74,6 +90,8 @@ mod queue_view;
 mod inbox_view;
 #[cfg(feature = "p2p-native-send-beta")]
 mod native_send_view;
+#[cfg(feature = "p2p-native-receive-beta")]
+mod native_receive_view;
 use layout::{card_size, details, display_size, hint, rule};
 pub use devices::{DeviceRow, DeviceStatus};
 pub use identity::{IdentityAction, IdentityPhase, IdentityView};
@@ -92,6 +110,8 @@ pub struct TransferDialog {
     pub inbox_save_actions: Vec<(WidgetId, String)>,
     #[cfg(feature = "p2p-native-send-beta")]
     pub native_send_actions: Vec<(WidgetId, NativeSendAction)>,
+    #[cfg(feature = "p2p-native-receive-beta")]
+    pub native_receive_actions: Vec<(WidgetId, NativeReceiveAction)>,
 }
 
 mod dialog_view;
