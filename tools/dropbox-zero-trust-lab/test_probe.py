@@ -13,7 +13,7 @@ import probe
 
 
 class FakeDropbox:
-    """In-memory provider controlled by tests; not a Dropbox API emulator."""
+    """In-memory provider controlled by tests; intentionally not a Dropbox emulator."""
 
     def __init__(self, policy="create_only"):
         self.policy = policy
@@ -27,9 +27,9 @@ class FakeDropbox:
         self.reads = 0
 
     def issue(self, token, path):
-        ticket = "test-ticket-%d" % (len(self.tickets) + 1)
-        self.tickets[ticket] = [path, False]
-        return ticket
+        url = "test-ticket-%d" % (len(self.tickets) + 1)
+        self.tickets[url] = [path, False]
+        return url
 
     def post_object(self, ticket, body):
         self.posts += 1
