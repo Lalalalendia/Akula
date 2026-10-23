@@ -151,7 +151,7 @@ function allowedLinuxBetaMigration(before, after, read) {
     + owned.map(path => "      - '" + path + "'\n").join('')
     + '\npermissions:\n';
   const newHeader = 'on:\n  workflow_call:\n'
-    + '  # Source ownership is enforced by the required Main PR gate.\n'
+    + '  # PR source owners are enforced by the required Main PR gate.\n'
     + '\npermissions:\n';
   if (before.split(oldHeader).length !== 2 || after !== before.replace(oldHeader, newHeader) ||
       after.includes('  workflow_dispatch:\n')) return false;
