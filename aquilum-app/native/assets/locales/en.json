@@ -113,6 +113,7 @@
   "search": {
     "noResults": "Nothing found",
     "noFolder": "No folder open",
+    "imageOpenFailed": "Could not open the image. It may be invalid, inaccessible or too large.",
     "noFolderHint": "Open a knowledge base to search",
     "unavailable": "Search is unavailable",
     "unavailableHint": "Could not open the search index",
