@@ -30,3 +30,17 @@ explicit temporary placeholder until authenticated filename metadata exists.
 **Not yet delivered:** internal Open action for arbitrary untrusted file
 types, original extension/filename, physical installed-app testing, Windows
 ancestor reparse/ACL custody. Do not turn the flag on in a public installer.
+
+## Protected destination exclusion
+
+A manual Save Copy must not act as an alternate File Gate write. The opt-in
+native controller now gathers the current Akula data directory, current Vault
+and all recorded workspace roots (failure to load the workspace list fails
+closed), while the backend also excludes the receiver Inbox itself.
+Canonicalized chosen parent paths inside these protected trees are refused,
+including ordinary symlinked parents leading into a known Vault. A separate
+test checks no file is published into either protected root.
+
+**Security limit:** canonical-path prechecks still have an ancestor TOCTOU
+window on an actively hostile local filesystem. OS-owned directory handles
+and Windows reparse/ACL acceptance remain a release HOLD, not a solved claim.
