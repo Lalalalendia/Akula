@@ -3,11 +3,9 @@ name: Native Vello natural-scroll stage attribution
 on:
   pull_request:
     paths:
-      - '.github/workflows/native-vello-natural-stages.yml'
       - '.github/scripts/summarize-vello-natural-stages.py'
-      - 'aquilum-app/native/src/render/renderer/**'
       - 'aquilum-app/native/src/app/tests/perf/vello_natural_stages.rs'
-      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
+      - '.github/workflows/native-vello-natural-stages.yml'
   workflow_dispatch:
 
 permissions:

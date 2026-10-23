@@ -5,8 +5,10 @@ on:
     branches:
       - main
       - experiment/akula-p2p-offer-contract-20261021
+      - feature/akula-staya-consent-provider-boundary-20261022
     paths:
       - 'interop/akula-staya/**'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
 
@@ -32,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Lalalalendia/staya-transfer
-          ref: fadb38a792126f6098df086fc56ce0dcae3ca3f1
+          ref: ccfe82dc6125e2810e95043a6a4ac55954b710e0
           path: .external/staya-transfer
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -40,16 +42,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .external/staya-transfer rev-parse HEAD)" = "fadb38a792126f6098df086fc56ce0dcae3ca3f1"
+          test "$(git -C .external/staya-transfer rev-parse HEAD)" = "ccfe82dc6125e2810e95043a6a4ac55954b710e0"
       - name: Rust formatting for standalone bridge crate
         shell: bash
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
+      - name: Rust formatting for exact opt-in inbox Core
+        shell: bash
+        run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
+      - name: Check Akula real create-new inbox, corruption, and no-overwrite
+        shell: bash
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+      - name: Authenticate real QUIC remote_id against fresh OS peer pin
+        shell: bash
+        env:
+          AKULA_P2P_OS_PIN_CI: '1'
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
       - name: Lint actual integration crate
         shell: bash
-        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --all-targets -- -D warnings
       - name: Build actual pinned Staya direct batch preview
         shell: bash
         run: |

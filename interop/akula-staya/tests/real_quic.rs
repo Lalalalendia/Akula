@@ -55,13 +55,17 @@ impl OwnedProcess {
             .expect("Staya process did not emit expected protocol line")
     }
 
-    fn send(&mut self, value: &str) {
+    fn send_line(&mut self, value: &str) {
         self.child
             .stdin
             .as_mut()
             .expect("child input")
             .write_all(format!("{value}\n").as_bytes())
-            .expect("send exact Akula-approved Staya invitation");
+            .expect("send exact Akula-approved Staya command");
+    }
+
+    fn send(&mut self, value: &str) {
+        self.send_line(value);
         drop(self.child.stdin.take());
     }
 
@@ -156,7 +160,14 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     let last_path = sources.file("object_02.bin", &last);
 
     // Two independent OS processes; the receiver creates a real Iroh key.
-    let mut receiver = OwnedProcess::spawn(&binary, &["receive-batch", "--lab-request-unlisted"]);
+    let mut receiver = OwnedProcess::spawn(
+        &binary,
+        &[
+            "receive-batch",
+            "--lab-request-unlisted",
+            "--lab-probe-before-arm",
+        ],
+    );
     let receiver_text = receiver.line();
     let receiver_id = receiver_text
         .strip_prefix("PEER_ID ")
@@ -167,8 +178,10 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     // every object in the offer. It will only serve the named receiver key.
     let first_arg = first_path.to_str().expect("test path utf8");
     let last_arg = last_path.to_str().expect("test path utf8");
-    let mut provider =
-        OwnedProcess::spawn(&binary, &["serve-batch", receiver_id, first_arg, last_arg]);
+    let mut provider = OwnedProcess::spawn(
+        &binary,
+        &["serve-batch-gated", receiver_id, first_arg, last_arg],
+    );
     let invitation = provider.line();
     let fields: Vec<&str> = invitation.split_whitespace().collect();
     assert_eq!(fields.first(), Some(&"CONNECT_BATCH"));
@@ -261,6 +274,25 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         "inserting unselected content must fail before GET"
     );
 
+    // Even the exact approved ephemeral receiver MUST fail before consent
+    // is released to the provider, not only in the test controller.
+    receiver.send_line(&invitation);
+    assert_eq!(
+        receiver.line(),
+        "PREARM_DENIED=true",
+        "real authorized Iroh key fetched before Akula approval"
+    );
+
+    // This command remains a trusted sender-local test seam: the real Akula
+    // OfferSession decision and actual Staya invitation were verified above.
+    // A production host must replace stdin with authenticated local IPC.
+    provider.send_line(&format!("AUTHORIZE {} {}", fields[2], receiver_id));
+    assert_eq!(
+        provider.line(),
+        "PROVIDER_ARMED",
+        "Staya provider did not enforce explicit sender authorization"
+    );
+
     // A separate, unlisted cryptographic receiver cannot GET bytes even
     // with the same endpoint ticket and otherwise valid invitation.
     let mut outsider = OwnedProcess::spawn(&binary, &["receive-batch"]);
@@ -276,9 +308,9 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
             .any(|line| line.starts_with("STAGED_QUEUE "))
     );
 
-    // Actual QUIC/Bao transfer begins only after the explicit Akula accept
-    // and independent manifest/transport commitment checks in this process.
-    receiver.send(&invitation);
+    // Real QUIC/Bao transfer begins only after verified Akula consent and
+    // provider-side arming, using the original receiver key across attempts.
+    receiver.send("CONTINUE");
     let mut staged_directories = Vec::new();
     for (slot, expected) in [&first[..], &last[..]].iter().enumerate() {
         let report = receiver.line();
@@ -313,6 +345,35 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         let manifest = prepared.queue.entries()[slot].manifest;
         assert_eq!(actual.len() as u64, manifest.size);
         assert_eq!(*blake3::hash(&actual).as_bytes(), manifest.id.0);
+
+        // This is the actual bytes delivered over QUIC into Staya's private
+        // stage: ask Akula Core to independently hash them while publishing
+        // exactly one NEW user-chosen file. No File Gate / Vault apply.
+        let inbox_target = sources.0.join(format!("accepted-inbox-{slot:02}.bin"));
+        let mut pinned_stage = fs::File::open(&stage).expect("open Staya's real staged file");
+        let saved = aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
+            &mut pinned_stage,
+            manifest.size,
+            manifest.id.0,
+            &inbox_target,
+        )
+        .expect("explicit create-new after cold stage authentication");
+        assert_eq!(saved.bytes, manifest.size);
+        assert_eq!(saved.blake3_root, manifest.id.0);
+        let accepted_bytes = fs::read(&inbox_target).expect("read real created inbox file");
+        assert_eq!(accepted_bytes.as_slice(), *expected);
+
+        // Reusing the valid stage is not permission to replace user bytes.
+        assert!(matches!(
+            aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
+                &mut pinned_stage,
+                manifest.size,
+                manifest.id.0,
+                &inbox_target
+            ),
+            Err(aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists),
+        ));
+        assert_eq!(fs::read(&inbox_target).unwrap().as_slice(), *expected);
         staged_directories.push(parent.to_path_buf());
     }
     assert_eq!(receiver.line(), "STY_G1K_UNLISTED_GET_DENIED=true");
@@ -332,6 +393,7 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     }
     println!(
         "AKULA_STAYA_REAL_QUIC=true two_os_processes=true selected=2 rejected=1 \
-         outsider_denied=true real_queue=true bao_cold_readback=true file_gate=false"
+         prearm_denied=true provider_armed=true outsider_denied=true \
+         real_queue=true bao_cold_readback=true file_gate=false"
     );
 }

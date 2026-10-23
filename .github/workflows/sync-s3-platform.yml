@@ -1,6 +1,7 @@
 name: Sync S3-bound custody OS checks
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - "aquilum-app/core/src/sync/profile_binding.rs"
@@ -15,7 +16,6 @@ on:
       - "aquilum-app/core/src/sync/guarded_editor.rs"
       - "aquilum-app/core/src/app_core.rs"
       - "aquilum-app/core/src/app_core_installed_host_tests.rs"
-      - "aquilum-app/native/Cargo.toml"
       - "aquilum-app/core/src/files/gate/write.rs"
       - "aquilum-app/core/src/files/gate/moves.rs"
       - "aquilum-app/core/src/files/gate/trash.rs"
@@ -24,15 +24,14 @@ on:
       - "aquilum-app/core/src/documents/io.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
       - "aquilum-app/core/src/sync/s3_transport/core_stage.rs"
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/Cargo.lock"
+
       - ".github/workflows/sync-s3-platform.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: sync-s3-platform-${{ github.event.pull_request.number }}
+  group: sync-s3-platform-${{ github.event.pull_request.number }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

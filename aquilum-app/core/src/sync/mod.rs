@@ -1,7 +1,5 @@
-//! PR 00: inert cloud-sync contracts, types and deterministic fake provider.
-//!
-//! The existing local note history is not the distributed revision graph.
-//! Later stages must use the File Gate for writes and protect dirty editor buffers.
+//! Inert sync contracts, types and deterministic fake provider.
+//! Local history is not distributed; File Gate protects dirty editor buffers.
 
 mod core_scan;
 mod dag;
@@ -16,8 +14,7 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
-// Installer-provisioned local custody epoch: independent of S3 transport.
-// Legacy unhosted Core::open remains a release blocker until native binding.
+// Host custody epoch is S3-independent; legacy unhosted Core::open is blocked.
 #[cfg(feature = "host-custody")]
 mod host_ledger_identity;
 #[cfg(feature = "host-custody")]
@@ -38,6 +35,8 @@ pub(crate) use host_admission::RegisteredReadAdmission;
 pub(crate) use pinned_read::{PinnedFileIdentity, PinnedReadOnlyRoot};
 #[cfg(test)]
 mod fault_matrix;
+#[cfg(feature = "device-roster-lab")]
+pub mod device_roster_lab;
 mod identity;
 mod journal;
 mod local_create;
@@ -50,6 +49,8 @@ mod recovery_review;
 /// Crypto envelope contract only: no production key custody or archive writer yet.
 pub mod sealed_archive;
 mod recovery_dashboard;
+#[cfg(feature = "sync-s3")]
+mod s3_publication_dashboard;
 mod planner;
 mod protection_store;
 #[cfg(feature = "sync-s3")]
@@ -80,8 +81,7 @@ mod s3_anchored_delta;
 mod s3_delta_walker;
 #[cfg(feature = "sync-s3")]
 mod s3_remote_anchor;
-// App-data-only V2 trust checkpoints: explicit genesis pin and monotonic
-// remote observation, never a per-document or user-write baseline.
+// App-data V2 trust anchor is not a per-document or write baseline.
 #[cfg(feature = "sync-s3")]
 mod s3_v2_trust_anchor;
 #[cfg(feature = "sync-s3")]
@@ -97,6 +97,8 @@ pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimi
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
 pub use dag_store::{DagStoreError, DagStoreResult, SqliteDagStore};
+#[cfg(feature = "sync-s3")]
+pub use s3_publication_dashboard::native_s3_bound_publication_overview;
 pub use recovery_dashboard::{
     native_recovery_overview, native_recovery_case_preview, native_record_recovery_decision,
     NativeRecoveryOverview, NativeRecoveryExample, NativeRecoveryCasePreview,
@@ -131,9 +133,7 @@ pub use s3_coord_v2::{
     MAX_DELTA_PACK_BYTES, MAX_DELTA_PACK_MEMBERS,
 };
 #[cfg(feature = "sync-s3")]
-pub use s3_anchored_delta::{
-    walk_s3_delta_from_saved_anchor, S3AnchoredWalkError,
-};
+pub use s3_anchored_delta::{walk_s3_delta_from_saved_anchor, S3AnchoredWalkError};
 #[cfg(feature = "sync-s3")]
 pub use s3_remote_anchor::{
     S3RemoteAnchor, S3RemoteAnchorError, S3RemoteAnchorJournal,

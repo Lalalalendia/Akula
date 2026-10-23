@@ -1,8 +1,5 @@
-use std::path::PathBuf;
-
-use aquilum_core::mcp::McpStatus;
 use aquilum_core::settings::models::AppConfig;
-use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview, NativeRecoveryDecision};
+use aquilum_core::sync::NativeRecoveryDecision;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -25,10 +22,10 @@ pub use context::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    /// Read-only SSH KEX + host inspection; no package/install/approval.
+    /// Read-only SSH verification; never an install approval.
     VerifyServer,
     ToggleServerAdvanced,
-    /// Blocked until signed installer and owner approval are implemented.
+    /// Disabled until signed installer and explicit owner approval exist.
     InstallServer,
     InspectRecovery(String),
     RequestRecoveryReview(NativeRecoveryDecision),

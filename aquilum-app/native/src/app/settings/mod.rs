@@ -14,11 +14,10 @@ use super::{App, Outcome, Popup};
 mod action;
 mod apply;
 mod context;
-mod press;
-pub(super) mod server_state;
 mod bindings;
 mod refresh;
 mod recovery;
+pub(super) mod server_state;
 #[cfg(all(windows, feature = "server-readonly-preflight"))]
 pub(super) mod server;
 

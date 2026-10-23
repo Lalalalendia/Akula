@@ -348,3 +348,71 @@ fn b1_e2e_01_native_verify_button_never_grants_install() {
     assert!(!bad.server_setup.valid_offline_pin());
     assert!(!buttons(&bad, &ctx)[0].enabled);
 }
+
+#[test]
+fn system_about_section_links_to_project_telegram_channel() {
+    let sections = blocks(Section::System, &AppConfig::default(), &Context::new(1.0));
+    let about = sections.last().expect("About section should be present");
+    assert_eq!(about.rows.len(), 2, "project channel and app version");
+    let telegram = &about.rows[0];
+    assert_eq!(telegram.label, t("settings.system.projectTelegram"));
+    let hint = t("settings.system.projectTelegramHint");
+    assert_eq!(telegram.description.as_deref(), Some(hint.as_str()));
+    assert!(telegram.setter.is_none());
+    let Control::Buttons(buttons) = &telegram.control else {
+        panic!("project Telegram channel must be a clickable link");
+    };
+    assert_eq!(buttons.len(), 1);
+    assert_eq!(buttons[0].label, "https://t.me/AkulaHubl");
+    assert_eq!(buttons[0].action, Action::OpenUrl("https://t.me/AkulaHubl"));
+}
+
+/// S3-E2E-01: remote VaultId is visible only in a separate, opt-in
+/// diagnostic surface. A real pending file must never become a Restore,
+/// ConfirmedBaseline or blind retry button.
+#[cfg(feature = "s3-e2e01-review-preview")]
+#[test]
+fn s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button() {
+    use aquilum_core::sync::{NativeRecoveryExample, NativeRecoveryOverview};
+    let config = AppConfig::default();
+    let mut ctx = Context::new(1.0);
+    ctx.sync_recovery = Some(NativeRecoveryOverview::NoLocalPublicationClaims);
+    ctx.s3_bound_publications = Some(NativeRecoveryOverview::RequiresReview {
+        total_claims: 1,
+        examples: vec![NativeRecoveryExample {
+            operation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+            historical_path: "notes/received-over-s3.md".into(),
+        }],
+    });
+    let sections = blocks(Section::Sync, &config, &ctx);
+    let panel = sections.iter()
+        .find(|block| block.title == t("settings.sync.title"))
+        .unwrap();
+    let unconfirmed = panel.rows.iter()
+        .find(|row| row.label == "notes/received-over-s3.md")
+        .unwrap();
+    assert!(unconfirmed.setter.is_none());
+    assert!(matches!(
+        &unconfirmed.control,
+        Control::Status { tone: Tone::Danger, .. }
+    ));
+    assert!(panel.rows.iter().any(|row| {
+        row.label == t("settings.sync.s3BoundCount")
+            && row.description.as_ref() == Some(&t("settings.sync.s3BoundNoAck"))
+    }));
+    assert!(!panel.rows.iter().any(|row| {
+        matches!(&row.control, Control::Buttons(_))
+            && row.label == t("settings.sync.s3BoundTitle")
+    }));
+
+    ctx.s3_bound_publications = Some(NativeRecoveryOverview::InspectionUnavailable);
+    let blocked = blocks(Section::Sync, &config, &ctx);
+    let panel = blocked.iter().find(|b| b.title == t("settings.sync.title")).unwrap();
+    assert!(panel.rows.iter().any(|row| {
+        row.label == t("settings.sync.s3BoundTitle")
+            && matches!(&row.control, Control::Status { tone: Tone::Danger, .. })
+    }));
+    assert!(!panel.rows.iter().any(|row| {
+        row.label == "notes/received-over-s3.md"
+    }));
+}

@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-native"
-version = "0.3.10"
+version = "0.3.11"
 description = "Aquilum native UI (Masonry on winit + vello_cpu), no WebView"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -28,9 +28,15 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 [features]
 installed = []
 memory-probe = []
-# Opt-in Windows native "Verify SSH" read-only user flow. No install RPC.
-# Remains absent from default/signed builds until independent preflight QA.
+# Optional Windows signed SSH read-only preflight; no installation authority.
 server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
+# Non-shipping read-only OS-backed Iroh contacts; no send actions.
+p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
+# Opt-in local Iroh public identity UI; uses the same protected peer contacts.
+p2p-device-ui = ["p2p-device-contacts-preview"]
+# S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
+# Does not expose S3 writes, apply, file mutation or baseline actions.
+s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.

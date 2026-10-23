@@ -31,7 +31,7 @@ fn preview_dimensions_allowed((width, height): (u32, u32)) -> bool {
             .is_some_and(|pixels| pixels <= MAX_IMAGE_PREVIEW_PIXELS)
 }
 
-fn local_image_preview(vault: &Path, source: &Path) -> Option<masonry::peniko::ImageBrush> {
+pub(in crate::app) fn local_image_preview(vault: &Path, source: &Path) -> Option<masonry::peniko::ImageBrush> {
     // The tree filters symlink entries; enforce the boundary again at open time.
     if !std::fs::symlink_metadata(source).ok()?.file_type().is_file() {
         return None;
@@ -64,19 +64,19 @@ fn local_image_preview(vault: &Path, source: &Path) -> Option<masonry::peniko::I
 }
 
 impl App {
-    // Opening an image from the file tree is a read-only modal preview.
-    // In particular it must not replace the active note, change tabs or save.
+    // File-tree images open in a normal tab. Embedded images may still use the modal viewer.
     pub(super) fn open_tree_file(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool) -> bool {
+        self.open_in(root, path, new_tab)
+    }
+
+    pub(in crate::app) fn image_tab_widget(&self) -> Option<masonry::core::NewWidget<dyn masonry::core::Widget>> {
+        let path = self.tabs.active().path.as_deref()?;
         if kind(&path.to_string_lossy()) != Some(MediaKind::Image) {
-            return self.open_in(root, path, new_tab);
+            return None;
         }
-        let preview = self.tree.root().and_then(|vault| local_image_preview(vault, &path));
-        if let Some(image) = preview {
-            self.open_viewer(root, image);
-        } else {
-            report!("изображение не открыто (повреждено, недоступно, >32 МиБ или >24 Мп): {}", path.display());
-        }
-        false // Window title and navigation remain on the current document.
+        let image = local_image_preview(self.tree.root()?, path)?;
+        let title = path.file_name()?.to_string_lossy();
+        Some(crate::ui::viewer::ImagePage::new(image, &title).erased())
     }
 
     pub fn paste_image(&mut self, root: &mut RenderRoot, png: &[u8]) -> bool {
@@ -118,16 +118,4 @@ impl App {
 }
 
 #[cfg(test)]
-mod preview_budget_tests {
-    use super::preview_dimensions_allowed;
-
-    #[test]
-    fn native_pixel_budget_is_separate_from_compressed_byte_budget() {
-        assert!(preview_dimensions_allowed((6_000, 4_000)));
-        assert!(preview_dimensions_allowed((1, 24_000_000)));
-        assert!(!preview_dimensions_allowed((6_001, 4_000)));
-        assert!(!preview_dimensions_allowed((65_000, 65_000)));
-        assert!(!preview_dimensions_allowed((0, 1)));
-        assert!(!preview_dimensions_allowed((1, 0)));
-    }
-}
+mod preview_tests;

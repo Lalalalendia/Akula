@@ -1,20 +1,20 @@
 name: Vello Common half-tie fidelity (production candidate)
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - 'aquilum-app/native/vendor/vello_common/**'
       - 'aquilum-app/native/vendor/vello_cpu/src/render.rs'
       - 'aquilum-app/native/src/app/tests/perf/worker_crossover.rs'
-      - 'aquilum-app/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+
       - '.github/workflows/native-vello-half-tie-regression.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: vello-half-tie-release-${{ github.event.pull_request.number || github.ref }}
+  group: vello-half-tie-release-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

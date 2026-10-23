@@ -1,6 +1,7 @@
 # RELEASE-LINUX-ID-01: ephemeral DEB/RPM packaging, never a release.
 name: Akula Linux beta candidate
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
@@ -9,13 +10,12 @@ on:
       - 'scripts/linux-beta-smoke.sh'
       - 'aquilum-app/native/packaging/akula-linux-nfpm.yaml'
       - 'aquilum-app/native/packaging/Akula.desktop'
-      - 'aquilum-app/native/src/**'
       - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+
 permissions:
   contents: read
 concurrency:
-  group: akula-linux-beta-${{ github.event.pull_request.number || github.ref }}
+  group: akula-linux-beta-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 env:
   NFPM_VERSION: 2.47.0

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs"
       - "aquilum-app/core/src/server_bootstrap_modules.rs"
       - "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs"
       - "scripts/ci/akula-b0c-windows-loopback-sshd.py"
@@ -16,6 +17,10 @@ on:
       - "aquilum-app/native/src/app/settings/context.rs"
       - "aquilum-app/native/src/app/settings/press.rs"
       - "aquilum-app/native/src/ui/settings/schema/server/server_status.rs"
+      - "aquilum-app/native/src/ui/settings/schema/server/identity.rs"
+      - "aquilum-app/native/src/ui/settings/schema/server.rs"
+      - "aquilum-app/native/assets/locales/ru.json"
+      - "aquilum-app/native/assets/locales/en.json"
       - "aquilum-app/native/src/ui/settings/schema/types/context.rs"
       - "aquilum-app/native/src/ui/settings/schema/tests.rs"
   workflow_dispatch:
@@ -52,7 +57,7 @@ jobs:
           $keygen = Join-Path $env:WINDIR "System32\OpenSSH\ssh-keygen.exe"
           if (!(Test-Path -LiteralPath $exe -PathType Leaf) -or !(Test-Path -LiteralPath $keygen -PathType Leaf)) { throw "Windows system OpenSSH required" }
           & $exe -V
-          rustfmt --edition 2021 aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs aquilum-app/core/tests/server_bootstrap_b0c_windows.rs
+          rustfmt --edition 2024 aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs aquilum-app/core/tests/server_bootstrap_b0c_windows.rs
           python -m py_compile scripts/ci/akula-b0c-windows-loopback-sshd.py
       - name: Real Windows OpenSSH signed KEX, forged pin rejection and B0 preview
         shell: pwsh

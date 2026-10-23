@@ -1,6 +1,7 @@
 name: Sync pinned-read OS checks
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - "aquilum-app/core/src/plugins/vault_reader.rs"
@@ -48,15 +49,14 @@ on:
       - "aquilum-app/core/src/documents/io.rs"
       - "aquilum-app/core/src/sync/pinned_windows.rs"
       - "aquilum-app/core/src/sync/mod.rs"
-      - "aquilum-app/core/Cargo.toml"
-      - "aquilum-app/Cargo.lock"
+
       - ".github/workflows/sync-pinned-read.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: pinned-read-${{ github.event.pull_request.number }}
+  group: pinned-read-${{ github.event.pull_request.number }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:

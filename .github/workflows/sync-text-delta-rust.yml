@@ -1,15 +1,8 @@
 name: SYNC-TEXT-DELTA-03 bounded Rust codec (opt-in, no S3)
 
 on:
-  pull_request:
-    paths:
-      - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
-      - 'aquilum-app/core/src/sync/text_delta_codec.rs'
-      - 'aquilum-app/core/src/sync/mod.rs'
-      - 'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'
-      - '.github/workflows/sync-text-delta-rust.yml'
-      - 'docs/sync/text-delta-03-rust-codec.md'
+  workflow_call:
+  # PR path owners are enforced in required central route.
   workflow_dispatch:
 
 permissions:
@@ -17,7 +10,7 @@ permissions:
 
 concurrency:
   # New PR revisions supersede old ones; explicit manual runs remain independent.
-  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: delta-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:

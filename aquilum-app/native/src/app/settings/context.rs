@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 impl App {
     pub(super) fn settings_context(&self, section: Section, copied: Option<usize>, trash_page: usize) -> Context {
@@ -22,6 +23,16 @@ impl App {
         } else {
             None
         };
+        #[cfg(feature = "s3-e2e01-review-preview")]
+        let s3_bound_publications = if section == Section::Sync {
+            workspace.as_deref().map(|root| {
+                aquilum_core::sync::native_s3_bound_publication_overview(
+                    &self.workspace.core, &self.workspace.data_dir, root,
+                )
+            })
+        } else {
+            None
+        };
         let server_probe = if section == Section::Server {
             let current = self.workspace.core.settings.get_config().server_setup;
             self.server_probe.observation.as_ref()
@@ -35,6 +46,8 @@ impl App {
             server_advanced: false,
             workspace,
             sync_recovery,
+            #[cfg(feature = "s3-e2e01-review-preview")]
+            s3_bound_publications,
             sync_selected: None,
             sync_notice: None,
             scale: self.interface.scale(),
@@ -46,5 +59,4 @@ impl App {
             update: crate::updater::available().then(|| self.updater.status()),
         }
     }
-
 }

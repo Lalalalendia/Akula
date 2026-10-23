@@ -24,6 +24,7 @@ lab="$(mktemp -d /tmp/akula-b1b2b-ubuntu.XXXXXXXX)"
 chmod 0700 "$lab"
 guest_pid=""
 active_ssh_pid=""
+reboot_ssh_pid=""
 cleanup(){
   result=$?
   trap - EXIT
@@ -31,6 +32,10 @@ cleanup(){
     echo "B1B2B_VM_FAILURE_WITNESS" >&2
     test ! -f "$lab/console.log" || tail -n 80 "$lab/console.log" >&2
     test ! -f "$lab/qemu.log" || tail -n 30 "$lab/qemu.log" >&2
+  fi
+  if [[ -n "$reboot_ssh_pid" ]]; then
+    kill "$reboot_ssh_pid" 2>/dev/null || true
+    wait "$reboot_ssh_pid" 2>/dev/null || true
   fi
   if [[ -n "$active_ssh_pid" ]]; then
     kill "$active_ssh_pid" 2>/dev/null || true
@@ -156,7 +161,11 @@ if [[ -c /dev/kvm ]]; then
   fi
   if [[ -r /dev/kvm && -w /dev/kvm ]]; then accelerator=kvm; fi
 fi
-echo "B1B2B_QEMU_ACCELERATOR=$accelerator"
+echo "B1B2B_QEMU_ACCELERATOR_REQUESTED=$accelerator"
+# Let QEMU attempt KVM and automatically fall back to TCG if KVM ioctl fails.
+# No change to crash-recovery, disk, or guest trust invariants.
+if [[ "$accelerator" == kvm ]]; then accelerator=kvm:tcg; fi
+echo "B1B2B_QEMU_ACCELERATOR_POLICY=$accelerator"
 # A disposable, signature-verified image COPY is the ONLY writable guest disk.
 # snapshot=off is essential: forced QEMU death must not discard the entire
 # guest disk and accidentally test a fresh machine instead of persisted state.
@@ -205,6 +214,8 @@ ssh_lab "sudo test -f /etc/akula-b1b2b-lab.marker &&
   test \"\$(sudo sha256sum /etc/akula-b1b2b-lab-public.ed25519 | cut -d ' ' -f1)\" = '$expected_key_sha'"
 echo "B1B2B_VM_PREBOOT_KEY_TRUST_VERIFIED"
 echo "B1B2B_FIRST_BOOT_VERIFY_SECONDS=$((SECONDS - first_boot_start))"
+# Optional, non-blocking diagnostic: does not change cloud-init acceptance.
+ssh_lab "sudo cloud-init analyze blame" 2>/dev/null | head -n 16 || true
 ssh_lab "mkdir -m 0700 /home/akulavm/b1b2b"
 scp -q -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes \
   -o "UserKnownHostsFile=$lab/known_hosts" -o GlobalKnownHostsFile=/dev/null \
@@ -245,7 +256,12 @@ fi
 echo "B1B2B_VM_INSTALLER_SIGKILL_CONFIRMED"
 # ssh may exit 0 or nonzero as the kernel drops its session during reboot;
 # prove the boot changed by independently reading the Linux boot_id afterward.
-ssh_lab "sudo systemctl reboot" </dev/null >/dev/null 2>&1 || true
+os_reboot_start=$SECONDS
+# SSH may block after the guest is already restarting (observed 303 s in
+# PR #561). Do not await the control session before checking the actual OS
+# boot ID; the independently proven new boot ID remains the sole success gate.
+ssh_lab "sudo systemctl reboot" </dev/null >/dev/null 2>&1 &
+reboot_ssh_pid=$!
 boot_after=""
 reboot_verified=false
 for i in $(seq 1 260); do
@@ -264,7 +280,13 @@ if [[ "$reboot_verified" != true ]]; then
   echo "B1B2B_REFUSED: guest OS reboot was not independently proved" >&2
   exit 1
 fi
+# The detached host SSH client may still be awaiting a vanished session;
+# terminate it only AFTER guest boot identity has been proved independently.
+kill "$reboot_ssh_pid" 2>/dev/null || true
+wait "$reboot_ssh_pid" 2>/dev/null || true
+reboot_ssh_pid=""
 echo "B1B2B_VM_OS_BOOT_ID_CHANGED"
+echo "B1B2B_OS_REBOOT_SECONDS=$((SECONDS - os_reboot_start))"
 # No unconfirmed candidate may auto-start during guest reboot.
 if ssh_lab "sudo systemctl is-active --quiet akula-b1b2b-lab.service"; then
   echo "B1B2B_REFUSED: unconfirmed candidate auto-started before recovery" >&2
@@ -318,6 +340,7 @@ kill "$active_ssh_pid" 2>/dev/null || true
 wait "$active_ssh_pid" 2>/dev/null || true
 active_ssh_pid=""
 cp "$lab/console.log" "$lab/console.pre-forceoff.log"
+hardoff_reboot_start=$SECONDS
 # Restart the same disposable qcow2 from scratch. The image is not pristine:
 # systemd unit, trusted key, signed artifacts and journal must survive.
 start_qemu
@@ -340,6 +363,7 @@ if [[ "$ready_after_forceoff" != true ]]; then
   exit 1
 fi
 echo "B1B2B_VM_HARDOFF_BOOT_ID_CHANGED"
+echo "B1B2B_HARDOFF_REBOOT_SECONDS=$((SECONDS - hardoff_reboot_start))"
 # ssh_lab always performs strict host-key pinning. Check the *release*
 # trust root was also preserved and did not silently fall back to a new key.
 ssh_lab "sudo cloud-init status --wait && sudo cloud-init schema --system --annotate"

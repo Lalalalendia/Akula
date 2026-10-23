@@ -36,6 +36,35 @@ test('Windows packager has a distinct, version-pinned Akula identity', () => {
   ]);
 });
 
+test('Pixel shark icon is installed consistently in Windows EXE, NSIS and desktop packages', () => {
+  const resource = fs.readFileSync(path.join(root, 'aquilum-app/native/assets/icon.ico'));
+  const installer = fs.readFileSync(path.join(root, 'aquilum-app/native/icons/icon.ico'));
+  assert.deepEqual(resource, installer, 'native EXE and NSIS must use the same shark artwork');
+  assert.equal(resource.readUInt16LE(0), 0);
+  assert.equal(resource.readUInt16LE(2), 1, 'Windows ICO image type');
+  assert.ok(resource.readUInt16LE(4) >= 6, 'include multiple Windows taskbar resolutions');
+
+  const icons = [
+    ['aquilum-app/native/assets/icon-64.png', 64],
+    ['aquilum-app/native/icons/32x32.png', 32],
+    ['aquilum-app/native/icons/128x128.png', 128],
+    ['aquilum-app/native/icons/128x128@2x.png', 256],
+  ];
+  for (const [filename, size] of icons) {
+    const content = fs.readFileSync(path.join(root, filename));
+    assert.equal(content.subarray(0, 8).toString('hex'), '89504e470d0a1a0a',
+      filename + ' must be a real PNG');
+    assert.equal(content.readUInt32BE(16), size);
+    assert.equal(content.readUInt32BE(20), size);
+  }
+  const icns = fs.readFileSync(path.join(root, 'aquilum-app/native/icons/icon.icns'));
+  assert.equal(icns.toString('ascii', 0, 4), 'icns');
+  assert.equal(icns.readUInt32BE(4), icns.length);
+  const nativeBuild = read('aquilum-app/native/build.rs');
+  assert.match(nativeBuild, /join\("assets\/icon\.ico"\)/,
+    'Windows binary resource should use the new icon.ico');
+});
+
 test('Windows runtime data and global process identities do not alias Aquilum', () => {
   // Akula Linux now intentionally shares Akula's independent identity,
   // not Aquilum's AppData. Windows has not changed its product identity.
