@@ -1,6 +1,35 @@
 use super::*;
 use aquilum_core::settings::models::DropboxReadOnlyDraft;
 
+/// Explain recoverable OAuth failures without printing tokens or Dropbox data.
+fn account_status_hint(status: &str) -> &'static str {
+    if status.contains("CALLBACK_PORT_UNAVAILABLE") {
+        "Локальный порт 47219 занят. Закройте другой экземпляр Akula и повторите вход."
+    } else if status.contains("OAUTH_APP_OR_REDIRECT_REJECTED") {
+        "Dropbox отклонил регистрацию приложения или callback. Проверьте точный URI в Dropbox App Console."
+    } else if status.contains("READ_SCOPES_REJECTED") {
+        "Dropbox не подтвердил права чтения. Включите account_info.read, files.metadata.read и files.content.read."
+    } else if status.contains("OS_KEYRING_UNAVAILABLE")
+        || status.contains("OS_KEYRING_VERIFY_FAILED")
+    {
+        "Недоступно защищённое хранилище ОС. Проверьте Windows Credential Manager или Secret Service, токен в файл не сохраняется."
+    } else if status.contains("SAVED_CONSENT_REVOKED")
+        || status.contains("NO_SAVED_CONSENT")
+    {
+        "Сохранённое разрешение Dropbox не действует. Нажмите «Войти в Dropbox» снова."
+    } else if status.contains("ACCOUNT_OR_ROOT_MISMATCH") {
+        "Изменился аккаунт Dropbox или его корневая область. Проверьте учётную запись и выполните вход заново."
+    } else if status.contains("CONSENT_DENIED") {
+        "Разрешение не подтверждено в браузере. Можно повторить вход, файлы не изменены."
+    } else if status.contains("BROWSER_UNAVAILABLE") {
+        "Не удалось открыть системный браузер. Проверьте обработчик ссылок HTTPS."
+    } else if status.contains("ACCOUNT_SESSION_RESTORED") {
+        "Аккаунт проверен заново после перезапуска. Доверие Vault и синхронизация по-прежнему выключены."
+    } else {
+        "Dropbox подключается только для чтения. Загрузка, удаление и синхронизация файлов отключены."
+    }
+}
+
 /// User-initiated Dropbox read-only connection; not a trusted or synchronized Vault.
 pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.dropbox_readonly;
@@ -8,12 +37,13 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
     let available = ready && !ctx.dropbox_preview_busy;
     let rows = vec![
         info("Dropbox — подключение (только чтение)".into(),
-            Some("Подключение Dropbox с проверкой данных. Загрузка, удаление и синхронизация файлов пока недоступны.".into()),
+            Some(account_status_hint(&ctx.dropbox_preview_status).into()),
             Control::Status {
                 text: ctx.dropbox_preview_status.clone(),
-                tone: if ctx.dropbox_preview_status.contains("REJECTED")
-                    || ctx.dropbox_preview_status.contains("FAILED") { Tone::Danger }
-                    else { Tone::Secondary },
+                tone: if ["REJECTED", "FAILED", "DENIED", "UNAVAILABLE",
+                    "MISMATCH", "REVOKED", "INVALID"].iter()
+                    .any(|word| ctx.dropbox_preview_status.contains(word))
+                    { Tone::Danger } else { Tone::Secondary },
             }),
         info("Приложение Dropbox".into(),
             Some("Используется официальное приложение Akula с OAuth PKCE. App Key и порт не вводятся вручную.".into()),
@@ -98,6 +128,23 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_error_guidance_has_safe_action_without_leaking_credentials() {
+        let expected = [
+            ("DROPBOX_CALLBACK_PORT_UNAVAILABLE / SYNC_DISABLED", "47219"),
+            ("DROPBOX_OAUTH_APP_OR_REDIRECT_REJECTED / SYNC_DISABLED", "callback"),
+            ("DROPBOX_READ_SCOPES_REJECTED / SYNC_DISABLED", "files.metadata.read"),
+            ("DROPBOX_OS_KEYRING_UNAVAILABLE / SYNC_DISABLED", "Secret Service"),
+            ("DROPBOX_SAVED_CONSENT_REVOKED / SYNC_DISABLED", "Войти в Dropbox"),
+            ("DROPBOX_ACCOUNT_OR_ROOT_MISMATCH / SYNC_DISABLED", "аккаунт"),
+        ];
+        for (status, needle) in expected {
+            let hint = account_status_hint(status);
+            assert!(hint.contains(needle), "{status}: {hint}");
+            assert!(!hint.contains("Bearer ") && !hint.contains("refresh_token"));
+        }
+    }
 
     #[test]
     fn public_akula_oauth_identity_is_not_editable_in_settings() {

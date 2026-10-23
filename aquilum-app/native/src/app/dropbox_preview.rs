@@ -7,7 +7,7 @@ use aquilum_core::settings::models::{
     DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
 };
 use akula_dropbox_connect_lab::{
-    account::{resume_account, AccountIdentity, AccountSession},
+    account::{resume_account, AccountIdentity, AccountLoginError, AccountSession},
     resume::resume_readonly, ConnectSession, ConnectionStatus,
 };
 use akula_dropbox_t0::{read_verify::TrustedBlake3, Scope};
@@ -25,8 +25,8 @@ use std::{
 // A Vault result is never converted to write/sync authority.
 enum PreviewReply {
     Vault(&'static str),
-    Account(Result<AccountIdentity, ()>),
-    Resumed(Result<AccountIdentity, ()>),
+    Account(Result<AccountIdentity, AccountLoginError>),
+    Resumed(Result<AccountIdentity, AccountLoginError>),
     SignedOut(Result<AccountIdentity, ()>),
 }
 
@@ -74,9 +74,11 @@ impl DropboxPreview {
                 // print the OAuth URL, authorization code or access token.
                 let result = AccountSession::begin(
                     AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
-                ).map_err(|_| ()).and_then(|session| {
-                    if !open_browser(session.browser_authorize_url()) { return Err(()); }
-                    session.finish(Duration::from_secs(120)).map_err(|_| ())
+                ).and_then(|session| {
+                    if !open_browser(session.browser_authorize_url()) {
+                        return Err(AccountLoginError::BrowserUnavailable);
+                    }
+                    session.finish(Duration::from_secs(120))
                 });
                 if tx.send((generation, PreviewReply::Account(result))).is_ok() {
                     wake();
@@ -114,7 +116,7 @@ impl DropboxPreview {
                     account_id: draft.account_id,
                     root_namespace_id: draft.root_namespace_id,
                 };
-                let result = resume_account(AKULA_DROPBOX_APP_KEY, &expected).map_err(|_| ());
+                let result = resume_account(AKULA_DROPBOX_APP_KEY, &expected);
                 if tx.send((generation, PreviewReply::Resumed(result))).is_ok() {
                     wake();
                 }
@@ -269,15 +271,15 @@ impl DropboxPreview {
                     self.status = "ACCOUNT_AUTHORIZED / VAULT_NOT_APPROVED / SYNC_DISABLED".into();
                     authenticated_account = Some(identity);
                 }
-                PreviewReply::Account(Err(_)) => {
-                    self.status = "ACCOUNT_LOGIN_REJECTED / SYNC_DISABLED".into();
+                PreviewReply::Account(Err(err)) => {
+                    self.status = err.public_status().into();
                 }
                 PreviewReply::Resumed(Ok(identity)) => {
                     self.status = "ACCOUNT_SESSION_RESTORED / VAULT_NOT_APPROVED / SYNC_DISABLED".into();
                     authenticated_account = Some(identity);
                 }
-                PreviewReply::Resumed(Err(_)) => {
-                    self.status = "ACCOUNT_RESUME_REJECTED / SYNC_DISABLED".into();
+                PreviewReply::Resumed(Err(err)) => {
+                    self.status = err.public_status().into();
                 }
                 PreviewReply::SignedOut(Ok(identity)) => {
                     self.status = "LOCAL_CREDENTIAL_FORGOTTEN / SYNC_DISABLED".into();
@@ -485,9 +487,25 @@ mod tests {
             account_id: "dbid:old".into(), root_namespace_id: "1".into(),
         })))).unwrap();
         assert_eq!(state.poll(), (false, None, None));
-        state.tx.send((state.generation, PreviewReply::Resumed(Err(())))).unwrap();
+        state.tx.send((state.generation, PreviewReply::Resumed(Err(AccountLoginError::MissingSavedConsent)))).unwrap();
         assert_eq!(state.poll(), (true, None, None));
-        assert_eq!(state.status, "ACCOUNT_RESUME_REJECTED / SYNC_DISABLED");
+        assert_eq!(state.status, "DROPBOX_NO_SAVED_CONSENT / SYNC_DISABLED");
+    }
+
+    #[test]
+    fn browser_port_and_revoke_failures_display_distinct_safe_categories() {
+        let mut state = DropboxPreview::new();
+        state.tx.send((state.generation, PreviewReply::Account(
+            Err(AccountLoginError::BrowserUnavailable)))).unwrap();
+        assert_eq!(state.poll(), (true, None, None));
+        assert_eq!(state.status, "DROPBOX_BROWSER_UNAVAILABLE / SYNC_DISABLED");
+        state.tx.send((state.generation, PreviewReply::Resumed(
+            Err(AccountLoginError::Refresh(
+                akula_dropbox_connect_lab::resume::ResumeError::RefreshRejected,
+            ))))).unwrap();
+        assert_eq!(state.poll(), (true, None, None));
+        assert_eq!(state.status, "DROPBOX_SAVED_CONSENT_REVOKED / SYNC_DISABLED");
+        assert!(!state.status.contains("Bearer"));
     }
 
     #[test]

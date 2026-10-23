@@ -5,7 +5,7 @@ use super::resume::{self, ResumeError};
 use akula_dropbox_auth_lab::{
     callback::{BoundLogin, CallbackError},
     exchange::{exchange_once, ExchangeError},
-    TokenExchange,
+    AuthError, TokenExchange,
 };
 use akula_dropbox_secret_store::{
     account::{AccountCredentialScope, AccountCredentialStore},
@@ -33,6 +33,7 @@ impl AccountIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountLoginError {
     InvalidPort,
+    BrowserUnavailable,
     Callback(CallbackError),
     Exchange(ExchangeError),
     Refresh(ResumeError),
@@ -41,6 +42,50 @@ pub enum AccountLoginError {
     InvalidAccount,
     NetworkUnavailable,
     SecretStore(SecretError),
+}
+
+/// Safe diagnostic categories: never include OAuth codes, tokens, account IDs
+/// or Dropbox-provided error text. Every rejection keeps sync disabled.
+impl AccountLoginError {
+    pub fn public_status(&self) -> &'static str {
+        match self {
+            Self::InvalidPort | Self::Callback(CallbackError::PortUnavailable) =>
+                "DROPBOX_CALLBACK_PORT_UNAVAILABLE / SYNC_DISABLED",
+            Self::BrowserUnavailable => "DROPBOX_BROWSER_UNAVAILABLE / SYNC_DISABLED",
+            Self::Callback(CallbackError::Expired) =>
+                "DROPBOX_BROWSER_TIMEOUT / SYNC_DISABLED",
+            Self::Callback(CallbackError::Authorization(AuthError::Denied)) =>
+                "DROPBOX_CONSENT_DENIED / SYNC_DISABLED",
+            Self::Callback(CallbackError::Authorization(AuthError::StateMismatch)) =>
+                "DROPBOX_OAUTH_STATE_MISMATCH / SYNC_DISABLED",
+            Self::Callback(_) => "DROPBOX_CALLBACK_REJECTED / SYNC_DISABLED",
+            Self::Exchange(ExchangeError::UnexpectedScope)
+            | Self::Refresh(ResumeError::ScopeEscalation) =>
+                "DROPBOX_READ_SCOPES_REJECTED / SYNC_DISABLED",
+            Self::Exchange(ExchangeError::Rejected) =>
+                "DROPBOX_OAUTH_APP_OR_REDIRECT_REJECTED / SYNC_DISABLED",
+            Self::Exchange(ExchangeError::TransportUncertain)
+            | Self::Refresh(ResumeError::RefreshUncertain) =>
+                "DROPBOX_NETWORK_UNAVAILABLE / SYNC_DISABLED",
+            Self::Exchange(_) => "DROPBOX_TOKEN_RESPONSE_REJECTED / SYNC_DISABLED",
+            Self::Refresh(ResumeError::RefreshRejected) =>
+                "DROPBOX_SAVED_CONSENT_REVOKED / SYNC_DISABLED",
+            Self::Refresh(_) => "DROPBOX_REFRESH_REJECTED / SYNC_DISABLED",
+            Self::MissingSavedConsent =>
+                "DROPBOX_NO_SAVED_CONSENT / SYNC_DISABLED",
+            Self::AccountMismatch =>
+                "DROPBOX_ACCOUNT_OR_ROOT_MISMATCH / SYNC_DISABLED",
+            Self::InvalidAccount =>
+                "DROPBOX_ACCOUNT_IDENTITY_INVALID / SYNC_DISABLED",
+            Self::NetworkUnavailable =>
+                "DROPBOX_ACCOUNT_LOOKUP_FAILED / SYNC_DISABLED",
+            Self::SecretStore(SecretError::StoreUnavailable)
+            | Self::SecretStore(SecretError::StoreFailure) =>
+                "DROPBOX_OS_KEYRING_UNAVAILABLE / SYNC_DISABLED",
+            Self::SecretStore(_) =>
+                "DROPBOX_OS_KEYRING_VERIFY_FAILED / SYNC_DISABLED",
+        }
+    }
 }
 
 /// One consent session. The fixed client ID/port must come from Akula's
@@ -258,6 +303,37 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    #[test]
+    fn diagnostic_codes_distinguish_console_callback_scope_and_keyring() {
+        let cases = [
+            (AccountLoginError::Callback(CallbackError::PortUnavailable),
+                "DROPBOX_CALLBACK_PORT_UNAVAILABLE"),
+            (AccountLoginError::BrowserUnavailable, "DROPBOX_BROWSER_UNAVAILABLE"),
+            (AccountLoginError::Callback(CallbackError::Authorization(AuthError::Denied)),
+                "DROPBOX_CONSENT_DENIED"),
+            (AccountLoginError::Exchange(ExchangeError::UnexpectedScope),
+                "DROPBOX_READ_SCOPES_REJECTED"),
+            (AccountLoginError::Exchange(ExchangeError::Rejected),
+                "DROPBOX_OAUTH_APP_OR_REDIRECT_REJECTED"),
+            (AccountLoginError::Refresh(ResumeError::RefreshRejected),
+                "DROPBOX_SAVED_CONSENT_REVOKED"),
+            (AccountLoginError::SecretStore(SecretError::StoreUnavailable),
+                "DROPBOX_OS_KEYRING_UNAVAILABLE"),
+            (AccountLoginError::AccountMismatch,
+                "DROPBOX_ACCOUNT_OR_ROOT_MISMATCH"),
+            (AccountLoginError::MissingSavedConsent, "DROPBOX_NO_SAVED_CONSENT"),
+        ];
+        for (err, expected) in cases {
+            let status = err.public_status();
+            assert!(status.starts_with(expected), "{status}");
+            assert!(status.ends_with(" / SYNC_DISABLED"));
+            assert!(!status.contains("dbid:") && !status.contains("Bearer "));
+        }
+        assert_ne!(
+            AccountLoginError::Exchange(ExchangeError::UnexpectedScope).public_status(),
+            AccountLoginError::Callback(CallbackError::PortUnavailable).public_status());
     }
 
     #[test]
