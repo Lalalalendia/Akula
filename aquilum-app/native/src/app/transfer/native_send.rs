@@ -3,7 +3,7 @@
 
 use super::super::App;
 use crate::ui::transfer::NativeSendView;
-use akula_staya_integration::one_file_lan::native_send_one;
+use akula_staya_integration::one_file_lan::{native_send_internet_one, native_send_one};
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -41,7 +41,9 @@ impl NativeSender {
             let event = self.rx.as_ref().map(|receiver| receiver.try_recv());
             match event {
                 Some(Ok(Event::Listening(addresses))) => {
-                    self.view.listening = Some(
+                    self.view.listening = Some(if addresses.is_empty() {
+                        crate::i18n::t("transfer.nativeSendInternetReady")
+                    } else {
                         addresses
                             .into_iter()
                             .map(|address| {
@@ -53,8 +55,8 @@ impl NativeSender {
                                 }
                             })
                             .collect::<Vec<_>>()
-                            .join(" · "),
-                    );
+                            .join(" · ")
+                    });
                     changed = true;
                 }
                 Some(Ok(Event::Finished(result))) => {
@@ -92,6 +94,7 @@ impl NativeSender {
         &mut self,
         peer: String,
         source: PathBuf,
+        internet: bool,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) {
         let (tx, rx) = mpsc::channel();
@@ -106,14 +109,23 @@ impl NativeSender {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .map_err(|error| format!("create LAN runtime: {error}"));
+                .map_err(|error| format!("create P2P runtime: {error}"));
             let result = runtime.and_then(|runtime| {
                 runtime.block_on(async {
                     tokio::select! {
-                        answer = native_send_one(peer, source, |bound| {
-                            let _ = tx.send(Event::Listening(bound));
-                            wake();
-                        }) => answer,
+                        answer = async {
+                            if internet {
+                                native_send_internet_one(peer, source, |bound| {
+                                    let _ = tx.send(Event::Listening(bound));
+                                    wake();
+                                }).await
+                            } else {
+                                native_send_one(peer, source, |bound| {
+                                    let _ = tx.send(Event::Listening(bound));
+                                    wake();
+                                }).await
+                            }
+                        } => answer,
                         _ = async {
                             while !stop.load(Ordering::Acquire) {
                                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -136,6 +148,14 @@ impl Drop for NativeSender {
 
 impl App {
     pub(super) fn begin_native_send(&mut self, peer: &str) -> bool {
+        self.begin_native_send_route(peer, false)
+    }
+
+    pub(super) fn begin_native_send_internet(&mut self, peer: &str) -> bool {
+        self.begin_native_send_route(peer, true)
+    }
+
+    fn begin_native_send_route(&mut self, peer: &str, internet: bool) -> bool {
         if self.transfer.sender.view.busy {
             return false;
         }
@@ -153,6 +173,7 @@ impl App {
         self.transfer.sender.start(
             peer.to_owned(),
             self.transfer.drafts[0].path.clone(),
+            internet,
             Arc::clone(&self.workspace.wake),
         );
         true
