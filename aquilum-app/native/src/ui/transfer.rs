@@ -34,9 +34,11 @@ mod devices;
 mod identity;
 mod layout;
 mod queue_view;
+mod peer_pair;
 use layout::{card_size, details, display_size, hint, rule};
 pub use devices::{DeviceRow, DeviceStatus};
 pub use identity::{IdentityAction, IdentityPhase, IdentityView};
+pub use peer_pair::{PeerAction, PeerControls, PeerPhase, PeerView};
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contact_preview;
 #[cfg(feature = "p2p-device-contacts-preview")]
@@ -49,19 +51,12 @@ pub struct TransferDialog {
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
+    pub peer_controls: Option<PeerControls>,
 }
 
+mod dialog_button;
 mod dialog_view;
 pub use dialog_view::dialog;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn byte_size_always_refers_to_source_metadata_not_network_progress() {
-        assert_eq!(display_size(0), "0 B");
-        assert_eq!(display_size(1024), "1.0 KiB");
-        assert_eq!(display_size(1_048_576), "1.0 MiB");
-    }
-}
+mod tests;

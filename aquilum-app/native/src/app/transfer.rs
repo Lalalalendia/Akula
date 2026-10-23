@@ -6,18 +6,19 @@ use std::sync::Arc;
 
 use aquilum_core::sync::DeviceId;
 use masonry::app::RenderRoot;
-use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
 
-use super::{App, Outcome, Popup};
-use crate::ui::dialog::{self, DialogAnswer};
-use crate::ui::transfer::{self as transfer_ui, QueueAction};
-use crate::ui::widgets::Pressed;
+use super::{App, Popup};
+use crate::ui::transfer as transfer_ui;
 
 const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
 mod model;
+mod actions;
+mod picker;
+#[cfg(feature = "p2p-device-ui")]
+mod peer_pair;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
@@ -52,6 +53,8 @@ pub(super) struct TransferState {
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
+    #[cfg(feature = "p2p-device-ui")]
+    pub(super) peer_pair: peer_pair::PeerUi,
 }
 
 impl App {
@@ -71,16 +74,28 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
+        let peer_view = {
+            #[cfg(feature = "p2p-device-ui")]
+            {
+                if matches!(self.transfer.local_identity.view.phase, transfer_ui::IdentityPhase::Ready(_)) {
+                    Some(&self.transfer.peer_pair.view)
+                } else {
+                    None
+                }
+            }
+            #[cfg(not(feature = "p2p-device-ui"))]
+            { None }
+        };
         #[cfg(feature = "p2p-device-contacts-preview")]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view,
+            self.transfer.error.as_deref(), identity_view, peer_view,
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
+            self.transfer.choosing, self.transfer.error.as_deref(), identity_view, peer_view,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
@@ -105,69 +120,13 @@ impl App {
         if self.transfer.local_identity.poll() {
             changed = true;
         }
+        #[cfg(feature = "p2p-device-ui")]
+        if self.transfer.peer_pair.poll() {
+            changed = true;
+        }
         if changed {
             self.refresh_transfers(root);
         }
-    }
-
-    fn choose_transfer_files(&mut self) {
-        if self.transfer.choosing {
-            return;
-        }
-        self.transfer.choosing = true;
-        let tx = self.transfer_tx.clone();
-        let wake = Arc::clone(&self.workspace.wake);
-        std::thread::spawn(move || {
-            let picked = rfd::FileDialog::new().pick_files().unwrap_or_default();
-            if tx.send(picked).is_ok() {
-                wake();
-            }
-        });
-    }
-
-    pub(super) fn on_transfer_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
-        let Some(Popup::Transfers(dialog)) = self.popup.take() else { return Outcome::default() };
-        let pressed = action.downcast_ref::<Pressed>().is_some();
-        let dismiss = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
-            || (id == dialog.close && pressed);
-        if dismiss {
-            dialog::close(root, dialog.layer);
-            return Outcome::default();
-        }
-        let mut refresh = false;
-        if id == dialog.choose && pressed {
-            self.choose_transfer_files();
-            refresh = true;
-        } else if pressed
-            && let Some((_, index, command)) = dialog.actions.iter().find(|(button, _, _)| *button == id)
-        {
-            match command {
-                QueueAction::Toggle => self.transfer.toggle(*index),
-                QueueAction::Remove => self.transfer.remove(*index),
-            }
-            refresh = true;
-        } else if pressed
-            && let Some((_, device_id, key)) = dialog.device_actions.iter().find(|(button, _, _)| *button == id)
-        {
-            self.transfer.choose_peer((*device_id, *key));
-            refresh = true;
-        }
-        #[cfg(feature = "p2p-device-ui")]
-        if pressed && !refresh {
-            if let Some((_, command)) = dialog.identity_actions.iter()
-                .find(|(button, _)| *button == id)
-            {
-                self.transfer.local_identity.action(
-                    *command, Arc::clone(&self.workspace.wake),
-                );
-                refresh = true;
-            }
-        }
-        self.popup = Some(Popup::Transfers(dialog));
-        if refresh {
-            self.refresh_transfers(root);
-        }
-        Outcome::default()
     }
 }
 
