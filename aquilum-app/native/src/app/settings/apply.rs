@@ -120,6 +120,10 @@ impl App {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;
                 }
+                #[cfg(feature = "dropbox-readonly-preview")]
+                if before.dropbox_readonly != after.dropbox_readonly {
+                    self.dropbox_preview.invalidate();
+                }
                 if mcp_changed {
                     core.apply_mcp_settings();
                 }
