@@ -26,9 +26,12 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
             Control::Buttons(vec![
                 Button::new("Войти в Dropbox".into(), Action::DropboxLoginAccount)
                     .enabled(!ctx.dropbox_preview_busy),
+                Button::new("Проверить сохранённый вход".into(), Action::DropboxResumeAccount)
+                    .enabled(!draft.account_id.is_empty() && !draft.root_namespace_id.is_empty()
+                        && !ctx.dropbox_preview_busy),
             ])),
         info("Сохранённый аккаунт".into(),
-            Some("Идентификатор сохраняется после проверки OAuth и системного хранилища. После перезапуска требуется повторная проверка; доверие Vault не установлено.".into()),
+            Some("После перезапуска нажмите «Проверить сохранённый вход»: Akula использует защищённый токен, без браузера и без доверия к Vault.".into()),
             Control::Status {
                 text: if draft.account_id.is_empty() {
                     "Нет авторизованного аккаунта".into()
@@ -114,6 +117,8 @@ mod tests {
         };
         assert!(buttons.iter().any(|button|
             matches!(&button.action, Action::DropboxLoginAccount) && button.enabled));
+        assert!(buttons.iter().any(|button|
+            matches!(&button.action, Action::DropboxResumeAccount) && !button.enabled));
         assert!(block.rows.iter().all(|row|
             row.label != "Dropbox account ID" && row.label != "Root namespace ID"));
         let local_logout = block.rows.iter()
@@ -128,6 +133,13 @@ mod tests {
         connected.dropbox_readonly.account_id = "dbid:alice".into();
         connected.dropbox_readonly.root_namespace_id = "12345".into();
         let logged_in = dropbox_setup(&connected, &Context::new(1.0));
+        let account = logged_in.rows.iter()
+            .find(|row| row.label == "Аккаунт Dropbox").unwrap();
+        let Control::Buttons(account_buttons) = &account.control else {
+            panic!("no account buttons");
+        };
+        assert!(account_buttons.iter().any(|button|
+            matches!(&button.action, Action::DropboxResumeAccount) && button.enabled));
         let logout = logged_in.rows.iter()
             .find(|row| row.label == "Управление авторизацией").unwrap();
         let Control::Buttons(buttons) = &logout.control else { panic!("missing logout"); };

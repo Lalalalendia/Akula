@@ -66,6 +66,15 @@ fn refresh_once(app_key: &str, saved: &RefreshToken)
     refresh_at(TOKEN_ENDPOINT, app_key, saved)
 }
 
+/// Reuse the same fail-closed refresh validation for account-only recovery.
+/// The short-lived bearer is moved into zeroizing memory; it cannot create
+/// a trusted Vault, apply files or retain refresh credentials.
+pub(crate) fn refresh_account_access(
+    app_key: &str, saved: &RefreshToken,
+) -> Result<Zeroizing<String>, ResumeError> {
+    Ok(refresh_once(app_key, saved)?.token.into_sensitive_string())
+}
+
 /// A test can substitute a local endpoint only inside this private module.
 fn refresh_at(endpoint: &str, app_key: &str, saved: &RefreshToken)
     -> Result<ShortLivedAccess, ResumeError>

@@ -7,7 +7,7 @@ use aquilum_core::settings::models::{
     DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
 };
 use akula_dropbox_connect_lab::{
-    account::{AccountIdentity, AccountSession},
+    account::{resume_account, AccountIdentity, AccountSession},
     resume::resume_readonly, ConnectSession, ConnectionStatus,
 };
 use akula_dropbox_t0::{read_verify::TrustedBlake3, Scope};
@@ -26,6 +26,7 @@ use std::{
 enum PreviewReply {
     Vault(&'static str),
     Account(Result<AccountIdentity, ()>),
+    Resumed(Result<AccountIdentity, ()>),
     SignedOut(Result<AccountIdentity, ()>),
 }
 
@@ -78,6 +79,43 @@ impl DropboxPreview {
                     session.finish(Duration::from_secs(120)).map_err(|_| ())
                 });
                 if tx.send((generation, PreviewReply::Account(result))).is_ok() {
+                    wake();
+                }
+            })
+            .map_err(|_| {
+                self.busy = false;
+                self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
+            });
+    }
+
+    /// Manual cold-start recovery from the OS secret store. This never
+    /// opens a browser or treats an OAuth identity as a trusted Vault.
+    pub(super) fn start_account_resume(
+        &mut self, draft: DropboxReadOnlyDraft,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) {
+        if self.busy { return; }
+        if draft.oauth_app_key != AKULA_DROPBOX_APP_KEY
+            || draft.registered_port != AKULA_DROPBOX_CALLBACK_PORT
+            || draft.account_id.is_empty() || draft.root_namespace_id.is_empty()
+        {
+            self.status = "ACCOUNT_RESUME_INVALID_IDENTITY / SYNC_DISABLED".into();
+            return;
+        }
+        self.busy = true;
+        self.status = "VERIFYING_SAVED_DROPBOX_CONSENT / SYNC_DISABLED".into();
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let tx = self.tx.clone();
+        let _ = std::thread::Builder::new()
+            .name("akula-dropbox-account-resume".into())
+            .spawn(move || {
+                let expected = AccountIdentity {
+                    account_id: draft.account_id,
+                    root_namespace_id: draft.root_namespace_id,
+                };
+                let result = resume_account(AKULA_DROPBOX_APP_KEY, &expected).map_err(|_| ());
+                if tx.send((generation, PreviewReply::Resumed(result))).is_ok() {
                     wake();
                 }
             })
@@ -234,6 +272,13 @@ impl DropboxPreview {
                 PreviewReply::Account(Err(_)) => {
                     self.status = "ACCOUNT_LOGIN_REJECTED / SYNC_DISABLED".into();
                 }
+                PreviewReply::Resumed(Ok(identity)) => {
+                    self.status = "ACCOUNT_SESSION_RESTORED / VAULT_NOT_APPROVED / SYNC_DISABLED".into();
+                    authenticated_account = Some(identity);
+                }
+                PreviewReply::Resumed(Err(_)) => {
+                    self.status = "ACCOUNT_RESUME_REJECTED / SYNC_DISABLED".into();
+                }
                 PreviewReply::SignedOut(Ok(identity)) => {
                     self.status = "LOCAL_CREDENTIAL_FORGOTTEN / SYNC_DISABLED".into();
                     forgotten_account = Some(identity);
@@ -310,6 +355,8 @@ impl super::App {
             self.dropbox_preview.start_account(config, wake);
         } else if matches!(&action, Action::DropboxForgetAccount) {
             self.dropbox_preview.start_logout(config, wake);
+        } else if matches!(&action, Action::DropboxResumeAccount) {
+            self.dropbox_preview.start_account_resume(config, wake);
         } else {
             let resume = matches!(action, Action::DropboxResumeReadOnly);
             self.dropbox_preview.start(config, resume, wake);
@@ -409,6 +456,38 @@ mod tests {
         state.tx.send((state.generation, PreviewReply::SignedOut(Err(())))).unwrap();
         assert_eq!(state.poll(), (true, None, None));
         assert_eq!(state.status, "LOCAL_CREDENTIAL_REMOVAL_FAILED / SYNC_DISABLED");
+    }
+
+    #[test]
+    fn cold_restart_resume_requires_saved_public_account_only() {
+        let mut state = DropboxPreview::new();
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(|| {});
+        state.start_account_resume(DropboxReadOnlyDraft::default(), wake);
+        assert!(!state.busy);
+        assert_eq!(state.status, "ACCOUNT_RESUME_INVALID_IDENTITY / SYNC_DISABLED");
+        let identity = AccountIdentity {
+            account_id: "dbid:alice".into(),
+            root_namespace_id: "12345".into(),
+        };
+        state.tx.send((state.generation,
+            PreviewReply::Resumed(Ok(identity.clone())))).unwrap();
+        assert_eq!(state.poll(), (true, Some(identity), None));
+        assert_eq!(state.status,
+            "ACCOUNT_SESSION_RESTORED / VAULT_NOT_APPROVED / SYNC_DISABLED");
+    }
+
+    #[test]
+    fn stale_or_failed_refresh_never_recovers_authority() {
+        let mut state = DropboxPreview::new();
+        let old_generation = state.generation;
+        state.invalidate();
+        state.tx.send((old_generation, PreviewReply::Resumed(Ok(AccountIdentity {
+            account_id: "dbid:old".into(), root_namespace_id: "1".into(),
+        })))).unwrap();
+        assert_eq!(state.poll(), (false, None, None));
+        state.tx.send((state.generation, PreviewReply::Resumed(Err(())))).unwrap();
+        assert_eq!(state.poll(), (true, None, None));
+        assert_eq!(state.status, "ACCOUNT_RESUME_REJECTED / SYNC_DISABLED");
     }
 
     #[test]

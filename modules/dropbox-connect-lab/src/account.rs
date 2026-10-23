@@ -1,6 +1,7 @@
 //! Dropbox login without a Vault. Consent confirms only the account,
 //! not the remote publisher, filesystem access or any synchronization.
 
+use super::resume::{self, ResumeError};
 use akula_dropbox_auth_lab::{
     callback::{BoundLogin, CallbackError},
     exchange::{exchange_once, ExchangeError},
@@ -29,11 +30,13 @@ impl AccountIdentity {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountLoginError {
     InvalidPort,
     Callback(CallbackError),
     Exchange(ExchangeError),
+    Refresh(ResumeError),
+    MissingSavedConsent,
     AccountMismatch,
     InvalidAccount,
     NetworkUnavailable,
@@ -143,6 +146,61 @@ fn connect_with<P: AccountPorts>(
     Ok(identity)
 }
 
+
+/// Explicit account-only recovery after a cold restart. Uses the exact
+/// account and namespace that were previously verified, without opening
+/// a browser and without granting Vault publisher/file-system authority.
+pub fn resume_account(
+    app: &str, expected: &AccountIdentity,
+) -> Result<AccountIdentity, AccountLoginError> {
+    resume_account_with(&LivePorts, app, expected)
+}
+
+trait AccountResumePorts {
+    fn load(&self, scope: &AccountCredentialScope)
+        -> Result<Option<RefreshToken>, AccountLoginError>;
+    fn refresh(&self, app: &str, saved: &RefreshToken)
+        -> Result<Zeroizing<String>, AccountLoginError>;
+    fn get_account(&self, access: &str)
+        -> Result<AccountIdentity, AccountLoginError>;
+}
+impl AccountResumePorts for LivePorts {
+    fn load(&self, scope: &AccountCredentialScope)
+        -> Result<Option<RefreshToken>, AccountLoginError>
+    {
+        AccountCredentialStore::system().map_err(AccountLoginError::SecretStore)?
+            .load_refresh(scope).map_err(AccountLoginError::SecretStore)
+    }
+    fn refresh(&self, app: &str, saved: &RefreshToken)
+        -> Result<Zeroizing<String>, AccountLoginError>
+    {
+        resume::refresh_account_access(app, saved).map_err(AccountLoginError::Refresh)
+    }
+    fn get_account(&self, access: &str)
+        -> Result<AccountIdentity, AccountLoginError>
+    {
+        <Self as AccountPorts>::get_account(self, access)
+    }
+}
+
+/// Never convert a saved account_id to proof of consent. Recovery is
+/// successful only after keyring read, OAuth refresh and a fresh Dropbox
+/// account/root identity check. Invalid scope prevents any network call.
+fn resume_account_with<P: AccountResumePorts>(
+    ports: &P, app: &str, expected: &AccountIdentity,
+) -> Result<AccountIdentity, AccountLoginError> {
+    let scope = expected.validate(app)?;
+    let saved = ports.load(&scope)?.ok_or(AccountLoginError::MissingSavedConsent)?;
+    let access = ports.refresh(app, &saved)?;
+    let actual = ports.get_account(&access)?;
+    if actual.account_id != expected.account_id
+        || actual.root_namespace_id != expected.root_namespace_id
+    {
+        return Err(AccountLoginError::AccountMismatch);
+    }
+    Ok(actual)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +287,111 @@ mod tests {
         assert_eq!(connect_with(&fake, code(), "app_key_123"),
             Err(AccountLoginError::SecretStore(SecretError::StoreUnavailable)));
         assert_eq!(fake.calls(), vec!["exchange", "get_current_account", "save_os"]);
+    }
+
+    #[derive(Default)]
+    struct FakeRecovery {
+        calls: Mutex<Vec<&'static str>>,
+        missing: bool,
+        locked: bool,
+        refresh_denied: bool,
+        network_down: bool,
+        other_account: bool,
+        other_root: bool,
+    }
+    impl FakeRecovery {
+        fn calls(&self) -> Vec<&'static str> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+    impl AccountResumePorts for FakeRecovery {
+        fn load(&self, _: &AccountCredentialScope)
+            -> Result<Option<RefreshToken>, AccountLoginError>
+        {
+            self.calls.lock().unwrap().push("load_keyring");
+            if self.locked {
+                return Err(AccountLoginError::SecretStore(SecretError::StoreUnavailable));
+            }
+            if self.missing { return Ok(None); }
+            Ok(Some(RefreshToken::new("synthetic-saved-refresh".into()).unwrap()))
+        }
+        fn refresh(&self, app: &str, saved: &RefreshToken)
+            -> Result<Zeroizing<String>, AccountLoginError>
+        {
+            self.calls.lock().unwrap().push("refresh_once");
+            assert_eq!(app, "app_key_123");
+            assert_eq!(saved.as_str(), "synthetic-saved-refresh");
+            if self.refresh_denied {
+                return Err(AccountLoginError::Refresh(ResumeError::RefreshRejected));
+            }
+            Ok(Zeroizing::new("synthetic-new-access".into()))
+        }
+        fn get_account(&self, access: &str)
+            -> Result<AccountIdentity, AccountLoginError>
+        {
+            self.calls.lock().unwrap().push("get_current_account");
+            assert_eq!(access, "synthetic-new-access");
+            if self.network_down { return Err(AccountLoginError::NetworkUnavailable); }
+            Ok(AccountIdentity {
+                account_id: if self.other_account { "dbid:bob" }
+                    else { "dbid:alice" }.into(),
+                root_namespace_id: if self.other_root { "98765" }
+                    else { "12345" }.into(),
+            })
+        }
+    }
+    fn expected_account() -> AccountIdentity {
+        AccountIdentity {
+            account_id: "dbid:alice".into(),
+            root_namespace_id: "12345".into(),
+        }
+    }
+
+    #[test]
+    fn restart_recovers_exact_account_without_browser_or_vault() {
+        let ports = FakeRecovery::default();
+        assert_eq!(resume_account_with(&ports, "app_key_123", &expected_account()),
+            Ok(expected_account()));
+        assert_eq!(ports.calls(),
+            vec!["load_keyring", "refresh_once", "get_current_account"]);
+    }
+
+    #[test]
+    fn restart_rejects_missing_locked_revoked_or_offline_consent() {
+        for ports in [
+            FakeRecovery { missing: true, ..Default::default() },
+            FakeRecovery { locked: true, ..Default::default() },
+            FakeRecovery { refresh_denied: true, ..Default::default() },
+            FakeRecovery { network_down: true, ..Default::default() },
+        ] {
+            assert!(resume_account_with(&ports, "app_key_123", &expected_account()).is_err());
+            assert!(!ports.calls().is_empty());
+        }
+    }
+
+    #[test]
+    fn restart_cannot_claim_foreign_account_or_changed_namespace() {
+        for ports in [
+            FakeRecovery { other_account: true, ..Default::default() },
+            FakeRecovery { other_root: true, ..Default::default() },
+        ] {
+            assert_eq!(
+                resume_account_with(&ports, "app_key_123", &expected_account()),
+                Err(AccountLoginError::AccountMismatch));
+            assert_eq!(ports.calls(),
+                vec!["load_keyring", "refresh_once", "get_current_account"]);
+        }
+    }
+
+    #[test]
+    fn forged_saved_app_or_account_fails_before_keyring_or_network() {
+        let ports = FakeRecovery::default();
+        assert_eq!(resume_account_with(&ports, "../wrong", &expected_account()),
+            Err(AccountLoginError::InvalidAccount));
+        assert_eq!(resume_account_with(&ports, "app_key_123", &AccountIdentity {
+            account_id: "other".into(), root_namespace_id: "12345".into(),
+        }), Err(AccountLoginError::InvalidAccount));
+        assert!(ports.calls().is_empty());
     }
 
     #[test]

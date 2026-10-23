@@ -40,6 +40,11 @@ impl AccessToken {
         }
         Ok(Self(raw))
     }
+    /// Consume the validated token into zeroizing memory for another
+    /// explicitly authenticated Dropbox API call (never log or persist).
+    pub fn into_sensitive_string(mut self) -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(std::mem::take(&mut self.0))
+    }
     fn bearer(&self) -> String { format!("Bearer {}", self.0) }
 }
 
