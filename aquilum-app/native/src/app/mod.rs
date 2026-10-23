@@ -2,6 +2,8 @@ mod actions;
 mod commands;
 mod book;
 mod core_events;
+#[cfg(feature = "dropbox-readonly-preview")]
+mod dropbox_preview;
 mod embeds;
 mod file_menu;
 mod find;
@@ -106,6 +108,8 @@ const HOLD: std::time::Duration = std::time::Duration::from_millis(500);
 
 pub struct App {
     workspace: Workspace,
+    #[cfg(feature = "dropbox-readonly-preview")]
+    dropbox_preview: dropbox_preview::DropboxPreview,
     tree: FileTree,
     chrome: Option<Chrome>,
     interface: Interface,
