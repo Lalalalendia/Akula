@@ -30,7 +30,7 @@ impl App {
         if let Some(cloud) = fresh.cloud_popup.as_mut() {
             cloud.rebuild(root, &config, &ctx);
         }
-        root.focus_on(Some(fresh.layer));
+        if fresh.cloud_popup.is_none() { root.focus_on(Some(fresh.layer)); }
         if let Some(offset) = offset {
             fresh.content.edit(root, |mut area| ScrollArea::set_offset(&mut area, offset));
         }
