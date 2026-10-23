@@ -6,6 +6,7 @@ on:
       - 'modules/dropbox-t0/**'
       - 'modules/dropbox-auth-lab/**'
       - 'modules/dropbox-secret-store/**'
+      - 'modules/dropbox-connect-lab/**'
       - '.github/workflows/dropbox-t0-isolated.yml'
   workflow_dispatch:
 
@@ -20,6 +21,8 @@ jobs:
   contract:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      CARGO_TARGET_DIR: target/dropbox-ci
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -33,3 +36,5 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Compile and test native OS credential backend (no real keys)
         run: cargo test --manifest-path modules/dropbox-secret-store/Cargo.toml --features system-store -- --nocapture
+      - name: Test read-only onboarding chain (fake boundary ports)
+        run: cargo test --manifest-path modules/dropbox-connect-lab/Cargo.toml -- --nocapture
