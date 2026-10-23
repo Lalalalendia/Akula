@@ -32,11 +32,11 @@ impl CloudProvider {
         })
     }
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     OpenCloudProvider(CloudProvider),
     #[cfg(feature = "dropbox-readonly-preview")] DropboxLoginAccount,
+    #[cfg(feature = "dropbox-readonly-preview")] DropboxForgetAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxConnectReadOnly,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeReadOnly,
     InspectRecovery(String),

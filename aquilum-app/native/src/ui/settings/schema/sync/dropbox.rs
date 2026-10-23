@@ -37,6 +37,14 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                 },
                 tone: Tone::Muted,
             }),
+        info("Управление авторизацией".into(),
+            Some("«Забыть» удаляет локальный токен, но не отзывает разрешение на стороне Dropbox. Для полного отзыва воспользуйтесь страницей подключённых приложений.".into()),
+            Control::Buttons(vec![
+                Button::new("Забыть аккаунт на этом устройстве".into(), Action::DropboxForgetAccount)
+                    .enabled(!draft.account_id.is_empty() && !ctx.dropbox_preview_busy),
+                Button::new("Отозвать доступ на сайте Dropbox".into(),
+                    Action::OpenUrl("https://www.dropbox.com/account/connected_apps")),
+            ])),
         info("Дополнительно: проверка существующего Vault".into(),
             Some("Необязательный ручной режим для ранее созданного и независимо подтверждённого Vault. Не требуется для входа в аккаунт.".into()),
             Control::Status {
@@ -108,5 +116,22 @@ mod tests {
             matches!(&button.action, Action::DropboxLoginAccount) && button.enabled));
         assert!(block.rows.iter().all(|row|
             row.label != "Dropbox account ID" && row.label != "Root namespace ID"));
+        let local_logout = block.rows.iter()
+            .find(|row| row.label == "Управление авторизацией")
+            .expect("local credential removal is mandatory");
+        let Control::Buttons(buttons) = &local_logout.control else {
+            panic!("disconnect controls unavailable");
+        };
+        assert!(buttons.iter().any(|button|
+            matches!(&button.action, Action::DropboxForgetAccount) && !button.enabled));
+        let mut connected = AppConfig::default();
+        connected.dropbox_readonly.account_id = "dbid:alice".into();
+        connected.dropbox_readonly.root_namespace_id = "12345".into();
+        let logged_in = dropbox_setup(&connected, &Context::new(1.0));
+        let logout = logged_in.rows.iter()
+            .find(|row| row.label == "Управление авторизацией").unwrap();
+        let Control::Buttons(buttons) = &logout.control else { panic!("missing logout"); };
+        assert!(buttons.iter().any(|button|
+            matches!(&button.action, Action::DropboxForgetAccount) && button.enabled));
     }
 }

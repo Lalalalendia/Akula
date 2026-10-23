@@ -11,7 +11,7 @@ impl App {
             Action::OpenCloudProvider(_) => Effect::None,
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
             #[cfg(feature = "dropbox-readonly-preview")]
-            a @ (Action::DropboxLoginAccount | Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly) => self.press_dropbox(a, dialog.section),
+            a @ (Action::DropboxLoginAccount | Action::DropboxForgetAccount | Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly) => self.press_dropbox(a, dialog.section),
             Action::OpenTrash => {
                 if let Some(workspace) = workspace {
                     match gate::ensure_trash(core, &workspace) {

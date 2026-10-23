@@ -11,6 +11,10 @@ use akula_dropbox_connect_lab::{
     resume::resume_readonly, ConnectSession, ConnectionStatus,
 };
 use akula_dropbox_t0::{read_verify::TrustedBlake3, Scope};
+use akula_dropbox_secret_store::{
+    account::{AccountCredentialScope, AccountCredentialStore},
+    CredentialScope, CredentialVault,
+};
 use std::{
     process::{Command, Stdio},
     sync::{mpsc::{channel, Receiver, Sender}, Arc},
@@ -22,6 +26,7 @@ use std::{
 enum PreviewReply {
     Vault(&'static str),
     Account(Result<AccountIdentity, ()>),
+    SignedOut(Result<AccountIdentity, ()>),
 }
 
 pub(super) struct DropboxPreview {
@@ -73,6 +78,59 @@ impl DropboxPreview {
                     session.finish(Duration::from_secs(120)).map_err(|_| ())
                 });
                 if tx.send((generation, PreviewReply::Account(result))).is_ok() {
+                    wake();
+                }
+            })
+            .map_err(|_| {
+                self.busy = false;
+                self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
+            });
+    }
+
+    /// Forget only this device's approved account and optional Vault tokens.
+    /// Do not claim remote revocation, and do not clear settings on OS failure.
+    pub(super) fn start_logout(
+        &mut self, draft: DropboxReadOnlyDraft,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) {
+        if self.busy { return; }
+        if draft.oauth_app_key != AKULA_DROPBOX_APP_KEY
+            || draft.registered_port != AKULA_DROPBOX_CALLBACK_PORT
+            || draft.account_id.is_empty() || draft.root_namespace_id.is_empty()
+        {
+            self.status = "ACCOUNT_LOGOUT_INVALID_IDENTITY / SYNC_DISABLED".into();
+            return;
+        }
+        self.busy = true;
+        self.status = "FORGETTING_LOCAL_DROPBOX_CREDENTIALS / SYNC_DISABLED".into();
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let tx = self.tx.clone();
+        let _ = std::thread::Builder::new()
+            .name("akula-dropbox-account-forget".into())
+            .spawn(move || {
+                let result = (|| {
+                    let scope = AccountCredentialScope::new(
+                        &draft.oauth_app_key, &draft.account_id, &draft.root_namespace_id,
+                    ).map_err(|_| ())?;
+                    AccountCredentialStore::system().map_err(|_| ())?
+                        .forget_local(&scope).map_err(|_| ())?;
+                    // A paired Vault's refresh token lives in a separate
+                    // credential namespace and must also be forgotten.
+                    if draft.ready() {
+                        let vault = CredentialScope::new(
+                            &draft.account_id, &draft.root_namespace_id,
+                            &draft.vault_id, &draft.profile_id, &draft.oauth_app_key,
+                        ).map_err(|_| ())?;
+                        CredentialVault::system().map_err(|_| ())?
+                            .forget_local(&vault).map_err(|_| ())?;
+                    }
+                    Ok(AccountIdentity {
+                        account_id: draft.account_id,
+                        root_namespace_id: draft.root_namespace_id,
+                    })
+                })();
+                if tx.send((generation, PreviewReply::SignedOut(result))).is_ok() {
                     wake();
                 }
             })
@@ -157,9 +215,12 @@ impl DropboxPreview {
         self.status = "DISCONNECTED / SYNC_DISABLED".into();
     }
 
-    pub(super) fn poll(&mut self) -> (bool, Option<AccountIdentity>) {
+    pub(super) fn poll(&mut self)
+        -> (bool, Option<AccountIdentity>, Option<AccountIdentity>)
+    {
         let mut changed = false;
         let mut authenticated_account = None;
+        let mut forgotten_account = None;
         while let Ok((generation, reply)) = self.rx.try_recv() {
             if generation != self.generation { continue; }
             self.busy = false;
@@ -173,9 +234,16 @@ impl DropboxPreview {
                 PreviewReply::Account(Err(_)) => {
                     self.status = "ACCOUNT_LOGIN_REJECTED / SYNC_DISABLED".into();
                 }
+                PreviewReply::SignedOut(Ok(identity)) => {
+                    self.status = "LOCAL_CREDENTIAL_FORGOTTEN / SYNC_DISABLED".into();
+                    forgotten_account = Some(identity);
+                }
+                PreviewReply::SignedOut(Err(_)) => {
+                    self.status = "LOCAL_CREDENTIAL_REMOVAL_FAILED / SYNC_DISABLED".into();
+                }
             }
         }
-        (changed, authenticated_account)
+        (changed, authenticated_account, forgotten_account)
     }
 }
 
@@ -185,7 +253,7 @@ impl super::App {
     pub(super) fn poll_dropbox_settings(
         &mut self, root: &mut masonry::app::RenderRoot,
     ) {
-        let (changed, account) = self.dropbox_preview.poll();
+        let (changed, account, forgotten) = self.dropbox_preview.poll();
         if let Some(identity) = account {
             let mut config = self.workspace.core.settings.get_config();
             if config.dropbox_readonly.account_id != identity.account_id
@@ -201,6 +269,22 @@ impl super::App {
                 if self.workspace.core.settings.update_config(config).is_err() {
                     self.dropbox_preview.status =
                         "ACCOUNT_IDENTITY_SAVE_FAILED / SYNC_DISABLED".into();
+                }
+            }
+        }
+        if let Some(identity) = forgotten {
+            let mut config = self.workspace.core.settings.get_config();
+            if config.dropbox_readonly.account_id == identity.account_id
+                && config.dropbox_readonly.root_namespace_id == identity.root_namespace_id
+            {
+                config.dropbox_readonly.account_id.clear();
+                config.dropbox_readonly.root_namespace_id.clear();
+                config.dropbox_readonly.vault_id.clear();
+                config.dropbox_readonly.profile_id.clear();
+                config.dropbox_readonly.trusted_head_blake3.clear();
+                if self.workspace.core.settings.update_config(config).is_err() {
+                    self.dropbox_preview.status =
+                        "ACCOUNT_DISCONNECT_SAVE_FAILED / SYNC_DISABLED".into();
                 }
             }
         }
@@ -222,8 +306,10 @@ impl super::App {
         }
         let config = self.workspace.core.settings.get_config().dropbox_readonly;
         let wake = std::sync::Arc::clone(&self.workspace.wake);
-        if matches!(action, Action::DropboxLoginAccount) {
+        if matches!(&action, Action::DropboxLoginAccount) {
             self.dropbox_preview.start_account(config, wake);
+        } else if matches!(&action, Action::DropboxForgetAccount) {
+            self.dropbox_preview.start_logout(config, wake);
         } else {
             let resume = matches!(action, Action::DropboxResumeReadOnly);
             self.dropbox_preview.start(config, resume, wake);
@@ -271,7 +357,7 @@ mod tests {
             original_generation,
             PreviewReply::Vault("REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED"),
         ));
-        assert_eq!(state.poll(), (false, None));
+        assert_eq!(state.poll(), (false, None, None));
         assert_eq!(state.status, "DISCONNECTED / SYNC_DISABLED");
     }
 
@@ -288,7 +374,7 @@ mod tests {
         };
         state.tx.send((state.generation,
             PreviewReply::Account(Ok(valid.clone())))).unwrap();
-        assert_eq!(state.poll(), (true, Some(valid)));
+        assert_eq!(state.poll(), (true, Some(valid), None));
         assert!(state.status.contains("SYNC_DISABLED"));
     }
 
@@ -301,8 +387,28 @@ mod tests {
             account_id: "dbid:old".into(),
             root_namespace_id: "1".into(),
         })))).unwrap();
-        assert_eq!(state.poll(), (false, None));
+        assert_eq!(state.poll(), (false, None, None));
         assert!(state.status.contains("DISCONNECTED"));
+    }
+
+    #[test]
+    fn local_forget_only_returns_the_exact_account_identity() {
+        let mut state = DropboxPreview::new();
+        let account = AccountIdentity {
+            account_id: "dbid:alice".into(), root_namespace_id: "12345".into(),
+        };
+        state.tx.send((state.generation,
+            PreviewReply::SignedOut(Ok(account.clone())))).unwrap();
+        assert_eq!(state.poll(), (true, None, Some(account)));
+        assert_eq!(state.status, "LOCAL_CREDENTIAL_FORGOTTEN / SYNC_DISABLED");
+    }
+
+    #[test]
+    fn failed_os_delete_never_claims_to_have_disconnected() {
+        let mut state = DropboxPreview::new();
+        state.tx.send((state.generation, PreviewReply::SignedOut(Err(())))).unwrap();
+        assert_eq!(state.poll(), (true, None, None));
+        assert_eq!(state.status, "LOCAL_CREDENTIAL_REMOVAL_FAILED / SYNC_DISABLED");
     }
 
     #[test]
