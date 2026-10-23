@@ -10,6 +10,7 @@ pub fn dialog(
     choosing: bool,
     error: Option<&str>,
     identity: Option<&IdentityView>,
+    peer: Option<&PeerView>,
     inbox: Option<&InboxView>,
     #[cfg(feature = "p2p-native-send-beta")] sender: Option<&NativeSendView>,
     #[cfg(feature = "p2p-native-send-beta")] can_send: bool,
@@ -34,6 +35,7 @@ pub fn dialog(
 
     let (info, device_actions) = devices::render(devices, error);
     let mut identity_actions = Vec::new();
+    let mut peer_controls = None;
     let footer = NewWidget::new(
         Flex::row()
             .main_axis_alignment(MainAxisAlignment::End)
@@ -55,6 +57,16 @@ pub fn dialog(
         let (panel, actions) = identity::render(identity);
         identity_actions = actions;
         card = card.with_fixed(rule()).with_fixed(panel);
+    }
+    if let Some(peer) = peer {
+        let (panel, controls) = peer_pair::render(peer);
+        peer_controls = Some(controls);
+        // Multiple devices, drafts and Inbox items must not push key-input
+        // controls outside a modal; the peer section is independently scrollable.
+        card = card.with_fixed(rule()).with(
+            NewWidget::new(ScrollArea::new(panel)),
+            1.0,
+        );
     }
     let (card, inbox_save_actions) = if let Some(inbox) = inbox {
         let (panel, buttons) = inbox_view::render(inbox);
@@ -104,6 +116,7 @@ pub fn dialog(
             actions,
             device_actions,
             identity_actions,
+            peer_controls,
             inbox_save_actions,
             #[cfg(feature = "p2p-native-send-beta")]
             native_send_actions,
