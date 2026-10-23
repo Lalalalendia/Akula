@@ -149,7 +149,10 @@ fn upgrading_from_five_keeps_the_session_and_adds_the_graph_camera() {
     migrate(&connection).expect("fresh database");
     connection
         .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN graph_center_x;
+            "DROP TABLE notion_cache_edges;
+             DROP TABLE notion_cache_objects;
+             DROP TABLE notion_cache_sources;
+             ALTER TABLE sessions DROP COLUMN graph_center_x;
              ALTER TABLE sessions DROP COLUMN graph_center_y;
              ALTER TABLE sessions DROP COLUMN graph_scale;
              ALTER TABLE workspaces DROP COLUMN home_page;
