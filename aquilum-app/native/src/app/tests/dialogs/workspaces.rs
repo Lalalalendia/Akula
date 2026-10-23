@@ -18,6 +18,7 @@ fn closing_the_only_workspace_returns_to_no_folder_and_preserves_notes() {
     let outcome = h.send(button, Pressed);
     assert!(outcome.title, "closing a vault updates the window title");
     assert!(h.app.tree.root().is_none());
+    assert!(h.app.workspace.core.search.active_root().is_none());
     assert!(h.app.workspace.root.is_none());
     assert!(h.app.tabs.active().path.is_none());
     assert!(h.app.note.is_none());
