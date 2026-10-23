@@ -58,6 +58,8 @@ impl App {
                 }
                 if before.s3_onboarding.bucket != new_yandex_bucket {
                     self.yandex_probe.set_bucket(&new_yandex_bucket);
+                    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+                    self.s3_pair.invalidate_verification();
                 }
                 if mcp_changed {
                     core.apply_mcp_settings();
