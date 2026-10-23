@@ -260,6 +260,7 @@
       "unavailable": "Coming soon",
       "unavailableHint": "This provider is not connected yet. No credentials are requested or saved from this dialog.",
       "save": "Save and close",
+      "saveBeforeAction": "Save the bucket name first. No operation was started.",
       "close": "Close"
     },
     "yandex": {
