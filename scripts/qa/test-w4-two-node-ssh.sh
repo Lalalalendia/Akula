@@ -37,11 +37,6 @@ if "$runner" "$sandbox/app.AppImage" '-oProxyCommand=evil' "$sha" >/dev/null 2>&
 if "$runner" "$sandbox/app.AppImage" 'root@vps.example' "$sha" >/dev/null 2>&1; then exit 1; fi
 if "$runner" "$sandbox/app.AppImage" 'user@localhost' "$sha" >/dev/null 2>&1; then exit 1; fi
 if "$runner" "$sandbox/app.AppImage" 'user@vps.example' 'invalidsha' >/dev/null 2>&1; then exit 1; fi
-if "$runner" "$sandbox/app.AppImage" 'user@vps.example' "${sha/0/1}" >/dev/null 2>&1; then
-  # It is possible for the source SHA to have no digit zero. Reject in the
-  # dedicated guaranteed-mismatch case below.
-  :
-fi
 fake_sha="$(printf '%064d' 0)"
 if [[ "$sha" == "$fake_sha" ]]; then fake_sha="$(printf '%064d' 1)"; fi
 if "$runner" "$sandbox/app.AppImage" 'user@vps.example' "$fake_sha" >/dev/null 2>&1; then exit 1; fi
