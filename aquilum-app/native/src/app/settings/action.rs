@@ -50,6 +50,15 @@ impl App {
                         .downcast::<TextEditor>()?.inner().text();
                     Some((*setter, text))
                 }).collect::<Vec<_>>();
+                // The compact S3 page exposes one ordinary text field: bucket.
+                // Reject an invalid typed bucket instead of closing the popup
+                // while the setter silently kept the previous valid bucket.
+                #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+                if texts.len() == 1 && !aquilum_core::settings::models::YandexS3Onboarding::valid_bucket(&texts[0].1) {
+                    dialog.yandex_notice = Some(crate::i18n::t("settings.yandex.keysNeedBucket"));
+                    dialog.cloud_popup = Some(cloud);
+                    return self.keep(dialog, None, Effect::Content, root);
+                }
                 let mut proposal = self.workspace.core.settings.get_config();
                 for (setter, text) in &texts {
                     if let crate::ui::settings::schema::Setter::Config(apply) = setter {
