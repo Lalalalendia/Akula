@@ -15,6 +15,15 @@ pub mod roster_observation_lab;
 #[cfg(feature = "sender-arm-lab")]
 pub mod sender_arm_lab;
 
+// Reuse this exact one-file implementation in Native UI and CLI without
+// starting discovery, QUIC or transfer at application startup.
+#[cfg(feature = "p2p-one-file-lan-beta")]
+extern crate self as akula_staya_integration;
+#[cfg(feature = "p2p-one-file-lan-beta")]
+#[path = "bin/p2p_one_file_beta.rs"]
+#[allow(dead_code)]
+pub mod one_file_lan;
+
 use staya_transfer::{
     ContentId, Manifest,
     queue::{QueueError, QueueSelection, SelectedFile},

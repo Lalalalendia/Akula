@@ -13,6 +13,20 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Windows-only private staging. Returns the directory handle as well as
+/// the exclusively created file; retain both through the receiver operation.
+/// Audits owner/DACL on an independently opened root and compares live NT
+/// identities before creating a child relative to the writable directory handle.
+/// The later SQLite/object publication is still path-based and NOT certified.
+#[cfg(windows)]
+pub fn create_pinned_windows_inbox_stage(
+    root: &Path,
+    name: &str,
+) -> Result<(File, File), InboxError> {
+    crate::sync::create_pinned_p2p_inbox_stage(root, name)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
