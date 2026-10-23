@@ -1,0 +1,42 @@
+name: Received Inbox Ledger isolated Rust proof
+
+# Only the standalone research branch; no PR fan-out, no main, no secrets.
+on:
+  push:
+    branches:
+      - research/akula-received-inbox-ledger-20261023
+    paths:
+      - modules/drop-inbox-ledger/**
+      - .github/workflows/drop-inbox-ledger-isolated.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inbox-ledger-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-ledger:
+    name: SQLite cold-read and replay / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify standalone ledger tests without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --nocapture
+      - name: Check standalone ledger compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path modules/drop-inbox-ledger/Cargo.toml
+
