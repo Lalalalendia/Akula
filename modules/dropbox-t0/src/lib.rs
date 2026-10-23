@@ -1,9 +1,8 @@
 #![forbid(unsafe_code)]
-//! Inert Dropbox T0 transport contract.
-//!
-//! No OAuth credentials, network client, cloud writes, File Gate, scheduler,
-//! Sync Core or journal authority lives in this crate. Only validated request
-//! descriptions and deterministic response classification are exposed.
+//! Isolated Dropbox contracts, no local file mutation or sync authority.
+pub mod publication;
+pub mod read_verify;
+pub mod read_http;
 
 use serde::Deserialize;
 use serde_json::{json, Value};

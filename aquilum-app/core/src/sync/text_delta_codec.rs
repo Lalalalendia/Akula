@@ -580,7 +580,6 @@ mod tests {
             "DELTA_TEXT_RUST_REAL_GIT pairs={cases} full_wire={full_bytes} selected_wire={selected_bytes} full={full_count} splice={splice_count} dictionary={dictionary_count}"
         );
     }
-
     #[test]
     fn forged_splice_offsets_and_trailing_bytes_refused() {
         let base=b"Unicode \xF0\x9F\x99\x82 content".to_vec();
@@ -598,4 +597,5 @@ mod tests {
         invalid.push(b'A');
         assert_eq!(splice_apply(&base,&invalid),Err(TextDeltaError::InvalidEnvelope));
     }
+    include!("text_delta_codec_profile_tests.rs");
 }
