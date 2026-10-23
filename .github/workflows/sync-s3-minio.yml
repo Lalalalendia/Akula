@@ -3,6 +3,8 @@ name: Sync S3/MinIO capability probe
 on:
   workflow_call:
   pull_request:
+    # Main PR runs via the required Application checks route; non-main stays direct.
+    branches-ignore: [main]
     paths:
       - 'aquilum-app/core/src/sync/s3_transport.rs'
       - 'aquilum-app/core/tests/aws_credentials_regression.rs'

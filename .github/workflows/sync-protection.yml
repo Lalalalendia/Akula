@@ -2,12 +2,7 @@ name: Sync durable preimage protection
 
 on:
   workflow_call:
-  pull_request:
-    paths:
-      - "aquilum-app/core/src/sync/protection_store.rs"
-      - "aquilum-app/core/src/sync/mod.rs"
-
-      - ".github/workflows/sync-protection.yml"
+  # PR path owners are enforced in required central route.
   workflow_dispatch:
 
 permissions:
