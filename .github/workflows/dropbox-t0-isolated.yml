@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/akula-dropbox-ci-target
+      CARGO_TARGET_DIR: target/dropbox-ci
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
