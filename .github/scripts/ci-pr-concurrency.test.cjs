@@ -19,8 +19,8 @@ test('good scoped cancellation, including quoted on keys',()=>{
 
 test('nonstandard YAML event indentation is guarded without mistaking nested inputs',()=>{
   const indented=good.replace(
-    "  pull_request:\n    paths:\n      - 'modules/test/**'",
-    "    pull_request:\n      paths:\n        - 'modules/test/**'"
+    "  pull_request:\n    paths:\n      - 'modules/test/**'\n  workflow_dispatch:",
+    "    pull_request:\n      paths:\n        - 'modules/test/**'\n    workflow_dispatch:"
   );
   assert.equal(prTrigger(indented),true,'four-space PR event cannot evade the audit');
   assert.deepEqual(policyErrors(indented,'indented.yml'),[]);
