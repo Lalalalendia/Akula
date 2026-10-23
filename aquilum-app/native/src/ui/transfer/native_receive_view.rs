@@ -26,7 +26,12 @@ pub(super) fn render(
             panel = panel.with_fixed(cancel);
         }
     } else {
-        for contact in contacts.rows.iter().filter(|contact| !contact.revoked).take(16) {
+        for contact in contacts
+            .rows
+            .iter()
+            .filter(|contact| !contact.revoked)
+            .take(16)
+        {
             let button = NewWidget::new(TextButton::new(
                 t("transfer.nativeReceiveButton"),
                 Variant::Ghost,
