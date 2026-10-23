@@ -92,3 +92,16 @@ pub fn read_from_live_iroh_peer(
     }
     read_with_device_proof(node_state, grant, grant_pin, device_proof).map_err(|_| NodeReadDenied)
 }
+
+#[cfg(feature = "node-v1-runtime")]
+impl OneUseChallengeFence for aquilum_core::node_v1::DurableChallengeFence {
+    fn consume_once(
+        &mut self, peer: [u8; 32], grant_digest: [u8; 32], challenge: [u8; 32],
+    ) -> bool {
+        // The root policy is re-read and the issued tuple is atomically
+        // consumed before returning bytes. Any SQLite or policy error denies.
+        aquilum_core::node_v1::DurableChallengeFence::consume_once(
+            self, peer, grant_digest, challenge,
+        ).unwrap_or(false)
+    }
+}

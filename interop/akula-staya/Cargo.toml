@@ -19,6 +19,8 @@ p2p-live-identity = ["aquilum-core/p2p-device-identity"]
 node-replica-transport-lab = ["aquilum-core/node-replica-auth-lab"]
 # Identity/grant join, never an OS authority or public listener.
 node-live-read-lab = ["node-replica-transport-lab", "aquilum-core/device-roster-lab"]
+# Current protected Node witness and SQLite replay fence, not a public listener.
+node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1"]
 
 [dependencies]
 aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }

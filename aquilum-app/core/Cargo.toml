@@ -20,6 +20,8 @@ node-lab = ["node-catalog-lab"]
 node-replica-lab = ["node-catalog-lab"]
 # Authenticated local read lab; no production pairing.
 node-replica-auth-lab = ["node-replica-lab"]
+# Non-shipping Node V1 host: root-pinned owner policy and durable one-use reads.
+node-v1 = ["node-replica-auth-lab", "device-roster-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
@@ -112,6 +114,11 @@ required-features = ["server-bootstrap-b1a-release-lab"]
 name = "akula-node-lab"
 path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
+
+[[bin]]
+name = "akula-node"
+path = "src/bin/akula_node.rs"
+required-features = ["node-v1"]
 
 [dependencies]
 akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
