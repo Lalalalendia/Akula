@@ -55,6 +55,11 @@ This does **not** authorize enrollment by itself. The signed/root-witnessed
 package approval, pinned host identity, durable CAS and actual installer
 invocation are still unconnected; this binary is not yet installed on a VPS.
 
+The owner-policy file is root-owned and group-readable by the dedicated
+`akula-node` account (`root:akula-node 0640`); it is never writable by
+the service. A root-only `0600` policy would prevent the non-root daemon
+from starting and is an invalid service configuration.
+
 ## Disposable Ubuntu systemd proof (not production installation)
 
 The branch-only smoke workflow builds both opt-in service/enrollment ELFs

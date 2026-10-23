@@ -81,8 +81,15 @@ config = {
 with open(sys.argv[1], "x", encoding="utf-8") as out:
     json.dump(config, out, separators=(",", ":"))
 PY
-sudo install -o root -g root -m 0600 "$TMP/policy.json" \
+sudo install -o root -g "$USER" -m 0640 "$TMP/policy.json" \
   "$POLICY/owner-policy.json"
+# The non-root Node must be able to read the root-owned, non-writable policy.
+[[ "$(sudo stat -c '%u:%G:%a:%h' "$POLICY/owner-policy.json")" == "0:$USER:640:1" ]] ||
+  refuse "policy is not root-owned, service-readable and immutable"
+sudo -u "$USER" test -r "$POLICY/owner-policy.json" ||
+  refuse "the non-root service cannot read root-owned policy"
+[[ ! -w "$POLICY/owner-policy.json" ]] ||
+  refuse "CI operator has unexpected write authority over policy"
 sudo install -o root -g root -m 0644 \
   "$ROOT/docs/platforms/node-v1/akula-node-v1.service" "$UNIT_FILE"
 cat >"$TMP/ci-localhost.conf" <<'EOF'
