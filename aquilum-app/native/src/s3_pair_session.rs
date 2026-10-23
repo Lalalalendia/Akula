@@ -158,9 +158,7 @@ impl PairSession {
     ) -> bool {
         self.run(move || {
             let result = (|| -> Result<(), ()> {
-                if !destination_root.is_dir()
-                    || destination_root.read_dir().map_err(|_| ())?.next().is_some()
-                {
+                if !destination_root.is_dir() {
                     return Err(());
                 }
                 let metadata = fs::metadata(&source).map_err(|_| ())?;
@@ -170,6 +168,15 @@ impl PairSession {
                 let sealed = fs::read(&source).map_err(|_| ())?;
                 let invite = open_s3_pair_invite(&sealed, &password).map_err(|_| ())?;
                 let profile = S3PairProfile::from_authenticated_invite(&invite);
+                if destination_root.read_dir().map_err(|_| ())?.next().is_some()
+                    && !s3_pair_host::already_imported_on_registered_root(
+                        &core, &destination_root, &appdata, &profile,
+                    )
+                {
+                    // A nonempty, unrelated workspace can never be silently
+                    // combined with an imported remote root.
+                    return Err(());
+                }
                 // A failed prior import may have registered the SAME profile.
                 // Never rebind a different profile or a different remote root.
                 if let Some(existing) = s3_pair_host::read_pair_profile(
