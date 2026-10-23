@@ -37,6 +37,7 @@ jobs:
         shell: bash
         run: |
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/native_receive.rs aquilum-app/native/src/ui/transfer/native_receive_view.rs
+          rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/peer_pair.rs aquilum-app/native/src/ui/transfer/peer_pair.rs
           cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Verify shipping lockfile remains resolved
         shell: bash
@@ -62,3 +63,7 @@ jobs:
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_receive_view::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_send_view::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::peer_pair::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::peer_pair::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::local_identity::tests -- --nocapture
