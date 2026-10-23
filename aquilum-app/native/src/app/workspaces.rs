@@ -63,7 +63,7 @@ impl App {
         self.popup = Some(Popup::Workspaces(WorkspacesState { dialog, forget: None }));
     }
 
-    fn close_workspaces(&mut self, root: &mut RenderRoot) {
+    pub(in crate::app) fn close_workspaces(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Workspaces(state)) = self.popup.take() {
             if let Some((forget, _, _)) = state.forget {
                 crate::ui::dialog::close(root, forget.layer);
@@ -89,7 +89,6 @@ impl App {
         });
         Outcome::default()
     }
-
     pub(super) fn switch_workspace(&mut self, root: &mut RenderRoot, path: PathBuf) -> Outcome {
         let path = crate::workspace::normalize(&path);
         let reopen = matches!(self.popup, Some(Popup::Workspaces(_)));
@@ -105,9 +104,9 @@ impl App {
             }
             Outcome::default()
         };
-        if !path.is_dir() {
-            return failed(self, root);
-        }
+        if !path.is_dir() { return failed(self, root); }
+        if self.tree.root().is_some_and(|old| !workspaces::same_path(old, &path))
+            && !self.canvas_can_leave_workspace(root) { return Outcome::default(); }
         if let Err(e) = self.workspace.core.ui_state.resolve_workspace(&path.to_string_lossy(), crate::dates::now_ms()) {
             report!("база {} не открыта: {e:?}", path.display());
             return failed(self, root);
@@ -143,6 +142,7 @@ impl App {
         self.version_notice = None;
         self.home = None;
         self.graph = super::graph_page::GraphState::default();
+        self.canvas = super::canvas::CanvasState::default();
         self.start_index();
         self.refresh_home();
         self.cleanup_retention();

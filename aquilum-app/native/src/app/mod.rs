@@ -1,6 +1,6 @@
 mod actions;
 mod commands;
-mod book;
+mod book; mod canvas;
 mod core_events;
 mod embeds;
 mod file_menu;
@@ -107,7 +107,7 @@ pub struct App {
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
-    graph: graph_page::GraphState,
+    graph: graph_page::GraphState, canvas: canvas::CanvasState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,
     find: Option<crate::ui::find::FindBar>,
