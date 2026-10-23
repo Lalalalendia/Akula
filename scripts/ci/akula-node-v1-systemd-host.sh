@@ -12,8 +12,7 @@ command -v sudo >/dev/null && command -v ss >/dev/null ||
   refuse "missing systemd OS tools"
 ROOT="$(git rev-parse --show-toplevel)"
 SERVICE="$ROOT/interop/akula-staya/target/debug/akula-node-v1-service"
-SOURCE_ENROLL="$ROOT/interop/akula-staya/target/debug/akula-node-v1-enroll"
-ENROLL="/opt/akula-node/enroll"
+ENROLL="/opt/akula-node/node"
 UNIT=akula-node-v1.service
 STATE=/var/lib/akula-node
 OPT=/opt/akula-node
@@ -22,7 +21,7 @@ UNIT_FILE=/etc/systemd/system/akula-node-v1.service
 DROPIN=/etc/systemd/system/akula-node-v1.service.d
 USER=akula-node
 PORT=43871
-test -x "$SERVICE" && test -x "$SOURCE_ENROLL" || refuse "unsigned test binaries missing"
+test -x "$SERVICE" || refuse "single Node test ELF missing"
 for path in "$STATE" "$OPT" "$POLICY" "$UNIT_FILE" "$DROPIN"; do
   [[ ! -e "$path" && ! -L "$path" ]] || refuse "existing OS installation"
 done
@@ -43,7 +42,7 @@ cleanup() {
     sudo rm -f -- "$DROPIN/ci-localhost.conf" "$UNIT_FILE"
     sudo rmdir -- "$DROPIN" 2>/dev/null || true
     sudo systemctl daemon-reload >/dev/null 2>&1 || true
-    sudo rm -f -- "$POLICY/owner-policy.json" "$OPT/node" "$OPT/enroll"
+    sudo rm -f -- "$POLICY/owner-policy.json" "$OPT/node"
     sudo rmdir -- "$POLICY" "$OPT" 2>/dev/null || true
     sudo rm -f -- "$STATE/node-identity.pk8" "$STATE/node-iroh-seed.bin"
     sudo rm -f -- "$STATE/node-challenges.sqlite" "$STATE/node-challenges.sqlite-journal"
@@ -60,10 +59,9 @@ sudo useradd --system --user-group --no-create-home \
 sudo install -d -o "$USER" -g "$USER" -m 0700 "$STATE"
 sudo install -d -o root -g root -m 0755 "$OPT" "$POLICY" "$DROPIN"
 sudo install -o root -g root -m 0555 "$SERVICE" "$OPT/node"
-sudo install -o root -g root -m 0555 "$SOURCE_ENROLL" "$ENROLL"
-# The service account cannot traverse the GitHub checkout's private /home
-# hierarchy. Only fixed, root-owned /opt binaries can be executed as Node.
-sudo -u "$USER" test -x "$ENROLL" || refuse "enrollment ELF not service executable"
+# Both fixed entrypoints live in the exact same root-owned executable.
+# No second unverified installation path or target is permitted.
+sudo -u "$USER" test -x "$ENROLL" || refuse "Node ELF not service executable"
 OUTPUT="$(sudo -u "$USER" "$ENROLL" --enroll-identities)" ||
   refuse "one-time identity enrollment failed"
 [[ "$OUTPUT" =~ ^AKULA_NODE_V1_ENROLLED[[:space:]]node=([0-9a-f]{64})[[:space:]]iroh=([0-9a-f]{64})$ ]] ||

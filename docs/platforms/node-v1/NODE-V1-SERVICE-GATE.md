@@ -36,8 +36,9 @@ A passing Linux CI confirms code and tests, not installed-VPS operation.
 
 ## One-shot non-root identity enrollment (install prerequisite)
 
-A separate opt-in `akula-node-v1-enroll --enroll-identities` executable
-has a **fixed operation and fixed StateDirectory**. It never accepts a
+The same signed-target `/opt/akula-node/node` executable has an opt-in
+`--enroll-identities` mode, not a second release artifact. It uses a
+**fixed operation and fixed StateDirectory**. It never accepts a
 path, private key, account name, command, or network address from the UI.
 A signed, owner-approved root installer must first create the dedicated
 non-root service account and private StateDirectory, then invoke this one-shot
@@ -50,6 +51,8 @@ Only after independent readback does the command emit their public
 identifiers. A partial crash is HOLD: no silent generation of whichever
 key is missing. The root installer must separately bind both keys and the
 owner's scoped grants into root-owned policy **v3** before systemd can start.
+The very same signed ELF then serves using `--serve-iroh`; arguments cannot
+select arbitrary file paths, shell commands or network addresses.
 
 This does **not** authorize enrollment by itself. The signed/root-witnessed
 package approval, pinned host identity, durable CAS and actual installer
@@ -62,8 +65,8 @@ from starting and is an invalid service configuration.
 
 ## Disposable Ubuntu systemd proof (not production installation)
 
-The branch-only smoke workflow builds both opt-in service/enrollment ELFs
-and runs `scripts/ci/akula-node-v1-systemd-host.sh` on a disposable GitHub
+The branch-only smoke workflow builds the single opt-in Node ELF with both
+fixed modes and runs `scripts/ci/akula-node-v1-systemd-host.sh` on a disposable GitHub
 Actions Ubuntu runner. The test proves real non-root static UID, isolated
 StateDirectory, one-shot keys, synthetic root-pinned policy v3, immutable
 root-owned service binary, systemd start, fixed UDP listener, SIGKILL restart

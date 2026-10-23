@@ -35,14 +35,11 @@ jobs:
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --bin akula-node-v1-service
       - name: Test persistent Iroh endpoint identity and unsafe key rejection
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --lib installed_key_is_stable_and_missing_or_unsafe_keys_never_regenerate -- --nocapture
-      - name: Compile one-shot unprivileged enrollment binary
-        run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --bin akula-node-v1-enroll
       - name: Reject re-enrollment and pre-existing root policy
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --lib enrollment::tests -- --nocapture
-      - name: Build exact Node service and one-shot enrollment ELFs
-        run: |
-          cargo build --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --bin akula-node-v1-service --bin akula-node-v1-enroll
+      - name: Build the single signed-target Node ELF with both fixed modes
+        run: cargo build --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --bin akula-node-v1-service
       - name: Validate disposable host-only systemd proof syntax
         run: bash -n scripts/ci/akula-node-v1-systemd-host.sh
       - name: Real non-root systemd start and SIGKILL restart (disposable CI)

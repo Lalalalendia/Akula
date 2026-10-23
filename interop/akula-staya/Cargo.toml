@@ -41,11 +41,6 @@ name = "akula-node-v1-service"
 path = "src/bin/akula_node_v1_service.rs"
 required-features = ["node-v1-runtime"]
 
-[[bin]]
-name = "akula-node-v1-enroll"
-path = "src/bin/akula_node_v1_enroll.rs"
-required-features = ["node-v1-runtime"]
-
 [dev-dependencies]
 tempfile = "3"
 ring = "=0.17.14"
