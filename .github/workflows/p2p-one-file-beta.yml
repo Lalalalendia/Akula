@@ -48,6 +48,10 @@ jobs:
       - name: Validate formatting of exact beta source
         shell: bash
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
+      - name: Rustfmt Native Inbox preview (dependent branch only)
+        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
+        shell: bash
+        run: cargo fmt --manifest-path aquilum-app/Cargo.toml -p aquilum-native -- --check
       - name: Format and test isolated receiver journal
         shell: bash
         run: |
@@ -69,10 +73,6 @@ jobs:
       - name: Exact Core atomic create-new regression tests
         shell: bash
         run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
-      - name: Rustfmt Native Inbox preview (dependent branch only)
-        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
-        shell: bash
-        run: cargo fmt --manifest-path aquilum-app/Cargo.toml -p aquilum-native -- --check
       - name: Compile Native Inbox preview and Save Copy (dependent branch only)
         if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
         shell: bash

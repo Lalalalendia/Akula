@@ -184,10 +184,7 @@ impl InboxLedger {
     /// SQLite claim alone never suffices: rehash *this opened handle*. A
     /// separate no-clobber export must rehash once more while copying.
     /// No network path, untrusted filename or Vault write is accepted here.
-    pub fn open_verified_file(
-        &self,
-        id: Uuid,
-    ) -> Result<(File, ExpectedTransfer), LedgerError> {
+    pub fn open_verified_file(&self, id: Uuid) -> Result<(File, ExpectedTransfer), LedgerError> {
         let record = self.get(id)?.ok_or(LedgerError::UnknownTransfer)?;
         if record.state != 1 {
             return Err(LedgerError::InvalidLocalObject);
