@@ -21,6 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify Rust formatting before expensive compilation
+        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Compile NodeV1 headless binary
         run: cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 --bin akula-node
       - name: Test signed NodeStore and durable challenge fence
@@ -28,5 +30,7 @@ jobs:
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 node_v1:: -- --nocapture
       - name: Test authenticated QUIC from source A to offline Node to B
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-e2e-tests --test node_v1_real_quic -- --nocapture
-      - name: Check integration formatting
-        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
+      - name: Compile non-root Iroh Node daemon
+        run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --bin akula-node-v1-service
+      - name: Test persistent Iroh endpoint identity and unsafe key rejection
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-runtime --lib stable_iroh_peer_survives_cold_reopen_and_denies_bad_permissions -- --nocapture

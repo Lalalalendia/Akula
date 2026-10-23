@@ -4,6 +4,7 @@
 //! no plaintext fallback, no request-selected server policy or File Gate write.
 mod client;
 mod server;
+pub mod service;
 mod wire;
 
 pub use client::{get_over_authenticated_iroh, put_over_authenticated_iroh};

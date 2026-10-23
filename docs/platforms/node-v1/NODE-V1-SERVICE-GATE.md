@@ -1,0 +1,50 @@
+# NODE-V1-SERVICE-01 — staged non-root Iroh daemon
+
+Status: **HOLD / candidate only**. This service is not installed by Akula.
+A passing Linux CI confirms code and tests, not installed-VPS operation.
+
+## Implemented boundaries
+
+- The opt-in \`akula-node-v1-service\` is a separate binary from the original
+  GUI-free local-health \`aquilum-core\` \`akula-node\` lab binary.
+- Exactly one CLI operation is accepted: \`--serve-iroh\`. Root refuses to run.
+- The immutable owner policy must already be independently enrolled under
+  root-owned \`/etc/akula-node/owner-policy.json\` and match the Node Ed25519
+  key under the dedicated private StateDirectory before any public listener.
+- Iroh uses a **separate**, persistent 256-bit Ed25519 seed stored as
+  \`/var/lib/akula-node/node-iroh-seed.bin\`. Requires same service UID,
+  0700 directory, 0600 file, one hardlink and NOFOLLOW access. Corruption,
+  replacement or unsafe permissions cause a hard HOLD: no silent identity
+  rotation or fallback to an ephemeral key.
+- Binds **only IPv4 UDP port 43871** using Iroh 1.3, relay disabled, with
+  the fixed \`akula-node-v1/quic/v1\` ALPN. The caller must independently
+  pin Iroh EndpointId AND the separate Node Ed25519 receipt/public key.
+- Maximum eight concurrent in-flight handshakes, ten-second handshake and
+  forty-second operation deadline. SQLite, owner policy and grant checks
+  continue to be performed inside \`serve_one_authenticated_connection\`.
+  A slow or unauthorized caller cannot create unlimited resources.
+- Systemd template is in
+  \`docs/platforms/node-v1/akula-node-v1.service\`, not deployed.
+  It assumes a separately created **static dedicated** \`akula-node\` account,
+  a signed root-owned ELF at \`/opt/akula-node/node\`, private state and
+  runtime directories, and exact root policy under \`/etc/akula-node\`.
+
+## Installation blockers — do not bypass
+
+1. The existing signed/root-witnessed installer prototype must provision the
+   actual service ELF with immutable release digest, package provenance,
+   external owner approval, fixed executable path and atomic CAS receipt.
+2. The trusted installer must create/verify the isolated service account and
+   root-owned policy **before** enabling systemd; it must refuse existing
+   conflicting units, service users, symlinks or unsafe state and log HOLD.
+3. Windows Akula must verify SSH host identity, show a short owner-approved
+   plan, verify the signed package and require separate installation consent.
+   A successful SSH probe is not installation consent.
+4. Port 43871/UDP must be explicitly authorized at the firewall and included
+   in an exportable configuration with independently verified endpoint IDs.
+5. The service must be tested on a real Ubuntu VPS through restart/reboot,
+   revocation, disk and network failure, including A→Node→B while A offline.
+   Receiver writes must go through the existing no-overwrite File Gate.
+
+The service MUST NOT be declared READY based on a listening process or an
+Iroh handshake alone. Full installed end-to-end acceptance remains HOLD.
