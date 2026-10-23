@@ -20,7 +20,6 @@ impl CloudProvider {
         Self::Dropbox,
         Self::WebDav,
     ];
-
     pub fn label(self) -> String {
         crate::i18n::t(match self {
             Self::Yandex => "settings.cloud.yandex",
@@ -37,6 +36,7 @@ impl CloudProvider {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     OpenCloudProvider(CloudProvider),
+    #[cfg(feature = "dropbox-readonly-preview")] DropboxLoginAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxConnectReadOnly,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeReadOnly,
     InspectRecovery(String),

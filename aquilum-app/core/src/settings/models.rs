@@ -246,7 +246,7 @@ impl YandexS3Onboarding {
 }
 
 mod dropbox;
-pub use dropbox::DropboxReadOnlyDraft;
+pub use dropbox::{DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT};
 
 /// Public-only preparation for *the user's own server*. No SSH private
 /// key, password, token, sudo credential or remote installation authority is

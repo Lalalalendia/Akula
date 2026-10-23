@@ -21,22 +21,27 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                 text: "Akula · вход через браузер".into(),
                 tone: Tone::Muted,
             }),
-        row("Dropbox account ID".into(),
-            Some("Идентификатор Dropbox-аккаунта (dbid:…).".into()),
-            Control::Text { value: draft.account_id.clone(), commit: true },
-            |c, v| {
-                let value = text(v);
-                if DropboxReadOnlyDraft::valid_account(&value) {
-                    c.dropbox_readonly.account_id = value;
-                }
+        info("Аккаунт Dropbox".into(),
+            Some("Вход в официальный аккаунт без настройки Vault. Akula запросит только доступ для чтения; никакой синхронизации.".into()),
+            Control::Buttons(vec![
+                Button::new("Войти в Dropbox".into(), Action::DropboxLoginAccount)
+                    .enabled(!ctx.dropbox_preview_busy),
+            ])),
+        info("Сохранённый аккаунт".into(),
+            Some("Идентификатор сохраняется после проверки OAuth и системного хранилища. После перезапуска требуется повторная проверка; доверие Vault не установлено.".into()),
+            Control::Status {
+                text: if draft.account_id.is_empty() {
+                    "Нет авторизованного аккаунта".into()
+                } else {
+                    format!("{} · подтверждение требуется", draft.account_id)
+                },
+                tone: Tone::Muted,
             }),
-        row("Root namespace ID".into(), None,
-            Control::Text { value: draft.root_namespace_id.clone(), commit: true },
-            |c, v| {
-                let value = text(v);
-                if DropboxReadOnlyDraft::valid_namespace(&value) {
-                    c.dropbox_readonly.root_namespace_id = value;
-                }
+        info("Дополнительно: проверка существующего Vault".into(),
+            Some("Необязательный ручной режим для ранее созданного и независимо подтверждённого Vault. Не требуется для входа в аккаунт.".into()),
+            Control::Status {
+                text: "Проверка только для чтения · SYNC_DISABLED".into(),
+                tone: Tone::Secondary,
             }),
         row("Идентификатор хранилища".into(), None,
             Control::Text { value: draft.vault_id.clone(), commit: true },
@@ -93,5 +98,15 @@ mod tests {
             row.label != "OAuth app key" && row.label != "Registered callback port"));
         assert!(block.rows.iter().any(|row|
             row.label == "Контрольный BLAKE3 HEAD"));
+        // Signing in must be available even without VaultId/profile/pin.
+        let login = block.rows.iter().find(|row| row.label == "Аккаунт Dropbox")
+            .expect("account entrypoint missing");
+        let Control::Buttons(buttons) = &login.control else {
+            panic!("account entrypoint is not a button");
+        };
+        assert!(buttons.iter().any(|button|
+            matches!(&button.action, Action::DropboxLoginAccount) && button.enabled));
+        assert!(block.rows.iter().all(|row|
+            row.label != "Dropbox account ID" && row.label != "Root namespace ID"));
     }
 }

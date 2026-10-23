@@ -3,8 +3,13 @@
 #[path = "dropbox_provider.rs"]
 mod provider;
 
-use aquilum_core::settings::models::DropboxReadOnlyDraft;
-use akula_dropbox_connect_lab::{resume::resume_readonly, ConnectSession, ConnectionStatus};
+use aquilum_core::settings::models::{
+    DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
+};
+use akula_dropbox_connect_lab::{
+    account::{AccountIdentity, AccountSession},
+    resume::resume_readonly, ConnectSession, ConnectionStatus,
+};
 use akula_dropbox_t0::{read_verify::TrustedBlake3, Scope};
 use std::{
     process::{Command, Stdio},
@@ -12,12 +17,19 @@ use std::{
     time::Duration,
 };
 
+// Only the account proof may update the saved public account/root identifiers.
+// A Vault result is never converted to write/sync authority.
+enum PreviewReply {
+    Vault(&'static str),
+    Account(Result<AccountIdentity, ()>),
+}
+
 pub(super) struct DropboxPreview {
     pub(super) status: String,
     pub(super) busy: bool,
     generation: u64,
-    tx: Sender<(u64, &'static str)>,
-    rx: Receiver<(u64, &'static str)>,
+    tx: Sender<(u64, PreviewReply)>,
+    rx: Receiver<(u64, PreviewReply)>,
 }
 impl DropboxPreview {
     pub(super) fn new() -> Self {
@@ -29,6 +41,45 @@ impl DropboxPreview {
             tx,
             rx,
         }
+    }
+
+    /// Account-only OAuth is independent of VaultId/profile/HEAD and grants
+    /// neither a confirmed baseline nor permission to apply remote documents.
+    pub(super) fn start_account(
+        &mut self, draft: DropboxReadOnlyDraft,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) {
+        if self.busy { return; }
+        if draft.oauth_app_key != AKULA_DROPBOX_APP_KEY
+            || draft.registered_port != AKULA_DROPBOX_CALLBACK_PORT
+        {
+            self.status = "INVALID_AKULA_OAUTH_IDENTITY / SYNC_DISABLED".into();
+            return;
+        }
+        self.busy = true;
+        self.status = "WAITING_FOR_DROPBOX_ACCOUNT_CONSENT / SYNC_DISABLED".into();
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let tx = self.tx.clone();
+        let _ = std::thread::Builder::new()
+            .name("akula-dropbox-account".into())
+            .spawn(move || {
+                // Bind loopback before launching the system browser. Never
+                // print the OAuth URL, authorization code or access token.
+                let result = AccountSession::begin(
+                    AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
+                ).map_err(|_| ()).and_then(|session| {
+                    if !open_browser(session.browser_authorize_url()) { return Err(()); }
+                    session.finish(Duration::from_secs(120)).map_err(|_| ())
+                });
+                if tx.send((generation, PreviewReply::Account(result))).is_ok() {
+                    wake();
+                }
+            })
+            .map_err(|_| {
+                self.busy = false;
+                self.status = "THREAD_START_FAILED / SYNC_DISABLED".into();
+            });
     }
 
     pub(super) fn start(
@@ -90,7 +141,7 @@ impl DropboxPreview {
                         Err(_) => "LOGIN_BIND_REJECTED / SYNC_DISABLED",
                     }
                 };
-                if tx.send((generation, outcome)).is_ok() { wake(); }
+                if tx.send((generation, PreviewReply::Vault(outcome))).is_ok() { wake(); }
             })
             .map_err(|_| {
                 self.busy = false;
@@ -106,15 +157,25 @@ impl DropboxPreview {
         self.status = "DISCONNECTED / SYNC_DISABLED".into();
     }
 
-    pub(super) fn poll(&mut self) -> bool {
+    pub(super) fn poll(&mut self) -> (bool, Option<AccountIdentity>) {
         let mut changed = false;
-        while let Ok((generation, status)) = self.rx.try_recv() {
+        let mut authenticated_account = None;
+        while let Ok((generation, reply)) = self.rx.try_recv() {
             if generation != self.generation { continue; }
-            self.status = status.into();
             self.busy = false;
             changed = true;
+            match reply {
+                PreviewReply::Vault(status) => self.status = status.into(),
+                PreviewReply::Account(Ok(identity)) => {
+                    self.status = "ACCOUNT_AUTHORIZED / VAULT_NOT_APPROVED / SYNC_DISABLED".into();
+                    authenticated_account = Some(identity);
+                }
+                PreviewReply::Account(Err(_)) => {
+                    self.status = "ACCOUNT_LOGIN_REJECTED / SYNC_DISABLED".into();
+                }
+            }
         }
-        changed
+        (changed, authenticated_account)
     }
 }
 
@@ -124,7 +185,26 @@ impl super::App {
     pub(super) fn poll_dropbox_settings(
         &mut self, root: &mut masonry::app::RenderRoot,
     ) {
-        if self.dropbox_preview.poll()
+        let (changed, account) = self.dropbox_preview.poll();
+        if let Some(identity) = account {
+            let mut config = self.workspace.core.settings.get_config();
+            if config.dropbox_readonly.account_id != identity.account_id
+                || config.dropbox_readonly.root_namespace_id != identity.root_namespace_id
+            {
+                // A different account invalidates all earlier Vault pairing.
+                // No file, baseline, scheduler or sync state is modified.
+                config.dropbox_readonly.vault_id.clear();
+                config.dropbox_readonly.profile_id.clear();
+                config.dropbox_readonly.trusted_head_blake3.clear();
+                config.dropbox_readonly.account_id = identity.account_id;
+                config.dropbox_readonly.root_namespace_id = identity.root_namespace_id;
+                if self.workspace.core.settings.update_config(config).is_err() {
+                    self.dropbox_preview.status =
+                        "ACCOUNT_IDENTITY_SAVE_FAILED / SYNC_DISABLED".into();
+                }
+            }
+        }
+        if changed
             && matches!(&self.popup, Some(super::Popup::Settings { dialog, .. })
                 if dialog.section == crate::ui::settings::schema::Section::Sync)
         {
@@ -140,12 +220,14 @@ impl super::App {
         if section != Section::Sync {
             return super::settings::Effect::None;
         }
-        let resume = matches!(action, Action::DropboxResumeReadOnly);
-        self.dropbox_preview.start(
-            self.workspace.core.settings.get_config().dropbox_readonly.clone(),
-            resume,
-            std::sync::Arc::clone(&self.workspace.wake),
-        );
+        let config = self.workspace.core.settings.get_config().dropbox_readonly;
+        let wake = std::sync::Arc::clone(&self.workspace.wake);
+        if matches!(action, Action::DropboxLoginAccount) {
+            self.dropbox_preview.start_account(config, wake);
+        } else {
+            let resume = matches!(action, Action::DropboxResumeReadOnly);
+            self.dropbox_preview.start(config, resume, wake);
+        }
         super::settings::Effect::Content
     }
 }
@@ -187,10 +269,40 @@ mod tests {
         assert!(!state.busy);
         let _ = state.tx.send((
             original_generation,
-            "REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED",
+            PreviewReply::Vault("REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED"),
         ));
-        assert!(!state.poll());
+        assert_eq!(state.poll(), (false, None));
         assert_eq!(state.status, "DISCONNECTED / SYNC_DISABLED");
+    }
+
+    #[test]
+    fn account_login_has_no_vault_prerequisite_and_cannot_enable_sync() {
+        let draft = DropboxReadOnlyDraft::default();
+        assert!(!draft.ready());
+        assert_eq!(draft.oauth_app_key, AKULA_DROPBOX_APP_KEY);
+        assert_eq!(draft.registered_port, AKULA_DROPBOX_CALLBACK_PORT);
+        let mut state = DropboxPreview::new();
+        let valid = AccountIdentity {
+            account_id: "dbid:alice".into(),
+            root_namespace_id: "12345".into(),
+        };
+        state.tx.send((state.generation,
+            PreviewReply::Account(Ok(valid.clone())))).unwrap();
+        assert_eq!(state.poll(), (true, Some(valid)));
+        assert!(state.status.contains("SYNC_DISABLED"));
+    }
+
+    #[test]
+    fn changed_identity_discards_late_account_consent() {
+        let mut state = DropboxPreview::new();
+        let generation = state.generation;
+        state.invalidate();
+        state.tx.send((generation, PreviewReply::Account(Ok(AccountIdentity {
+            account_id: "dbid:old".into(),
+            root_namespace_id: "1".into(),
+        })))).unwrap();
+        assert_eq!(state.poll(), (false, None));
+        assert!(state.status.contains("DISCONNECTED"));
     }
 
     #[test]
