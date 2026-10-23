@@ -32,6 +32,8 @@ memory-probe = []
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
 # Opt-in local Iroh public identity UI; uses the same protected peer contacts.
 p2p-device-ui = ["p2p-device-contacts-preview"]
+# Read-only verified receiving journal in the Native transfer panel, opt-in only.
+p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
 # S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
 # Does not expose S3 writes, apply, file mutation or baseline actions.
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
@@ -44,6 +46,7 @@ sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum
 
 [dependencies]
 aquilum-core = { path = "../core", features = ["host-custody"] }
+akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
 # Основная ветка xilem: Masonry без релиза больше года, бэкенды под vello_cpu только там.
 # Ревизия зафиксирована, обновлять пачками.
 masonry = { git = "https://github.com/linebender/xilem", rev = "271a27a6d4a930f7878d404f9014e3c50a3a9b88", default-features = false }
