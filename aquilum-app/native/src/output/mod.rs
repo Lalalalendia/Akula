@@ -7,7 +7,9 @@ mod dxgi;
 mod soft;
 
 #[cfg(target_os = "windows")]
-pub use dxgi::Output;
+mod dispatch;
+#[cfg(target_os = "windows")]
+pub use dispatch::Output;
 #[cfg(not(target_os = "windows"))]
 pub use soft::Output;
 
