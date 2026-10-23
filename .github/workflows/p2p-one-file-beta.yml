@@ -63,7 +63,7 @@ jobs:
         if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
         shell: bash
         run: |
-          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 --no-deps > /dev/null
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 > /dev/null
           git diff -- aquilum-app/Cargo.lock
           git diff --exit-code -- aquilum-app/Cargo.lock
       - name: Exact Core atomic create-new regression tests
@@ -73,7 +73,7 @@ jobs:
         if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
         shell: bash
         run: cargo fmt --manifest-path aquilum-app/Cargo.toml -p aquilum-native -- --check
-      - name: Compile read-only Native Inbox preview (dependent branch only)
+      - name: Compile Native Inbox preview and Save Copy (dependent branch only)
         if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
         shell: bash
         run: |
