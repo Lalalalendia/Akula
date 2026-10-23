@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use aquilum_core::files::gate;
 use crate::ui::editor::TextEditor;
@@ -12,10 +11,14 @@ use crate::ui::editor::TextAction;
 use super::{App, Outcome, Popup};
 
 mod action;
+mod cloud_action;
+mod menu_action;
 mod apply;
+mod press;
 mod context;
 mod bindings;
 mod refresh;
+mod section;
 mod recovery;
 
 use crate::system;
@@ -42,11 +45,6 @@ pub(super) enum Effect {
 }
 
 impl App {
-    pub(super) fn open_settings(&mut self, root: &mut RenderRoot) {
-        let section = self.interface.settings_section().and_then(Section::from_key).unwrap_or(Section::Ui);
-        self.show_settings(root, section);
-    }
-
     fn show_settings(&mut self, root: &mut RenderRoot, section: Section) {
         let config = self.workspace.core.settings.get_config();
         let ctx = self.settings_context(section, None, 0);

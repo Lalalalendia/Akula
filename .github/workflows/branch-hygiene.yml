@@ -61,9 +61,10 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    # Avoid cancelling admission if the same PR is reopened immediately.
+    # Serialize admission across ALL new/reopened PRs; a per-PR group can race
+    # another PR against the same shrinking ceiling. Never cancel a waiting event.
     concurrency:
-      group: akula-pr-admission-${{ github.event.pull_request.number }}
+      group: akula-pr-admission-global
       cancel-in-progress: false
     steps:
       # Trust only the protected default branch; never run the incoming PR head.
