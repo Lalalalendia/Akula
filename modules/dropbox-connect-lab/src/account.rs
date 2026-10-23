@@ -119,17 +119,11 @@ trait AccountPorts {
     fn save(&self, scope: &AccountCredentialScope, refresh: &str)
         -> Result<(), AccountLoginError>;
 }
-struct LivePorts;
-impl AccountPorts for LivePorts {
-    fn exchange(&self, code: TokenExchange) -> Result<SessionTokens, AccountLoginError> {
-        let reply = exchange_once(code).map_err(AccountLoginError::Exchange)?;
-        Ok(SessionTokens {
-            account_id: reply.account_id().to_owned(),
-            access: Zeroizing::new(reply.access_token().to_owned()),
-            refresh: Zeroizing::new(reply.refresh_token().to_owned()),
-        })
-    }
-    fn get_account(&self, access: &str) -> Result<AccountIdentity, AccountLoginError> {
+/// Only this private seam can substitute a local endpoint in tests. The
+/// public account login always calls Dropbox's hard-coded HTTPS API.
+fn lookup_account_at(endpoint: &str, access: &str)
+    -> Result<AccountIdentity, AccountLoginError>
+{
         #[derive(Deserialize)]
         struct Root { root_namespace_id: String }
         #[derive(Deserialize)]
@@ -139,7 +133,7 @@ impl AccountPorts for LivePorts {
             .timeout_connect(Duration::from_secs(10))
             .timeout_read(Duration::from_secs(20))
             .timeout_write(Duration::from_secs(20)).build();
-        let response = agent.post(ACCOUNT_ROUTE)
+        let response = agent.post(endpoint)
             .set("Authorization", &auth)
             .set("Accept", "application/json")
             .call().map_err(|_| AccountLoginError::NetworkUnavailable)?;
@@ -160,6 +154,20 @@ impl AccountPorts for LivePorts {
             account_id: wire.account_id,
             root_namespace_id: wire.root_info.root_namespace_id,
         })
+}
+
+struct LivePorts;
+impl AccountPorts for LivePorts {
+    fn exchange(&self, code: TokenExchange) -> Result<SessionTokens, AccountLoginError> {
+        let reply = exchange_once(code).map_err(AccountLoginError::Exchange)?;
+        Ok(SessionTokens {
+            account_id: reply.account_id().to_owned(),
+            access: Zeroizing::new(reply.access_token().to_owned()),
+            refresh: Zeroizing::new(reply.refresh_token().to_owned()),
+        })
+    }
+    fn get_account(&self, access: &str) -> Result<AccountIdentity, AccountLoginError> {
+        lookup_account_at(ACCOUNT_ROUTE, access)
     }
     fn save(&self, scope: &AccountCredentialScope, refresh: &str)
         -> Result<(), AccountLoginError>
@@ -302,6 +310,62 @@ mod tests {
                 return Err(AccountLoginError::SecretStore(SecretError::StoreUnavailable));
             }
             Ok(())
+        }
+    }
+
+    fn fake_account_response(
+        status: u16, response_body: String,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut received = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !received.windows(4).any(|b| b == b"\r\n\r\n") {
+                let n = stream.read(&mut chunk).unwrap();
+                if n == 0 || received.len() > 8192 { panic!("invalid fake RPC request"); }
+                received.extend_from_slice(&chunk[..n]);
+            }
+            let header = String::from_utf8_lossy(&received).to_ascii_lowercase();
+            assert!(header.starts_with("post /2/users/get_current_account http/1.1"));
+            assert!(header.contains("authorization: bearer synthetic-access"));
+            let reason = if status == 200 { "OK" } else { "Unauthorized" };
+            write!(stream,
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(), response_body,
+            ).unwrap();
+        });
+        (format!("http://127.0.0.1:{port}/2/users/get_current_account"), worker)
+    }
+
+    #[test]
+    fn wire_account_lookup_rejects_malformed_oversize_and_unauthorized() {
+        let valid = serde_json::json!({
+            "account_id": "dbid:alice",
+            "root_info": {".tag":"user","root_namespace_id":"12345","home_namespace_id":"12345"}
+        }).to_string();
+        let (url, task) = fake_account_response(200, valid);
+        let result = lookup_account_at(&url, "synthetic-access").unwrap();
+        task.join().unwrap();
+        assert_eq!(result.account_id, "dbid:alice");
+        assert_eq!(result.root_namespace_id, "12345");
+        assert!(result.validate("app_key_123").is_ok());
+
+        for (status, body, expected) in [
+            (200, r#"{"account_id":"dbid:alice"}"#.to_owned(),
+                AccountLoginError::InvalidAccount),
+            (200, "x".repeat(MAX_ACCOUNT_REPLY as usize + 1),
+                AccountLoginError::InvalidAccount),
+            (401, r#"{"error":"expired"}"#.to_owned(),
+                AccountLoginError::NetworkUnavailable),
+        ] {
+            let (url, task) = fake_account_response(status, body);
+            assert_eq!(lookup_account_at(&url, "synthetic-access"), Err(expected));
+            task.join().unwrap();
         }
     }
 
