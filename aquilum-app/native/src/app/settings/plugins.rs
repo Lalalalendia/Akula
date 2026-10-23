@@ -93,7 +93,7 @@ impl App {
         }
     }
 
-    pub(super) fn plugin_demo_run(&self) -> Result<usize, String> {
+    pub(in crate::app) fn plugin_demo_run(&self) -> Result<usize, String> {
         let config = self.workspace.core.settings.get_config();
         if !config.plugin_alpha.installed || !config.plugin_alpha.enabled {
             return Err("The sample is disabled or not installed".into());
