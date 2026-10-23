@@ -11,13 +11,15 @@ use super::s3::S3Keyspace;
 use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
+mod explicit_credentials;
+pub(crate) mod pair_upload;
+pub(crate) mod pair_receive;
+pub use explicit_credentials::S3PairAccess;
 mod manifest;
 mod principal;
 pub use principal::{S3AwsAccountProofError, S3AwsVerifiedAccountScope};
 mod v2_readonly;
 pub use v2_readonly::{S3PinnedV2ReadError, S3PinnedV2ReadPreview};
-// Bounded, opt-in read-only pack verifier. The sender/builder stays
-// test-only; no new remote writer or local file apply is enabled.
 mod pack_probe;
 // Pure bounded pack encoder for future host-admitted sender; no S3 writer.
 mod coord_pack_encode;
@@ -45,7 +47,6 @@ mod coord_chain;
 pub use coord_chain::{S3CoordOfflineChainError, S3CoordOfflineChainPreview};
 mod coord_selective_packs;
 pub use coord_selective_packs::S3CoordSelectivePacksPreview;
-// Immutable V1-manifest-ID keyed advisory locator discovery; never S3 LIST.
 mod coord_locator;
 // V2 immutable packs/letter/locator prepublication; never mutable CAS.
 mod coord_immutable_publish;
@@ -69,7 +70,6 @@ use std::time::Duration;
 
 #[cfg(test)]
 use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
-
 /// Test-only S3 method-attempt instrumentation. These count Akula SDK
 /// HEAD/GET attempts and fully read payload bytes, not TCP bytes, retries
 /// inside the AWS SDK, TLS frames or server-side network traffic.

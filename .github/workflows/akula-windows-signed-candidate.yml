@@ -86,12 +86,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $release | Out-Null
           Copy-Item -LiteralPath $built -Destination (Join-Path $release 'shiva-pdf-preview.exe') -Force
           Write-Host "AKULA_PDF_SHIVA_BUNDLED pin=$actual"
-      - name: Build trusted-source local-only Akula and NSIS package
+      - name: Build signed Akula with S3 pairing, Shiva PDF sidecar and NSIS
         working-directory: aquilum-app
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo build --release --locked -p aquilum-native --features installed
+          # S3 pairing remains user-initiated in the single signed Akula.
+          cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta
           if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
           $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
           Copy-Item -LiteralPath (Join-Path $bin 'aquilum-native.exe') -Destination (Join-Path $bin 'akula-app.exe') -Force
@@ -345,7 +346,7 @@ jobs:
           cat >> "$RUNNER_TEMP/akula-release-notes.md" <<'NOTES'
 
           ---
-          Signed Akula Windows NSIS beta. Automatic NSIS crash rollback is
+          Signed Akula Windows NSIS update. Automatic NSIS crash rollback is
           not provided: reinstall the previous signed Akula version if needed.
           Akula is a separate product from Aquilum; Linux/macOS are not
           authorized by this Windows-only release.
@@ -359,6 +360,6 @@ jobs:
           gh release create "v${version}" \
             "dist/${file}" "dist/${file}.sig" dist/latest.json dist/latest.json.sig \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Akula v${version} (Windows beta)" --latest \
+            --title "Akula v${version}" --latest \
             --notes-file "$RUNNER_TEMP/akula-release-notes.md"
           echo "AKULA_SIGNED_WINDOWS_BETA_PUBLISHED version=${version} source=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
