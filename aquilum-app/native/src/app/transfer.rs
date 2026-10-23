@@ -75,18 +75,29 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
-        #[cfg(feature = "p2p-device-contacts-preview")]
+        #[cfg(all(feature = "p2p-device-contacts-preview", feature = "messaging-w4-pilot"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
             self.transfer.error.as_deref(), identity_view,
-            #[cfg(feature = "messaging-w4-pilot")] Some(&self.transfer.w4_pilot.view),
+            Some(&self.transfer.w4_pilot.view),
         );
-        #[cfg(not(feature = "p2p-device-contacts-preview"))]
+        #[cfg(all(feature = "p2p-device-contacts-preview", not(feature = "messaging-w4-pilot")))]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            &self.transfer.transport_contacts, self.transfer.choosing,
+            self.transfer.error.as_deref(), identity_view,
+        );
+        #[cfg(all(not(feature = "p2p-device-contacts-preview"), feature = "messaging-w4-pilot"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
-            #[cfg(feature = "messaging-w4-pilot")] Some(&self.transfer.w4_pilot.view),
+            Some(&self.transfer.w4_pilot.view),
+        );
+        #[cfg(all(not(feature = "p2p-device-contacts-preview"), not(feature = "messaging-w4-pilot")))]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
