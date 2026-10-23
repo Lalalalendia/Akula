@@ -49,8 +49,14 @@ pub struct TransferDialog {
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
+    #[cfg(feature = "messaging-w4-pilot")]
+    pub w4_actions: Vec<(WidgetId, PilotAction)>,
 }
 
+#[cfg(feature = "messaging-w4-pilot")]
+mod w4_pilot;
+#[cfg(feature = "messaging-w4-pilot")]
+pub use w4_pilot::{PilotAction,PilotView};
 mod dialog_view;
 pub use dialog_view::dialog;
 
