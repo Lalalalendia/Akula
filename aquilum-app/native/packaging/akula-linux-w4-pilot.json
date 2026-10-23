@@ -1,6 +1,6 @@
 {
   "productName": "Akula",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "identifier": "io.github.lalalendia.akula",
   "description": "Akula local-first workspace + opt-in encrypted W3/W4 messaging pilot (no auto listener)",
   "homepage": "https://github.com/Lalalalendia/Akula",
