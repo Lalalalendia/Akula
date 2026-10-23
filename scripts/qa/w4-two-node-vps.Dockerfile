@@ -13,6 +13,7 @@ RUN apt-get update -qq \
        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash w4qa \
+    && usermod --password '*' w4qa \
     && install -d -m 0700 -o w4qa -g w4qa /home/w4qa/.ssh \
     && install -d -m 0755 /run/sshd \
     && printf '%s\n' \
