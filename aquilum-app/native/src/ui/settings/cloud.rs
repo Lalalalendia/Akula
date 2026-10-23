@@ -28,7 +28,7 @@ use crate::ui::tokens::size;
 use crate::ui::widgets::{IconButton, Leading, Press, Pressed, Rule, TextButton, Variant, Wrap};
 use crate::ui::{icons, theme};
 
-use schema::{Action, CloudProvider, Context, Section};
+use schema::{Action, CloudProvider, Context, Control, Section, Setter};
 
 const TILE_WIDTH: f64 = 196.0;
 const TILE_HEIGHT: f64 = 148.0;
@@ -265,6 +265,19 @@ pub struct CloudPopup {
     pub save: Option<WidgetId>,
     pub provider: CloudProvider,
     pub bindings: HashMap<WidgetId, Binding>,
+    // Draft public fields live only in this modal until explicit Save.
+    // OS credentials and completed Configure/Import actions are independent.
+    staged_texts: Vec<(Setter, String)>,
+}
+
+fn same_setter(a: Setter, b: Setter) -> bool {
+    match (a, b) {
+        (Setter::Config(x), Setter::Config(y)) => std::ptr::fn_addr_eq(x, y),
+        (Setter::Scale, Setter::Scale) |
+        (Setter::HomePage, Setter::HomePage) |
+        (Setter::Autostart, Setter::Autostart) => true,
+        _ => false,
+    }
 }
 
 pub struct CloudCard {
@@ -279,14 +292,21 @@ fn window_size(room: Size) -> Size {
     Size::new(room.width.min(840.0), room.height.min(720.0))
 }
 
-fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider) -> CloudCard {
+fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider, staged: &[(Setter, String)]) -> CloudCard {
     let close = NewWidget::new(IconButton::new(icons::X, t("settings.cloud.close")));
     let close_id = close.id();
     let mut bindings = HashMap::new();
     let title = provider.label();
     let inner = if provider == CloudProvider::Yandex {
-        let block = schema::blocks(Section::Sync, config, ctx)
+        let mut block = schema::blocks(Section::Sync, config, ctx)
             .into_iter().next().expect("Yandex setup block");
+        for row in &mut block.rows {
+            if let (Some(setter), Control::Text { value, .. }) = (row.setter, &mut row.control)
+                && let Some((_, draft)) = staged.iter().find(|(key, _)| same_setter(*key, setter))
+            {
+                value.clone_from(draft);
+            }
+        }
         super::layout::block_widget(block, &mut bindings)
     } else {
         NewWidget::new(Flex::column()
@@ -320,7 +340,7 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider) -> CloudCard
 }
 
 pub fn provider_modal(config: &AppConfig, ctx: &Context, provider: CloudProvider) -> (NewWidget<Modal>, CloudPopup) {
-    let built = card(config, ctx, provider);
+    let built = card(config, ctx, provider, &[]);
     let title = provider.label();
     let layer = Modal::new(built.card, &title, CardSize::Window(window_size), Role::Dialog, false);
     let popup = CloudPopup {
@@ -330,13 +350,24 @@ pub fn provider_modal(config: &AppConfig, ctx: &Context, provider: CloudProvider
         save: built.save,
         provider,
         bindings: built.bindings,
+        staged_texts: Vec::new(),
     };
     (layer, popup)
 }
 
 impl CloudPopup {
+    pub fn remember_text(&mut self, setter: Setter, text: &str) {
+        if let Some((_, existing)) = self.staged_texts.iter_mut()
+            .find(|(stored, _)| same_setter(*stored, setter))
+        {
+            text.clone_into(existing);
+        } else {
+            self.staged_texts.push((setter, text.to_owned()));
+        }
+    }
+
     pub fn rebuild(&mut self, root: &mut RenderRoot, config: &AppConfig, ctx: &Context) {
-        let built = card(config, ctx, self.provider);
+        let built = card(config, ctx, self.provider, &self.staged_texts);
         root.edit_widget(self.layer, |mut w| Modal::set_card(
             &mut w.downcast(), built.card, &self.provider.label(),
         ));
@@ -393,7 +424,7 @@ mod tests {
         assert_eq!(actions.len(), CloudProvider::ALL.len());
         for provider in CloudProvider::ALL {
             assert!(actions.contains(&provider));
-            let built = card(&config, &ctx, provider);
+            let built = card(&config, &ctx, provider, &[]);
             assert_eq!(built.save.is_some(), provider == CloudProvider::Yandex);
             if provider != CloudProvider::Yandex {
                 assert!(built.bindings.is_empty());
