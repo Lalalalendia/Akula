@@ -962,6 +962,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "external n0 discovery: explicitly run only in P2P Windows profile CI"]
     async fn actual_n0_identity_only_quic_one_file_to_cold_inbox() {
         // Only synthetic bytes and disposable QUIC keys leave this CI host.
         // This exercises n0 Internet discovery by EndpointId without a copied
