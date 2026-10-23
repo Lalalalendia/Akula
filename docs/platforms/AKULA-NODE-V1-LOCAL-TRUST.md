@@ -67,6 +67,41 @@ This is a local SQLite durability boundary, **not** a signed end-to-end
 receipt after power loss and not an independent revocation oracle if a
 hostile root deliberately rolls back both the policy and disk.
 
+## Local authorised replica Put/Get (next integration slice)
+
+The new `OwnerPutGrant` is an exact, owner-signed WRITE claim. It cannot be
+substituted with an `OwnerReadGrant`: the signed domains and independent
+root-owned digests are distinct. Owner policy schema is now **version 2**;
+older schema is intentionally HOLD rather than silently treated as sufficient
+write authority. Only one pinned Vault, exact file/revision and a currently
+recorded Iroh device can be admitted. Initial bound: a single top-level UTF-8
+Markdown file no larger than **16 MiB**. Arbitrary binaries and folder trees
+are not enabled.
+
+`NodeHost::issue_put_challenge` first verifies the exact owner-signed grant,
+root pins and owner-signed roster. `commit_put` checks the device's Ed25519
+proof for the issued nonce. A separate persistent SQLite `put_issued` table
+uses FULL sync and one-use transactional consume; `read_issued` (table
+`issued`) cannot be reused for Put. Both share a 64 outstanding challenge
+quota and rollback clock guard.
+
+After successful proof the new `store::commit` writes a BLAKE3 blob and
+immutable `RevisionRecord` via the **existing** `SqliteDagStore`, closes
+the DB, reopens independently and verifies the exact document/revision/path,
+hash, bytes and length. An orphan blob committed without its DAG revision
+cannot be read as an authorised revision. Only after this check and a fresh
+root policy read does Node Ed25519-sign a domain-separated `NodePutReceipt`.
+The client must independently pin its Node public key and check the receipt.
+A receipt confirms the Node's own locally re-opened commit; it is NOT an
+independent external durability audit against hostile root or disk rollback.
+
+`issue_read_challenge`/`fulfill_read` independently validate signed
+read scope and device proof, consume a READ-only challenge, and read only
+matching immutable bytes from the same Node state. These are **local Core
+APIs**, not live QUIC endpoints; the network layer is still not connected
+to them. No server listener, remote write, installation or File Gate authority
+is activated.
+
 ## Evidence and release gaps
 
 Code contains negative tests for persist/restart/replay, wrong peer/grant,
@@ -76,7 +111,7 @@ exact integration SHA.**
 
 Still blocked: trusted installer enrollment and signed release, actual
 systemd RuntimeDirectory/StateDirectory integration, authenticated Iroh
-server listener, owner-approved scoped Put, durable blob/revision receipt,
-second Akula Get and File Gate create-new, revoke after reboot and full
-Windows A → VPS → Windows B E2E. Do not enable the install button or
-merge this release slice until all of those pass.
+server listener, **remote** Put/Get, independent second-client File Gate
+create-new, revoke after reboot and full Windows A → VPS → Windows B E2E.
+This source is not compiler/CI-accepted on the integration HEAD. Do not
+enable the install button or merge this release slice until all pass.

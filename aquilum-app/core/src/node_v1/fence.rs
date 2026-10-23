@@ -3,6 +3,8 @@
 //! preissued challenge under the SAME currently protected owner policy.
 
 use super::trust::{AdmittedRead, RootTrust};
+
+mod put;
 use super::NodeV1Error;
 use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::{params, Connection, Transaction, TransactionBehavior};
@@ -108,15 +110,34 @@ impl DurableChallengeFence {
                    policy_digest BLOB NOT NULL CHECK(length(policy_digest) = 32),
                    expires_at INTEGER NOT NULL CHECK(expires_at > 0)
                  );
+                 CREATE TABLE put_issued (
+                   challenge BLOB PRIMARY KEY CHECK(length(challenge) = 32),
+                   peer BLOB NOT NULL CHECK(length(peer) = 32),
+                   grant_digest BLOB NOT NULL CHECK(length(grant_digest) = 32),
+                   policy_digest BLOB NOT NULL CHECK(length(policy_digest) = 32),
+                   expires_at INTEGER NOT NULL CHECK(expires_at > 0)
+                 );
                  CREATE TABLE clock_guard (
                    id INTEGER PRIMARY KEY CHECK(id = 1),
                    seen INTEGER NOT NULL CHECK(seen >= 0)
                  );
                  INSERT INTO clock_guard(id, seen) VALUES (1, 0);
-                 PRAGMA user_version = 1;
+                 PRAGMA user_version = 2;
                  COMMIT;",
             )?,
-            1 => {},
+            1 => db.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE put_issued (
+                   challenge BLOB PRIMARY KEY CHECK(length(challenge) = 32),
+                   peer BLOB NOT NULL CHECK(length(peer) = 32),
+                   grant_digest BLOB NOT NULL CHECK(length(grant_digest) = 32),
+                   policy_digest BLOB NOT NULL CHECK(length(policy_digest) = 32),
+                   expires_at INTEGER NOT NULL CHECK(expires_at > 0)
+                 );
+                 PRAGMA user_version = 2;
+                 COMMIT;",
+            )?,
+            2 => {},
             _ => return Err(NodeV1Error::Hold("unsupported Node challenge schema")),
         }
         let count: i64 = db.query_row(
@@ -144,8 +165,10 @@ impl DurableChallengeFence {
         let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         guarded_clock(&tx, now)?;
         tx.execute("DELETE FROM issued WHERE expires_at < ?1", params![now])?;
+        tx.execute("DELETE FROM put_issued WHERE expires_at < ?1", params![now])?;
         let pending: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM issued", [], |row| row.get(0),
+            "SELECT (SELECT COUNT(*) FROM issued) + (SELECT COUNT(*) FROM put_issued)",
+            [], |row| row.get(0),
         )?;
         if pending >= MAX_PENDING {
             return Err(NodeV1Error::Hold("Node challenge quota exhausted"));
@@ -189,46 +212,4 @@ impl DurableChallengeFence {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use super::super::trust::{admitted_fixture, policy_fixture};
-
-    #[test]
-    fn durable_once_and_wrong_peer_survive_restart() {
-        let temp = tempfile::tempdir().unwrap();
-        let state = temp.path().join("state");
-        fs::create_dir(&state).unwrap();
-        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
-        let trust = policy_fixture(&temp.path().join("root"), [5; 32]);
-        let admission = admitted_fixture(&trust);
-        let mut ledger = DurableChallengeFence::open(&state, trust.clone()).unwrap();
-        let nonce = ledger.issue(&admission).unwrap();
-        assert!(!ledger.consume_once([8; 32], [31; 32], nonce).unwrap());
-        drop(ledger);
-        let mut reopened = DurableChallengeFence::open(&state, trust).unwrap();
-        assert!(reopened.consume_once([7; 32], [31; 32], nonce).unwrap());
-        assert!(!reopened.consume_once([7; 32], [31; 32], nonce).unwrap());
-        assert!(!reopened.consume_once([7; 32], [32; 32], nonce).unwrap());
-        assert!(!reopened.consume_once([7; 32], [31; 32], [0; 32]).unwrap());
-    }
-
-    #[test]
-    fn root_policy_revoke_and_bad_state_permissions_halt() {
-        let temp = tempfile::tempdir().unwrap();
-        let state = temp.path().join("state");
-        fs::create_dir(&state).unwrap();
-        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
-        let owner_dir = temp.path().join("root");
-        let trust = policy_fixture(&owner_dir, [6; 32]);
-        let admission = admitted_fixture(&trust);
-        let mut ledger = DurableChallengeFence::open(&state, trust).unwrap();
-        let nonce = ledger.issue(&admission).unwrap();
-        fs::write(owner_dir.join("owner-policy.json"), b"revoked").unwrap();
-        assert!(ledger.consume_once([7; 32], [31; 32], nonce).is_err());
-        assert!(ledger.issue(&admission).is_err());
-        fs::set_permissions(&state, fs::Permissions::from_mode(0o777)).unwrap();
-        assert!(DurableChallengeFence::open(
-            &state, policy_fixture(&temp.path().join("root2"), [6; 32]),
-        ).is_err());
-    }
-}
+mod tests;

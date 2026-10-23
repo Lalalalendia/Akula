@@ -82,6 +82,14 @@ impl NodeIdentity {
 
     pub fn public_key(&self) -> [u8; 32] { self.public }
 
+    /// Only internal callers can sign a domain-separated local receipt.
+    pub(super) fn sign_receipt_claim(&self, claim: &[u8]) -> [u8; 64] {
+        let signature = self.key.sign(claim);
+        let mut out = [0; 64];
+        out.copy_from_slice(signature.as_ref());
+        out
+    }
+
     pub fn sign_health(&self, nonce: [u8; 32])
         -> Result<[u8; 64], NodeV1Error>
     {

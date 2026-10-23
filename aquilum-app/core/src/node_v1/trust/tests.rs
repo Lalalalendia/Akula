@@ -1,4 +1,6 @@
 use super::*;
+use crate::node_replica_auth_lab::{OwnerReadGrant, owner_claim, signed_grant_digest};
+use crate::sync::device_roster_lab::{OwnerSignedRoster, RosterStatus};
 use crate::sync::{DeviceId, DocumentId, RevisionId};
 use crate::sync::device_roster_lab::ClaimedDevice;
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -61,13 +63,14 @@ fn grant_requires_current_signed_roster_and_owner_signature() {
     grant.owner_signature = owner.sign(&owner_claim(&grant).unwrap())
         .as_ref().try_into().unwrap();
     let policy = PolicyFile {
-        version: 1,
+        version: 2,
         node_public: node,
         owner_public: owner.public_key().as_ref().try_into().unwrap(),
         vault_id,
         grant_epoch: 3,
         roster_digest: roster.claim_digest().unwrap(),
         grant_digest: signed_grant_digest(&grant).unwrap(),
+        put_grant_digest: [41; 32],
     };
     let path = parent.join(POLICY_NAME);
     fs::write(&path, serde_json::to_vec(&policy).unwrap()).unwrap();
