@@ -29,17 +29,17 @@ chmod 700 "$sandbox/bin/ssh"
 export PATH="$sandbox/bin:$PATH" AKULA_MOCK_CALLS="$sandbox/calls"
 
 bash -n "$runner"
-"$runner" --help | grep -q 'E2E' || "$runner" --help | grep -q 'two' # help output is stable
+bash "$runner" --help | grep -q 'E2E' || bash "$runner" --help | grep -q 'two' # help output is stable
 
 # Inputs must be rejected *before* any SSH invocation.
 : > "$sandbox/calls"
-if "$runner" "$sandbox/app.AppImage" '-oProxyCommand=evil' "$sha" >/dev/null 2>&1; then exit 1; fi
-if "$runner" "$sandbox/app.AppImage" 'root@vps.example' "$sha" >/dev/null 2>&1; then exit 1; fi
-if "$runner" "$sandbox/app.AppImage" 'user@localhost' "$sha" >/dev/null 2>&1; then exit 1; fi
-if "$runner" "$sandbox/app.AppImage" 'user@vps.example' 'invalidsha' >/dev/null 2>&1; then exit 1; fi
+if bash "$runner" "$sandbox/app.AppImage" '-oProxyCommand=evil' "$sha" >/dev/null 2>&1; then exit 1; fi
+if bash "$runner" "$sandbox/app.AppImage" 'root@vps.example' "$sha" >/dev/null 2>&1; then exit 1; fi
+if bash "$runner" "$sandbox/app.AppImage" 'user@localhost' "$sha" >/dev/null 2>&1; then exit 1; fi
+if bash "$runner" "$sandbox/app.AppImage" 'user@vps.example' 'invalidsha' >/dev/null 2>&1; then exit 1; fi
 fake_sha="$(printf '%064d' 0)"
 if [[ "$sha" == "$fake_sha" ]]; then fake_sha="$(printf '%064d' 1)"; fi
-if "$runner" "$sandbox/app.AppImage" 'user@vps.example' "$fake_sha" >/dev/null 2>&1; then exit 1; fi
+if bash "$runner" "$sandbox/app.AppImage" 'user@vps.example' "$fake_sha" >/dev/null 2>&1; then exit 1; fi
 if [[ -s "$sandbox/calls" ]]; then
   echo "SSH was invoked before validation" >&2
   exit 1
@@ -51,7 +51,7 @@ local_id="$(cat /etc/machine-id)"
 if [[ "$local_id" == "$AKULA_MOCK_REMOTE_ID" ]]; then
   export AKULA_MOCK_REMOTE_ID=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 fi
-"$runner" --preflight "$sandbox/app.AppImage" 'user@vps.example' "$sha" \
+bash "$runner" --preflight "$sandbox/app.AppImage" 'user@vps.example' "$sha" \
   > "$sandbox/good"
 grep -q '^AKULA_W4_TWO_NODE_PREFLIGHT_PASS ' "$sandbox/good"
 grep -Fq 'StrictHostKeyChecking=yes' "$sandbox/calls"
@@ -61,12 +61,12 @@ if grep -Fq 'StrictHostKeyChecking=no' "$sandbox/calls"; then exit 1; fi
 
 # Same machine ID and rejected SSH must prevent any experiment.
 export AKULA_MOCK_REMOTE_ID="$local_id"
-if "$runner" --preflight "$sandbox/app.AppImage" 'user@vps.example' "$sha" > /dev/null 2>&1; then
+if bash "$runner" --preflight "$sandbox/app.AppImage" 'user@vps.example' "$sha" > /dev/null 2>&1; then
   echo "two accounts on the same machine were accepted" >&2
   exit 1
 fi
 export AKULA_MOCK_MODE=refuse
-if "$runner" --preflight "$sandbox/app.AppImage" 'user@vps.example' "$sha" > /dev/null 2>&1; then
+if bash "$runner" --preflight "$sandbox/app.AppImage" 'user@vps.example' "$sha" > /dev/null 2>&1; then
   echo "rejected SSH host key was accepted" >&2
   exit 1
 fi
