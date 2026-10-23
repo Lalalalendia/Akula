@@ -26,6 +26,10 @@ impl App {
         fresh.sync_selected = dialog.sync_selected;
         fresh.sync_notice = dialog.sync_notice;
         fresh.yandex_notice = dialog.yandex_notice;
+        fresh.cloud_popup = dialog.cloud_popup;
+        if let Some(cloud) = fresh.cloud_popup.as_mut() {
+            cloud.rebuild(root, &config, &ctx);
+        }
         root.focus_on(Some(fresh.layer));
         if let Some(offset) = offset {
             fresh.content.edit(root, |mut area| ScrollArea::set_offset(&mut area, offset));
@@ -38,10 +42,15 @@ impl App {
     fn refocus(&mut self, root: &mut RenderRoot) {
         let Some((setter, text, caret)) = self.typing.take() else { return };
         let Some(Popup::Settings { dialog, .. }) = &self.popup else { return };
-        let field = dialog.bindings.iter().find_map(|(id, binding)| match binding {
-            Binding::Number { setter: s, .. } | Binding::Text { setter: s, .. } if same_setter(*s, setter) => Some(*id),
-            _ => None,
-        });
+        let find_field = |bindings: &std::collections::HashMap<_, _>| bindings.iter()
+            .find_map(|(id, binding)| match binding {
+                Binding::Number { setter: s, .. } | Binding::Text { setter: s, .. }
+                    if same_setter(*s, setter) => Some(*id),
+                _ => None,
+            });
+        let field = dialog.cloud_popup.as_ref()
+            .and_then(|cloud| find_field(&cloud.bindings))
+            .or_else(|| find_field(&dialog.bindings));
         if let Some(field) = field {
             root.focus_on(Some(field));
             root.edit_widget(field, |mut w| {
@@ -66,6 +75,9 @@ impl App {
         let switches = switch_travel(root, &dialog.bindings);
         dialog.bindings = bindings;
         dialog.content.edit(root, |mut area| ScrollArea::set_child(&mut area, content));
+        if let Some(cloud) = dialog.cloud_popup.as_mut() {
+            cloud.rebuild(root, &config, &ctx);
+        }
         resume_switches(root, &dialog.bindings, &switches);
         self.refocus(root);
     }
