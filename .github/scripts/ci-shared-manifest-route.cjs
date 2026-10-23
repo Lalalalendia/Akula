@@ -1,5 +1,6 @@
 'use strict';
 const {execFileSync}=require('node:child_process');
+const {matches: matchesWorkflowPaths}=require('./ci-file-ratchet.cjs');
 const CORE='aquilum-app/core/Cargo.toml';
 const LOCK='aquilum-app/Cargo.lock';
 const LIB='aquilum-app/core/src/lib.rs';
@@ -158,12 +159,28 @@ const OWNED_SUITES=Object.freeze({
     "aquilum-app/core/src/sync/pinned_windows.rs",
     "aquilum-app/core/src/sync/mod.rs",
     ".github/workflows/sync-pinned-read.yml"
+  ],
+  "owned_s3_reservation": [
+    "aquilum-app/core/src/sync/s3_reserved_replace*.rs",
+    "aquilum-app/core/src/sync/guarded_note_write.rs",
+    "aquilum-app/core/src/sync/guarded_note_write/tests/**",
+    "aquilum-app/core/src/sync/profile_binding.rs",
+    "aquilum-app/core/src/sync/s3_preimage_capture.rs",
+    "aquilum-app/core/src/sync/pinned_read.rs",
+    "aquilum-app/core/src/sync/journal/**",
+    "aquilum-app/core/src/sync/mod.rs",
+    "aquilum-app/core/src/documents/hub.rs",
+    "aquilum-app/core/src/files/gate/write.rs",
+    "aquilum-app/core/src/files/gate/mod.rs",
+    ".github/workflows/sync-reserved-s3-transaction.yml",
+    "docs/sync/p0g2-held-s3-editor-reservation.md",
+    "docs/sync/p0g3a-single-filegate-prewrite.md"
   ]
 });
 function ownedRoutes(paths){
   const changed=new Set(paths);
   return Object.fromEntries(Object.entries(OWNED_SUITES).map(([key,owned])=>
-    [key,owned.some(file=>changed.has(file))]));
+    [key,[...changed].some(file=>matchesWorkflowPaths({t:'paths',p:owned},file))]));
 }
 function changes(diff){
   return String(diff||'').split(/\r?\n/)
