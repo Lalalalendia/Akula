@@ -1,14 +1,14 @@
 use super::*;
 use aquilum_core::settings::models::DropboxReadOnlyDraft;
 
-/// A single opt-in test profile, never a connected or trusted Vault.
+/// User-initiated Dropbox read-only connection; not a trusted or synchronized Vault.
 pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.dropbox_readonly;
     let ready = draft.ready();
     let available = ready && !ctx.dropbox_preview_busy;
     let rows = vec![
-        info("Dropbox 3.13 — read-only test".into(),
-            Some("Separate Dropbox App Folder; only a pinned synthetic Vault. No upload, delete or local document changes.".into()),
+        info("Dropbox — подключение (только чтение)".into(),
+            Some("Подключение Dropbox с проверкой данных. Загрузка, удаление и синхронизация файлов пока недоступны.".into()),
             Control::Status {
                 text: ctx.dropbox_preview_status.clone(),
                 tone: if ctx.dropbox_preview_status.contains("REJECTED")
@@ -34,7 +34,7 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                 }
             }),
         row("Dropbox account ID".into(),
-            Some("Exact dbid:… from independently verified test account.".into()),
+            Some("Идентификатор Dropbox-аккаунта (dbid:…).".into()),
             Control::Text { value: draft.account_id.clone(), commit: true },
             |c, v| {
                 let value = text(v);
@@ -50,7 +50,7 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                     c.dropbox_readonly.root_namespace_id = value;
                 }
             }),
-        row("Synthetic Vault ID".into(), None,
+        row("Идентификатор хранилища".into(), None,
             Control::Text { value: draft.vault_id.clone(), commit: true },
             |c, v| {
                 let value = text(v);
@@ -58,7 +58,7 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                     c.dropbox_readonly.vault_id = value;
                 }
             }),
-        row("Test profile".into(), None,
+        row("Профиль подключения".into(), None,
             Control::Text { value: draft.profile_id.clone(), commit: true },
             |c, v| {
                 let value = text(v);
@@ -66,8 +66,8 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                     c.dropbox_readonly.profile_id = value;
                 }
             }),
-        row("Independently pinned HEAD BLAKE3".into(),
-            Some("64 lower-case hex digits obtained outside Dropbox. Never use a digest supplied by the remote service.".into()),
+        row("Контрольный BLAKE3 HEAD".into(),
+            Some("64 шестнадцатеричных символа из независимого доверенного источника.".into()),
             Control::Text { value: draft.trusted_head_blake3.clone(), commit: true },
             |c, v| {
                 let value = text(v);
@@ -75,18 +75,18 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                     c.dropbox_readonly.trusted_head_blake3 = value;
                 }
             }),
-        info("Explicit test (no sync)".into(),
+        info("Подключение без синхронизации".into(),
             Some(if ready {
-                "Browser authorization and cold restart readback use the native connector. Data stays read-only.".into()
+                "Авторизация откроется в браузере. Проверка подключения не изменяет файлы.".into()
             } else {
-                "Fill all independent test-account fields; the real account and HEAD must already exist.".into()
+                "Заполните параметры аккаунта и проверяемого хранилища.".into()
             }),
             Control::Buttons(vec![
-                Button::new("Authorize and verify (read-only)".into(), Action::DropboxConnectReadOnly)
+                Button::new("Подключить Dropbox (чтение)".into(), Action::DropboxConnectReadOnly)
                     .enabled(available),
-                Button::new("Resume stored connection (read-only)".into(), Action::DropboxResumeReadOnly)
+                Button::new("Проверить сохранённое подключение".into(), Action::DropboxResumeReadOnly)
                     .enabled(available),
             ])),
     ];
-    Block { title: "Dropbox — experimental".into(), rows }
+    Block { title: "Dropbox".into(), rows }
 }
