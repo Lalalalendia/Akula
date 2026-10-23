@@ -83,9 +83,11 @@ fn health(provider: CloudProvider, ctx: &Context) -> Health {
     {
         use crate::s3_pair_session::PairStatus;
         if ctx.s3_pair.busy { return Health::Checking; }
-        if matches!(ctx.s3_pair.status, PairStatus::Failed | PairStatus::Transferred {
-            needs_review: 1.., ..
-        }) {
+        if matches!(ctx.s3_pair.status,
+            PairStatus::Failed
+            | PairStatus::Transferred { needs_review: 1.., .. }
+            | PairStatus::Transferred { received_unconfirmed: 1.., .. }
+        ) {
             return Health::Review;
         }
         if ctx.s3_pair.configured && ctx.s3_pair.verified {
@@ -316,5 +318,59 @@ impl CloudPopup {
         self.save = built.save;
         self.bindings = built.bindings;
         root.focus_on(Some(self.layer));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cloud_tiles_never_confuse_stored_keys_with_working_sync() {
+        let mut ctx = Context::new(1.0);
+        assert_eq!(health(CloudProvider::Yandex, &ctx), Health::NotConnected);
+        assert_eq!(health(CloudProvider::AmazonS3, &ctx), Health::Unavailable);
+        ctx.yandex_keys = Some(true);
+        #[cfg(not(all(target_os = "windows", feature = "s3-pair-beta")))]
+        assert_eq!(health(CloudProvider::Yandex, &ctx), Health::NotConnected);
+        #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+        {
+            use crate::s3_pair_session::PairStatus;
+            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Saved);
+            ctx.s3_pair.configured = true;
+            ctx.s3_pair.status = PairStatus::Configured;
+            ctx.s3_pair.verified = false;
+            assert_ne!(health(CloudProvider::Yandex, &ctx), Health::Verified);
+            ctx.s3_pair.verified = true;
+            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Verified);
+            ctx.s3_pair.status = PairStatus::Transferred {
+                sent: 1, received_unconfirmed: 1, needs_review: 0,
+            };
+            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Review);
+            ctx.s3_pair.status = PairStatus::Failed;
+            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Review);
+        }
+    }
+
+    #[test]
+    fn every_provider_is_navigable_but_only_yandex_has_a_form() {
+        let config = AppConfig::default();
+        let ctx = Context::new(1.0);
+        let (_, bindings) = catalog(&ctx);
+        let actions = bindings.values().filter_map(|binding| {
+            match binding {
+                Binding::Button(Action::OpenCloudProvider(provider)) => Some(*provider),
+                _ => None,
+            }
+        }).collect::<Vec<_>>();
+        assert_eq!(actions.len(), CloudProvider::ALL.len());
+        for provider in CloudProvider::ALL {
+            assert!(actions.contains(&provider));
+            let built = card(&config, &ctx, provider);
+            assert_eq!(built.save.is_some(), provider == CloudProvider::Yandex);
+            if provider != CloudProvider::Yandex {
+                assert!(built.bindings.is_empty());
+            }
+        }
     }
 }
