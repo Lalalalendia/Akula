@@ -107,6 +107,9 @@ mod tests {
         let (_, actions) = render(&NativeReceiveView::default(), &contacts);
         assert_eq!(actions.len(), 2);
         assert!(matches!(&actions[0].1, NativeReceiveAction::Start(_)));
-        assert!(matches!(&actions[1].1, NativeReceiveAction::StartInternet(_)));
+        assert!(matches!(
+            &actions[1].1,
+            NativeReceiveAction::StartInternet(_)
+        ));
     }
 }
