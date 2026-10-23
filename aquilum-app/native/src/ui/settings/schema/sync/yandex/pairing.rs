@@ -96,7 +96,7 @@ pub(super) fn compact(
             Some(t("settings.yandex.manageKeysHint")),
             Control::Buttons(vec![
                 Button::new(t("settings.yandex.addKeys"), Action::StoreYandexKeys)
-                    .enabled(view.supported && view.bucket_ready && !ctx.s3_pair.busy),
+                                        .enabled(view.supported && !ctx.s3_pair.busy),
                 Button::new(t("settings.yandex.removeKeys"), Action::RemoveYandexKeys)
                     .enabled(view.supported && view.bucket_ready
                         && ctx.yandex_keys == Some(true) && !ctx.s3_pair.busy),
@@ -104,5 +104,9 @@ pub(super) fn compact(
         ),
     ];
     fields.extend(rows(ctx, view.supported && view.bucket_ready));
+    if let Some(notice) = &ctx.yandex_notice {
+        fields.push(info(t("settings.yandex.keyActionResult"), None,
+            Control::Status { text: notice.clone(), tone: Tone::Secondary }));
+    }
     Block { title: t("settings.yandex.pairEntry"), rows: fields }
 }
