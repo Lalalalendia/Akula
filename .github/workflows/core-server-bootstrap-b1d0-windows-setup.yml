@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# Cancel outdated PR revisions to avoid repeating expensive Windows cargo tests.
+# Manual probes are isolated by github.run_id and remain independent.
+concurrency:
+  group: akula-b1d0-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   windows-public-host-pin-and-disabled-install-ui:
     runs-on: windows-2025
