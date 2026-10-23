@@ -1,6 +1,6 @@
-# Opt-in native Dropbox integration compile gate, no Dropbox credentials or live calls.
-# This is a test-only PR workflow; it does not publish an installer.
-name: Akula 3.13 Dropbox native preview
+# Verify the ordinary installed Akula v0.3.13 contains the Dropbox read-only UI.
+# CI never needs live Dropbox credentials or automatically publishes releases.
+name: Akula 3.13 installed Dropbox verification
 
 on:
   pull_request:
@@ -30,8 +30,8 @@ jobs:
         with:
           workspaces: aquilum-app -> target
           key: 3-13-dropbox-native
-      - name: Compile real native window with Dropbox read-only code
-        run: cargo check --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features dropbox-readonly-preview
+      - name: Compile normal installed native Akula with Dropbox read-only code
+        run: cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed
       - name: Run public-scope configuration tests
         run: cargo test --manifest-path aquilum-app/Cargo.toml -p aquilum-core dropbox_readonly_draft_tests --lib
       - name: Run isolated native Dropbox onboarding tests
