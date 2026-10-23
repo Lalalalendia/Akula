@@ -81,3 +81,33 @@ Everyone Full Control. This is a negative gate, not proof against a malicious
 same-user process or privileged actor. The **objects directory and SQLite
 database still reopen by global paths**, and the whole ancestor chain is not
 pinned for the duration of publication. Release HOLD remains in force.
+
+### Local OS-protected peer enrollment integrated from PR #609 (opt-in)
+
+The Native send/receive beta now enables the existing `p2p-device-ui` feature,
+rather than only listing previously pinned contacts. The transfer dialog
+offers the existing user-mediated two-field manual pin interface from
+[PR #609](https://github.com/Lalalalendia/Akula/pull/609), using the same
+first-party Windows Credential Manager `peer_pin::confirm_peer`,
+`peer_state`, and `revoke_peer` APIs. The source implementation and
+18 RU/EN pairing strings are reused from #609, not an additional identity
+store. Peer controls appear only when the protected local identity has
+been explicitly loaded or initialized by the user. No private key is
+displayed, exported, stored in app files or sent across the network.
+
+The user must manually enter and independently compare the full 64-character
+key twice. Confirmation does not create a network session or authorize
+remote Vault/file reads. Separate review and confirmation are required to
+revoke, a changed key invalidates revocation, and stale background results
+cannot silently change the selected peer. A successful confirm/revoke
+refreshes OS-backed contacts so Native send/receive reflects revocation.
+The actual QUIC `remote_id` and fresh protected pin are still checked by
+the transport before reading a file or writing the private Inbox.
+
+The existing scoped Windows workflow additionally builds the complete
+Native feature and runs both peer-pair UI/state test modules, local-key UI
+tests and native send/receive action tests. **Code and test wiring only**:
+no confirmed exact-head CI, physical Windows two-device acceptance, complete
+Windows Inbox handle custody or shipping Windows installer. PR #609 remains
+an independent upstream implementation until reconciled; this branch
+does not merge or close it.
