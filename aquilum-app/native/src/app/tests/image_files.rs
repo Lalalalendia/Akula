@@ -11,7 +11,7 @@ fn click_file(h: &mut Harness, path: &Path) {
 }
 
 #[test]
-fn png_jpeg_and_webp_open_from_tree_without_replacing_the_note() {
+fn png_jpeg_and_webp_open_from_tree_as_readonly_document_pages() {
     let mut h = Harness::new();
     let vault = h.vault.path().to_path_buf();
     let note = vault.join("a.md");
@@ -34,18 +34,20 @@ fn png_jpeg_and_webp_open_from_tree_without_replacing_the_note() {
         }
         let before = std::fs::read(&path).unwrap();
         click_file(&mut h, &path);
-        let layer = match h.app.popup {
-            Some(Popup::Viewer { layer }) => layer,
-            _ => panic!("отдельное изображение не открылось: {name}"),
-        };
-        assert!(h.root.get_widget(layer).and_then(|w| w.downcast::<crate::ui::viewer::Viewer>()).is_some());
-        assert_eq!(h.app.tabs.active_id(), active);
-        assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
-        assert_eq!(h.body_text(), initial_text);
+        assert!(h.app.popup.is_none(), "фото не должно перекрывать README: {name}");
+        assert_eq!(h.app.tabs.active().path.as_deref(), Some(path.as_path()));
+        assert!(h.app.note.is_none(), "фотография не открывается в редакторе");
+        assert!(h.app.image_tab_widget().is_some());
         assert_eq!(std::fs::read(&path).unwrap(), before, "просмотр изменил исходник");
-        h.escape();
-        assert!(h.app.popup.is_none(), "Escape не закрыл просмотр");
+        assert!(h.app.open(&mut h.root, note.clone()));
+        assert_eq!(h.app.tabs.active_id(), active);
+        assert_eq!(h.body_text(), initial_text);
     }
+    let photo = vault.join("Фотография.PnG");
+    assert!(h.app.open_tree_file(&mut h.root, photo.clone(), true));
+    assert_eq!(h.app.tabs.tabs().len(), 2);
+    assert_eq!(h.app.tabs.tabs()[0].path.as_deref(), Some(note.as_path()));
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(photo.as_path()));
 }
 
 #[test]
@@ -67,9 +69,7 @@ fn corrupt_oversized_and_unsupported_files_do_not_open_or_modify_the_note() {
     click_file(&mut h, &large);
     assert!(h.app.popup.is_none(), "превышен лимит 32 МиБ");
 
-    // A valid PNG header can claim billions of decoded pixels while the
-    // compressed source still fits in a few dozen bytes. Reject by dimensions
-    // before invoking a fallback decoder with potentially huge allocations.
+    // Tiny compressed PNG claiming huge dimensions must be rejected.
     let bomb = vault.join("небольшой-файл-огромное-изображение.png");
     let mut header = Vec::new();
     {
@@ -77,11 +77,7 @@ fn corrupt_oversized_and_unsupported_files_do_not_open_or_modify_the_note() {
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().unwrap();
-        // The PNG decoder requires an IDAT chunk even when only reading
-        // dimensions. An IHDR-only fixture fails with MissingImageData before
-        // the preview pixel-budget guard is exercised.
-        // This valid zlib envelope has no image rows on purpose: dimensions
-        // must be rejected before decoding any pixel data.
+        // An IDAT chunk lets the dimension check execute before decoding.
         writer.write_chunk(png::chunk::IDAT, &[0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]).unwrap();
         writer.finish().unwrap();
     }
@@ -112,7 +108,9 @@ fn tree_image_preview_refuses_files_outside_the_open_vault() {
     let picture = outside.path().join("private.png");
     image::RgbaImage::new(8, 8).save(&picture).unwrap();
 
+    let active = h.app.tabs.active_id();
     assert!(!h.app.open_tree_file(&mut h.root, picture, false));
+    assert_eq!(h.app.tabs.active_id(), active);
     assert!(h.app.popup.is_none(), "нельзя смотреть за пределами рабочей папки");
 
     #[cfg(unix)]
