@@ -227,7 +227,11 @@ impl AccountResumePorts for LivePorts {
     fn refresh(&self, app: &str, saved: &RefreshToken)
         -> Result<Zeroizing<String>, AccountLoginError>
     {
-        resume::refresh_account_access(app, saved).map_err(AccountLoginError::Refresh)
+        // Reuse the exact fail-closed Vault refresh validation, but retain
+        // account-only authority and return only a zeroizing short-lived token.
+        resume::refresh_once(app, saved)
+            .map(|session| session.token.into_sensitive_string())
+            .map_err(AccountLoginError::Refresh)
     }
     fn get_account(&self, access: &str)
         -> Result<AccountIdentity, AccountLoginError>

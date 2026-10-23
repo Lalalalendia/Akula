@@ -54,25 +54,16 @@ impl Drop for RefreshReply {
     fn drop(&mut self) { self.access_token.zeroize(); }
 }
 
-struct ShortLivedAccess {
-    token: AccessToken,
+pub(super) struct ShortLivedAccess {
+    pub(super) token: AccessToken,
     #[allow(dead_code)]
     expires_in_seconds: u64,
 }
 
-fn refresh_once(app_key: &str, saved: &RefreshToken)
+pub(super) fn refresh_once(app_key: &str, saved: &RefreshToken)
     -> Result<ShortLivedAccess, ResumeError>
 {
     refresh_at(TOKEN_ENDPOINT, app_key, saved)
-}
-
-/// Reuse the same fail-closed refresh validation for account-only recovery.
-/// The short-lived bearer is moved into zeroizing memory; it cannot create
-/// a trusted Vault, apply files or retain refresh credentials.
-pub(crate) fn refresh_account_access(
-    app_key: &str, saved: &RefreshToken,
-) -> Result<Zeroizing<String>, ResumeError> {
-    Ok(refresh_once(app_key, saved)?.token.into_sensitive_string())
 }
 
 /// A test can substitute a local endpoint only inside this private module.
