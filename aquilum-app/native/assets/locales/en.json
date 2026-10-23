@@ -1,6 +1,7 @@
 {
   "transfer": {
     "nativeSendTitle": "One-file send · LAN beta",
+    "nativeSendCancel": "Cancel transfer",
     "nativeSendButton": "Send selected file",
     "nativeSendChoose": "Add exactly one file to the queue.",
     "nativeSendWaiting": "Waiting for receiver. Share your LAN IP and the displayed UDP port.",

@@ -30,6 +30,13 @@ pub enum QueueAction {
     Remove,
 }
 
+#[cfg(feature = "p2p-native-send-beta")]
+#[derive(Clone, Debug)]
+pub enum NativeSendAction {
+    Start(String),
+    Cancel,
+}
+
 /// Read-only view model; only the opt-in receiver-side worker populates rows.
 /// Display labels never become filesystem paths.
 #[derive(Clone, Debug)]
@@ -54,6 +61,7 @@ pub struct InboxView {
 #[derive(Clone, Debug, Default)]
 pub struct NativeSendView {
     pub busy: bool,
+    pub canceling: bool,
     pub listening: Option<String>,
     pub message: Option<String>,
     pub success: bool,
@@ -83,7 +91,7 @@ pub struct TransferDialog {
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
     pub inbox_save_actions: Vec<(WidgetId, String)>,
     #[cfg(feature = "p2p-native-send-beta")]
-    pub native_send_actions: Vec<(WidgetId, String)>,
+    pub native_send_actions: Vec<(WidgetId, NativeSendAction)>,
 }
 
 mod dialog_view;

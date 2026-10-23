@@ -9,6 +9,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, TryRecvError},
     },
     thread,
@@ -23,9 +24,17 @@ enum Event {
 pub(in crate::app) struct NativeSender {
     pub(super) view: NativeSendView,
     rx: Option<Receiver<Event>>,
+    stop: Option<Arc<AtomicBool>>,
 }
 
 impl NativeSender {
+    pub(super) fn cancel(&mut self) {
+        if let Some(flag) = &self.stop {
+            flag.store(true, Ordering::Release);
+            self.view.canceling = true;
+        }
+    }
+
     pub(super) fn poll(&mut self) -> bool {
         let mut changed = false;
         loop {
@@ -55,6 +64,8 @@ impl NativeSender {
                         error.chars().filter(|ch| !ch.is_control()).take(240).collect()
                     });
                     self.rx = None;
+                    self.stop = None;
+                    self.view.canceling = false;
                     changed = true;
                     break;
                 }
@@ -63,6 +74,8 @@ impl NativeSender {
                     self.view.busy = false;
                     self.view.message = Some("sender worker disconnected".into());
                     self.rx = None;
+                    self.stop = None;
+                    self.view.canceling = false;
                     changed = true;
                     break;
                 }
@@ -79,6 +92,8 @@ impl NativeSender {
     ) {
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
+        let stop = Arc::new(AtomicBool::new(false));
+        self.stop = Some(Arc::clone(&stop));
         self.view = NativeSendView {
             busy: true,
             ..NativeSendView::default()
@@ -89,14 +104,29 @@ impl NativeSender {
                 .build()
                 .map_err(|error| format!("create LAN runtime: {error}"));
             let result = runtime.and_then(|runtime| {
-                runtime.block_on(native_send_one(peer, source, |bound| {
-                    let _ = tx.send(Event::Listening(bound));
-                    wake();
-                }))
+                runtime.block_on(async {
+                    tokio::select! {
+                        answer = native_send_one(peer, source, |bound| {
+                            let _ = tx.send(Event::Listening(bound));
+                            wake();
+                        }) => answer,
+                        _ = async {
+                            while !stop.load(Ordering::Acquire) {
+                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            }
+                        } => Err("cancelled by local user".to_owned()),
+                    }
+                })
             });
             let _ = tx.send(Event::Finished(result));
             wake();
         });
+    }
+}
+
+impl Drop for NativeSender {
+    fn drop(&mut self) {
+        self.cancel();
     }
 }
 

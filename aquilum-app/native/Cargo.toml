@@ -50,7 +50,7 @@ sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum
 aquilum-core = { path = "../core", features = ["host-custody"] }
 akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
 akula-staya-integration = { path = "../../interop/akula-staya", features = ["p2p-one-file-lan-beta"], optional = true }
-tokio = { version = "1", features = ["rt", "time"], optional = true }
+tokio = { version = "1", features = ["rt", "time", "macros"], optional = true }
 # Основная ветка xilem: Masonry без релиза больше года, бэкенды под vello_cpu только там.
 # Ревизия зафиксирована, обновлять пачками.
 masonry = { git = "https://github.com/linebender/xilem", rev = "271a27a6d4a930f7878d404f9014e3c50a3a9b88", default-features = false }

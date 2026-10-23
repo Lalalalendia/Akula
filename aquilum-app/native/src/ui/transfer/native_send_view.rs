@@ -7,7 +7,7 @@ pub(super) fn render(
     view: &NativeSendView,
     contacts: &TransportContactView,
     exactly_one: bool,
-) -> (NewWidget<Flex>, Vec<(WidgetId, String)>) {
+) -> (NewWidget<Flex>, Vec<(WidgetId, NativeSendAction)>) {
     let mut actions = Vec::new();
     let mut panel = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
@@ -24,6 +24,14 @@ pub(super) fn render(
         if let Some(address) = &view.listening {
             panel = panel.with_fixed(details(address));
         }
+        if !view.canceling {
+            let cancel = NewWidget::new(TextButton::new(
+                t("transfer.nativeSendCancel"),
+                Variant::Ghost,
+            ));
+            actions.push((cancel.id(), NativeSendAction::Cancel));
+            panel = panel.with_fixed(cancel);
+        }
     } else {
         for contact in &contacts.rows {
             if contact.revoked || !exactly_one {
@@ -33,7 +41,7 @@ pub(super) fn render(
                 t("transfer.nativeSendButton"),
                 Variant::Ghost,
             ));
-            actions.push((button.id(), contact.full_endpoint_id.clone()));
+            actions.push((button.id(), NativeSendAction::Start(contact.full_endpoint_id.clone())));
             let short: String = contact.full_endpoint_id.chars().take(16).collect();
             panel = panel.with_fixed(NewWidget::new(
                 Flex::row()

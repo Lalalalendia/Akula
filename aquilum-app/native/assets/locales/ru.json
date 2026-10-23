@@ -1,6 +1,7 @@
 {
   "transfer": {
     "nativeSendTitle": "Отправка одного файла · LAN-бета",
+    "nativeSendCancel": "Отменить отправку",
     "nativeSendButton": "Отправить выбранный файл",
     "nativeSendChoose": "Добавьте ровно один файл в очередь.",
     "nativeSendWaiting": "Ожидание получателя. Нужны ваш LAN IP и указанный порт UDP.",

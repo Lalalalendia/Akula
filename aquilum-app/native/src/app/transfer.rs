@@ -161,6 +161,8 @@ impl App {
         let dismiss = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
             || (id == dialog.close && pressed);
         if dismiss {
+            #[cfg(feature = "p2p-native-send-beta")]
+            self.transfer.sender.cancel();
             dialog::close(root, dialog.layer);
             return Outcome::default();
         }
@@ -195,7 +197,13 @@ impl App {
             if let Some((_, peer)) = dialog.native_send_actions.iter()
                 .find(|(button, _)| *button == id)
             {
-                refresh = self.begin_native_send(peer);
+                refresh = match peer {
+                    transfer_ui::NativeSendAction::Start(peer) => self.begin_native_send(peer),
+                    transfer_ui::NativeSendAction::Cancel => {
+                        self.transfer.sender.cancel();
+                        true
+                    }
+                };
             }
         }
         #[cfg(feature = "p2p-device-ui")]
