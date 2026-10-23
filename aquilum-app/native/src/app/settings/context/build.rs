@@ -50,8 +50,9 @@ impl App {
             yandex_probe_busy: self.yandex_probe.busy(),
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             s3_pair: crate::s3_pair_session::PairUiView {
-                status: self.s3_pair.status(),
+                status: self.s3_pair.status_for(workspace.as_deref()),
                 busy: self.s3_pair.busy(),
+                verified: section == Section::Sync && self.s3_pair.verified_for(workspace.as_deref()),
                 configured: section == Section::Sync && workspace.as_deref()
                     .and_then(|root| aquilum_core::sync::s3_pair_host::read_pair_profile(
                         root, &self.workspace.data_dir,
