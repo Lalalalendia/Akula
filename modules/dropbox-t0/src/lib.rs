@@ -63,6 +63,15 @@ pub fn parse_delta_page(scope: &Scope, bytes: &[u8]) -> Result<DropboxDeltaPage,
             return Err(Error::InvalidMetadata);
         }
         let suffix = &path[prefix.len()..];
+        // Recursive Dropbox listings include the four structural folders.
+        // They are not sync objects or deletions; skip only the exact names.
+        // A deleted folder, foreign folder or unknown directory fails closed.
+        if tag == "folder" {
+            if !matches!(suffix, "refs" | "blobs" | "manifests" | "revisions") {
+                return Err(Error::InvalidMetadata);
+            }
+            continue;
+        }
         let key = ObjectKey::parse(suffix).map_err(|_| Error::InvalidMetadata)?;
         if !seen.insert(key.as_str().to_owned()) { return Err(Error::InvalidMetadata); }
         let entry = match tag {
@@ -104,6 +113,39 @@ mod delta_page_tests {
             "entries":[{".tag":"deleted","path_lower":path()}]});
         assert!(matches!(parse_delta_page(&scope(), &serde_json::to_vec(&tombstone).unwrap())
             .unwrap().entries[0], DropboxDeltaEntry::Deleted(_)));
+    }
+    #[test]
+    fn known_structural_folders_are_skipped_but_folder_deletions_hold() {
+        let prefix = format!("/akula-sync/v1/vaults/{}", scope().vault_id());
+        let mut entries = vec![];
+        for name in ["refs", "blobs", "manifests", "revisions"] {
+            entries.push(serde_json::json!({
+                ".tag":"folder","path_lower":format!("{prefix}/{name}")
+            }));
+        }
+        entries.push(serde_json::json!({
+            ".tag":"file","path_lower":path(),
+            "id":"id:abc","rev":"a1","size":3,"is_downloadable":true
+        }));
+        let page = serde_json::json!({
+            "cursor":"cursor","has_more":false,"entries":entries
+        });
+        let parsed = parse_delta_page(&scope(), &serde_json::to_vec(&page).unwrap()).unwrap();
+        assert_eq!(parsed.entries.len(), 1);
+        let root_deleted = serde_json::json!({
+            "cursor":"cursor","has_more":false,"entries":[
+                {".tag":"deleted","path_lower":format!("{prefix}/refs")}
+            ]
+        });
+        assert_eq!(parse_delta_page(&scope(), &serde_json::to_vec(&root_deleted).unwrap()),
+            Err(Error::InvalidMetadata));
+        let foreign_folder = serde_json::json!({
+            "cursor":"cursor","has_more":false,"entries":[
+                {".tag":"folder","path_lower":format!("{prefix}/unexpected")}
+            ]
+        });
+        assert_eq!(parse_delta_page(&scope(), &serde_json::to_vec(&foreign_folder).unwrap()),
+            Err(Error::InvalidMetadata));
     }
     #[test]
     fn foreign_paths_duplicate_keys_and_unknown_tags_are_rejected() {
