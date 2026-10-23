@@ -42,7 +42,7 @@ impl App {
     fn refocus(&mut self, root: &mut RenderRoot) {
         let Some((setter, text, caret)) = self.typing.take() else { return };
         let Some(Popup::Settings { dialog, .. }) = &self.popup else { return };
-        let find_field = |bindings: &std::collections::HashMap<_, _>| bindings.iter()
+        let find_field = |bindings: &std::collections::HashMap<masonry::core::WidgetId, Binding>| bindings.iter()
             .find_map(|(id, binding)| match binding {
                 Binding::Number { setter: s, .. } | Binding::Text { setter: s, .. }
                     if same_setter(*s, setter) => Some(*id),
