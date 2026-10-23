@@ -33,6 +33,8 @@ POST_WIN7_APIS = {
     "GetThreadDescription": "Windows 10",
     "SetProcessDpiAwarenessContext": "Windows 10",
     "EnableNonClientDpiScaling": "Windows 10",
+    "RoOriginateErrorW": "Windows 8",
+    "ProcessPrng": "Windows 8",
 }
 
 _DLL = re.compile(r"^\s*DLL Name:\s*(\S+)", re.IGNORECASE)
