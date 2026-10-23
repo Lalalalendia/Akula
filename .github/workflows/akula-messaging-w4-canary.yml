@@ -171,7 +171,10 @@ jobs:
           sha="$(sha256sum "$app" | cut -d' ' -f1)"
           # Uses a real SSH server in a private Docker network, but one CI host;
           # it is not evidence of a public WAN or two physical machines.
-          bash scripts/qa/w4-two-node-docker-fixture.sh "$app" "$sha"
+          bash scripts/qa/w4-two-node-docker-fixture.sh "$app" "$sha" |
+            tee dist/docs/W4_ISOLATED_SSH_TEST.txt
+          grep -Fxq 'AKULA_W4_TWO_NAMESPACE_SSH_PASS ssh_encrypted=1 sealed_W3=1 signed_W4=1 lost_w4=1 duplicate_commits=0' dist/docs/W4_ISOLATED_SSH_TEST.txt
+          grep -Fxq 'AKULA_W4_TEST_LIMITATIONS same_runner=1 public_internet=NOT_TESTED physical_two_pc=NOT_TESTED' dist/docs/W4_ISOLATED_SSH_TEST.txt
       - name: Upload unsigned canary candidate, not a public release
         uses: actions/upload-artifact@v7
         with:
