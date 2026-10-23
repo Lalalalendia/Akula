@@ -39,7 +39,10 @@ fn valid_label(label: &str, max: usize) -> bool {
         label.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 
-/// The identity of a credential within exactly one Akula vault/profile.
+/// The identity of a read-only credential in one Akula Vault Sync profile.
+/// The Dropbox OAuth app key is REQUIRED: different App Folder applications
+/// must not read or overwrite each other's refresh tokens, even when they
+/// belong to the same Dropbox account and the same local Akula vault.
 /// It contains no bearer token. Key names expose only a SHA-256 fingerprint.
 pub struct CredentialScope {
     username: String,
@@ -53,7 +56,8 @@ impl fmt::Debug for CredentialScope {
 
 impl CredentialScope {
     pub fn new(
-        account_id: &str, root_namespace: &str, vault_id: &str, profile_id: &str,
+        account_id: &str, root_namespace: &str, vault_id: &str,
+        profile_id: &str, oauth_app_key: &str,
     ) -> Result<Self, SecretError> {
         let account = account_id.strip_prefix("dbid:").ok_or(SecretError::InvalidScope)?;
         if !valid_label(account, 128)
@@ -61,10 +65,11 @@ impl CredentialScope {
             || !root_namespace.bytes().all(|x| x.is_ascii_digit())
             || !valid_uuid(vault_id)
             || !valid_label(profile_id, 64)
+            || !valid_label(oauth_app_key, 128)
         { return Err(SecretError::InvalidScope); }
 
         let mut hash = Sha256::new();
-        for component in [account_id, root_namespace, vault_id, profile_id] {
+        for component in [account_id, root_namespace, vault_id, profile_id, oauth_app_key] {
             hash.update((component.len() as u64).to_le_bytes());
             hash.update(component.as_bytes());
         }
@@ -235,7 +240,7 @@ mod tests {
     }
 
     fn scope(account: &str, vault: &str) -> CredentialScope {
-        CredentialScope::new(account, "123456", vault, "default").unwrap()
+        CredentialScope::new(account, "123456", vault, "default", "vault_sync_app").unwrap()
     }
     const VAULT: &str = "12345678-1234-1234-1234-123456789abc";
     fn test_vault() -> CredentialVault {
@@ -251,12 +256,28 @@ mod tests {
         assert!(!a.is_same_scope(&scope("dbid:alice",
             "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")));
         assert!(!a.is_same_scope(&CredentialScope::new(
-            "dbid:alice", "654321", VAULT, "default").unwrap()));
+            "dbid:alice", "654321", VAULT, "default", "vault_sync_app").unwrap()));
         assert!(!a.is_same_scope(&CredentialScope::new(
-            "dbid:alice", "123456", VAULT, "other").unwrap()));
+            "dbid:alice", "123456", VAULT, "other", "vault_sync_app").unwrap()));
+        assert!(!a.is_same_scope(&CredentialScope::new(
+            "dbid:alice", "123456", VAULT, "default", "other_dropbox_app").unwrap()));
+        assert!(!a.username().contains("vault_sync_app"));
         assert!(!a.username().contains("alice"));
         assert!(!a.username().contains(VAULT));
         assert!(!format!("{a:?}").contains(VAULT));
+    }
+
+    #[test]
+    fn oauth_apps_in_same_dropbox_account_cannot_share_a_refresh_token() {
+        let vault = test_vault();
+        let primary = scope("dbid:alice", VAULT);
+        let dropbox_drop = CredentialScope::new(
+            "dbid:alice", "123456", VAULT, "default", "drop_app").unwrap();
+        vault.save_refresh(&primary, &RefreshToken::new("readonly-refresh".into()).unwrap()).unwrap();
+        assert!(vault.load_refresh(&dropbox_drop).unwrap().is_none());
+        vault.save_refresh(&dropbox_drop, &RefreshToken::new("other-app-refresh".into()).unwrap()).unwrap();
+        vault.forget_local(&dropbox_drop).unwrap();
+        assert_eq!(vault.load_refresh(&primary).unwrap().unwrap().as_str(), "readonly-refresh");
     }
 
     #[test]
@@ -287,13 +308,15 @@ mod tests {
 
     #[test]
     fn invalid_scopes_and_secrets_are_rejected() {
-        for (account, root, vault, profile) in [
-            ("alice", "123", VAULT, "default"),
-            ("dbid:alice", "../bad", VAULT, "default"),
-            ("dbid:alice", "123", "bad", "default"),
-            ("dbid:alice", "123", VAULT, "../bad"),
+        for (account, root, vault, profile, app) in [
+            ("alice", "123", VAULT, "default", "vault_sync_app"),
+            ("dbid:alice", "../bad", VAULT, "default", "vault_sync_app"),
+            ("dbid:alice", "123", "bad", "default", "vault_sync_app"),
+            ("dbid:alice", "123", VAULT, "../bad", "vault_sync_app"),
+            ("dbid:alice", "123", VAULT, "default", ""),
+            ("dbid:alice", "123", VAULT, "default", "../different_app"),
         ] {
-            assert!(matches!(CredentialScope::new(account, root, vault, profile),
+            assert!(matches!(CredentialScope::new(account, root, vault, profile, app),
                 Err(SecretError::InvalidScope)));
         }
         assert!(matches!(RefreshToken::new("".into()), Err(SecretError::InvalidToken)));
