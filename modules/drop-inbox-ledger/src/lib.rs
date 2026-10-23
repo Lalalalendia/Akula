@@ -170,7 +170,16 @@ impl InboxLedger {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-        writer(&destination)?;
+        match writer(&destination) {
+            Ok(()) => {}
+            // Another trusted no-replace publisher can win between the
+            // existence check and this writer. Never accept its return code
+            // alone: independently confirm the exact local bytes and intent.
+            Err(LedgerError::Io(err)) if err.kind() == io::ErrorKind::AlreadyExists => {
+                return self.confirm(expected);
+            }
+            Err(err) => return Err(err),
+        }
         self.confirm(expected)
     }
 
@@ -538,6 +547,53 @@ mod tests {
         }), Err(LedgerError::InvalidLocalObject)));
         assert_eq!(inbox.count().unwrap(), 1);
         assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::NeedsReview);
+    }
+
+    #[test]
+    fn no_replace_race_adopts_only_the_verified_winner() {
+        let dir = tempfile::tempdir().unwrap();
+        let (v, data) = intent(Transport::P2p);
+        let mut first = InboxLedger::open(dir.path()).unwrap();
+        let mut contender = InboxLedger::open(dir.path()).unwrap();
+        first.reserve(&v).unwrap();
+        let mut attempts = 0;
+        let outcome = contender.receive_with_writer(&v, |path| {
+            assert_eq!(first.receive_with_writer(&v, |winner_path| {
+                use std::io::Write;
+                let mut file = fs::OpenOptions::new()
+                    .write(true).create_new(true).open(winner_path)?;
+                file.write_all(&data)?;
+                file.sync_all()?;
+                Ok(())
+            })?, LocalStatus::VerifiedLocal);
+            attempts += 1;
+            // A second no-replace publisher loses the filesystem race.
+            let _ = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+            Ok(())
+        }).unwrap();
+        assert_eq!(outcome, LocalStatus::VerifiedLocal);
+        assert_eq!(attempts, 1);
+        assert_eq!(contender.count().unwrap(), 1);
+        assert_eq!(contender.status(v.id).unwrap(), LocalStatus::VerifiedLocal);
+    }
+
+    #[test]
+    fn no_replace_race_with_bad_winner_never_confirms() {
+        let dir = tempfile::tempdir().unwrap();
+        let (v, _) = intent(Transport::P2p);
+        let mut ledger = InboxLedger::open(dir.path()).unwrap();
+        assert!(matches!(ledger.receive_with_writer(&v, |path| {
+            use std::io::Write;
+            let mut file = fs::OpenOptions::new()
+                .write(true).create_new(true).open(path)?;
+            file.write_all(b"wrong content")?;
+            file.sync_all()?;
+            // EEXIST is not enough to establish that the winner is valid.
+            let _ = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+            Ok(())
+        }), Err(LedgerError::InvalidLocalObject)));
+        assert_eq!(ledger.status(v.id).unwrap(), LocalStatus::NeedsReview);
+        assert_eq!(ledger.count().unwrap(), 1);
     }
 
     #[test]
