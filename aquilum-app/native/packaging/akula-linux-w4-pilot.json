@@ -1,0 +1,30 @@
+{
+  "productName": "Akula",
+  "version": "0.3.12",
+  "identifier": "io.github.lalalendia.akula",
+  "description": "Akula local-first workspace + opt-in encrypted W3/W4 messaging pilot (no auto listener)",
+  "homepage": "https://github.com/Lalalalendia/Akula",
+  "publisher": "Akula",
+  "name": "aquilum-native",
+  "binaries": [
+    {
+      "path": "akula-app",
+      "main": true
+    },
+    {
+      "path": "akula-w4-lab",
+      "main": false
+    }
+  ],
+  "binariesDir": "../../../.artifacts/cargo-native/release",
+  "icons": [
+    "../icons/32x32.png",
+    "../icons/128x128.png",
+    "../icons/128x128@2x.png"
+  ],
+  "appimage": {
+    "linuxdeployPlugins": {
+      "gstreamer": "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh"
+    }
+  }
+}
