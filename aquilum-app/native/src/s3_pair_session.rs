@@ -97,14 +97,17 @@ impl PairSession {
         self.run(move || {
             let result = yandex_credentials::with_stored_keys(
                 &bucket, |id, secret| {
-                    let outcome = with_runtime(|rt| rt.block_on(create_first_pair_profile(
+                    let profile = with_runtime(|rt| rt.block_on(create_first_pair_profile(
                         &core, &root, &appdata, &bucket, id, secret,
-                    )).map(|_| ()).map_err(|_| ()));
-                    if outcome.is_err()
-                        || !yandex_credentials::still_matches(&bucket, id, secret)
-                    {
+                    )).map_err(|_| ()))?;
+                    if !yandex_credentials::still_matches(&bucket, id, secret) {
                         return Err(());
                     }
+                    // WinCred was bucket-only in the legacy setup preview.
+                    // From now on, export and sync exclusively use this
+                    // exact cloud identity (VaultId/prefix/genesis pin).
+                    yandex_credentials::save_profile_keys(&profile, id, secret)
+                        .map_err(|_| ())?;
                     let base = custody::prepare_host_base().map_err(|_| ())?;
                     s3_pair_host::provision_cooperative_s3_pair_custody(
                         &core, &root, &appdata, &base,
@@ -131,8 +134,8 @@ impl PairSession {
             let result = (|| -> Result<(), ()> {
                 let profile = s3_pair_host::read_pair_profile(&root, &appdata)
                     .map_err(|_| ())?.ok_or(())?;
-                let encrypted = yandex_credentials::with_stored_keys(
-                    &profile.bucket, |id, secret| {
+                let encrypted = yandex_credentials::with_profile_keys(
+                    &profile, |id, secret| {
                         let invite = profile.with_keys(id, secret).map_err(|_| ())?;
                         seal_s3_pair_invite(&invite, &password).map_err(|_| ())
                     },
@@ -167,8 +170,27 @@ impl PairSession {
                 let sealed = fs::read(&source).map_err(|_| ())?;
                 let invite = open_s3_pair_invite(&sealed, &password).map_err(|_| ())?;
                 let profile = S3PairProfile::from_authenticated_invite(&invite);
+                // A failed prior import may have registered the SAME profile.
+                // Never rebind a different profile or a different remote root.
+                if let Some(existing) = s3_pair_host::read_pair_profile(
+                    &destination_root, &appdata,
+                ).map_err(|_| ())? {
+                    if existing != profile { return Err(()); }
+                }
+                // The entire remote trust / credential preflight runs BEFORE
+                // local workspace registration, profile binding and OS locks.
+                with_runtime(|rt| rt.block_on(s3_pair_host::verify_second_pair_remote(
+                    &profile, &invite.access_key_id, &invite.secret_access_key,
+                )).map_err(|_| ()))?;
+                // A scope-specific WinCred entry cannot silently overwrite
+                // a different key pair, even when the bucket name matches.
+                // An interruption can leave an inert unbound key, which a
+                // retry may reuse after repeating the remote verification.
+                yandex_credentials::save_profile_keys(
+                    &profile, &invite.access_key_id, &invite.secret_access_key,
+                ).map_err(|_| ())?;
                 // The selected empty directory is registered as a NEW local
-                // workspace. The cloud UUID is never a local workspace UUID.
+                // workspace, with its own local UUID and SQLite DB.
                 core.ui_state.resolve_workspace(
                     &destination_root.to_string_lossy(), crate::dates::now_ms(),
                 ).map_err(|_| ())?;
@@ -180,15 +202,13 @@ impl PairSession {
                 s3_pair_host::provision_cooperative_s3_pair_custody(
                     &core, &destination_root, &appdata, &base,
                 ).map_err(|_| ())?;
-                yandex_credentials::save_imported_keys(
-                    &profile.bucket, &invite.access_key_id, &invite.secret_access_key,
-                ).map_err(|_| ())?;
-                // Only the non-secret selected bucket is reflected in Native
-                // settings. Password, profile keys and SQLite state are never
-                // serialized into AppConfig or copied to the UI.
+                // This is only a UI preference; the authoritative selected
+                // profile is in app-private storage, not in editable config.
+                // Failure to save the display bucket must not report that a
+                // successfully bound workspace failed to import.
                 let mut settings = core.settings.get_config();
                 settings.s3_onboarding.bucket = profile.bucket.clone();
-                core.settings.update_config(settings).map_err(|_| ())?;
+                let _ = core.settings.update_config(settings);
                 Ok(())
             })();
             if result.is_ok() {
@@ -214,8 +234,8 @@ impl PairSession {
                 let scope = s3_pair_host::open_existing_cooperative_s3_pair_custody(
                     &core, &root, &appdata, &host_base,
                 ).map_err(|_| ())?;
-                let outcome = yandex_credentials::with_stored_keys(
-                    &profile.bucket, |id, secret| {
+                let outcome = yandex_credentials::with_profile_keys(
+                    &profile, |id, secret| {
                         with_runtime(|rt| rt.block_on(sync_new_files_once(
                             &core, &root, &appdata, Some(&scope), &profile,
                             id, secret,
