@@ -49,10 +49,7 @@ jobs:
       - name: Verify shipping lockfile remains resolved
         shell: bash
         run: |
-          # Diagnostic-only reconciliation: emit exact Cargo dependency diff
-          # and fail closed until reviewed lock bytes are committed.
-          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 > /dev/null
-          git diff -- aquilum-app/Cargo.lock
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --format-version 1 > /dev/null
           git diff --exit-code -- aquilum-app/Cargo.lock
       - name: Check shared real QUIC receiver and Inbox tests
         shell: bash
