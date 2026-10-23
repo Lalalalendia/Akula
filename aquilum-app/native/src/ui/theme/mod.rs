@@ -1,8 +1,8 @@
 mod colors;
+mod contrast;
 mod fonts;
 #[cfg(test)]
 mod tests;
-
 pub use colors::*;
 pub use fonts::*;
 

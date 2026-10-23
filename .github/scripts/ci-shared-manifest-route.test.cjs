@@ -124,3 +124,6 @@ test('Native package metadata is routed without duplicate direct OS workflows',(
     assert.equal(found.native_manifest_risky,p===NATIVE);
   }
 });
+
+const owned=require('./ci-shared-manifest-route.cjs');
+test('owned tests run once via gate on source-only and mixed manifest diffs',()=>{for(const [k,items] of Object.entries(owned.OWNED_SUITES)){for(const p of items){assert.equal(owned.ownedRoutes([p])[k],true);assert.equal(owned.ownedRoutes([p,LOCK,NATIVE])[k],true);}assert.equal(owned.ownedRoutes(['README.md'])[k],false);}const p=owned.assess({paths:[LOCK,NATIVE,'aquilum-app/core/src/sync/mod.rs']});for(const k of Object.keys(owned.OWNED_SUITES))assert.equal(p[k],true);});
