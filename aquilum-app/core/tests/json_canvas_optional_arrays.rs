@@ -20,7 +20,7 @@ fn valid_optional_sections_open_without_implicitly_mutating_bytes() {
         fs::write(&path, raw).unwrap();
         let doc = StructuredDocument::open(&path).expect("optional arrays are valid");
         let value = doc.canvas().unwrap();
-        assert_eq!(value.is_object(), true);
+        assert!(value.is_object());
         assert_eq!(fs::read(&path).unwrap(), *raw, "read must not normalize JSON");
         // The Core snapshot normalizes CRLF in memory; only the file's
         // original bytes must remain byte-for-byte unchanged on disk.

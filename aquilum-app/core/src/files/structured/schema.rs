@@ -183,5 +183,7 @@ pub(super) fn validate_canvas(text: &str) -> Result<Value, StructuredError> {
     let root = object(&value, "root")?;
     let node_ids = nodes(optional_array(root.get("nodes"), "nodes")?)?;
     edges(optional_array(root.get("edges"), "edges")?, &node_ids)?;
+    // The ID set borrows from `value`; release it before returning the Value.
+    drop(node_ids);
     Ok(value)
 }
