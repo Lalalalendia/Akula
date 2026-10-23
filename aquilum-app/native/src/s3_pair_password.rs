@@ -45,7 +45,7 @@ fn prompt(title: &str, details: &str) -> Result<Option<Zeroizing<String>>, Passw
     if rc != ERROR_SUCCESS { return Err(PasswordPromptError::Unavailable); }
     let length = secret.iter().position(|c| *c == 0)
         .unwrap_or(secret.len());
-    if !(12..=1023).contains(&length) {
+    if !(20..=1023).contains(&length) {
         return Err(PasswordPromptError::Invalid);
     }
     let answer = String::from_utf16(&secret[..length])
@@ -70,7 +70,7 @@ pub fn ask_import_password() -> Result<Option<Zeroizing<String>>, PasswordPrompt
 pub fn ask_export_password() -> Result<Option<Zeroizing<String>>, PasswordPromptError> {
     let Some(first) = prompt(
         "Akula S3: Share settings",
-        "Choose a long password. Send this password separately from the file.",
+        "Use a unique passphrase of at least 20 characters. Share it separately.",
     )? else { return Ok(None); };
     let Some(second) = prompt(
         "Akula S3: Confirm password",
