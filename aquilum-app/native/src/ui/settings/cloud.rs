@@ -308,7 +308,7 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider) -> CloudCard
     let footer = NewWidget::new(footer).with_props(PropertySet::new()
         .with(Gap::new(Length::px(size::GAP_LG)))
         .with(Padding::all(Length::px(size::DIALOG_PADDING))));
-    let divider = || NewWidget::new(Rule::new(Axis::Horizontal, || theme::current().border_default));
+    let divider = || Rule::new(Axis::Horizontal, || theme::current().border_default);
     let modal = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(header(&title, Some(close)))
