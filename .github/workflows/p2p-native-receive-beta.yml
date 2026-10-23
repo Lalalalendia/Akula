@@ -48,6 +48,8 @@ jobs:
         run: |
           cargo check --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta native_address_accepts_private_lan -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta native_internet_entrypoints_reject_bad_peer_before_n0_network -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta internet_routing_is_never_selected_by_legacy_lan_modes -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta native_recipient_persists_only_inbox -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta native_receiver_rejects_corrupted -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_receiver_refuses_junction_ancestor -- --nocapture
