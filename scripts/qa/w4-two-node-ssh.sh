@@ -116,7 +116,7 @@ scp -q "${ssh_opts[@]}" "$app" "$destination:$remote_dir/akula.AppImage" ||
   die "could not upload synthetic test AppImage to remote scratch directory"
 remote "chmod 700 '$remote_dir/akula.AppImage'" ||
   die "could not protect remote binary"
-remote_digest="$(remote "sha256sum '$remote_dir/akula.AppImage' | awk '{print \\$1}'")" ||
+remote_digest="$(remote "sha256sum '$remote_dir/akula.AppImage' | awk '{print \$1}'")" ||
   die "remote SHA256 failed"
 [[ "$remote_digest" == "$expected" ]] || die "remote executable changed in transit"
 remote "APPIMAGE_EXTRACT_AND_RUN=1 '$remote_dir/akula.AppImage' --w4-pilot status" |
