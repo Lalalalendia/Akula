@@ -3,7 +3,7 @@
 use super::identity;
 use aquilum_core::node_v1::NodeIdentity;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
