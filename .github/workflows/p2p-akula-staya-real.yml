@@ -86,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan
-          cargo build --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity
+          cargo build --manifest-path aquilum-app/Cargo.toml --target-dir .artifacts/cargo-native --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity
           mkdir -p .artifacts/p2p-cross-network-windows
           cp interop/akula-staya/target/debug/akula-p2p-lan.exe .artifacts/p2p-cross-network-windows/
           cp .artifacts/cargo-native/debug/akula-p2p-identity.exe .artifacts/p2p-cross-network-windows/
