@@ -26,14 +26,30 @@ jobs:
           rustc -Vv
           cargo -V
           rustup target list | Select-String 'win7|windows-msvc'
+          rustc --print target-list | Select-String 'win7-windows-msvc'
           New-Item -ItemType Directory -Force -Path win7-results | Out-Null
+      - name: Find MSVC PE inspection tool
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          if (!(Test-Path $vswhere)) { throw 'vswhere.exe absent on runner' }
+          $vsroot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (!$vsroot) { throw 'Visual Studio C++ tools not found' }
+          $msvcs = @(Get-ChildItem (Join-Path $vsroot 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          if ($msvcs.Count -eq 0) { throw 'MSVC tool directories missing' }
+          $dumpbin = Join-Path $msvcs[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          if (!(Test-Path $dumpbin)) { throw "dumpbin.exe missing: $dumpbin" }
+          "AKULA_DUMPBIN=$dumpbin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "PE inspection executable: $dumpbin"
       - name: Build A/B minimal components independently
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
           $targets = @('x86_64-pc-windows-msvc', 'x86_64-win7-windows-msvc')
           $modes = @('normal', 'slim')
+          $built = 0
           foreach ($target in $targets) {
             foreach ($mode in $modes) {
               $env:RUSTFLAGS = if ($mode -eq 'slim') { '--cfg windows_slim_errors' } else { '' }
@@ -44,22 +60,34 @@ jobs:
                 $out = Join-Path 'win7-results' "$target-$mode-$probe"
                 New-Item -ItemType Directory -Force -Path $out | Out-Null
                 Write-Host "PROBE $target $mode $probe"
-                & cargo @args *> (Join-Path $out 'build.log')
-                $exit = $LASTEXITCODE
+                try {
+                  & cargo @args *> (Join-Path $out 'build.log')
+                  $exit = $LASTEXITCODE
+                } catch {
+                  $exit = 999
+                  "EXCEPTION: $_" | Add-Content (Join-Path $out 'build.log')
+                }
                 "exit_code=$exit" | Set-Content (Join-Path $out 'status.txt')
                 if ($exit -eq 0) {
                   $exe = Join-Path 'docs/research/win7-ab/target' "$target/release/$probe.exe"
                   if (Test-Path $exe) {
                     Copy-Item $exe (Join-Path $out "$probe.exe")
-                    Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-String | Add-Content (Join-Path $out 'status.txt')
-                    & dumpbin /imports $exe *> (Join-Path $out 'imports.txt')
-                    & dumpbin /headers $exe *> (Join-Path $out 'headers.txt')
+                    "sha256=$((Get-FileHash $exe -Algorithm SHA256).Hash)" | Add-Content (Join-Path $out 'status.txt')
+                    & $env:AKULA_DUMPBIN /imports $exe *> (Join-Path $out 'imports.txt')
+                    "imports_exit=$LASTEXITCODE" | Add-Content (Join-Path $out 'status.txt')
+                    & $env:AKULA_DUMPBIN /headers $exe *> (Join-Path $out 'headers.txt')
+                    "headers_exit=$LASTEXITCODE" | Add-Content (Join-Path $out 'status.txt')
+                    $built += 1
+                  } else {
+                    'exe_missing=1' | Add-Content (Join-Path $out 'status.txt')
                   }
                 }
               }
             }
           }
           Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          if ($built -eq 0) { throw 'No probe built successfully: inspect per-case build.log' }
+          Write-Host "PROBES_BUILT=$built / 16"
       - name: Summarize binaries and known post-Win7 imports
         if: always()
         shell: pwsh
