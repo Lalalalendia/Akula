@@ -82,8 +82,10 @@ chmod 700 "$tmp/commands/ssh" "$tmp/commands/scp"
 export AKULA_W4_FIXTURE_CONFIG="$tmp/keys/ssh-config"
 export PATH="$tmp/commands:$PATH"
 
+# Do not send the multi-GB Rust target directory as Docker build context.
 docker build --pull=false --tag "$image_name" \
-  --file "$root/scripts/qa/w4-two-node-vps.Dockerfile" "$root" >/dev/null
+  --file "$root/scripts/qa/w4-two-node-vps.Dockerfile" \
+  "$root/scripts/qa" >/dev/null
 
 # The receiver has its own /etc/machine-id and filesystem and is reachable
 # only through a Docker-mapped loopback SSH port on the disposable runner.
