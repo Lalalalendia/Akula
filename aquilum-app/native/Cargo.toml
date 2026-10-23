@@ -34,8 +34,9 @@ p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
 p2p-device-ui = ["p2p-device-contacts-preview"]
 # Read-only verified receiving journal in the Native transfer panel, opt-in only.
 p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
-# Explicit Native one-file LAN send. Never enabled in installed builds.
-p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-contacts-preview", "dep:akula-staya-integration", "dep:tokio"]
+# Explicit Native one-file LAN/Internet send plus local OS-backed pairing UI.
+# Never enabled in installed builds; manual peer pin remains distinct from grants.
+p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-ui", "dep:akula-staya-integration", "dep:tokio"]
 # Native receiver: explicitly request from an OS-pinned peer and store only in Inbox.
 p2p-native-receive-beta = ["p2p-native-send-beta"]
 # S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
