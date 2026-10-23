@@ -30,6 +30,54 @@ impl App {
             return self.keep(dialog, None, effect, root);
         }
 
+        // A cloud provider is a second, focus-trapped dialog above the settings
+        // catalog. No click on the catalog may be interpreted while it is open.
+        if let Some(mut cloud) = dialog.cloud_popup.take() {
+            let pressed = action.downcast_ref::<Pressed>().is_some();
+            let closing = (id == cloud.layer && action.downcast_ref::<DialogAnswer>() == Some(&DialogAnswer::Cancel))
+                || (pressed && (id == cloud.close || id == cloud.cancel));
+            if closing {
+                crate::ui::dialog::close(root, cloud.layer);
+                root.focus_on(Some(dialog.layer));
+                return self.keep(dialog, None, Effect::Content, root);
+            }
+            if pressed && cloud.save == Some(id) {
+                // Save also commits the current contents of fields even if the
+                // user clicked Save without pressing Enter in each field.
+                let texts = cloud.bindings.iter().filter_map(|(id, binding)| {
+                    let Binding::Text { setter, .. } = binding else { return None };
+                    let text = root.get_widget(*id)?
+                        .downcast::<TextEditor>()?.inner().text();
+                    Some((*setter, text))
+                }).collect::<Vec<_>>();
+                let mut proposal = self.workspace.core.settings.get_config();
+                for (setter, text) in &texts {
+                    if let crate::ui::settings::schema::Setter::Config(apply) = setter {
+                        apply(&mut proposal, &Value::Text(text.clone()));
+                    }
+                }
+                if !aquilum_core::settings::models::YandexS3Onboarding::valid_bucket(
+                    &proposal.s3_onboarding.bucket,
+                ) {
+                    dialog.yandex_notice = Some(crate::i18n::t("settings.yandex.keysNeedBucket"));
+                    dialog.cloud_popup = Some(cloud);
+                    return self.keep(dialog, None, Effect::Content, root);
+                }
+                for (setter, text) in texts {
+                    self.apply(setter, Value::Text(text));
+                }
+                crate::ui::dialog::close(root, cloud.layer);
+                root.focus_on(Some(dialog.layer));
+                return self.keep(dialog, None, Effect::Content, root);
+            }
+            let (mut effect, _) = self.on_binding(root, &mut cloud.bindings, id, action);
+            if pressed && let Some(Binding::Button(button)) = cloud.bindings.get(&id) {
+                effect = self.press(&mut dialog, button.clone());
+            }
+            dialog.cloud_popup = Some(cloud);
+            return self.keep(dialog, None, effect, root);
+        }
+
         if let Some(picked) = action.downcast_ref::<Picked>() {
             let Some(menu) = menu else {
                 self.popup = Some(Popup::Settings { dialog, menu: None });
@@ -124,6 +172,15 @@ impl App {
                 Action::RequestRecoveryReview(decision) if dialog.section == super::Section::Sync =>
                     self.request_sync_review(root, &mut dialog, decision),
                 Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
+                Action::OpenCloudProvider(provider) if dialog.section == super::Section::Sync => {
+                    let config = self.workspace.core.settings.get_config();
+                    let ctx = self.settings_context(dialog.section, dialog.copied, dialog.trash_page);
+                    let (layer, popup) = crate::ui::settings::provider_modal(&config, &ctx, provider);
+                    root.add_layer(layer, masonry::kurbo::Point::ORIGIN);
+                    root.focus_on(Some(popup.layer));
+                    dialog.cloud_popup = Some(popup);
+                    Effect::None
+                }
                 other => self.press(&mut dialog, other),
             };
         }
