@@ -3,8 +3,9 @@
 //! checksum. Never upgrade it into a verified snapshot or a File Gate grant.
 
 use aquilum_core::sync::{
+    plan_snapshot, DocumentId, HoldReason, ObservedObject, PlannedAction,
     ProviderCapabilities, RemoteObject, RemotePage, RemotePrecondition, RemoteStore,
-    RemoteStoreError, RemoteWriteReceipt,
+    RemoteStoreError, RemoteWriteReceipt, RevisionDag, RevisionId, SafetyPolicy, SnapshotDiff,
 };
 use akula_dropbox_t0::{
     read_http::{AccessToken, DropboxReadOnly, ReadError},
@@ -69,6 +70,24 @@ fn project_page(
         complete: !page.has_more,
         snapshot_id: "DROPBOX_UNVERIFIED_TRANSPORT_ONLY".to_owned(),
     })
+}
+
+/// Dropbox metadata is only a transport hint. Until a remote revision is
+/// admitted into Akula's authenticated DAG, the core planner must HOLD even
+/// if a Dropbox cursor says that a file exists or was deleted.
+pub(super) fn plan_transport_preview(
+    document_id: DocumentId,
+    local: ObservedObject,
+    baseline: Option<RevisionId>,
+    _remote: &RemoteObject,
+    dag: &RevisionDag,
+) -> PlannedAction {
+    plan_snapshot(&SnapshotDiff {
+        document_id,
+        confirmed_baseline: baseline,
+        local,
+        remote: ObservedObject::Unknown,
+    }, dag, SafetyPolicy::default())
 }
 
 fn map_error(error: ReadError) -> RemoteStoreError {
@@ -164,6 +183,18 @@ mod tests {
         assert_eq!(first.objects[0].content_hash, None);
         assert!(!first.complete);
         assert_eq!(first.next_cursor.as_deref(), Some("cursor-next"));
+    }
+
+    #[test]
+    fn unverified_dropbox_revision_cannot_become_a_download_or_delete_plan() {
+        let remote = project_page(page(serde_json::json!([file()]), false), 100)
+            .unwrap().objects.remove(0);
+        let doc = DocumentId::new();
+        let dag = RevisionDag::new();
+        let action = plan_transport_preview(doc, ObservedObject::VerifiedAbsent,
+            None, &remote, &dag);
+        assert_eq!(action, PlannedAction::Hold(HoldReason::UntrustedObservation));
+        assert_eq!(remote.revision, "r1");
     }
 
     #[test]
