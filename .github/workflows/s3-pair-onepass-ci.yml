@@ -12,6 +12,15 @@ on:
       - 'aquilum-app/native/src/s3_pair_*.rs'
       - 'aquilum-app/native/src/s3_pair_session/**'
       - 'aquilum-app/native/src/yandex_credentials/imported.rs'
+      - 'scripts/windows-cloud-provider-uia.ps1'
+      - 'scripts/windows-beta-gui-input.ps1'
+      - 'aquilum-app/native/src/app/settings/cloud_action.rs'
+      - 'aquilum-app/native/src/app/settings/action.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud.rs'
+      - 'aquilum-app/native/src/ui/settings/binding.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex/pairing.rs'
+      - '.github/scripts/s3-pair-routing.test.cjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,6 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify S3 smoke monitors real Windows UI and owned provider code
+        run: node --test .github/scripts/s3-pair-routing.test.cjs
       - name: Core pairing compile
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-core --features sync-s3
