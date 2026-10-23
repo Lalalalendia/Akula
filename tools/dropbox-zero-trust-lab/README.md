@@ -48,8 +48,10 @@ python3 -m py_compile probe.py test_probe.py
 python3 -m unittest -v test_probe
 ```
 
-The suite contains **11 mocked checks** for P01/P02/P03 and common fail-closed
-behavior. No real Dropbox service is contacted during these tests.
+The suite contains **17 mocked/offline checks** for P01/P02/P03, including a
+simulated post-commit transport failure, Dropbox-API-Result header consistency,
+remote path binding, bounded binary downloads, and negative oversize readback.
+No real Dropbox service is contacted during these tests.
 
 P01: Mint **two distinct** one-use temporary upload links for the same random
 exact path, both using `mode=add`, `autorename=false`, `strict_conflict=true`.
@@ -58,18 +60,23 @@ Upload A using link1. Try upload B using link2; verify original `file_id`,
 sibling. `PASS` only if the conflicting second write fails and A remains.
 
 P02: Mint one new link for a random path; send exactly **8 MiB + 1 byte** to a
-receiver that agreed to accept at most 8 MiB. If Dropbox accepts, report
+receiver that agreed to accept at most 8 MiB. If Dropbox responds successfully,
+read back **all 8 MiB + 1 byte** from the exact revision and compare independent
+file bytes and Dropbox content hash. Only verified acceptance reports
 `NO_8M_SERVER_CAP_OBSERVED`. That is a **negative security finding**: the
 Dropbox API did not enforce the Akula-specific per-invitation budget; the
 receiver must still reject the oversize object, but cloud quota was consumed.
-If Dropbox rejects, report HOLD until the specific reason is known. Do not
-mistake generic account or upload limits for per-invitation enforcement.
+The +1-byte bounded read is an explicit *test-only exception*, NOT permission to
+publish oversize objects to the production Inbox. If Dropbox rejects or readback
+cannot be verified, report HOLD until the specific cause is understood.
 
-P03: Create one random path and upload 1024 bytes, then deliberately ignore the
-application's knowledge of the POST result. Recover by read-only metadata,
+P03: Create one random path and upload 1024 bytes. Deliberately ignore the
+application's knowledge of the POST result, or tolerate a connection exception
+that can occur *after Dropbox has committed*. Recover by read-only metadata,
 `file_id/rev`, bounded `rev:` download, Dropbox hash and independent exact
-byte-for-byte comparison. **No blind retry.** This is application-layer ACK
-loss, not yet a real TCP-drop fault-injection test.
+byte-for-byte comparison. **No blind retry.** An offline fault-injection test
+simulates a post-commit transport error; the live test still uses application-layer
+ACK discard, not a packet-level TCP proxy. Neither proves Inbox durability.
 
 ## Evidence and limitations
 
@@ -77,7 +84,9 @@ The output includes only random experiment IDs and sanitized HTTP status,
 object metadata and PASS/HOLD/FAIL. It intentionally excludes access tokens,
 passwords, temporary upload URLs and user filenames. Dropbox `content_hash`
 is SHA-256 over per-4-MiB SHA-256 blocks, not Akula BLAKE3. Byte equality is
-proven independently by readback in this lab; Akula's own cryptographic sender
+proven independently by readback in this lab. Dropbox `Dropbox-API-Result` metadata
+and `path_lower` are cross-checked but are still provider assertions, not
+cryptographic evidence of sender identity. Akula's own cryptographic sender
 signature/AEAD/BLAKE3 and durable Inbox remain **separate required gates**.
 
 For each experiment, do not report live PASS without actually executing
