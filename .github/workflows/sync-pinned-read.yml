@@ -3,6 +3,8 @@ name: Sync pinned-read OS checks
 on:
   workflow_call:
   pull_request:
+    # Main uses the required Application checks owner route; other PR bases stay direct.
+    branches-ignore: [main]
     paths:
       - "aquilum-app/core/src/plugins/vault_reader.rs"
       - "aquilum-app/core/src/plugins/read_tests.rs"

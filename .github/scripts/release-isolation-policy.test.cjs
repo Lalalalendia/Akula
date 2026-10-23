@@ -95,6 +95,7 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY/);
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD/);
   assert.match(yaml, /test-windows-beta\.ps1/);
+  assert.match(yaml, /node scripts\/akula-version\.cjs check/);
   assert.match(yaml, /schema = 1/);
   assert.match(yaml, /artifacts = \[ordered\]@\{/);
   assert.match(yaml, /filename = \$package\[0\]\.Name/);
@@ -116,6 +117,23 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(publish, /m\.source_commit!==process\.env\.GITHUB_SHA/);
   assert.match(publish, /if gh release view/);
   assert.match(publish, /git ls-remote --exit-code --tags/);
+  assert.match(publish, /gh api .*releases\/latest/);
+  assert.match(publish, /node scripts\/akula-version\.cjs assert-newer/);
+  assert.match(publish, /releases\/generate-notes/);
+  assert.match(publish, /--notes-file/);
   assert.match(publish, /gh release create/);
   assert.match(publish, /--latest/);
+});
+
+// One signed Akula update is installed over the previous version. S3 is a
+// user-invoked feature of that same executable, not a second release channel.
+test('single published Akula installer includes opt-in S3 feature', () => {
+  const signed = file('.github/workflows/akula-windows-signed-candidate.yml');
+  const active = signed.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+  assert.match(active,
+    /^\s*cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta\s*$/m,
+    'the signed update must compile the S3 feature into the ordinary Akula EXE');
+  assert.match(active, /scripts\/test-windows-beta\.ps1/);
+  assert.match(active, /--title "Akula v\$\{version\}" --latest/);
+  assert.doesNotMatch(active, /--features installed,s3-pair-beta\s+--bin\s+different-app/);
 });
