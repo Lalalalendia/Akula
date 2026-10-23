@@ -155,8 +155,30 @@ pub async fn create_first_pair_profile(
 ) -> Result<S3PairProfile, S3PairHostError> {
     safe_appdata(root, appdata)?;
     RegisteredReadAdmission::open(core, root)?;
-    if read_pair_profile(root, appdata)?.is_some() {
-        return Err(S3PairHostError::ExistingDifferentProfile);
+    // A failed earlier setup may have committed the remote genesis and
+    // profile before Native could install its OS-owned File Gate lock or
+    // profile-scoped WinCred entry. Re-check the SAME registered cloud root
+    // instead of creating another one (and never capture a foreign root).
+    if let Some(existing) = read_pair_profile(root, appdata)? {
+        if existing.provider != "yandex" || existing.bucket != bucket {
+            return Err(S3PairHostError::ExistingDifferentProfile);
+        }
+        let ns = existing.keyspace()?;
+        let conn = existing.connection()?;
+        let client = AwsS3ProbeClient::connect_with_explicit_credentials(
+            conn.clone(), ns.clone(), access_id, access_secret,
+        ).await?;
+        let verified = verify_invited_genesis(
+            &client, &ns, &existing.genesis_fingerprint,
+        ).await?;
+        let admission = RegisteredReadAdmission::open(core, root)?;
+        let mut bindings = super::profile_binding::SqliteRegisteredS3Bindings::open(
+            &admission, &appdata.join("s3-profiles.sqlite"),
+        )?;
+        bindings.bind_existing_verified_s3(
+            &admission, "akula-pair-v1", &conn, &ns, &verified,
+        )?;
+        return Ok(existing);
     }
     let vault = VaultId::new();
     let profile = S3PairProfile::yandex_first_device(bucket, vault, "0".repeat(64));
@@ -189,6 +211,24 @@ pub async fn create_first_pair_profile(
     Ok(accepted)
 }
 
+/// Read-only remote identity preflight BEFORE registering any local
+/// workspace or mutating its SQLite/credential records. The imported pin is
+/// merely a trust-on-first-share assertion; it is NOT a signing certificate.
+pub async fn verify_second_pair_remote(
+    profile: &S3PairProfile,
+    access_id: &str,
+    access_secret: &str,
+) -> Result<(), S3PairHostError> {
+    profile.validate()?;
+    let ns = profile.keyspace()?;
+    let connection = profile.connection()?;
+    let client = AwsS3ProbeClient::connect_with_explicit_credentials(
+        connection, ns.clone(), access_id, access_secret,
+    ).await?;
+    verify_invited_genesis(&client, &ns, &profile.genesis_fingerprint).await?;
+    Ok(())
+}
+
 /// Second device. The encrypted invitation carries the genesis trust pin.
 /// Bind ONLY to a registered local workspace after verifying the full remote
 /// ancestry; never treat an arbitrary user-provided URL as authenticated.
@@ -202,6 +242,13 @@ pub async fn accept_second_pair_profile(
 ) -> Result<(), S3PairHostError> {
     safe_appdata(root, appdata)?;
     profile.validate()?;
+    // A partial import can be resumed for the same bound profile, but never
+    // rebind this installation's recorded local profile to another root.
+    if let Some(previous) = read_pair_profile(root, appdata)? {
+        if previous != *profile {
+            return Err(S3PairHostError::ExistingDifferentProfile);
+        }
+    }
     let ns = profile.keyspace()?;
     let conn = profile.connection()?;
     let client = AwsS3ProbeClient::connect_with_explicit_credentials(
