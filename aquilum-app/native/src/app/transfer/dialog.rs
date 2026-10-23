@@ -1,5 +1,4 @@
-//! Overlay construction is kept separate so the parent Transfer module does
-//! not grow with experimental messaging panels.
+//! Transfer overlay construction, preserving W4 alongside opt-in native P2P.
 use super::*;
 
 impl App {
@@ -10,29 +9,38 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
-        #[cfg(all(feature = "p2p-device-contacts-preview", feature = "messaging-w4-pilot"))]
+        let extras = transfer_ui::TransferExtras {
+            identity: identity_view,
+            #[cfg(feature = "p2p-device-ui")]
+            peer: if matches!(
+                self.transfer.local_identity.view.phase,
+                transfer_ui::IdentityPhase::Ready(_)
+            ) {
+                Some(&self.transfer.peer_pair.view)
+            } else {
+                None
+            },
+            #[cfg(feature = "p2p-inbox-preview")]
+            inbox: Some(&self.transfer.inbox.view),
+            #[cfg(feature = "p2p-native-send-beta")]
+            sender: Some(&self.transfer.sender.view),
+            #[cfg(feature = "p2p-native-send-beta")]
+            can_send: self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
+            #[cfg(feature = "p2p-native-receive-beta")]
+            receiver: Some(&self.transfer.receiver.view),
+            #[cfg(feature = "messaging-w4-pilot")]
+            w4: Some(&self.transfer.w4_pilot.view),
+        };
+        #[cfg(feature = "p2p-device-contacts-preview")]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view,
-            Some(&self.transfer.w4_pilot.view),
+            self.transfer.error.as_deref(), extras,
         );
-        #[cfg(all(feature = "p2p-device-contacts-preview", not(feature = "messaging-w4-pilot")))]
+        #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
-            &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view,
-        );
-        #[cfg(all(not(feature = "p2p-device-contacts-preview"), feature = "messaging-w4-pilot"))]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
-            Some(&self.transfer.w4_pilot.view),
-        );
-        #[cfg(all(not(feature = "p2p-device-contacts-preview"), not(feature = "messaging-w4-pilot")))]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
+            self.transfer.choosing, self.transfer.error.as_deref(), extras,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
@@ -45,5 +53,4 @@ impl App {
             self.show_transfers(root);
         }
     }
-
 }

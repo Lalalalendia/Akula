@@ -92,6 +92,8 @@ pub fn dialog(
         (card, Vec::new())
     };
     #[cfg(feature = "messaging-w4-pilot")]
+    let mut card = card;
+    #[cfg(feature = "messaging-w4-pilot")]
     let mut w4_actions = Vec::new();
     #[cfg(feature = "messaging-w4-pilot")]
     if let Some(view) = extras.w4 {
