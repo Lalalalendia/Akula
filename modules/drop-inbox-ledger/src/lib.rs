@@ -160,13 +160,16 @@ impl InboxLedger {
 
     /// The newest bounded page by local SQLite insertion order, not a
     /// provider-controlled timestamp. Every row is independently rehashed.
-    pub fn list_recent(&self, max_items: usize) -> Result<Vec<(ExpectedTransfer, LocalStatus)>, LedgerError> {
+    pub fn list_recent(
+        &self,
+        max_items: usize,
+    ) -> Result<Vec<(ExpectedTransfer, LocalStatus)>, LedgerError> {
         if max_items == 0 || max_items > 64 {
             return Err(LedgerError::InvalidIntent);
         }
-        let mut stmt = self.db.prepare(
-            "SELECT transfer_id FROM received_inbox ORDER BY rowid DESC LIMIT ?1",
-        )?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT transfer_id FROM received_inbox ORDER BY rowid DESC LIMIT ?1")?;
         let ids = stmt.query_map([max_items as i64], |row| row.get::<_, String>(0))?;
         let mut result = Vec::new();
         for id in ids {
@@ -824,14 +827,24 @@ mod tests {
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].0.id, last.id);
         assert_eq!(recent[0].1, LocalStatus::VerifiedLocal);
-        assert!(matches!(reader.list_recent(0), Err(LedgerError::InvalidIntent)));
-        assert!(matches!(reader.list_recent(65), Err(LedgerError::InvalidIntent)));
+        assert!(matches!(
+            reader.list_recent(0),
+            Err(LedgerError::InvalidIntent)
+        ));
+        assert!(matches!(
+            reader.list_recent(65),
+            Err(LedgerError::InvalidIntent)
+        ));
         fs::write(reader.object_path(last.id), b"tampered").unwrap();
-        assert_eq!(reader.list_recent(1).unwrap()[0].1, LocalStatus::NeedsReview);
+        assert_eq!(
+            reader.list_recent(1).unwrap()[0].1,
+            LocalStatus::NeedsReview
+        );
         // An SQL read-only handle cannot append a fake received item.
-        assert!(reader.db.execute(
-            "UPDATE received_inbox SET state = 0", []
-        ).is_err());
+        assert!(reader
+            .db
+            .execute("UPDATE received_inbox SET state = 0", [])
+            .is_err());
     }
 
     #[test]
