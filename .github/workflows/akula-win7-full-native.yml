@@ -1,5 +1,7 @@
 name: LAB Win7 full native build
 on:
+  push:
+    branches: ['lab/win7-release-pe-imports-20261023']
   pull_request:
     branches: [main]
     paths:
