@@ -319,6 +319,71 @@ mod tests {
     }
 
     #[test]
+    fn list_and_continue_use_only_verified_account_and_read_routes() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            for i in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                let header_end = loop {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&buf[..n]);
+                    if let Some(p) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break p + 4;
+                    }
+                };
+                let headers = String::from_utf8(request[..header_end].to_vec()).unwrap();
+                assert!(headers.to_ascii_lowercase().contains("authorization: bearer fake-token"));
+                let size = headers.lines().find_map(|line|
+                    line.to_ascii_lowercase().strip_prefix("content-length:")
+                        .and_then(|value| value.trim().parse::<usize>().ok())).unwrap_or(0);
+                while request.len() - header_end < size {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&buf[..n]);
+                }
+                let body = &request[header_end..header_end + size];
+                let reply = match i {
+                    0 => {
+                        assert!(headers.contains("/2/users/get_current_account"));
+                        json!({"account_id":"dbid:alice",
+                            "root_info":{"root_namespace_id":"12345"}})
+                    }
+                    1 => {
+                        assert!(headers.contains("/2/files/list_folder "));
+                        let payload: Value = serde_json::from_slice(body).unwrap();
+                        assert_eq!(payload["recursive"], true);
+                        assert_eq!(payload["path"], format!(
+                            "/akula-sync/v1/vaults/{}",scope().vault_id()));
+                        json!({"entries":[],"cursor":"c1","has_more":true})
+                    }
+                    _ => {
+                        assert!(headers.contains("/2/files/list_folder/continue "));
+                        let payload: Value = serde_json::from_slice(body).unwrap();
+                        assert_eq!(payload["cursor"], "c1");
+                        json!({"entries":[],"cursor":"c2","has_more":false})
+                    }
+                }.to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    reply.len(),reply).unwrap();
+            }
+        });
+        let base = format!("http://{addr}");
+        let client = connect_test(Endpoints { api: base.clone(), content: base });
+        let first = client.list_delta(None).unwrap();
+        assert!(first.entries.is_empty());
+        assert!(first.has_more);
+        let next = client.list_delta(Some(&first.cursor)).unwrap();
+        assert_eq!(next.cursor,"c2");
+        assert!(!next.has_more);
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn read_exact_revision_with_two_hashes_and_account_proof() {
         let bytes = b"hello akula".to_vec();
         let (endpoints, thread) = server(bytes.clone(), false, false);
