@@ -85,24 +85,26 @@ impl App {
         let inbox_view = Some(&self.transfer.inbox.view);
         #[cfg(not(feature = "p2p-inbox-preview"))]
         let inbox_view = None;
-        #[cfg(feature = "p2p-device-contacts-preview")]
+        // Rust cannot conditionally remove individual call arguments.
+        // Keep feature combinations explicit so default-off still compiles.
+        #[cfg(all(feature = "p2p-device-contacts-preview", feature = "p2p-native-send-beta"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
             self.transfer.error.as_deref(), identity_view, inbox_view,
-            #[cfg(feature = "p2p-native-send-beta")]
             Some(&self.transfer.sender.view),
-            #[cfg(feature = "p2p-native-send-beta")]
             self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
+        );
+        #[cfg(all(feature = "p2p-device-contacts-preview", not(feature = "p2p-native-send-beta")))]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            &self.transfer.transport_contacts, self.transfer.choosing,
+            self.transfer.error.as_deref(), identity_view, inbox_view,
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(), identity_view, inbox_view,
-            #[cfg(feature = "p2p-native-send-beta")]
-            Some(&self.transfer.sender.view),
-            #[cfg(feature = "p2p-native-send-beta")]
-            self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
