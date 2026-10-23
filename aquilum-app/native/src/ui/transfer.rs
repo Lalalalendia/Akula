@@ -34,6 +34,7 @@ pub enum QueueAction {
 #[derive(Clone, Debug)]
 pub enum NativeSendAction {
     Start(String),
+    StartInternet(String),
     Cancel,
 }
 
@@ -41,6 +42,7 @@ pub enum NativeSendAction {
 #[derive(Clone, Debug)]
 pub enum NativeReceiveAction {
     Start(String),
+    StartInternet(String),
     Cancel,
 }
 
