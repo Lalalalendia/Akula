@@ -412,7 +412,9 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
             .expect("real transferred file must be verified into local inbox");
         assert_eq!(status, LocalStatus::VerifiedLocal);
         assert_eq!(
-            fs::read(ledger.object_path(expected_receipt.id)).unwrap().as_slice(),
+            fs::read(ledger.object_path(expected_receipt.id))
+                .unwrap()
+                .as_slice(),
             *expected,
             "the persisted inbox object differs from real QUIC/Bao bytes"
         );
