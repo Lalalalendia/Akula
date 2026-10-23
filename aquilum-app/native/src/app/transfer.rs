@@ -20,6 +20,8 @@ const MAX_DEVICE_ROWS: usize = 32;
 mod model;
 #[cfg(feature = "p2p-inbox-preview")]
 mod inbox;
+#[cfg(feature = "p2p-native-send-beta")]
+mod native_send;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
@@ -56,6 +58,8 @@ pub(super) struct TransferState {
     pub(super) local_identity: local_identity::LocalIdentityUi,
     #[cfg(feature = "p2p-inbox-preview")]
     pub(super) inbox: inbox::InboxPreview,
+    #[cfg(feature = "p2p-native-send-beta")]
+    pub(super) sender: native_send::NativeSender,
 }
 
 impl App {
@@ -86,11 +90,19 @@ impl App {
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
             self.transfer.error.as_deref(), identity_view, inbox_view,
+            #[cfg(feature = "p2p-native-send-beta")]
+            Some(&self.transfer.sender.view),
+            #[cfg(feature = "p2p-native-send-beta")]
+            self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(), identity_view, inbox_view,
+            #[cfg(feature = "p2p-native-send-beta")]
+            Some(&self.transfer.sender.view),
+            #[cfg(feature = "p2p-native-send-beta")]
+            self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
@@ -117,6 +129,10 @@ impl App {
         }
         #[cfg(feature = "p2p-inbox-preview")]
         if self.transfer.inbox.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "p2p-native-send-beta")]
+        if self.transfer.sender.poll() {
             changed = true;
         }
         if changed {
@@ -172,6 +188,14 @@ impl App {
                 .find(|(button, _)| *button == id)
             {
                 refresh = self.begin_inbox_save(receipt);
+            }
+        }
+        #[cfg(feature = "p2p-native-send-beta")]
+        if pressed && !refresh {
+            if let Some((_, peer)) = dialog.native_send_actions.iter()
+                .find(|(button, _)| *button == id)
+            {
+                refresh = self.begin_native_send(peer);
             }
         }
         #[cfg(feature = "p2p-device-ui")]

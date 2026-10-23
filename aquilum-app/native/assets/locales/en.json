@@ -1,5 +1,13 @@
 {
   "transfer": {
+    "nativeSendTitle": "One-file send · LAN beta",
+    "nativeSendButton": "Send selected file",
+    "nativeSendChoose": "Add exactly one file to the queue.",
+    "nativeSendWaiting": "Waiting for receiver. Share your LAN IP and the displayed UDP port.",
+    "nativeSendSuccess": "Receiver verified the file. Not a durable acknowledgement.",
+    "nativeSendFailed": "Transfer failed",
+    "nativeSendNoPeers": "No confirmed devices.",
+    "nativeSendWarning": "Confirmed peers only. No Notes Vault access.",
     "inboxTitle": "Received Inbox · verified files",
     "inboxLoading": "Checking received files…",
     "inboxEmpty": "No received files yet.",
