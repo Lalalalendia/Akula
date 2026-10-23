@@ -69,3 +69,69 @@ fn converter_error_is_a_real_visible_native_dialog() {
     h.send(dialog, crate::ui::dialog::DialogAnswer::Cancel);
     assert!(h.app.popup.is_none());
 }
+
+
+/// Tests the app's production PDF->File Gate->Tantivy->native search result
+/// against the installed, SHA-pinned Shiva executable on disposable Windows.
+#[test]
+#[ignore = "Windows installed-beta acceptance with pinned Shiva sidecar"]
+fn installed_shiva_pdf_is_searchable_and_opens_from_native_result() {
+    use std::path::PathBuf;
+    use std::time::Duration;
+    let sidecar = PathBuf::from(
+        std::env::var_os("AKULA_PDF_INSTALLED_SIDECAR")
+            .expect("installed sidecar path required"),
+    );
+    let fixture = PathBuf::from(
+        std::env::var_os("AKULA_PDF_FIXTURE_PATH")
+            .expect("synthetic PDF fixture required"),
+    );
+    assert!(sidecar.is_file() && fixture.is_file());
+    let mut h = Harness::new();
+    let original = fs::read(&fixture).unwrap();
+    let source = h.vault.path().join("CI trusted PDF.pdf");
+    fs::write(&source, &original).unwrap();
+    let vault = h.vault.path().to_path_buf();
+    let note = crate::app::pdf_preview::import_trusted_with_converter(
+        &h.app.workspace.core, &vault, &source, &sidecar,
+    ).expect("Akula must create an indexed PDF preview from installed Shiva");
+    let contents = fs::read_to_string(&note).unwrap();
+    assert!(contents.contains("AKULANATIVEPDFNEEDLE"), "source text not indexed");
+    assert!(contents.contains("Needs review"), "not allowed to mark PDF complete");
+    assert_eq!(fs::read(&source).unwrap(), original, "user source was modified");
+
+    let duplicate = crate::app::pdf_preview::import_trusted_with_converter(
+        &h.app.workspace.core, &vault, &source, &sidecar,
+    ).expect("repeated import must be idempotent");
+    assert_eq!(duplicate, note);
+    assert_eq!(fs::read_to_string(&note).unwrap(), contents);
+
+    // The same native App search popup and result click as the real user.
+    h.app.workspace.core.search.prepare(&vault.to_string_lossy())
+        .expect("search service must initialize");
+    assert!(h.app.open(&mut h.root, note.clone()), "preview must open as a native tab");
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
+    h.app.open_search(&mut h.root);
+    h.app.query_changed(&mut h.root, "AKULANATIVEPDFNEEDLE".to_owned());
+    let mut result = None;
+    for _ in 0..600 {
+        h.app.on_core_events(&mut h.root);
+        h.app.on_search_results(&mut h.root);
+        if let Some(Popup::Search(state)) = &h.app.popup {
+            if state.result_count() > 0 {
+                result = Some(state.selected_path());
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(result.as_deref(), Some(note.as_path()),
+        "actual native search UI did not return the PDF-derived note");
+    let card = match &h.app.popup {
+        Some(Popup::Search(state)) => state.cards[0],
+        _ => panic!("native search popup disappeared"),
+    };
+    h.send(card, crate::ui::search::CardAction::Open { new_tab: false });
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
+    println!("AKULA_PDF_NATIVE_SEARCH_E2E=PASS;installed_shiva=1;gate=1;tantivy=1;ui=1;source_unchanged=1");
+}

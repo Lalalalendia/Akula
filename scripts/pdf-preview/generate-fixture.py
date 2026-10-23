@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def pdf_with_text():
-    instructions = b"BT /F1 16 Tf 72 720 Td (AKULA_NATIVE_PDF_NEEDLE) Tj ET\n"
+    instructions = b"BT /F1 16 Tf 72 720 Td (AKULANATIVEPDFNEEDLE) Tj ET\n"
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",

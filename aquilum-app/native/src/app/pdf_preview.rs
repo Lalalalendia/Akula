@@ -164,10 +164,18 @@ fn preview_body(filename: &str, digest: &str, text: &str) -> String {
 fn import_trusted_pdf(core: &Core, vault: &Path, source: &Path) -> Result<PathBuf, String> {
     // Missing companion is detected before creating a copy inside the vault.
     let companion = bundled_converter()?;
+    import_trusted_with_converter(core, vault, source, &companion)
+}
+
+/// Acceptance seam: the installed companion is supplied by the Windows test,
+/// while the release path above can only use the bundled binary.
+pub(in crate::app) fn import_trusted_with_converter(
+    core: &Core, vault: &Path, source: &Path, companion: &Path,
+) -> Result<PathBuf, String> {
     let admitted = admit_pdf_source(core, vault, source)?;
     let (actual, original) = read_trusted_pdf(vault, &admitted)?;
     let digest = blake3::hash(&original);
-    let text = extract_text(&companion, &original)?;
+    let text = extract_text(companion, &original)?;
     let (confirmed, current) = read_trusted_pdf(vault, &admitted)?;
     if actual != confirmed || blake3::hash(&current) != digest {
         return Err("PDF изменился во время обработки".into());

@@ -72,10 +72,25 @@ if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $extractedMd -PathType Leaf
   throw 'Installed Shiva PDF sidecar rejected valid digital-text PDF'
 }
 $extracted = Get-Content -LiteralPath $extractedMd -Raw -Encoding UTF8
-if (-not $extracted.Contains('AKULA_NATIVE_PDF_NEEDLE')) {
+if (-not $extracted.Contains('AKULANATIVEPDFNEEDLE')) {
   throw 'Installed Shiva PDF extraction lost native PDF text'
 }
 Write-Host 'AKULA_PDF_SIDECAR_INSTALLED=PASS;source=pinned-shiva;real_pdf=1;external_setup=0'
+# Run the full native application integration path against this *installed*
+# sidecar: File Gate, idempotence, Tantivy search UI cards and result opening.
+$env:AKULA_PDF_INSTALLED_SIDECAR = $sidecar
+$env:AKULA_PDF_FIXTURE_PATH = $sourcePdf
+Push-Location (Join-Path $env:GITHUB_WORKSPACE 'aquilum-app')
+try {
+  cargo test --locked -p aquilum-native --bin aquilum-native app::tests::pdf_preview::installed_shiva_pdf_is_searchable_and_opens_from_native_result -- --exact --ignored --nocapture
+  if ($LASTEXITCODE -ne 0) { throw 'Installed Shiva to native Akula search E2E failed' }
+} finally {
+  Pop-Location
+  Remove-Item Env:\AKULA_PDF_INSTALLED_SIDECAR -ErrorAction SilentlyContinue
+  Remove-Item Env:\AKULA_PDF_FIXTURE_PATH -ErrorAction SilentlyContinue
+}
+Write-Host 'AKULA_PDF_NATIVE_SEARCH_E2E=PASS;source=installed;real_ui_state=1'
+
 
 $vault = Join-Path $env:RUNNER_TEMP 'akula-beta-vault'
 New-Item -ItemType Directory -Force -Path $vault | Out-Null
