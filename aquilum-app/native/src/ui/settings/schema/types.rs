@@ -31,6 +31,10 @@ pub enum Action {
     NewToken,
     Copy(usize, String),
     OpenUrl(&'static str),
+    #[cfg(feature = "dropbox-readonly-preview")]
+    DropboxConnectReadOnly,
+    #[cfg(feature = "dropbox-readonly-preview")]
+    DropboxResumeReadOnly,
     CheckUpdates,
     InstallUpdate,
 }
