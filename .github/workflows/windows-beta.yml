@@ -61,6 +61,13 @@ jobs:
       - name: Build local-only native application
         working-directory: aquilum-app
         run: cargo build --release --locked -p aquilum-native --features installed
+      - name: Verify Windows Credential Manager with synthetic isolated credentials
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          # Native Windows API test; never uses Yandex credentials, network, or Akula vault data.
+          cargo test --release --locked -p aquilum-native --features installed --bin aquilum-native yandex_credentials::tests::windows_credential_manager_isolated_roundtrip -- --exact --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "Synthetic Windows Credential Manager round-trip failed" }
       - name: Compile pinned Shiva CLI as Akula's PDF sidecar
         shell: pwsh
         run: |

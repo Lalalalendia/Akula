@@ -1,81 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Do not accidentally package an experimental live network control. QA may
+// compile it only in non-release builds; production release requires separate
+// acceptance, code change and review.
+#[cfg(all(feature = "yandex-s3-connection-preview", not(debug_assertions)))]
+compile_error!("Yandex S3 connection preview must not ship in release builds");
+
 macro_rules! report {
     ($($arg:tt)*) => {
         $crate::host::report(&format!($($arg)*))
     };
 }
 
-mod a11y;
-mod args;
-mod autostart;
-mod app;
-mod cover;
-mod poster;
-mod graph;
-mod reader;
-mod video;
-mod dates;
-mod disk;
-mod file_ops;
-mod fling;
-mod frontmatter;
-mod i18n;
-mod images;
-mod instance;
-mod interface;
-mod links;
-mod history;
-mod host;
-mod metrics;
-#[cfg(feature = "memory-probe")]
-mod memory_probe;
+include!("native_modules.rs");
 
-#[cfg(feature = "memory-probe")]
-#[global_allocator]
-static ALLOCATOR: memory_probe::Counting = memory_probe::Counting;
-mod navigation;
-mod note;
-mod output;
-mod paths;
-mod pdf;
-mod rank;
-mod rope;
-mod stats;
-mod render;
-#[cfg(not(feature = "installed"))]
-mod replay;
-mod session;
-mod system;
-mod tabs;
-#[cfg(target_os = "windows")]
-mod touchpad;
-#[cfg(not(target_os = "windows"))]
-mod touchpad {
-    pub struct Touchpad;
-
-    impl Touchpad {
-        pub fn attach(_: &dyn winit::window::Window) -> Option<Self> {
-            None
-        }
-
-        pub fn active(&self) -> bool {
-            false
-        }
-
-        pub fn update(&self, _: std::time::Instant, _: f64) -> (f32, f32, f32) {
-            (0.0, 0.0, 1.0)
-        }
-    }
-}
-#[cfg(test)]
-mod test_dir;
-mod vault_files;
-mod vsync;
-mod ui;
-mod updater;
-mod window_state;
-mod workspace;
 pub use args::Args;
 fn main() {
     args::run_w4_pilot_if_requested();

@@ -1,6 +1,5 @@
 //! Inert sync contracts, types and deterministic fake provider.
 //! Local history is not distributed; File Gate protects dirty editor buffers.
-
 mod core_scan;
 mod dag;
 mod delta;
@@ -46,8 +45,15 @@ mod native_existing_replace_probe;
 mod native_windows_replace_probe;
 mod local_recovery;
 mod recovery_review;
-/// Crypto envelope contract only: no production key custody or archive writer yet.
 pub mod sealed_archive;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_invite;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_bootstrap;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_profile;
+#[cfg(feature = "sync-s3")]
+pub mod s3_pair_host;
 mod recovery_dashboard;
 #[cfg(feature = "sync-s3")]
 mod s3_publication_dashboard;
@@ -71,7 +77,6 @@ mod protocol;
 mod provider;
 mod s3;
 mod s3_manifest;
-// Inert V2 contract only: no S3 pack writer, reader or auto-sync activation.
 mod s3_pack_index;
 mod s3_manifest_delta;
 mod s3_coord_v2;
@@ -81,7 +86,6 @@ mod s3_anchored_delta;
 mod s3_delta_walker;
 #[cfg(feature = "sync-s3")]
 mod s3_remote_anchor;
-// App-data V2 trust anchor is not a per-document or write baseline.
 #[cfg(feature = "sync-s3")]
 mod s3_v2_trust_anchor;
 #[cfg(feature = "sync-s3")]
@@ -92,7 +96,6 @@ mod s3_transport;
 mod yandex_readonly_probe;
 mod upload;
 mod vault;
-
 pub use core_scan::{CoreVaultScanner, LocalScanPreview, LocalScanTrust, ScanLimits};
 pub use dag::{DagError, IngestOutcome, RevisionDag, RevisionOperation, RevisionRecord};
 pub use delta::{plan_revision_exchange, DeltaPlanError, MissingRevisionBatch, RevisionExchangePlan, RevisionInventory};
@@ -119,7 +122,6 @@ pub use protocol::{
     decode_identity_for_write, IdentityEnvelope, IdentityRecord, ProtocolCompatibility,
     ProtocolError, ProtocolVersion, SyncConfig, SyncProvider, WireEnvelope,
 };
-
 pub use fake::FakeRemoteStore;
 pub use fake_vault::FakeVaultPort;
 pub use provider::{
@@ -175,7 +177,7 @@ pub use s3_head_probe::{
 pub use yandex_readonly_probe::{probe_yandex_s3_read_only, YandexS3ProbeError};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
-    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage,
+    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage, S3PairAccess,
     S3AwsAccountProofError, S3AwsVerifiedAccountScope,
     S3ObservedObject, S3PutCondition, S3TransportError,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
@@ -191,7 +193,6 @@ pub use s3_transport::{
     S3VerifiedHintsError, S3VerifiedHintsJournal,
     plan_verified_s3_revision_replay, S3CasReplanPreview, S3ReplanError,
 };
-
 pub use upload::{upload_immutable_verified, UploadOutcome, VerifiedUploadError};
 pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
@@ -199,7 +200,6 @@ pub use vault::{
 };
 
 /// No sync scheduler or external I/O is started by importing these contracts.
-/// Runtime activation/UI remain out of scope until the S3 slice is validated.
 pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");

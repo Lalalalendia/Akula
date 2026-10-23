@@ -28,7 +28,6 @@ mod widths;
 mod workspaces;
 #[cfg(test)]
 mod tests;
-
 use std::collections::HashMap;
 use crate::ui::editor::TextEditor;
 use std::path::{Path, PathBuf};
@@ -80,14 +79,12 @@ enum Popup {
     Workspaces(workspaces::WorkspacesState),
     Transfers(crate::ui::transfer::TransferDialog),
 }
-
 #[derive(Default)]
 pub struct Outcome {
     pub title: bool,
     pub rescale: bool,
     pub window: Option<WindowCommand>,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WindowCommand {
     Drag,
@@ -137,6 +134,9 @@ pub struct App {
     panel_rx: Receiver<Listing>,
     panel_body: Option<Body>,
     retention_done: Arc<std::sync::atomic::AtomicBool>,
+    yandex_probe: crate::yandex_probe_session::ProbeSession,
+    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+    s3_pair: crate::s3_pair_session::PairSession,
     controls: Option<(WidgetId, Handle<WindowButton>)>,
     window: Size,
     resizing: Option<(crate::interface::Side, f64, f64)>,
