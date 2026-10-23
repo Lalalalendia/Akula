@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
-//! Offline Dropbox OAuth PKCE/S256 contract for a native client.
-//! No browser opening, token exchange HTTP, local listener, or persistence.
-//! The host must bind loopback before opening the system browser and
-//! register the exact redirect address with Dropbox App Console.
+//! Dropbox OAuth PKCE, loopback callback and token exchange contracts.
+//! No browser opening, credential persistence, cloud writes or File Gate.
+//! The exact loopback address must be registered in Dropbox App Console.
+
+pub mod callback;
+pub mod exchange;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use sha2::{Digest, Sha256};
