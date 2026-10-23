@@ -118,6 +118,26 @@ function Find-Node([string]$role, [string]$name, [int]$seconds) {
     } catch [System.Windows.Automation.ElementNotAvailableException] {}
     Start-Sleep -Milliseconds 250
   }
+  Write-Host "AKULA_UX_UIA_LOOKUP_MISSING role=$role label=$name hwnd=$hwnd process_title=$($proc.MainWindowTitle)"
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition)
+    Write-Host "AKULA_UX_UIA_TREE_COUNT=$($all.Count)"
+    $printed = 0
+    for ($k = 0; $k -lt $all.Count -and $printed -lt 75; $k++) {
+      try {
+        $current = $all.Item($k).Current
+        $title = [string]$current.Name
+        $control = [string]$current.ControlType.ProgrammaticName
+        if ($title -match 'README|Photo|Akula|Folder|folder|base|knowledge|close|Close' -or
+            $control -match 'TabItem|TreeItem|Image|Document') {
+          Write-Host "AKULA_UX_UIA_NODE role=$control name=$title enabled=$($current.IsEnabled) offscreen=$($current.IsOffscreen)"
+          $printed++
+        }
+      } catch [System.Windows.Automation.ElementNotAvailableException] {}
+    }
+  } catch { Write-Host "AKULA_UX_UIA_DUMP_ERROR $($_.Exception.Message)" }
   throw "UIA $role '$name' not visible"
 }
 function Count-Node([string]$role, [string]$name) {
