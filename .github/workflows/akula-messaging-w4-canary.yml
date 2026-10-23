@@ -136,6 +136,12 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 "$candidate" --w4-pilot status |
             grep -Fxq 'AKULA_W4_PILOT_READY helper=verified network=inactive auto_start=no SSH_only=yes'
           echo 'AKULA_W4_INSIDE_INSTALLED_APPIMAGE_PASS helper_hash=verified'
+          # Previous smoke covered only the loose native binary. Now exercise
+          # the *published AppImage*, extracting for each independent process.
+          # Two private SQLite roots, signed W4, dropped acknowledgement,
+          # idempotent retry, kill switch and no default public TCP listener.
+          bash scripts/messaging/w4-pilot-smoke.sh "$candidate"
+          echo 'AKULA_W4_INSTALLED_APPIMAGE_E2E_PASS bytes=1024 signed_w4=1 retry=1'
           (
             cd dist
             sha256sum *.AppImage > APPIMAGE_SHA256.txt
