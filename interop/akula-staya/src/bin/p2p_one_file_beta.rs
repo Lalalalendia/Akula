@@ -1059,7 +1059,10 @@ mod tests {
         let cold = akula_inbox_ledger_lab::InboxLedger::open(&inbox_root).unwrap();
         let checked = cold.list().unwrap();
         assert_eq!(checked.len(), 1);
-        assert_eq!(checked[0].1, akula_inbox_ledger_lab::LocalStatus::VerifiedLocal);
+        assert_eq!(
+            checked[0].1,
+            akula_inbox_ledger_lab::LocalStatus::VerifiedLocal
+        );
         assert_eq!(checked[0].0.sender_key, *sender_id.as_bytes());
         assert_eq!(checked[0].0.recipient_key, *receiver_id.as_bytes());
         assert_eq!(fs::read(cold.object_path(checked[0].0.id)).unwrap(), bytes);
