@@ -28,8 +28,6 @@ mod links;
 mod history;
 mod host;
 mod metrics;
-#[cfg(feature = "messaging-w4-pilot")]
-mod messaging_w4_pilot;
 #[cfg(feature = "memory-probe")]
 mod memory_probe;
 
@@ -82,16 +80,7 @@ mod workspace;
 pub use args::Args;
 
 fn main() {
-    // Explicit opt-in: normal Akula startup never starts a messaging listener.
-    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--w4-pilot")) {
-        #[cfg(feature = "messaging-w4-pilot")]
-        std::process::exit(messaging_w4_pilot::run());
-        #[cfg(not(feature = "messaging-w4-pilot"))]
-        {
-            eprintln!("W4 пилот недоступен в этой сборке Акулы");
-            std::process::exit(2);
-        }
-    }
+    args::run_w4_pilot_if_requested();
     #[cfg(target_os = "windows")]
     unsafe {
         #[link(name = "winmm")]
