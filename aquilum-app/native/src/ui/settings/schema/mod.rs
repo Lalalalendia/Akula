@@ -46,9 +46,9 @@ pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block>
         Section::Mcp => mcp(config, ctx),
         Section::Sync => {
             let mut blocks = vec![yandex_setup(config)];
+            blocks.extend(sync_recovery(ctx));
             #[cfg(feature = "dropbox-readonly-preview")]
             blocks.push(dropbox_setup(config, ctx));
-            blocks.extend(sync_recovery(ctx));
             blocks
         },
         Section::Server => vec![server_setup(config)],
