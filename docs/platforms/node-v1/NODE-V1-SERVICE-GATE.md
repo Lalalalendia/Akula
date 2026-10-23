@@ -82,6 +82,27 @@ startup test, not a production owner-revocation mechanism.
 The test does not prove a signed root-helper installation, independent owner
 approval, real VPS reboot, Windows setup or receiver File Gate import.
 
+## Same-ELF signed file/receipt hand-off — disposable Linux proof
+
+The next single scoped workflow job also reuses the **existing B1d0**
+root-owned first-install test instead of inventing a second CAS or signer.
+It builds the B1d0 test on the exact Node branch, passes the same real
+`akula-node-v1-service` ELF already built and tested by the systemd step,
+and runs the actual verified-FD, test-only Ed25519 release/owner approval,
+witness CAS, fsynced O_EXCL+NOREPLACE `/opt` install and durable receipt
+readback. The test runs as UID0 inside a private mount namespace whose /opt
+is overlaid by a strictly root-owned 0755 disposable directory. Real
+`/opt/akula-node` and the production witness are never created.
+
+Required marker:
+`NODE_V1_REAL_SIGNED_ELF_OPT_RECEIPT_AND_CAS_HOLD_PASS`.
+
+This proves byte-exact interoperability between the Node-V1 executable
+and existing B1d0 transaction under a **test-only** signing key. It does
+not yet connect real release-key enrollment, independent user consent,
+a root service activation RPC, real server reboot, Windows setup or the
+actual user's VPS. The durable file transaction still returns HOLD.
+
 ## Installation blockers — do not bypass
 
 1. The existing signed/root-witnessed installer prototype must provision the
