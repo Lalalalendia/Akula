@@ -9,6 +9,10 @@
     {
       "path": "akula-app",
       "main": true
+    },
+    {
+      "path": "shiva-pdf-preview",
+      "main": false
     }
   ],
   "icons": [

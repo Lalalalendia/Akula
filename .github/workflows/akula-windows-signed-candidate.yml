@@ -25,7 +25,7 @@ jobs:
   windows-build:
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 85
+    timeout-minutes: 120
     environment: akula-release
     steps:
       - uses: actions/checkout@v7
@@ -57,6 +57,12 @@ jobs:
           node scripts/akula-version.cjs check
           if ($LASTEXITCODE -ne 0) { throw 'Akula Windows version contract failed' }
 
+      - uses: actions/checkout@v7
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-preview
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
@@ -65,13 +71,27 @@ jobs:
       - name: Install pinned NSIS packager
         run: cargo install cargo-packager --version 0.11.8 --locked
 
-      - name: Build the single Akula Windows app with S3 pairing and NSIS
+      - name: Compile pinned Shiva CLI as Akula's PDF sidecar
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git -C _shiva-preview rev-parse HEAD).Trim()
+          if ($actual -cne '40b72a90b1dac39812c77c7321e57d613a81cb51') { throw 'Shiva PDF source commit drifted' }
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/shiva-preview'
+          cargo build --release --manifest-path _shiva-preview/Cargo.toml -p cli
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Shiva PDF companion compilation failed' }
+          $built = Join-Path $env:CARGO_TARGET_DIR 'release/shiva.exe'
+          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          if (!(Test-Path -LiteralPath $built -PathType Leaf)) { throw 'Shiva executable absent' }
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          Copy-Item -LiteralPath $built -Destination (Join-Path $release 'shiva-pdf-preview.exe') -Force
+          Write-Host "AKULA_PDF_SHIVA_BUNDLED pin=$actual"
+      - name: Build signed Akula with S3 pairing, Shiva PDF sidecar and NSIS
         working-directory: aquilum-app
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # S3 remains user-invoked and new-file-only; no background S3 activation.
-          # The signed updater installs this package OVER the existing Akula.
+          # S3 pairing remains user-initiated in the single signed Akula.
           cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta
           if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
           $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
