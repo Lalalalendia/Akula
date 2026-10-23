@@ -80,7 +80,7 @@ impl BoundLogin {
                     };
                     let target = Zeroizing::new(target);
                     let callback = Zeroizing::new(format!(
-                        "http://127.0.0.1:{}{}", self.port, target,
+                        "http://127.0.0.1:{}{}", self.port, target.as_str(),
                     ));
                     let result = self.start.complete(&callback);
                     match result {
