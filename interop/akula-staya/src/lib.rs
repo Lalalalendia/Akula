@@ -11,6 +11,14 @@ use aquilum_core::p2p_offer_lab::{
 #[cfg(feature = "p2p-live-identity")]
 pub mod live_identity;
 
+// The very same authenticated one-file QUIC implementation is callable from
+// the feature-gated Native UI.  The source also remains the operator CLI bin;
+// neither side starts a listener during ordinary Akula startup.
+#[cfg(feature = "p2p-one-file-lan-beta")]
+#[path = "bin/p2p_one_file_beta.rs"]
+#[allow(dead_code)]
+pub mod one_file_lan;
+
 use staya_transfer::{
     ContentId, Manifest,
     queue::{QueueError, QueueSelection, SelectedFile},
