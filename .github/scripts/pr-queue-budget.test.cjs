@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { calculateBudget, oldestCandidates, enforceAdmission } = require('./pr-queue-budget.cjs');
+const { MAX_OPEN_PRS, calculateBudget, oldestCandidates, listPulls, enforceAdmission } = require('./pr-queue-budget.cjs');
 
 function pr(n, opts = {}) {
   return {
@@ -14,32 +14,45 @@ function pr(n, opts = {}) {
 }
 function queue(n) { return Array.from({ length: n }, (_, i) => pr(i + 1)); }
 
-test('initial cap 140 and goal 50 count Draft and stacked PRs', () => {
-  const all = queue(136);
-  all[1].base.ref = 'feature/stack';
-  all[2].draft = false;
-  const result = calculateBudget(all);
-  assert.deepEqual([result.openCount, result.draftCount, result.stackedCount, result.ceiling, result.goal],
-    [136, 135, 1, 140, 50]);
+test('fixed cap 130 counts Draft and stacked PRs',()=>{
+  const full=queue(130);
+  full[0].base.ref='feature/dependency';full[1].draft=false;
+  assert.equal(MAX_OPEN_PRS,130);
+  assert.deepEqual([calculateBudget(full).ceiling,calculateBudget(full).draftCount,
+    calculateBudget(full).stackedCount,calculateBudget(full).overflow],[130,129,1,0]);
+  assert.equal(calculateBudget(queue(131)).overflow,1);
 });
 
-test('closing each legacy PR ratchets cap down exactly one', () => {
-  const all = [...queue(135), pr(136, {state:'closed', closed:'2026-10-23T17:00:00Z'})];
-  const result = calculateBudget(all);
-  assert.deepEqual([result.openCount, result.retiredLegacy, result.ceiling], [135, 1, 139]);
+test('legacy and post-cutover closures release capacity without shrinking 130',()=>{
+  const closedOld=pr(1000,{state:'closed',closed:'2026-10-23T17:00:00Z'});
+  const closedNew=pr(1001,{state:'closed',closed:'2026-10-24T12:00:00Z',
+    created:'2026-10-24T08:00:00Z'});
+  const full=queue(130);
+  assert.deepEqual([calculateBudget([...full,closedOld,closedNew]).openCount,
+    calculateBudget([...full,closedOld,closedNew]).ceiling],[130,130]);
+  const reduced=calculateBudget([...full.slice(1),closedOld,closedNew]);
+  assert.deepEqual([reduced.openCount,reduced.ceiling,reduced.overflow],[129,130,0]);
 });
 
-test('floor at 50 and never counts pre-cutover closures', () => {
-  const old = Array.from({length: 110}, (_,i) => pr(i+1, {state:'closed', closed:'2026-10-23T17:00:00Z'}));
-  old.push(pr(111, {state:'closed', closed:'2026-10-22T18:00:00Z'}));
-  old.push(pr(112, {state:'closed', closed:'2026-10-23T17:00:00Z', created:'2026-10-23T16:13:00Z'}));
-  assert.equal(calculateBudget(old).ceiling, 50);
-  assert.equal(calculateBudget([old[110],old[111]]).retiredLegacy, 0);
+test('no historical backlog or reopen can ratchet the limit',()=>{
+  const closed=Array.from({length:110},(_,i)=>pr(i+500,{
+    state:'closed',closed:'2026-10-23T17:00:00Z'}));
+  assert.deepEqual([calculateBudget([...queue(130),...closed]).ceiling,
+    calculateBudget([...queue(130),...closed]).overflow],[130,0]);
+  const reopened=pr(900,{created:'2026-10-17T00:00:00Z'});
+  assert.equal(calculateBudget([...queue(129),reopened]).overflow,0);
+  assert.equal(calculateBudget([...queue(130),reopened]).overflow,1);
 });
 
-test('a reopened legacy PR is not falsely counted as retired', () => {
-  const all = [pr(1), pr(2, {state:'closed', closed:'2026-10-23T17:00:00Z'})];
-  assert.equal(calculateBudget(all).retiredLegacy, 1);
+test('paginated GitHub inventory reads only open PRs',async()=>{
+  const calls=[];
+  const github={rest:{pulls:{list:'list'}},paginate:async(fn,args)=>{
+    calls.push({fn,args});return queue(130);
+  }};
+  assert.equal((await listPulls(github,'org','Akula')).length,130);
+  assert.deepEqual(calls,[{fn:'list',args:{
+    owner:'org',repo:'Akula',state:'open',per_page:100
+  }}]);
 });
 
 test('triage prioritizes stacked open PRs but never closes them', () => {
@@ -69,16 +82,16 @@ function mock(initial, fresh = initial, prState = 'open') {
   return { github:api, context, core, calls, messages };
 }
 
-test('new PR below cap is admitted with no comment or mutation', async () => {
-  const s = mock(queue(136));
+test('new PR at cap 130 is admitted with no mutation', async () => {
+  const s = mock(queue(130));
   const result = await enforceAdmission(s);
   assert.equal(result.admitted,true);
   assert.equal(s.calls.listings,1);
   assert.equal(s.calls.closed.length,0);
 });
 
-test('new PR above 140 is commented and closed without deleting its branch', async () => {
-  const s = mock(queue(141));
+test('new PR above 130 is commented and closed without deleting its branch', async () => {
+  const s = mock(queue(131));
   const result = await enforceAdmission(s);
   assert.equal(result.reason,'over_ceiling');
   assert.equal(s.calls.listings,2);
@@ -87,20 +100,40 @@ test('new PR above 140 is commented and closed without deleting its branch', asy
 });
 
 test('second snapshot below cap preserves PR after a concurrent merge', async () => {
-  const s=mock(queue(141),queue(140));
+  const s=mock(queue(131),queue(130));
   assert.equal((await enforceAdmission(s)).admitted,true);
   assert.equal(s.calls.closed.length,0);
 });
 
-test('post-cutover legacy reductions enforce a lower-than-140 cap', async () => {
-  const legacy = Array.from({length:90},(_,i)=>pr(i+1,{state:'closed',closed:'2026-10-23T17:00:00Z'}));
-  const s=mock([...queue(51),...legacy]);
-  assert.equal((await enforceAdmission(s)).reason,'over_ceiling');
-  assert.equal(s.calls.closed.length,1);
+test('historical closings never lower admission ceiling',async()=>{
+  const closed=Array.from({length:90},(_,i)=>pr(i+1000,{
+    state:'closed',closed:'2026-10-23T17:00:00Z'
+  }));
+  const st=mock([...queue(130),...closed]);
+  assert.equal((await enforceAdmission(st)).admitted,true);
+  assert.equal(st.calls.closed.length,0);
+});
+
+test('over-limit explanation says fixed 130, not shrinking target',async()=>{
+  const st=mock(queue(131));
+  assert.equal((await enforceAdmission(st)).reason,'over_ceiling');
+  assert.match(st.calls.comments[0].body,/fixed maximum: 130/);
+  assert.match(st.calls.comments[0].body,/does not shrink/);
+  assert.doesNotMatch(st.calls.comments[0].body,/target: 50|absolute maximum: 140/);
+});
+
+test('global admission checks are serialized and never cancel each other',()=>{
+  const fs=require('node:fs'),path=require('node:path');
+  const wf=fs.readFileSync(path.join(__dirname,'../workflows/branch-hygiene.yml'),'utf8');
+  const section=wf.split('  pr-admission:')[1]?.split('  audit-or-prune:')[0];
+  assert.ok(section);
+  assert.match(section,/group: akula-pr-admission-global/);
+  assert.match(section,/cancel-in-progress: false/);
+  assert.match(section,/github.event.repository.default_branch/);
 });
 
 test('already closed and invalid events never close any PR', async () => {
-  const s=mock(queue(141),queue(141),'closed');
+  const s=mock(queue(131),queue(131),'closed');
   assert.equal((await enforceAdmission(s)).reason,'already_closed');
   assert.equal(s.calls.listings,0);
   assert.equal(s.calls.closed.length,0);
@@ -109,7 +142,7 @@ test('already closed and invalid events never close any PR', async () => {
 });
 
 test('API failure does not mutate other PRs', async () => {
-  const s=mock(queue(141));
+  const s=mock(queue(131));
   s.github.paginate=async()=>{throw new Error('GitHub unavailable')};
   await assert.rejects(enforceAdmission(s),/GitHub unavailable/);
   assert.equal(s.calls.closed.length,0);
