@@ -1,6 +1,14 @@
 name: Akula P2P one-file LAN beta vertical path
 
 on:
+  push:
+    # One temporary implementation branch, no extra shared Core fan-out.
+    branches:
+      - feature/ak-p2p-beta-persistent-inbox-20261023
+    paths:
+      - 'interop/akula-staya/**'
+      - 'modules/drop-inbox-ledger/**'
+      - '.github/workflows/p2p-one-file-beta.yml'
   pull_request:
     branches:
       - main
@@ -33,6 +41,11 @@ jobs:
       - name: Validate formatting of exact beta source
         shell: bash
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
+      - name: Format and test isolated receiver journal
+        shell: bash
+        run: |
+          cargo fmt --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --check
+          cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --nocapture
       - name: Compile actual opt-in one-file beta
         shell: bash
         run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta

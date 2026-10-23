@@ -19,6 +19,9 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "p2p_one_file_beta/inbox.rs"]
+mod inbox;
+
 const ALPN: &[u8] = b"akula/p2p-one-file-lan-beta/1";
 const REQUEST: &[u8] = b"AKP2_GET_ONE_V1";
 const ACK: &[u8] = b"AKP2_VERIFIED_NEW_FILE_V1";
@@ -175,7 +178,16 @@ impl Drop for StageCleanup {
 /// Receiver has selected this exact NEW path before network negotiation.
 /// The remote peer can choose neither the destination nor a Vault operation.
 /// Physical bytes are cold-verified again by existing Core create-no-replace.
+#[cfg(test)]
 fn save_received(frame: &[u8], destination: &Path) -> Result<(), String> {
+    save_received_with(frame, destination, |_, _, _| Ok(()))
+}
+
+fn save_received_with(
+    frame: &[u8],
+    destination: &Path,
+    before_publish: impl FnOnce(&mut File, u64, [u8; 32]) -> Result<(), String>,
+) -> Result<(), String> {
     if !destination.is_absolute() || destination.file_name().is_none() {
         return Err("destination must be an absolute NEW filename".into());
     }
@@ -207,6 +219,9 @@ fn save_received(frame: &[u8], destination: &Path) -> Result<(), String> {
     drop(scratch);
     let mut reopened = File::open(&scratch_path)
         .map_err(|error| format!("open receiver stage for cold verification: {error}"))?;
+    // Record the verified local object before optional user-selected export.
+    // If that export fails, the independent Inbox remains recoverable.
+    before_publish(&mut reopened, size, digest)?;
     save_verified_stage_as_new(&mut reopened, size, digest, destination)
         .map_err(|error| format!("Core create-new publication rejected: {error:?}"))?;
     drop(reopened);
@@ -262,6 +277,8 @@ async fn send_one(
 async fn receive_one(
     connection: &iroh::endpoint::Connection,
     destination: &Path,
+    inbox_root: &Path,
+    local_endpoint_key: [u8; 32],
     check_peer: impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     // Receive command already names the exact destination and trusted sender.
@@ -285,7 +302,17 @@ async fn receive_one(
         .map_err(|error| format!("read bounded file: {error}"))?;
     // OS revocation is rechecked before physically publishing a new file.
     check_peer()?;
-    save_received(&bytes, destination)?;
+    save_received_with(&bytes, destination, |stage, size, digest| {
+        inbox::persist_received(
+            stage,
+            inbox_root,
+            size,
+            digest,
+            *connection.remote_id().as_bytes(),
+            local_endpoint_key,
+        )
+        .map(|_| ())
+    })?;
     let mut ack = connection
         .open_uni()
         .await
@@ -357,9 +384,16 @@ async fn run() -> Result<(), String> {
                     .map_err(|_| "direct LAN connection timed out")?
                     .map_err(|error| format!("authenticated QUIC connection: {error}"))?;
             live_peer(&connection, &peer)?;
+            let inbox_root = inbox::default_root()?;
             let outcome = tokio::time::timeout(
                 Duration::from_secs(120),
-                receive_one(&connection, &destination, || live_peer(&connection, &peer)),
+                receive_one(
+                    &connection,
+                    &destination,
+                    &inbox_root,
+                    *endpoint.id().as_bytes(),
+                    || live_peer(&connection, &peer),
+                ),
             )
             .await
             .map_err(|_| "file-receive operation timed out")?;
@@ -465,6 +499,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("selected-source.txt");
         let output = dir.path().join("receiver-selected-name.txt");
+        let inbox_root = dir.path().join("inbox");
         let bytes = b"Akula P2P one-file LAN beta real QUIC payload";
         fs::write(&source, bytes).unwrap();
 
@@ -526,7 +561,13 @@ mod tests {
         assert_eq!(connection.remote_id(), sender_id);
         tokio::time::timeout(
             Duration::from_secs(25),
-            receive_one(&connection, &output, || Ok(())),
+            receive_one(
+                &connection,
+                &output,
+                &inbox_root,
+                *receiver_id.as_bytes(),
+                || Ok(()),
+            ),
         )
         .await
         .unwrap()
@@ -536,6 +577,18 @@ mod tests {
         receiver.close().await;
         sender_task.await.unwrap();
         assert_eq!(fs::read(&output).unwrap(), bytes);
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+        // The same actual authenticated QUIC bytes must survive a closed and
+        // reopened receiver journal, independently of the user-selected copy.
+        let cold = akula_inbox_ledger_lab::InboxLedger::open(&inbox_root).unwrap();
+        let items = cold.list().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].1,
+            akula_inbox_ledger_lab::LocalStatus::VerifiedLocal
+        );
+        assert_eq!(items[0].0.sender_key, *sender_id.as_bytes());
+        assert_eq!(items[0].0.recipient_key, *receiver_id.as_bytes());
+        assert_eq!(fs::read(cold.object_path(items[0].0.id)).unwrap(), bytes);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3);
     }
 }
