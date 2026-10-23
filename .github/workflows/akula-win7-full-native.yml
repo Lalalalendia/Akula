@@ -28,57 +28,30 @@ jobs:
           "exit_code=$LASTEXITCODE" | Out-File win7-full-results/status.txt
           Get-Content win7-full-results/build.log -Tail 50 | Write-Host
           if ($LASTEXITCODE -ne 0) { exit 1 }
-      - name: Inspect import tables and retain exact full PE evidence
+      - name: Inspect complete native EXE static PE imports
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $out = 'win7-full-results'
           $exe = '.artifacts/cargo-native/x86_64-win7-windows-msvc/release/aquilum-native.exe'
-          if (!(Test-Path $exe)) { throw "The expected full native Win7 target executable was not produced: $exe" }
+          if (!(Test-Path $exe)) { throw "No native executable at $exe" }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          $size = (Get-Item $exe).Length
-          "source_binary=$exe" | Add-Content "$out/status.txt"
+          $bytes = (Get-Item $exe).Length
           "exe_sha256=$hash" | Add-Content "$out/status.txt"
-          "exe_bytes=$size" | Add-Content "$out/status.txt"
+          "exe_bytes=$bytes" | Add-Content "$out/status.txt"
           $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
-          if (!(Test-Path $vswhere)) { throw "MSVC vswhere.exe missing" }
-          $vsroot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-          if (!$vsroot) { throw "MSVC tools not found" }
-          $msvc = @(Get-ChildItem (Join-Path $vsroot 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
-          $dumpbin = Join-Path $msvc[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
-          if (!(Test-Path $dumpbin)) { throw "PE import inspection tool missing: $dumpbin" }
-          & $dumpbin /imports $exe | Out-File "$out/full-imports.txt" -Encoding utf8
-          if ($LASTEXITCODE -ne 0) { throw "dumpbin /imports failed" }
-          & $dumpbin /headers $exe | Out-File "$out/full-headers.txt" -Encoding utf8
-          if ($LASTEXITCODE -ne 0) { throw "dumpbin /headers failed" }
-          $imports = Get-Content "$out/full-imports.txt" -Raw
-          $known = @(
-            'GetSystemTimePreciseAsFileTime', 'WaitOnAddress', 'WakeByAddressSingle',
-            'WakeByAddressAll', 'ProcessPrng', 'RoOriginateErrorW',
-            'GetPointerType', 'CreateDXGIFactory2'
-          )
-          $matches = @($known | Where-Object { $imports -match ('(?m)^\s+[0-9A-Fa-f]+\s+\d+\s+' + [regex]::Escape($_) + '\s*) })
-          $dlls = @('combase.dll','api-ms-win-core-synch-l1-2-0.dll','api-ms-win-core-winrt-error-l1-1-0.dll','bcryptprimitives.dll')
-          $dllsFound = @($dlls | Where-Object { $imports -match ('(?im)^\s*' + [regex]::Escape($_) + '\s*) })
-          $data = [ordered]@{
-            target = 'x86_64-win7-windows-msvc'
-            rustflags = '--cfg windows_slim_errors'
-            binary_sha256 = $hash
-            binary_bytes = $size
-            known_post_win7_static_imports = $matches
-            risk_dlls = $dllsFound
-            runtime_tested = $false
-          }
-          $data | ConvertTo-Json -Depth 4 | Set-Content "$out/full-audit.json" -Encoding utf8
-          "# Akula Win7 full-native PE screen" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "EXE SHA-256: $hash" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "EXE bytes: $size" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "Known post-Win7 imports: $($matches -join ', ')" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "Additional risk DLLs: $($dllsFound -join ', ')" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "No Windows 7 runtime test performed; no compatibility claim." | Add-Content $env:GITHUB_STEP_SUMMARY
-          Write-Host "SHA256=$hash bytes=$size"
-          Write-Host "KNOWN_POST_WIN7_IMPORTS=$($matches -join ',')"
-          Write-Host "ADDITIONAL_RISK_DLLS=$($dllsFound -join ',')"
+          $root = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (!$root) { throw 'MSVC toolchain missing' }
+          $toolsets = @(Get-ChildItem (Join-Path $root 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          $dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          if (!(Test-Path $dumpbin)) { throw 'dumpbin missing' }
+          & $dumpbin /imports $exe | Set-Content "$out/full-imports.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin imports failed' }
+          & $dumpbin /headers $exe | Set-Content "$out/full-headers.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin headers failed' }
+          python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/full-imports.txt" --out $out --sha256 $hash --bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw 'Full import parser failed' }
+          Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
       - name: Upload compile evidence
         if: always()
         uses: actions/upload-artifact@v4
