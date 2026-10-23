@@ -126,3 +126,60 @@ this seam yet. No DeviceId/Vault/object authorization, sender consent, local
 IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
 The existing receiver create-new and OS identity code stay opt-in. This work
 cannot enable network file access.
+
+## AK-P2P-LAN-PROBE-01 — operator-only two-PC direct QUIC probe
+
+This default-off standalone binary calls the **existing** #625 protected-key
+and live remote-ID admission helpers. It does not add a second peer registry,
+authorize Staya GET, transfer files, start sync workers or change Native Akula.
+One real authenticated Iroh/QUIC session exchanges only bounded HELLO/OK.
+
+**On each Windows PC**, explicitly enroll/read the OS Credential Manager
+device key and independently confirm the entire remote public key:
+
+```sh
+cargo run --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity -- --init
+cargo run --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity -- --id
+cargo run --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity -- --peer-confirm REMOTE_FULL_ID
+```
+
+The final command requires an **independently verified full key** to be
+typed again in the terminal. An untrusted invitation alone is not pairing.
+Revoked peers cannot silently re-enroll. Never share either OS private seed.
+
+On PC A, using the confirmed full EndpointId of PC B:
+
+```sh
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features p2p-manual-lan-probe --bin akula-p2p-quic-probe -- listen PEER_B_FULL_ID
+```
+
+The listener prints the public LOCAL_ENDPOINT_ID and BOUND_UDP port. On PC B,
+use PC A's separately verified full EndpointId, numeric reachable LAN IP and
+its reported UDP port (replace the illustrative LAN address and port):
+
+```sh
+cargo run --manifest-path interop/akula-staya/Cargo.toml --features p2p-manual-lan-probe --bin akula-p2p-quic-probe -- connect PEER_A_FULL_ID 192.168.1.10:50432
+```
+
+Successful peers print:
+
+```text
+PINNED_QUIC_OK=true FILE_TRANSFER=false FILE_GATE=false
+```
+
+Both directions require OS peer pin confirmation **before** socket creation,
+TLS-authenticated Connection::remote_id verification after the handshake,
+and another cold OS recheck before the new stream. Mismatched, unknown,
+revoked, invalid and unsupported-OS identities fail closed. The receiver
+handles one request with bounded frame sizes and timeouts. The diagnostic
+does not read, send, modify or publish a user file.
+
+**Limits:** direct UDP only (no n0 public relay, NAT traversal assurance,
+mDNS, DHT, automatic firewall exception or router modifications). A local
+firewall may block the probe; troubleshoot with the system administrator,
+not by weakening identity or GET rules. Linux has no protected key backend.
+CI on Windows/Linux checks CLI parsing, compilation, no-file regression,
+and the separately validated real QUIC/OS pin tests. Physical Windows PC A/B
+tests on an actual LAN are still an operator acceptance, not CI proof.
+Different-NAT relay and installed Native File transfers remain out of scope;
+no File Gate APPLIED, Vault permission, durable ACK or shipped P2P is claimed.

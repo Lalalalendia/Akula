@@ -60,9 +60,14 @@ jobs:
         env:
           AKULA_P2P_OS_PIN_CI: '1'
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
+      - name: Build and unit-test protected-key manual LAN QUIC probe
+        shell: bash
+        run: |
+          cargo check --manifest-path interop/akula-staya/Cargo.toml --features p2p-manual-lan-probe --bin akula-p2p-quic-probe
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-manual-lan-probe --bin akula-p2p-quic-probe -- --nocapture
       - name: Lint actual integration crate
         shell: bash
-        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --all-targets -- -D warnings
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-manual-lan-probe --all-targets -- -D warnings
       - name: Build actual pinned Staya direct batch preview
         shell: bash
         run: |
