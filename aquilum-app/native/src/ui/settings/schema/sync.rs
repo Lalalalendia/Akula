@@ -1,6 +1,10 @@
 use super::*;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryDecision};
 mod yandex;
+#[cfg(feature = "dropbox-readonly-preview")]
+mod dropbox;
+#[cfg(feature = "dropbox-readonly-preview")]
+pub(super) use dropbox::dropbox_setup;
 pub(super) use yandex::yandex_setup;
 
 /// User-controlled *documentation* endpoints. Never use arbitrary input as a
