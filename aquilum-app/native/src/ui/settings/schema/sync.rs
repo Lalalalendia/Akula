@@ -160,6 +160,7 @@ pub(super) fn sync_recovery(ctx: &Context) -> Vec<Block> {
     // 3.13 Dropbox integration visibility. This is deliberately read-only:
     // OAuth onboarding is still a standalone developer probe, not a native
     // UI action, and must not be represented as a connected account.
+    #[cfg(not(feature = "dropbox-readonly-preview"))]
     rows.push(info(
         "Dropbox (3.13 preview)".to_owned(),
         Some("Read-only connector exists as a separate QA probe; native authorization and synchronization are not enabled.".to_owned()),
