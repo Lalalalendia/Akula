@@ -1,9 +1,8 @@
-name: Akula native received Inbox LAN beta
+name: Akula native P2P LAN and Internet installed beta
 
 on:
-  push:
-    branches:
-      - feature/ak-p2p-native-receive-onefile-20261024
+  pull_request:
+    types: [opened, synchronize, reopened]
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/native/src/app/transfer/**'
@@ -20,16 +19,27 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-receive-beta-${{ github.ref }}
+  group: native-receive-beta-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   native-receive-windows:
-    name: Win Native receive beta (exact-head, no installer)
+    name: Win Native P2P LAN/Internet installed feature (exact-head)
+    if: github.event.pull_request.head.ref == 'feature/ak-p2p-native-receive-onefile-20261024'
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Pull requests default to a synthetic merge ref. Validate the exact
+          # submitted HEAD so the result cannot be mistaken for another tree.
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Assert exact PR head checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "P2P_EXACT_HEAD=${{ github.event.pull_request.head.sha }}"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
