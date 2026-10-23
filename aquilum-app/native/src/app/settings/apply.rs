@@ -116,12 +116,14 @@ impl App {
                     || retention
                     || before.s3_onboarding != after.s3_onboarding
                     || before.dropbox_readonly != after.dropbox_readonly;
+                #[cfg(feature = "dropbox-readonly-preview")]
+                let dropbox_changed = before.dropbox_readonly != after.dropbox_readonly;
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;
                 }
                 #[cfg(feature = "dropbox-readonly-preview")]
-                if before.dropbox_readonly != after.dropbox_readonly {
+                if dropbox_changed {
                     self.dropbox_preview.invalidate();
                 }
                 if mcp_changed {
