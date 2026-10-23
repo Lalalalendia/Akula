@@ -196,7 +196,18 @@ impl InboxLedger {
     /// file must still match the *previously authenticated* immutable intent.
     pub fn status(&self, id: Uuid) -> Result<LocalStatus, LedgerError> {
         let Some(record) = self.get(id)? else { return Ok(LocalStatus::Unknown); };
-        if record.state == 0 { return Ok(LocalStatus::Pending); }
+        if record.state == 0 {
+            // A previous failed writer may have left an occupied corrupt object.
+            // Showing ordinary Pending would conceal a non-retryable conflict.
+            match fs::symlink_metadata(self.object_path(id)) {
+                Ok(_) if !self.local_matches(&record.expected)? =>
+                    return Ok(LocalStatus::NeedsReview),
+                Ok(_) => return Ok(LocalStatus::Pending), // valid pre-commit crash candidate
+                Err(e) if e.kind() == io::ErrorKind::NotFound =>
+                    return Ok(LocalStatus::Pending),
+                Err(e) => return Err(e.into()),
+            }
+        }
         if self.local_matches(&record.expected)? {
             Ok(LocalStatus::VerifiedLocal)
         } else {
@@ -495,7 +506,7 @@ mod tests {
             panic!("occupied path cannot call writer")
         }), Err(LedgerError::InvalidLocalObject)));
         assert_eq!(fs::read(inbox.object_path(v.id)).unwrap(), b"attacker modified bytes");
-        assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Pending);
+        assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::NeedsReview);
     }
 
     #[test]
@@ -526,7 +537,7 @@ mod tests {
             Ok(())
         }), Err(LedgerError::InvalidLocalObject)));
         assert_eq!(inbox.count().unwrap(), 1);
-        assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Pending);
+        assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::NeedsReview);
     }
 
     #[test]
