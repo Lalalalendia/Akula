@@ -44,7 +44,13 @@ pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block>
         Section::Data => [templates(config, ctx), files(config)].into_iter().flatten().collect(),
         Section::Analysis => analysis(config),
         Section::Mcp => mcp(config, ctx),
-        Section::Sync => std::iter::once(yandex_setup(config)).chain(sync_recovery(ctx)).collect(),
+        Section::Sync => {
+            let mut blocks = vec![yandex_setup(config)];
+            #[cfg(feature = "dropbox-readonly-preview")]
+            blocks.push(dropbox_setup(config, ctx));
+            blocks.extend(sync_recovery(ctx));
+            blocks
+        },
         Section::Server => vec![server_setup(config)],
         Section::History => history(config),
         Section::Trash => trash(config, ctx),
