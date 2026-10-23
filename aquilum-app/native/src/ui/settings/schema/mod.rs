@@ -44,7 +44,7 @@ pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block>
         Section::Data => [templates(config, ctx), files(config)].into_iter().flatten().collect(),
         Section::Analysis => analysis(config),
         Section::Mcp => mcp(config, ctx),
-        Section::Sync => std::iter::once(yandex_setup(config)).chain(sync_recovery(ctx)).collect(),
+        Section::Sync => std::iter::once(yandex_setup(config, ctx)).chain(sync_recovery(ctx)).collect(),
         Section::Server => vec![server_setup(config)],
         Section::History => history(config),
         Section::Trash => trash(config, ctx),
