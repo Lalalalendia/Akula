@@ -1,0 +1,17 @@
+[package]
+name = "staya-ydb-replication-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone Akula research fixture. No production dependency or File Gate access.
+[workspace]
+resolver = "2"
+
+[dependencies]
+# An exact SHA of our own LesHa source is checked out by the CI workflow under
+# /deps. Keep the pure planner as external research input.
+lesha-replication = { path = "../../deps/crates/lesha-replication" }
+lesha-types = { path = "../../deps/crates/lesha-types" }
+sha2 = "0.10"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }

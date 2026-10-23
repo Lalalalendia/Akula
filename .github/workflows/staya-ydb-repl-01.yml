@@ -1,0 +1,47 @@
+name: Staya YDB-REPL-01 isolated verified replica planner
+on:
+  pull_request:
+    paths:
+      - "experiments/staya-ydb-repl-01/**"
+      - ".github/workflows/staya-ydb-repl-01.yml"
+      - "docs/sync/staya-ydb-repl-01.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  receipts-and-repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Checkout exact LesHa R0 source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: Lalalalendia/med
+          ref: 5046ff53207ce2fc89fb83277d9ceec1fee30935
+          path: deps
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: "1.91.0"
+      - name: Verify exact source identity
+        run: |
+          test "$(git -C deps rev-parse HEAD)" = 5046ff53207ce2fc89fb83277d9ceec1fee30935
+          test -f deps/crates/lesha-replication/src/lib.rs
+      - name: Resolve standalone dependencies
+        run: cargo generate-lockfile --manifest-path experiments/staya-ydb-repl-01/Cargo.toml
+      - name: Verify signature, receipt admission, domains, corruption and repair
+        run: |
+          set -o pipefail
+          cargo test --locked --manifest-path experiments/staya-ydb-repl-01/Cargo.toml --all-targets -- --nocapture 2>&1 | tee staya-ydb-repl-tests.log
+      - name: Upload exact experimental evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staya-ydb-repl-01
+          retention-days: 14
+          path: |
+            staya-ydb-repl-tests.log
+            experiments/staya-ydb-repl-01/Cargo.lock
