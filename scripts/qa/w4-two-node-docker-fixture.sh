@@ -125,8 +125,9 @@ bash "$root/scripts/qa/w4-two-node-ssh.sh" --preflight \
 
 report="$tmp/results.txt"
 timeout 160 bash "$root/scripts/qa/w4-two-node-ssh.sh" \
-  "$app" 'w4qa@akula-w4-fixture.invalid' "$digest" "$report" |
-  grep -Fxq 'AKULA_W4_TWO_NODE_SSH_PASS'
+  "$app" 'w4qa@akula-w4-fixture.invalid' "$digest" "$report" \
+  > "$tmp/acceptance.log"
+grep -Fxq 'AKULA_W4_TWO_NODE_SSH_PASS' "$tmp/acceptance.log"
 test -s "$report"
 grep -Fxq 'recipient_signed_w4=verified' "$report"
 grep -Fxq 'lost_w4=1' "$report"
