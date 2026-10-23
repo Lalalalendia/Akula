@@ -2,7 +2,8 @@
 //! decision and the actual Staya QueueSelection. Only disposable test files.
 //! This is not proof of trusted long-lived Device enrollment or File Gate.
 
-use akula_staya_integration::{prepare_staya_batch, verify_staya_invitation};
+use akula_inbox_ledger_lab::{ExpectedTransfer, InboxLedger, LedgerError, LocalStatus, Transport};
+use akula_staya_integration::{PreparedBatch, prepare_staya_batch, verify_staya_invitation};
 use aquilum_core::{
     p2p_offer_lab::{DecisionAction, OfferV1, OfferedFile, PeerBinding, SCHEMA},
     sync::DeviceId,
@@ -138,6 +139,42 @@ fn source(label: &str, payload: &[u8]) -> OfferedFile {
         label: label.into(),
         bytes: payload.len() as u64,
         blake3_root: *blake3::hash(payload).as_bytes(),
+    }
+}
+
+/// A stable logical ID for one explicitly selected, independently checked
+/// synthetic offer item. This is not a remote sender authorization.
+fn ledger_item(
+    offer: &OfferV1,
+    prepared: &PreparedBatch,
+    slot: usize,
+    sender: PeerBinding,
+    receiver: PeerBinding,
+) -> ExpectedTransfer {
+    let index = prepared.offer_indexes[slot];
+    let selected = prepared.queue.entries()[slot].manifest;
+    let source = &offer.files[index];
+    assert_eq!(source.bytes, selected.size);
+    assert_eq!(source.blake3_root, selected.id.0);
+    let mut hasher = blake3::Hasher::new_derive_key("Akula P2P local received item id v1");
+    hasher.update(offer.offer_id.as_bytes());
+    hasher.update(&[u8::try_from(index).expect("bounded Akula offer index")]);
+    hasher.update(&prepared.offer_commitment);
+    hasher.update(&sender.endpoint_id);
+    hasher.update(&receiver.endpoint_id);
+    let commitment = hasher.finalize();
+    let mut uuid_bytes = [0u8; 16];
+    uuid_bytes.copy_from_slice(&commitment.as_bytes()[..16]);
+    // A deterministic version-8 UUID derived from the accepted local offer.
+    uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x80;
+    uuid_bytes[8] = (uuid_bytes[8] & 0x3f) | 0x80;
+    ExpectedTransfer {
+        id: Uuid::from_bytes(uuid_bytes),
+        sender_key: sender.endpoint_id,
+        recipient_key: receiver.endpoint_id,
+        source: Transport::P2p,
+        bytes: selected.size,
+        blake3: selected.id.0,
     }
 }
 
@@ -312,6 +349,10 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     // provider-side arming, using the original receiver key across attempts.
     receiver.send("CONTINUE");
     let mut staged_directories = Vec::new();
+    // The receiver keeps a separate local inbox, never the user's Vault.
+    let ledger_root = sources.0.join("received-inbox-ledger");
+    let mut ledger = InboxLedger::open(&ledger_root).expect("open private receiver ledger");
+    let mut receipts = Vec::new();
     for (slot, expected) in [&first[..], &last[..]].iter().enumerate() {
         let report = receiver.line();
         let prefix = format!("STAGED_QUEUE {slot} ");
@@ -345,6 +386,45 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         let manifest = prepared.queue.entries()[slot].manifest;
         assert_eq!(actual.len() as u64, manifest.size);
         assert_eq!(*blake3::hash(&actual).as_bytes(), manifest.id.0);
+
+        // Feed the *same real Staya/QUIC/Bao staged bytes* to the persistent
+        // receiver journal through the trusted Akula no-replace file writer.
+        // The UUID is bound to the already-approved offer and selection.
+        let expected_receipt = ledger_item(&offer, &prepared, slot, sender, receiver_peer);
+        let mut opened_stage = fs::File::open(&stage).expect("pin the QUIC verified stage");
+        let status = ledger
+            .receive_with_writer(&expected_receipt, |destination| {
+                aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
+                    &mut opened_stage,
+                    expected_receipt.bytes,
+                    expected_receipt.blake3,
+                    destination,
+                )
+                .map(|_| ())
+                .map_err(|error| match error {
+                    aquilum_core::p2p_inbox_lab::InboxError::Io(err) => LedgerError::Io(err),
+                    aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists => {
+                        LedgerError::Io(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+                    }
+                    _ => LedgerError::InvalidLocalObject,
+                })
+            })
+            .expect("real transferred file must be verified into local inbox");
+        assert_eq!(status, LocalStatus::VerifiedLocal);
+        assert_eq!(
+            fs::read(ledger.object_path(expected_receipt.id)).unwrap().as_slice(),
+            *expected,
+            "the persisted inbox object differs from real QUIC/Bao bytes"
+        );
+        assert_eq!(
+            ledger
+                .receive_with_writer(&expected_receipt, |_| {
+                    panic!("replayed real QUIC receipt cannot create a second file")
+                })
+                .unwrap(),
+            LocalStatus::VerifiedLocal
+        );
+        receipts.push(expected_receipt);
 
         // This is the actual bytes delivered over QUIC into Staya's private
         // stage: ask Akula Core to independently hash them while publishing
@@ -388,12 +468,28 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
     assert!(receiver.finish().success(), "recipient process failed");
     drop(provider.child.stdin.take());
     assert!(provider.finish().success(), "provider process failed");
+    // A cold Akula receiver process can reopen the same journal without
+    // Staya, cloud metadata, sender presence or a second write.
+    assert_eq!(ledger.count().unwrap(), 2);
+    drop(ledger);
+    let cold = InboxLedger::open(&ledger_root).expect("cold restart after QUIC transfer");
+    assert_eq!(cold.count().unwrap(), 2);
+    let listed = cold.list().expect("read persisted received items");
+    assert_eq!(listed.len(), 2);
+    assert!(
+        listed
+            .iter()
+            .all(|(_, state)| *state == LocalStatus::VerifiedLocal)
+    );
+    for receipt in &receipts {
+        assert_eq!(cold.status(receipt.id).unwrap(), LocalStatus::VerifiedLocal);
+    }
     for directory in staged_directories {
         fs::remove_dir_all(directory).expect("clean only process-generated private stages");
     }
     println!(
         "AKULA_STAYA_REAL_QUIC=true two_os_processes=true selected=2 rejected=1 \
          prearm_denied=true provider_armed=true outsider_denied=true \
-         real_queue=true bao_cold_readback=true file_gate=false"
+         real_queue=true bao_cold_readback=true inbox_cold_restart=true inbox_count=2 file_gate=false"
     );
 }

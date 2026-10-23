@@ -1,6 +1,14 @@
 name: Akula P2P to real Staya QUIC two-process interoperability
 
 on:
+  # Exercise the real QUIC -> local Inbox path only on its research branch.
+  push:
+    branches:
+      - research/akula-received-inbox-ledger-20261023
+    paths:
+      - 'interop/akula-staya/**'
+      - 'modules/drop-inbox-ledger/**'
+      - '.github/workflows/p2p-akula-staya-real.yml'
   pull_request:
     branches:
       - main
@@ -8,6 +16,7 @@ on:
       - feature/akula-staya-consent-provider-boundary-20261022
     paths:
       - 'interop/akula-staya/**'
+      - 'modules/drop-inbox-ledger/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:

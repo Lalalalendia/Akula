@@ -26,3 +26,5 @@ uuid = { version = "=1.23.5", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# Opt-in, receiver-owned persistent receipts for the actual QUIC stage test.
+akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger" }

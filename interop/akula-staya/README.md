@@ -126,3 +126,21 @@ this seam yet. No DeviceId/Vault/object authorization, sender consent, local
 IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
 The existing receiver create-new and OS identity code stay opt-in. This work
 cannot enable network file access.
+
+## Received Inbox Ledger attached to real Staya staging
+
+The opt-in two-process test now takes **actual QUIC/Bao staged bytes** and
+calls the Akula Core no-replace writer through the standalone
+`akula-inbox-ledger-lab` SQLite receiver journal. Each accepted file is
+bound to a reproducible per-item UUID derived from the approved synthetic
+offer, selected file index, sender/receiver endpoint keys and commitment.
+The flow verifies both objects on disk, refuses a second writer on replay,
+reopens the SQLite journal after closing it, lists exactly two checked objects
+and independently rehashes them on cold read.
+
+This changes **only the isolated integration test** and the laboratory
+manifest. It does not enable receiving in installed Native Akula, install a
+network listener, persist production peer trust or implement signed sender ACKs.
+This is a process-restart test, not an OS power-loss durability proof.
+Windows ACL/reparse point custody, real authenticated enrollment and a native
+Inbox panel remain separate release gates.
