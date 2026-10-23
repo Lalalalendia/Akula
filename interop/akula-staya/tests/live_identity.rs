@@ -3,13 +3,13 @@
 use akula_staya_integration::live_identity::{
     require_pinned_live_peer, with_protected_iroh_secret,
 };
-use aquilum_core::p2p_device_identity::IdentityError;
-#[cfg(windows)]
-use aquilum_core::p2p_device_identity::{self, peer_pin};
 #[cfg(windows)]
 use akula_staya_integration::roster_observation_lab::{
     ObservationError, observe_live_pinned_roster_peer,
 };
+use aquilum_core::p2p_device_identity::IdentityError;
+#[cfg(windows)]
+use aquilum_core::p2p_device_identity::{self, peer_pin};
 #[cfg(windows)]
 use aquilum_core::sync::{
     DeviceId, VaultId,
@@ -18,9 +18,9 @@ use aquilum_core::sync::{
         inspect_signed_roster,
     },
 };
+use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, endpoint::presets};
 #[cfg(windows)]
 use ring::signature::{Ed25519KeyPair, KeyPair};
-use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, endpoint::presets};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     time::Duration,
