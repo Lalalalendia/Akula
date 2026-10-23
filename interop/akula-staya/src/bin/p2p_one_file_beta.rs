@@ -483,7 +483,10 @@ async fn await_selected_incoming(
             if connection.remote_id() == expected {
                 // The expected transport key is not enough: OS pin/revoke
                 // must still be freshly checked before admitting this peer.
-                verify(&connection)?;
+                if let Err(error) = verify(&connection) {
+                    connection.close(0u8.into(), b"selected peer authorization failed");
+                    return Err(error);
+                }
                 return Ok(connection);
             }
             connection.close(0u8.into(), b"unselected peer");
