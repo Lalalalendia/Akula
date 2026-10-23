@@ -24,8 +24,7 @@ fn check_windows_directory_chain(root: &Path, create_missing: bool) -> Result<()
     fn inspect(path: &Path) -> Result<bool, String> {
         match fs::symlink_metadata(path) {
             Ok(meta)
-                if meta.is_dir()
-                    && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 =>
+                if meta.is_dir() && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 =>
             {
                 Ok(true)
             }
