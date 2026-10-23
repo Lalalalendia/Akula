@@ -15,7 +15,18 @@ command -v sudo >/dev/null && command -v unshare >/dev/null ||
 
 ROOT="$(git rev-parse --show-toplevel)"
 NODE="$ROOT/interop/akula-staya/target/debug/akula-node-v1-service"
-TEST_ROOT="$ROOT/.artifacts/cargo-native/debug/deps"
+# Resolve the actual Cargo target directory used by the B1d0 test command,
+# rather than assuming a checkout-local .cargo/config.toml was loaded.
+# Cargo invoked from repository root may use aquilum-app/target instead.
+command -v cargo >/dev/null && command -v python3 >/dev/null ||
+  hold "Cargo metadata or JSON parser unavailable"
+TARGET_DIR="$(cargo metadata --locked --no-deps --format-version=1 \
+  --manifest-path "$ROOT/aquilum-app/Cargo.toml" |
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')" ||
+  hold "cannot resolve actual Cargo target directory"
+[[ "$TARGET_DIR" = /* && -d "$TARGET_DIR/debug/deps" ]] ||
+  hold "resolved Cargo test artifact directory unavailable"
+TEST_ROOT="$TARGET_DIR/debug/deps"
 MOUNT_ROOT="/var/tmp/akula-b1d0-opt-ci-root"
 test -f "$NODE" && test -x "$NODE" || hold "exact Node V1 ELF missing"
 test "$(head -c 4 "$NODE" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ||
@@ -37,7 +48,8 @@ for path in "$TEST_ROOT"/server_bootstrap_b1d0-*; do
     count=$((count + 1))
   fi
 done
-[[ "$count" == 1 ]] || hold "exactly one compiled B1d0 test executable required"
+[[ "$count" == 1 ]] ||
+  hold "expected exactly one compiled B1d0 test in Cargo target/debug/deps (found $count)"
 
 sudo -n install -d -o root -g root -m 0755 "$MOUNT_ROOT"
 cleanup() {
