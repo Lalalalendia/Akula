@@ -110,7 +110,7 @@ jobs:
               --out-dir "$GITHUB_WORKSPACE/dist"
           )
           test "$(find dist -maxdepth 1 -name '*.AppImage' -type f | wc -l)" -eq 1
-          candidate="$(find dist -maxdepth 1 -name '*.AppImage' -type f -print -quit)"
+          candidate="$(realpath "$(find dist -maxdepth 1 -name '*.AppImage' -type f -print -quit)")"
           chmod u+x "$candidate"
           (cd "$RUNNER_TEMP" && "$candidate" --appimage-extract >/dev/null)
           embedded="$RUNNER_TEMP/squashfs-root/usr/share/akula-w4/akula-w4-lab"
