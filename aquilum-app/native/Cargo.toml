@@ -26,7 +26,9 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
-installed = []
+# Standard signed Windows installs and updates include opt-in P2P.
+# No discovery, listener or file transfer starts on application launch.
+installed = ["p2p-native-receive-beta"]
 memory-probe = []
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
@@ -35,7 +37,8 @@ p2p-device-ui = ["p2p-device-contacts-preview"]
 # Read-only verified receiving journal in the Native transfer panel, opt-in only.
 p2p-inbox-preview = ["dep:akula-inbox-ledger-lab", "aquilum-core/p2p-inbox-lab"]
 # Explicit Native one-file LAN/Internet send plus local OS-backed pairing UI.
-# Never enabled in installed builds; manual peer pin remains distinct from grants.
+# Included via installed; all network actions require explicit user consent.
+# Trusted peer pin is transport authentication, not a Vault/file grant.
 p2p-native-send-beta = ["p2p-inbox-preview", "p2p-device-ui", "dep:akula-staya-integration", "dep:tokio"]
 # Native receiver: explicitly request from an OS-pinned peer and store only in Inbox.
 p2p-native-receive-beta = ["p2p-native-send-beta"]

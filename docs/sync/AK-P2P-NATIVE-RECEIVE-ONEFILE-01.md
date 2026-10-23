@@ -1,6 +1,10 @@
 # AK-P2P-NATIVE-RECEIVE-ONEFILE-01
 
-Experimental, default-off Native receiving stack on the one-file QUIC beta.
+Native P2P receiving stack on the one-file QUIC beta. The signed Windows
+installed feature is configured to include P2P send, receive and pairing,
+subject to PR integration, exact-head testing and signed release approval.
+The user must explicitly start each network operation; no P2P listener runs
+automatically at application launch or during an updater check.
 
 ## 24 October: explicit Internet/N0 route on the same authenticated file protocol
 
@@ -111,3 +115,18 @@ no confirmed exact-head CI, physical Windows two-device acceptance, complete
 Windows Inbox handle custody or shipping Windows installer. PR #609 remains
 an independent upstream implementation until reconciled; this branch
 does not merge or close it.
+
+## 24 October: standard auto-update integration decision
+
+The normal signed Windows installer and updater use Cargo --features installed.
+This profile now includes p2p-native-receive-beta transitively, so a future
+main-based, publisher-signed, version-increased release will contain P2P
+without a second application or a separate P2P installer. The standard
+signed candidate workflow inspects the installed feature relationship
+before packaging. Scoped Windows CI compiles/tests this installed graph.
+
+This source change alone is NOT a published update. Public v0.3.12 is
+unchanged. The stacked PR chain must enter protected main, CI must pass,
+and the normal owner-approved signed release must publish a newer version.
+No bypass of signature, Windows path-custody or updater integrity checks.
+Peer confirmation is local-only, not a durable delivery ACK.
