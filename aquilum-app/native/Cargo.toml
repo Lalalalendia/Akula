@@ -26,7 +26,9 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
-installed = []
+# Public installed Windows/Linux builds include Dropbox read-only connection UI.
+# Actual cloud synchronization and writes remain disabled until separately accepted.
+installed = ["dropbox-readonly-preview"]
 memory-probe = []
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
