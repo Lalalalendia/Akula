@@ -60,6 +60,8 @@ impl Host {
             }
             active
         };
+        #[cfg(all(target_os = "windows", not(feature = "installed")))]
+        output.begin_output_stages(crate::render::Renderer::diagnostic_stages_enabled());
         let raster_start = Instant::now();
         let drawn = match self.renderer.draw(&layers, width, height, scale, background, full, output) {
             Ok(drawn) => drawn,
@@ -78,6 +80,10 @@ impl Host {
         if !drawn.is_empty() {
             output.present(&drawn);
         }
+        // Release the mutable output borrow before calling methods on Host.
+        // The native timing snapshot belongs to the frame just submitted.
+        #[cfg(all(target_os = "windows", not(feature = "installed")))]
+        let native_output_stages = output.take_output_stages();
         self.layers = Some(layers);
         self.schedule_live();
         self.reveal();
@@ -109,6 +115,17 @@ impl Host {
             stage.scene_ms = scene.as_secs_f64() * 1000.0;
             stage.renderer_draw_ms = raster.as_secs_f64() * 1000.0;
             stage.output_present_ms = present.as_secs_f64() * 1000.0;
+            #[cfg(target_os = "windows")]
+            {
+                let native = native_output_stages;
+                stage.output_map_ms = native.map_ms;
+                stage.output_unmap_ms = native.unmap_ms;
+                stage.output_copy_submit_ms = native.copy_submit_ms;
+                stage.output_present_call_ms = native.present_call_ms;
+                stage.output_copy_bytes = native.copy_bytes;
+                stage.output_copy_rects = native.copy_rects;
+                stage.output_map_calls = native.map_calls;
+            }
             Some(stage)
         } else {
             None

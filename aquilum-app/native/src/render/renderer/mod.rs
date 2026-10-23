@@ -71,6 +71,21 @@ pub struct StageSample {
     pub scene_ms: f64,
     pub renderer_draw_ms: f64,
     pub output_present_ms: f64,
+    // Windows developer-only WARP trace. CPU call times, not GPU completion.
+    #[cfg(target_os = "windows")]
+    pub output_map_ms: f64,
+    #[cfg(target_os = "windows")]
+    pub output_unmap_ms: f64,
+    #[cfg(target_os = "windows")]
+    pub output_copy_submit_ms: f64,
+    #[cfg(target_os = "windows")]
+    pub output_present_call_ms: f64,
+    #[cfg(target_os = "windows")]
+    pub output_copy_bytes: u64,
+    #[cfg(target_os = "windows")]
+    pub output_copy_rects: u64,
+    #[cfg(target_os = "windows")]
+    pub output_map_calls: u64,
     pub encode_ms: f64,
     pub vello_ms: f64,
     pub scroll_shift_ms: f64,

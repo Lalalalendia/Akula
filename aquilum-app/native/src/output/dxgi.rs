@@ -1,6 +1,8 @@
 use std::rc::Rc;
+#[cfg(not(feature = "installed"))]
+use std::time::Instant;
 use windows::Win32::Foundation::{HWND, POINT};
-use windows::Win32::Graphics::Direct3D11::{D3D11_MAP_WRITE, D3D11_MAPPED_SUBRESOURCE, ID3D11Texture2D};
+use windows::Win32::Graphics::Direct3D11::{D3D11_MAP_READ_WRITE, D3D11_MAP_WRITE, D3D11_MAPPED_SUBRESOURCE, ID3D11Texture2D};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_UNKNOWN;
 use windows::Win32::Graphics::Dxgi::{DXGI_PRESENT, DXGI_PRESENT_PARAMETERS, DXGI_SWAP_CHAIN_FLAG};
 use winit::event_loop::OwnedDisplayHandle;
@@ -10,6 +12,18 @@ use winit::window::Window;
 use super::device::{capacity, create, rect, region, texture, Gpu, GROWTH};
 use super::{Area, Canvas, Target};
 
+#[cfg(not(feature = "installed"))]
+#[derive(Default, Clone, Copy)]
+pub(crate) struct OutputStages {
+    pub map_ms: f64,
+    pub unmap_ms: f64,
+    pub copy_submit_ms: f64,
+    pub present_call_ms: f64,
+    pub copy_bytes: u64,
+    pub copy_rects: u64,
+    pub map_calls: u64,
+}
+
 pub struct Output {
     hwnd: HWND,
     gpu: Option<Gpu>,
@@ -17,6 +31,10 @@ pub struct Output {
     capacity: (u32, u32),
     fresh: bool,
     background: u32,
+    #[cfg(not(feature = "installed"))]
+    output_stages: OutputStages,
+    #[cfg(not(feature = "installed"))]
+    measure_output_stages: bool,
 }
 
 impl Output {
@@ -29,7 +47,27 @@ impl Output {
         let size = (size.width.max(1), size.height.max(1));
         let capacity = (size.0.next_multiple_of(GROWTH), size.1.next_multiple_of(GROWTH));
         let gpu = create(hwnd, capacity.0, capacity.1)?;
-        Ok(Output { hwnd, gpu: Some(gpu), size, capacity, fresh: true, background: 0 })
+        Ok(Output {
+            hwnd, gpu: Some(gpu), size, capacity, fresh: true, background: 0,
+            #[cfg(not(feature = "installed"))]
+            output_stages: OutputStages::default(),
+            #[cfg(not(feature = "installed"))]
+            measure_output_stages: false,
+        })
+    }
+
+    /// A single, coherent native redraw owns one diagnostic sample.
+    /// Clear previous live-tick data before measuring the current frame.
+    #[cfg(not(feature = "installed"))]
+    pub(crate) fn begin_output_stages(&mut self, enabled: bool) {
+        self.output_stages = OutputStages::default();
+        self.measure_output_stages = enabled;
+    }
+
+    #[cfg(not(feature = "installed"))]
+    pub(crate) fn take_output_stages(&mut self) -> OutputStages {
+        self.measure_output_stages = false;
+        std::mem::take(&mut self.output_stages)
     }
 
     fn lost(&mut self, err: impl std::fmt::Display) {
@@ -56,7 +94,7 @@ impl Output {
         }
         let _zone = aq_trace::zone("размер цепочки");
         unsafe { gpu.chain.ResizeBuffers(0, capacity.0, capacity.1, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(0)) }.map_err(|e| format!("размер цепочки: {e}"))?;
-        gpu.canvas = texture(&gpu.device, capacity.0, capacity.1).map_err(|e| format!("холст: {e}"))?;
+        gpu.canvas = texture(&gpu.device, capacity.0, capacity.1, gpu.map_read_write).map_err(|e| format!("холст: {e}"))?;
         gpu.back = 0;
         self.capacity = capacity;
         self.clear();
@@ -101,10 +139,25 @@ impl Output {
         }
         gpu.back = (gpu.back + 1) % gpu.stale.len();
         let mut rects: Vec<_> = copy.iter().map(|a| rect(*a)).collect();
+        #[cfg(not(feature = "installed"))]
+        let mut stages = OutputStages::default();
+        #[cfg(not(feature = "installed"))]
+        let measure = self.measure_output_stages;
         let result = unsafe {
             gpu.chain.GetBuffer::<ID3D11Texture2D>(0).and_then(|back| {
+                #[cfg(not(feature = "installed"))]
+                let copy_start = measure.then(Instant::now);
                 for area in &copy {
                     gpu.context.CopySubresourceRegion(&back, 0, area.x, area.y, 0, &gpu.canvas, 0, Some(&region(*area)));
+                }
+                #[cfg(not(feature = "installed"))]
+                if let Some(start) = copy_start {
+                    // CPU submission time, NOT completion of an asynchronous GPU copy.
+                    stages.copy_submit_ms = start.elapsed().as_secs_f64() * 1000.0;
+                    stages.copy_rects = copy.len() as u64;
+                    stages.copy_bytes = copy.iter().fold(0_u64, |bytes, area| {
+                        bytes.saturating_add(u64::from(area.w) * u64::from(area.h) * 4)
+                    });
                 }
                 let params = DXGI_PRESENT_PARAMETERS {
                     DirtyRectsCount: if self.fresh { 0 } else { rects.len() as u32 },
@@ -112,9 +165,24 @@ impl Output {
                     pScrollRect: std::ptr::null_mut(),
                     pScrollOffset: std::ptr::null_mut::<POINT>(),
                 };
-                gpu.chain.Present1(1, DXGI_PRESENT(0), &params).ok()
+                #[cfg(not(feature = "installed"))]
+                let present_start = measure.then(Instant::now);
+                let result = gpu.chain.Present1(1, DXGI_PRESENT(0), &params).ok();
+                #[cfg(not(feature = "installed"))]
+                if let Some(start) = present_start {
+                    // May include wait for the refresh interval; not scanout time.
+                    stages.present_call_ms = start.elapsed().as_secs_f64() * 1000.0;
+                }
+                result
             })
         };
+        #[cfg(not(feature = "installed"))]
+        if measure {
+            self.output_stages.copy_submit_ms += stages.copy_submit_ms;
+            self.output_stages.present_call_ms += stages.present_call_ms;
+            self.output_stages.copy_bytes = self.output_stages.copy_bytes.saturating_add(stages.copy_bytes);
+            self.output_stages.copy_rects = self.output_stages.copy_rects.saturating_add(stages.copy_rects);
+        }
         if aq_trace::enabled() {
             let mut stats = windows::Win32::Graphics::Dxgi::DXGI_FRAME_STATISTICS::default();
             if unsafe { gpu.chain.GetFrameStatistics(&mut stats) }.is_ok() {
@@ -133,13 +201,31 @@ impl Canvas for Output {
     fn with_target(&mut self, paint: &mut dyn FnMut(Target<'_>)) {
         let Some(gpu) = &self.gpu else { return };
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        if let Err(err) = unsafe { gpu.context.Map(&gpu.canvas, 0, D3D11_MAP_WRITE, 0, Some(&mut mapped)) } {
+        #[cfg(not(feature = "installed"))]
+        let map_start = self.measure_output_stages.then(Instant::now);
+        let result = unsafe {
+            gpu.context.Map(&gpu.canvas, 0,
+                if gpu.map_read_write { D3D11_MAP_READ_WRITE } else { D3D11_MAP_WRITE },
+                0, Some(&mut mapped))
+        };
+        #[cfg(not(feature = "installed"))]
+        if let Some(start) = map_start {
+            self.output_stages.map_ms += start.elapsed().as_secs_f64() * 1000.0;
+            self.output_stages.map_calls += 1;
+        }
+        if let Err(err) = result {
             self.lost(err);
             return;
         }
         let (width, height) = (mapped.RowPitch / 4, self.capacity.1);
         let pixels = unsafe { std::slice::from_raw_parts_mut(mapped.pData.cast::<u32>(), (width * height) as usize) };
         paint(Target { pixels, width: width as u16, height: height as u16 });
+        #[cfg(not(feature = "installed"))]
+        let unmap_start = self.measure_output_stages.then(Instant::now);
         unsafe { gpu.context.Unmap(&gpu.canvas, 0) };
+        #[cfg(not(feature = "installed"))]
+        if let Some(start) = unmap_start {
+            self.output_stages.unmap_ms += start.elapsed().as_secs_f64() * 1000.0;
+        }
     }
 }
