@@ -17,6 +17,10 @@ impl App {
                 return Outcome::default();
             }
         }
+        if let Err(error) = self.workspace.core.search.deactivate() {
+            report!("база не закрыта: поисковый индекс не остановлен: {error:?}");
+            return Outcome::default();
+        }
         self.leave_note();
         if let Some(session) = &mut self.session {
             session.save(&self.workspace.core, &mut self.tabs);
