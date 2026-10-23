@@ -21,6 +21,8 @@ jobs:
   windows-313-exe:
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: .artifacts/cargo-native
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -35,7 +37,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist\akula-313-dropbox | Out-Null
-          Copy-Item aquilum-app\target\release\aquilum-native.exe dist\akula-313-dropbox\Akula-3.13-Dropbox-TEST-ONLY.exe
+          Copy-Item .artifacts\cargo-native\release\aquilum-native.exe dist\akula-313-dropbox\Akula-3.13-Dropbox-TEST-ONLY.exe
           $sha = (Get-FileHash dist\akula-313-dropbox\Akula-3.13-Dropbox-TEST-ONLY.exe -Algorithm SHA256).Hash
           "UNSIGNED / TEST ONLY / NOT A PUBLIC RELEASE" | Set-Content dist\akula-313-dropbox\README.txt
           "PR commit: ${{ github.sha }}" | Add-Content dist\akula-313-dropbox\README.txt
