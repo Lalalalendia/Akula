@@ -36,6 +36,19 @@ impl WorkspacesState {
 
 
 impl App {
+    fn save_before_workspace_change(&mut self, root: &mut RenderRoot) -> bool {
+        if let Some(note) = self.note.as_mut() {
+            // Keep the Note and editor alive until the serial disk worker has
+            // reported the result. Note::leave consumes this recovery state.
+            note.flush(&self.workspace.core, &self.text);
+            if note.save_error.is_some() {
+                self.refresh_save_error(root);
+                return false;
+            }
+        }
+        true
+    }
+
     pub(super) fn open_workspaces(&mut self, root: &mut RenderRoot) {
         self.show_workspaces(root, None);
     }
@@ -108,14 +121,22 @@ impl App {
         if !path.is_dir() {
             return failed(self, root);
         }
+        if self.tree.root().is_some_and(|current| workspaces::same_path(current, &path)) {
+            self.close_workspaces(root);
+            return Outcome::default();
+        }
+        if !self.save_before_workspace_change(root) {
+            self.close_workspaces(root);
+            self.show_workspaces(root, Some(t("workspaces.switchSaveFailed")));
+            return Outcome::default();
+        }
+        // Do not remember the target as the last opened folder until the old
+        // note is safely saved; a refused switch must survive an app restart.
         if let Err(e) = self.workspace.core.ui_state.resolve_workspace(&path.to_string_lossy(), crate::dates::now_ms()) {
             report!("база {} не открыта: {e:?}", path.display());
             return failed(self, root);
         }
         self.close_workspaces(root);
-        if self.tree.root().is_some_and(|current| workspaces::same_path(current, &path)) {
-            return Outcome::default();
-        }
         self.leave_note();
         // No document content from the previous workspace survives the switch,
         // even if the same relative pathname exists in the next vault.

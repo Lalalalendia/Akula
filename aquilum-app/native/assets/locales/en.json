@@ -867,6 +867,7 @@
     "forgetPending": "Removing…",
     "listFailed": "Could not read the list of knowledge bases: {{reason}}",
     "closeActive": "Close knowledge base",
-    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning."
+    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning.",
+    "switchSaveFailed": "Could not switch folders because a note was not saved. The current folder stays open. Check the editor warning."
   }
 }
