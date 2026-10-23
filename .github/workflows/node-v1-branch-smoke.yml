@@ -1,0 +1,31 @@
+name: Node V1 integration smoke (temporary branch only)
+on:
+  push:
+    branches:
+      - feature/akula-node-v1-integration
+    paths:
+      - '.github/workflows/node-v1-branch-smoke.yml'
+      - 'aquilum-app/core/src/node_v1/**'
+      - 'aquilum-app/core/src/lib.rs'
+      - 'aquilum-app/core/Cargo.toml'
+      - 'interop/akula-staya/**'
+permissions:
+  contents: read
+concurrency:
+  group: node-v1-branch-only-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  linux-node-v1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile NodeV1 headless binary
+        run: cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 --bin akula-node
+      - name: Test signed NodeStore and durable challenge fence
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 node_v1:: -- --nocapture
+      - name: Test authenticated QUIC from source A to offline Node to B
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-e2e-tests --test node_v1_real_quic -- --nocapture
+      - name: Check integration formatting
+        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check

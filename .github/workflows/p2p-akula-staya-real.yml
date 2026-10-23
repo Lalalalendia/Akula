@@ -11,46 +11,17 @@ on:
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
-  push:
-    branches:
-      - feature/akula-node-v1-integration
-    paths:
-      - 'aquilum-app/core/src/node_v1/**'
-      - 'aquilum-app/core/src/lib.rs'
-      - 'aquilum-app/core/Cargo.toml'
-      - 'interop/akula-staya/**'
-      - '.github/workflows/p2p-akula-staya-real.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: akula-staya-real-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: akula-staya-real-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
-  node-v1-branch-verify:
-    name: Node-V1 exact-branch Linux compile and QUIC E2E
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/akula-node-v1-integration'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 55
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Compile opt-in Linux Node-V1 headless binary
-        run: cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 --bin akula-node
-      - name: Verify Node-V1 scoped owner, replica and replay tests
-        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 node_v1:: -- --nocapture
-      - name: Build and test authenticated Iroh A to Node to B
-        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-e2e-tests --test node_v1_real_quic -- --nocapture
-      - name: Rust formatting for all new integration sources
-        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
-
   real-interop:
     name: Actual Akula decision plus Staya Iroh and Bao on ${{ matrix.os }}
-    if: github.event_name != 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
