@@ -41,12 +41,13 @@ pub(super) fn render(
                 t("transfer.nativeSendButton"),
                 Variant::Ghost,
             ));
-            actions.push((button.id(), NativeSendAction::Start(contact.full_endpoint_id.clone())));
+            actions.push((
+                button.id(),
+                NativeSendAction::Start(contact.full_endpoint_id.clone()),
+            ));
             let short: String = contact.full_endpoint_id.chars().take(16).collect();
             panel = panel.with_fixed(NewWidget::new(
-                Flex::row()
-                    .with(details(&short), 1.0)
-                    .with_fixed(button),
+                Flex::row().with(details(&short), 1.0).with_fixed(button),
             ));
         }
     }
@@ -55,7 +56,9 @@ pub(super) fn render(
     }
     if let Some(error) = &view.message {
         panel = panel.with_fixed(hint(&format!(
-            "{}: {}", t("transfer.nativeSendFailed"), error
+            "{}: {}",
+            t("transfer.nativeSendFailed"),
+            error
         )));
     }
     let panel = NewWidget::new(panel).with_props(

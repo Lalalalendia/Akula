@@ -61,7 +61,11 @@ impl NativeSender {
                     self.view.busy = false;
                     self.view.success = result.is_ok();
                     self.view.message = result.err().map(|error| {
-                        error.chars().filter(|ch| !ch.is_control()).take(240).collect()
+                        error
+                            .chars()
+                            .filter(|ch| !ch.is_control())
+                            .take(240)
+                            .collect()
                     });
                     self.rx = None;
                     self.stop = None;
@@ -137,9 +141,12 @@ impl App {
         }
         // The UI is not a trust authority. The transport rechecks the
         // protected OS pin and TLS remote endpoint before reading bytes.
-        let confirmed = self.transfer.transport_contacts.rows.iter().any(|entry| {
-            !entry.revoked && entry.full_endpoint_id == peer
-        });
+        let confirmed = self
+            .transfer
+            .transport_contacts
+            .rows
+            .iter()
+            .any(|entry| !entry.revoked && entry.full_endpoint_id == peer);
         if !confirmed || self.transfer.drafts.len() != 1 || self.transfer.drafts[0].paused {
             return false;
         }
