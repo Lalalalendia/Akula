@@ -8,6 +8,16 @@ impl App {
             // This handler is reached only for ordinary settings buttons.
             // Review actions require the separately confirmed modal flow.
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
+            #[cfg(feature = "dropbox-readonly-preview")]
+            Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly => {
+                let resume = matches!(action, Action::DropboxResumeReadOnly);
+                self.dropbox_preview.start(
+                    core.settings.get_config().dropbox_readonly.clone(),
+                    resume,
+                    std::sync::Arc::clone(&self.workspace.wake),
+                );
+                Effect::Content
+            }
             Action::OpenTrash => {
                 if let Some(workspace) = workspace {
                     match gate::ensure_trash(core, &workspace) {
@@ -104,7 +114,8 @@ impl App {
                     || before.templates.folder != after.templates.folder
                     || mcp_changed
                     || retention
-                    || before.s3_onboarding != after.s3_onboarding;
+                    || before.s3_onboarding != after.s3_onboarding
+                    || before.dropbox_readonly != after.dropbox_readonly;
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;
