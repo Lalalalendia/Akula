@@ -76,10 +76,14 @@ pub enum LedgerError {
 }
 
 impl From<io::Error> for LedgerError {
-    fn from(value: io::Error) -> Self { Self::Io(value) }
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
 }
 impl From<rusqlite::Error> for LedgerError {
-    fn from(value: rusqlite::Error) -> Self { Self::Database(value) }
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Database(value)
+    }
 }
 
 pub struct InboxLedger {
@@ -92,14 +96,24 @@ impl InboxLedger {
     /// the local root. This lab rejects symlinks on the root and direct objects
     /// directory, but does not claim to handle hostile ancestor-directory races.
     pub fn open(root: &Path) -> Result<Self, LedgerError> {
-        if !root.exists() { fs::create_dir_all(root)?; }
-        if !regular_directory(root)? { return Err(LedgerError::UnsafeRoot); }
+        if !root.exists() {
+            fs::create_dir_all(root)?;
+        }
+        if !regular_directory(root)? {
+            return Err(LedgerError::UnsafeRoot);
+        }
         let objects = root.join("objects");
-        if !objects.exists() { fs::create_dir(&objects)?; }
-        if !regular_directory(&objects)? { return Err(LedgerError::UnsafeRoot); }
+        if !objects.exists() {
+            fs::create_dir(&objects)?;
+        }
+        if !regular_directory(&objects)? {
+            return Err(LedgerError::UnsafeRoot);
+        }
         let db_path = root.join("received-inbox.sqlite3");
         if let Ok(meta) = fs::symlink_metadata(&db_path) {
-            if !meta.file_type().is_file() { return Err(LedgerError::UnsafeRoot); }
+            if !meta.file_type().is_file() {
+                return Err(LedgerError::UnsafeRoot);
+            }
         }
         let db = Connection::open(db_path)?;
         db.execute_batch(
@@ -121,7 +135,8 @@ impl InboxLedger {
 
     /// Internal transfer ID only. Remote filenames are never used as paths.
     pub fn object_path(&self, transfer_id: Uuid) -> PathBuf {
-        self.objects.join(format!("{}.blob", transfer_id.hyphenated()))
+        self.objects
+            .join(format!("{}.blob", transfer_id.hyphenated()))
     }
 
     /// Persist immutable intent *before* the file writer publishes its object.
@@ -132,12 +147,21 @@ impl InboxLedger {
             "INSERT OR IGNORE INTO received_inbox
                 (transfer_id, sender, recipient, source, bytes, digest, state)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-            params![expected.id.to_string(), &expected.sender_key[..],
-                    &expected.recipient_key[..], expected.source.as_str(),
-                    expected.bytes as i64, &expected.blake3[..]],
+            params![
+                expected.id.to_string(),
+                &expected.sender_key[..],
+                &expected.recipient_key[..],
+                expected.source.as_str(),
+                expected.bytes as i64,
+                &expected.blake3[..]
+            ],
         )?;
-        let saved = self.get(expected.id)?.ok_or(LedgerError::CorruptDatabaseRecord)?;
-        if saved.expected != *expected { return Err(LedgerError::ConflictingIntent); }
+        let saved = self
+            .get(expected.id)?
+            .ok_or(LedgerError::CorruptDatabaseRecord)?;
+        if saved.expected != *expected {
+            return Err(LedgerError::ConflictingIntent);
+        }
         self.status(expected.id)
     }
 
@@ -189,8 +213,12 @@ impl InboxLedger {
     pub fn confirm(&mut self, expected: &ExpectedTransfer) -> Result<LocalStatus, LedgerError> {
         validate(expected)?;
         let saved = self.get(expected.id)?.ok_or(LedgerError::UnknownTransfer)?;
-        if saved.expected != *expected { return Err(LedgerError::ConflictingIntent); }
-        if !self.local_matches(expected)? { return Err(LedgerError::InvalidLocalObject); }
+        if saved.expected != *expected {
+            return Err(LedgerError::ConflictingIntent);
+        }
+        if !self.local_matches(expected)? {
+            return Err(LedgerError::InvalidLocalObject);
+        }
         let transaction = self.db.transaction()?;
         transaction.execute(
             "UPDATE received_inbox SET state = 1 WHERE transfer_id = ?1 AND state IN (0,1)",
@@ -204,16 +232,18 @@ impl InboxLedger {
     /// On every query, a committed DB row is insufficient. The locally opened
     /// file must still match the *previously authenticated* immutable intent.
     pub fn status(&self, id: Uuid) -> Result<LocalStatus, LedgerError> {
-        let Some(record) = self.get(id)? else { return Ok(LocalStatus::Unknown); };
+        let Some(record) = self.get(id)? else {
+            return Ok(LocalStatus::Unknown);
+        };
         if record.state == 0 {
             // A previous failed writer may have left an occupied corrupt object.
             // Showing ordinary Pending would conceal a non-retryable conflict.
             match fs::symlink_metadata(self.object_path(id)) {
-                Ok(_) if !self.local_matches(&record.expected)? =>
-                    return Ok(LocalStatus::NeedsReview),
+                Ok(_) if !self.local_matches(&record.expected)? => {
+                    return Ok(LocalStatus::NeedsReview)
+                }
                 Ok(_) => return Ok(LocalStatus::Pending), // valid pre-commit crash candidate
-                Err(e) if e.kind() == io::ErrorKind::NotFound =>
-                    return Ok(LocalStatus::Pending),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(LocalStatus::Pending),
                 Err(e) => return Err(e.into()),
             }
         }
@@ -225,16 +255,18 @@ impl InboxLedger {
     }
 
     pub fn count(&self) -> Result<u64, LedgerError> {
-        let n: i64 = self.db.query_row("SELECT COUNT(*) FROM received_inbox", [], |row| row.get(0))?;
+        let n: i64 = self
+            .db
+            .query_row("SELECT COUNT(*) FROM received_inbox", [], |row| row.get(0))?;
         u64::try_from(n).map_err(|_| LedgerError::CorruptDatabaseRecord)
     }
 
     /// Checked Inbox listing. Never expose a row as received from DB state
     /// alone: each candidate is independently re-opened and rehashed.
     pub fn list(&self) -> Result<Vec<(ExpectedTransfer, LocalStatus)>, LedgerError> {
-        let mut stmt = self.db.prepare(
-            "SELECT transfer_id FROM received_inbox ORDER BY transfer_id",
-        )?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT transfer_id FROM received_inbox ORDER BY transfer_id")?;
         let ids = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let mut result = Vec::new();
         for item in ids {
@@ -247,18 +279,25 @@ impl InboxLedger {
         Ok(result)
     }
 
-
     fn get(&self, id: Uuid) -> Result<Option<Record>, LedgerError> {
-        let raw = self.db.query_row(
-            "SELECT sender, recipient, source, bytes, digest, state
+        let raw = self
+            .db
+            .query_row(
+                "SELECT sender, recipient, source, bytes, digest, state
                FROM received_inbox WHERE transfer_id = ?1",
-            [id.to_string()],
-            |r| {
-                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?,
-                    r.get::<_, String>(2)?, r.get::<_, i64>(3)?,
-                    r.get::<_, Vec<u8>>(4)?, r.get::<_, i64>(5)?))
-            },
-        ).optional()?;
+                [id.to_string()],
+                |r| {
+                    Ok((
+                        r.get::<_, Vec<u8>>(0)?,
+                        r.get::<_, Vec<u8>>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, Vec<u8>>(4)?,
+                        r.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
         let Some((sender, recipient, source, bytes, digest, state)) = raw else {
             return Ok(None);
         };
@@ -271,14 +310,22 @@ impl InboxLedger {
         let bytes = u64::try_from(bytes).map_err(|_| LedgerError::CorruptDatabaseRecord)?;
         let expected = ExpectedTransfer {
             id,
-            sender_key: sender.try_into().map_err(|_| LedgerError::CorruptDatabaseRecord)?,
-            recipient_key: recipient.try_into().map_err(|_| LedgerError::CorruptDatabaseRecord)?,
+            sender_key: sender
+                .try_into()
+                .map_err(|_| LedgerError::CorruptDatabaseRecord)?,
+            recipient_key: recipient
+                .try_into()
+                .map_err(|_| LedgerError::CorruptDatabaseRecord)?,
             source,
             bytes,
-            blake3: digest.try_into().map_err(|_| LedgerError::CorruptDatabaseRecord)?,
+            blake3: digest
+                .try_into()
+                .map_err(|_| LedgerError::CorruptDatabaseRecord)?,
         };
         validate(&expected)?;
-        if !matches!(state, 0 | 1) { return Err(LedgerError::CorruptDatabaseRecord); }
+        if !matches!(state, 0 | 1) {
+            return Err(LedgerError::CorruptDatabaseRecord);
+        }
         Ok(Some(Record { expected, state }))
     }
 
@@ -289,17 +336,27 @@ impl InboxLedger {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(e) => return Err(e.into()),
         };
-        if !info.file_type().is_file() || info.len() != expected.bytes { return Ok(false); }
+        if !info.file_type().is_file() || info.len() != expected.bytes {
+            return Ok(false);
+        }
         let mut file = File::open(&path)?;
-        if !file.metadata()?.is_file() { return Ok(false); }
+        if !file.metadata()?.is_file() {
+            return Ok(false);
+        }
         let mut digest = blake3::Hasher::new();
         let mut read = 0u64;
         let mut buffer = [0u8; BUFFER_BYTES];
         loop {
             let n = file.read(&mut buffer)?;
-            if n == 0 { break; }
-            read = read.checked_add(n as u64).ok_or(LedgerError::InvalidLocalObject)?;
-            if read > expected.bytes { return Ok(false); }
+            if n == 0 {
+                break;
+            }
+            read = read
+                .checked_add(n as u64)
+                .ok_or(LedgerError::InvalidLocalObject)?;
+            if read > expected.bytes {
+                return Ok(false);
+            }
             digest.update(&buffer[..n]);
         }
         Ok(read == expected.bytes && *digest.finalize().as_bytes() == expected.blake3)
@@ -316,8 +373,11 @@ fn regular_directory(path: &Path) -> Result<bool, io::Error> {
 }
 
 fn validate(v: &ExpectedTransfer) -> Result<(), LedgerError> {
-    if v.id.is_nil() || v.bytes == 0 || v.bytes > MAX_ITEM_BYTES
-        || v.sender_key == [0; 32] || v.recipient_key == [0; 32]
+    if v.id.is_nil()
+        || v.bytes == 0
+        || v.bytes > MAX_ITEM_BYTES
+        || v.sender_key == [0; 32]
+        || v.recipient_key == [0; 32]
         || v.blake3 == [0; 32]
     {
         return Err(LedgerError::InvalidIntent);
@@ -331,19 +391,28 @@ mod tests {
 
     fn intent(source: Transport) -> (ExpectedTransfer, Vec<u8>) {
         let bytes = b"receiver-owned synthetic file".to_vec();
-        (ExpectedTransfer {
-            id: Uuid::new_v4(),
-            sender_key: [1; 32], recipient_key: [2; 32],
-            source, bytes: bytes.len() as u64,
-            blake3: *blake3::hash(&bytes).as_bytes(),
-        }, bytes)
+        (
+            ExpectedTransfer {
+                id: Uuid::new_v4(),
+                sender_key: [1; 32],
+                recipient_key: [2; 32],
+                source,
+                bytes: bytes.len() as u64,
+                blake3: *blake3::hash(&bytes).as_bytes(),
+            },
+            bytes,
+        )
     }
 
     fn publish_fixture(ledger: &InboxLedger, v: &ExpectedTransfer, bytes: &[u8]) {
         // Simulates an *independent* no-replace file writer. The ledger itself
         // has no ability to publish bytes or choose an arbitrary destination.
         let path = ledger.object_path(v.id);
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(path).unwrap();
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
         use std::io::Write;
         file.write_all(bytes).unwrap();
         file.sync_all().unwrap();
@@ -375,13 +444,22 @@ mod tests {
         assert_eq!(inbox.count().unwrap(), 1);
         let mut replaced = v.clone();
         replaced.source = Transport::S3;
-        assert!(matches!(inbox.reserve(&replaced), Err(LedgerError::ConflictingIntent)));
+        assert!(matches!(
+            inbox.reserve(&replaced),
+            Err(LedgerError::ConflictingIntent)
+        ));
         replaced = v.clone();
         replaced.blake3 = [3; 32];
-        assert!(matches!(inbox.reserve(&replaced), Err(LedgerError::ConflictingIntent)));
+        assert!(matches!(
+            inbox.reserve(&replaced),
+            Err(LedgerError::ConflictingIntent)
+        ));
         replaced = v.clone();
         replaced.sender_key = [4; 32];
-        assert!(matches!(inbox.reserve(&replaced), Err(LedgerError::ConflictingIntent)));
+        assert!(matches!(
+            inbox.reserve(&replaced),
+            Err(LedgerError::ConflictingIntent)
+        ));
         assert_eq!(inbox.count().unwrap(), 1);
     }
 
@@ -391,7 +469,10 @@ mod tests {
         let mut inbox = InboxLedger::open(dir.path()).unwrap();
         let (v, _data) = intent(Transport::S3);
         inbox.reserve(&v).unwrap();
-        assert!(matches!(inbox.confirm(&v), Err(LedgerError::InvalidLocalObject)));
+        assert!(matches!(
+            inbox.confirm(&v),
+            Err(LedgerError::InvalidLocalObject)
+        ));
         assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Pending);
     }
 
@@ -430,7 +511,10 @@ mod tests {
         let mut inbox = InboxLedger::open(dir.path()).unwrap();
         let (v, data) = intent(Transport::S3);
         publish_fixture(&inbox, &v, &data);
-        assert!(matches!(inbox.confirm(&v), Err(LedgerError::UnknownTransfer)));
+        assert!(matches!(
+            inbox.confirm(&v),
+            Err(LedgerError::UnknownTransfer)
+        ));
         assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Unknown);
     }
 
@@ -461,10 +545,16 @@ mod tests {
         let outside = dir.path().join("external.bin");
         fs::write(&outside, &data).unwrap();
         symlink(&outside, inbox.object_path(v.id)).unwrap();
-        assert!(matches!(inbox.confirm(&v), Err(LedgerError::InvalidLocalObject)));
+        assert!(matches!(
+            inbox.confirm(&v),
+            Err(LedgerError::InvalidLocalObject)
+        ));
         let linked_root = dir.path().join("linked-store");
         symlink(&root, &linked_root).unwrap();
-        assert!(matches!(InboxLedger::open(&linked_root), Err(LedgerError::UnsafeRoot)));
+        assert!(matches!(
+            InboxLedger::open(&linked_root),
+            Err(LedgerError::UnsafeRoot)
+        ));
     }
 
     #[test]
@@ -473,18 +563,26 @@ mod tests {
         let (v, data) = intent(Transport::P2p);
         let mut inbox = InboxLedger::open(dir.path()).unwrap();
         let mut writes = 0;
-        let first = inbox.receive_with_writer(&v, |path| {
-            writes += 1;
-            use std::io::Write;
-            let mut f = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
-            f.write_all(&data)?;
-            f.sync_all()?;
-            Ok(())
-        }).unwrap();
+        let first = inbox
+            .receive_with_writer(&v, |path| {
+                writes += 1;
+                use std::io::Write;
+                let mut f = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)?;
+                f.write_all(&data)?;
+                f.sync_all()?;
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(first, LocalStatus::VerifiedLocal);
-        assert_eq!(inbox.receive_with_writer(&v, |_| {
-            panic!("replayed transfer cannot invoke writer")
-        }).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            inbox
+                .receive_with_writer(&v, |_| { panic!("replayed transfer cannot invoke writer") })
+                .unwrap(),
+            LocalStatus::VerifiedLocal
+        );
         assert_eq!(writes, 1);
         assert_eq!(inbox.count().unwrap(), 1);
     }
@@ -499,9 +597,14 @@ mod tests {
             publish_fixture(&inbox, &v, &data);
         }
         let mut inbox = InboxLedger::open(dir.path()).unwrap();
-        assert_eq!(inbox.receive_with_writer(&v, |_| {
-            panic!("existing file must be verified, not overwritten")
-        }).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            inbox
+                .receive_with_writer(&v, |_| {
+                    panic!("existing file must be verified, not overwritten")
+                })
+                .unwrap(),
+            LocalStatus::VerifiedLocal
+        );
     }
 
     #[test]
@@ -511,10 +614,14 @@ mod tests {
         let mut inbox = InboxLedger::open(dir.path()).unwrap();
         inbox.reserve(&v).unwrap();
         fs::write(inbox.object_path(v.id), b"attacker modified bytes").unwrap();
-        assert!(matches!(inbox.receive_with_writer(&v, |_| {
-            panic!("occupied path cannot call writer")
-        }), Err(LedgerError::InvalidLocalObject)));
-        assert_eq!(fs::read(inbox.object_path(v.id)).unwrap(), b"attacker modified bytes");
+        assert!(matches!(
+            inbox.receive_with_writer(&v, |_| { panic!("occupied path cannot call writer") }),
+            Err(LedgerError::InvalidLocalObject)
+        ));
+        assert_eq!(
+            fs::read(inbox.object_path(v.id)).unwrap(),
+            b"attacker modified bytes"
+        );
         assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::NeedsReview);
     }
 
@@ -523,17 +630,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (v, data) = intent(Transport::P2p);
         let mut inbox = InboxLedger::open(dir.path()).unwrap();
-        assert!(matches!(inbox.receive_with_writer(&v, |_| {
+        assert!(matches!(
+            inbox.receive_with_writer(&v, |_| { Err(LedgerError::InvalidLocalObject) }),
             Err(LedgerError::InvalidLocalObject)
-        }), Err(LedgerError::InvalidLocalObject)));
+        ));
         assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Pending);
-        assert_eq!(inbox.receive_with_writer(&v, |path| {
-            use std::io::Write;
-            let mut f = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
-            f.write_all(&data)?;
-            f.sync_all()?;
-            Ok(())
-        }).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(
+            inbox
+                .receive_with_writer(&v, |path| {
+                    use std::io::Write;
+                    let mut f = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(path)?;
+                    f.write_all(&data)?;
+                    f.sync_all()?;
+                    Ok(())
+                })
+                .unwrap(),
+            LocalStatus::VerifiedLocal
+        );
     }
 
     #[test]
@@ -541,10 +657,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (v, _) = intent(Transport::S3);
         let mut inbox = InboxLedger::open(dir.path()).unwrap();
-        assert!(matches!(inbox.receive_with_writer(&v, |path| {
-            fs::write(path, b"wrong bytes")?;
-            Ok(())
-        }), Err(LedgerError::InvalidLocalObject)));
+        assert!(matches!(
+            inbox.receive_with_writer(&v, |path| {
+                fs::write(path, b"wrong bytes")?;
+                Ok(())
+            }),
+            Err(LedgerError::InvalidLocalObject)
+        ));
         assert_eq!(inbox.count().unwrap(), 1);
         assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::NeedsReview);
     }
@@ -557,20 +676,30 @@ mod tests {
         let mut contender = InboxLedger::open(dir.path()).unwrap();
         first.reserve(&v).unwrap();
         let mut attempts = 0;
-        let outcome = contender.receive_with_writer(&v, |path| {
-            assert_eq!(first.receive_with_writer(&v, |winner_path| {
-                use std::io::Write;
-                let mut file = fs::OpenOptions::new()
-                    .write(true).create_new(true).open(winner_path)?;
-                file.write_all(&data)?;
-                file.sync_all()?;
+        let outcome = contender
+            .receive_with_writer(&v, |path| {
+                assert_eq!(
+                    first.receive_with_writer(&v, |winner_path| {
+                        use std::io::Write;
+                        let mut file = fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(winner_path)?;
+                        file.write_all(&data)?;
+                        file.sync_all()?;
+                        Ok(())
+                    })?,
+                    LocalStatus::VerifiedLocal
+                );
+                attempts += 1;
+                // A second no-replace publisher loses the filesystem race.
+                let _ = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)?;
                 Ok(())
-            })?, LocalStatus::VerifiedLocal);
-            attempts += 1;
-            // A second no-replace publisher loses the filesystem race.
-            let _ = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
-            Ok(())
-        }).unwrap();
+            })
+            .unwrap();
         assert_eq!(outcome, LocalStatus::VerifiedLocal);
         assert_eq!(attempts, 1);
         assert_eq!(contender.count().unwrap(), 1);
@@ -582,16 +711,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (v, _) = intent(Transport::P2p);
         let mut ledger = InboxLedger::open(dir.path()).unwrap();
-        assert!(matches!(ledger.receive_with_writer(&v, |path| {
-            use std::io::Write;
-            let mut file = fs::OpenOptions::new()
-                .write(true).create_new(true).open(path)?;
-            file.write_all(b"wrong content")?;
-            file.sync_all()?;
-            // EEXIST is not enough to establish that the winner is valid.
-            let _ = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
-            Ok(())
-        }), Err(LedgerError::InvalidLocalObject)));
+        assert!(matches!(
+            ledger.receive_with_writer(&v, |path| {
+                use std::io::Write;
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)?;
+                file.write_all(b"wrong content")?;
+                file.sync_all()?;
+                // EEXIST is not enough to establish that the winner is valid.
+                let _ = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)?;
+                Ok(())
+            }),
+            Err(LedgerError::InvalidLocalObject)
+        ));
         assert_eq!(ledger.status(v.id).unwrap(), LocalStatus::NeedsReview);
         assert_eq!(ledger.count().unwrap(), 1);
     }
@@ -609,6 +746,8 @@ mod tests {
         assert_eq!(inbox.count().unwrap(), 3);
         let listed = inbox.list().unwrap();
         assert_eq!(listed.len(), 3);
-        assert!(listed.iter().all(|(_expected, status)| *status == LocalStatus::VerifiedLocal));
+        assert!(listed
+            .iter()
+            .all(|(_expected, status)| *status == LocalStatus::VerifiedLocal));
     }
 }
