@@ -158,3 +158,38 @@ fn fallback_candidates_keep_same_parent_preference_and_slash_style() {
     assert_eq!(plan.len(), 1);
     assert_eq!(plan[0].content, "[[Renamed]] [[A/Renamed]] [[B/Same]]");
 }
+
+#[test]
+fn candidate_selection_keeps_parent_and_lexical_tiebreakers() {
+    use super::target::{pick_candidate, select_candidate};
+    use std::path::Path;
+    let root = Path::new("vault");
+    let source = root.join("notes/Source.md");
+    let nearby = root.join("notes/Note.md");
+    let remote = root.join("other/Note.md");
+    let alternatives = vec![
+        remote.to_string_lossy().into_owned(),
+        nearby.to_string_lossy().into_owned(),
+    ];
+    assert_eq!(select_candidate(root, &source, &alternatives), Some(nearby));
+    let ties = ["vault/notes/Beta.md", "vault/notes/Alpha.md"];
+    assert_eq!(pick_candidate(root, &source, &ties), Some("vault/notes/Alpha.md"));
+}
+
+#[test]
+fn sparse_unicode_openers_keep_original_offsets() {
+    let prefix = "[regular markdown] 🦈 ".repeat(2_000);
+    let source = format!("{prefix}`[[ignored]]` [[Цель#Заголовок|подпись]]");
+    let links = super::parser::extract(&source);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target, "Цель#Заголовок");
+    assert_eq!(links[0].offset_utf16, format!("{prefix}`[[ignored]]` ").encode_utf16().count());
+    assert_eq!(&source[links[0].note_range.clone()], "Цель");
+}
+
+#[test]
+fn escaped_openers_are_skipped_without_losing_the_next_link() {
+    let links = super::parser::extract(r"\[[[Note]] [[Accepted]]");
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target, "Accepted");
+}

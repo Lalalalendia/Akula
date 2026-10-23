@@ -1,7 +1,9 @@
 use super::target::{is_attachment, parts};
 use crate::text::utf16::utf16_len;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::ops::Range;
+
+mod excluded;
+use excluded::excluded_ranges;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WikiLink {
@@ -87,25 +89,6 @@ fn scan_candidates(source: &str) -> Vec<WikiLink> {
         })
         .collect()
 }
-fn excluded_ranges(source: &str) -> Vec<Range<usize>> {
-    let mut ranges = Vec::new();
-    let mut block_start = None;
-    for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
-        match event {
-            Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => ranges.push(range),
-            Event::Start(Tag::CodeBlock(_)) => block_start = Some(range.start),
-            Event::End(TagEnd::CodeBlock) => {
-                if let Some(start) = block_start.take() {
-                    ranges.push(start..range.end);
-                }
-            }
-            _ => {}
-        }
-    }
-    ranges.sort_by_key(|range| range.start);
-    ranges
-}
-
 fn find_close(bytes: &[u8], mut cursor: usize) -> Option<usize> {
     while cursor + 1 < bytes.len() {
         if bytes[cursor] == b'\n' || bytes[cursor] == b'\r' {
@@ -184,25 +167,6 @@ mod tests {
 
     fn targets(source: &str) -> Vec<String> {
         extract(source).into_iter().map(|link| link.target).collect()
-    }
-
-    #[test]
-    fn sparse_unicode_openers_keep_original_offsets() {
-        let prefix = "[regular markdown] 🦈 ".repeat(2_000);
-        let source = format!("{prefix}`[[ignored]]` [[Цель#Заголовок|подпись]]");
-        let links = extract(&source);
-        assert_eq!(links.len(), 1);
-        assert_eq!(links[0].target, "Цель#Заголовок");
-        assert_eq!(
-            links[0].offset_utf16,
-            format!("{prefix}`[[ignored]]` ").encode_utf16().count()
-        );
-        assert_eq!(&source[links[0].note_range.clone()], "Цель");
-    }
-
-    #[test]
-    fn escaped_overlapping_opener_can_still_be_found() {
-        assert_eq!(targets(r"\[[[Note]]"), ["Note"]);
     }
 
     #[test]

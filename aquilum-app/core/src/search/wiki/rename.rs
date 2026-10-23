@@ -1,12 +1,15 @@
 use super::super::error::SearchError;
 use super::parser::extract;
 use super::resolver::LinkResolver;
-use super::target::{relative_key, relative_target, select_candidate, target_key, title_key};
+use super::target::{relative_key, relative_target, title_key};
 use crate::files::document::{hash_bytes, normalize_line_endings};
 use crate::search::paths::same_path;
 use rusqlite::Connection;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+mod target_path;
+use target_path::targets_path;
 
 pub struct LinkRewrite {
     pub path: PathBuf,
@@ -87,34 +90,4 @@ pub fn plan_for_rename(
         });
     }
     Ok(rewrites)
-}
-
-fn targets_path(
-    resolver: &mut LinkResolver<'_>,
-    root: &Path,
-    source: &Path,
-    target: &str,
-    old_path: &Path,
-    old_relative_key: &str,
-    old_title_key: &str,
-    fallback_candidates: Option<&[String]>,
-) -> Result<bool, SearchError> {
-    let (key, kind) = target_key(target);
-    if let Some(candidates) = fallback_candidates {
-        return Ok(if kind == "path" {
-            key == old_relative_key
-        } else {
-            key == old_title_key
-                && select_candidate(root, source, candidates)
-                    .is_some_and(|path| same_path(&path, old_path))
-        });
-    }
-    if let Some(path) = resolver.resolve(root, source, target)? {
-        return Ok(same_path(&path, old_path));
-    }
-    Ok(if kind == "path" {
-        key == old_relative_key
-    } else {
-        key == old_title_key
-    })
 }
