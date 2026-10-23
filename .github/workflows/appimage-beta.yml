@@ -4,17 +4,7 @@ name: Akula AppImage beta candidate
 
 on:
   workflow_call:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/appimage-beta.yml'
-      - '.github/scripts/appimage-beta-identity.test.cjs'
-      - 'scripts/appimage-beta-smoke.sh'
-      - 'scripts/appimage-real-upgrade-accept.py'
-      - 'scripts/appimage-real-upgrade-helper.rs'
-      - 'aquilum-app/native/packaging/akula-linux.json'
-      - 'aquilum-app/native/packaging/Akula.desktop'
-      - 'aquilum-app/native/Cargo.toml'
+  # PR path owners are enforced in required central route.
 
 permissions:
   contents: read
@@ -32,10 +22,15 @@ jobs:
       - name: Prove independent identity and CI-only publication HOLD
         run: node --test .github/scripts/appimage-beta-identity.test.cjs
       - name: Install native AppImage packaging dependencies
+        # The entire AppImage job can take 110 min, but a stalled apt mirror
+        # must fail within 10 min rather than hold unrelated security PRs.
+        timeout-minutes: 10
         shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
           sudo apt-get remove -y $(dpkg-query -W -f='${Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
           sudo apt-get install -y libunwind-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \

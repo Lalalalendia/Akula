@@ -1,0 +1,40 @@
+name: Dropbox T0 isolated contract
+
+on:
+  pull_request:
+    paths:
+      - 'modules/dropbox-t0/**'
+      - 'modules/dropbox-auth-lab/**'
+      - 'modules/dropbox-secret-store/**'
+      - 'modules/dropbox-connect-lab/**'
+      - '.github/workflows/dropbox-t0-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dropbox-t0-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CARGO_TARGET_DIR: target/dropbox-ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Offline Dropbox contract tests (no credentials)
+        run: cargo test --manifest-path modules/dropbox-t0/Cargo.toml -- --nocapture
+      - name: OAuth PKCE read-only contract (no secrets or network)
+        run: cargo test --manifest-path modules/dropbox-auth-lab/Cargo.toml -- --nocapture
+      - name: Test Dropbox scope-bound credentials without OS secrets
+        run: cargo test --manifest-path modules/dropbox-secret-store/Cargo.toml -- --nocapture
+      - name: Install Linux Secret Service build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Compile and test native OS credential backend (no real keys)
+        run: cargo test --manifest-path modules/dropbox-secret-store/Cargo.toml --features system-store -- --nocapture
+      - name: Test read-only onboarding chain (fake boundary ports)
+        run: cargo test --manifest-path modules/dropbox-connect-lab/Cargo.toml -- --nocapture

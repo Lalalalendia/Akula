@@ -1,0 +1,19 @@
+[package]
+name = "akula-dropbox-secret-store"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Fail-closed OS credential storage contract for Dropbox refresh tokens"
+
+[workspace]
+
+[features]
+default = []
+system-store = ["dep:keyring"]
+
+[dependencies]
+sha2 = "0.10"
+subtle = "2.6"
+zeroize = "1.9"
+keyring = { version = "=3.6.3", optional = true, default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }

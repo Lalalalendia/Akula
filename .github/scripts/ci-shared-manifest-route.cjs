@@ -4,8 +4,111 @@ const CORE='aquilum-app/core/Cargo.toml';
 const LOCK='aquilum-app/Cargo.lock';
 const LIB='aquilum-app/core/src/lib.rs';
 const ROOT='aquilum-app/Cargo.toml';
+const NATIVE='aquilum-app/native/Cargo.toml';
+const WINDOWS='aquilum-app/native/packaging/akula-windows.json';
+const VERSION_ONLY_PATHS=new Set([CORE,LOCK,NATIVE,WINDOWS]);
+// A version bump changes package identity strings, not the Rust dependency
+// graph. Require byte-for-byte equality of every other manifest/lock field.
+function versionAt(body,marker){
+  if(typeof body!=='string'||body.split(marker).length!==2)return null;
+  const m=/^((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))"/.exec(body.split(marker)[1]);
+  if(!m||!m[1].split('.').every(x=>Number.isSafeInteger(Number(x))))return null;
+  return m[1];
+}
+function versionIncreases(oldV,newV){
+  const a=oldV.split('.').map(Number),b=newV.split('.').map(Number);
+  for(let i=0;i<3;i++)if(a[i]!==b[i])return b[i]>a[i];
+  return false;
+}
+function versionBumpOnly({paths,coreBefore,coreAfter,nativeBefore,nativeAfter,lockBefore,lockAfter,windowsBefore,windowsAfter}){
+  if(!Array.isArray(paths)||paths.length!==4||new Set(paths).size!==4||
+     paths.some(p=>!VERSION_ONLY_PATHS.has(p)))return false;
+  const core='[package]\nname = "aquilum-core"\nversion = "';
+  const native='[package]\nname = "aquilum-native"\nversion = "';
+  const lockCore='[[package]]\nname = "aquilum-core"\nversion = "';
+  const lockNative='[[package]]\nname = "aquilum-native"\nversion = "';
+  const windows='"version": "';
+  const oldV=versionAt(coreBefore,core),newV=versionAt(coreAfter,core);
+  if(!oldV||!newV||!versionIncreases(oldV,newV))return false;
+  for(const [before,after,marker] of [
+    [nativeBefore,nativeAfter,native],
+    [lockBefore,lockAfter,lockCore],
+    [lockBefore,lockAfter,lockNative],
+    [windowsBefore,windowsAfter,windows],
+  ]){
+    if(versionAt(before,marker)!==oldV||versionAt(after,marker)!==newV)return false;
+  }
+  const swap=(s,marker)=>s.replace(marker+oldV+'"',marker+newV+'"');
+  return swap(coreBefore,core)===coreAfter&&
+    swap(nativeBefore,native)===nativeAfter&&
+    swap(swap(lockBefore,lockCore),lockNative)===lockAfter&&
+    swap(windowsBefore,windows)===windowsAfter&&
+    windowsBefore.includes('"productName": "Akula"');
+}
 // Owner-only OS acceptance always runs for its own sources, not for every shared manifest.
 const INSTALLED_OWNER_PATHS=new Set(["aquilum-app/core/src/sync/host_install_unix_root.rs","aquilum-app/core/src/sync/host_install_witness.rs","aquilum-app/core/src/sync/mod.rs","aquilum-app/native/Cargo.toml",".github/workflows/sync-installed-os-owner-witness.yml","docs/sync/adr-0038-unix-root-owned-install-receipt.md"]);
+
+// Preserve the exact former pull_request.path owners. These source-owned labs
+// run through the required Main PR gate, including mixed source/manifest diffs.
+const OWNED_SUITES=Object.freeze({
+  "owned_host_custody": [
+    "aquilum-app/core/src/app_core.rs",
+    "aquilum-app/core/src/app_core_installed_host_tests.rs",
+    "aquilum-app/core/src/files/gate/write.rs",
+    "aquilum-app/core/src/history/service.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    "aquilum-app/core/src/sync/host_custody_registry.rs",
+    "aquilum-app/core/src/sync/host_admission.rs",
+    "aquilum-app/core/src/sync/local_create_tests.rs",
+    "aquilum-app/core/src/sync/host_ledger_identity.rs",
+    "aquilum-app/core/src/sync/host_cold_identity_tests.rs",
+    "aquilum-app/core/src/sync/host_install_witness.rs",
+    "aquilum-app/core/src/app_core_witness_tests.rs",
+    "aquilum-app/core/src/sync/host_core_epoch_tests.rs",
+    "aquilum-app/native/src/workspace.rs",
+    "aquilum-app/native/src/workspace_installed_witness_tests.rs",
+    ".github/workflows/sync-host-custody.yml"
+  ],
+  "owned_sync_protection": [
+    "aquilum-app/core/src/sync/protection_store.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    ".github/workflows/sync-protection.yml"
+  ],
+  "owned_text_delta": [
+    "aquilum-app/core/src/sync/text_delta_codec.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    "aquilum-app/core/src/sync/s3_transport/pack_probe.rs",
+    ".github/workflows/sync-text-delta-rust.yml",
+    "docs/sync/text-delta-03-rust-codec.md"
+  ],
+  "owned_appimage": [
+    ".github/workflows/appimage-beta.yml",
+    ".github/scripts/appimage-beta-identity.test.cjs",
+    "scripts/appimage-beta-smoke.sh",
+    "scripts/appimage-real-upgrade-accept.py",
+    "scripts/appimage-real-upgrade-helper.rs",
+    "aquilum-app/native/packaging/akula-linux.json",
+    "aquilum-app/native/packaging/Akula.desktop",
+    "aquilum-app/native/Cargo.toml"
+  ],
+  "owned_windows_beta": [
+    ".github/workflows/windows-beta.yml",
+    ".github/scripts/windows-beta-identity.test.cjs",
+    "scripts/test-windows-beta.ps1",
+    "scripts/build-windows-update-fixture.ps1",
+    "scripts/test-windows-beta-upgrade.ps1",
+    "scripts/windows-beta-gui-input.ps1",
+    "scripts/windows-beta-candidate-manifest.ps1",
+    "scripts/windows-accesskit-uia.ps1",
+    "aquilum-app/native/packaging/akula-windows.json",
+    "aquilum-app/native/Cargo.toml"
+  ]
+});
+function ownedRoutes(paths){
+  const changed=new Set(paths);
+  return Object.fromEntries(Object.entries(OWNED_SUITES).map(([key,owned])=>
+    [key,owned.some(file=>changed.has(file))]));
+}
 function changes(diff){
   return String(diff||'').split(/\r?\n/)
     .filter(x=>(x.startsWith('+')&&!x.startsWith('+++'))||(x.startsWith('-')&&!x.startsWith('---')))
@@ -93,18 +196,21 @@ function libAdditive(diff,features){
   }
   return true;
 }
-function assess({paths,coreDiff='',lockBefore='',lockAfter='',libDiff=''}){
+function assess({paths,coreDiff='',lockBefore='',lockAfter='',libDiff='',versionOnly=false}){
   const changed=new Set(paths);
+  const metadataOnly=versionOnly&&paths.length===4&&changed.size===4&&
+    [...changed].every(p=>VERSION_ONLY_PATHS.has(p));
   const cargo=changed.has(CORE)?cargoAdditive(coreDiff):{safe:true,packages:new Set(),features:new Set()};
   const lockSafe=changed.has(LOCK)&&changed.has(CORE)&&cargo.safe&&lockAdditive(lockBefore,lockAfter,cargo.packages);
-  const coreRisk=changed.has(CORE)&&(!cargo.safe||(changed.has(LOCK)&&!lockSafe));
-  const lockRisk=changed.has(LOCK)&&!lockSafe;
+  const coreRisk=changed.has(CORE)&&!metadataOnly&&(!cargo.safe||(changed.has(LOCK)&&!lockSafe));
+  const lockRisk=changed.has(LOCK)&&!metadataOnly&&!lockSafe;
   const libRisk=changed.has(LIB)&&!(changed.has(CORE)&&cargo.safe&&libAdditive(libDiff,cargo.features));
   const rootRisk=changed.has(ROOT);
-  const installedOwnerOwned=[...changed].some(p=>INSTALLED_OWNER_PATHS.has(p));
+  const installedOwnerOwned=!metadataOnly&&[...changed].some(p=>INSTALLED_OWNER_PATHS.has(p));
+  const native_manifest_risky=changed.has(NATIVE)&&!metadataOnly;
   return {shared_core_cargo_risky:coreRisk,shared_lock_risky:lockRisk,shared_core_lib_risky:libRisk,shared_root_cargo_risky:rootRisk,
     shared_any_risky:coreRisk||lockRisk||libRisk||rootRisk,
-    installed_owner_owned:installedOwnerOwned};
+    installed_owner_owned:installedOwnerOwned,native_manifest_risky,...ownedRoutes(paths)};
 }
 function git(...args){return execFileSync('git',args,{encoding:'utf8',maxBuffer:16*1024*1024});}
 function compute(base,head){
@@ -114,7 +220,19 @@ function compute(base,head){
   const libDiff=names.includes(LIB)?git('diff','--unified=0',base,head,'--',LIB):'';
   const lockBefore=names.includes(LOCK)?git('show',base+':'+LOCK):'';
   const lockAfter=names.includes(LOCK)?git('show',head+':'+LOCK):'';
-  return assess({paths:names,coreDiff,libDiff,lockBefore,lockAfter});
+  // Only the exact four-file version bump is exempted from shared OS labs.
+  // Mixed release/CI/source changes (such as PR #621) retain every OS lab.
+  const pureVersionPaths=names.length===4&&new Set(names).size===4&&
+    names.every(p=>VERSION_ONLY_PATHS.has(p));
+  const versionOnly=pureVersionPaths&&versionBumpOnly({
+    paths:names,
+    coreBefore:git('show',base+':'+CORE),coreAfter:git('show',head+':'+CORE),
+    nativeBefore:git('show',base+':'+NATIVE),nativeAfter:git('show',head+':'+NATIVE),
+    lockBefore,lockAfter,
+    windowsBefore:git('show',base+':'+WINDOWS),windowsAfter:git('show',head+':'+WINDOWS),
+  });
+  if(versionOnly)process.stderr.write('CI_SHARED_MANIFEST_VERSION_ONLY no dependency graph changes\n');
+  return assess({paths:names,coreDiff,libDiff,lockBefore,lockAfter,versionOnly});
 }
 if(require.main===module){
   try{
@@ -124,4 +242,4 @@ if(require.main===module){
     process.stderr.write('CI_SHARED_MANIFEST_ROUTE '+JSON.stringify(r)+'\n');
   }catch(e){console.error('CI_SHARED_MANIFEST_ROUTE_FAIL_CLOSED '+e.message);process.exitCode=1;}
 }
-module.exports={cargoAdditive,lockAdditive,libAdditive,assess,compute,CORE,LOCK,LIB,ROOT};
+module.exports={OWNED_SUITES,ownedRoutes,cargoAdditive,lockAdditive,libAdditive,versionBumpOnly,assess,compute,CORE,LOCK,LIB,ROOT,NATIVE,WINDOWS};

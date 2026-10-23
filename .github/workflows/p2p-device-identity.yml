@@ -1,0 +1,89 @@
+name: Akula OS-backed P2P device identity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/p2p_device_identity.rs'
+      - 'aquilum-app/core/src/p2p_device_identity/peer_pin.rs'
+      - 'aquilum-app/core/src/p2p_device_identity/peer_pin/contacts.rs'
+      - 'aquilum-app/native/src/app/transfer/contacts.rs'
+      - 'aquilum-app/native/src/ui/transfer/contact_preview.rs'
+      - 'aquilum-app/native/src/ui/transfer/dialog_view.rs'
+      - 'aquilum-app/core/src/bin/akula_p2p_identity.rs'
+      - '.github/workflows/p2p-device-identity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ak-p2p-os-identity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-os-credential:
+    name: Real Windows Credential Manager persistence and native compile
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-p2p-os-identity-v1
+      - name: Check Core module and separate identity diagnostics
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          rustfmt --edition 2021 --check core/src/p2p_device_identity.rs
+          rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin.rs
+          rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin/contacts.rs
+          rustfmt --edition 2021 --check core/src/bin/akula_p2p_identity.rs
+      - name: Prove Windows credential survives separate OS process
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          cargo test --locked -p aquilum-core --features p2p-device-identity p2p_device_identity:: -- --nocapture
+      - name: Strict lint of new Core identity module
+        working-directory: aquilum-app
+        shell: bash
+        run: cargo clippy --locked -p aquilum-core --lib --features p2p-device-identity -- -W clippy::all
+      - name: Format opt-in native contacts preview
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          rustfmt --edition 2024 --check native/src/app/transfer/contacts.rs
+          rustfmt --edition 2024 --check native/src/ui/transfer/contact_preview.rs
+          rustfmt --edition 2024 --check native/src/ui/transfer/dialog_view.rs
+      - name: Compile Native opt-in contacts read-only view
+        working-directory: aquilum-app
+        shell: bash
+        run: cargo check --locked -p aquilum-native --features p2p-device-contacts-preview
+      - name: Compile opt-in diagnostic executable without native GUI
+        working-directory: aquilum-app
+        shell: bash
+        run: cargo check --locked -p aquilum-core --bin akula-p2p-identity --features p2p-device-identity
+
+  linux-fail-closed:
+    name: Linux rejects unavailable OS backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check Core source
+        working-directory: aquilum-app
+        run: |
+          rustfmt --edition 2021 --check core/src/p2p_device_identity.rs
+          rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin.rs
+          rustfmt --edition 2021 --check core/src/p2p_device_identity/peer_pin/contacts.rs
+      - name: Test explicit unsupported-platform refusal
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core --features p2p-device-identity p2p_device_identity:: -- --nocapture

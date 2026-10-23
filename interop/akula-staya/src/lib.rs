@@ -8,6 +8,9 @@
 use aquilum_core::p2p_offer_lab::{
     DecisionV1, OfferError, OfferSession, OfferV1, Outcome, PeerBinding,
 };
+#[cfg(feature = "p2p-live-identity")]
+pub mod live_identity;
+
 use staya_transfer::{
     ContentId, Manifest,
     queue::{QueueError, QueueSelection, SelectedFile},
