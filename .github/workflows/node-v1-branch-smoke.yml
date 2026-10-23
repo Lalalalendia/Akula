@@ -24,7 +24,8 @@ jobs:
       - name: Compile NodeV1 headless binary
         run: cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 --bin akula-node
       - name: Test signed NodeStore and durable challenge fence
-        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 node_v1:: -- --nocapture
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 node_v1:: -- --nocapture
       - name: Test authenticated QUIC from source A to offline Node to B
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-e2e-tests --test node_v1_real_quic -- --nocapture
       - name: Check integration formatting
