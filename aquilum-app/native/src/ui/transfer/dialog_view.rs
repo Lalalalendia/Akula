@@ -10,6 +10,7 @@ pub fn dialog(
     choosing: bool,
     error: Option<&str>,
     identity: Option<&IdentityView>,
+    #[cfg(feature = "messaging-w4-pilot")] w4: Option<&PilotView>,
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
@@ -52,6 +53,14 @@ pub fn dialog(
         identity_actions = actions;
         card = card.with_fixed(rule()).with_fixed(panel);
     }
+    #[cfg(feature = "messaging-w4-pilot")]
+    let mut w4_actions = Vec::new();
+    #[cfg(feature = "messaging-w4-pilot")]
+    if let Some(view) = w4 {
+        let (panel, actions) = w4_pilot::render(view);
+        w4_actions = actions;
+        card = card.with_fixed(rule()).with_fixed(panel);
+    }
     let card = NewWidget::new(
         card.with_fixed(rule())
             .with(queue, 1.0)
@@ -75,6 +84,8 @@ pub fn dialog(
             actions,
             device_actions,
             identity_actions,
+            #[cfg(feature = "messaging-w4-pilot")]
+            w4_actions,
         },
     )
 }
