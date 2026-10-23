@@ -134,8 +134,8 @@ pub(super) fn persist_received_payload(
     {
         return Err("rejected invalid native receiver payload".into());
     }
-    let root_metadata = fs::symlink_metadata(inbox_root)
-        .map_err(|error| format!("receiver root: {error}"))?;
+    let root_metadata =
+        fs::symlink_metadata(inbox_root).map_err(|error| format!("receiver root: {error}"))?;
     if !root_metadata.file_type().is_dir() {
         return Err("native receiver root is not a real directory".into());
     }
@@ -162,8 +162,8 @@ pub(super) fn persist_received_payload(
     file.sync_all()
         .map_err(|error| format!("sync private receiver stage: {error}"))?;
     drop(file);
-    let mut pinned = File::open(&path)
-        .map_err(|error| format!("open private receiver stage: {error}"))?;
+    let mut pinned =
+        File::open(&path).map_err(|error| format!("open private receiver stage: {error}"))?;
     persist_received(&mut pinned, inbox_root, size, digest, sender, receiver)
 }
 
@@ -180,20 +180,21 @@ mod tests {
         let digest = *blake3::hash(bytes).as_bytes();
         let source = [77; 32];
         let target = [78; 32];
-        let first = persist_received_payload(
-            bytes, &root, bytes.len() as u64, digest, source, target,
-        ).unwrap();
-        let replay = persist_received_payload(
-            bytes, &root, bytes.len() as u64, digest, source, target,
-        ).unwrap();
+        let first =
+            persist_received_payload(bytes, &root, bytes.len() as u64, digest, source, target)
+                .unwrap();
+        let replay =
+            persist_received_payload(bytes, &root, bytes.len() as u64, digest, source, target)
+                .unwrap();
         assert_eq!(first, replay);
         let ledger = InboxLedger::open(&root).unwrap();
         assert_eq!(ledger.count().unwrap(), 1);
         assert_eq!(ledger.status(first.id).unwrap(), LocalStatus::VerifiedLocal);
         assert_eq!(fs::read(ledger.object_path(first.id)).unwrap(), bytes);
-        let stray_stages = fs::read_dir(&root).unwrap().flatten().any(|entry| {
-            entry.file_name().to_string_lossy().ends_with(".stage")
-        });
+        let stray_stages = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".stage"));
         assert!(!stray_stages);
     }
 
@@ -203,10 +204,17 @@ mod tests {
         let root = dir.path().join("received-inbox");
         fs::create_dir(&root).unwrap();
         let bytes = b"no forged recipient file";
-        assert!(persist_received_payload(
-            bytes, &root, bytes.len() as u64,
-            *blake3::hash(b"forgery").as_bytes(), [7;32], [8;32],
-        ).is_err());
+        assert!(
+            persist_received_payload(
+                bytes,
+                &root,
+                bytes.len() as u64,
+                *blake3::hash(b"forgery").as_bytes(),
+                [7; 32],
+                [8; 32],
+            )
+            .is_err()
+        );
         assert!(!root.join("objects").exists());
     }
 

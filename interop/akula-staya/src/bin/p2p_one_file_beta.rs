@@ -287,8 +287,13 @@ async fn receive_one(
     check_peer: impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     receive_one_target(
-        connection, Some(destination), inbox_root, local_endpoint_key, check_peer,
-    ).await
+        connection,
+        Some(destination),
+        inbox_root,
+        local_endpoint_key,
+        check_peer,
+    )
+    .await
 }
 
 // The same authenticated network request and ACK path is shared by
@@ -336,8 +341,12 @@ async fn receive_one_target(
     } else {
         let (size, digest, data) = decode_frame(&bytes)?;
         inbox::persist_received_payload(
-            data, inbox_root, size, digest,
-            *connection.remote_id().as_bytes(), local_endpoint_key,
+            data,
+            inbox_root,
+            size,
+            digest,
+            *connection.remote_id().as_bytes(),
+            local_endpoint_key,
         )?;
     }
     let mut ack = connection
@@ -396,7 +405,9 @@ pub async fn native_send_one(
 
 async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result<(), String> {
     let peer = match &mode {
-        Mode::Send { peer, .. } | Mode::Receive { peer, .. } | Mode::ReceiveInbox { peer, .. } => peer,
+        Mode::Send { peer, .. } | Mode::Receive { peer, .. } | Mode::ReceiveInbox { peer, .. } => {
+            peer
+        }
     };
     let expected = selected_peer(peer)?;
     // No automatic enrollment, plaintext private key or default-on service.
@@ -548,7 +559,11 @@ mod tests {
 
     #[tokio::test]
     async fn native_receive_rejects_unverified_peer_before_any_network_use() {
-        let result = native_receive_one("not-an-enrolled-key".into(), "192.168.1.20:45678".parse().unwrap()).await;
+        let result = native_receive_one(
+            "not-an-enrolled-key".into(),
+            "192.168.1.20:45678".parse().unwrap(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
