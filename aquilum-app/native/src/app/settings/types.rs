@@ -1,4 +1,4 @@
-pub(super) enum Effect {
+pub(in crate::app) enum Effect {
     None,
     Rescale,
     Panel,
