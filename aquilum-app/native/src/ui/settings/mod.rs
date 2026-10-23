@@ -3,6 +3,8 @@ pub mod schema;
 
 mod control;
 mod layout;
+mod cloud;
+pub use cloud::{CloudPopup, provider_modal};
 use std::collections::HashMap;
 
 use aquilum_core::settings::models::AppConfig;
@@ -50,6 +52,7 @@ pub struct SettingsDialog {
     pub sync_notice: Option<String>,
     pub yandex_notice: Option<String>,
     pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
+    pub cloud_popup: Option<CloudPopup>,
 }
 
 fn card_size(room: Size) -> Size {
@@ -98,11 +101,14 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
         .with_fixed(Rule::new(Axis::Horizontal, || theme::current().border_default))
         .with(NewWidget::new(body), 1.0);
     let (copied, trash_page) = (ctx.copied, ctx.trash_page);
-    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, yandex_notice: ctx.yandex_notice.clone(), sync_confirm: None };
+    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, yandex_notice: ctx.yandex_notice.clone(), sync_confirm: None, cloud_popup: None };
     (NewWidget::new(card), finish)
 }
 
 pub fn content(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<Flex>, HashMap<WidgetId, Binding>) {
+    if section == Section::Sync {
+        return cloud::catalog(ctx);
+    }
     let mut bindings = HashMap::new();
     let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);
     for block in schema::blocks(section, config, ctx) {
