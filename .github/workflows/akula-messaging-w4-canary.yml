@@ -79,6 +79,8 @@ jobs:
           set -euo pipefail
           cargo test --locked -p aquilum-native --features messaging-w4-pilot \
             --bin aquilum-native -- messaging_w4_pilot::tests:: --nocapture
+          cargo test --locked -p aquilum-native --features messaging-w4-pilot \
+            --bin aquilum-native -- w4_pilot::tests:: --nocapture
       - name: Build actual installed Akula binary with disabled-by-default pilot
         working-directory: aquilum-app
         shell: bash
@@ -110,6 +112,11 @@ jobs:
           test "$(find dist -maxdepth 1 -name '*.AppImage' -type f | wc -l)" -eq 1
           candidate="$(find dist -maxdepth 1 -name '*.AppImage' -type f -print -quit)"
           chmod u+x "$candidate"
+          (cd "$RUNNER_TEMP" && "$candidate" --appimage-extract >/dev/null)
+          embedded="$RUNNER_TEMP/squashfs-root/usr/share/akula-w4/akula-w4-lab"
+          test -f "$embedded" && test -x "$embedded"
+          printf '%s  %s\n' "$AKULA_W4_SIDECAR_SHA256" "$embedded" | sha256sum -c -
+          echo 'AKULA_W4_IMMUTABLE_RESOURCE_SHA256_PASS'
           APPIMAGE_EXTRACT_AND_RUN=1 "$candidate" --w4-pilot status |
             grep -Fxq 'AKULA_W4_PILOT_READY helper=verified network=inactive auto_start=no SSH_only=yes'
           echo 'AKULA_W4_INSIDE_INSTALLED_APPIMAGE_PASS helper_hash=verified'
