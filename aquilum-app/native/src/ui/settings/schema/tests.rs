@@ -180,7 +180,9 @@ fn yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret() {
     let mut config = AppConfig::default();
     i18n::set_language("ru");
     let sections = blocks(Section::Sync, &config, &ctx);
-    assert_eq!(sections.len(), 2);
+    // The installed edition adds a separate read-only Dropbox section;
+    // Yandex's first section and its no-credentials guard remain unchanged.
+    assert_eq!(sections.len(), if cfg!(feature = "dropbox-readonly-preview") { 3 } else { 2 });
     let setup = &sections[0];
     assert_eq!(setup.title, t("settings.yandex.title"));
     let mut links = 0;
