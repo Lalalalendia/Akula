@@ -1,7 +1,7 @@
 name: LAB Win7 full native build
 on:
-  push:
-    branches: ['lab/win7-release-pe-imports-20261023']
+  pull_request:
+    branches: [main]
     paths:
       - '.github/workflows/akula-win7-full-native.yml'
       - 'aquilum-app/native/src/output/**'
@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
@@ -57,6 +59,116 @@ jobs:
           python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/full-imports.txt" --out $out --sha256 $hash --bytes $bytes
           if ($LASTEXITCODE -ne 0) { throw 'Full import parser failed' }
           Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Build downloadable Win7 portable test ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output'
+          $portable = Join-Path $root 'portable'
+          New-Item -ItemType Directory -Force $portable | Out-Null
+          $source = '.artifacts/cargo-native/x86_64-win7-windows-msvc/release/aquilum-native.exe'
+          $exe = Join-Path $portable 'akula-app.exe'
+          $report = Get-Content 'win7-full-results/full-audit.json' -Raw | ConvertFrom-Json
+          $expected = @('CoCreateFreeThreadedMarshaler', 'CoTaskMemFree')
+          $actual = @($report.imports.'combase.dll' | Sort-Object)
+          if (($actual -join ',') -ne (($expected | Sort-Object) -join ',')) { throw 'Unexpected COMBASE imports; refusing lab rewrite' }
+          if (@($report.known_post_win7_imports).Count -ne 0) { throw 'Known incompatible imports remain' }
+          @'
+from pathlib import Path
+import sys
+src, dst = map(Path, sys.argv[1:])
+data = src.read_bytes()
+before = b"combase.dll\x00"
+after = b"ole32.dll\x00\x00\x00"
+if len(before) != len(after) or data.count(before) != 1:
+    raise SystemExit("FAIL_CLOSED: unexpected COMBASE string occurrences")
+dst.write_bytes(data.replace(before, after, 1))
+print("LAB ONLY: remapped known Co* imports to Win7 ole32.dll")
+'@ | Set-Content -Path "$root/rewrite.py" -Encoding utf8
+          python "$root/rewrite.py" $source $exe
+          if ($LASTEXITCODE -ne 0) { throw 'PE rewrite failed' }
+          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vsroot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          $toolsets = @(Get-ChildItem (Join-Path $vsroot 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          $dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          & $dumpbin /imports $exe | Set-Content "$root/test-imports.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'Patched import dump failed' }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $bytes = (Get-Item $exe).Length
+          python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$root/test-imports.txt" --out $root --sha256 $hash --bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw 'Patched import audit failed' }
+          $patched = Get-Content "$root/full-audit.json" -Raw | ConvertFrom-Json
+          if (@($patched.known_post_win7_imports).Count -ne 0 -or @($patched.potentially_risky_imported_dlls) -contains 'combase.dll') { throw 'PE incompatible after lab rewrite' }
+          @'
+AKULA WIN7 LAB - unsigned, unverified portable test, NOT public release.
+Built from experimental PR #667, for Windows 7 SP1 x64.
+Unpack into a NEW directory and run START-WIN7-LAB.cmd.
+The test vault and state are kept in the unpacked directory.
+A limited laboratory PE import rewrite replaces combase.dll
+with ole32.dll for two Co* functions supported on Win7.
+Do NOT install over your normal Akula; do NOT use real files.
+Use offline in a test VM/profile. Do NOT run normal auto-update.
+May require Win7 SP1, UCRT KB2999226 and Microsoft VC++ x64 runtime.
+Do not download Windows DLLs from unofficial websites.
+Report the full text/screenshot of any startup error.
+'@ | Set-Content (Join-Path $portable 'README-WIN7-LAB.txt') -Encoding ascii
+          @'
+@echo off
+setlocal
+set "ROOT=%~dp0"
+if not exist "%ROOT%vault" mkdir "%ROOT%vault"
+if not exist "%ROOT%state" mkdir "%ROOT%state"
+"%ROOT%akula-app.exe" --vault "%ROOT%vault" --data-dir "%ROOT%state"
+'@ | Set-Content (Join-Path $portable 'START-WIN7-LAB.cmd') -Encoding ascii
+          "source_head=$env:GITHUB_SHA" | Set-Content (Join-Path $root 'PROVENANCE.txt')
+          "patched_exe_sha256=$hash" | Add-Content (Join-Path $root 'PROVENANCE.txt')
+          "patched_exe_bytes=$bytes" | Add-Content (Join-Path $root 'PROVENANCE.txt')
+          "win7_runtime_tested=false" | Add-Content (Join-Path $root 'PROVENANCE.txt')
+          Compress-Archive -Path "$portable/*" -DestinationPath (Join-Path $root 'Akula-Win7-LAB-portable.zip') -CompressionLevel Optimal -Force
+          if (!(Test-Path (Join-Path $root 'Akula-Win7-LAB-portable.zip'))) { throw 'Portable ZIP missing' }
+          "portable_zip_sha256=$((Get-FileHash (Join-Path $root 'Akula-Win7-LAB-portable.zip') -Algorithm SHA256).Hash)" | Add-Content (Join-Path $root 'PROVENANCE.txt')
+          Get-Content "$root/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Package optional separate Win7 LAB NSIS installer
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'win7-lab-output'
+          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          New-Item -ItemType Directory -Force $release | Out-Null
+          Copy-Item (Join-Path $root 'portable/akula-app.exe') (Join-Path $release 'akula-app.exe') -Force
+          $cfg = Get-Content 'aquilum-app/native/packaging/akula-windows.json' -Raw | ConvertFrom-Json
+          $cfg.productName = 'Akula Win7 LAB'
+          $cfg.identifier = 'io.github.lalalendia.akula.win7lab'
+          $cfg.description = 'Unsigned Windows 7 compatibility laboratory'
+          $cfg | ConvertTo-Json -Depth 24 | Set-Content 'aquilum-app/native/packaging/akula-win7-lab.json' -Encoding utf8
+          cargo install cargo-packager --version 0.11.8 --locked
+          if ($LASTEXITCODE -ne 0) { throw 'cargo-packager install failed' }
+          Push-Location aquilum-app
+          try {
+            cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-win7-lab.json --out-dir "$root/nsis"
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS packaging failed' }
+          } finally { Pop-Location }
+          $setup = @(Get-ChildItem "$root/nsis" -Filter '*-setup.exe' -Recurse)
+          if ($setup.Count -ne 1) { throw "Expected one NSIS lab installer, got $($setup.Count)" }
+          Copy-Item $setup[0].FullName (Join-Path $root 'Akula-Win7-LAB-test-setup.exe') -Force
+          "nsis_sha256=$((Get-FileHash (Join-Path $root 'Akula-Win7-LAB-test-setup.exe') -Algorithm SHA256).Hash)" | Add-Content (Join-Path $root 'PROVENANCE.txt')
+
+      - name: Upload Win7 LAB test archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-win7-lab-test-${{ github.run_id }}
+          path: |
+            win7-lab-output/Akula-Win7-LAB-portable.zip
+            win7-lab-output/Akula-Win7-LAB-test-setup.exe
+            win7-lab-output/PROVENANCE.txt
+            win7-lab-output/full-audit.md
+            win7-lab-output/full-audit.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Upload compile evidence
         if: always()
         uses: actions/upload-artifact@v4
