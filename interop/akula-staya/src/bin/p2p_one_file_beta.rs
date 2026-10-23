@@ -19,6 +19,7 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "p2p_one_file_beta/inbox.rs"]
 mod inbox;
 
 const ALPN: &[u8] = b"akula/p2p-one-file-lan-beta/1";
