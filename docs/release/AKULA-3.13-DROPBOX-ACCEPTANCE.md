@@ -29,3 +29,20 @@
 - Write/sync protocol and two-device conflicts if a later release is to offer complete bidirectional synchronization.
 
 Sources: [PR #670](https://github.com/Lalalendia/Akula/pull/670), [Windows publisher workflow](https://github.com/Lalalendia/Akula/blob/main/.github/workflows/akula-windows-signed-candidate.yml), [Akula version contract](https://github.com/Lalalendia/Akula/blob/main/docs/release/AKULA-VERSIONING-01.md).
+
+
+## Akula-owned Dropbox OAuth Console — status observed 24 October 2026
+
+- Public client ID (safe to embed in source): `gzrirdrrx4tarly`. App is `Scoped App (App Folder)` with folder name `Akula`; **do not use the Aquilum client ID**.
+- Exact OAuth PKCE callback configured in code: `http://127.0.0.1:47219/dropbox/callback`. The Dropbox Console screenshot shows the address in the input next to **Add**, not proof the **Add** button was pressed. Owner must register the URI and verify it appears in the saved redirect list.
+- `account_info.read` is checked in the screenshot. `files.metadata.read` is **not** checked. `files.content.read` is outside the visible part of the screenshot, so its state is unknown. Owner must enable these two read-only scopes and save on the Permissions tab. No `files.*.write` or `account_info.write` required.
+- Dropbox app remains in **Development** and the Development users list shows only the owner. Production authorization for arbitrary users is **not yet approved**. Complete Dropbox's review for public distribution before describing mass-market sign-in as ready.
+- PR #670 includes an Akula-fixed, non-secret client ID and callback port in the ordinary `installed` build. Serialized settings ignore old QA app IDs/ports, and the two corresponding inputs were removed from the native UI. **This is not one-click account enrollment yet:** a separately paired Vault still requires account/root/Vault/profile identifiers and independently pinned HEAD to establish read-only remote proof.
+- Until verified live authorization, cold-restart OS secret recovery, and separate publisher trust are evidenced: `SYNC_DISABLED`, no local apply, no upload/delete and no assumption of verified user files.
+
+Owner checklist (external Dropbox Console, cannot be completed from repository CI):
+
+- [ ] Click **Add** for exact loopback redirect and verify saved entry.
+- [ ] Enable and save `files.metadata.read` and `files.content.read`; keep only the three required read scopes.
+- [ ] Complete live OAuth PKCE+read-only verification with an isolated test account and independently trusted test Vault.
+- [ ] Apply for **Production** access before public user authorization.
