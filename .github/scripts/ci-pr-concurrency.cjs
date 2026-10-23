@@ -24,14 +24,21 @@ function prEvents(yaml) {
   const on = topBlock(yaml, 'on');
   if (on.length === 0) return [];
   const inline = on[0].replace(/^(['"]?on['"]?):\s*/, '');
-  // YAML permits any positive indentation. Match only the shallowest
-  // event keys so a nested manual input named pull_request is not a trigger.
-  const children = on.slice(1).filter(line => /^\s+[^#\s]/.test(line));
-  const indent = children.length ? Math.min(...children.map(line => line.match(/^\s*/)[0].length)) : 0;
+  // Track ancestor indentation rather than assuming all event keys use
+  // the same indentation. Nested workflow_dispatch inputs are not triggers.
+  const rootEvents = new Set();
+  const parents = [];
+  for (const line of on.slice(1)) {
+    const match = line.match(/^(\s+)(['"]?)([\w-]+)\2:(?:\s|$)/);
+    if (!match) continue;
+    const depth = match[1].length;
+    while (parents.length && parents[parents.length - 1] >= depth) parents.pop();
+    if (parents.length === 0) rootEvents.add(match[3]);
+    parents.push(depth);
+  }
   return ['pull_request', 'pull_request_target'].filter(event => {
-    const entry = new RegExp('^\\s{' + indent + '}[\\x27"]?' + event + '[\\x27"]?:');
     const inlineName = new RegExp('\\b' + event + '\\b');
-    return inlineName.test(inline) || (indent > 0 && children.some(line => entry.test(line)));
+    return inlineName.test(inline) || rootEvents.has(event);
   });
 }
 function prTrigger(yaml) { return prEvents(yaml).length > 0; }
