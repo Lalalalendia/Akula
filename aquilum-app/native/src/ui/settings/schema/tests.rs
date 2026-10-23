@@ -60,7 +60,7 @@ fn templates_and_attachments_share_one_section_and_search_tuning_lives_with_bm25
         assert_eq!(Section::from_key(old), Some(Section::Data), "сохранённый раздел «{old}» открывает общий раздел");
     }
     assert_eq!(Section::from_key("search"), Some(Section::Analysis));
-    assert_eq!(Section::ALL.len(), 12);
+    assert_eq!(Section::ALL.len(), 13);
     assert_eq!(Section::from_key("server"), Some(Section::Server));
     assert_eq!(Section::from_key("sync"), Some(Section::Sync));
 
@@ -335,4 +335,13 @@ fn s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button() {
     assert!(!panel.rows.iter().any(|row| {
         row.label == "notes/received-over-s3.md"
     }));
+}
+
+#[test]
+fn plugin_alpha_is_off_by_default_and_can_show_sample_controls() {
+    let config = AppConfig::default();
+    let ctx = Context::new(1.0);
+    assert_eq!(Section::from_key("plugins"), Some(Section::Plugins));
+    assert_eq!(blocks(Section::Plugins, &config, &ctx).len(), 1);
+    assert!(!config.plugin_alpha.installed);
 }

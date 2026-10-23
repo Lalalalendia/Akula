@@ -397,23 +397,8 @@ impl ServerBootstrapDraft {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct AppConfig {
-    pub analysis: AnalysisSettings,
-    pub mcp: McpSettings,
-    pub trash: TrashSettings,
-    pub history: HistorySettings,
-    pub search: SearchIndexSettings,
-    pub editor: EditorSettings,
-    pub reader: ReaderSettings,
-    pub ui: UiSettings,
-    pub templates: TemplateSettings,
-    pub files: FilesSettings,
-    pub updates: UpdateSettings,
-    pub s3_onboarding: YandexS3Onboarding,
-    pub server_setup: ServerBootstrapDraft,
-}
+mod app_config;
+pub use app_config::{AppConfig, PluginAlphaSettings};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]

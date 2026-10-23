@@ -13,6 +13,8 @@ use super::{App, Outcome, Popup};
 
 mod action;
 mod apply;
+mod buttons;
+mod plugins;
 mod context;
 mod bindings;
 mod refresh;
@@ -93,7 +95,6 @@ impl App {
             }
         }
     }
-
     pub fn settings_key(&mut self, root: &mut RenderRoot, key: &Key) -> Option<Outcome> {
         let direction = match key {
             Key::Named(NamedKey::ArrowUp) => 1.0,
@@ -117,7 +118,6 @@ impl App {
         }
         Some(self.finish(root, effect))
     }
-
     fn popup_bindings(&mut self) -> Option<&mut HashMap<WidgetId, Binding>> {
         match &mut self.popup {
             Some(Popup::Settings { dialog, menu: None }) => Some(&mut dialog.bindings),

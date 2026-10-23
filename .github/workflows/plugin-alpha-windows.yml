@@ -1,0 +1,20 @@
+# Branch-only unsigned Windows candidate for the first user-facing plugin sample.
+# Reuses Akula's existing Windows installed-UIA/NSIS acceptance and artifact upload.
+# This is NOT an Akula public release or a code-signing grant.
+name: PLUGIN-ALPHA-01 Windows installed sample
+
+on:
+  push:
+    branches:
+      - feature/plugin-first-user-scenario-20261023
+    paths:
+      - 'aquilum-app/**'
+      - '.github/workflows/plugin-alpha-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installed-windows-alpha:
+    uses: ./.github/workflows/windows-beta.yml

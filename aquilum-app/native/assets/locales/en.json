@@ -343,7 +343,8 @@
       "history": "History",
       "trash": "Trash",
       "system": "System",
-      "shortcuts": "Keyboard shortcuts"
+      "shortcuts": "Keyboard shortcuts",
+      "plugins": "Plugins"
     },
     "font": {
       "section": "Fonts",
@@ -598,7 +599,23 @@
       "previousPage": "Previous page",
       "closeReader": "Close reader"
     },
-    "numberValue": "Numeric value"
+    "numberValue": "Numeric value",
+    "plugins": {
+      "section": "Local extensions · alpha",
+      "demo": "Word Count (sample)",
+      "description": "Local extension-action demonstration. Counts words in the saved active note through guarded Core. Host-backed sample, not execution of third-party WASM code.",
+      "status": "State",
+      "off": "Sample not installed",
+      "disabled": "Installed · disabled",
+      "ready": "Installed · available",
+      "last": "Last count: {count} words (saved file)",
+      "install": "Install sample",
+      "run": "Allow one read and count words",
+      "disable": "Disable",
+      "enable": "Enable",
+      "remove": "Remove sample",
+      "notice": "Consent applies to this single run only. Unsaved editor changes are not read."
+    }
   },
   "window": {
     "close": "Close",
