@@ -744,6 +744,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("selected-source.txt");
         let inbox_root = dir.path().join("inbox");
+        fs::create_dir(&inbox_root).unwrap();
         let bytes = b"Akula P2P one-file LAN beta real QUIC payload";
         fs::write(&source, bytes).unwrap();
 
@@ -821,7 +822,7 @@ mod tests {
         receiver.close().await;
         sender_task.await.unwrap();
         // The same actual authenticated QUIC bytes must survive a closed and
-        // reopened receiver journal, independently of the user-selected copy.
+        // reopened permanent receiver journal, without any exported copy.
         let cold = akula_inbox_ledger_lab::InboxLedger::open(&inbox_root).unwrap();
         let items = cold.list().unwrap();
         assert_eq!(items.len(), 1);
