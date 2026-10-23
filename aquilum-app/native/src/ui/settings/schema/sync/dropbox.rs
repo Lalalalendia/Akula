@@ -15,23 +15,11 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                     || ctx.dropbox_preview_status.contains("FAILED") { Tone::Danger }
                     else { Tone::Secondary },
             }),
-        row("OAuth app key".into(), Some("Public App Folder application ID; never paste a client secret.".into()),
-            Control::Text { value: draft.oauth_app_key.clone(), commit: true },
-            |c, v| {
-                let value = text(v);
-                if DropboxReadOnlyDraft::valid_app_key(&value) {
-                    c.dropbox_readonly.oauth_app_key = value;
-                }
-            }),
-        row("Registered callback port".into(),
-            Some("Exact http://127.0.0.1:PORT/dropbox/callback must be registered in Dropbox.".into()),
-            Control::Number(Number::new(f64::from(draft.registered_port), 1.0, 65535.0, 1.0)),
-            |c, v| {
-                let number = number(v);
-                if number.is_finite() && (1.0..=65535.0).contains(&number)
-                    && number.fract() == 0.0 {
-                    c.dropbox_readonly.registered_port = number as u16;
-                }
+        info("Приложение Dropbox".into(),
+            Some("Используется официальное приложение Akula с OAuth PKCE. App Key и порт не вводятся вручную.".into()),
+            Control::Status {
+                text: "Akula · вход через браузер".into(),
+                tone: Tone::Muted,
             }),
         row("Dropbox account ID".into(),
             Some("Идентификатор Dropbox-аккаунта (dbid:…).".into()),
@@ -79,7 +67,7 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
             Some(if ready {
                 "Авторизация откроется в браузере. Проверка подключения не изменяет файлы.".into()
             } else {
-                "Заполните параметры аккаунта и проверяемого хранилища.".into()
+                "Для проверки существующего Vault укажите его идентификаторы и независимый BLAKE3 HEAD. Подключение аккаунта и синхронизация — разные этапы.".into()
             }),
             Control::Buttons(vec![
                 Button::new("Подключить Dropbox (чтение)".into(), Action::DropboxConnectReadOnly)
@@ -89,4 +77,21 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
             ])),
     ];
     Block { title: "Dropbox".into(), rows }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_akula_oauth_identity_is_not_editable_in_settings() {
+        let block = dropbox_setup(&AppConfig::default(), &Context::new(1.0));
+        assert_eq!(block.title, "Dropbox");
+        assert!(block.rows.iter().any(|row|
+            row.label == "Приложение Dropbox" && row.setter.is_none()));
+        assert!(block.rows.iter().all(|row|
+            row.label != "OAuth app key" && row.label != "Registered callback port"));
+        assert!(block.rows.iter().any(|row|
+            row.label == "Контрольный BLAKE3 HEAD"));
+    }
 }
