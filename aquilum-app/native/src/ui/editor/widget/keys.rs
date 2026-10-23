@@ -165,9 +165,7 @@ impl TextEditor {
             Ime::Disabled => self.compose = None,
             Ime::Preedit(text, _) if text.is_empty() => self.compose = None,
             Ime::Preedit(text, cursor) => {
-                // Preedit is a transient visual preview. Do not replace the
-                // selection, update Undo, or emit an edited/save action until
-                // the IME confirms the replacement with Commit.
+                // Preedit is visual only: never edit the selection or create Undo.
                 self.compose = Some((text.clone(), *cursor));
             }
             // An empty commit (including cancellation from some OS IMEs)
