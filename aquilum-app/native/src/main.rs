@@ -76,9 +76,7 @@ mod ui;
 mod updater;
 mod window_state;
 mod workspace;
-
 pub use args::Args;
-
 fn main() {
     args::run_w4_pilot_if_requested();
     #[cfg(target_os = "windows")]
