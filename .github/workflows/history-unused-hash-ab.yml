@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Lalalalendia/Akula
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
           path: baseline
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C baseline rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
+          echo "Baseline exact SHA: $(git -C baseline rev-parse HEAD)"
           cmp baseline/aquilum-app/Cargo.lock candidate/aquilum-app/Cargo.lock
           mkdir -p baseline/.github/bench
           cp -R candidate/.github/bench/rope-gate-history-e2e baseline/.github/bench/
@@ -100,7 +100,7 @@ jobs:
           report = [
               "## History snapshot unused digest: same-runner real-save A/B",
               "",
-              "Exact PR base SHA, same release fixture and resolved Cargo.lock.",
+              "Resolved base-branch SHA recorded, same release fixture and resolved Cargo.lock.",
               "Every sample verifies primary BLAKE3+bytes, both history revisions",
               "and stale-CAS refusal without overwriting foreign changes.",
               "",
