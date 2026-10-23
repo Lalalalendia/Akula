@@ -1,3 +1,5 @@
+# CI-only opt-in S3 candidate. Never modifies the ordinary 0.3.11 installer
+# or publishes to the signed Akula update channel.
 name: Akula S3 pairing smoke
 on:
   pull_request:
@@ -5,7 +7,10 @@ on:
     paths:
       - '.github/workflows/s3-pair-onepass-ci.yml'
       - 'aquilum-app/core/src/sync/s3_pair_*.rs'
+      - 'aquilum-app/core/src/sync/s3_pair_host/**'
       - 'aquilum-app/native/src/s3_pair_*.rs'
+      - 'aquilum-app/native/src/s3_pair_session/**'
+      - 'aquilum-app/native/src/yandex_credentials/imported.rs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +30,72 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: s3-pair-beta-windows
+          cache-on-failure: true
       - name: Native pairing beta compile
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-native --features installed,s3-pair-beta
+      - name: Verify real isolated Windows Credential Manager profile binding
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --release --locked -p aquilum-native --bin aquilum-native --features installed,s3-pair-beta real_windows_profile_credential_roundtrip_and_collision_refusal -- --exact --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Profile-scoped WinCred test failed' }
+      - name: Build separate opt-in Windows S3 Beta executable
+        working-directory: aquilum-app
+        run: cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta
+      - name: Install pinned NSIS packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+      - name: Package opt-in S3 Beta using distinct Akula installer identity
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item (Join-Path $release 'aquilum-native.exe') (Join-Path $release 'akula-app.exe') -Force
+          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --out-dir $dist
+          if ($LASTEXITCODE -ne 0) { throw 'Opt-in S3 Beta NSIS packaging failed' }
+          $setup = @(Get-ChildItem $dist -Filter '*-setup.exe' -File)
+          if ($setup.Count -ne 1) { throw "Expected one opt-in S3 Beta installer, got $($setup.Count)" }
+          if ($setup[0].Name.StartsWith('akula-app_')) {
+            Rename-Item $setup[0].FullName -NewName ($setup[0].Name -replace '^akula-app_', 'Akula_')
+          } elseif (-not $setup[0].Name.StartsWith('Akula_')) {
+            throw "Wrong package identity: $($setup[0].Name)"
+          }
+      - name: Install, edit, cold-reopen, and uninstall actual S3-enabled NSIS
+        shell: pwsh
+        run: ./scripts/test-windows-beta.ps1
+      - name: Record actual checkout and installed artifact hashes
+        shell: pwsh
+        run: ./scripts/windows-beta-candidate-manifest.ps1
+      - name: Mark candidate experimental and document what was NOT tested
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          AKULA S3 SYNC BETA — UNSIGNED CI-ONLY CANDIDATE, NOT A PUBLIC RELEASE
+          Built with --features installed,s3-pair-beta in the dedicated pairing job.
+          Installed Windows editor GUI smoke and provenance checks passed before upload.
+          This job does NOT test actual Yandex access, importing a real invitation,
+          physical two-PC A/B exchange, signed publisher authority, or power-off durability.
+          Sync is new-file-only; no automatic overwrite, delete or confirmed ACK.
+          Same-user cooperative File Gate custody is NOT hostile-process isolation.
+          Use a disposable Windows profile and isolated test bucket for any manual trial.
+          Never install over valuable user data as a substitute for acceptance.
+          '@ | Set-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'dist/S3-BETA-CI-ONLY.txt') -Encoding UTF8
+      - name: Upload S3-enabled Windows candidate only after actual installed GUI smoke
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-s3-pair-beta-CI-ONLY
+          path: |
+            dist/Akula_*-setup.exe
+            dist/candidate-manifest.json
+            dist/S3-BETA-CI-ONLY.txt
+          if-no-files-found: error
+          retention-days: 7
