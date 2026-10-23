@@ -1,4 +1,4 @@
-# Real installed Akula UIA verification, isolated to disposable GitHub-hosted Windows.
+﻿# Real installed Akula UIA verification, isolated to disposable GitHub-hosted Windows.
 param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$VaultPath,
