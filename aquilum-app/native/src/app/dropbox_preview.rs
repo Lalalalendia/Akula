@@ -95,6 +95,14 @@ impl DropboxPreview {
             });
     }
 
+    /// Editing account/root/head invalidates even an in-flight successful reply.
+    /// A stale test must not be displayed as proof for newly selected identity.
+    pub(super) fn invalidate(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.busy = false;
+        self.status = "DISCONNECTED / SYNC_DISABLED".into();
+    }
+
     pub(super) fn poll(&mut self) -> bool {
         let mut changed = false;
         while let Ok((generation, status)) = self.rx.try_recv() {
@@ -133,6 +141,21 @@ mod tests {
         state.start(DropboxReadOnlyDraft::default(), false, wake);
         assert!(!state.busy);
         assert_eq!(state.status, "INVALID_TEST_CONFIG / SYNC_DISABLED");
+    }
+
+    #[test]
+    fn config_change_rejects_late_success_from_previous_account() {
+        let mut state = DropboxPreview::new();
+        let original_generation = state.generation;
+        state.invalidate();
+        assert_ne!(state.generation, original_generation);
+        assert!(!state.busy);
+        let _ = state.tx.send((
+            original_generation,
+            "REMOTE_PINNED_READ_OK / PUBLISHER_NOT_APPROVED / SYNC_DISABLED",
+        ));
+        assert!(!state.poll());
+        assert_eq!(state.status, "DISCONNECTED / SYNC_DISABLED");
     }
 
     #[test]
