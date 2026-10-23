@@ -87,6 +87,7 @@ pub struct NativeReceiveView {
 
 mod devices;
 mod identity;
+mod peer_pair;
 mod layout;
 mod queue_view;
 mod inbox_view;
@@ -97,6 +98,7 @@ mod native_receive_view;
 use layout::{card_size, details, display_size, hint, rule};
 pub use devices::{DeviceRow, DeviceStatus};
 pub use identity::{IdentityAction, IdentityPhase, IdentityView};
+pub use peer_pair::{PeerAction, PeerControls, PeerPhase, PeerView};
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contact_preview;
 #[cfg(feature = "p2p-device-contacts-preview")]
@@ -109,6 +111,7 @@ pub struct TransferDialog {
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
+    pub peer_controls: Option<PeerControls>,
     pub inbox_save_actions: Vec<(WidgetId, String)>,
     #[cfg(feature = "p2p-native-send-beta")]
     pub native_send_actions: Vec<(WidgetId, NativeSendAction)>,
