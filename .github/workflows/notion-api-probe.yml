@@ -12,6 +12,12 @@ on:
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/notion-api-probe.yml'
+  push:
+    branches: ['experiment/notion-api-readonly-01']
+    paths:
+      - '.github/workflows/notion-api-probe.yml'
+      - 'aquilum-app/core/src/notion_api_probe/**'
+      - 'aquilum-app/core/src/ui_state/migrations/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,6 +42,26 @@ jobs:
       - name: Compile opt-in Notion cache and import CLI
         working-directory: aquilum-app
         run: cargo build -p aquilum-core --locked --features notion-api-probe --bin akula-notion-import-lab
+      - name: Prove versioned UI-state migration and offline cache miss
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p aquilum-core --locked --features notion-api-probe ui_state::migration_tests
+          app="$(mktemp -d)"
+          output="$(mktemp)"
+          errors="$(mktemp)"
+          trap 'rm -rf "$app" "$output" "$errors"' EXIT
+          unset AKULA_NOTION_READ_TOKEN
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --offline \
+              aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa "$app" >"$output" 2>"$errors"; then
+            echo "No-source offline lookup should not claim a complete cached root" >&2
+            exit 1
+          fi
+          test ! -s "$output"
+          grep -q "not cached" "$errors"
+
       - name: Refuse unconfigured CLI without network or output files
         working-directory: aquilum-app
         shell: bash
