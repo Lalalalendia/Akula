@@ -20,7 +20,7 @@ Uses DELTA-TEXT-02's five public first-party Markdown paths and the same selecti
 - full git history mandatory (`actions/checkout` with `fetch-depth: 0`);
 - 9–20 cases allowed to accommodate legitimate history changes;
 - every output contains public path, 12-character old/new commit IDs, old/new **BLAKE3** digests and lengths. No file content is exported.
-  
+
 The corpus is **history-rule-compatible** with DELTA-TEXT-02, **not necessarily byte-for-byte identical to the original October 18 fixed output after new Git commits**. Actual IDs/hashes in CSV are the source of truth; do not claim identical 17 cases without checking the recorded pairs.
 
 Each mode processes *the same* set of valid pairs; the harness refuses a mismatch in paths, commit IDs, base hashes or target hashes.
