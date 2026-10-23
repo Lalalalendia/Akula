@@ -10,7 +10,7 @@ use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
 
 use super::{App, Outcome, Popup};
-use crate::ui::dialog::{self, DialogAnswer};
+use crate::ui::dialog::{self as ui_dialog, DialogAnswer};
 use crate::ui::transfer::{self as transfer_ui, QueueAction};
 use crate::ui::widgets::Pressed;
 
@@ -110,7 +110,7 @@ impl App {
         let dismiss = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
             || (id == dialog.close && pressed);
         if dismiss {
-            dialog::close(root, dialog.layer);
+            ui_dialog::close(root, dialog.layer);
             return Outcome::default();
         }
         let mut refresh = false;
