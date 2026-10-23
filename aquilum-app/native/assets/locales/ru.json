@@ -244,6 +244,26 @@
       "verifyButton": "Проверить SSH (недоступно)",
       "installButton": "Установить Node (недоступно)"
     },
+    "cloud": {
+      "catalogTitle": "Облачные подключения",
+      "catalogHint": "Выберите сервис. Настройка откроется в отдельном окне; цветной индикатор показывает результат последней проверки, а не наличие сохранённых ключей.",
+      "yandex": "Yandex Object Storage",
+      "amazon": "Amazon S3",
+      "minio": "MinIO",
+      "otherS3": "Другой S3",
+      "googleDrive": "Google Drive",
+      "dropbox": "Dropbox",
+      "webdav": "WebDAV",
+      "disconnected": "Не подключено",
+      "saved": "Настроено · не проверено",
+      "checking": "Проверяем…",
+      "verified": "Связь проверена",
+      "review": "Требует проверки",
+      "unavailable": "Скоро",
+      "unavailableHint": "Подключение этого провайдера пока не реализовано. Это окно не запрашивает ключи и не создаёт облачное подключение.",
+      "save": "Сохранить и закрыть",
+      "close": "Закрыть"
+    },
     "yandex": {
       "title": "Yandex Object Storage · подключение",
       "explanation": "Состояние подключения",
