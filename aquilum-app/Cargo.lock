@@ -321,6 +321,7 @@ dependencies = [
  "accesskit_unix",
  "accesskit_windows",
  "akula-dropbox-connect-lab",
+ "akula-dropbox-secret-store",
  "akula-dropbox-t0",
  "aq_trace",
  "aquilum-core",
