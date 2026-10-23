@@ -18,6 +18,8 @@ const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
 mod model;
+#[cfg(feature = "messaging-w4-pilot")]
+mod w4_pilot;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
@@ -50,6 +52,8 @@ pub(super) struct TransferState {
     #[cfg(feature = "p2p-device-contacts-preview")]
     transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
+    #[cfg(feature = "messaging-w4-pilot")]
+    pub(super) w4_pilot: w4_pilot::PilotUi,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
 }
@@ -76,6 +80,7 @@ impl App {
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
             self.transfer.error.as_deref(), identity_view,
+            #[cfg(feature = "messaging-w4-pilot")] Some(&self.transfer.w4_pilot.view),
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
@@ -103,6 +108,10 @@ impl App {
         }
         #[cfg(feature = "p2p-device-ui")]
         if self.transfer.local_identity.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "messaging-w4-pilot")]
+        if self.transfer.w4_pilot.poll() {
             changed = true;
         }
         if changed {
@@ -160,6 +169,15 @@ impl App {
                 self.transfer.local_identity.action(
                     *command, Arc::clone(&self.workspace.wake),
                 );
+                refresh = true;
+            }
+        }
+        #[cfg(feature = "messaging-w4-pilot")]
+        if pressed && !refresh {
+            if let Some((_, command)) = dialog.w4_actions.iter()
+                .find(|(button, _)| *button == id)
+            {
+                self.transfer.w4_pilot.action(*command, Arc::clone(&self.workspace.wake));
                 refresh = true;
             }
         }
