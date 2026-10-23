@@ -1,14 +1,12 @@
 //! Bounded, versioned NodeV1 control messages. This encoding is NOT a grant:
 //! exact owner signatures, root-witnessed digests, and live Iroh remote_id
 //! are verified separately before any bytes are read from NodeStore.
+use super::NodeWireDenied;
 use aquilum_core::node_replica_auth_lab::OwnerReadGrant;
 use aquilum_core::node_v1::{NodePutReceipt, OwnerPutGrant};
-use aquilum_core::sync::device_roster_lab::{
-    ClaimedDevice, OwnerSignedRoster, RosterStatus,
-};
+use aquilum_core::sync::device_roster_lab::{ClaimedDevice, OwnerSignedRoster, RosterStatus};
 use aquilum_core::sync::{DeviceId, DocumentId, RevisionId, VaultId};
 use serde::{Deserialize, Serialize};
-use super::NodeWireDenied;
 
 pub(super) const MAX_CONTROL: usize = 32 * 1024;
 pub(super) const MAX_ACK: usize = 4096;
@@ -45,7 +43,10 @@ pub(super) struct WireGrant {
 }
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum Operation { Put, Get }
+pub(super) enum Operation {
+    Put,
+    Get,
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,15 +87,19 @@ impl From<&OwnerSignedRoster> for WireRoster {
         Self {
             vault_id: value.vault_id,
             epoch: value.epoch,
-            devices: value.devices.iter().map(|d| WireDevice {
-                device_id: d.device_id,
-                device_public_key: d.device_public_key,
-                endpoint_public_key: d.endpoint_public_key,
-                status: match d.status {
-                    RosterStatus::RecordedOnly => 1,
-                    RosterStatus::Revoked => 2,
-                },
-            }).collect(),
+            devices: value
+                .devices
+                .iter()
+                .map(|d| WireDevice {
+                    device_id: d.device_id,
+                    device_public_key: d.device_public_key,
+                    endpoint_public_key: d.endpoint_public_key,
+                    status: match d.status {
+                        RosterStatus::RecordedOnly => 1,
+                        RosterStatus::Revoked => 2,
+                    },
+                })
+                .collect(),
             signature: value.signature.to_vec(),
         }
     }
@@ -102,19 +107,25 @@ impl From<&OwnerSignedRoster> for WireRoster {
 impl TryFrom<WireRoster> for OwnerSignedRoster {
     type Error = NodeWireDenied;
     fn try_from(wire: WireRoster) -> Result<Self, Self::Error> {
-        if wire.devices.len() > 32 { return Err(NodeWireDenied); }
-        let devices = wire.devices.into_iter().map(|d| {
-            Ok(ClaimedDevice {
-                device_id: d.device_id,
-                device_public_key: d.device_public_key,
-                endpoint_public_key: d.endpoint_public_key,
-                status: match d.status {
-                    1 => RosterStatus::RecordedOnly,
-                    2 => RosterStatus::Revoked,
-                    _ => return Err(NodeWireDenied),
-                },
+        if wire.devices.len() > 32 {
+            return Err(NodeWireDenied);
+        }
+        let devices = wire
+            .devices
+            .into_iter()
+            .map(|d| {
+                Ok(ClaimedDevice {
+                    device_id: d.device_id,
+                    device_public_key: d.device_public_key,
+                    endpoint_public_key: d.endpoint_public_key,
+                    status: match d.status {
+                        1 => RosterStatus::RecordedOnly,
+                        2 => RosterStatus::Revoked,
+                        _ => return Err(NodeWireDenied),
+                    },
+                })
             })
-        }).collect::<Result<Vec<_>, NodeWireDenied>>()?;
+            .collect::<Result<Vec<_>, NodeWireDenied>>()?;
         Ok(Self {
             vault_id: wire.vault_id,
             epoch: wire.epoch,

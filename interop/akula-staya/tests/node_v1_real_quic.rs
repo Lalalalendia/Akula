@@ -4,18 +4,12 @@
 #![cfg(all(target_os = "linux", feature = "node-v1-e2e-tests"))]
 
 use akula_staya_integration::node_v1_runtime::{
-    get_over_authenticated_iroh, put_over_authenticated_iroh,
-    serve_one_authenticated_connection, NodeWireDenied,
+    NodeWireDenied, get_over_authenticated_iroh, put_over_authenticated_iroh,
+    serve_one_authenticated_connection,
 };
-use aquilum_core::node_replica_auth_lab::{
-    OwnerReadGrant, owner_claim, signed_grant_digest,
-};
-use aquilum_core::node_v1::{
-    NodeHost, NodeIdentity, OwnerPutGrant, put_claim, signed_put_digest,
-};
-use aquilum_core::sync::device_roster_lab::{
-    ClaimedDevice, OwnerSignedRoster, RosterStatus,
-};
+use aquilum_core::node_replica_auth_lab::{OwnerReadGrant, owner_claim, signed_grant_digest};
+use aquilum_core::node_v1::{NodeHost, NodeIdentity, OwnerPutGrant, put_claim, signed_put_digest};
+use aquilum_core::sync::device_roster_lab::{ClaimedDevice, OwnerSignedRoster, RosterStatus};
 use aquilum_core::sync::{DeviceId, DocumentId, RevisionId, VaultId};
 use iroh::endpoint::{Connection, Endpoint, presets};
 use iroh::{EndpointAddr, RelayMode, SecretKey};
@@ -29,11 +23,12 @@ use std::time::Duration;
 const ALPN: &[u8] = b"akula-node-v1/quic/v1";
 const CONTENT: &[u8] = b"# Akula NodeV1 owner-signed replica\nA to VPS to B, source offline\n";
 
-fn sign_roster(mut roster: OwnerSignedRoster, owner: &Ed25519KeyPair)
-    -> OwnerSignedRoster
-{
-    roster.signature = owner.sign(&roster.canonical_claim().unwrap())
-        .as_ref().try_into().unwrap();
+fn sign_roster(mut roster: OwnerSignedRoster, owner: &Ed25519KeyPair) -> OwnerSignedRoster {
+    roster.signature = owner
+        .sign(&roster.canonical_claim().unwrap())
+        .as_ref()
+        .try_into()
+        .unwrap();
     roster
 }
 
@@ -69,7 +64,8 @@ fn fixture(root: &Path) -> Fixture {
     let a_device = DeviceId::new();
     let b_device = DeviceId::new();
     let mut roster = OwnerSignedRoster {
-        vault_id, epoch: 9,
+        vault_id,
+        epoch: 9,
         devices: vec![
             ClaimedDevice {
                 device_id: a_device,
@@ -92,23 +88,39 @@ fn fixture(root: &Path) -> Fixture {
 
     let hash = blake3::hash(CONTENT).to_hex().to_string();
     let mut put = OwnerPutGrant {
-        vault_id, document_id: doc, revision_id: rev,
-        filename: "sample.md".to_string(), expected_blake3: hash.clone(),
-        node_identity: node_public, device_id: a_device,
-        device_public_key: a_endpoint, grant_epoch: 9,
+        vault_id,
+        document_id: doc,
+        revision_id: rev,
+        filename: "sample.md".to_string(),
+        expected_blake3: hash.clone(),
+        node_identity: node_public,
+        device_id: a_device,
+        device_public_key: a_endpoint,
+        grant_epoch: 9,
         owner_signature: [0; 64],
     };
-    put.owner_signature = owner.sign(&put_claim(&put).unwrap())
-        .as_ref().try_into().unwrap();
+    put.owner_signature = owner
+        .sign(&put_claim(&put).unwrap())
+        .as_ref()
+        .try_into()
+        .unwrap();
     let mut read = OwnerReadGrant {
-        vault_id, document_id: doc, revision_id: rev,
-        filename: "sample.md".to_string(), expected_blake3: hash,
-        node_identity: node_public, device_id: b_device,
-        device_public_key: b_endpoint, grant_epoch: 9,
+        vault_id,
+        document_id: doc,
+        revision_id: rev,
+        filename: "sample.md".to_string(),
+        expected_blake3: hash,
+        node_identity: node_public,
+        device_id: b_device,
+        device_public_key: b_endpoint,
+        grant_epoch: 9,
         owner_signature: [0; 64],
     };
-    read.owner_signature = owner.sign(&owner_claim(&read).unwrap())
-        .as_ref().try_into().unwrap();
+    read.owner_signature = owner
+        .sign(&owner_claim(&read).unwrap())
+        .as_ref()
+        .try_into()
+        .unwrap();
     let owner_public: [u8; 32] = owner.public_key().as_ref().try_into().unwrap();
     let config = serde_json::json!({
         "version": 2,
@@ -123,17 +135,28 @@ fn fixture(root: &Path) -> Fixture {
     let file = policy.join("owner-policy.json");
     fs::write(&file, serde_json::to_vec(&config).unwrap()).unwrap();
     fs::set_permissions(file, fs::Permissions::from_mode(0o600)).unwrap();
-    Fixture { state, policy, node_public, roster, put, read, a, b }
+    Fixture {
+        state,
+        policy,
+        node_public,
+        roster,
+        put,
+        read,
+        a,
+        b,
+    }
 }
 
-async fn establish(
-    server: &Endpoint, secret: SecretKey,
-) -> (Endpoint, Connection, Connection) {
+async fn establish(server: &Endpoint, secret: SecretKey) -> (Endpoint, Connection, Connection) {
     let client = Endpoint::builder(presets::Minimal)
         .secret_key(secret)
         .relay_mode(RelayMode::Disabled)
-        .bind().await.unwrap();
-    let socket = server.bound_sockets().into_iter()
+        .bind()
+        .await
+        .unwrap();
+    let socket = server
+        .bound_sockets()
+        .into_iter()
         .find(|socket| socket.is_ipv4())
         .or_else(|| server.bound_sockets().into_iter().next())
         .unwrap();
@@ -141,19 +164,18 @@ async fn establish(
         SocketAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
         SocketAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
     };
-    let target = EndpointAddr::new(server.id())
-        .with_ip_addr(SocketAddr::new(ip, socket.port()));
+    let target = EndpointAddr::new(server.id()).with_ip_addr(SocketAddr::new(ip, socket.port()));
     let (outbound, inbound) = tokio::join!(
-        tokio::time::timeout(
-            Duration::from_secs(20), client.connect(target, ALPN),
-        ),
+        tokio::time::timeout(Duration::from_secs(20), client.connect(target, ALPN),),
         async {
-            let incoming = tokio::time::timeout(
-                Duration::from_secs(20), server.accept(),
-            ).await.unwrap().unwrap();
+            let incoming = tokio::time::timeout(Duration::from_secs(20), server.accept())
+                .await
+                .unwrap()
+                .unwrap();
             let handshake = incoming.accept().unwrap();
             tokio::time::timeout(Duration::from_secs(20), handshake)
-                .await.unwrap()
+                .await
+                .unwrap()
         }
     );
     (client, outbound.unwrap().unwrap(), inbound.unwrap())
@@ -170,11 +192,11 @@ async fn actual_quic_put_reopen_node_then_get_on_other_device() {
         .secret_key(SecretKey::from_bytes(&[44; 32]))
         .relay_mode(RelayMode::Disabled)
         .alpns(vec![ALPN.to_vec()])
-        .bind().await.unwrap();
+        .bind()
+        .await
+        .unwrap();
     let server_endpoint = *server.id().as_bytes();
-    let mut node = NodeHost::open_integration_fixture(
-        &f.state, &f.policy,
-    ).unwrap();
+    let mut node = NodeHost::open_integration_fixture(&f.state, &f.policy).unwrap();
     assert_eq!(f.node_public, node.public_key());
     let (client_a, outgoing_a, incoming_a) =
         establish(&server, SecretKey::from_bytes(&[21; 32])).await;
@@ -182,7 +204,11 @@ async fn actual_quic_put_reopen_node_then_get_on_other_device() {
     let (served, put) = tokio::join!(
         serve_one_authenticated_connection(&incoming_a, &mut node),
         put_over_authenticated_iroh(
-            &outgoing_a, server_endpoint, &f.roster, &f.put, CONTENT,
+            &outgoing_a,
+            server_endpoint,
+            &f.roster,
+            &f.put,
+            CONTENT,
             |claim| Ok(f.a.sign(claim).as_ref().try_into().unwrap()),
         ),
     );
@@ -198,16 +224,17 @@ async fn actual_quic_put_reopen_node_then_get_on_other_device() {
     assert!(!source.exists());
     drop(node);
 
-    let mut reopened = NodeHost::open_integration_fixture(
-        &f.state, &f.policy,
-    ).unwrap();
+    let mut reopened = NodeHost::open_integration_fixture(&f.state, &f.policy).unwrap();
     assert_eq!(reopened.public_key(), receipt.node_public);
     let (client_b, outgoing_b, incoming_b) =
         establish(&server, SecretKey::from_bytes(&[22; 32])).await;
     let (served, get) = tokio::join!(
         serve_one_authenticated_connection(&incoming_b, &mut reopened),
         get_over_authenticated_iroh(
-            &outgoing_b, server_endpoint, &f.roster, &f.read,
+            &outgoing_b,
+            server_endpoint,
+            &f.roster,
+            &f.read,
             |claim| Ok(f.b.sign(claim).as_ref().try_into().unwrap()),
         ),
     );
@@ -223,7 +250,11 @@ async fn actual_quic_put_reopen_node_then_get_on_other_device() {
     let (rejected, attempt) = tokio::join!(
         serve_one_authenticated_connection(&rogue_in, &mut reopened),
         put_over_authenticated_iroh(
-            &rogue_out, server_endpoint, &f.roster, &f.put, CONTENT,
+            &rogue_out,
+            server_endpoint,
+            &f.roster,
+            &f.put,
+            CONTENT,
             |claim| Ok(f.b.sign(claim).as_ref().try_into().unwrap()),
         ),
     );
