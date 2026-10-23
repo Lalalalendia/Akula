@@ -28,6 +28,8 @@ mod native_receive;
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
 mod local_identity;
+#[cfg(feature = "p2p-device-ui")]
+mod peer_pair;
 
 /// A display-only identity observation. The first-party owner registry still
 /// needs to supply a verified snapshot. No production path populates this
@@ -58,6 +60,8 @@ pub(super) struct TransferState {
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
+    #[cfg(feature = "p2p-device-ui")]
+    pub(super) peer_pair: peer_pair::PeerUi,
     #[cfg(feature = "p2p-inbox-preview")]
     pub(super) inbox: inbox::InboxPreview,
     #[cfg(feature = "p2p-native-send-beta")]
@@ -85,6 +89,23 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
+        let peer_view = {
+            #[cfg(feature = "p2p-device-ui")]
+            {
+                if matches!(
+                    self.transfer.local_identity.view.phase,
+                    transfer_ui::IdentityPhase::Ready(_)
+                ) {
+                    Some(&self.transfer.peer_pair.view)
+                } else {
+                    None
+                }
+            }
+            #[cfg(not(feature = "p2p-device-ui"))]
+            {
+                None
+            }
+        };
         #[cfg(feature = "p2p-inbox-preview")]
         let inbox_view = Some(&self.transfer.inbox.view);
         #[cfg(not(feature = "p2p-inbox-preview"))]
@@ -95,7 +116,7 @@ impl App {
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view, inbox_view,
+            self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
             Some(&self.transfer.sender.view),
             self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
             Some(&self.transfer.receiver.view),
@@ -104,7 +125,7 @@ impl App {
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view, inbox_view,
+            self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
             Some(&self.transfer.sender.view),
             self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
         );
@@ -112,12 +133,12 @@ impl App {
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view, inbox_view,
+            self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view, inbox_view,
+            self.transfer.choosing, self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
@@ -140,6 +161,14 @@ impl App {
         }
         #[cfg(feature = "p2p-device-ui")]
         if self.transfer.local_identity.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "p2p-device-ui")]
+        if self.transfer.peer_pair.poll() {
+            // Refresh the same protected OS contacts after a confirmed pin
+            // or revocation; transfer buttons must reflect the new authority.
+            #[cfg(feature = "p2p-device-contacts-preview")]
+            self.transfer.refresh_transport_contacts();
             changed = true;
         }
         #[cfg(feature = "p2p-inbox-preview")]
@@ -259,6 +288,17 @@ impl App {
                     *command, Arc::clone(&self.workspace.wake),
                 );
                 refresh = true;
+            }
+        }
+        #[cfg(feature = "p2p-device-ui")]
+        if !refresh {
+            if let Some(controls) = &dialog.peer_controls {
+                refresh = self.transfer.peer_pair.handle(
+                    controls,
+                    id,
+                    action,
+                    Arc::clone(&self.workspace.wake),
+                );
             }
         }
         self.popup = Some(Popup::Transfers(dialog));
