@@ -13,25 +13,24 @@ impl App {
         self.open_error = None;
         self.open_error_ids = None;
         let result = StructuredDocument::open(path).and_then(|doc| {
-            let header = match doc.format() {
-                Format::Canvas => {
-                    let canvas = doc.canvas()?;
-                    let nodes = canvas["nodes"].as_array().map_or(0, Vec::len);
-                    let edges = canvas["edges"].as_array().map_or(0, Vec::len);
-                    format!("JSON Canvas — {nodes} objects, {edges} connections")
-                }
-                Format::Base => "Obsidian Bases — YAML source".to_owned(),
-            };
-            Ok((header, doc.text().chars().take(2048).collect::<String>()))
+            match doc.format() {
+                Format::Canvas => Ok(Ok(doc.canvas()?)),
+                Format::Base => Ok(Err(doc.text().chars().take(2048).collect::<String>())),
+            }
         });
         match result {
-            Ok((heading, preview)) => {
+            Ok(Ok(canvas)) => {
+                let page = crate::ui::canvas::CanvasPage::new(&canvas);
+                if let Some(chrome) = &self.chrome {
+                    chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
+                }
+            }
+            Ok(Err(preview)) => {
                 let page = NewWidget::new(
                     Flex::column()
                         .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(
-                            "Read-only preview — editing is not available yet",
+                            "Obsidian Bases — read-only YAML source",
                         )))
-                        .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&heading)))
                         .with_fixed(NewWidget::new(crate::ui::widgets::Caption::new(&preview))),
                 );
                 if let Some(chrome) = &self.chrome {

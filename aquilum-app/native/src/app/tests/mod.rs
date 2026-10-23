@@ -1,3 +1,4 @@
+mod canvas;
 mod damage;
 mod dialogs;
 mod external;
@@ -28,9 +29,7 @@ mod tree_toolbar;
 mod wide;
 mod wiki;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use aquilum_core::settings::models::AppConfig;
 use masonry::app::{RenderRoot, RenderRootOptions, RenderRootSignal, WindowSizePolicy};
