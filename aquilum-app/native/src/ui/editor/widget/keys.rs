@@ -170,6 +170,9 @@ impl TextEditor {
                 // the IME confirms the replacement with Commit.
                 self.compose = Some((text.clone(), *cursor));
             }
+            // An empty commit (including cancellation from some OS IMEs)
+            // must never erase the selected text or create an Undo entry.
+            Ime::Commit(text) if text.is_empty() => self.compose = None,
             Ime::Commit(text) => {
                 self.compose = None;
                 self.insert(text, Kind::Other);

@@ -138,3 +138,33 @@ fn ime_commit_replaces_selection_once_and_one_undo_restores_it() {
     command_key(&mut root, "y");
     assert_eq!(text(&root), "слева 日本語 справа");
 }
+
+#[test]
+fn ime_empty_commit_preserves_multiline_selection_and_undo() {
+    let original = "начало\nсередина\n日本語";
+    let mut root = root(original);
+    let start = original.find("середина").unwrap();
+    let end = original.len();
+    let selected_original = &original[start..end];
+    let id = super::support::editor_id(&root);
+    root.edit_widget(id, |mut w| TextEditor::select_byte_range(&mut w.downcast(), start, end));
+    let _ = root.redraw();
+    assert_eq!(selected(&root), selected_original);
+
+    // OS IMEs may finish a cancelled or emptied composition with Commit("").
+    // Unlike a real nonempty Commit, it must not delete any selected bytes.
+    ime(&mut root, Ime::Enabled);
+    ime(&mut root, Ime::Preedit("に".into(), Some((3, 3))));
+    ime(&mut root, Ime::Preedit(String::new(), None));
+    ime(&mut root, Ime::Commit(String::new()));
+    assert_eq!(text(&root), original, "empty commit must not alter document bytes");
+    assert_eq!(selected(&root), selected_original, "empty commit must retain selection");
+    command_key(&mut root, "z");
+    assert_eq!(text(&root), original, "no empty commit undo entry is allowed");
+
+    // A second empty commit while a nonempty preedit is active is also inert.
+    ime(&mut root, Ime::Preedit("日本".into(), Some((6, 6))));
+    ime(&mut root, Ime::Commit(String::new()));
+    assert_eq!(text(&root), original);
+    assert_eq!(selected(&root), selected_original);
+}
