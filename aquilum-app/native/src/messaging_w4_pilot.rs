@@ -99,7 +99,7 @@ fn w4_args(a:&Action,root:&Path)->Vec<String>{
         Action::InitSender=>vec!["init-sender".into(),sender],
         Action::InitRecipient=>vec!["init-recipient".into(),recipient],
         Action::Listen{key,drop_ack}=>vec![
-            if *drop_ack{"serve-drop-ack"}else{"serve-once"}.into(),
+            (if *drop_ack { "serve-drop-ack" } else { "serve-once" }).into(),
             recipient,inbox,key.clone(),"127.0.0.1:42042".into(),
         ],
         Action::Send{invite}=>vec![
