@@ -94,7 +94,27 @@ function Wait-ButtonGone {
         if ($null -eq (Find-VisibleButton -Tree $Tree -Names $Names)) { return }
         Start-Sleep -Milliseconds 200
     }
-    throw ('Provider modal did not close: ' + ($Names -join ' / '))
+    # Diagnostic output is restricted to disposable CI bucket markers.
+    # Never dump arbitrary editor content, imported invitations, or secrets.
+    $lastSaved = Saved-Bucket
+    $knownNotices = @()
+    foreach ($key in @('keysNeedBucket','saveFailed','saveBeforeAction')) {
+        foreach ($locale in $locales) {
+            try {
+                $message = [string]$locale.settings.cloud.$key
+                if ([string]::IsNullOrWhiteSpace($message)) { continue }
+                if ($null -ne $Tree.FindFirst(
+                    [System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.PropertyCondition]::new(
+                        [System.Windows.Automation.AutomationElement]::NameProperty, $message))) {
+                    $knownNotices += $key
+                }
+            } catch {}
+        }
+    }
+    throw ('Provider modal did not close: ' + ($Names -join ' / ') +
+        '; persistedSyntheticBucket=' + $lastSaved +
+        '; knownValidationNotices=' + (($knownNotices | Sort-Object -Unique) -join ','))
 }
 function Bucket-Editor([System.Windows.Automation.AutomationElement]$Tree) {
     # The underlying note editor can remain visible in UIA behind the
@@ -194,6 +214,27 @@ try {
     $editor.SetFocus()
     $hwnd = Ensure-Foreground $proc
     [AkulaBetaGuiInput]::TypeAsciiKeys($hwnd, $proc.Id, 'cloudtestbucket314')
+    # Check the actual native Accessibility ValuePattern before asking Save
+    # to commit. If physical keyboard injection misses the editor, report
+    # the typing defect instead of mislabelling it as a persistence failure.
+    $observed = ''
+    $valuePatternSupported = $false
+    try {
+        $valuePattern = [System.Windows.Automation.ValuePattern]$editor.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern)
+        $valuePatternSupported = $true
+        for ($attempt = 0; $attempt -lt 35; $attempt++) {
+            $observed = [string]$valuePattern.Current.Value
+            if ($observed -ceq 'cloudtestbucket314') { break }
+            Start-Sleep -Milliseconds 100
+        }
+    } catch [System.InvalidOperationException] {
+        # Some native Windows accessibility providers do not expose
+        # ValuePattern. The authoritative test remains the persisted bytes.
+    }
+    if ($valuePatternSupported -and $observed -cne 'cloudtestbucket314') {
+        throw "Native bucket editor did not receive exact synthetic typing; valueLength=$($observed.Length), expectedLength=18"
+    }
     # Typing into the draft is not a settings write.
     if ((Saved-Bucket) -ne '') { throw 'Typing provider draft prematurely saved the bucket' }
     Invoke-Button (Wait-Button -Tree $root -Names $saveNames)
