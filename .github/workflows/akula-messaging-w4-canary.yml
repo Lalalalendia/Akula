@@ -1,0 +1,125 @@
+# AK-MSG-PROD-CANARY-01: NOT the Akula public release workflow.
+name: Akula W3-W4 installed canary (Linux only)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/akula-messaging-w4-canary.yml"
+      - "aquilum-app/native/src/messaging_w4_pilot.rs"
+      - "aquilum-app/native/src/main.rs"
+      - "aquilum-app/native/Cargo.toml"
+      - "aquilum-app/native/packaging/akula-linux-w4-pilot.json"
+      - "scripts/messaging/**"
+      - "docs/messaging/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-w4-canary-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  product-w3-w4-canary:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Retrieve pinned WOW W3/W4
+        uses: actions/checkout@v7
+        with:
+          repository: calex794/wow
+          ref: 85b95c1d38a9a8b803b5e0ba1d9fcaac521e4dfa
+          path: _w4-pilot-upstream
+          persist-credentials: false
+      - name: Verify exact WOW revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C _w4-pilot-upstream rev-parse HEAD)" = 85b95c1d38a9a8b803b5e0ba1d9fcaac521e4dfa
+          grep -Fqx 'license = "MIT"' _w4-pilot-upstream/Cargo.toml
+          test -f _w4-pilot-upstream/src/bin/w4_tunnel_lab.rs
+      - name: Native Linux prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get remove -y $(dpkg-query -W -f='%{Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
+          sudo apt-get install -y -qq libunwind-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            pkg-config curl ca-certificates patchelf file socat
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: akula-w4-canary-linux
+          cache-on-failure: true
+      - name: Build WOW independently; pin exact installed helper SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/akula-w4-target"
+          cargo build --release --manifest-path _w4-pilot-upstream/Cargo.toml --bin w4_tunnel_lab
+          helper="$GITHUB_WORKSPACE/.artifacts/cargo-native/release/akula-w4-lab"
+          install -D -m 0755 "$CARGO_TARGET_DIR/release/w4_tunnel_lab" "$helper"
+          digest="$(sha256sum "$helper" | cut -d' ' -f1)"
+          test "$(printf %s "$digest" | wc -c)" -eq 64
+          printf 'AKULA_W4_SIDECAR_SHA256=%s\n' "$digest" >> "$GITHUB_ENV"
+          echo "AKULA_W4_HELPER_SHA256=$digest"
+      - name: Test real native command parser and helper binding
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p aquilum-native --features messaging-w4-pilot \
+            --bin aquilum-native -- messaging_w4_pilot::tests:: --nocapture
+      - name: Build actual installed Akula binary with disabled-by-default pilot
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p aquilum-native --features installed,messaging-w4-pilot
+          install -m 0755 ../.artifacts/cargo-native/release/aquilum-native ../.artifacts/cargo-native/release/akula-app
+          ../.artifacts/cargo-native/release/akula-app --w4-pilot status | grep -q '^AKULA_W4_PILOT_READY'
+      - name: Send 1024 bytes via Akula, lose W4, retransmit with same ciphertext
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/messaging/w4-pilot-smoke.sh
+          bash scripts/messaging/w4-pilot-smoke.sh "$GITHUB_WORKSPACE/.artifacts/cargo-native/release/akula-app"
+      - name: Build isolated non-release Akula AppImage with W4 helper
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          cargo install cargo-packager --version 0.11.8 --locked
+          mkdir -p dist
+          (
+            cd aquilum-app
+            cargo packager -p aquilum-native --release --formats appimage \
+              --config native/packaging/akula-linux-w4-pilot.json \
+              --out-dir "$GITHUB_WORKSPACE/dist"
+          )
+          test "$(find dist -maxdepth 1 -name '*.AppImage' -type f | wc -l)" -eq 1
+          sha256sum dist/*.AppImage > dist/APPIMAGE_SHA256.txt
+          mkdir -p dist/docs
+          cp docs/messaging/AK-W4-PROD-CANARY-01.md dist/docs/INSTRUCTIONS.md
+          cp scripts/messaging/w4-pilot-smoke.sh dist/docs/smoke.sh
+          sha256sum .artifacts/cargo-native/release/akula-w4-lab > dist/docs/W4_HELPER_SHA256.txt
+          printf '%s\n' "$GITHUB_SHA" > dist/docs/AKULA_SOURCE_COMMIT.txt
+          printf '%s\n' 85b95c1d38a9a8b803b5e0ba1d9fcaac521e4dfa > dist/docs/WOW_SOURCE_COMMIT.txt
+          echo 'AKULA_W4_CANARY_CANDIDATE_OK (NOT RELEASE)'
+      - name: Upload unsigned canary candidate, not a public release
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-w4-installed-canary-NOT-RELEASE-${{ github.sha }}
+          path: |
+            dist/*.AppImage
+            dist/APPIMAGE_SHA256.txt
+            dist/docs/*
+          retention-days: 14
+          if-no-files-found: error
