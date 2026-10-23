@@ -40,16 +40,31 @@ test ! -e /var/lib/akula/server-bootstrap ||
 test ! -e "$MOUNT_ROOT" && test ! -L "$MOUNT_ROOT" ||
   hold "existing disposable mount root"
 
-TEST_BIN=""
-count=0
-for path in "$TEST_ROOT"/server_bootstrap_b1d0-*; do
-  if [[ -f "$path" && -x "$path" && "$path" != *.d ]]; then
-    TEST_BIN="$path"
-    count=$((count + 1))
-  fi
-done
-[[ "$count" == 1 ]] ||
-  hold "expected exactly one compiled B1d0 test in Cargo target/debug/deps (found $count)"
+# Ask Cargo for the precise executable emitted by THIS feature/target build.
+# Multiple stale/other-feature test binaries may legitimately coexist in deps.
+# The JSON artifact selection is bound to the explicit B1d0 --test command.
+TEST_BIN="$(cargo test --locked --manifest-path "$ROOT/aquilum-app/Cargo.toml" \
+  -p aquilum-core --features server-bootstrap-b1d0-durable-node \
+  --test server_bootstrap_b1d0 --no-run --message-format=json |
+  python3 -c '
+import json, sys
+hits = []
+for line in sys.stdin:
+    record = json.loads(line)
+    target = record.get("target") or {}
+    if (record.get("reason") == "compiler-artifact"
+        and target.get("name") == "server_bootstrap_b1d0"
+        and "test" in target.get("kind", [])
+        and record.get("executable")):
+        hits.append(record["executable"])
+if len(hits) != 1:
+    sys.stderr.write("B1D0 explicit Cargo test artifact count mismatch: %d\\n" % len(hits))
+    sys.exit(2)
+print(hits[0])
+')" || hold "Cargo did not yield one exact B1d0 executable"
+[[ "$TEST_BIN" == "$TEST_ROOT"/server_bootstrap_b1d0-* &&
+   -f "$TEST_BIN" && -x "$TEST_BIN" && ! -L "$TEST_BIN" ]] ||
+  hold "Cargo B1d0 executable must be a non-symlink in the configured target directory"
 
 sudo -n install -d -o root -g root -m 0755 "$MOUNT_ROOT"
 cleanup() {

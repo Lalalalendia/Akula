@@ -45,8 +45,6 @@ jobs:
         run: bash -n scripts/ci/akula-node-v1-systemd-host.sh
       - name: Real non-root systemd start and SIGKILL restart (disposable CI)
         run: bash scripts/ci/akula-node-v1-systemd-host.sh
-      - name: Compile existing B1d0 signed owner/CAS test using exact HEAD
-        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features server-bootstrap-b1d0-durable-node --test server_bootstrap_b1d0 --no-run
       - name: Validate isolated signed Node-V1 direct opt receipt proof
         run: bash -n scripts/ci/akula-node-v1-signed-opt-proof.sh
       - name: Verify real Node-V1 signed ELF via existing B1d0 /opt durable CAS

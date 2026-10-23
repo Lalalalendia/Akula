@@ -86,7 +86,10 @@ approval, real VPS reboot, Windows setup or receiver File Gate import.
 
 The next single scoped workflow job also reuses the **existing B1d0**
 root-owned first-install test instead of inventing a second CAS or signer.
-It builds the B1d0 test on the exact Node branch, passes the same real
+The proof script builds the B1d0 test with one explicit feature/target
+command and consumes the **exact executable path from Cargo JSON
+`compiler-artifact`**, not a directory glob (other feature variants can
+coexist in the same target directory). It passes the same real
 `akula-node-v1-service` ELF already built and tested by the systemd step,
 and runs the actual verified-FD, test-only Ed25519 release/owner approval,
 witness CAS, fsynced O_EXCL+NOREPLACE `/opt` install and durable receipt
