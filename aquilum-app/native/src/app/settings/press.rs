@@ -65,6 +65,8 @@ impl App {
                 );
                 if matches!(result, Ok(crate::yandex_credentials::SaveOutcome::Saved)) {
                     self.yandex_probe.credentials_changed();
+                    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+                    self.s3_pair.invalidate_verification();
                 }
                 let key = match result {
                     Ok(crate::yandex_credentials::SaveOutcome::Saved) =>
@@ -94,6 +96,8 @@ impl App {
                     match crate::yandex_credentials::remove(&bucket) {
                         Ok(()) => {
                             self.yandex_probe.credentials_changed();
+                            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+                            self.s3_pair.invalidate_verification();
                             "settings.yandex.keysRemoved"
                         },
                         Err(_) => "settings.yandex.keysRemoveFailed",
