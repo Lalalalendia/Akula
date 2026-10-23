@@ -253,3 +253,9 @@ If you cannot or do not want to use n0 infrastructure, use direct
 `listen`/`connect` with a reachable numeric IP:port or a separately
 configured private overlay/VPN. In that case the normal direct-only CLI
 will not use any n0 discovery/relay.
+
+## NODE-E2E-02a — offline verified Node replica via Staya (lab)
+
+The opt-in `node-replica-transport-lab` test persists one allowlisted Markdown fixture through the existing Sync DAG. After its original source is removed, a signed exact read grant and synthetic device proof allow a one-time disposable export. Actual Staya Iroh QUIC/Bao transfers verified bytes to a separate process. The provider refuses pre-arm GET and an unlisted Iroh peer.
+
+This does **not** enroll a real user device, grant File Gate rights, provide a server Node daemon or remove the temporary plaintext path. Existing `p2p-live-identity` and `p2p-inbox-lab` retain their separate validation gates. Product NODE-E2E-02/07 remain unaccepted; see [AKULA-NODE-E2E-01A](../../docs/platforms/AKULA-NODE-E2E-01A.md).

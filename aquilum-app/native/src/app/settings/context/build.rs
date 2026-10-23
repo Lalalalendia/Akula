@@ -1,6 +1,5 @@
 use super::super::*;
 use std::path::Path;
-
 impl App {
     pub(in crate::app::settings) fn settings_context(&self, section: Section, copied: Option<usize>, trash_page: usize) -> Context {
         let workspace = self.tree.root().map(Path::to_path_buf);
@@ -12,8 +11,7 @@ impl App {
                 known.into_iter().find(|w| w.path == path).map(|w| w.home_page)
             })
             .unwrap_or_default();
-        // SQLite is opened only for this page, and strictly read-only.
-        // Missing/unsupported journals are NOT described as "synchronized".
+        // Read-only journal inspection never implies a synchronized state.
         let sync_recovery = if section == Section::Sync {
             workspace.as_deref().map(|vault| {
                 aquilum_core::sync::native_recovery_overview(
@@ -59,6 +57,8 @@ impl App {
                     ).ok().flatten()).is_some(),
             },
             yandex_notice: None,
+            server_probe: self.server_probe_view(section),
+            server_advanced: false,
             sync_selected: None,
             sync_notice: None,
             scale: self.interface.scale(),

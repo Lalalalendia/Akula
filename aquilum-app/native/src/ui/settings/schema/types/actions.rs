@@ -1,5 +1,4 @@
 use aquilum_core::sync::NativeRecoveryDecision;
-
 /// The catalog is provider discovery, not permission to use a provider.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CloudProvider {
@@ -11,7 +10,6 @@ pub enum CloudProvider {
     Dropbox,
     WebDav,
 }
-
 impl CloudProvider {
     pub const ALL: [Self; 7] = [
         Self::Yandex,
@@ -35,7 +33,6 @@ impl CloudProvider {
         })
     }
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     OpenCloudProvider(CloudProvider),
@@ -59,6 +56,9 @@ pub enum Action {
     ImportS3Pair,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
     SyncS3PairOnce,
+    VerifyServer,
+    ToggleServerAdvanced,
+    InstallServer,
     CheckUpdates,
     InstallUpdate,
 }

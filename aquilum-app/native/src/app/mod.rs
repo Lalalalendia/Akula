@@ -92,7 +92,6 @@ pub enum WindowCommand {
     Minimize,
     Close,
 }
-
 const MENU_RENAME: usize = 0;
 const MENU_DUPLICATE: usize = 1;
 const MENU_DELETE: usize = 2;
@@ -107,6 +106,7 @@ pub struct App {
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
+    server_probe: settings::server_state::ServerProbeState,
     graph: graph_page::GraphState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,

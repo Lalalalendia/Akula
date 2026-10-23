@@ -1,6 +1,5 @@
 use super::*;
 use std::path::Path;
-
 impl App {
     pub(super) fn apply(&mut self, setter: Setter, value: Value) -> Effect {
         match setter {
@@ -50,7 +49,8 @@ impl App {
                     || before.templates.folder != after.templates.folder
                     || mcp_changed
                     || retention
-                    || before.s3_onboarding != after.s3_onboarding;
+                    || before.s3_onboarding != after.s3_onboarding
+                    || before.server_setup != after.server_setup;
                 let new_yandex_bucket = after.s3_onboarding.bucket.clone();
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
