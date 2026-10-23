@@ -35,6 +35,8 @@ p2p-device-ui = ["p2p-device-contacts-preview"]
 # S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
 # Does not expose S3 writes, apply, file mutation or baseline actions.
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
+# Explicit, opt-in native Dropbox read-only test; never enables cloud writes.
+dropbox-readonly-preview = ["dep:akula-dropbox-connect-lab", "dep:akula-dropbox-t0"]
 # Installer-enforced local custody flavor; does not pull in AWS/S3.
 sync-installed-host = ["aquilum-core/sync-installed-host"]
 # Separate non-published installer-witness integration acceptance.
@@ -44,6 +46,8 @@ sync-installed-host-unix-root-witness = ["sync-installed-host-witness", "aquilum
 
 [dependencies]
 aquilum-core = { path = "../core", features = ["host-custody"] }
+akula-dropbox-connect-lab = { path = "../../modules/dropbox-connect-lab", optional = true }
+akula-dropbox-t0 = { path = "../../modules/dropbox-t0", optional = true }
 # Основная ветка xilem: Masonry без релиза больше года, бэкенды под vello_cpu только там.
 # Ревизия зафиксирована, обновлять пачками.
 masonry = { git = "https://github.com/linebender/xilem", rev = "271a27a6d4a930f7878d404f9014e3c50a3a9b88", default-features = false }
