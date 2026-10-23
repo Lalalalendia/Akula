@@ -188,8 +188,8 @@ fn sparse_unicode_openers_keep_original_offsets() {
 }
 
 #[test]
-fn escaped_openers_are_skipped_without_losing_the_next_link() {
+fn escaped_overlapping_openers_preserve_existing_target_selection() {
     let links = super::parser::extract(r"\[[[Note]] [[Accepted]]");
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].target, "Accepted");
+    let targets = links.iter().map(|link| link.target.as_str()).collect::<Vec<_>>();
+    assert_eq!(targets, ["Note", "Accepted"]);
 }
