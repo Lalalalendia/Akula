@@ -4,8 +4,8 @@ mod tick;
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
-        match &self.note {
-            Some(note) => format!("{} — {product}", note.path.file_stem().unwrap_or_default().to_string_lossy()),
+        match self.note.as_ref().map(|n| n.path.as_path()).or_else(|| self.tabs.active().path.as_deref()) {
+            Some(path) => format!("{} — {product}", path.file_stem().unwrap_or_default().to_string_lossy()),
             None => product.to_owned(),
         }
     }

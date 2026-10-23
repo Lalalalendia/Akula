@@ -1,3 +1,6 @@
+mod actions;
+mod close;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -17,7 +20,7 @@ use crate::ui::workspaces::{self, RowAction, WorkspaceDialog};
 
 pub(super) struct WorkspacesState {
     dialog: WorkspaceDialog,
-    forget: Option<(DialogIds, Uuid)>,
+    forget: Option<(DialogIds, Uuid, bool)>,
 }
 
 #[cfg(test)]
@@ -27,7 +30,7 @@ impl WorkspacesState {
     }
 
     pub(super) fn forget_layer(&self) -> Option<WidgetId> {
-        self.forget.as_ref().map(|(ids, _)| ids.layer)
+        self.forget.as_ref().map(|(ids, _, _)| ids.layer)
     }
 }
 
@@ -62,64 +65,11 @@ impl App {
 
     fn close_workspaces(&mut self, root: &mut RenderRoot) {
         if let Some(Popup::Workspaces(state)) = self.popup.take() {
-            if let Some((forget, _)) = state.forget {
+            if let Some((forget, _, _)) = state.forget {
                 crate::ui::dialog::close(root, forget.layer);
             }
             crate::ui::dialog::close(root, state.dialog.layer);
         }
-    }
-
-    pub(super) fn on_workspaces_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
-        let Some(Popup::Workspaces(mut state)) = self.popup.take() else { return Outcome::default() };
-        if let Some((forget, workspace)) = state.forget.take() {
-            let Some(answer) = forget.answer(id, action) else {
-                state.forget = Some((forget, workspace));
-                self.popup = Some(Popup::Workspaces(state));
-                return Outcome::default();
-            };
-            crate::ui::dialog::close(root, forget.layer);
-            if answer == DialogAnswer::Cancel {
-                root.focus_on(Some(state.dialog.layer));
-                self.popup = Some(Popup::Workspaces(state));
-                return Outcome::default();
-            }
-            root.remove_layer(state.dialog.layer);
-            let error = self.workspace.core.ui_state.forget_workspace(workspace).err().map(|e| {
-                report!("база не забыта: {e:?}");
-                t("workspaces.forgetFailed")
-            });
-            self.show_workspaces(root, error);
-            return Outcome::default();
-        }
-        let dialog = &state.dialog;
-        let pressed = action.downcast_ref::<Pressed>().is_some();
-        let closing = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
-            || (id == dialog.close && pressed);
-        if closing {
-            crate::ui::dialog::close(root, dialog.layer);
-            return Outcome::default();
-        }
-        if id == dialog.open_folder && pressed {
-            self.popup = Some(Popup::Workspaces(state));
-            return self.pick_workspace(root);
-        }
-        let row = dialog.rows.iter().find(|(row, _, _)| *row == id).map(|(_, path, uuid)| (path.clone(), *uuid));
-        match (row, action.downcast_ref::<RowAction>()) {
-            (Some((path, _)), Some(RowAction::Open)) => {
-                self.popup = Some(Popup::Workspaces(state));
-                return self.switch_workspace(root, path);
-            }
-            (Some((path, workspace)), Some(RowAction::Forget)) => {
-                let (title, description) = workspaces::forget_texts(&path);
-                let (layer, forget) = ConfirmDialog::new(&title, &description, &t("common.cancel"), &t("workspaces.forgetConfirm"));
-                root.add_layer(layer, Point::ORIGIN);
-                root.focus_on(Some(forget.layer));
-                state.forget = Some((forget, workspace));
-            }
-            _ => {}
-        }
-        self.popup = Some(Popup::Workspaces(state));
-        Outcome::default()
     }
 
     pub(super) fn pick_workspace(&mut self, _root: &mut RenderRoot) -> Outcome {

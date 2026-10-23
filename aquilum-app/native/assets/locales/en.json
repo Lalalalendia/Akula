@@ -130,7 +130,8 @@
     "matches": {
       "one": "{{count}} match",
       "other": "{{count}} matches"
-    }
+    },
+    "imageOpenFailed": "Could not open the image. It may be invalid, inaccessible or too large."
   },
   "backlinks": {
     "panelTitle": "Document links",
@@ -295,7 +296,7 @@
       "neverPasteKeys": "Never paste Secret Access Key into these fields",
       "connectionTest": "5. Test connection (not yet available)",
       "connectionTestHint": "This button will be enabled only after secure credential storage, a bounded read-only S3 probe and explicit remote trust verification are implemented. Preparing this form never starts sync.",
-            "keyStatus": "S3 keys in Windows",
+      "keyStatus": "S3 keys in Windows",
       "keyStatusHint": "Windows Credential Manager stores a bucket-scoped credential for this Windows account. Stored credentials are not proof of valid Yandex access.",
       "keysUnsupported": "Protected key entry is not yet supported on this OS",
       "keysNeedBucket": "Save a bucket name first",
@@ -318,7 +319,7 @@
       "keysRemoveCancelled": "Credential removal cancelled.",
       "keysConfirmTitle": "Remove S3 credentials",
       "keysConfirmText": "Remove this bucket's keys from Windows Credential Manager? Akula files are not affected. This does NOT revoke keys in Yandex Cloud; revoke them separately in the console.",
-"checkConnection": "Check connection · not available",
+      "checkConnection": "Check connection · not available",
       "checkConnectionPreview": "Check S3 access · read-only (test)",
       "probeStatus": "S3 verification result",
       "probeChecking": "Checking bucket access… Sync remains off.",
@@ -543,9 +544,9 @@
     "system": {
       "autostart": "Startup",
       "launch": "Launch at sign-in",
-      "launchHint": "Aquilum will start automatically after you sign in to Windows.",
+      "launchHint": "Akula will start automatically after you sign in to Windows.",
       "launchUnavailable": "Launch at sign-in is only available in the installed app, not in a development build.",
-      "launchAria": "Launch Aquilum at sign-in",
+      "launchAria": "Launch Akula at sign-in",
       "about": "About",
       "projectTelegram": "Project Telegram channel",
       "projectTelegramHint": "Akula channel on Telegram",
@@ -553,7 +554,7 @@
       "versionHint": "Include it when reporting a problem.",
       "updates": "Updates",
       "autoUpdate": "Update automatically",
-      "autoUpdateHint": "On launch Aquilum downloads and installs a new version from GitHub.",
+      "autoUpdateHint": "On launch Akula downloads and installs a new version from GitHub.",
       "manualUpdate": "New version",
       "checkUpdates": "Check for updates",
       "installUpdate": "Install",
@@ -861,9 +862,11 @@
     "openFailed": "Could not open “{{path}}”. The folder may have been renamed, deleted, or left on a disconnected drive.",
     "forgetFailed": "Could not remove the base from the list.",
     "forgetTitle": "Remove the base from the list?",
-    "forgetDescription": "The “{{name}}” folder stays on disk, but Aquilum forgets its open tabs and caret positions.",
+    "forgetDescription": "The “{{name}}” folder stays on disk, but Akula forgets its open tabs and caret positions.",
     "forgetConfirm": "Remove",
     "forgetPending": "Removing…",
-    "listFailed": "Could not read the list of knowledge bases: {{reason}}"
+    "listFailed": "Could not read the list of knowledge bases: {{reason}}",
+    "closeActive": "Close knowledge base",
+    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning."
   }
 }
