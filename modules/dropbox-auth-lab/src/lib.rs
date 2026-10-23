@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
-//! Offline Dropbox OAuth PKCE/S256 contract for a native client.
-//! No browser opening, token exchange HTTP, local listener, or persistence.
-//! The host must bind loopback before opening the system browser and
-//! register the exact redirect address with Dropbox App Console.
+//! Native PKCE with registered loopback callback; no embedded browser, persisted secrets, cloud writes or File Gate.
+
+pub mod callback;
+pub mod exchange;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use sha2::{Digest, Sha256};
@@ -156,7 +156,7 @@ impl PendingPkce {
             return if code.is_none() { Err(AuthError::Denied) }
                 else { Err(AuthError::InvalidCallback) };
         }
-        let code = code.ok_or(AuthError::InvalidCallback)?;
+        let code = Zeroizing::new(code.ok_or(AuthError::InvalidCallback)?);
         if code.is_empty() || code.len() > 4096
             || !code.bytes().all(|b| b.is_ascii_graphic() && b != b'&' && b != b'#')
         {
