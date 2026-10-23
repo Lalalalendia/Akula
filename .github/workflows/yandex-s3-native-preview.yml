@@ -1,0 +1,223 @@
+# YC-S3-T01c-WIN-BRIDGE: experimental opt-in compile and integration gates.
+# Never ships an installer, never requests Yandex credentials and never runs
+# the actual live endpoint. User-initiated network paths are tested via
+# synthetic state machines plus the separate #408 localhost MinIO suite.
+name: Yandex S3 native read-only bridge preview
+on:
+  pull_request:
+    paths:
+      # New feature-owned files only. Subscribing a new workflow to the
+      # existing native/src/app/** and schema/** families violates the
+      # repository's protected CI fanout budget.
+      - '.github/workflows/yandex-s3-native-preview.yml'
+      - 'aquilum-app/native/src/yandex_credentials.rs'
+      - 'aquilum-app/native/src/yandex_probe_session.rs'
+      - 'aquilum-app/native/src/yandex_probe_worker.rs'
+      - 'aquilum-app/native/src/native_modules.rs'
+      - 'aquilum-app/native/src/app/init/bootstrap.rs'
+      - 'aquilum-app/native/src/app/lifecycle/tick.rs'
+      - 'aquilum-app/native/src/app/settings/press.rs'
+      - 'aquilum-app/native/src/app/settings/section.rs'
+      - 'aquilum-app/native/src/app/settings/context/build.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/yandex/controls.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context/defaults.rs'
+      - 'scripts/test-yandex-credui-cancel.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keep independent manual runs; cancel only superseded commits of this PR.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows-readonly-preview:
+    name: No-credentials Windows read-only connection preview
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: yandex-readonly-preview
+          save-if: false
+      - name: Assert default installed build does not enable Yandex network preview
+        shell: pwsh
+        run: |
+          $cargo = Get-Content -Raw aquilum-app/native/Cargo.toml
+          if ($cargo -notmatch 'installed\s*=\s*\[\s*\]') {
+            throw "installed feature must be empty: S3 UI preview may not ship"
+          }
+          if ($cargo -notmatch 'yandex-s3-connection-preview\s*=') {
+            throw "missing explicit opt-in feature"
+          }
+          if ($cargo -match '(?m)^default\s*=.*yandex-s3-connection-preview') {
+            throw "unsafe opt-in feature default"
+          }
+          # Lock the release boundary, not just Cargo feature naming.
+          $entry = Get-Content -Raw aquilum-app/native/src/main.rs
+          if ($entry -notmatch '(?s)#\[cfg\(all\(feature = "yandex-s3-connection-preview", not\(debug_assertions\)\)\)\]\s*compile_error!') {
+            throw "release feature must be blocked at compilation"
+          }
+          $beta = Get-Content -Raw .github/workflows/windows-beta.yml
+          if ($beta -match 'yandex-s3-connection-preview') {
+            throw "normal Windows installer must not enable experimental S3"
+          }
+          if ($beta -notmatch 'cargo build --release --locked -p aquilum-native --features installed') {
+            throw "normal Windows installer must remain local-only"
+          }
+      - name: Compile normal installed native build with no AWS SDK feature
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-native --features installed
+      - name: Verify WinCred round-trip and secret status
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features installed yandex_credentials::tests -- --test-threads=1
+      - name: Verify no stale UI probe status can survive rotation or close
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features installed yandex_probe_session::tests -- --test-threads=1
+      - name: Compile opt-in read-only bridge and prove typed error policy
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview yandex_probe_worker::tests -- --test-threads=1
+      - name: Prove localized settings button remains disabled without keys
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret -- --test-threads=1
+      - name: Verify both isolated S3 preview capabilities coexist
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          # Both flags must compile in ONE native test binary. Separate CI
+          # lanes cannot detect collisions in Settings context, actions,
+          # or UI rendering. This is a debug-only, no-credentials check.
+          $ErrorActionPreference = 'Stop'
+          $features = 'installed,yandex-s3-connection-preview,s3-e2e01-review-preview'
+          $targets = @(
+            'ui::settings::schema::tests::yandex_wizard_is_bounded_and_never_activates_s3_or_persists_a_secret',
+            'ui::settings::schema::tests::s3_e2e01_bound_receive_status_is_visible_but_never_an_apply_button'
+          )
+          $present = @(cargo test --locked -p aquilum-native --bin aquilum-native --features $features -- --list)
+          if ($LASTEXITCODE -ne 0) { throw 'Dual-S3 native test-harness compilation failed' }
+          foreach ($target in $targets) {
+            if (-not ($present -contains "${target}: test")) {
+              throw "Dual-S3 exact test not discovered: $target"
+            }
+            cargo test --locked -p aquilum-native --bin aquilum-native --features $features $target -- --exact --test-threads=1
+            if ($LASTEXITCODE -ne 0) { throw "Dual-S3 exact test failed: $target" }
+          }
+          Write-Host 'DUAL_S3_QA_PASS: combined_features=True isolated_tests=2 remote_writes=False'
+      - name: Verify read-only Core error taxonomy
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-s3 yandex_readonly_probe::tests -- --test-threads=1
+      # A disposable QA-only portable executable, not an NSIS installer.
+      # Cargo's release guard forbids shipping this feature to end users.
+      - name: Build Windows debug-only S3 verification QA executable
+        working-directory: aquilum-app
+        run: cargo build --locked -p aquilum-native --bin aquilum-native --features installed,yandex-s3-connection-preview
+      - name: Smoke launch non-release S3 UI in isolated ephemeral Windows vault
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
+            throw "S3 QA GUI smoke is restricted to clean GitHub-hosted Windows runners"
+          }
+          $meta = (cargo metadata --locked --format-version 1 --no-deps | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $exe = Join-Path $meta.target_directory 'debug\aquilum-native.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "missing S3 preview debug binary" }
+          $vault = Join-Path $env:RUNNER_TEMP 'akula-s3-preview-smoke-vault'
+          $data = Join-Path $env:RUNNER_TEMP 'akula-s3-preview-smoke-state'
+          New-Item -ItemType Directory -Path $vault, $data -Force | Out-Null
+          $note = Join-Path $vault 'S3 QA smoke.md'
+          Set-Content -LiteralPath $note -Value '# Read-only S3 QA smoke fixture'
+          $before = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+          $arguments = "--vault `"$vault`" --data-dir `"$data`" --open `"$note`""
+          $app = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 45; $i++) {
+              Start-Sleep -Seconds 1
+              $app.Refresh()
+              if ($app.HasExited) { throw "QA preview exited before GUI became ready" }
+              if ($app.MainWindowHandle -ne 0 -and
+                  $app.MainWindowTitle -like '*S3 QA smoke*' -and
+                  $app.MainWindowTitle -like '*Akula*') {
+                $ready = $true
+                break
+              }
+            }
+            if (-not $ready) { throw "No actual Akula note window visible in isolated QA run" }
+            if (-not $app.CloseMainWindow()) { throw "QA preview refused normal window close" }
+            if (-not $app.WaitForExit(20000)) { throw "QA preview did not close cleanly" }
+            if ($app.ExitCode -ne 0) { throw "QA preview GUI exited with failure" }
+            $after = (Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash
+            if ($before -ne $after) { throw "QA preview altered the read-only smoke fixture" }
+            Write-Host 'YANDEX_S3_DEBUG_QA_GUI_SMOKE_PASS: isolated_window_opened=True note_untouched=True no_cloud_action_triggered=True'
+          } finally {
+            $app.Refresh()
+            if (-not $app.HasExited) {
+              $app.Kill()
+              $app.WaitForExit(5000) | Out-Null
+            }
+          }
+      - name: Real Microsoft CredUI masked native field and UIA Cancel
+        shell: pwsh
+        run: |
+          # The Rust test is ignored by default and limited to ephemeral CI.
+          # PowerShell 5.1 STA is required by Microsoft Windows UIA.
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\scripts\test-yandex-credui-cancel.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Real Windows CredUI Cancel/UIA QA failed" }
+      - name: Package isolated QA executable and safety instructions
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $meta = (cargo metadata --locked --format-version 1 --no-deps | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $binary = Join-Path $meta.target_directory 'debug\aquilum-native.exe'
+          if (-not (Test-Path $binary)) { throw "missing compiled debug QA binary" }
+          $folder = Join-Path $env:RUNNER_TEMP 'akula-yandex-s3-readonly-qa'
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          Copy-Item $binary (Join-Path $folder 'akula-yandex-s3-readonly-qa.exe') -Force
+          @'
+          AKULA YANDEX S3 - EXPERIMENTAL READ-ONLY QA
+          ====================================================
+          This is a DEBUG binary for manual verification on a disposable
+          Windows user profile or VM. NOT an installer or production release.
+          Do not run it against an existing Akula user profile or real vault.
+          It can use the same local app settings as a normally installed build.
+          This binary must not be redistributed as a supported Akula release.
+
+          No automatic S3 operation runs when opening Settings. The only
+          network operation available here is a user-triggered, bounded
+          signed ListObjectsV2 on https://storage.yandexcloud.net.
+          No S3 writes, deletes, CAS, remote File Gate or Sync are enabled.
+          A successful LIST verifies only object-list permission at that time.
+
+          (1) Create a disposable test Windows profile/VM.
+          (2) Validate masked Save/Cancel/Replace/Delete with SYNTHETIC KEYS.
+          (3) For actual Yandex testing, use only an explicitly authorized,
+              isolated PRIVATE test bucket and bucket-scoped read-only keys.
+          (4) Never put real keys in screenshots, issues, chat or logs.
+          (5) Remove the test Windows credentials after use. Local deletion
+              does NOT revoke an actual static key at the Yandex backend.
+
+          Acceptance procedure and remaining blockers:
+          https://app.notion.com/p/3fe32a84beec8118a2b4e31f64434602
+          Original Windows OS-key test PR:
+          https://github.com/Lalalalendia/Akula/pull/388
+          Experimental native integration PR:
+          https://github.com/Lalalalendia/Akula/pull/428
+          '@ | Set-Content -Encoding UTF8 (Join-Path $folder 'README-QA.txt')
+          Compress-Archive -Path (Join-Path $folder '*') -DestinationPath (Join-Path $env:GITHUB_WORKSPACE 'akula-yandex-s3-readonly-qa.zip') -Force
+      - name: Retain temporary Windows S3 manual QA package
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-yandex-s3-readonly-qa-${{ github.event.pull_request.head.sha || github.sha }}
+          path: akula-yandex-s3-readonly-qa.zip
+          retention-days: 7
+          if-no-files-found: error

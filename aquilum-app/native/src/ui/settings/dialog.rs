@@ -1,5 +1,4 @@
-use super::{Binding, Section};
-use std::collections::HashMap;
+use super::{Binding, CloudPopup, Section};
 use masonry::core::WidgetId;
 use masonry::widgets::Flex;
 use crate::ui::dialog::DialogIds;
@@ -15,8 +14,10 @@ pub struct SettingsDialog {
     pub bindings: HashMap<WidgetId, Binding>,
     pub copied: Option<usize>,
     pub trash_page: usize,
-    pub server_advanced: bool,
     pub sync_selected: Option<aquilum_core::sync::NativeRecoveryCasePreview>,
     pub sync_notice: Option<String>,
+    pub server_advanced: bool,
+    pub yandex_notice: Option<String>,
     pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
+    pub cloud_popup: Option<CloudPopup>,
 }
