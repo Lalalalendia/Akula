@@ -19,10 +19,7 @@ fn absent(path: &Path) -> Result<(), &'static str> {
     }
 }
 
-fn enroll_at(
-    state: &Path,
-    owner_policy: &Path,
-) -> Result<PublicIdentityPair, &'static str> {
+fn enroll_at(state: &Path, owner_policy: &Path) -> Result<PublicIdentityPair, &'static str> {
     if rustix::process::geteuid().as_raw() == 0 {
         return Err("identity enrollment refuses root");
     }
@@ -41,8 +38,8 @@ fn enroll_at(
     absent(&state.join("node-identity.pk8"))?;
     absent(&state.join("node-iroh-seed.bin"))?;
 
-    let node = NodeIdentity::enroll_first(state)
-        .map_err(|_| "Node signing identity enrollment failed")?;
+    let node =
+        NodeIdentity::enroll_first(state).map_err(|_| "Node signing identity enrollment failed")?;
     let iroh = identity::enroll_first(state)?;
     let witness = NodeIdentity::open_provisioned(state)
         .map_err(|_| "Node signing identity readback failed")?;
@@ -75,8 +72,7 @@ pub(super) fn run_fixed() -> Result<(), &'static str> {
     let mut iroh_hex = String::with_capacity(64);
     for octet in result.iroh_endpoint {
         use std::fmt::Write as _;
-        write!(&mut iroh_hex, "{octet:02x}")
-            .map_err(|_| "Iroh public endpoint encoding failed")?;
+        write!(&mut iroh_hex, "{octet:02x}").map_err(|_| "Iroh public endpoint encoding failed")?;
     }
     println!("AKULA_NODE_V1_ENROLLED node={public_hex} iroh={iroh_hex}");
     Ok(())
@@ -102,7 +98,10 @@ mod tests {
             enrolled.node_public,
         );
         assert_eq!(
-            *identity::load_provisioned(&state).unwrap().public().as_bytes(),
+            *identity::load_provisioned(&state)
+                .unwrap()
+                .public()
+                .as_bytes(),
             enrolled.iroh_endpoint,
         );
         fs::remove_file(state.join("node-iroh-seed.bin")).unwrap();

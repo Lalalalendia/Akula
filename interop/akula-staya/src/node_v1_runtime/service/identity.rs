@@ -87,15 +87,16 @@ pub(super) fn enroll_first(state: &Path) -> Result<SecretKey, &'static str> {
         openat(
             &dir,
             KEY,
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL
-                | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::RUSR | Mode::WUSR,
         )
         .map_err(|_| "Iroh identity exists or enrollment refused")?,
     );
-    key.write_all(&seed).map_err(|_| "Iroh identity write failed")?;
+    key.write_all(&seed)
+        .map_err(|_| "Iroh identity write failed")?;
     key.sync_all().map_err(|_| "Iroh identity sync failed")?;
-    dir.sync_all().map_err(|_| "Iroh enrollment directory sync failed")?;
+    dir.sync_all()
+        .map_err(|_| "Iroh enrollment directory sync failed")?;
     drop(key);
     let installed = load_provisioned(state)?;
     if installed.public() != SecretKey::from_bytes(&seed).public() {

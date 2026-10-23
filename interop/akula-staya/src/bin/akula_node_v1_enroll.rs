@@ -16,9 +16,7 @@ fn main() {
         eprintln!("AKULA_NODE_V1_HOLD: fixed enrollment operation required");
         std::process::exit(78);
     }
-    if let Err(reason) =
-        akula_staya_integration::node_v1_runtime::service::enroll_for_installer()
-    {
+    if let Err(reason) = akula_staya_integration::node_v1_runtime::service::enroll_for_installer() {
         eprintln!("AKULA_NODE_V1_HOLD: {reason}");
         std::process::exit(78);
     }

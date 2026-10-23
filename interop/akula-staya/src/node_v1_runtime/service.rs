@@ -1,7 +1,7 @@
 //! Explicit non-root Node-V1 Iroh daemon. NO installer or root authority.
 //! Only a separately owner-provisioned systemd unit may start this listener.
-mod identity;
 mod enrollment;
+mod identity;
 
 use aquilum_core::node_v1::NodeHost;
 use iroh::{
