@@ -90,6 +90,18 @@ const OWNED_SUITES=Object.freeze({
     "aquilum-app/native/packaging/akula-linux.json",
     "aquilum-app/native/packaging/Akula.desktop",
     "aquilum-app/native/Cargo.toml"
+  ],
+  "owned_windows_beta": [
+    ".github/workflows/windows-beta.yml",
+    ".github/scripts/windows-beta-identity.test.cjs",
+    "scripts/test-windows-beta.ps1",
+    "scripts/build-windows-update-fixture.ps1",
+    "scripts/test-windows-beta-upgrade.ps1",
+    "scripts/windows-beta-gui-input.ps1",
+    "scripts/windows-beta-candidate-manifest.ps1",
+    "scripts/windows-accesskit-uia.ps1",
+    "aquilum-app/native/packaging/akula-windows.json",
+    "aquilum-app/native/Cargo.toml"
   ]
 });
 function ownedRoutes(paths){
