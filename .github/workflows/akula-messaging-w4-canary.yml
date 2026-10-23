@@ -12,7 +12,11 @@ on:
       - "aquilum-app/native/src/app/transfer/dialog.rs"
       - "aquilum-app/native/packaging/akula-linux-w4-pilot.json"
       - "scripts/messaging/**"
+      - "scripts/qa/w4-two-node-ssh.sh"
+      - "scripts/qa/w4-two-node-docker-fixture.sh"
+      - "scripts/qa/w4-two-node-vps.Dockerfile"
       - "docs/messaging/**"
+      - "docs/qa/AK-W4-TWO-NODE-SSH-01.md"
   workflow_dispatch:
 
 permissions:
@@ -156,6 +160,18 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > dist/docs/AKULA_SOURCE_COMMIT.txt
           printf '%s\n' 85b95c1d38a9a8b803b5e0ba1d9fcaac521e4dfa > dist/docs/WOW_SOURCE_COMMIT.txt
           echo 'AKULA_W4_CANARY_CANDIDATE_OK (NOT RELEASE)'
+      - name: Real encrypted SSH across disposable Linux network namespace
+        shell: bash
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          bash -n scripts/qa/w4-two-node-ssh.sh
+          bash -n scripts/qa/w4-two-node-docker-fixture.sh
+          app="$(realpath "$(find dist -maxdepth 1 -name '*.AppImage' -type f -print -quit)")"
+          sha="$(sha256sum "$app" | cut -d' ' -f1)"
+          # Uses a real SSH server in a private Docker network, but one CI host;
+          # it is not evidence of a public WAN or two physical machines.
+          bash scripts/qa/w4-two-node-docker-fixture.sh "$app" "$sha"
       - name: Upload unsigned canary candidate, not a public release
         uses: actions/upload-artifact@v7
         with:
