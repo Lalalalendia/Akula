@@ -341,10 +341,7 @@ pub async fn native_send_one(
     run_mode(Mode::Send { peer, source }, listening).await
 }
 
-async fn run_mode(
-    mode: Mode,
-    listening: impl FnOnce(Vec<SocketAddr>),
-) -> Result<(), String> {
+async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result<(), String> {
     let peer = match &mode {
         Mode::Send { peer, .. } | Mode::Receive { peer, .. } => peer,
     };
@@ -452,11 +449,10 @@ mod tests {
     async fn native_send_refuses_malformed_peer_before_lan_bind() {
         let source = std::env::temp_dir().join("not-opened-source.txt");
         let mut listening = false;
-        let result = native_send_one(
-            "not-a-peer".to_owned(),
-            source,
-            |_| { listening = true; },
-        ).await;
+        let result = native_send_one("not-a-peer".to_owned(), source, |_| {
+            listening = true;
+        })
+        .await;
         assert!(result.is_err());
         assert!(!listening);
     }
