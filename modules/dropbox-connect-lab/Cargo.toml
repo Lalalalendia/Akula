@@ -14,6 +14,7 @@ akula-dropbox-auth-lab = { path = "../dropbox-auth-lab" }
 akula-dropbox-secret-store = { path = "../dropbox-secret-store", features = ["system-store"] }
 blake3 = "1.8.5"
 zeroize = "1.9"
-
-[dev-dependencies]
 url = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "=2.12.1"
