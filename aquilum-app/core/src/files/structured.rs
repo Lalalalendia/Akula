@@ -57,7 +57,7 @@ fn validate_canvas(text: &str) -> Result<Value, StructuredError> {
         return Err(StructuredError::InvalidFormat("JSON Canvas root must be an object".into()));
     };
     for key in ["nodes", "edges"] {
-        if !obj.get(key).is_some_and(Value::is_array) {
+        if obj.get(key).is_some_and(|value| !value.is_array()) {
             return Err(StructuredError::InvalidFormat(format!("JSON Canvas {key} must be an array")));
         }
     }
