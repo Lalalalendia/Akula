@@ -12,6 +12,7 @@ mod home;
 mod init;
 mod lifecycle;
 mod media;
+mod pdf_preview;
 mod note_page;
 mod panel;
 #[cfg(feature = "memory-probe")]
@@ -34,14 +35,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
-
 use aquilum_core::CoreEvent;
 use aquilum_core::mcp::bridge::{Disposition, Navigation};
 use masonry::app::RenderRoot;
 use masonry::core::{ErasedAction, NewWidget, Widget, WidgetId};
 use masonry::kurbo::{Point, Size};
 use crate::ui::editor::TextAction;
-
 use crate::i18n::{self, t, t_with};
 use crate::ui::dialog::{ConfirmDialog, DialogAnswer, DialogIds};
 use crate::ui::file_tree::{FileTree, TreeAction};
@@ -62,7 +61,6 @@ use crate::session::Session;
 use crate::tabs::Tabs;
 use crate::workspace::Workspace;
 use uuid::Uuid;
-
 enum Popup {
     FileMenu { layer: WidgetId, targets: Vec<PathBuf>, clicked: PathBuf, tab: Option<Uuid> },
     Delete { dialog: DialogIds, targets: Vec<PathBuf> },
@@ -74,6 +72,8 @@ enum Popup {
     SortMenu { layer: WidgetId, button: WidgetId },
     TabsMenu { layer: WidgetId, button: WidgetId },
     Viewer { layer: WidgetId },
+    PdfImport { dialog: DialogIds, source: PathBuf },
+    PdfNotice { dialog: DialogIds },
     Reader(Box<reader::ReaderState>),
     Search(search::SearchState),
     Templates(templates::TemplatesState),
@@ -103,7 +103,6 @@ const MENU_CLOSE: usize = 3;
 const MENU_COLOR: usize = 3;
 const MENU_MARGIN: f64 = 8.0;
 const HOLD: std::time::Duration = std::time::Duration::from_millis(500);
-
 pub struct App {
     workspace: Workspace,
     tree: FileTree,

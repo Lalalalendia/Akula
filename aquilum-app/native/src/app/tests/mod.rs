@@ -12,6 +12,7 @@ mod misc;
 mod navigation;
 mod notes;
 mod panels;
+mod pdf_preview;
 mod perf;
 mod reader;
 mod snapshots;
