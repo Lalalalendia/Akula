@@ -5,10 +5,14 @@
 
 use akula_inbox_ledger_lab::{ExpectedTransfer, InboxLedger, LedgerError, LocalStatus, Transport};
 use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
+#[cfg(windows)]
+use aquilum_core::p2p_inbox_lab::create_pinned_windows_inbox_stage;
+#[cfg(not(windows))]
+use std::fs::OpenOptions;
 #[cfg(not(windows))]
 use std::ffi::OsString;
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{self, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
@@ -196,7 +200,8 @@ pub(super) fn persist_received_payload(
     if !root_metadata.file_type().is_dir() {
         return Err("native receiver root is not a real directory".into());
     }
-    let path = inbox_root.join(format!(".akula-native-received-{}.stage", Uuid::new_v4()));
+    let stage_name = format!(".akula-native-received-{}.stage", Uuid::new_v4());
+    let path = inbox_root.join(&stage_name);
     struct RemoveOnDrop(PathBuf);
     impl Drop for RemoveOnDrop {
         fn drop(&mut self) {
@@ -204,18 +209,24 @@ pub(super) fn persist_received_payload(
         }
     }
     let _cleanup = RemoveOnDrop(path.clone());
-    let mut options = OpenOptions::new();
-    // Preserve one read/write OS handle from exclusive creation through the
-    // cold rehash. Never reopen the stage by a mutable path name.
-    options.read(true).write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(&path)
-        .map_err(|error| format!("create private receiver stage: {error}"))?;
+    // Windows: the opened parent HANDLE and new stage HANDLE remain live
+    // through verification; no ambient pathname is used to create this stage.
+    #[cfg(windows)]
+    let (_pinned_root, mut file) = create_pinned_windows_inbox_stage(inbox_root, &stage_name)
+        .map_err(|error| format!("Windows pinned Inbox stage refused: {error:?}"))?;
+    #[cfg(not(windows))]
+    let mut file = {
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options
+            .open(&path)
+            .map_err(|error| format!("create private receiver stage: {error}"))?
+    };
     file.write_all(data)
         .map_err(|error| format!("write private receiver stage: {error}"))?;
     file.sync_all()
@@ -310,6 +321,26 @@ mod tests {
         let file = inbox.join("not-a-directory");
         fs::write(&file, b"not a directory").unwrap();
         assert!(check_windows_directory_chain(&file, false).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receiver_rejects_inbox_with_everyone_full_control() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let grant = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .expect("icacls is required for Windows DACL regression");
+        assert!(
+            grant.status.success(),
+            "icacls grant failed: {}",
+            String::from_utf8_lossy(&grant.stderr)
+        );
+        assert!(create_pinned_windows_inbox_stage(&root, "untrusted.stage").is_err());
+        assert!(!root.join("untrusted.stage").exists());
     }
 
     fn stage(root: &Path, data: &[u8]) -> File {

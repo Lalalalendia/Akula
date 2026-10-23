@@ -67,6 +67,23 @@ mod pinned_read;
 mod filegate_windows_acl;
 #[cfg(windows)]
 mod pinned_windows;
+// P2P-only, default-off receiver stage creation. Reuse the existing NT
+// handle-relative create primitive and conservative owner/DACL audit.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn create_pinned_p2p_inbox_stage(
+    root: &std::path::Path,
+    name: &str,
+) -> Result<(std::fs::File, std::fs::File), VaultPortError> {
+    let inspected = pinned_windows::open_root(root)?;
+    filegate_windows_acl::audit_owner_dacl(&inspected)?;
+    let writable = pinned_windows::open_root_for_create(root)?;
+    if pinned_windows::file_identity(&inspected)? != pinned_windows::file_identity(&writable)? {
+        return Err(VaultPortError::FileChanged);
+    }
+    let stage = pinned_windows::create_stage_child(&writable, name)?;
+    Ok((writable, stage))
+}
+
 mod protocol;
 mod provider;
 mod s3;

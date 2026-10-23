@@ -66,3 +66,18 @@ the scoped receiver workflow.
 **Still HOLD:** these checks are path-based and subject to ancestor substitution.
 There is no claimed Windows handle-relative root/objects/SQLite custody, owner-DACL
 proof, same-user attacker isolation, or power-loss durable signed delivery receipt.
+
+### Windows pinned stage and owner/DACL gate (experimental)
+
+For Native receiving on Windows, the existing Akula Core NT directory-handle
+primitive now creates the private stage relative to a pinned parent HANDLE
+(never by resolving a separate global stage pathname). The parent is first
+audited using the existing read-only owner/DACL guard, and separately opened
+read/write parent handles must have identical Windows file identities.
+The parent and stage handles remain alive during fsync and cold verification.
+
+The Windows CI additionally tests rejection of an Inbox root with explicit
+Everyone Full Control. This is a negative gate, not proof against a malicious
+same-user process or privileged actor. The **objects directory and SQLite
+database still reopen by global paths**, and the whole ancestor chain is not
+pinned for the duration of publication. Release HOLD remains in force.
