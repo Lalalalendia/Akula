@@ -18,6 +18,7 @@ const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
 mod model;
+mod dialog;
 #[cfg(feature = "messaging-w4-pilot")]
 mod w4_pilot;
 #[cfg(feature = "p2p-device-contacts-preview")]
@@ -66,49 +67,6 @@ impl App {
         #[cfg(feature = "p2p-device-contacts-preview")]
         self.transfer.refresh_transport_contacts();
         self.show_transfers(root);
-    }
-
-    fn show_transfers(&mut self, root: &mut RenderRoot) {
-        let identity_view = {
-            #[cfg(feature = "p2p-device-ui")]
-            { Some(&self.transfer.local_identity.view) }
-            #[cfg(not(feature = "p2p-device-ui"))]
-            { None }
-        };
-        #[cfg(all(feature = "p2p-device-contacts-preview", feature = "messaging-w4-pilot"))]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view,
-            Some(&self.transfer.w4_pilot.view),
-        );
-        #[cfg(all(feature = "p2p-device-contacts-preview", not(feature = "messaging-w4-pilot")))]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view,
-        );
-        #[cfg(all(not(feature = "p2p-device-contacts-preview"), feature = "messaging-w4-pilot"))]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
-            Some(&self.transfer.w4_pilot.view),
-        );
-        #[cfg(all(not(feature = "p2p-device-contacts-preview"), not(feature = "messaging-w4-pilot")))]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
-        );
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
-        self.popup = Some(Popup::Transfers(dialog));
-    }
-
-    fn refresh_transfers(&mut self, root: &mut RenderRoot) {
-        if let Some(Popup::Transfers(dialog)) = self.popup.take() {
-            root.remove_layer(dialog.layer);
-            self.show_transfers(root);
-        }
     }
 
     pub(super) fn on_transfer_picked(&mut self, root: &mut RenderRoot) {
