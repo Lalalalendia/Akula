@@ -22,7 +22,10 @@ fn valid_optional_sections_open_without_implicitly_mutating_bytes() {
         let value = doc.canvas().unwrap();
         assert_eq!(value.is_object(), true);
         assert_eq!(fs::read(&path).unwrap(), *raw, "read must not normalize JSON");
-        assert_eq!(doc.text().as_bytes(), *raw);
+        // The Core snapshot normalizes CRLF in memory; only the file's
+        // original bytes must remain byte-for-byte unchanged on disk.
+        let normalized = std::str::from_utf8(raw).unwrap().replace("\r\n", "\n");
+        assert_eq!(doc.text(), normalized);
     }
 }
 
