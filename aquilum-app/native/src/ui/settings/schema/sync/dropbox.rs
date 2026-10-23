@@ -2,7 +2,7 @@ use super::*;
 use aquilum_core::settings::models::DropboxReadOnlyDraft;
 
 /// A single opt-in test profile, never a connected or trusted Vault.
-pub(super) fn dropbox_setup(config: &AppConfig, ctx: &Context) -> Block {
+pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &Context) -> Block {
     let draft = &config.dropbox_readonly;
     let ready = draft.ready();
     let available = ready && !ctx.dropbox_preview_busy;
