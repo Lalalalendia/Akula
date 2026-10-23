@@ -9,6 +9,7 @@ impl App {
         match action {
             // This handler is reached only for ordinary settings buttons.
             // Review actions require the separately confirmed modal flow.
+            Action::OpenCloudProvider(_) => Effect::None,
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
             Action::OpenTrash => {
                 if let Some(workspace) = workspace {
