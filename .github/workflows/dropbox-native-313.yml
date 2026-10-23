@@ -33,7 +33,7 @@ jobs:
       - name: Compile normal installed native Akula with Dropbox read-only code
         run: cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed
       - name: Run native Dropbox connection state regression tests
-        run: cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed dropbox_preview::tests
+        run: cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed dropbox_preview
       - name: Run public-scope configuration tests
         run: cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core dropbox_readonly_draft_tests --lib
       - name: Run isolated native Dropbox onboarding tests
