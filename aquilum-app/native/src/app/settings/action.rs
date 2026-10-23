@@ -4,7 +4,7 @@ use masonry::core::{ErasedAction, WidgetId};
 use super::bindings::same_setter;
 use super::{App, Effect, Outcome, Popup};
 use crate::ui::dialog::DialogAnswer;
-use crate::ui::editor::TextEditor;
+use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::menu::MenuChoice;
 use crate::ui::settings::Binding;
 use crate::ui::settings::controls::{Changed, DropdownButton, Picked};
@@ -34,6 +34,20 @@ impl App {
         // A cloud provider is a second, focus-trapped dialog above the settings
         // catalog. No click on the catalog may be interpreted while it is open.
         if let Some(mut cloud) = dialog.cloud_popup.take() {
+            // A provider dialog owns a transient draft. Pressing Enter must
+            // not silently persist it before the user clicks Save.
+            if let Some(text_action) = action.downcast_ref::<TextAction>()
+                && let Some(Binding::Text { setter, .. }) = cloud.bindings.get(&id)
+            {
+                match text_action {
+                    TextAction::Changed(text) | TextAction::Entered(text) => {
+                        cloud.remember_text(*setter, text);
+                    }
+                    _ => {}
+                }
+                dialog.cloud_popup = Some(cloud);
+                return self.keep(dialog, None, Effect::None, root);
+            }
             let pressed = action.downcast_ref::<Pressed>().is_some();
             let closing = (id == cloud.layer && action.downcast_ref::<DialogAnswer>() == Some(&DialogAnswer::Cancel))
                 || (pressed && (id == cloud.close || id == cloud.cancel));
@@ -82,7 +96,44 @@ impl App {
             }
             let (mut effect, _) = self.on_binding(root, &mut cloud.bindings, id, action);
             if pressed && let Some(Binding::Button(button)) = cloud.bindings.get(&id) {
-                effect = self.press(&mut dialog, button.clone());
+                let button = button.clone();
+                // A saved provider never implicitly targets a different
+                // bucket from the text currently visible in this dialog.
+                #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+                if cloud.provider == crate::ui::settings::schema::CloudProvider::Yandex {
+                    let draft = cloud.bindings.iter().find_map(|(field, binding)| {
+                        let Binding::Text { setter, .. } = binding else { return None };
+                        let text = root.get_widget(*field)?
+                            .downcast::<TextEditor>()?.inner().text();
+                        Some((*setter, text))
+                    });
+                    if let Some((setter, bucket)) = draft {
+                        let valid = aquilum_core::settings::models::YandexS3Onboarding::valid_bucket(&bucket);
+                        let stored = self.workspace.core.settings.get_config().s3_onboarding.bucket;
+                        let uses_bucket = matches!(button,
+                            Action::StoreYandexKeys | Action::RemoveYandexKeys |
+                            Action::ConfigureS3Pair | Action::ExportS3Pair |
+                            Action::ImportS3Pair | Action::SyncS3PairOnce
+                        );
+                        if uses_bucket && !valid {
+                            dialog.yandex_notice = Some(crate::i18n::t("settings.yandex.keysNeedBucket"));
+                            dialog.cloud_popup = Some(cloud);
+                            return self.keep(dialog, None, Effect::Content, root);
+                        }
+                        if uses_bucket && bucket != stored {
+                            if matches!(button, Action::StoreYandexKeys) {
+                                // Explicit credential setup may save the
+                                // public bucket name before opening WinCred.
+                                self.apply(setter, Value::Text(bucket));
+                            } else {
+                                dialog.yandex_notice = Some(crate::i18n::t("settings.cloud.saveBeforeAction"));
+                                dialog.cloud_popup = Some(cloud);
+                                return self.keep(dialog, None, Effect::Content, root);
+                            }
+                        }
+                    }
+                }
+                effect = self.press(&mut dialog, button);
             }
             dialog.cloud_popup = Some(cloud);
             return self.keep(dialog, None, effect, root);
