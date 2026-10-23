@@ -101,7 +101,7 @@ impl S3PairInvite {
 }
 
 fn password_valid(password: &str) -> bool {
-    (12..=1024).contains(&password.len())
+    (20..=1024).contains(&password.len())
         && !password.bytes().any(|b| b == 0)
 }
 
