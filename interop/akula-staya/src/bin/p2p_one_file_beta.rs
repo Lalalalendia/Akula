@@ -41,10 +41,17 @@ enum Mode {
         address: SocketAddr,
         destination: PathBuf,
     },
+    // Native-only explicit opt-in: use third-party n0 discovery/relay.
+    // No LAN or WAN mode silently changes routing under the same button.
+    SendInternet {
+        peer: String,
+        source: PathBuf,
+    },
     // Not CLI-addressable: Native stores verified data only in its Inbox.
+    // None means explicitly selected Internet/N0; Some means direct LAN.
     ReceiveInbox {
         peer: String,
-        address: SocketAddr,
+        address: Option<SocketAddr>,
     },
 }
 
@@ -385,7 +392,14 @@ pub fn validate_direct_lan_address(address: SocketAddr) -> Result<(), String> {
 pub async fn native_receive_one(peer: String, address: SocketAddr) -> Result<(), String> {
     parse_peer(&peer)?;
     validate_direct_lan_address(address)?;
-    run_mode(Mode::ReceiveInbox { peer, address }, |_| {}).await
+    run_mode(Mode::ReceiveInbox { peer, address: Some(address) }, |_| {}).await
+}
+
+/// Internet/N0 is a separate explicit UI action. No clipboard addresses,
+/// no automatic discovery at application launch, no change to LAN-only mode.
+pub async fn native_receive_internet_one(peer: String) -> Result<(), String> {
+    parse_peer(&peer)?;
+    run_mode(Mode::ReceiveInbox { peer, address: None }, |_| {}).await
 }
 
 /// Explicit, one-shot native send. The UI must select exactly one local
@@ -403,11 +417,30 @@ pub async fn native_send_one(
     run_mode(Mode::Send { peer, source }, listening).await
 }
 
+/// Explicit WAN sender reuses the same bounded one-file QUIC protocol and
+/// protected peer identity; n0 discovery/relay is opt-in, never automatic.
+pub async fn native_send_internet_one(
+    peer: String,
+    source: PathBuf,
+    internet_ready: impl FnOnce(Vec<SocketAddr>),
+) -> Result<(), String> {
+    parse_peer(&peer)?;
+    if !source.is_absolute() {
+        return Err("select an absolute source file".into());
+    }
+    run_mode(Mode::SendInternet { peer, source }, internet_ready).await
+}
+
 async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result<(), String> {
+    let internet = matches!(
+        &mode,
+        Mode::SendInternet { .. } | Mode::ReceiveInbox { address: None, .. }
+    );
     let peer = match &mode {
-        Mode::Send { peer, .. } | Mode::Receive { peer, .. } | Mode::ReceiveInbox { peer, .. } => {
-            peer
-        }
+        Mode::Send { peer, .. }
+        | Mode::SendInternet { peer, .. }
+        | Mode::Receive { peer, .. }
+        | Mode::ReceiveInbox { peer, .. } => peer,
     };
     let expected = selected_peer(peer)?;
     // No automatic enrollment, plaintext private key or default-on service.
@@ -416,23 +449,40 @@ async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result
     if local.public() == expected {
         return Err("cannot pair a device with itself".into());
     }
-    let endpoint = Endpoint::builder(presets::Minimal)
+    let builder = if internet {
+        // Explicit Internet action only. Third-party n0 relay sees network
+        // metadata but cannot decrypt end-to-end QUIC contents.
+        Endpoint::builder(presets::N0)
+    } else {
+        Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled)
+    };
+    let endpoint = builder
         .secret_key(local)
         .alpns(vec![ALPN.to_vec()])
-        .relay_mode(RelayMode::Disabled)
         .bind()
         .await
-        .map_err(|error| format!("bind direct LAN QUIC: {error}"))?;
+        .map_err(|error| format!("bind selected P2P route: {error}"))?;
     println!("LOCAL_ENDPOINT_ID={}", endpoint.id());
+    if internet {
+        tokio::time::timeout(Duration::from_secs(60), endpoint.online())
+            .await
+            .map_err(|_| "n0 discovery/relay not ready within 60 seconds")?;
+        println!("INTERNET_DISCOVERY_READY=true THIRD_PARTY_N0=true");
+    }
     let result = match mode {
-        Mode::Send { peer, source } => {
-            let bound = endpoint.bound_sockets();
-            for socket in &bound {
-                println!("LISTEN_UDP={socket} (share the reachable LAN IP and UDP port only)");
+        Mode::Send { peer, source } | Mode::SendInternet { peer, source } => {
+            if internet {
+                // Empty list means n0 identity-only address discovery is ready.
+                // No public or LAN IP is advertised as a guaranteed route.
+                listening(Vec::new());
+            } else {
+                let bound = endpoint.bound_sockets();
+                for socket in &bound {
+                    println!("LISTEN_UDP={socket} (share reachable LAN IP and UDP port only)");
+                }
+                // Wildcard 0.0.0.0/:: is not a remote-reachable IP.
+                listening(bound);
             }
-            // Listening callback contains only bound sockets, never a key.
-            // Wildcard 0.0.0.0/:: is not a remote-reachable IP; UI states so.
-            listening(bound);
             let incoming = tokio::time::timeout(Duration::from_secs(180), endpoint.accept())
                 .await
                 .map_err(|_| "no receiving peer within 180 seconds")?
@@ -488,12 +538,22 @@ async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result
             outcome
         }
         Mode::ReceiveInbox { peer, address } => {
-            let addr = EndpointAddr::new(expected).with_ip_addr(address);
-            let connection =
-                tokio::time::timeout(Duration::from_secs(20), endpoint.connect(addr, ALPN))
-                    .await
-                    .map_err(|_| "direct LAN connection timed out")?
-                    .map_err(|error| format!("authenticated QUIC connection: {error}"))?;
+            let addr = match address {
+                Some(lan) => {
+                    validate_direct_lan_address(lan)?;
+                    EndpointAddr::new(expected).with_ip_addr(lan)
+                }
+                None => EndpointAddr::new(expected),
+            };
+            let connect_timeout = if internet {
+                Duration::from_secs(90)
+            } else {
+                Duration::from_secs(20)
+            };
+            let connection = tokio::time::timeout(connect_timeout, endpoint.connect(addr, ALPN))
+                .await
+                .map_err(|_| "selected P2P route connection timed out")?
+                .map_err(|error| format!("authenticated QUIC connection: {error}"))?;
             live_peer(&connection, &peer)?;
             let inbox_root = inbox::default_root()?;
             let outcome = tokio::time::timeout(
@@ -546,6 +606,40 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert!(!listening);
+    }
+
+    #[tokio::test]
+    async fn native_internet_entrypoints_reject_bad_peer_before_n0_network() {
+        let source = std::env::temp_dir().join("never-opened-onefile-internet-test");
+        let mut advertised = false;
+        assert!(
+            native_send_internet_one("invalid".into(), source, |_| advertised = true)
+                .await
+                .is_err()
+        );
+        assert!(!advertised);
+        assert!(native_receive_internet_one("invalid".into()).await.is_err());
+    }
+
+    #[test]
+    fn internet_routing_is_never_selected_by_legacy_lan_modes() {
+        let id = iroh::SecretKey::generate().public().to_string();
+        let legacy = Mode::ReceiveInbox {
+            peer: id.clone(),
+            address: Some("192.168.1.23:5000".parse().unwrap()),
+        };
+        let explicitly_internet = Mode::ReceiveInbox {
+            peer: id,
+            address: None,
+        };
+        assert!(!matches!(
+            legacy,
+            Mode::ReceiveInbox { address: None, .. }
+        ));
+        assert!(matches!(
+            explicitly_internet,
+            Mode::ReceiveInbox { address: None, .. }
+        ));
     }
 
     #[test]
