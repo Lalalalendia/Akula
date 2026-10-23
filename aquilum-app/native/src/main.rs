@@ -48,10 +48,10 @@ mod replay;
 mod session;
 mod system;
 mod tabs;
-// DirectManipulation and GetPointerType require Windows 8+.
-#[cfg(all(target_os = "windows", not(target_vendor = "win7")))]
+// Touchpad is runtime-gated; a single executable preserves Win10 support.
+#[cfg(target_os = "windows")]
 mod touchpad;
-#[cfg(any(not(target_os = "windows"), target_vendor = "win7"))]
+#[cfg(not(target_os = "windows"))]
 mod touchpad {
     pub struct Touchpad;
 
