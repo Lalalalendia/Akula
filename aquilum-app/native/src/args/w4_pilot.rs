@@ -17,4 +17,3 @@ pub fn run_w4_pilot_if_requested() {
         std::process::exit(2);
     }
 }
-
