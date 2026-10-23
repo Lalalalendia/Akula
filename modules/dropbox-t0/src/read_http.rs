@@ -164,6 +164,41 @@ impl DropboxReadOnly {
         crate::parse_delta_page(&self.scope, &bytes).map_err(ReadError::Metadata)
     }
 
+    /// Collect a bounded, read-only remote snapshot. Never expose a partial
+    /// listing as complete or persist a cursor before all pages validate.
+    pub fn snapshot(&self) -> Result<crate::DropboxDeltaPage, ReadError> {
+        const MAX_PAGES: usize = 128;
+        const MAX_ENTRIES: usize = 50_000;
+        let mut cursor: Option<String> = None;
+        let mut seen_cursors = std::collections::HashSet::new();
+        let mut by_key = std::collections::BTreeMap::new();
+        for _ in 0..MAX_PAGES {
+            let page = self.list_delta(cursor.as_deref())?;
+            if !seen_cursors.insert(page.cursor.clone()) {
+                return Err(ReadError::Protocol(crate::Error::InvalidCursor));
+            }
+            for entry in page.entries {
+                let key = match &entry {
+                    crate::DropboxDeltaEntry::File(file) => file.logical_key.as_str(),
+                    crate::DropboxDeltaEntry::Deleted(key) => key.as_str(),
+                };
+                by_key.insert(key.to_owned(), entry);
+                if by_key.len() > MAX_ENTRIES {
+                    return Err(ReadError::ResponseTooLarge);
+                }
+            }
+            if !page.has_more {
+                return Ok(crate::DropboxDeltaPage {
+                    entries: by_key.into_values().collect(),
+                    cursor: page.cursor,
+                    has_more: false,
+                });
+            }
+            cursor = Some(page.cursor);
+        }
+        Err(ReadError::ResponseTooLarge)
+    }
+
     /// Lookup happens inside the verified account and vault scope. Caller
     /// cannot supply an unrelated Dropbox file reference or revision.
     pub fn read_key_verified(
