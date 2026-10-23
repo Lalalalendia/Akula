@@ -182,3 +182,27 @@ a product hardening limitation; use only trusted local destination folders.
 CI compile/unit tests do not replace physical two-Windows-PC acceptance.
 Integrate with the installed File transfers UI and signed Windows packaging
 before marking this feature released to users.
+
+## Follow-up: constant-time Inbox lookup after one-file LAN reception
+
+The **dependent opt-in branch** now persists the verified payload in a
+receiver-local SQLite Inbox **before** copying it to the separately chosen
+destination. On Windows the local Inbox root is
+`%LOCALAPPDATA%\\Akula\\received-inbox`. On Linux this lab uses
+`$XDG_DATA_HOME/Akula/received-inbox` or `$HOME/.local/share/Akula/received-inbox`.
+The current Windows launcher/UI does not yet browse these receipts.
+
+The receipt ID is domain-separated from the actual authenticated sender
+Iroh key, local receiver key, byte count and BLAKE3. Identical content from
+the same sender to the same receiver is treated as a replay, not a second
+received row; a future signed Offer UUID will distinguish intentionally
+repeated user deliveries. The journal refuses conflicting bytes and never
+overwrites a pre-existing object. A failed user export leaves a checked
+local Inbox object available for later explicit Save As; it never issues
+an extra success ACK.
+
+This remains a **default-off LAN beta laboratory**, not an installed
+receiving service, File Gate APPLIED, Vault sync or power-loss durable
+sender ACK. Windows ACL/NTFS reparse and hostile ancestor-path race tests
+remain release blockers, as does a real native Inbox UI and two physical
+Windows machines. Do not silently switch on beta reception in the installer.
