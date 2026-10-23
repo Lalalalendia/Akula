@@ -1,8 +1,6 @@
 //! Transfer dialog construction, leaving transfer.rs as a compact API.
 use super::*;
 
-/// The only actionable controls modify local drafts or open the local picker.
-/// No button can reach QUIC, File Gate, YDB or any source of peer authority.
 pub fn dialog(
     rows: &[QueueRow],
     devices: &[DeviceRow],
@@ -14,21 +12,11 @@ pub fn dialog(
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
-    let choose = NewWidget::new(
-        TextButton::new(
-            if choosing {
-                t("transfer.picking")
-            } else {
-                t("transfer.addFile")
-            },
-            Variant::Primary,
-        )
-        .with_icon(icons::UPLOAD),
-    );
+    let label = if choosing { t("transfer.picking") } else { t("transfer.addFile") };
+    let choose = NewWidget::new(TextButton::new(label, Variant::Primary).with_icon(icons::UPLOAD));
     let choose_id = choose.id();
     let (queue, actions) = queue_view::render(rows);
     let queue = NewWidget::new(ScrollArea::new(queue));
-
     let (info, device_actions) = devices::render(devices, error);
     let mut identity_actions = Vec::new();
     let footer = NewWidget::new(
