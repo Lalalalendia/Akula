@@ -17,6 +17,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+
+# Coalesce superseded PR commits without cancelling manual or push runs.
+# A unique run_id suffix for non-PR events preserves every manual run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   linux-rollback-lab:
     runs-on: ubuntu-24.04
