@@ -16,9 +16,7 @@ use std::{
 
 use akula_game_session::{
     PeerId,
-    transport::{
-        GameTransport, MAX_FRAME_BYTES, MAX_QUEUED_FRAMES, ReceivedFrame, TransportError,
-    },
+    transport::{GameTransport, MAX_FRAME_BYTES, MAX_QUEUED_FRAMES, ReceivedFrame, TransportError},
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use iroh::{
@@ -46,7 +44,10 @@ pub fn is_lan_address(addr: SocketAddr) -> bool {
 
 /// No listener exists until the explicit caller invokes this function.
 pub async fn bind_lan(addr: SocketAddr) -> Result<Endpoint> {
-    ensure!(is_lan_address(addr), "LAN-only mode rejects nonlocal bind address");
+    ensure!(
+        is_lan_address(addr),
+        "LAN-only mode rejects nonlocal bind address"
+    );
     let endpoint = Endpoint::builder(presets::Minimal)
         .alpns(vec![GAME_ALPN.to_vec()])
         .clear_address_lookup()
@@ -87,7 +88,10 @@ pub async fn connect_lan(
     expected_host: EndpointId,
     host_addr: SocketAddr,
 ) -> Result<Connection> {
-    ensure!(is_lan_address(host_addr), "WAN address refused in LAN-only mode");
+    ensure!(
+        is_lan_address(host_addr),
+        "WAN address refused in LAN-only mode"
+    );
     ensure!(expected_host != endpoint.id(), "refusing self-connect");
     let direct = EndpointAddr::new(expected_host).with_ip_addr(host_addr);
     let conn = timeout(HANDSHAKE_TIMEOUT, endpoint.connect(direct, GAME_ALPN))
@@ -140,7 +144,13 @@ impl RohaLanTransport {
                 if data.is_empty() {
                     break;
                 }
-                if incoming_frames.send(ReceivedFrame { from: remote, payload: data }).await.is_err()
+                if incoming_frames
+                    .send(ReceivedFrame {
+                        from: remote,
+                        payload: data,
+                    })
+                    .await
+                    .is_err()
                 {
                     break;
                 }
@@ -224,13 +234,20 @@ mod tests {
     #[test]
     fn offline_address_policy_rejects_public_and_unspecified() {
         for good in [
-            "127.0.0.1:1010", "192.168.1.2:10", "10.10.1.2:10",
-            "172.19.0.1:10", "[::1]:10", "[fd01::2]:10",
+            "127.0.0.1:1010",
+            "192.168.1.2:10",
+            "10.10.1.2:10",
+            "172.19.0.1:10",
+            "[::1]:10",
+            "[fd01::2]:10",
         ] {
             assert!(is_lan_address(good.parse().unwrap()), "{good}");
         }
         for bad in [
-            "0.0.0.0:10", "8.8.8.8:53", "1.1.1.1:53", "[::]:10",
+            "0.0.0.0:10",
+            "8.8.8.8:53",
+            "1.1.1.1:53",
+            "[::]:10",
             "[2606:4700:4700::1111]:53",
         ] {
             assert!(!is_lan_address(bad.parse().unwrap()), "{bad}");
@@ -245,10 +262,8 @@ mod tests {
         assert_eq!(guest.addr().relay_urls().count(), 0);
         let host_addr = host.bound_sockets()[0];
         let host_id = host.id();
-        let (accepted, connected) = tokio::join!(
-            accept_lan(&host),
-            connect_lan(&guest, host_id, host_addr)
-        );
+        let (accepted, connected) =
+            tokio::join!(accept_lan(&host), connect_lan(&guest, host_id, host_addr));
         let host_conn = accepted.unwrap();
         let guest_conn = connected.unwrap();
         assert_eq!(host_conn.remote_id(), guest.id());
