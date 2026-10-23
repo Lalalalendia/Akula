@@ -3,7 +3,9 @@
 
 use super::super::App;
 use crate::ui::transfer::NativeReceiveView;
-use akula_staya_integration::one_file_lan::{native_receive_one, validate_direct_lan_address};
+use akula_staya_integration::one_file_lan::{
+    native_receive_internet_one, native_receive_one, validate_direct_lan_address,
+};
 use std::{
     net::SocketAddr,
     sync::{
@@ -72,7 +74,12 @@ impl NativeReceiver {
         }
     }
 
-    fn start(&mut self, peer: String, address: SocketAddr, wake: Arc<dyn Fn() + Send + Sync>) {
+    fn start(
+        &mut self,
+        peer: String,
+        address: Option<SocketAddr>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) {
         let (tx, rx) = mpsc::channel();
         let stopped = Arc::new(AtomicBool::new(false));
         self.rx = Some(rx);
@@ -85,11 +92,16 @@ impl NativeReceiver {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .map_err(|error| format!("create LAN runtime: {error}"));
+                .map_err(|error| format!("create P2P runtime: {error}"));
             let result = runtime.and_then(|runtime| {
                 runtime.block_on(async {
                     tokio::select! {
-                        result = native_receive_one(peer, address) => result,
+                        result = async {
+                            match address {
+                                Some(address) => native_receive_one(peer, address).await,
+                                None => native_receive_internet_one(peer).await,
+                            }
+                        } => result,
                         _ = async {
                             while !stopped.load(Ordering::Acquire) {
                                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -112,6 +124,14 @@ impl Drop for NativeReceiver {
 
 impl App {
     pub(super) fn begin_native_receive(&mut self, peer: &str) -> bool {
+        self.begin_native_receive_route(peer, false)
+    }
+
+    pub(super) fn begin_native_receive_internet(&mut self, peer: &str) -> bool {
+        self.begin_native_receive_route(peer, true)
+    }
+
+    fn begin_native_receive_route(&mut self, peer: &str, internet: bool) -> bool {
         if self.transfer.receiver.view.busy {
             return false;
         }
@@ -125,10 +145,18 @@ impl App {
         if !confirmed {
             return false;
         }
-        let selected = arboard::Clipboard::new()
-            .and_then(|mut clipboard| clipboard.get_text())
-            .map_err(|_| "could not read numeric LAN address from clipboard".to_string())
-            .and_then(|value| address_from_text(&value));
+        // Internet mode deliberately does not read an IP or a claimed ID
+        // from clipboard. N0 only provides routes; OS pin and live TLS are
+        // checked again by the existing authenticated transfer function.
+        let selected = if internet {
+            Ok(None)
+        } else {
+            arboard::Clipboard::new()
+                .and_then(|mut clipboard| clipboard.get_text())
+                .map_err(|_| "could not read numeric LAN address from clipboard".to_string())
+                .and_then(|value| address_from_text(&value))
+                .map(Some)
+        };
         match selected {
             Ok(address) => {
                 self.transfer.receiver.start(
