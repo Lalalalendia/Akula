@@ -1,0 +1,86 @@
+name: LAB Windows 7 modern Rust A/B probes
+on:
+  push:
+    branches: ['lab/win7-release-pe-imports-20261023']
+    paths:
+      - 'docs/research/win7-ab/**'
+      - '.github/workflows/akula-win7-ab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+          targets: x86_64-pc-windows-msvc
+      - name: Version and compiler evidence
+        shell: pwsh
+        run: |
+          rustc -Vv
+          cargo -V
+          rustup target list | Select-String 'win7|windows-msvc'
+          New-Item -ItemType Directory -Force -Path win7-results | Out-Null
+      - name: Build A/B minimal components independently
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $ErrorActionPreference = 'Stop'
+          $targets = @('x86_64-pc-windows-msvc', 'x86_64-win7-windows-msvc')
+          $modes = @('normal', 'slim')
+          foreach ($target in $targets) {
+            foreach ($mode in $modes) {
+              $env:RUSTFLAGS = if ($mode -eq 'slim') { '--cfg windows_slim_errors' } else { '' }
+              foreach ($probe in @('std_probe','random_probe','error_probe','gui_probe')) {
+                $features = if ($probe -eq 'gui_probe') { @('--features', 'gui') } else { @() }
+                $args = @('build','--release','--manifest-path','docs/research/win7-ab/Cargo.toml','--target',$target,'--bin',$probe) + $features
+                if ($target -eq 'x86_64-win7-windows-msvc') { $args += @('-Z','build-std=std,panic_abort') }
+                $out = Join-Path 'win7-results' "$target-$mode-$probe"
+                New-Item -ItemType Directory -Force -Path $out | Out-Null
+                Write-Host "PROBE $target $mode $probe"
+                & cargo @args *> (Join-Path $out 'build.log')
+                $exit = $LASTEXITCODE
+                "exit_code=$exit" | Set-Content (Join-Path $out 'status.txt')
+                if ($exit -eq 0) {
+                  $exe = Join-Path 'docs/research/win7-ab/target' "$target/release/$probe.exe"
+                  if (Test-Path $exe) {
+                    Copy-Item $exe (Join-Path $out "$probe.exe")
+                    Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-String | Add-Content (Join-Path $out 'status.txt')
+                    & dumpbin /imports $exe *> (Join-Path $out 'imports.txt')
+                    & dumpbin /headers $exe *> (Join-Path $out 'headers.txt')
+                  }
+                }
+              }
+            }
+          }
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+      - name: Summarize binaries and known post-Win7 imports
+        if: always()
+        shell: pwsh
+        run: |
+          $list = @('GetSystemTimePreciseAsFileTime','WaitOnAddress','WakeByAddressSingle','WakeByAddressAll','ProcessPrng','RoOriginateErrorW','GetPointerType','CreateDXGIFactory2')
+          $rows = @()
+          foreach ($dir in @(Get-ChildItem win7-results -Directory)) {
+            $status = Get-Content (Join-Path $dir.FullName 'status.txt') -ErrorAction SilentlyContinue | Select-Object -First 1
+            $imports = Get-Content (Join-Path $dir.FullName 'imports.txt') -Raw -ErrorAction SilentlyContinue
+            $hits = @($list | Where-Object { $imports -and $imports.Contains($_) })
+            $rows += [pscustomobject]@{case=$dir.Name;status=$status;post_win7_imports=($hits -join ',')}
+          }
+          $rows | ConvertTo-Json | Out-File win7-results/summary.json -Encoding utf8
+          $rows | Format-Table -AutoSize | Out-String | Write-Host
+          $rows | ConvertTo-Csv -NoTypeInformation | Set-Content win7-results/summary.csv
+          $rows | Format-Table -AutoSize | Out-String | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Save evidence (no execution)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-win7-modern-toolchain-ab
+          path: win7-results/
+          retention-days: 14
+          if-no-files-found: warn
