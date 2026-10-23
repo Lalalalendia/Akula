@@ -1,13 +1,15 @@
-#[cfg(target_os = "windows")]
+// Win7 has no CreateDXGIFactory2. Its lab-only target uses the existing
+// software raster output, whose Windows backend presents via GDI.
+#[cfg(all(target_os = "windows", not(target_vendor = "win7")))]
 mod device;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(target_vendor = "win7")))]
 mod dxgi;
-#[cfg(not(target_os = "windows"))]
+#[cfg(any(not(target_os = "windows"), target_vendor = "win7"))]
 mod soft;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(target_vendor = "win7")))]
 pub use dxgi::Output;
-#[cfg(not(target_os = "windows"))]
+#[cfg(any(not(target_os = "windows"), target_vendor = "win7"))]
 pub use soft::Output;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
