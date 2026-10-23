@@ -345,6 +345,35 @@ fn akula_consent_to_real_staya_direct_quic_and_cold_bao_stage() {
         let manifest = prepared.queue.entries()[slot].manifest;
         assert_eq!(actual.len() as u64, manifest.size);
         assert_eq!(*blake3::hash(&actual).as_bytes(), manifest.id.0);
+
+        // This is the actual bytes delivered over QUIC into Staya's private
+        // stage: ask Akula Core to independently hash them while publishing
+        // exactly one NEW user-chosen file. No File Gate / Vault apply.
+        let inbox_target = sources.0.join(format!("accepted-inbox-{slot:02}.bin"));
+        let mut pinned_stage = fs::File::open(&stage).expect("open Staya's real staged file");
+        let saved = aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
+            &mut pinned_stage,
+            manifest.size,
+            manifest.id.0,
+            &inbox_target,
+        )
+        .expect("explicit create-new after cold stage authentication");
+        assert_eq!(saved.bytes, manifest.size);
+        assert_eq!(saved.blake3_root, manifest.id.0);
+        let accepted_bytes = fs::read(&inbox_target).expect("read real created inbox file");
+        assert_eq!(accepted_bytes.as_slice(), *expected);
+
+        // Reusing the valid stage is not permission to replace user bytes.
+        assert!(matches!(
+            aquilum_core::p2p_inbox_lab::save_verified_stage_as_new(
+                &mut pinned_stage,
+                manifest.size,
+                manifest.id.0,
+                &inbox_target
+            ),
+            Err(aquilum_core::p2p_inbox_lab::InboxError::AlreadyExists),
+        ));
+        assert_eq!(fs::read(&inbox_target).unwrap().as_slice(), *expected);
         staged_directories.push(parent.to_path_buf());
     }
     assert_eq!(receiver.line(), "STY_G1K_UNLISTED_GET_DENIED=true");

@@ -2,15 +2,7 @@
 name: Akula Linux beta candidate
 on:
   workflow_call:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/linux-beta.yml'
-      - '.github/scripts/linux-beta-identity.test.cjs'
-      - 'scripts/linux-beta-smoke.sh'
-      - 'aquilum-app/native/packaging/akula-linux-nfpm.yaml'
-      - 'aquilum-app/native/packaging/Akula.desktop'
-      - 'aquilum-app/native/Cargo.toml'
+  # PR source owners are enforced by the required Main PR gate.
 
 permissions:
   contents: read
