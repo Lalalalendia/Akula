@@ -55,3 +55,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cargo test --locked -p aquilum-native --bin aquilum-native --features installed,s3-pair-beta real_windows_profile_credential_roundtrip_and_collision_refusal -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'Profile-scoped WinCred test failed' }
+      - name: Build S3-enabled Akula executable for real Windows UIA smoke
+        working-directory: aquilum-app
+        run: cargo build --locked -p aquilum-native --features installed,s3-pair-beta
+      - name: Click provider catalog, save bucket and discard draft via Windows UI Automation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/debug/aquilum-native.exe'
+          & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File './scripts/windows-cloud-provider-uia.ps1' -ExePath $exe
+          if ($LASTEXITCODE -ne 0) { throw 'Real S3-enabled cloud provider Windows GUI acceptance failed' }
