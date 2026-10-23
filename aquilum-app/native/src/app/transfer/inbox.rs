@@ -263,7 +263,8 @@ mod tests {
             bytes: bytes.len() as u64,
             blake3: *blake3::hash(bytes).as_bytes(),
         };
-        let mut ledger = InboxLedger::open(dir.path()).unwrap();
+        let inbox_root = dir.path().join("received-inbox");
+        let mut ledger = InboxLedger::open(&inbox_root).unwrap();
         assert_eq!(ledger.reserve(&file).unwrap(), LocalStatus::Pending);
         let path = ledger.object_path(file.id);
         let mut created = fs::OpenOptions::new()
@@ -276,25 +277,25 @@ mod tests {
         drop(created);
         assert_eq!(ledger.confirm(&file).unwrap(), LocalStatus::VerifiedLocal);
         drop(ledger);
-        let model = read_checked_inbox(dir.path()).unwrap();
+        let model = read_checked_inbox(&inbox_root).unwrap();
         assert_eq!(model.total, 1);
         assert_eq!(model.rows[0].status_key, "transfer.inboxVerified");
 
         let export_dir = dir.path().join("external-exports");
         fs::create_dir(&export_dir).unwrap();
         let copy = export_dir.join("new-copy.bin");
-        save_checked_copy(dir.path(), file.id, &copy, &[]).unwrap();
+        save_checked_copy(&inbox_root, file.id, &copy, &[]).unwrap();
         assert_eq!(fs::read(&copy).unwrap(), bytes);
         // No replacing even a user-created or previously exported file.
-        assert!(save_checked_copy(dir.path(), file.id, &copy, &[]).is_err());
+        assert!(save_checked_copy(&inbox_root, file.id, &copy, &[]).is_err());
         assert_eq!(fs::read(&copy).unwrap(), bytes);
 
         fs::write(&path, b"modified").unwrap();
-        let model = read_checked_inbox(dir.path()).unwrap();
+        let model = read_checked_inbox(&inbox_root).unwrap();
         assert_eq!(model.total, 1);
         assert_eq!(model.rows[0].status_key, "transfer.inboxReview");
         let refused = export_dir.join("never-created.bin");
-        assert!(save_checked_copy(dir.path(), file.id, &refused, &[]).is_err());
+        assert!(save_checked_copy(&inbox_root, file.id, &refused, &[]).is_err());
         assert!(!refused.exists());
     }
 
