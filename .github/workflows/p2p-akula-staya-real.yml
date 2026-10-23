@@ -9,6 +9,7 @@ on:
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/p2p_inbox_lab/**'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
 
@@ -51,10 +52,14 @@ jobs:
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
       - name: Rust formatting for exact opt-in inbox Core
         shell: bash
-        run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
+        run: |
+          rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs \
+            aquilum-app/core/src/p2p_inbox_lab/file_gate.rs \
+            aquilum-app/core/src/p2p_inbox_lab/tests.rs
       - name: Check Akula real create-new inbox, corruption, and no-overwrite
         shell: bash
-        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab:: -- --nocapture
       - name: Authenticate real QUIC remote_id against fresh OS peer pin
         shell: bash
         env:

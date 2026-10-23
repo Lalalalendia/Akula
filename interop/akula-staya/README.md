@@ -126,3 +126,12 @@ this seam yet. No DeviceId/Vault/object authorization, sender consent, local
 IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
 The existing receiver create-new and OS identity code stay opt-in. This work
 cannot enable network file access.
+
+
+## Core File Gate receiver proof (P2P-INBOX-GATE-01, optional)
+
+The added `save_verified_stage_through_file_gate` rereads the actual opened Staya stage, checks exact size and BLAKE3, and passes at most 8 MiB of verified bytes to the **existing** `files::gate::create_binary`. The Core instance applies its own mutation HOLD and create-new protection. A valid stage cannot replace a preexisting destination, and a corrupt digest never enters File Gate.
+
+The live two-process Iroh/Bao integration test calls this new Core route for each received stage, checks the physical output and refuses duplicate publication. This is intentionally separate from the original hard-link lab path and is disabled by default.
+
+**Important limits:** Existing `create_binary` exposes a newly created destination while writing and is not an atomic publish or crash-stable receipt. This lab does not establish protected-root authority, recipient UI consent, authenticated peer admission, host-owned grants, installed two-PC transfer, Vault APPLIED or ACK. In particular, do not use the basic create_binary route as a substitute for future atomic/pinned handle-relative publication in hostile filesystem conditions. The source is still bounded and verified before entering this existing gate.
