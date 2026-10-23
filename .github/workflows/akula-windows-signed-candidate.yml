@@ -65,12 +65,14 @@ jobs:
       - name: Install pinned NSIS packager
         run: cargo install cargo-packager --version 0.11.8 --locked
 
-      - name: Build trusted-source local-only Akula and NSIS package
+      - name: Build the single Akula Windows app with S3 pairing and NSIS
         working-directory: aquilum-app
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo build --release --locked -p aquilum-native --features installed
+          # S3 remains user-invoked and new-file-only; no background S3 activation.
+          # The signed updater installs this package OVER the existing Akula.
+          cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta
           if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
           $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
           Copy-Item -LiteralPath (Join-Path $bin 'aquilum-native.exe') -Destination (Join-Path $bin 'akula-app.exe') -Force
