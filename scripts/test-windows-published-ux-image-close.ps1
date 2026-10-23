@@ -187,10 +187,16 @@ function Click-FileTreeItem([string]$name) {
   [AkulaUxPointer]::Click($x, $y)
 }
 
-$null = Find-Node 'TabItem' 'README' 45
+# File-tree ordinary clicks reuse the active tab. First explicitly open
+# README, create a second tab through the actual top-bar button, and open
+# the image there. Do not assume --open wins against initial folder restore.
+$null = Find-Node 'TreeItem' 'README' 40
+Click-FileTreeItem 'README'
+$null = Find-Node 'TabItem' 'README' 40
+Invoke-Button ([string]$locale.tabs.newTab)
 Click-FileTreeItem 'Photo.png'
 $null = Find-Node 'TabItem' 'Photo' 40
-$null = Find-Node 'TabItem' 'README' 10
+$null = Find-Node 'TabItem' 'README' 20
 $null = Find-Node 'Image' 'Photo.png' 25
 if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $noteHash -or
     (Get-FileHash -LiteralPath $photo -Algorithm SHA256).Hash -ne $photoHash) {
