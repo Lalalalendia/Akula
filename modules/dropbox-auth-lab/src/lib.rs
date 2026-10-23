@@ -158,7 +158,7 @@ impl PendingPkce {
             return if code.is_none() { Err(AuthError::Denied) }
                 else { Err(AuthError::InvalidCallback) };
         }
-        let code = code.ok_or(AuthError::InvalidCallback)?;
+        let code = Zeroizing::new(code.ok_or(AuthError::InvalidCallback)?);
         if code.is_empty() || code.len() > 4096
             || !code.bytes().all(|b| b.is_ascii_graphic() && b != b'&' && b != b'#')
         {

@@ -78,6 +78,7 @@ impl BoundLogin {
                             return Err(CallbackError::InvalidRequest);
                         }
                     };
+                    let target = Zeroizing::new(target);
                     let callback = Zeroizing::new(format!(
                         "http://127.0.0.1:{}{}", self.port, target,
                     ));
@@ -105,7 +106,7 @@ impl BoundLogin {
 
 /// Only a relative GET with one valid Host is acceptable.
 fn read_request(stream: &mut TcpStream, port: u16) -> Result<Option<String>, ()> {
-    let mut buf = Vec::with_capacity(1024);
+    let mut buf = Zeroizing::new(Vec::with_capacity(1024));
     let mut chunk = [0u8; 1024];
     let end = loop {
         if buf.len() > MAX_HEADER { return Err(()); }
