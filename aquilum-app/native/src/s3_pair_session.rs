@@ -3,7 +3,7 @@
 //! No raw errors, passwords, AWS SDK objects or credentials enter UI state.
 
 use std::{
-    fs::{self, OpenOptions}, io::Write, path::PathBuf,
+    fs::{self, OpenOptions}, io::Write, path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver, Sender}, Arc}, thread,
 };
 use aquilum_core::Core;
@@ -40,6 +40,8 @@ pub struct PairUiView {
     pub status: PairStatus,
     pub busy: bool,
     pub configured: bool,
+    /// Last successful user-initiated remote verification for this workspace.
+    pub verified: bool,
 }
 
 pub struct PairSession {
@@ -48,16 +50,34 @@ pub struct PairSession {
     wake: Arc<dyn Fn() + Send + Sync>,
     busy: bool,
     status: PairStatus,
+    active_root: Option<PathBuf>,
+    verified_root: Option<PathBuf>,
 }
 
 impl PairSession {
     pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         let (tx, rx) = mpsc::channel();
-        Self { rx, tx, wake, busy: false, status: PairStatus::Idle }
+        Self { rx, tx, wake, busy: false, status: PairStatus::Idle, active_root: None, verified_root: None }
     }
 
     pub fn status(&self) -> PairStatus { self.status }
     pub fn busy(&self) -> bool { self.busy }
+
+    pub fn status_for(&self, root: Option<&Path>) -> PairStatus {
+        if root.is_some() && self.active_root.as_deref() == root {
+            self.status
+        } else {
+            PairStatus::Idle
+        }
+    }
+
+    pub fn verified_for(&self, root: Option<&Path>) -> bool {
+        root.is_some() && self.verified_root.as_deref() == root
+    }
+
+    pub fn invalidate_verification(&mut self) {
+        self.verified_root = None;
+    }
 
     fn run(&mut self, work: impl FnOnce() -> PairStatus + Send + 'static) -> bool {
         if self.busy { return false; }
@@ -83,6 +103,16 @@ impl PairSession {
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
         while let Ok(status) = self.rx.try_recv() {
+            match status {
+                PairStatus::Configured | PairStatus::Imported |
+                    PairStatus::Transferred { received_unconfirmed: 0, needs_review: 0, .. } => {
+                        self.verified_root = self.active_root.clone();
+                    }
+                PairStatus::Failed | PairStatus::Transferred { .. } => {
+                    self.verified_root = None;
+                }
+                _ => {}
+            }
             self.status = status;
             self.busy = false;
             changed = true;
@@ -94,7 +124,8 @@ impl PairSession {
         &mut self,
         core: Arc<Core>, root: PathBuf, appdata: PathBuf, bucket: String,
     ) -> bool {
-        self.run(move || {
+        let selected = root.clone();
+        let started = self.run(move || {
             let result = yandex_credentials::with_stored_keys(
                 &bucket, |id, secret| {
                     let profile = with_runtime(|rt| rt.block_on(create_first_pair_profile(
@@ -120,14 +151,20 @@ impl PairSession {
             } else {
                 PairStatus::Failed
             }
-        })
+        });
+        if started {
+            self.active_root = Some(selected);
+            self.verified_root = None;
+        }
+        started
     }
 
     pub fn start_export(
         &mut self, root: PathBuf, appdata: PathBuf,
         destination: PathBuf, password: Zeroizing<String>,
     ) -> bool {
-        self.run(move || {
+        let selected = root.clone();
+        let started = self.run(move || {
             if destination.extension().and_then(|e| e.to_str()) != Some("akula-sync") {
                 return PairStatus::Failed;
             }
@@ -147,7 +184,9 @@ impl PairSession {
                 Ok(())
             })();
             if result.is_ok() { PairStatus::Exported } else { PairStatus::Failed }
-        })
+        });
+        if started { self.active_root = Some(selected); }
+        started
     }
 
     pub fn start_import(
@@ -156,7 +195,8 @@ impl PairSession {
         password: Zeroizing<String>,
         after_import: impl FnOnce(PathBuf) + Send + 'static,
     ) -> bool {
-        self.run(move || {
+        let selected = destination_root.clone();
+        let started = self.run(move || {
             let result = (|| -> Result<(), ()> {
                 if !destination_root.is_dir() {
                     return Err(());
@@ -224,13 +264,19 @@ impl PairSession {
             } else {
                 PairStatus::Failed
             }
-        })
+        });
+        if started {
+            self.active_root = Some(selected);
+            self.verified_root = None;
+        }
+        started
     }
 
     pub fn start_sync_once(
         &mut self, core: Arc<Core>, root: PathBuf, appdata: PathBuf,
     ) -> bool {
-        self.run(move || {
+        let selected = root.clone();
+        let started = self.run(move || {
             let result = (|| -> Result<PairStatus, ()> {
                 let profile = s3_pair_host::read_pair_profile(&root, &appdata)
                     .map_err(|_| ())?.ok_or(())?;
@@ -256,7 +302,9 @@ impl PairSession {
                 })
             })();
             result.unwrap_or(PairStatus::Failed)
-        })
+        });
+        if started { self.active_root = Some(selected); }
+        started
     }
 }
 
