@@ -42,6 +42,28 @@ const BOX_ICON: icons::Icon = icons::Icon::lucide(&[
     icons::Shape::Path("M12 12v10"),
 ]);
 
+// Small provider-specific pictograms rather than identical generic cloud
+// symbols. Icons are vectors rendered by Akula's native paint engine.
+const MINIO_ICON: icons::Icon = icons::Icon::lucide(&[
+    icons::Shape::Path("m4 5 5-3 5 3-5 3-5-3"),
+    icons::Shape::Path("m10 10 5-3 5 3-5 3-5-3"),
+    icons::Shape::Path("m4 15 5-3 5 3-5 3-5-3"),
+    icons::Shape::Path("m10 20 5-3 5 3-5 3-5-3"),
+]);
+const DRIVE_ICON: icons::Icon = icons::Icon::lucide(&[
+    icons::Shape::Path("M9 3h6l7 13-3 5H5l-3-5z"),
+    icons::Shape::Path("m9 3 8 13"),
+    icons::Shape::Path("M2 16h20"),
+    icons::Shape::Path("m15 3-8 13"),
+]);
+const DROPBOX_ICON: icons::Icon = icons::Icon::lucide(&[
+    icons::Shape::Path("m6 2 6 4-6 4-6-4z"),
+    icons::Shape::Path("m18 2 6 4-6 4-6-4z"),
+    icons::Shape::Path("m6 11 6 4-6 4-6-4z"),
+    icons::Shape::Path("m18 11 6 4-6 4-6-4z"),
+    icons::Shape::Path("m6 20 6 3 6-3"),
+]);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Health {
     NotConnected,
@@ -126,8 +148,10 @@ impl ProviderTile {
     fn icon(&self) -> icons::Icon {
         match self.provider {
             CloudProvider::Yandex | CloudProvider::S3Compatible => CLOUD_ICON,
-            CloudProvider::AmazonS3 | CloudProvider::Minio => BOX_ICON,
-            CloudProvider::GoogleDrive | CloudProvider::Dropbox => icons::FOLDER,
+            CloudProvider::AmazonS3 => BOX_ICON,
+            CloudProvider::Minio => MINIO_ICON,
+            CloudProvider::GoogleDrive => DRIVE_ICON,
+            CloudProvider::Dropbox => DROPBOX_ICON,
             CloudProvider::WebDav => icons::NETWORK,
         }
     }
@@ -185,10 +209,13 @@ impl Widget for ProviderTile {
         painter.fill(Circle::new(indicator, 9.0), color.multiply_alpha(0.16)).draw();
         painter.fill(Circle::new(indicator, 5.0), color).draw();
 
-        let icon_color = if self.provider == CloudProvider::Yandex {
-            colors.text_accent
-        } else {
-            colors.text_secondary
+        let icon_color = match self.provider {
+            CloudProvider::Yandex => Color::new([0.08, 0.39, 0.91, 1.0]),
+            CloudProvider::AmazonS3 => Color::new([0.84, 0.35, 0.14, 1.0]),
+            CloudProvider::Minio => Color::new([0.85, 0.14, 0.26, 1.0]),
+            CloudProvider::GoogleDrive => Color::new([0.20, 0.59, 0.33, 1.0]),
+            CloudProvider::Dropbox => Color::new([0.11, 0.39, 0.87, 1.0]),
+            CloudProvider::S3Compatible | CloudProvider::WebDav => colors.text_secondary,
         };
         self.icon().draw(painter, Point::new(bounds.center().x - 23.0, bounds.y0 + 23.0), 46.0, 1.6, icon_color);
 
