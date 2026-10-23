@@ -22,6 +22,19 @@ pub fn set_fields(text: &str, updates: &[(&str, String)]) -> Option<String> {
     // Only the short metadata header is revisited. The (potentially huge)
     // note body is appended once, after all sequential alias rules resolve.
     for (key, value) in updates {
+        // The sequential setter reparses multiline values on each update.
+        // Re-tokenize only metadata lines, never the note body.
+        if lines.iter().any(|line| line.contains('\n')) {
+            let mut physical = Vec::with_capacity(lines.len());
+            for line in lines.drain(..) {
+                if line.contains('\n') {
+                    physical.extend(line.split('\n').map(|part| Cow::Owned(part.to_owned())));
+                } else {
+                    physical.push(line);
+                }
+            }
+            lines = physical;
+        }
         let mut found = false;
         lines.retain_mut(|line| {
             if !is_key(split_line(line.as_ref()).0, key) {
