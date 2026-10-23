@@ -2,6 +2,34 @@
 
 Experimental, default-off Native receiving stack on the one-file QUIC beta.
 
+## 24 October: explicit Internet/N0 route on the same authenticated file protocol
+
+Native sender and receiver now have **separate LAN and Internet (n0)** buttons.
+The Internet button opts into Iroh 1.3 `presets::N0`, n0 DNS/Pkarr
+discovery and encrypted relay fallback; the LAN button retains
+`presets::Minimal` and `RelayMode::Disabled`, using the exact numeric private
+IP:UDP port from the receiver's clipboard. Internet mode needs no LAN address.
+The same bounded one-file QUIC stream, TLS `remote_id()`, fresh Windows
+Credential Manager pin/revoke checks, BLAKE3 and persistent private Inbox are
+used on both routes, without a second transfer engine or Vault writes.
+
+No external service starts at application launch. On user opt-in, an N0
+endpoint must report `online()` within 60 seconds; the identified receiver
+uses `EndpointAddr::new(confirmed_peer)` with a 90-second connect bound.
+The sender awaits a manually triggered receiver; the third-party n0 service
+can see IP addresses, timing, and traffic metadata but cannot read the QUIC
+file content. This reliance is disclosed in the RU/EN transfer interface.
+A relay only forwards packets; it **does not** store data for offline devices.
+A successful receiver ACK is **not** power-loss durable or File Gate APPLIED.
+
+The existing standalone CLI remains LAN-only. This change is on #691's
+stacked default-off research branch, not in `main` and not in signed Akula.
+Real WAN two-physical-Windows-PC proof, cross-network n0 availability,
+receiver identity confirmation, negative/revoke tests, handle-relative
+Windows Inbox custody and signed installer are still release HOLD.
+Test-only invalid-key rejection and strict separation of the two route
+choices are checked in the scoped Windows workflow.
+
 The recipient selects an OS-pinned, non-revoked sender in Akula. A numeric
 private LAN IP:UDP port in the system clipboard provides connectivity only,
 not identity or file permission. The transport independently rechecks the OS
