@@ -8,8 +8,8 @@ use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(not(windows))]
 use std::ffi::OsString;
 use std::{
-    fs::{self, File},
-    io,
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
@@ -115,9 +115,100 @@ pub(super) fn persist_received(
     Ok(intent)
 }
 
+/// The Native recipient has **no** user destination. Persist a verified
+/// frame exclusively in the bounded, separately audited SQLite Inbox.
+/// A private, new-only stage is removed on success and every failure.
+pub(super) fn persist_received_payload(
+    data: &[u8],
+    inbox_root: &Path,
+    size: u64,
+    digest: [u8; 32],
+    sender: [u8; 32],
+    receiver: [u8; 32],
+) -> Result<ExpectedTransfer, String> {
+    if size == 0
+        || size > aquilum_core::p2p_inbox_lab::MAX_INBOX_ITEM_BYTES
+        || data.len() as u64 != size
+        || digest == [0; 32]
+        || *blake3::hash(data).as_bytes() != digest
+    {
+        return Err("rejected invalid native receiver payload".into());
+    }
+    let root_metadata = fs::symlink_metadata(inbox_root)
+        .map_err(|error| format!("receiver root: {error}"))?;
+    if !root_metadata.file_type().is_dir() {
+        return Err("native receiver root is not a real directory".into());
+    }
+    let path = inbox_root.join(format!(".akula-native-received-{}.stage", Uuid::new_v4()));
+    struct RemoveOnDrop(PathBuf);
+    impl Drop for RemoveOnDrop {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+    let _cleanup = RemoveOnDrop(path.clone());
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .map_err(|error| format!("create private receiver stage: {error}"))?;
+    file.write_all(data)
+        .map_err(|error| format!("write private receiver stage: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("sync private receiver stage: {error}"))?;
+    drop(file);
+    let mut pinned = File::open(&path)
+        .map_err(|error| format!("open private receiver stage: {error}"))?;
+    persist_received(&mut pinned, inbox_root, size, digest, sender, receiver)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_recipient_persists_only_inbox_and_reuses_exact_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let bytes = b"Native receiver goes to Inbox, not user Vault";
+        let digest = *blake3::hash(bytes).as_bytes();
+        let source = [77; 32];
+        let target = [78; 32];
+        let first = persist_received_payload(
+            bytes, &root, bytes.len() as u64, digest, source, target,
+        ).unwrap();
+        let replay = persist_received_payload(
+            bytes, &root, bytes.len() as u64, digest, source, target,
+        ).unwrap();
+        assert_eq!(first, replay);
+        let ledger = InboxLedger::open(&root).unwrap();
+        assert_eq!(ledger.count().unwrap(), 1);
+        assert_eq!(ledger.status(first.id).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(fs::read(ledger.object_path(first.id)).unwrap(), bytes);
+        let stray_stages = fs::read_dir(&root).unwrap().flatten().any(|entry| {
+            entry.file_name().to_string_lossy().ends_with(".stage")
+        });
+        assert!(!stray_stages);
+    }
+
+    #[test]
+    fn native_receiver_rejects_corrupted_frame_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let bytes = b"no forged recipient file";
+        assert!(persist_received_payload(
+            bytes, &root, bytes.len() as u64,
+            *blake3::hash(b"forgery").as_bytes(), [7;32], [8;32],
+        ).is_err());
+        assert!(!root.join("objects").exists());
+    }
 
     fn stage(root: &Path, data: &[u8]) -> File {
         let path = root.join("verified-stage.bin");
