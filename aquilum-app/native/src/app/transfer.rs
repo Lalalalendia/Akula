@@ -223,6 +223,9 @@ impl App {
             {
                 refresh = match peer {
                     transfer_ui::NativeSendAction::Start(peer) => self.begin_native_send(peer),
+                    transfer_ui::NativeSendAction::StartInternet(peer) => {
+                        self.begin_native_send_internet(peer)
+                    }
                     transfer_ui::NativeSendAction::Cancel => {
                         self.transfer.sender.cancel();
                         true
@@ -237,6 +240,9 @@ impl App {
             {
                 refresh = match command {
                     transfer_ui::NativeReceiveAction::Start(peer) => self.begin_native_receive(peer),
+                    transfer_ui::NativeReceiveAction::StartInternet(peer) => {
+                        self.begin_native_receive_internet(peer)
+                    }
                     transfer_ui::NativeReceiveAction::Cancel => {
                         self.transfer.receiver.cancel();
                         true
