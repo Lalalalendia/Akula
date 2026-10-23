@@ -1,0 +1,21 @@
+[package]
+name = "staya-fed-gossip-lab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone research crate. No Akula runtime, no production dependencies.
+[workspace]
+resolver = "2"
+
+[dependencies]
+iroh-gossip = { version = "=0.101.0", default-features = false, features = ["test-utils"] }
+rand = { version = "0.10", features = ["chacha"] }
+bytes = "1.7"
+blake3 = "=1.8.5"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+
+[patch.crates-io]
+# Use our Roha for the iroh-base crate identity. The IO-less state machine
+# does not use a QUIC transport and does not replace pinned Roha/noq.
+iroh-base = { git = "https://github.com/calex794/roha", rev = "a42ad5aef1626df80d39398e05dac6e362bf6e49" }
