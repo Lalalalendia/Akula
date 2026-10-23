@@ -132,21 +132,27 @@ test('Native Cargo metadata uses existing required S3 and host routes, never an 
   const pure=r.assess({paths:[r.CORE,r.LOCK,r.NATIVE,r.WINDOWS],versionOnly:true});
   assert.equal(pure.native_manifest_risky,false,'pure bump exempts only validated dependency graph');
   assert.equal(pure.installed_owner_owned,false);
-  for(const file of ['sync-host-custody.yml','sync-s3-platform.yml']){
-    const body=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
-    const policy=parse(body);
-    assert.equal(matches(policy,native),false,file+' must not duplicate App checks route');
-    assert.equal(matches(policy,'.github/workflows/'+file),true,file+' self-edits trigger direct proof');
-    assert.equal(matches(policy,'aquilum-app/core/src/app_core.rs'),true,file+' direct source proof retained');
-    assert.match(body,/^  workflow_call:$/m,'required reusable invocation retained');
+  const host=fs.readFileSync(path.join(__dirname,'../workflows/sync-host-custody.yml'),'utf8');
+  assert.equal(parse(host).t,'none','host custody must have no parallel pull_request run');
+  assert.match(host,/^  workflow_call:$/m,'required host callable retained');
+  assert.doesNotMatch(host,/^  pull_request:$/m);
+  for(const path of ['.github/workflows/sync-host-custody.yml','aquilum-app/core/src/app_core.rs']){
+    assert.ok(r.OWNED_SUITES.owned_host_custody.includes(path),path+' retains source ownership');
+    assert.equal(r.assess({paths:[path]}).owned_host_custody,true,path+' required route');
   }
+  const s3=fs.readFileSync(path.join(__dirname,'../workflows/sync-s3-platform.yml'),'utf8');
+  const s3Policy=parse(s3);
+  assert.equal(matches(s3Policy,native),false,'S3 platform shared Native route is not duplicated');
+  for(const path of ['.github/workflows/sync-s3-platform.yml','aquilum-app/core/src/app_core.rs'])
+    assert.equal(matches(s3Policy,path),true,path+' retains standalone S3 proof');
+  assert.match(s3,/^  workflow_call:$/m,'required S3 callable retained');
   assert.match(core,/native_manifest_risky: \$\{\{ steps\.scope\.outputs\.native_manifest_risky \}\}/);
   assert.match(core,/native: \$\{\{ needs\.classify\.outputs\.native_manifest_risky == 'true' \}\}/);
   assert.match(core,/SHARED_RISKY: .*native_manifest_risky/);
   assert.match(shared,/^      native:\n        required: true\n        type: boolean$/m);
-  assert.match(shared,/route-host-custody:\n    name: Impacted shared manifest \/ host-custody\n    if: \$\{\{ inputs\.core \|\| inputs\.native \}\}/);
+  assert.match(shared,/route-host-custody:\n    name: Impacted shared manifest \/ host-custody\n    if: \$\{\{ inputs\.core \|\| inputs\.native \|\| inputs\.owned_host_custody \}\}/);
   assert.match(shared,/route-s3-platform:\n    name: Impacted shared manifest \/ s3-platform\n    if: \$\{\{ inputs\.core \|\| inputs\.lock \|\| inputs\.native \}\}/);
-  assert.match(shared,/route-host-custody",\["core","native"\]/);
+  assert.match(shared,/route-host-custody",\["owned_host_custody","core","native"\]/);
   assert.match(shared,/route-s3-platform",\["core","lock","native"\]/);
 });
 
