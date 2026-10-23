@@ -110,4 +110,3 @@ mod dropbox_readonly_draft_tests {
         assert!(!DropboxReadOnlyDraft::valid_pin(&"0".repeat(64)));
     }
 }
-

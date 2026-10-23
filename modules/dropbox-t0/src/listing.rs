@@ -188,5 +188,3 @@ mod listing_tests {
             Ok(("abc".to_owned(), false)));
     }
 }
-
-

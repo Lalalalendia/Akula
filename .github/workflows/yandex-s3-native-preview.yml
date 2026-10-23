@@ -50,8 +50,10 @@ jobs:
         shell: pwsh
         run: |
           $cargo = Get-Content -Raw aquilum-app/native/Cargo.toml
-          if ($cargo -notmatch 'installed\s*=\s*\[\s*\]') {
-            throw "installed feature must be empty: S3 UI preview may not ship"
+          # Installed may include the strictly read-only Dropbox connector,
+          # but never Yandex/S3 preview, S3 pairing, or a cloud writer.
+          if ($cargo -notmatch '(?m)^installed\s*=\s*\[\s*(?:"dropbox-readonly-preview"\s*)?\]') {
+            throw "installed may only be empty or Dropbox read-only; S3 preview must not ship"
           }
           if ($cargo -notmatch 'yandex-s3-connection-preview\s*=') {
             throw "missing explicit opt-in feature"
