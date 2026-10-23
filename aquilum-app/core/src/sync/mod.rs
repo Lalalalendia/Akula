@@ -46,11 +46,15 @@ mod native_windows_replace_probe;
 mod local_recovery;
 mod recovery_review;
 pub mod sealed_archive;
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "sync-s3-invite")]
+mod s3_pair_connection;
+#[cfg(feature = "sync-s3-invite")]
+pub use s3_pair_connection::{S3ConnectionProfile, S3TransportError};
+#[cfg(feature = "sync-s3-invite")]
 pub mod s3_pair_invite;
 #[cfg(feature = "sync-s3")]
 pub mod s3_pair_bootstrap;
-#[cfg(feature = "sync-s3")]
+#[cfg(feature = "sync-s3-invite")]
 pub mod s3_pair_profile;
 #[cfg(feature = "sync-s3")]
 pub mod s3_pair_host;
@@ -177,9 +181,9 @@ pub use s3_head_probe::{
 pub use yandex_readonly_probe::{probe_yandex_s3_read_only, YandexS3ProbeError};
 #[cfg(feature = "sync-s3")]
 pub use s3_transport::{
-    AwsS3ProbeClient, S3BoundedObject, S3ConnectionProfile, S3DiagnosticPage, S3PairAccess,
+    AwsS3ProbeClient, S3BoundedObject, S3DiagnosticPage, S3PairAccess,
     S3AwsAccountProofError, S3AwsVerifiedAccountScope,
-    S3ObservedObject, S3PutCondition, S3TransportError,
+    S3ObservedObject, S3PutCondition,
     S3MultipartError, S3MultipartIntent, S3MultipartJournal, S3MultipartOutcome,
     S3MultipartPhase, S3MultipartStatus, S3StreamDigest,
     S3HeadAttemptPhase, S3HeadError, S3HeadJournal, S3HeadPublication, S3VerifiedHead,

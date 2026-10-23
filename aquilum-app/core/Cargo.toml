@@ -71,8 +71,10 @@ sync-installed-host-witness = ["sync-installed-host"]
 # Extra, non-shipping Unix OS-owner preflight. Refuses all protected host
 # admission on Windows until a real installer/Broker DACL verifier exists.
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness"]
-# Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
-sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
+# Offline S3 invitation V1 parsing only: no AWS SDK, network or host custody.
+sync-s3-invite = ["dep:url"]
+# Real S3 transport remains opt-in, including the portable invite V1 contract.
+sync-s3 = ["sync-s3-invite", "sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio"]
 
 [[example]]
 name = "akula_b1b3c_fixture"
