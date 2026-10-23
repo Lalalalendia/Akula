@@ -111,12 +111,18 @@ test('installer smoke checks distinct directories and preserves existing Aquilum
 });
 
 test('installed Windows beta GUI edit must use OS-level input into its own foreground editor', () => {
+  const route = require('./ci-shared-manifest-route.cjs');
   for (const value of [
     'scripts/windows-beta-gui-input.ps1',
     'scripts/test-windows-beta.ps1',
   ]) {
-    assert.ok(workflow.includes(value), 'missing Windows CI path: ' + value);
+    assert.ok(route.OWNED_SUITES.owned_windows_beta.includes(value),
+      'missing required Windows CI owner path: ' + value);
+    assert.equal(route.assess({ paths: [value] }).owned_windows_beta, true,
+      'Windows GUI source-only change must enter Main PR gate: ' + value);
   }
+  assert.ok(script.includes('windows-beta-gui-input.ps1'),
+    'installed Windows smoke must still invoke the real OS GUI input helper');
   for (const value of [
     'Start-And-Close -EditNote',
     "if ($EditNote -or $VerifyRestoredContent) { $arguments += ' --focus' }",
