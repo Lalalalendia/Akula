@@ -26,7 +26,9 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
-installed = []
+# The published Windows installation must expose real read-only SSH Verify.
+# Installation remains a separate signed owner-approved release gate.
+installed = ["server-readonly-preflight"]
 memory-probe = []
 # Optional Windows signed SSH read-only preflight; no installation authority.
 server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
