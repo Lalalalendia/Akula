@@ -17,22 +17,22 @@ use crate::ui::widgets::Pressed;
 const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
-mod model;
+#[cfg(feature = "p2p-device-contacts-preview")]
+mod contacts;
 mod dialog;
 #[cfg(feature = "p2p-inbox-preview")]
 mod inbox;
-#[cfg(feature = "p2p-native-send-beta")]
-mod native_send;
+#[cfg(feature = "p2p-device-ui")]
+mod local_identity;
+mod model;
 #[cfg(feature = "p2p-native-receive-beta")]
 mod native_receive;
+#[cfg(feature = "p2p-native-send-beta")]
+mod native_send;
 #[cfg(feature = "p2p-device-ui")]
 mod peer_pair;
 #[cfg(feature = "messaging-w4-pilot")]
 mod w4_pilot;
-#[cfg(feature = "p2p-device-contacts-preview")]
-mod contacts;
-#[cfg(feature = "p2p-device-ui")]
-mod local_identity;
 
 /// A display-only identity observation. The first-party owner registry still
 /// needs to supply a verified snapshot. No production path populates this
@@ -144,10 +144,21 @@ impl App {
         });
     }
 
-    pub(super) fn on_transfer_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction) -> Outcome {
-        let Some(Popup::Transfers(dialog)) = self.popup.take() else { return Outcome::default() };
+    pub(super) fn on_transfer_action(
+        &mut self,
+        root: &mut RenderRoot,
+        id: WidgetId,
+        action: &ErasedAction,
+    ) -> Outcome {
+        let Some(Popup::Transfers(dialog)) = self.popup.take() else {
+            return Outcome::default();
+        };
         let pressed = action.downcast_ref::<Pressed>().is_some();
-        let dismiss = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
+        let dismiss = (id == dialog.layer
+            && matches!(
+                action.downcast_ref::<DialogAnswer>(),
+                Some(DialogAnswer::Cancel)
+            ))
             || (id == dialog.close && pressed);
         if dismiss {
             #[cfg(feature = "p2p-native-send-beta")]
@@ -162,7 +173,8 @@ impl App {
             self.choose_transfer_files();
             refresh = true;
         } else if pressed
-            && let Some((_, index, command)) = dialog.actions.iter().find(|(button, _, _)| *button == id)
+            && let Some((_, index, command)) =
+                dialog.actions.iter().find(|(button, _, _)| *button == id)
         {
             match command {
                 QueueAction::Toggle => self.transfer.toggle(*index),
@@ -170,14 +182,19 @@ impl App {
             }
             refresh = true;
         } else if pressed
-            && let Some((_, device_id, key)) = dialog.device_actions.iter().find(|(button, _, _)| *button == id)
+            && let Some((_, device_id, key)) = dialog
+                .device_actions
+                .iter()
+                .find(|(button, _, _)| *button == id)
         {
             self.transfer.choose_peer((*device_id, *key));
             refresh = true;
         }
         #[cfg(feature = "p2p-inbox-preview")]
         if pressed && !refresh {
-            if let Some((_, receipt)) = dialog.inbox_save_actions.iter()
+            if let Some((_, receipt)) = dialog
+                .inbox_save_actions
+                .iter()
                 .find(|(button, _)| *button == id)
             {
                 refresh = self.begin_inbox_save(receipt);
@@ -185,7 +202,9 @@ impl App {
         }
         #[cfg(feature = "p2p-native-send-beta")]
         if pressed && !refresh {
-            if let Some((_, command)) = dialog.native_send_actions.iter()
+            if let Some((_, command)) = dialog
+                .native_send_actions
+                .iter()
                 .find(|(button, _)| *button == id)
             {
                 refresh = match command {
@@ -202,11 +221,15 @@ impl App {
         }
         #[cfg(feature = "p2p-native-receive-beta")]
         if pressed && !refresh {
-            if let Some((_, command)) = dialog.native_receive_actions.iter()
+            if let Some((_, command)) = dialog
+                .native_receive_actions
+                .iter()
                 .find(|(button, _)| *button == id)
             {
                 refresh = match command {
-                    transfer_ui::NativeReceiveAction::Start(peer) => self.begin_native_receive(peer),
+                    transfer_ui::NativeReceiveAction::Start(peer) => {
+                        self.begin_native_receive(peer)
+                    }
                     transfer_ui::NativeReceiveAction::StartInternet(peer) => {
                         self.begin_native_receive_internet(peer)
                     }
@@ -219,12 +242,14 @@ impl App {
         }
         #[cfg(feature = "p2p-device-ui")]
         if pressed && !refresh {
-            if let Some((_, command)) = dialog.identity_actions.iter()
+            if let Some((_, command)) = dialog
+                .identity_actions
+                .iter()
                 .find(|(button, _)| *button == id)
             {
-                self.transfer.local_identity.action(
-                    *command, Arc::clone(&self.workspace.wake),
-                );
+                self.transfer
+                    .local_identity
+                    .action(*command, Arc::clone(&self.workspace.wake));
                 refresh = true;
             }
         }
@@ -232,16 +257,19 @@ impl App {
         if !refresh {
             if let Some(controls) = &dialog.peer_controls {
                 refresh = self.transfer.peer_pair.handle(
-                    controls, id, action, Arc::clone(&self.workspace.wake),
+                    controls,
+                    id,
+                    action,
+                    Arc::clone(&self.workspace.wake),
                 );
             }
         }
         #[cfg(feature = "messaging-w4-pilot")]
         if pressed && !refresh {
-            if let Some((_, command)) = dialog.w4_actions.iter()
-                .find(|(button, _)| *button == id)
-            {
-                self.transfer.w4_pilot.action(*command, Arc::clone(&self.workspace.wake));
+            if let Some((_, command)) = dialog.w4_actions.iter().find(|(button, _)| *button == id) {
+                self.transfer
+                    .w4_pilot
+                    .action(*command, Arc::clone(&self.workspace.wake));
                 refresh = true;
             }
         }

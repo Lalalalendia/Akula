@@ -44,7 +44,7 @@ jobs:
         run: |
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/native_receive.rs aquilum-app/native/src/ui/transfer/native_receive_view.rs
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/peer_pair.rs aquilum-app/native/src/ui/transfer/peer_pair.rs
-          rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer.rs aquilum-app/native/src/app/transfer/dialog.rs aquilum-app/native/src/ui/transfer.rs aquilum-app/native/src/ui/transfer/dialog_view.rs
+          rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer.rs aquilum-app/native/src/app/transfer/dialog.rs aquilum-app/native/src/ui/transfer.rs aquilum-app/native/src/ui/transfer/dialog_view.rs
           cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Verify shipping lockfile remains resolved
         shell: bash

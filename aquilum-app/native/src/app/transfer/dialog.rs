@@ -5,9 +5,13 @@ impl App {
     pub(super) fn show_transfers(&mut self, root: &mut RenderRoot) {
         let identity_view = {
             #[cfg(feature = "p2p-device-ui")]
-            { Some(&self.transfer.local_identity.view) }
+            {
+                Some(&self.transfer.local_identity.view)
+            }
             #[cfg(not(feature = "p2p-device-ui"))]
-            { None }
+            {
+                None
+            }
         };
         let extras = transfer_ui::TransferExtras {
             identity: identity_view,
@@ -33,14 +37,20 @@ impl App {
         };
         #[cfg(feature = "p2p-device-contacts-preview")]
         let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), extras,
+            &self.transfer.rows(),
+            &self.transfer.device_rows(),
+            &self.transfer.transport_contacts,
+            self.transfer.choosing,
+            self.transfer.error.as_deref(),
+            extras,
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), extras,
+            &self.transfer.rows(),
+            &self.transfer.device_rows(),
+            self.transfer.choosing,
+            self.transfer.error.as_deref(),
+            extras,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));

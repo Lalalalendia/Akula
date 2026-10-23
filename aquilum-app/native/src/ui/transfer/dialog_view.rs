@@ -60,10 +60,9 @@ pub fn dialog(
         peer_controls = Some(controls);
         // Multiple devices, drafts and Inbox items must not push key-input
         // controls outside a modal; the peer section is independently scrollable.
-        card = card.with_fixed(rule()).with(
-            NewWidget::new(ScrollArea::new(panel)),
-            1.0,
-        );
+        card = card
+            .with_fixed(rule())
+            .with(NewWidget::new(ScrollArea::new(panel)), 1.0);
     }
     #[cfg(feature = "p2p-inbox-preview")]
     let (card, inbox_save_actions) = if let Some(inbox) = extras.inbox {
