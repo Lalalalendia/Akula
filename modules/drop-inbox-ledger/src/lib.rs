@@ -141,6 +141,39 @@ impl InboxLedger {
         self.status(expected.id)
     }
 
+    /// Bridge between an independently authenticated offer and a trusted
+    /// create-NO-REPLACE writer supplied by Akula Core.
+    ///
+    /// The host MUST independently verify ExpectedTransfer from a signed offer.
+    /// The writer is trusted application code, not remote/provider-supplied code.
+    /// Provider HTTP 200 and remote ACK cannot authorize writing or import.
+    /// Existing files are reverified and never overwritten on retries.
+    pub fn receive_with_writer<F>(
+        &mut self,
+        expected: &ExpectedTransfer,
+        writer: F,
+    ) -> Result<LocalStatus, LedgerError>
+    where
+        F: FnOnce(&Path) -> Result<(), LedgerError>,
+    {
+        match self.reserve(expected)? {
+            LocalStatus::VerifiedLocal => return Ok(LocalStatus::VerifiedLocal),
+            LocalStatus::NeedsReview => return Err(LedgerError::InvalidLocalObject),
+            LocalStatus::Pending => {}
+            LocalStatus::Unknown => return Err(LedgerError::CorruptDatabaseRecord),
+        }
+        let destination = self.object_path(expected.id);
+        match fs::symlink_metadata(&destination) {
+            // May have been saved before a crash: verify the same fixed object.
+            // Existing symlinks, directories and altered files fail closed.
+            Ok(_) => return self.confirm(expected),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        writer(&destination)?;
+        self.confirm(expected)
+    }
+
     /// Caller publishes a verified file through independent create-NO-REPLACE
     /// File Gate / P2P Inbox writer, then calls `confirm` to establish local
     /// metadata. A provider HTTP 200 or S3/Dropbox ACK must NEVER call this.
@@ -412,6 +445,88 @@ mod tests {
         let linked_root = dir.path().join("linked-store");
         symlink(&root, &linked_root).unwrap();
         assert!(matches!(InboxLedger::open(&linked_root), Err(LedgerError::UnsafeRoot)));
+    }
+
+    #[test]
+    fn receiver_writer_is_invoked_once_even_when_offer_replayed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (v, data) = intent(Transport::P2p);
+        let mut inbox = InboxLedger::open(dir.path()).unwrap();
+        let mut writes = 0;
+        let first = inbox.receive_with_writer(&v, |path| {
+            writes += 1;
+            use std::io::Write;
+            let mut f = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+            f.write_all(&data)?;
+            f.sync_all()?;
+            Ok(())
+        }).unwrap();
+        assert_eq!(first, LocalStatus::VerifiedLocal);
+        assert_eq!(inbox.receive_with_writer(&v, |_| {
+            panic!("replayed transfer cannot invoke writer")
+        }).unwrap(), LocalStatus::VerifiedLocal);
+        assert_eq!(writes, 1);
+        assert_eq!(inbox.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn cold_resume_adopts_exact_file_without_second_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (v, data) = intent(Transport::Dropbox);
+        {
+            let inbox = InboxLedger::open(dir.path()).unwrap();
+            inbox.reserve(&v).unwrap();
+            publish_fixture(&inbox, &v, &data);
+        }
+        let mut inbox = InboxLedger::open(dir.path()).unwrap();
+        assert_eq!(inbox.receive_with_writer(&v, |_| {
+            panic!("existing file must be verified, not overwritten")
+        }).unwrap(), LocalStatus::VerifiedLocal);
+    }
+
+    #[test]
+    fn corrupt_existing_object_cannot_be_overwritten_by_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let (v, _) = intent(Transport::S3);
+        let mut inbox = InboxLedger::open(dir.path()).unwrap();
+        inbox.reserve(&v).unwrap();
+        fs::write(inbox.object_path(v.id), b"attacker modified bytes").unwrap();
+        assert!(matches!(inbox.receive_with_writer(&v, |_| {
+            panic!("occupied path cannot call writer")
+        }), Err(LedgerError::InvalidLocalObject)));
+        assert_eq!(fs::read(inbox.object_path(v.id)).unwrap(), b"attacker modified bytes");
+        assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Pending);
+    }
+
+    #[test]
+    fn writer_failure_leaves_pending_and_empty_destination_is_retryable() {
+        let dir = tempfile::tempdir().unwrap();
+        let (v, data) = intent(Transport::P2p);
+        let mut inbox = InboxLedger::open(dir.path()).unwrap();
+        assert!(matches!(inbox.receive_with_writer(&v, |_| {
+            Err(LedgerError::InvalidLocalObject)
+        }), Err(LedgerError::InvalidLocalObject)));
+        assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Pending);
+        assert_eq!(inbox.receive_with_writer(&v, |path| {
+            use std::io::Write;
+            let mut f = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+            f.write_all(&data)?;
+            f.sync_all()?;
+            Ok(())
+        }).unwrap(), LocalStatus::VerifiedLocal);
+    }
+
+    #[test]
+    fn lying_writer_cannot_confirm_untrusted_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (v, _) = intent(Transport::S3);
+        let mut inbox = InboxLedger::open(dir.path()).unwrap();
+        assert!(matches!(inbox.receive_with_writer(&v, |path| {
+            fs::write(path, b"wrong bytes")?;
+            Ok(())
+        }), Err(LedgerError::InvalidLocalObject)));
+        assert_eq!(inbox.count().unwrap(), 1);
+        assert_eq!(inbox.status(v.id).unwrap(), LocalStatus::Pending);
     }
 
     #[test]
