@@ -94,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -f dist/akula-app_0.3.9_x86_64.AppImage
+          test -f dist/akula-app_0.3.13_x86_64.AppImage
           mkdir -p dist/e2e-v2
           trap 'git restore -- aquilum-app/native/Cargo.toml aquilum-app/Cargo.lock aquilum-app/native/packaging/akula-linux.json' EXIT
           python3 - <<'PY'
@@ -102,49 +102,49 @@ jobs:
           from pathlib import Path
           native = Path("aquilum-app/native/Cargo.toml")
           old = native.read_text()
-          marker = 'name = "aquilum-native"\nversion = "0.3.9"\n'
+          marker = 'name = "aquilum-native"\nversion = "0.3.13"\n'
           assert old.count(marker) == 1, "unexpected native package version"
-          native.write_text(old.replace(marker, marker.replace('0.3.9', '0.3.10'), 1))
+          native.write_text(old.replace(marker, marker.replace('0.3.13', '0.3.14'), 1))
           lock = Path("aquilum-app/Cargo.lock")
           data = lock.read_text()
-          block = '[[package]]\nname = "aquilum-native"\nversion = "0.3.9"\n'
+          block = '[[package]]\nname = "aquilum-native"\nversion = "0.3.13"\n'
           assert data.count(block) == 1, "unexpected native Cargo.lock package"
-          lock.write_text(data.replace(block, block.replace('0.3.9', '0.3.10'), 1))
+          lock.write_text(data.replace(block, block.replace('0.3.13', '0.3.14'), 1))
           config = Path("aquilum-app/native/packaging/akula-linux.json")
           obj = json.loads(config.read_text())
-          assert obj["productName"] == "Akula" and obj["version"] == "0.3.9"
-          obj["version"] = "0.3.10"
+          assert obj["productName"] == "Akula" and obj["version"] == "0.3.13"
+          obj["version"] = "0.3.14"
           config.write_text(json.dumps(obj, indent=2) + "\n")
           PY
           (
             cd aquilum-app
             cargo metadata --locked --no-deps --format-version 1 |
-              python3 -c 'import json,sys; x=json.load(sys.stdin); assert any(p["name"]=="aquilum-native" and p["version"]=="0.3.10" for p in x["packages"]), "CI-only version metadata mismatch"'
+              python3 -c 'import json,sys; x=json.load(sys.stdin); assert any(p["name"]=="aquilum-native" and p["version"]=="0.3.14" for p in x["packages"]), "CI-only version metadata mismatch"'
             cargo build --release --locked -p aquilum-native --features installed
             install -m 0755 ../.artifacts/cargo-native/release/aquilum-native ../.artifacts/cargo-native/release/akula-app
             cargo packager -p aquilum-native --release --formats appimage \
               --config native/packaging/akula-linux.json \
               --out-dir "$GITHUB_WORKSPACE/dist/e2e-v2"
           )
-          test -s dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage
-          chmod u+x dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage
+          test -s dist/e2e-v2/akula-app_0.3.14_x86_64.AppImage
+          chmod u+x dist/e2e-v2/akula-app_0.3.14_x86_64.AppImage
           install -m 0755 "$RUNNER_TEMP/akula-disposable-upgrade-helper" \
             dist/e2e-v2/transaction-helper
           test -x dist/e2e-v2/transaction-helper
           sha256sum aquilum-app/Cargo.lock | awk '{print $1}' > dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt
-          sha256sum dist/akula-app_0.3.9_x86_64.AppImage \
-            dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage \
+          sha256sum dist/akula-app_0.3.13_x86_64.AppImage \
+            dist/e2e-v2/akula-app_0.3.14_x86_64.AppImage \
             > dist/e2e-v2/BOTH_REAL_APPIMAGE_SHA256.txt
           {
             echo "BASE_HEAD=$GITHUB_SHA"
-            echo "V1=Akula-0.3.9-unchanged"
-            echo "V2=Akula-0.3.10-CI-only-metadata-variant"
+            echo "V1=Akula-0.3.13-unchanged"
+            echo "V2=Akula-0.3.14-CI-only-metadata-variant"
             cat dist/e2e-v2/BOTH_REAL_APPIMAGE_SHA256.txt
             printf 'CI_VARIANT_CARGO_LOCK_SHA256='; cat dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt
           } | tee dist/e2e-v2/CI_GENERATION_PROVENANCE.txt
           git restore -- aquilum-app/native/Cargo.toml aquilum-app/Cargo.lock aquilum-app/native/packaging/akula-linux.json
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo 'AKULA_TWO_REAL_APPIMAGE_BUILDS_PASS baseline=0.3.9 ci_variant=0.3.10 no_release=1'
+          echo 'AKULA_TWO_REAL_APPIMAGE_BUILDS_PASS baseline=0.3.13 ci_variant=0.3.14 no_release=1'
 
       - name: Verify internal AppImage identity, run installed GUI, preserve Aquilum
         shell: bash
@@ -157,9 +157,9 @@ jobs:
         if: startsWith(github.event.pull_request.title, 'RELEASE-SIGNED-STAGING-')
         uses: actions/upload-artifact@v7
         with:
-          name: akula-e2e-unsigned-0.3.10-NOT-RELEASE-${{ github.sha }}
+          name: akula-e2e-unsigned-0.3.14-NOT-RELEASE-${{ github.sha }}
           path: |
-            dist/e2e-v2/akula-app_0.3.10_x86_64.AppImage
+            dist/e2e-v2/akula-app_0.3.14_x86_64.AppImage
             dist/e2e-v2/BOTH_REAL_APPIMAGE_SHA256.txt
             dist/e2e-v2/CI_GENERATION_PROVENANCE.txt
             dist/e2e-v2/CI_V2_CARGO_LOCK_SHA256.txt
