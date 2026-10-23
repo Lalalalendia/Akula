@@ -4,12 +4,18 @@ on:
   push:
     branches:
       - feature/ak-p2p-native-receive-onefile-20261024
+      - feature/ak-p2p-installed-main-integration-20261024
     paths:
       - 'interop/akula-staya/**'
       - 'aquilum-app/native/src/app/transfer/**'
       - 'aquilum-app/native/src/app/transfer.rs'
+      - 'aquilum-app/native/src/app/transfer/dialog.rs'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'modules/drop-inbox-ledger/**'
       - 'aquilum-app/native/src/ui/transfer/**'
       - 'aquilum-app/native/src/ui/transfer.rs'
+      - 'aquilum-app/native/src/ui/transfer/dialog_view.rs'
       - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/native/assets/locales/**'
       - 'aquilum-app/Cargo.lock'
@@ -38,6 +44,7 @@ jobs:
         run: |
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/native_receive.rs aquilum-app/native/src/ui/transfer/native_receive_view.rs
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/peer_pair.rs aquilum-app/native/src/ui/transfer/peer_pair.rs
+          rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer.rs aquilum-app/native/src/app/transfer/dialog.rs aquilum-app/native/src/ui/transfer.rs aquilum-app/native/src/ui/transfer/dialog_view.rs
           cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Verify shipping lockfile remains resolved
         shell: bash
@@ -61,7 +68,9 @@ jobs:
         shell: bash
         run: |
           # Exact feature graph of ordinary Windows installers and auto-updates.
+          # Standard signed Windows installer/auto-update feature graph.
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_receive_view::tests -- --nocapture
