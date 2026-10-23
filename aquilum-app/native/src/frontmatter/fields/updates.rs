@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use super::split_line;
-use super::super::{block, is_key};
+use super::super::{block, fence, is_key};
 
 // Lines borrow the original frontmatter until their value actually changes.
 // Applying a batch must not clone the entire note for every updated field.
@@ -10,6 +10,13 @@ pub fn set_fields(text: &str, updates: &[(&str, String)]) -> Option<String> {
     // note does not have valid frontmatter.
     if updates.is_empty() {
         return Some(text.to_owned());
+    }
+    // An injected YAML fence changes where the next sequential edit sees
+    // frontmatter ending. Preserve the former behavior for this rare case.
+    if updates.iter().any(|(key, value)| {
+        key.contains('\n') || value.split('\n').skip(1).any(fence)
+    }) {
+        return sequential_with_fence(text, updates);
     }
     let block = block(text)?;
     let body = &text[block.body];
@@ -65,6 +72,32 @@ pub fn set_fields(text: &str, updates: &[(&str, String)]) -> Option<String> {
     result.push_str("\n---");
     result.push_str(tail);
     Some(result)
+}
+
+// Rare fallback: a generated fence may change the next update's block boundary.
+fn sequential_with_fence(text: &str, updates: &[(&str, String)]) -> Option<String> {
+    updates.iter().try_fold(text.to_owned(), |current, (key, value)| {
+        let section = block(&current)?;
+        let body = &current[section.body];
+        let mut found = false;
+        let mut lines = Vec::new();
+        if !body.is_empty() {
+            for line in body.split('\n') {
+                if !is_key(split_line(line).0, key) {
+                    lines.push(line.to_owned());
+                    continue;
+                }
+                found = true;
+                if !value.is_empty() {
+                    lines.push(format!("{key}: {value}"));
+                }
+            }
+        }
+        if !found && !value.is_empty() {
+            lines.push(format!("{key}: {value}"));
+        }
+        Some(format!("---\n{}\n---{}", lines.join("\n"), &current[section.end..]))
+    })
 }
 
 // Keep the older single-field behavior exercised by the existing tests.
@@ -148,6 +181,28 @@ mod tests {
                 assert_eq!(actual, expected, "trial={trial}, sample={sample:?}, updates={updates:?}");
             }
         }
+    }
+
+    #[test]
+    fn an_embedded_yaml_fence_preserves_sequential_update_boundaries() {
+        let initial = "---\ncover: old\n---\nbody";
+        let cases = [
+            vec![(COVER, "first\n---\ntail".to_owned()), (TYPE, "book".to_owned())],
+            vec![(COVER, "first\n--- \t\ntail".to_owned()), (TYPE, "book".to_owned())],
+            vec![(COVER, "first\n---\ntail".to_owned()), (COVER, String::new())],
+            vec![("new\n---", "value".to_owned()), (TYPE, "book".to_owned())],
+        ];
+        for updates in cases {
+            assert_eq!(set_fields(initial, &updates), original_set_fields(initial, &updates));
+        }
+        let standard = [
+            (COVER, "first\n---\ntail".to_owned()),
+            (TYPE, "book".to_owned()),
+        ];
+        assert_eq!(
+            set_fields(initial, &standard).as_deref(),
+            Some("---\ncover: first\ntype: book\n---\ntail\n---\nbody")
+        );
     }
 
     #[test]
