@@ -221,6 +221,14 @@ if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula Windows UIA acceptance failed: PowerShell exit $LASTEXITCODE"
 }
 
+# This separate OS-pointer test covers the actual installed PDF context menu,
+# consent, preview, native search result and Enter reopening a different tab.
+$pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
+}
+
 Start-And-Close -EditNote
 $state = Join-Path $akulaData 'window-state.json'
 if (!(Test-Path $state)) { throw 'Akula window state not persisted to its own AppData' }
