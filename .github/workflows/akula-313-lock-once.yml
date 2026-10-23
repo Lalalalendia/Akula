@@ -3,6 +3,9 @@
 name: Akula 3.13 lockfile one-shot
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/akula-313-lock-once.yml'
   push:
     branches:
       - 'feature/akula-3-13-dropbox-preview-20261023'
@@ -14,12 +17,13 @@ permissions:
 
 jobs:
   write-lockfile:
-    if: github.repository == 'Lalalalendia/Akula' && github.ref_name == 'feature/akula-3-13-dropbox-preview-20261023'
+    if: github.repository == 'Lalalalendia/Akula' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'Lalalalendia/Akula' && github.event.pull_request.head.ref == 'feature/akula-3-13-dropbox-preview-20261023'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: feature/akula-3-13-dropbox-preview-20261023
           persist-credentials: true
       - uses: dtolnay/rust-toolchain@stable
       - name: Resolve only the current pinned workspace dependency graph
