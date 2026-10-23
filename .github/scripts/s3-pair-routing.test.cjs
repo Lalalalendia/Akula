@@ -18,15 +18,23 @@ test('S3 smoke watches the actual native Windows modal and UIA ownership', () =>
     'scripts/windows-cloud-provider-uia.ps1',
     'scripts/windows-beta-gui-input.ps1',
     'aquilum-app/native/src/app/settings/cloud_action.rs',
-    'aquilum-app/native/src/app/settings/action.rs',
     'aquilum-app/native/src/ui/settings/cloud.rs',
     'aquilum-app/native/src/ui/settings/binding.rs',
-    'aquilum-app/native/src/ui/settings/schema/sync/yandex.rs',
     'aquilum-app/native/src/ui/settings/schema/sync/yandex/pairing.rs',
   ];
   for (const file of required) {
     assert.ok(fs.existsSync(path.join(ROOT, file)), 'Missing watched source: ' + file);
     assert.ok(prSection.includes("      - '" + file + "'\n"), 'Unwatched S3 user path: ' + file);
+  }
+  // No-growth CI fanout: shared settings entrypoints already have their own
+  // broad validation routes. This focused S3 lane watches the provider-owned
+  // implementation, not every generic settings action or Yandex schema edit.
+  for (const common of [
+    'aquilum-app/native/src/app/settings/action.rs',
+    'aquilum-app/native/src/ui/settings/schema/sync/yandex.rs',
+  ]) {
+    assert.ok(!prSection.includes("      - '" + common + "'\n"),
+      'Do not add a workflow subscriber to common settings code: ' + common);
   }
   assert.doesNotMatch(prSection, /native\/src\/(?:app|ui)\/\*\*/,
     'Do not subscribe the new workflow to broad native paths');
