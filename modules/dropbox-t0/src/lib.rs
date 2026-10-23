@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
-//! Inert Dropbox transport and pre-publication receipt contracts.
-//! No OAuth, remote client, native File Gate or Sync Core authority.
-
+//! Isolated Dropbox contracts, no local file mutation or sync authority.
 pub mod publication;
+pub mod read_verify;
+pub mod read_http;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
