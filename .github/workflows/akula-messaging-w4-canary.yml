@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get remove -y $(dpkg-query -W -f='%{Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
+          sudo apt-get remove -y $(dpkg-query -W -f='${Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
           sudo apt-get install -y -qq libunwind-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             pkg-config curl ca-certificates patchelf file socat
@@ -105,6 +105,11 @@ jobs:
               --out-dir "$GITHUB_WORKSPACE/dist"
           )
           test "$(find dist -maxdepth 1 -name '*.AppImage' -type f | wc -l)" -eq 1
+          candidate="$(find dist -maxdepth 1 -name '*.AppImage' -type f -print -quit)"
+          chmod u+x "$candidate"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$candidate" --w4-pilot status |
+            grep -Fxq 'AKULA_W4_PILOT_READY helper=verified network=inactive auto_start=no SSH_only=yes'
+          echo 'AKULA_W4_INSIDE_INSTALLED_APPIMAGE_PASS helper_hash=verified'
           sha256sum dist/*.AppImage > dist/APPIMAGE_SHA256.txt
           mkdir -p dist/docs
           cp docs/messaging/AK-W4-PROD-CANARY-01.md dist/docs/INSTRUCTIONS.md
