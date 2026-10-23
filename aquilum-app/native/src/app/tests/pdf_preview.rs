@@ -127,11 +127,11 @@ fn installed_shiva_pdf_is_searchable_and_opens_from_native_result() {
     }
     assert_eq!(result.as_deref(), Some(note.as_path()),
         "actual native search UI did not return the PDF-derived note");
-    let card = match &h.app.popup {
-        Some(Popup::Search(state)) => state.cards[0],
-        _ => panic!("native search popup disappeared"),
-    };
-    h.send(card, crate::ui::search::CardAction::Open { new_tab: false });
+    h.app.search_key(
+        &mut h.root,
+        &Key::Named(NamedKey::Enter),
+        Modifiers::empty(),
+    ).expect("native search Enter key must be recognized");
     assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
     println!("AKULA_PDF_NATIVE_SEARCH_E2E=PASS;installed_shiva=1;gate=1;tantivy=1;ui=1;source_unchanged=1");
 }
