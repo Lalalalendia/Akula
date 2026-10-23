@@ -962,6 +962,110 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actual_n0_identity_only_quic_one_file_to_cold_inbox() {
+        // Only synthetic bytes and disposable QUIC keys leave this CI host.
+        // This exercises n0 Internet discovery by EndpointId without a copied
+        // IP. It does NOT prove relay fallback across two physical networks,
+        // OS-pinned identity, or a power-loss durable ACK.
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("synthetic-ci-source.txt");
+        let inbox_root = dir.path().join("received-inbox");
+        fs::create_dir(&inbox_root).unwrap();
+        let bytes = b"Akula n0 identity-only experimental QUIC file to persistent inbox";
+        fs::write(&source, bytes).unwrap();
+
+        let sender = Endpoint::builder(presets::N0)
+            .secret_key(iroh::SecretKey::generate())
+            .alpns(vec![ALPN.to_vec()])
+            .bind()
+            .await
+            .unwrap();
+        let receiver = Endpoint::builder(presets::N0)
+            .secret_key(iroh::SecretKey::generate())
+            .alpns(vec![ALPN.to_vec()])
+            .bind()
+            .await
+            .unwrap();
+        let sender_id = sender.id();
+        let receiver_id = receiver.id();
+        tokio::time::timeout(Duration::from_secs(60), sender.online())
+            .await
+            .expect("n0 sender must become online");
+        tokio::time::timeout(Duration::from_secs(60), receiver.online())
+            .await
+            .expect("n0 receiver must become online");
+
+        let sender_task = tokio::spawn(async move {
+            let connection = await_selected_incoming(&sender, receiver_id, |conn| {
+                if conn.remote_id() == receiver_id {
+                    Ok(())
+                } else {
+                    Err("wrong synthetic receiver".into())
+                }
+            })
+            .await
+            .unwrap();
+            tokio::time::timeout(
+                Duration::from_secs(120),
+                send_one(&connection, &source, || {
+                    if connection.remote_id() == receiver_id {
+                        Ok(())
+                    } else {
+                        Err("wrong synthetic receiver during send".into())
+                    }
+                }),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            connection.close(0u8.into(), b"n0 synthetic file sent");
+            sender.close().await;
+        });
+
+        // No address from clipboard or IP/port: this is the n0 native path.
+        let connection = tokio::time::timeout(
+            Duration::from_secs(90),
+            receiver.connect(EndpointAddr::new(sender_id), ALPN),
+        )
+        .await
+        .expect("n0 EndpointId-only connection timeout")
+        .expect("n0 EndpointId-only connection rejected");
+        assert_eq!(connection.remote_id(), sender_id);
+        tokio::time::timeout(
+            Duration::from_secs(120),
+            receive_one_target(
+                &connection,
+                None,
+                &inbox_root,
+                *receiver_id.as_bytes(),
+                || {
+                    if connection.remote_id() == sender_id {
+                        Ok(())
+                    } else {
+                        Err("wrong synthetic sender during receive".into())
+                    }
+                },
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        connection.close(0u8.into(), b"n0 synthetic inbox received");
+        receiver.close().await;
+        sender_task.await.unwrap();
+
+        let cold = akula_inbox_ledger_lab::InboxLedger::open(&inbox_root).unwrap();
+        let checked = cold.list().unwrap();
+        assert_eq!(checked.len(), 1);
+        assert_eq!(checked[0].1, akula_inbox_ledger_lab::LocalStatus::VerifiedLocal);
+        assert_eq!(checked[0].0.sender_key, *sender_id.as_bytes());
+        assert_eq!(checked[0].0.recipient_key, *receiver_id.as_bytes());
+        assert_eq!(fs::read(cold.object_path(checked[0].0.id)).unwrap(), bytes);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_iroh_native_received_inbox_only_roundtrip_without_user_credentials() {
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
