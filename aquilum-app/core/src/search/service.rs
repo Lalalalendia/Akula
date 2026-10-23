@@ -1,3 +1,4 @@
+mod lifecycle;
 use super::analysis::graph::GraphSnapshot;
 use super::error::SearchError;
 use super::guest::Guest;
@@ -13,7 +14,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-
 #[derive(Clone)]
 pub struct SearchService {
     pub base_directory: PathBuf,
