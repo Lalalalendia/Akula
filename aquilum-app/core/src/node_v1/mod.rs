@@ -12,7 +12,7 @@ mod trust;
 pub use fence::DurableChallengeFence;
 pub use trust::{AdmittedPut, AdmittedRead, RootTrust};
 pub use identity::NodeIdentity;
-pub use put::{OwnerPutGrant, put_claim, put_proof_claim, signed_put_digest};
+pub use put::{OwnerPutGrant, MAX_PUT_BYTES, put_claim, put_proof_claim, signed_put_digest};
 pub use receipt::NodePutReceipt;
 
 use std::io;
@@ -53,6 +53,18 @@ impl NodeHost {
         let state = Path::new("/var/lib/akula-node");
         let identity = NodeIdentity::open_or_create(state)?;
         let trust = RootTrust::open_provisioned(identity.public_key())?;
+        let ledger = DurableChallengeFence::open(state, trust.clone())?;
+        Ok(Self { identity, trust, ledger, state: state.to_path_buf() })
+    }
+
+    /// Only for explicitly feature-gated debug integration E2E. No shipped
+    /// binary can redirect root trust to an application-owned policy.
+    #[cfg(all(feature = "node-v1-transport-tests", debug_assertions))]
+    pub fn open_integration_fixture(
+        state: &Path, policy_dir: &Path,
+    ) -> Result<Self, NodeV1Error> {
+        let identity = NodeIdentity::open_or_create(state)?;
+        let trust = RootTrust::open_integration_fixture(policy_dir, identity.public_key())?;
         let ledger = DurableChallengeFence::open(state, trust.clone())?;
         Ok(Self { identity, trust, ledger, state: state.to_path_buf() })
     }

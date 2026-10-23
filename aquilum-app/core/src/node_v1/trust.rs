@@ -71,6 +71,13 @@ pub struct RootTrust {
 }
 
 impl RootTrust {
+    #[cfg(all(feature = "node-v1-transport-tests", debug_assertions))]
+    pub fn open_integration_fixture(
+        parent: &Path, node_public: [u8; 32],
+    ) -> Result<Self, NodeV1Error> {
+        Self::load_from(parent, rustix::process::geteuid().as_raw(), node_public)
+    }
+
     pub fn open_provisioned(node_public: [u8; 32]) -> Result<Self, NodeV1Error> {
         // A malicious same-UID service cannot replace a root-owned /etc tree.
         for path in ["/", "/etc"] {

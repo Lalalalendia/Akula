@@ -115,3 +115,37 @@ server listener, **remote** Put/Get, independent second-client File Gate
 create-new, revoke after reboot and full Windows A → VPS → Windows B E2E.
 This source is not compiler/CI-accepted on the integration HEAD. Do not
 enable the install button or merge this release slice until all pass.
+
+## Bounded real Iroh QUIC control protocol (NODE-V1-QUIC-01)
+
+The opt-in bridge crate contains a real two-stream QUIC Put/Get transport:
+[node_v1_runtime](../../../interop/akula-staya/src/node_v1_runtime).
+This code is **not** included in default Akula and does not start a public
+Iroh Endpoint. A separately provisioned service is required.
+
+1. The client requires independently pinned Iroh EndpointId and Node Ed25519
+   identity, chooses a fresh nonce and submits a bounded, versioned signed
+   roster and exact operation-specific Put/Get grant on established QUIC.
+2. The server takes device identity only from authenticated connection
+   remote_id; NodeHost verifies exact owner rights against root-owned policy,
+   issues persistent one-use nonce and signs the client's fresh nonce.
+3. The client verifies the Node signature before signing the challenge using
+   its protected device identity. Put sends a 64-byte signature plus up to
+   16 MiB UTF-8 Markdown; Get sends a 64-byte signature only.
+4. The server commits/reads from its immutable NodeStore and returns verified
+   bytes or a Node-signed receipt; all failures are opaque HOLD. The client
+   verifies the receipt's Node/Vault/Document/Revision/hash/length/epoch/grant
+   or the readback BLAKE3. No 0-RTT or plaintext fallback is provided.
+
+The [node_v1_real_quic.rs](../../../interop/akula-staya/tests/node_v1_real_quic.rs)
+test uses real Iroh handshakes. Device A PUTs to Node, its source is removed,
+the NodeHost is reopened from disk and independently enrolled B GETs the exact
+bytes. Unauthorized reuse of A's write grant by B is rejected. The special
+temp-policy fixture exists only under explicit debug-only feature:
+\`aquilum-core/node-v1-transport-tests\`. Its method is absent from release
+binaries even when that feature is mistakenly selected.
+
+**Unverified:** No rustfmt/rustc/CI PASS on this new SHA yet. This narrow
+bounded raw QUIC protocol does not replace Staya/Bao streaming for large
+objects and still lacks a service process, signed installer, reboot proof,
+recipient File Gate import and externally witnessed durability. Release HOLD.

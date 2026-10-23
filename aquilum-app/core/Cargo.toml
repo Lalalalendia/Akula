@@ -22,6 +22,8 @@ node-replica-lab = ["node-catalog-lab"]
 node-replica-auth-lab = ["node-replica-lab"]
 # Non-shipping Node V1 host: root-pinned owner policy and durable one-use reads.
 node-v1 = ["node-replica-auth-lab", "device-roster-lab"]
+# Integration-test-only owner policy under temporary paths; release builds refuse it.
+node-v1-transport-tests = ["node-v1"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.

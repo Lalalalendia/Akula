@@ -12,6 +12,8 @@ use aquilum_core::p2p_offer_lab::{
 pub mod live_identity;
 #[cfg(all(target_os = "linux", feature = "node-live-read-lab"))]
 pub mod node_live_read;
+#[cfg(all(target_os = "linux", feature = "node-v1-runtime"))]
+pub mod node_v1_runtime;
 
 use staya_transfer::{
     ContentId, Manifest,
