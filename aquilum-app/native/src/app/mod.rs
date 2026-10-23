@@ -92,7 +92,6 @@ pub enum WindowCommand {
     Minimize,
     Close,
 }
-
 const MENU_RENAME: usize = 0;
 const MENU_DUPLICATE: usize = 1;
 const MENU_DELETE: usize = 2;

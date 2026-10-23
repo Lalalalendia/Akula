@@ -38,11 +38,11 @@ fn b1d0_native_server_settings_have_three_fields_and_never_grant_install() {
     set(&mut config, &Value::Text(fingerprint.clone()));
     assert_eq!(config.server_setup.host_public_key, "");
     assert_eq!(config.server_setup.host_key_fingerprint, fingerprint);
-    assert!(server::identity::can_probe(&config.server_setup));
+    assert!(super::super::server::identity::can_probe(&config.server_setup));
     set(&mut config, &Value::Text("-----BEGIN OPENSSH PRIVATE KEY-----".into()));
     assert!(config.server_setup.host_public_key.is_empty());
     assert!(config.server_setup.host_key_fingerprint.is_empty());
-    assert!(!server::identity::can_probe(&config.server_setup));
+    assert!(!super::super::server::identity::can_probe(&config.server_setup));
 
     let mut advanced = Context::new(1.0);
     advanced.server_advanced = true;

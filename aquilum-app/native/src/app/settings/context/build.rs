@@ -1,6 +1,5 @@
 use super::super::*;
 use std::path::Path;
-
 impl App {
     pub(in crate::app::settings) fn settings_context(&self, section: Section, copied: Option<usize>, trash_page: usize) -> Context {
         let workspace = self.tree.root().map(Path::to_path_buf);
