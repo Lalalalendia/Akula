@@ -55,3 +55,16 @@ fn forgetting_current_workspace_closes_it_but_never_deletes_its_directory() {
         .iter().all(|w| !crate::ui::workspaces::same_path(std::path::Path::new(&w.path), &path)));
     assert_eq!(std::fs::read(&note).unwrap(), before);
 }
+
+#[test]
+fn unsaved_failure_must_keep_current_workspace_and_editor_open() {
+    let mut h = Harness::new();
+    let path = h.vault.path().to_path_buf();
+    let note = path.join("a.md");
+    assert!(h.app.open(&mut h.root, note.clone()));
+    h.app.note.as_mut().unwrap().save_error = Some("manual review required".to_owned());
+    assert!(!h.app.close_current_workspace(&mut h.root).title);
+    assert!(h.app.workspace.root.as_deref() == Some(path.as_path()));
+    assert!(h.app.note.as_ref().is_some_and(|n| n.is(&note)));
+    assert_eq!(h.app.workspace.core.active_note.get().as_deref(), Some(note.as_path()));
+}
