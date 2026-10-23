@@ -80,7 +80,9 @@ aq_trace = { path = "vendor/aq_trace" }
 crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
 blake3 = { version = "1.8.5", features = ["rayon"] }
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+# Use the existing GDI-backed softbuffer on the dedicated Windows 7 target.
+# Default Windows builds keep the existing Direct3D/DXGI renderer unchanged.
+[target.'cfg(any(not(target_os = "windows"), target_vendor = "win7"))'.dependencies]
 softbuffer = "0.4.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
