@@ -118,6 +118,38 @@ impl DropboxPreview {
     }
 }
 
+// The current App/settings modules are intentionally kept within the
+// repository source-size ratchet; Dropbox integration lives here.
+impl super::App {
+    pub(super) fn poll_dropbox_settings(
+        &mut self, root: &mut masonry::app::RenderRoot,
+    ) {
+        if self.dropbox_preview.poll()
+            && matches!(&self.popup, Some(super::Popup::Settings { dialog, .. })
+                if dialog.section == crate::ui::settings::schema::Section::Sync)
+        {
+            self.refresh_settings(root);
+        }
+    }
+
+    pub(super) fn press_dropbox(
+        &mut self, action: crate::ui::settings::schema::Action,
+        section: crate::ui::settings::schema::Section,
+    ) -> super::settings::Effect {
+        use crate::ui::settings::schema::{Action, Section};
+        if section != Section::Sync {
+            return super::settings::Effect::None;
+        }
+        let resume = matches!(action, Action::DropboxResumeReadOnly);
+        self.dropbox_preview.start(
+            self.workspace.core.settings.get_config().dropbox_readonly.clone(),
+            resume,
+            std::sync::Arc::clone(&self.workspace.wake),
+        );
+        super::settings::Effect::Content
+    }
+}
+
 fn open_browser(url: &str) -> bool {
     let binary = if cfg!(target_os = "windows") {
         "explorer.exe"

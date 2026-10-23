@@ -363,6 +363,7 @@ dependencies = [
  "skrifa",
  "softbuffer",
  "tempfile",
+ "tokio",
  "unicode-segmentation",
  "uuid",
  "vello_cpu",
@@ -371,6 +372,7 @@ dependencies = [
  "winit",
  "write-fonts",
  "wuff",
+ "zeroize",
 ]
 
 [[package]]

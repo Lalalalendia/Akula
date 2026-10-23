@@ -1,71 +1,6 @@
 use super::*;
-
+use std::path::Path;
 impl App {
-    pub(super) fn press(&mut self, dialog: &mut SettingsDialog, action: Action) -> Effect {
-        let core = &self.workspace.core;
-        let workspace = self.tree.root().map(Path::to_path_buf);
-        match action {
-            // This handler is reached only for ordinary settings buttons.
-            // Review actions require the separately confirmed modal flow.
-            Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
-            #[cfg(feature = "dropbox-readonly-preview")]
-            Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly => {
-                let resume = matches!(action, Action::DropboxResumeReadOnly);
-                self.dropbox_preview.start(
-                    core.settings.get_config().dropbox_readonly.clone(),
-                    resume,
-                    std::sync::Arc::clone(&self.workspace.wake),
-                );
-                Effect::Content
-            }
-            Action::OpenTrash => {
-                if let Some(workspace) = workspace {
-                    match gate::ensure_trash(core, &workspace) {
-                        Ok(path) => system::open(&path),
-                        Err(error) => report!("корзина не открыта: {error:?}"),
-                    }
-                }
-                Effect::None
-            }
-            Action::Restore(id) => {
-                let Some(workspace) = workspace else { return Effect::None };
-                if let Err(error) = gate::restore_deletion(core, &workspace, &id) {
-                    report!("заметка не восстановлена: {error:?}");
-                }
-                Effect::Content
-            }
-            Action::TrashPage(page) => {
-                dialog.trash_page = page;
-                Effect::Content
-            }
-            Action::CreateTemplates => {
-                let Some(workspace) = workspace else { return Effect::None };
-                crate::app::templates::write_starters(core, &schema::templates_path(&workspace, &core.settings.get_config().templates.folder));
-                Effect::Content
-            }
-            Action::CheckUpdates => {
-                self.updater.check();
-                Effect::Content
-            }
-            Action::InstallUpdate => {
-                self.updater.install();
-                Effect::Content
-            }
-            Action::NewToken => self.apply(Setter::Config(|c, _| c.mcp.token = schema::new_token()), Value::Bool(true)),
-            Action::Copy(index, code) => {
-                match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(code)) {
-                    Ok(()) => dialog.copied = Some(index),
-                    Err(error) => report!("не скопировано: {error}"),
-                }
-                Effect::Content
-            }
-            Action::OpenUrl(url) => {
-                system::open_url(url);
-                Effect::None
-            }
-        }
-    }
-
     pub(super) fn apply(&mut self, setter: Setter, value: Value) -> Effect {
         match setter {
             Setter::Scale => {
@@ -114,17 +49,19 @@ impl App {
                     || before.templates.folder != after.templates.folder
                     || mcp_changed
                     || retention
-                    || before.s3_onboarding != after.s3_onboarding
-                    || before.dropbox_readonly != after.dropbox_readonly;
-                #[cfg(feature = "dropbox-readonly-preview")]
+                    || before.s3_onboarding != after.s3_onboarding;
+                let new_yandex_bucket = after.s3_onboarding.bucket.clone();
                 let dropbox_changed = before.dropbox_readonly != after.dropbox_readonly;
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;
                 }
                 #[cfg(feature = "dropbox-readonly-preview")]
-                if dropbox_changed {
-                    self.dropbox_preview.invalidate();
+                if dropbox_changed { self.dropbox_preview.invalidate(); }
+                if before.s3_onboarding.bucket != new_yandex_bucket {
+                    self.yandex_probe.set_bucket(&new_yandex_bucket);
+                    #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
+                    self.s3_pair.invalidate_verification();
                 }
                 if mcp_changed {
                     core.apply_mcp_settings();
@@ -136,7 +73,7 @@ impl App {
                     Effect::Everything
                 } else if fonts_changed || colors_changed {
                     Effect::Restyle(fonts_changed)
-                } else if rows_changed {
+                } else if rows_changed || dropbox_changed {
                     Effect::Content
                 } else if analysis_changed {
                     Effect::Panel
@@ -146,13 +83,11 @@ impl App {
             }
         }
     }
-
     pub(super) fn refresh_analysis(&mut self, root: &mut RenderRoot) {
         if self.panel_mode() == crate::links::Mode::Analysis {
             self.request_panel(root);
         }
     }
-
     pub(in crate::app) fn cleanup_retention(&self) {
         let Some(workspace) = self.tree.root().map(Path::to_path_buf) else { return };
         let core = std::sync::Arc::clone(&self.workspace.core);

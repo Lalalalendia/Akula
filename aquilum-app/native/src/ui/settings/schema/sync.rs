@@ -1,12 +1,9 @@
 use super::*;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryDecision};
 mod yandex;
-#[cfg(feature = "dropbox-readonly-preview")]
-mod dropbox;
-#[cfg(feature = "dropbox-readonly-preview")]
-pub(super) use dropbox::dropbox_setup;
+#[cfg(feature = "dropbox-readonly-preview")] mod dropbox;
+#[cfg(feature = "dropbox-readonly-preview")] pub(super) use dropbox::dropbox_setup;
 pub(super) use yandex::yandex_setup;
-
 /// User-controlled *documentation* endpoints. Never use arbitrary input as a
 /// link target, endpoint or credential provider inside this setup surface.
 pub(super) const YANDEX_CONSOLE: &str = "https://console.yandex.cloud/";
@@ -14,7 +11,6 @@ pub(super) const YANDEX_ACCOUNT_DOCS: &str = "https://yandex.cloud/ru/docs/iam/o
 pub(super) const YANDEX_KEY_DOCS: &str = "https://yandex.cloud/ru/docs/iam/operations/sa/create-access-key";
 pub(super) const YANDEX_BUCKET_DOCS: &str = "https://yandex.cloud/ru/docs/storage/operations/buckets/create";
 pub(super) const YANDEX_AWS_PROFILE_DOCS: &str = "https://yandex.cloud/ru/docs/storage/quickstart/quickstart-aws-cli";
-
 /// A read-only native safety surface. In particular, DO NOT add generic
 /// Action::Restore, cleanup, "retry sync" or stage-delete controls here:
 /// the current M1d journal has no cross-process provenance/durability receipt.
@@ -157,18 +153,6 @@ pub(super) fn sync_recovery(ctx: &Context) -> Vec<Block> {
             )));
         }
     }
-    // 3.13 Dropbox integration visibility. This is deliberately read-only:
-    // OAuth onboarding is still a standalone developer probe, not a native
-    // UI action, and must not be represented as a connected account.
-    #[cfg(not(feature = "dropbox-readonly-preview"))]
-    rows.push(info(
-        "Dropbox (3.13 preview)".to_owned(),
-        Some("Read-only connector exists as a separate QA probe; native authorization and synchronization are not enabled.".to_owned()),
-        Control::Status {
-            text: "DISCONNECTED / SYNC_DISABLED".to_owned(),
-            tone: Tone::Secondary,
-        },
-    ));
     if let Some(notice) = &ctx.sync_notice {
         rows.push(info(t("settings.sync.reviewResult"), None,
             Control::Status { text: notice.clone(), tone: Tone::Secondary }));

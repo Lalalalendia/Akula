@@ -137,6 +137,61 @@ function allowedWindowsBetaMigration(before, after, read) {
   return true;
 }
 
+function allowedLinuxBetaMigration(before, after, read) {
+  // Only the byte-preserving Linux beta PR -> required callable route change.
+  const owned = [
+    '.github/workflows/linux-beta.yml',
+    '.github/scripts/linux-beta-identity.test.cjs',
+    'scripts/linux-beta-smoke.sh',
+    'aquilum-app/native/packaging/akula-linux-nfpm.yaml',
+    'aquilum-app/native/packaging/Akula.desktop',
+    'aquilum-app/native/Cargo.toml',
+  ];
+  const oldHeader = 'on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n'
+    + owned.map(path => "      - '" + path + "'\n").join('')
+    + '\npermissions:\n';
+  const newHeader = 'on:\n  workflow_call:\n'
+    + '  # PR source owners are enforced by the required Main PR gate.\n'
+    + '\npermissions:\n';
+  if (before.split(oldHeader).length !== 2 || after !== before.replace(oldHeader, newHeader) ||
+      after.includes('  workflow_dispatch:\n')) return false;
+  let routes, app, shared;
+  try {
+    routes = read('.github/scripts/ci-shared-manifest-route.cjs');
+    app = read('.github/workflows/app-checks.yml');
+    shared = read('.github/workflows/ci-shared-manifest-labs.yml');
+  } catch { return false; }
+  if (![routes, app, shared].every(x => typeof x === 'string')) return false;
+  const list = routes.match(/^  "owned_linux_beta": (\[[\s\S]*?^  \])/m)?.[1];
+  let actual;
+  try { actual = JSON.parse(list); } catch { return false; }
+  if (JSON.stringify(actual) !== JSON.stringify(owned) ||
+      !routes.includes('function ownedRoutes(paths){\n  const changed=new Set(paths);') ||
+      !routes.includes('...ownedRoutes(paths)') ||
+      !routes.includes('module.exports={OWNED_SUITES,ownedRoutes,')) return false;
+  const classification = app.split('  required-tests:\n')[0];
+  const sharedJob = app.split('  shared-labs:\n')[1]?.split('  checks:\n')[0] || '';
+  const mainGate = app.split('  checks:\n')[1] || '';
+  if (!classification.includes('      owned_linux_beta: ${{ steps.scope.outputs.owned_linux_beta }}') ||
+      !classification.includes('node .github/scripts/ci-shared-manifest-route.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"') ||
+      !sharedJob.includes("needs.classify.outputs.owned_linux_beta == 'true'") ||
+      !sharedJob.includes("      owned_linux_beta: ${{ needs.classify.outputs.owned_linux_beta == 'true' }}") ||
+      !sharedJob.includes('uses: ./.github/workflows/ci-shared-manifest-labs.yml') ||
+      !mainGate.includes('    name: Main PR gate') ||
+      !mainGate.includes("    if: ${{ always() && github.event_name == 'pull_request' }}") ||
+      !mainGate.includes('    needs: [classify, required-tests, native-frames, shared-labs]') ||
+      !mainGate.includes('          SHARED_RISKY: ${{') ||
+      !mainGate.includes("needs.classify.outputs.owned_linux_beta == 'true'") ||
+      !mainGate.includes('          ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}') ||
+      !mainGate.includes('if [ "$SHARED_RISKY" = true ]; then') ||
+      !mainGate.includes('if [ "$ROUTED_SHARED_RESULT" != success ]; then')) return false;
+  if (!shared.includes('      owned_linux_beta:\n        required: true\n        type: boolean') ||
+      !shared.includes('  route-linux-beta:\n    name: Impacted shared manifest / linux-beta\n    if: ${{ inputs.lock || inputs.owned_linux_beta }}\n    uses: ./.github/workflows/linux-beta.yml') ||
+      !/^    needs: \[[^\n]*route-linux-beta[^\n]*\]$/m.test(shared) ||
+      !shared.includes('"route-linux-beta",["lock","owned_linux_beta"]')) return false;
+  return true;
+}
+
 function git(cwd, ...args) {
   return cp.execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 }
@@ -185,10 +240,13 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
       if (prTrigger(before) && topBlock(before, 'concurrency').length > 0) {
         protectedModified++;
         if (!prTrigger(text)) {
-          // Permit only the proven Windows beta -> mandatory PR gate migration.
-          // Every unrelated deletion of a protected trigger still fails closed.
-          const routed = record.path === '.github/workflows/windows-beta.yml' &&
-            allowedWindowsBetaMigration(before, text, path => git(cwd, 'show', head + ':' + path));
+          // Permit only byte-exact owner moves backed by the mandatory route.
+          // Every other removed protected trigger still fails closed.
+          const read = path => git(cwd, 'show', head + ':' + path);
+          const routed = (record.path === '.github/workflows/windows-beta.yml' &&
+            allowedWindowsBetaMigration(before, text, read)) ||
+            (record.path === '.github/workflows/linux-beta.yml' &&
+            allowedLinuxBetaMigration(before, text, read));
           if (!routed) errors.push(record.path + ': removed existing pull_request trigger');
         } else {
           const newer = topBlock(text, 'concurrency');
@@ -233,4 +291,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, changedWorkflows, audit, main };
+module.exports = { topBlock, prEvents, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, changedWorkflows, audit, main };

@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     pub fn on_core_events(&mut self, root: &mut RenderRoot) -> bool {
         let mut title = false;
@@ -25,14 +24,7 @@ impl App {
         self.on_graph_results(root);
         self.on_update(root);
         self.on_retention_done(root);
-        #[cfg(feature = "dropbox-readonly-preview")]
-        if self.dropbox_preview.poll() && matches!(
-            &self.popup,
-            Some(Popup::Settings { dialog, .. })
-                if dialog.section == crate::ui::settings::schema::Section::Sync
-        ) {
-            self.refresh_settings(root);
-        }
+        #[cfg(feature = "dropbox-readonly-preview")] self.poll_dropbox_settings(root);
         self.undo_failed_renames(root);
         self.poll_find(root);
         let mut links_changed = false;
