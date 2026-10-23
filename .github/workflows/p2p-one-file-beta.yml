@@ -59,6 +59,13 @@ jobs:
       - name: Strict isolated beta tests
         shell: bash
         run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta -- --nocapture
+      - name: Diagnose Native Inbox lockfile reconciliation (fail if changed)
+        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
+        shell: bash
+        run: |
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 --no-deps > /dev/null
+          git diff -- aquilum-app/Cargo.lock
+          git diff --exit-code -- aquilum-app/Cargo.lock
       - name: Exact Core atomic create-new regression tests
         shell: bash
         run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
