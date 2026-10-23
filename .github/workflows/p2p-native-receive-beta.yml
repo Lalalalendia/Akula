@@ -73,7 +73,7 @@ jobs:
         run: |
           # Synthetic bytes and ephemeral keys only; external n0 infra required.
           # This is NOT a two-physical-network relay or power-loss test.
-          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta actual_n0_identity_only_quic_one_file_to_cold_inbox -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta actual_n0_identity_only_quic_one_file_to_cold_inbox -- --ignored --nocapture
       - name: Compile actual Native receiving feature
         shell: bash
         run: |
