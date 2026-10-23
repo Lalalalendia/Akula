@@ -253,4 +253,3 @@ If you cannot or do not want to use n0 infrastructure, use direct
 `listen`/`connect` with a reachable numeric IP:port or a separately
 configured private overlay/VPN. In that case the normal direct-only CLI
 will not use any n0 discovery/relay.
-
