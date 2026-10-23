@@ -27,6 +27,10 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 
 [features]
 installed = []
+# Explicit, opt-in native W4/SSH production pilot. No automatically started
+# listeners, no file-sync authority, no default/signed Windows release impact.
+# The helper is a separate, SHA-256-pinned binary beside the Linux Akula app.
+messaging-w4-pilot = []
 memory-probe = []
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
