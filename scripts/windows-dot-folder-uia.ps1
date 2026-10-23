@@ -16,6 +16,62 @@ $installed = Join-Path $env:LOCALAPPDATA 'Akula\akula-app.exe'
 if ([System.IO.Path]::GetFullPath($ExePath) -ne [System.IO.Path]::GetFullPath($installed) -or
     !(Test-Path -LiteralPath $installed)) { throw 'Unexpected executable, not installed Akula' }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes -ErrorAction Stop
+
+# TreeItem exposes AccessKit Click, but Windows UIA does not expose InvokePattern
+# for this role. Exercise the real installed pointer path, not a model-only hook.
+. (Join-Path $PSScriptRoot 'windows-beta-gui-input.ps1')
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class AkulaDotPointer {
+    [StructLayout(LayoutKind.Explicit, Size = 40)]
+    public struct Input {
+        [FieldOffset(0)] public uint Type;
+        [FieldOffset(20)] public uint Flags;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Point {
+        public int X;
+        public int Y;
+    }
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern uint SendInput(uint count, [In] Input[] inputs, int size);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")]
+    static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+
+    public static void Click(IntPtr hwnd, int expectedPid, int x, int y) {
+        if (IntPtr.Size != 8 || Marshal.SizeOf(typeof(Input)) != 40 || hwnd == IntPtr.Zero)
+            throw new InvalidOperationException("Invalid Windows x64 pointer input layout/window");
+        uint owner;
+        if (GetWindowThreadProcessId(hwnd, out owner) == 0 || owner != (uint)expectedPid)
+            throw new InvalidOperationException("Refusing pointer input: Akula window PID mismatch");
+        if (GetForegroundWindow() != hwnd)
+            throw new InvalidOperationException("Refusing pointer input: Akula is not foreground");
+        if (!SetCursorPos(x, y))
+            throw new InvalidOperationException("Cannot position mouse on verified Akula TreeItem");
+        IntPtr underPointer = WindowFromPoint(new Point { X = x, Y = y });
+        if (underPointer == IntPtr.Zero || GetAncestor(underPointer, 2) != hwnd)
+            throw new InvalidOperationException("Refusing to click outside the installed Akula window");
+        var inputs = new Input[] {
+            new Input { Type = 0, Flags = 0x0002 },
+            new Input { Type = 0, Flags = 0x0004 }
+        };
+        uint sent = SendInput(2, inputs, Marshal.SizeOf(typeof(Input)));
+        if (sent != 2)
+            throw new InvalidOperationException("OS mouse click injected " + sent +
+                "/2 events; Win32 error " + Marshal.GetLastWin32Error());
+    }
+}
+'@ -ErrorAction Stop
+
 $baseline = Join-Path $VaultPath 'First note.md'
 if (!(Test-Path -LiteralPath $baseline)) { throw 'Missing existing Windows beta note' }
 $userDir = Join-Path $VaultPath '.заметки'
@@ -50,17 +106,41 @@ function Find-TreeItem {
     return $null
 }
 function Activate-TreeItem {
-    param([System.Windows.Automation.AutomationElement]$Item)
-    $pattern = $null
-    if ($Item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
-        ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
-        return
+    param(
+        [System.Windows.Automation.AutomationElement]$Item,
+        [System.Windows.Automation.AutomationElement]$Root,
+        [System.Diagnostics.Process]$Process
+    )
+    $Process.Refresh()
+    if ($Process.HasExited -or $Process.MainWindowHandle -eq [IntPtr]::Zero -or
+        $Process.MainWindowTitle -notlike '*Akula*') {
+        throw 'Cannot click an absent or unexpected Akula window'
     }
-    if ($Item.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$pattern)) {
-        ([System.Windows.Automation.ExpandCollapsePattern]$pattern).Expand()
-        return
+    $bounds = $Item.Current.BoundingRectangle
+    $windowBounds = $Root.Current.BoundingRectangle
+    if ($Item.Current.IsOffscreen -or $bounds.IsEmpty -or
+        $bounds.Width -le 0 -or $bounds.Height -le 0) {
+        throw "Cannot physically click an invisible TreeItem: $($Item.Current.Name)"
     }
-    throw "No UIA activation available for TreeItem '$($Item.Current.Name)'"
+    $x = [int][Math]::Floor($bounds.Left + $bounds.Width / 2)
+    $y = [int][Math]::Floor($bounds.Top + $bounds.Height / 2)
+    if ($x -lt $windowBounds.Left -or $x -ge $windowBounds.Right -or
+        $y -lt $windowBounds.Top -or $y -ge $windowBounds.Bottom) {
+        throw "TreeItem center outside verified Akula window: $($Item.Current.Name)"
+    }
+    $hwnd = [IntPtr]$Process.MainWindowHandle
+    [AkulaBetaGuiInput]::ShowWindow($hwnd, 9) | Out-Null
+    $foreground = $false
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        [AkulaBetaGuiInput]::SetForegroundWindow($hwnd) | Out-Null
+        Start-Sleep -Milliseconds 150
+        if ([AkulaBetaGuiInput]::GetForegroundWindow() -eq $hwnd) {
+            $foreground = $true
+            break
+        }
+    }
+    if (!$foreground) { throw 'Refusing pointer click without foreground Akula' }
+    [AkulaDotPointer]::Click($hwnd, $Process.Id, $x, $y)
 }
 $proc = $null
 try {
@@ -105,7 +185,7 @@ try {
     foreach ($name in @('.git', '.trash', 'SECRET', 'DELETED')) {
         if ($null -ne (Find-TreeItem -Root $root -Name $name)) { throw "Internal UIA TreeItem exposed: $name" }
     }
-    Activate-TreeItem -Item $user
+    Activate-TreeItem -Item $user -Root $root -Process $proc
     $noteRow = $null
     for ($i = 0; $i -lt 80; $i++) {
         Start-Sleep -Milliseconds 200
@@ -115,7 +195,7 @@ try {
     if ($null -eq $noteRow -or $noteRow.Current.IsOffscreen) {
         throw 'Expanding the real .заметки TreeItem did not expose its note'
     }
-    Activate-TreeItem -Item $noteRow
+    Activate-TreeItem -Item $noteRow -Root $root -Process $proc
     $opened = $false
     for ($i = 0; $i -lt 80; $i++) {
         Start-Sleep -Milliseconds 200
