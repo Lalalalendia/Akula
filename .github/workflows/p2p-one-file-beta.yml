@@ -1,0 +1,84 @@
+name: Akula P2P one-file LAN beta vertical path
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'interop/akula-staya/**'
+      - '.github/workflows/p2p-one-file-beta.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  one-file:
+    name: Compile and verify Windows/LAN beta boundary on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Validate formatting of exact beta source
+        shell: bash
+        run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
+      - name: Compile actual opt-in one-file beta
+        shell: bash
+        run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta
+      - name: Strict isolated beta tests
+        shell: bash
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta -- --nocapture
+      - name: Exact Core atomic create-new regression tests
+        shell: bash
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+      - name: Strict Clippy for opt-in beta and bridge
+        shell: bash
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --all-targets -- -D warnings
+      - name: Build Windows one-file acceptance tools (NOT RELEASE)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta
+          if ($LASTEXITCODE -ne 0) { throw 'One-file beta binary build failed' }
+          cargo build --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity
+          if ($LASTEXITCODE -ne 0) { throw 'OS identity operator binary build failed' }
+          $bridge = cargo metadata --manifest-path interop/akula-staya/Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Interop metadata failed' }
+          $core = cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Core metadata failed' }
+          $out = '.artifacts/p2p-lan-beta-ci'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -LiteralPath (Join-Path $bridge.target_directory 'debug/akula-p2p-one-file-beta.exe') -Destination $out
+          Copy-Item -LiteralPath (Join-Path $core.target_directory 'debug/akula-p2p-identity.exe') -Destination $out
+          Copy-Item -LiteralPath 'interop/akula-staya/README.md' -Destination (Join-Path $out 'README.md')
+          @(
+            'CI ONLY - UNSIGNED - NOT AN AKULA RELEASE',
+            'Operator-only P2P LAN beta prototype. No installed GUI or signed updater.',
+            'Use only on two consenting Windows test devices with independently verified Iroh EndpointIds.',
+            'Do not redistribute, automate or treat RECEIVER_VERIFIED as a power-loss durable receipt.',
+            "SOURCE_COMMIT=$env:GITHUB_SHA"
+          ) | Set-Content -LiteralPath (Join-Path $out 'NOT_RELEASED.txt')
+          Get-ChildItem -LiteralPath $out -Filter '*.exe' | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Add-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt')
+          }
+      - name: Retain Windows operator acceptance pair (NEVER AUTO-RELEASE)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-p2p-one-file-Windows-CI-ONLY-NOT-RELEASE
+          path: .artifacts/p2p-lan-beta-ci/*
+          retention-days: 5
+          if-no-files-found: error
