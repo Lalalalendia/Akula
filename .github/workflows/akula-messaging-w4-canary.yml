@@ -43,10 +43,13 @@ jobs:
           grep -Fqx 'license = "MIT"' _w4-pilot-upstream/Cargo.toml
           test -f _w4-pilot-upstream/src/bin/w4_tunnel_lab.rs
       - name: Native Linux prerequisites
+        timeout-minutes: 10
         shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
           sudo apt-get remove -y $(dpkg-query -W -f='${Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
           sudo apt-get install -y -qq libunwind-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
