@@ -3,6 +3,8 @@ pub mod schema;
 
 mod control;
 mod layout;
+mod dialog;
+pub use dialog::SettingsDialog;
 
 use std::collections::HashMap;
 
@@ -16,7 +18,7 @@ use masonry::properties::{Gap, Padding};
 use masonry::widgets::{Flex, SizedBox};
 
 use crate::i18n::t;
-use crate::ui::dialog::{CardSize, DialogIds, Modal, header};
+use crate::ui::dialog::{CardSize, Modal, header};
 use crate::ui::editor::TextEditor;
 use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
@@ -38,20 +40,6 @@ pub enum Binding {
     Button(Action),
 }
 
-pub struct SettingsDialog {
-    pub layer: WidgetId,
-    pub close: WidgetId,
-    pub content: Handle<ScrollArea<Flex>>,
-    pub nav: Vec<(WidgetId, Section)>,
-    pub section: Section,
-    pub bindings: HashMap<WidgetId, Binding>,
-    pub copied: Option<usize>,
-    pub trash_page: usize,
-    pub server_advanced: bool,
-    pub sync_selected: Option<aquilum_core::sync::NativeRecoveryCasePreview>,
-    pub sync_notice: Option<String>,
-    pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
-}
 
 fn card_size(room: Size) -> Size {
     let window = Size::new(room.width + size::SPACE_32, room.height + size::SPACE_32);

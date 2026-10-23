@@ -14,14 +14,11 @@ on:
       - "aquilum-app/native/Cargo.toml"
       - "aquilum-app/native/src/app/settings/server.rs"
       - "aquilum-app/native/src/app/settings/server_state.rs"
-      - "aquilum-app/native/src/app/settings/context.rs"
       - "aquilum-app/native/src/app/settings/press.rs"
       - "aquilum-app/native/src/ui/settings/schema/server/server_status.rs"
       - "aquilum-app/native/src/ui/settings/schema/server/identity.rs"
-      - "aquilum-app/native/src/ui/settings/schema/server.rs"
       - "aquilum-app/native/assets/locales/ru.json"
       - "aquilum-app/native/assets/locales/en.json"
-      - "aquilum-app/native/src/ui/settings/schema/types/context.rs"
       - "aquilum-app/native/src/ui/settings/schema/tests.rs"
   workflow_dispatch:
 

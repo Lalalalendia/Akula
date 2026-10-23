@@ -20,6 +20,8 @@ mod server;
 mod tests;
 mod trash;
 mod types;
+mod blocks;
+pub use blocks::blocks;
 
 pub use appearance::reader_quick;
 pub use data::templates_path;
@@ -37,20 +39,3 @@ use server::*;
 #[cfg(all(windows, feature = "server-readonly-preflight"))]
 pub(crate) use server::identity::probe_target;
 use trash::*;
-
-pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block> {
-    match section {
-        Section::Ui => ui(config, ctx),
-        Section::Editor => editor(config),
-        Section::Reader => reader(config),
-        Section::Data => [templates(config, ctx), files(config)].into_iter().flatten().collect(),
-        Section::Analysis => analysis(config),
-        Section::Mcp => mcp(config, ctx),
-        Section::Sync => std::iter::once(yandex_setup(config)).chain(sync_recovery(ctx)).collect(),
-        Section::Server => vec![server_setup(config, ctx)],
-        Section::History => history(config),
-        Section::Trash => trash(config, ctx),
-        Section::System => system(config, ctx),
-        Section::Shortcuts => shortcuts(),
-    }
-}

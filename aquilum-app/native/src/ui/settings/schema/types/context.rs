@@ -1,18 +1,8 @@
 use std::path::PathBuf;
 use aquilum_core::mcp::McpStatus;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview};
-
-/// Ephemeral SSH verification result, not a Node install receipt.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ServerProbeView {
-    Checking,
-    Observed { facts: String },
-    Unsupported { facts: String },
-    Failed,
-}
-
 pub struct Context {
-    pub server_probe: Option<ServerProbeView>,
+    pub server_probe: Option<super::ServerProbeView>,
     pub server_advanced: bool,
     pub workspace: Option<PathBuf>,
     pub scale: f64,
@@ -28,7 +18,6 @@ pub struct Context {
     pub autostart: Option<bool>,
     pub update: Option<crate::updater::Status>,
 }
-
 impl Context {
     #[cfg(test)]
     pub fn new(scale: f64) -> Self {

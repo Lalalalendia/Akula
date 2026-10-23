@@ -1,5 +1,5 @@
 //! Feature-gated SSH probe state, separate from window's global state.
-use super::{App, Effect};
+use super::{App, Effect, Section};
 use aquilum_core::settings::models::ServerBootstrapDraft;
 use crate::ui::settings::schema::ServerProbeView;
 use masonry::app::RenderRoot;
@@ -29,6 +29,16 @@ impl Default for ServerProbeState {
     }
 }
 impl App {
+    pub(super) fn server_probe_view(&self, section: Section) -> Option<ServerProbeView> {
+        if section != Section::Server {
+            return None;
+        }
+        let current = self.workspace.core.settings.get_config().server_setup;
+        self.server_probe.observation.as_ref()
+            .filter(|(draft, _)| draft == &current)
+            .map(|(_, status)| status.clone())
+    }
+
     pub(in crate::app) fn on_update_and_server_probe(&mut self, root: &mut RenderRoot) {
         self.on_update(root);
         #[cfg(all(windows, feature = "server-readonly-preflight"))]

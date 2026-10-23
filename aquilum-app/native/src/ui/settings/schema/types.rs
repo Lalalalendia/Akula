@@ -1,5 +1,4 @@
 use aquilum_core::settings::models::AppConfig;
-use aquilum_core::sync::NativeRecoveryDecision;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -18,27 +17,11 @@ pub enum Setter {
 }
 
 mod context;
+mod actions;
+mod server_probe;
 pub use context::*;
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Action {
-    /// Read-only SSH verification; never an install approval.
-    VerifyServer,
-    ToggleServerAdvanced,
-    /// Disabled until signed installer and explicit owner approval exist.
-    InstallServer,
-    InspectRecovery(String),
-    RequestRecoveryReview(NativeRecoveryDecision),
-    OpenTrash,
-    Restore(String),
-    TrashPage(usize),
-    CreateTemplates,
-    NewToken,
-    Copy(usize, String),
-    OpenUrl(&'static str),
-    CheckUpdates,
-    InstallUpdate,
-}
+pub use actions::Action;
+pub use server_probe::ServerProbeView;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Button {
