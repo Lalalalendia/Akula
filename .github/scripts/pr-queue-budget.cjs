@@ -1,31 +1,17 @@
 'use strict';
 
-// The starting snapshot was 136 open PRs. 140 is a hard admission ceiling;
-// resolving pre-cutover PRs lowers it toward 50 without deleting old work.
-const INITIAL_LIMIT = 140;
-const GOAL_LIMIT = 50;
-const CUTOVER = '2026-10-23T16:12:00Z';
-const CUTOVER_TIME = Date.parse(CUTOVER);
+// Fixed PR admission ceiling. Closed/merged PRs release one slot.
+const MAX_OPEN_PRS = 130;
 
 function calculateBudget(pulls) {
   if (!Array.isArray(pulls)) throw new TypeError('Expected an array of pull requests');
   const open = pulls.filter(pr => pr.state === 'open');
-  const retiredLegacy = pulls.filter(pr =>
-    pr.state === 'closed' &&
-    Number.isFinite(Date.parse(pr.created_at)) &&
-    Number.isFinite(Date.parse(pr.closed_at)) &&
-    Date.parse(pr.created_at) < CUTOVER_TIME &&
-    Date.parse(pr.closed_at) >= CUTOVER_TIME
-  ).length;
-  const ceiling = Math.max(GOAL_LIMIT, INITIAL_LIMIT - retiredLegacy);
   return {
     openCount: open.length,
     draftCount: open.filter(pr => pr.draft).length,
     stackedCount: open.filter(pr => pr.base?.ref !== 'main').length,
-    retiredLegacy,
-    ceiling,
-    goal: GOAL_LIMIT,
-    overflow: Math.max(0, open.length - ceiling),
+    ceiling: MAX_OPEN_PRS,
+    overflow: Math.max(0, open.length - MAX_OPEN_PRS),
   };
 }
 
@@ -39,8 +25,8 @@ function oldestCandidates(pulls, max = 15) {
 }
 
 async function listPulls(github, owner, repo) {
-  // Use the GitHub Pulls API: the Issues API includes PRs and would inflate counts.
-  return github.paginate(github.rest.pulls.list, { owner, repo, state: 'all', per_page: 100 });
+  // Only open PRs are needed; avoid fetching hundreds of closed PRs.
+  return github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
 }
 
 async function auditQueue({ github, context, core }) {
@@ -50,8 +36,7 @@ async function auditQueue({ github, context, core }) {
   const lines = [
     '## Akula PR queue budget',
     `- Open: **${result.openCount}** (Draft: ${result.draftCount}; non-main base: ${result.stackedCount})`,
-    `- Current admission ceiling: **${result.ceiling}**; absolute maximum: **140**; goal: **50**`,
-    `- Resolved pre-cutover PRs: **${result.retiredLegacy}**`,
+    `- Fixed admission maximum: **${result.ceiling}**; closing/merging a PR frees one slot`,
     `- Open above ceiling: **${result.overflow}**`,
     '',
     '### Existing PRs for manual triage (not automatically closed)',
@@ -61,7 +46,7 @@ async function auditQueue({ github, context, core }) {
     'Close or merge superseded PRs only after reviewing dependencies and required checks. Never silently delete unmerged branches.',
   ];
   await core.summary.addRaw(lines.join('\n')).write();
-  core.info(`PR budget open=${result.openCount} ceiling=${result.ceiling} retired_legacy=${result.retiredLegacy}`);
+  core.info(`PR budget open=${result.openCount} fixed_ceiling=${result.ceiling}`);
   return result;
 }
 
@@ -89,9 +74,9 @@ async function enforceAdmission({ github, context, core }) {
   const note = [
     '**Akula PR admission budget: this new/reopened PR exceeds the queue ceiling.**',
     '',
-    `Current queue: ${current.openCount} open; admission ceiling: ${current.ceiling}; absolute maximum: 140; target: 50.`,
-    `The ceiling decreases by one for each pre-${CUTOVER} PR resolved after the cutover, down to 50.`,
-    'To resume this work, merge or close another superseded PR, check its dependent branches, then reopen this PR.',
+    `Current queue: ${current.openCount} open; fixed maximum: ${current.ceiling}.`,
+    'The maximum does not shrink. Closing or merging any PR releases one slot.',
+    'To resume, merge or close a PR after checking its dependencies, then reopen when the total fits the fixed maximum.',
     'No commit or branch is deleted by this admission rule. Urgent fixes need a slot too; retire lower-priority work first.',
     '',
     'Policy: docs/engineering/AKULA-PR-QUEUE-BUDGET.md',
@@ -108,6 +93,6 @@ async function enforceAdmission({ github, context, core }) {
 }
 
 module.exports = {
-  INITIAL_LIMIT, GOAL_LIMIT, CUTOVER,
+  MAX_OPEN_PRS,
   calculateBudget, oldestCandidates, listPulls, auditQueue, enforceAdmission,
 };
