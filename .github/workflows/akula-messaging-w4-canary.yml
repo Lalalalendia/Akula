@@ -6,8 +6,10 @@ on:
     paths:
       - ".github/workflows/akula-messaging-w4-canary.yml"
       - "aquilum-app/native/src/messaging_w4_pilot.rs"
-      - "aquilum-app/native/src/main.rs"
-      - "aquilum-app/native/Cargo.toml"
+      - "aquilum-app/native/src/args/w4_pilot.rs"
+      - "aquilum-app/native/src/app/transfer/w4_pilot.rs"
+      - "aquilum-app/native/src/ui/transfer/w4_pilot.rs"
+      - "aquilum-app/native/src/app/transfer/dialog.rs"
       - "aquilum-app/native/packaging/akula-linux-w4-pilot.json"
       - "scripts/messaging/**"
       - "docs/messaging/**"
