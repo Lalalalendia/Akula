@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     pub fn new(workspace: Workspace, initial_text: String) -> Self {
         let tree = FileTree::new(workspace.root.clone(), &workspace.data_dir, Arc::clone(&workspace.wake));
@@ -28,6 +27,7 @@ impl App {
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,
+            find_mark_stamp: None,
             note: None,
             text: crop::Rope::from(initial_text),
             inactive_notes: Vec::new(),

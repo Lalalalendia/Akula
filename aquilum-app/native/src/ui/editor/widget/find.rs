@@ -4,19 +4,19 @@ use aquilum_core::text::cancel::Generation;
 use aquilum_core::text::matcher::Matcher;
 
 use super::matching::{FIND, find_in};
-use super::*;
+use super::find_terms::find_terms;use super::*;
 use crate::ui::editor::change::{self, Change};
 
 pub type Status = (usize, usize, bool);
 
 #[derive(Default)]
 pub(super) struct Find {
-    query: String,
-    matches: Vec<Range<usize>>,
+    pub(super) query: String,
+    pub(super) matches: Vec<Range<usize>>,
     active: usize,
     only_active: bool,
-    generation: Generation,
-    pending: Option<Receiver<Vec<Range<usize>>>>,
+    pub(super) generation: Generation,
+    pub(super) pending: Option<Receiver<Vec<Range<usize>>>>,
 }
 
 impl TextEditor {
@@ -28,7 +28,7 @@ impl TextEditor {
     fn search(&mut self) {
         let cancel = self.find.generation.next();
         self.find.pending = None;
-        let matcher = Matcher::new(&self.find.query, FIND);
+        let matcher = Matcher::any(&find_terms(&self.find.query), FIND);
         let (base, end) = self.doc.loaded_range();
         if matcher.is_empty() || base == 0 && end == self.doc.len() {
             self.find.matches = self.doc.search(|text| matcher.find_all(text));
@@ -106,7 +106,7 @@ impl TextEditor {
         if total > 0 {
             let find = &mut this.widget.find;
             find.active = crate::ui::keymap::cycle(find.active, total, delta > 0);
-            find.only_active = true;
+            find.only_active = false; // Keep every match visible after next/previous.
             this.ctx.request_render();
         }
         let start = this.widget.find.matches.get(this.widget.find.active).map(|m| m.start);

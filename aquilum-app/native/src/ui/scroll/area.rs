@@ -17,6 +17,9 @@ pub struct ScrollArea<W: Widget> {
     pub(super) bar: Scrollbar,
     pub(super) published: Option<u64>,
     pub(super) thumb: masonry::peniko::ImageBrush,
+    pub(super) find_marks: Vec<f64>,
+    pub(super) find_rows: Vec<usize>,
+    pub(super) find_raster: Option<(f64, f64)>,
 }
 
 impl<W: Widget> Drop for ScrollArea<W> {
@@ -51,21 +54,10 @@ impl<W: Widget> ScrollArea<W> {
             bar: Scrollbar::new(axis),
             published: None,
             thumb: crate::render::sprite::marker(),
+            find_marks: Vec::new(),
+            find_rows: Vec::new(),
+            find_raster: None,
         }
-    }
-
-    pub fn offset(&self) -> f64 {
-        self.offset
-    }
-
-    pub fn at(mut self, offset: f64) -> Self {
-        self.offset = offset.max(0.0);
-        self
-    }
-
-    pub fn fill(mut self, fill: bool) -> Self {
-        self.fill = fill;
-        self
     }
 
     pub fn set_child(this: &mut WidgetMut<'_, Self>, child: NewWidget<W>) {

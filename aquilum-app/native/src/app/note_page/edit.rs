@@ -1,5 +1,4 @@
 use std::time::Duration;
-
 use masonry::app::RenderRoot;
 
 use super::super::App;
@@ -17,6 +16,7 @@ impl App {
         self.queue_save();
         self.refresh_hero(root);
         self.metadata_changed(root, had);
+        self.refresh_find_marks(root);
     }
 
     fn adopt_body(&mut self, root: &RenderRoot) {

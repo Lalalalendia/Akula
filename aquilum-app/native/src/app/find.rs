@@ -2,13 +2,12 @@
 //! совпадению, Escape закрывает.
 
 use masonry::app::RenderRoot;
-use masonry::core::keyboard::{Key, Modifiers};
-use crate::ui::keymap::{self, Command, Scope};
 use masonry::core::{ErasedAction, NewWidget, WidgetId};
 use masonry::widgets::SizedBox;
 use crate::ui::editor::TextAction;
 
 use super::App;
+
 use crate::ui::editor::TextEditor;
 use crate::ui::search::Placeholder;
 use crate::ui::widgets::{Pressed, Slot};
@@ -25,11 +24,12 @@ impl App {
         root.focus_on(field);
     }
 
-    fn close_find(&mut self, root: &mut RenderRoot) {
+    pub(super) fn close_find(&mut self, root: &mut RenderRoot) {
         let (Some(_), Some(ids)) = (self.find.take(), &self.note_ids) else { return };
         ids.find.edit(root, |mut slot| Slot::set_child(&mut slot, NewWidget::new(SizedBox::empty()).erased()));
         ids.body.edit(root, |mut body| TextEditor::find(&mut body, ""));
         root.focus_on(Some(ids.body.id()));
+        self.refresh_find_marks(root);
     }
 
     fn show_status(&self, root: &mut RenderRoot, (current, total, more): crate::ui::editor::Status) {
@@ -44,9 +44,10 @@ impl App {
         if let Some(status) = ids.body.edit(root, |mut body| TextEditor::poll_find(&mut body)).flatten() {
             self.show_status(root, status);
         }
+        self.refresh_find_marks(root);
     }
 
-    fn find_step(&mut self, root: &mut RenderRoot, delta: isize) {
+    pub(super) fn find_step(&mut self, root: &mut RenderRoot, delta: isize) {
         let Some(ids) = &self.note_ids else { return };
         let Some((status, start)) = ids.body.edit(root, |mut body| TextEditor::find_step(&mut body, delta)) else { return };
         self.show_status(root, status);
@@ -65,6 +66,7 @@ impl App {
                 let status = ids.body.edit(root, |mut body| TextEditor::find(&mut body, query)).unwrap_or_default();
                 placeholder.edit(root, |mut p| Placeholder::set_empty(&mut p, query.is_empty()));
                 self.show_status(root, status);
+                self.refresh_find_marks(root);
             }
             return true;
         }
@@ -84,17 +86,5 @@ impl App {
         true
     }
 
-    pub fn find_key(&mut self, root: &mut RenderRoot, key: &Key, modifiers: Modifiers) -> bool {
-        let Some(find) = &self.find else { return false };
-        if root.focused_widget() != Some(find.field.id()) {
-            return false;
-        }
-        match keymap::command(&[Scope::Find], key, modifiers) {
-            Some(Command::FindNext) => self.find_step(root, 1),
-            Some(Command::FindPrevious) => self.find_step(root, -1),
-            Some(Command::Close) => self.close_find(root),
-            _ => return false,
-        }
-        true
-    }
+
 }

@@ -21,7 +21,7 @@ pub struct Search {
 
 impl Search {
     pub fn ranges(&self, text: &str, seen: &mut usize) -> Vec<Range<usize>> {
-        let found = Matcher::new(&self.query, FIND).find_all(text);
+        let found = Matcher::any(&super::find_terms::find_terms(&self.query), FIND).find_all(text);
         let first = *seen;
         *seen += found.len();
         match self.only {

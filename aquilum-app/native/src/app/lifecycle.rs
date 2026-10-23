@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
@@ -26,6 +25,7 @@ impl App {
             self.set_text(root, text);
             self.refresh_save_error(root);
         }
+        self.refresh_find_marks(root); // Account for resize and asynchronous layout changes.
     }
 
     pub fn scale(&self) -> f64 {

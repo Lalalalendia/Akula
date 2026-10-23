@@ -11,15 +11,6 @@ use super::Scrolled;
 use super::area::ScrollArea;
 use crate::ui::tokens::size;
 
-impl<W: Widget> ScrollArea<W> {
-    fn measure_cross(&mut self, ctx: &mut MeasureCtx<'_>, cross: Option<Length>) -> Length {
-        let content = ctx.compute_length(&mut self.child, LenReq::MaxContent.into(), LayoutSize::NONE, Axis::Horizontal, None);
-        let height = ctx.compute_length(&mut self.child, LenReq::MaxContent.into(), LayoutSize::NONE, Axis::Vertical, Some(content));
-        let overflow = cross.is_some_and(|width| content.get() > width.get() + 0.5);
-        Length::px(height.get() + if overflow { size::SCROLLBAR_WIDTH } else { 0.0 })
-    }
-}
-
 impl<W: Widget> Widget for ScrollArea<W> {
     type Action = Scrolled;
 
@@ -127,12 +118,16 @@ impl<W: Widget> Widget for ScrollArea<W> {
 
     fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _painter: &mut Painter<'_>) {}
 
-    fn post_paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
+    fn post_paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, painter: &mut Painter<'_>) {
         if !self.overflow {
             return;
         }
+        let span = self.span();
         crate::render::sprite::paint(&self.thumb, self.bar.color());
-        painter.fill(self.bar.shape(&self.span()), &self.thumb).draw();
+        painter.fill(self.bar.shape(&span), &self.thumb).draw();
+        self.paint_find_marks(ctx, painter, &span);
+
+
     }
 
     fn accessibility_role(&self) -> Role {

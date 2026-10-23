@@ -4,7 +4,7 @@ mod book;
 mod core_events;
 mod embeds;
 mod file_menu;
-mod find;
+mod find; mod find_keys; mod find_marks; mod find_marks_impl;
 mod editor_requests;
 mod graph_page;
 mod history;
@@ -27,7 +27,6 @@ mod widths;
 mod workspaces;
 #[cfg(test)]
 mod tests;
-
 use std::collections::HashMap;
 use crate::ui::editor::TextEditor;
 use std::path::{Path, PathBuf};
@@ -115,6 +114,7 @@ pub struct App {
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,
     find: Option<crate::ui::find::FindBar>,
+    find_mark_stamp: Option<find_marks::MarkStamp>,
     note: Option<Note>,
     text: crop::Rope,
     // At most two clean, hash-verified Rope snapshots from inactive tabs.
