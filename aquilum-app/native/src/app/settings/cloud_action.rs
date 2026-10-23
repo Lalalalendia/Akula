@@ -5,6 +5,7 @@ use super::{App, Effect, Outcome};
 use crate::ui::dialog::DialogAnswer;
 use crate::ui::editor::{TextAction, TextEditor};
 use crate::ui::settings::{Binding, CloudPopup, SettingsDialog};
+use crate::ui::settings::controls::Committed;
 use crate::ui::settings::schema::{Action, Value};
 use crate::ui::widgets::Pressed;
 
@@ -23,6 +24,29 @@ impl App {
                     cloud.remember_text(*setter, text);
                 }
                 _ => {}
+            }
+            dialog.cloud_popup = Some(cloud);
+            return self.keep(dialog, None, Effect::None, root);
+        }
+        // InputBox emits Committed when its child loses focus (including
+        // clicking Cancel). Inside this provider modal the commit belongs
+        // to the *draft*, not to AppConfig. The general settings handler
+        // persists on Committed and must never receive this event here.
+        if action.downcast_ref::<Committed>().is_some() {
+            let draft = match cloud.bindings.get(&id) {
+                Some(Binding::Commit(field)) => {
+                    let setter = match cloud.bindings.get(&field.id()) {
+                        Some(Binding::Text { setter, .. }) => Some(*setter),
+                        _ => None,
+                    };
+                    setter.and_then(|setter| {
+                        field.get(root).map(|editor| (setter, editor.inner().text()))
+                    })
+                }
+                _ => None,
+            };
+            if let Some((setter, text)) = draft {
+                cloud.remember_text(setter, &text);
             }
             dialog.cloud_popup = Some(cloud);
             return self.keep(dialog, None, Effect::None, root);
