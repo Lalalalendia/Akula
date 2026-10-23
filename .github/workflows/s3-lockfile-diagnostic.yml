@@ -1,0 +1,28 @@
+# Isolated Cargo.lock investigation; never publishes artifacts or mutates main.
+name: Temporary S3 Cargo lockfile diagnosis
+on:
+  push:
+    branches:
+      - diagnostics/s3-lockfile-20261023
+permissions:
+  contents: read
+jobs:
+  lockfile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Reconcile only ctutils and print reproducible Cargo.lock diff
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          echo 'HEAD=$(git rev-parse HEAD)'
+          cargo update -p ctutils --precise 0.4.5
+          echo '=== START LOCKFILE DIFF ==='
+          git diff -- Cargo.lock
+          echo '=== END LOCKFILE DIFF ==='
+          echo '=== VERIFY CARGO LOCKED METADATA ==='
+          cargo metadata --locked --format-version 1 --no-deps > /dev/null
+          echo 'AKULA_S3_LOCKFILE_METADATA_PASS'
