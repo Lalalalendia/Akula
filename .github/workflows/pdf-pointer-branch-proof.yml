@@ -1,0 +1,12 @@
+# Temporary, branch-scoped acceptance runner; never ships in main.
+# Reuses the existing Windows NSIS installed-beta gate with its pinned Shiva.
+name: Akula PDF OS pointer proof (isolated)
+on:
+  push:
+    branches:
+      - test/pdf-installed-windows-pointer-20261023
+permissions:
+  contents: read
+jobs:
+  installed-pdf-pointer:
+    uses: ./.github/workflows/windows-beta.yml
