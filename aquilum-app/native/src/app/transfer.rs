@@ -166,6 +166,14 @@ impl App {
             self.transfer.choose_peer((*device_id, *key));
             refresh = true;
         }
+        #[cfg(feature = "p2p-inbox-preview")]
+        if pressed && !refresh {
+            if let Some((_, receipt)) = dialog.inbox_save_actions.iter()
+                .find(|(button, _)| *button == id)
+            {
+                refresh = self.begin_inbox_save(receipt);
+            }
+        }
         #[cfg(feature = "p2p-device-ui")]
         if pressed && !refresh {
             if let Some((_, command)) = dialog.identity_actions.iter()

@@ -69,6 +69,10 @@ jobs:
       - name: Exact Core atomic create-new regression tests
         shell: bash
         run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+      - name: Rustfmt Native Inbox preview (dependent branch only)
+        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
+        shell: bash
+        run: cargo fmt --manifest-path aquilum-app/Cargo.toml -p aquilum-native -- --check
       - name: Compile read-only Native Inbox preview (dependent branch only)
         if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
         shell: bash

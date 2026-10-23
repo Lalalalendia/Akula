@@ -18,7 +18,7 @@
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::{
     fs::{self, File},
-    io::{self, Read},
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
@@ -178,6 +178,55 @@ impl InboxLedger {
             result.push((record.expected, self.status(id)?));
         }
         Ok(result)
+    }
+
+    /// Obtain a single pinned local file for a user-selected export. The
+    /// SQLite claim alone never suffices: rehash *this opened handle*. A
+    /// separate no-clobber export must rehash once more while copying.
+    /// No network path, untrusted filename or Vault write is accepted here.
+    pub fn open_verified_file(
+        &self,
+        id: Uuid,
+    ) -> Result<(File, ExpectedTransfer), LedgerError> {
+        let record = self.get(id)?.ok_or(LedgerError::UnknownTransfer)?;
+        if record.state != 1 {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        let expected = record.expected;
+        let path = self.object_path(id);
+        let info = fs::symlink_metadata(&path)?;
+        if !info.file_type().is_file() || info.len() != expected.bytes {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        let mut file = File::open(&path)?;
+        let opened = file.metadata()?;
+        if !opened.is_file() || opened.len() != expected.bytes {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        let mut hasher = blake3::Hasher::new();
+        let mut counted = 0u64;
+        let mut buffer = [0u8; BUFFER_BYTES];
+        loop {
+            let size = file.read(&mut buffer)?;
+            if size == 0 {
+                break;
+            }
+            counted = counted
+                .checked_add(size as u64)
+                .ok_or(LedgerError::InvalidLocalObject)?;
+            if counted > expected.bytes {
+                return Err(LedgerError::InvalidLocalObject);
+            }
+            hasher.update(&buffer[..size]);
+        }
+        if counted != expected.bytes
+            || file.metadata()?.len() != expected.bytes
+            || *hasher.finalize().as_bytes() != expected.blake3
+        {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        file.seek(SeekFrom::Start(0))?;
+        Ok((file, expected))
     }
 
     /// Internal transfer ID only. Remote filenames are never used as paths.
@@ -797,6 +846,33 @@ mod tests {
         ));
         assert_eq!(ledger.status(v.id).unwrap(), LocalStatus::NeedsReview);
         assert_eq!(ledger.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn export_source_requires_verified_state_and_rehashes_opened_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let (intent, bytes) = intent(Transport::P2p);
+        let mut writer = InboxLedger::open(dir.path()).unwrap();
+        writer.reserve(&intent).unwrap();
+        assert!(matches!(
+            writer.open_verified_file(intent.id),
+            Err(LedgerError::InvalidLocalObject)
+        ));
+        publish_fixture(&writer, &intent, &bytes);
+        assert_eq!(writer.confirm(&intent).unwrap(), LocalStatus::VerifiedLocal);
+        drop(writer);
+        let reader = InboxLedger::open_existing(dir.path()).unwrap().unwrap();
+        let (mut source, expected) = reader.open_verified_file(intent.id).unwrap();
+        assert_eq!(expected, intent);
+        let mut observed = Vec::new();
+        source.read_to_end(&mut observed).unwrap();
+        assert_eq!(observed, bytes);
+        drop(source);
+        fs::write(reader.object_path(intent.id), b"tampered").unwrap();
+        assert!(matches!(
+            reader.open_verified_file(intent.id),
+            Err(LedgerError::InvalidLocalObject)
+        ));
     }
 
     #[test]

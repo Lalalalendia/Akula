@@ -46,6 +46,8 @@ pub struct InboxView {
     pub total: u64,
     pub loading: bool,
     pub error: Option<String>,
+    pub exporting: bool,
+    pub notice_key: Option<&'static str>,
 }
 
 mod devices;
@@ -68,6 +70,7 @@ pub struct TransferDialog {
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
+    pub inbox_save_actions: Vec<(WidgetId, String)>,
 }
 
 mod dialog_view;

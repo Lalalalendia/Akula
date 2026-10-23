@@ -1,8 +1,8 @@
 //! Transfer dialog construction, leaving transfer.rs as a compact API.
 use super::*;
 
-/// The only actionable controls modify local drafts or open the local picker.
-/// No button can reach QUIC, File Gate, YDB or any source of peer authority.
+/// Draft controls remain inert. The optional received-Inbox Save Copy button
+/// invokes only an explicit local no-clobber export, never QUIC or Vault ACL.
 pub fn dialog(
     rows: &[QueueRow],
     devices: &[DeviceRow],
@@ -53,12 +53,16 @@ pub fn dialog(
         identity_actions = actions;
         card = card.with_fixed(rule()).with_fixed(panel);
     }
-    let card = if let Some(inbox) = inbox {
-        card.with_fixed(rule())
-            .with_fixed(details(&t("transfer.inboxTitle")))
-            .with(NewWidget::new(ScrollArea::new(inbox_view::render(inbox))), 1.0)
+    let (card, inbox_save_actions) = if let Some(inbox) = inbox {
+        let (panel, buttons) = inbox_view::render(inbox);
+        (
+            card.with_fixed(rule())
+                .with_fixed(details(&t("transfer.inboxTitle")))
+                .with(NewWidget::new(ScrollArea::new(panel)), 1.0),
+            buttons,
+        )
     } else {
-        card
+        (card, Vec::new())
     };
     let card = NewWidget::new(
         card.with_fixed(rule())
@@ -83,6 +87,7 @@ pub fn dialog(
             actions,
             device_actions,
             identity_actions,
+            inbox_save_actions,
         },
     )
 }
