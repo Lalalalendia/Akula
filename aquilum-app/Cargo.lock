@@ -123,6 +123,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "akula-inbox-ledger-lab"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rusqlite",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "akula-node-catalog"
 version = "0.1.0"
 dependencies = [
@@ -258,6 +268,7 @@ dependencies = [
  "accesskit_unix",
  "accesskit_windows",
  "aq_trace",
+ "akula-inbox-ledger-lab",
  "aquilum-core",
  "arboard",
  "base64 0.22.1",

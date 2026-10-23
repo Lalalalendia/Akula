@@ -10,6 +10,7 @@ pub fn dialog(
     choosing: bool,
     error: Option<&str>,
     identity: Option<&IdentityView>,
+    inbox: Option<&InboxView>,
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
@@ -52,6 +53,13 @@ pub fn dialog(
         identity_actions = actions;
         card = card.with_fixed(rule()).with_fixed(panel);
     }
+    let card = if let Some(inbox) = inbox {
+        card.with_fixed(rule())
+            .with_fixed(details(&t("transfer.inboxTitle")))
+            .with(NewWidget::new(ScrollArea::new(inbox_view::render(inbox))), 1.0)
+    } else {
+        card
+    };
     let card = NewWidget::new(
         card.with_fixed(rule())
             .with(queue, 1.0)

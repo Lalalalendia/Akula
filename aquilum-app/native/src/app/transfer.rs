@@ -18,6 +18,8 @@ const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
 mod model;
+#[cfg(feature = "p2p-inbox-preview")]
+mod inbox;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
@@ -52,6 +54,8 @@ pub(super) struct TransferState {
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
+    #[cfg(feature = "p2p-inbox-preview")]
+    pub(super) inbox: inbox::InboxPreview,
 }
 
 impl App {
@@ -61,6 +65,8 @@ impl App {
         }
         #[cfg(feature = "p2p-device-contacts-preview")]
         self.transfer.refresh_transport_contacts();
+        #[cfg(feature = "p2p-inbox-preview")]
+        self.begin_inbox_preview();
         self.show_transfers(root);
     }
 
@@ -71,16 +77,20 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
+        #[cfg(feature = "p2p-inbox-preview")]
+        let inbox_view = Some(&self.transfer.inbox.view);
+        #[cfg(not(feature = "p2p-inbox-preview"))]
+        let inbox_view = None;
         #[cfg(feature = "p2p-device-contacts-preview")]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view,
+            self.transfer.error.as_deref(), identity_view, inbox_view,
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
+            self.transfer.choosing, self.transfer.error.as_deref(), identity_view, inbox_view,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
@@ -103,6 +113,10 @@ impl App {
         }
         #[cfg(feature = "p2p-device-ui")]
         if self.transfer.local_identity.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "p2p-inbox-preview")]
+        if self.transfer.inbox.poll() {
             changed = true;
         }
         if changed {

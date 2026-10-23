@@ -5,9 +5,16 @@ on:
     # One temporary implementation branch, no extra shared Core fan-out.
     branches:
       - feature/ak-p2p-beta-persistent-inbox-20261023
+      - feature/ak-p2p-native-inbox-preview-20261023
     paths:
       - 'interop/akula-staya/**'
       - 'modules/drop-inbox-ledger/**'
+      - 'aquilum-app/native/src/app/transfer/**'
+      - 'aquilum-app/native/src/app/transfer.rs'
+      - 'aquilum-app/native/src/ui/transfer/**'
+      - 'aquilum-app/native/src/ui/transfer.rs'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/Cargo.lock'
       - '.github/workflows/p2p-one-file-beta.yml'
   pull_request:
     branches:
@@ -55,6 +62,12 @@ jobs:
       - name: Exact Core atomic create-new regression tests
         shell: bash
         run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+      - name: Compile read-only Native Inbox preview (dependent branch only)
+        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
+        shell: bash
+        run: |
+          cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-inbox-preview
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-inbox-preview app::transfer::inbox::tests -- --nocapture
       - name: Strict Clippy for opt-in beta and bridge
         shell: bash
         run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --all-targets -- -D warnings

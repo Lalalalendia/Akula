@@ -30,10 +30,29 @@ pub enum QueueAction {
     Remove,
 }
 
+/// Read-only view model; only the opt-in receiver-side worker populates rows.
+/// Display labels never become filesystem paths.
+#[derive(Clone, Debug)]
+pub struct InboxRow {
+    pub id: String,
+    pub bytes: u64,
+    pub sender: String,
+    pub status_key: &'static str,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct InboxView {
+    pub rows: Vec<InboxRow>,
+    pub total: u64,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
 mod devices;
 mod identity;
 mod layout;
 mod queue_view;
+mod inbox_view;
 use layout::{card_size, details, display_size, hint, rule};
 pub use devices::{DeviceRow, DeviceStatus};
 pub use identity::{IdentityAction, IdentityPhase, IdentityView};
