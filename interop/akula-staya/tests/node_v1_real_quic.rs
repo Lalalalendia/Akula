@@ -123,7 +123,8 @@ fn fixture(root: &Path) -> Fixture {
         .unwrap();
     let owner_public: [u8; 32] = owner.public_key().as_ref().try_into().unwrap();
     let config = serde_json::json!({
-        "version": 2,
+        "version": 3,
+        "iroh_endpoint_public": *SecretKey::from_bytes(&[44; 32]).public().as_bytes(),
         "node_public": node_public,
         "owner_public": owner_public,
         "vault_id": vault_id,
@@ -198,6 +199,8 @@ async fn actual_quic_put_reopen_node_then_get_on_other_device() {
     let server_endpoint = *server.id().as_bytes();
     let mut node = NodeHost::open_integration_fixture(&f.state, &f.policy).unwrap();
     assert_eq!(f.node_public, node.public_key());
+    node.verify_iroh_endpoint(server_endpoint).unwrap();
+    assert!(node.verify_iroh_endpoint([9; 32]).is_err());
     let (client_a, outgoing_a, incoming_a) =
         establish(&server, SecretKey::from_bytes(&[21; 32])).await;
 

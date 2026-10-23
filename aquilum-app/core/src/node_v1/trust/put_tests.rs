@@ -74,7 +74,8 @@ fn fixture(root: &Path) -> Fixture {
         .as_ref().try_into().unwrap();
 
     let policy = PolicyFile {
-        version: 2, node_public,
+        version: 3, node_public,
+        iroh_endpoint_public: [51; 32],
         owner_public: owner.public_key().as_ref().try_into().unwrap(),
         vault_id, grant_epoch: 9, roster_digest: roster.claim_digest().unwrap(),
         grant_digest: signed_grant_digest(&read).unwrap(),
@@ -99,6 +100,8 @@ fn signed_put_receipt_and_independent_read_survive_process_restart() {
     let temp = tempfile::tempdir().unwrap();
     let mut f = fixture(temp.path());
     let peer = f.put.device_public_key;
+    assert!(f.host.verify_iroh_endpoint([51; 32]).is_ok());
+    assert!(f.host.verify_iroh_endpoint([99; 32]).is_err());
     let nonce = f.host.issue_put_challenge(&f.roster, &f.put, peer).unwrap();
     let signed: [u8; 64] = f.device.sign(&put_proof_claim(&f.put, nonce).unwrap())
         .as_ref().try_into().unwrap();

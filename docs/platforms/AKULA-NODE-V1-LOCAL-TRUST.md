@@ -11,7 +11,7 @@ Akula desktop build. No public listener or server-install opcode is added.
 | Signed Windows SSH KEX host pin | Windows Akula | Identity of the SSH installation host; not a Node data grant |
 | Release manifest / root CAS receipt | root-only installer | Provenance of installed ELF; not service activation authority |
 | Node Ed25519 private key | private non-root Node StateDirectory | Stable Node identity and signed **local-only** health challenge |
-| Owner public key, exact Vault, roster/grant digests, epoch | root-owned /etc/akula-node/owner-policy.json | Independently provisioned read authorization pins |
+| Owner public key, NodeId, Iroh EndpointId, exact Vault, roster/grant digests and epoch | root-owned /etc/akula-node/owner-policy.json | Independently provisioned read/write and transport identity pins |
 | SQLite issued challenge ledger | non-root private StateDirectory | Atomic issued-first, single-use replay rejection |
 | Current Iroh remote_id | actual authenticated QUIC connection | Cryptographic transport identity, not permission by itself |
 
@@ -71,7 +71,7 @@ hostile root deliberately rolls back both the policy and disk.
 
 The new `OwnerPutGrant` is an exact, owner-signed WRITE claim. It cannot be
 substituted with an `OwnerReadGrant`: the signed domains and independent
-root-owned digests are distinct. Owner policy schema is now **version 2**;
+root-owned digests are distinct. Owner policy schema is now **version 3**, including a root-pinned Iroh EndpointId;
 older schema is intentionally HOLD rather than silently treated as sufficient
 write authority. Only one pinned Vault, exact file/revision and a currently
 recorded Iroh device can be admitted. Initial bound: a single top-level UTF-8
@@ -149,3 +149,12 @@ binaries even when that feature is mistakenly selected.
 bounded raw QUIC protocol does not replace Staya/Bao streaming for large
 objects and still lacks a service process, signed installer, reboot proof,
 recipient File Gate import and externally witnessed durability. Release HOLD.
+
+## Service identity enrollment — additional fail-closed gate
+
+The installed Node daemon never regenerates its Iroh key on file loss. A
+signed, owner-approved root installer must provision `node-iroh-seed.bin` in
+the isolated 0700 service StateDirectory, enroll its exact public EndpointId
+in owner-policy.json **v3**, then separately activate systemd. Missing seed,
+wrong file ownership/mode, wrong public endpoint or stale policy v2 all cause
+HOLD before UDP bind. The separate Node receipt key remains root-pinned.

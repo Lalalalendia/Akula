@@ -71,6 +71,14 @@ impl NodeHost {
 
     pub fn public_key(&self) -> [u8; 32] { self.identity.public_key() }
 
+    /// The public QUIC endpoint is another key, separately pinned by root.
+    /// It must match before the daemon opens a UDP listener.
+    pub fn verify_iroh_endpoint(&self, endpoint: [u8; 32])
+        -> Result<(), NodeV1Error>
+    {
+        self.trust.require_iroh_endpoint(endpoint)
+    }
+
     /// This proves the local process owns the enrolled Node key. It does
     /// not prove remote connectivity, a writable store or a healthy data plane.
     pub fn sign_local_health(&self, challenge: [u8; 32])

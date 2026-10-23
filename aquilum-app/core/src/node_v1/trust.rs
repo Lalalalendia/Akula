@@ -28,6 +28,7 @@ const MAX_POLICY_BYTES: u64 = 2048;
 struct PolicyFile {
     version: u32,
     node_public: [u8; 32],
+    iroh_endpoint_public: [u8; 32],
     owner_public: [u8; 32],
     vault_id: VaultId,
     grant_epoch: u64,
@@ -126,7 +127,8 @@ impl RootTrust {
         }
         let policy: PolicyFile = serde_json::from_slice(&bytes)
             .map_err(|_| NodeV1Error::Hold("invalid owner policy"))?;
-        if policy.version != 2 || policy.node_public != node_public
+        if policy.version != 3 || policy.node_public != node_public
+            || policy.iroh_endpoint_public == [0; 32]
             || node_public == [0; 32] || policy.owner_public == [0; 32]
             || policy.vault_id.as_uuid().is_nil() || policy.grant_epoch == 0
             || policy.roster_digest == [0; 32] || policy.grant_digest == [0; 32]
@@ -141,6 +143,16 @@ impl RootTrust {
     /// Every remote access checks that a root-only policy update or revoke
     /// has not invalidated the in-memory trusted snapshot.
     pub(super) fn policy_digest(&self) -> [u8; 32] { self.digest }
+
+    pub(super) fn require_iroh_endpoint(&self, presented: [u8; 32])
+        -> Result<(), NodeV1Error>
+    {
+        self.require_current()?;
+        if presented != self.policy.iroh_endpoint_public {
+            return Err(NodeV1Error::Hold("Iroh EndpointId differs from root policy"));
+        }
+        Ok(())
+    }
 
     pub fn require_current(&self) -> Result<(), NodeV1Error> {
         let updated = Self::load_from(

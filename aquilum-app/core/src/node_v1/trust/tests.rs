@@ -63,8 +63,9 @@ fn grant_requires_current_signed_roster_and_owner_signature() {
     grant.owner_signature = owner.sign(&owner_claim(&grant).unwrap())
         .as_ref().try_into().unwrap();
     let policy = PolicyFile {
-        version: 2,
+        version: 3,
         node_public: node,
+        iroh_endpoint_public: [51; 32],
         owner_public: owner.public_key().as_ref().try_into().unwrap(),
         vault_id,
         grant_epoch: 3,

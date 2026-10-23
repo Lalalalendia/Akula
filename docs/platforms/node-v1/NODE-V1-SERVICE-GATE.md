@@ -12,10 +12,13 @@ A passing Linux CI confirms code and tests, not installed-VPS operation.
   root-owned \`/etc/akula-node/owner-policy.json\` and match the Node Ed25519
   key under the dedicated private StateDirectory before any public listener.
 - Iroh uses a **separate**, persistent 256-bit Ed25519 seed stored as
-  \`/var/lib/akula-node/node-iroh-seed.bin\`. Requires same service UID,
-  0700 directory, 0600 file, one hardlink and NOFOLLOW access. Corruption,
-  replacement or unsafe permissions cause a hard HOLD: no silent identity
-  rotation or fallback to an ephemeral key.
+  `/var/lib/akula-node/node-iroh-seed.bin`. Only the approved installer may
+  create it once; the service never generates or rotates this identity.
+  Same service UID, 0700 directory, 0600 file, one link and NOFOLLOW apply.
+  Missing, corrupt or replaced keys cause HOLD.
+- Root policy schema **v3** pins the exact Iroh EndpointId alongside the
+  Node receipt key and exact owner-signed read/write authority. The daemon
+  checks this independent pin BEFORE opening the public UDP socket.
 - Binds **only IPv4 UDP port 43871** using Iroh 1.3, relay disabled, with
   the fixed \`akula-node-v1/quic/v1\` ALPN. The caller must independently
   pin Iroh EndpointId AND the separate Node Ed25519 receipt/public key.
@@ -33,7 +36,8 @@ A passing Linux CI confirms code and tests, not installed-VPS operation.
 
 1. The existing signed/root-witnessed installer prototype must provision the
    actual service ELF with immutable release digest, package provenance,
-   external owner approval, fixed executable path and atomic CAS receipt.
+   external owner approval, fixed executable path and atomic CAS receipt;
+   it must pre-provision the Iroh key and independently pin its public ID.
 2. The trusted installer must create/verify the isolated service account and
    root-owned policy **before** enabling systemd; it must refuse existing
    conflicting units, service users, symlinks or unsafe state and log HOLD.

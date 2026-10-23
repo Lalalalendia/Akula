@@ -5,8 +5,9 @@ pub(in crate::node_v1) fn policy_fixture(parent: &Path, node_public: [u8; 32]) -
     fs::create_dir(parent).unwrap();
     fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).unwrap();
     let policy = PolicyFile {
-        version: 2,
+        version: 3,
         node_public,
+        iroh_endpoint_public: [51; 32],
         owner_public: [11; 32],
         vault_id: VaultId::new(),
         grant_epoch: 7,

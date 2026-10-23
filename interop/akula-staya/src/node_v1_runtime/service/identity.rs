@@ -1,17 +1,17 @@
-//! Durable Iroh transport identity, separate from the Node Ed25519 receipt key.
-//! The file is confined to the dedicated 0700 non-root StateDirectory.
+//! Never rotate Iroh transport identity from a running service.
+//! A signed root-approved installer must first enroll this 32-byte seed
+//! and pin its exact public EndpointId in owner-policy.json (v3).
 
 use iroh::SecretKey;
-use ring::rand::{SecureRandom, SystemRandom};
 use rustix::fs::{open, openat, Mode, OFlags};
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
 const KEY: &str = "node-iroh-seed.bin";
 
-pub(super) fn load_or_create(state: &Path) -> Result<SecretKey, &'static str> {
+pub(super) fn load_provisioned(state: &Path) -> Result<SecretKey, &'static str> {
     let before = fs::symlink_metadata(state).map_err(|_| "state directory unavailable")?;
     let uid = rustix::process::geteuid().as_raw();
     if !before.is_dir() || before.uid() != uid
@@ -28,34 +28,11 @@ pub(super) fn load_or_create(state: &Path) -> Result<SecretKey, &'static str> {
     if before.dev() != after.dev() || before.ino() != after.ino() {
         return Err("Iroh key directory replaced");
     }
-    let mut handle = match openat(
+    let mut handle = File::from(openat(
         &dir, KEY,
         OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         Mode::empty(),
-    ) {
-        Ok(fd) => File::from(fd),
-        Err(rustix::io::Errno::NOENT) => {
-            let mut seed = [0u8; 32];
-            SystemRandom::new().fill(&mut seed)
-                .map_err(|_| "Iroh identity entropy unavailable")?;
-            let mut fresh = File::from(openat(
-                &dir, KEY,
-                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL
-                    | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                Mode::RUSR | Mode::WUSR,
-            ).map_err(|_| "Iroh key creation failed")?);
-            fresh.write_all(&seed).map_err(|_| "Iroh key write failed")?;
-            fresh.sync_all().map_err(|_| "Iroh key sync failed")?;
-            dir.sync_all().map_err(|_| "Iroh directory sync failed")?;
-            drop(fresh);
-            File::from(openat(
-                &dir, KEY,
-                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                Mode::empty(),
-            ).map_err(|_| "Iroh key reopen failed")?)
-        }
-        Err(_) => return Err("Iroh identity file refused"),
-    };
+    ).map_err(|_| "Iroh identity not enrolled or unsafe")?);
     let info = handle.metadata().map_err(|_| "Iroh key metadata failed")?;
     if !info.is_file() || info.uid() != uid || info.nlink() != 1
         || info.len() != 32 || info.permissions().mode() & 0o7777 != 0o600
@@ -70,19 +47,34 @@ pub(super) fn load_or_create(state: &Path) -> Result<SecretKey, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
     #[test]
-    fn stable_iroh_peer_survives_cold_reopen_and_denies_bad_permissions() {
+    fn installed_key_is_stable_and_missing_or_unsafe_keys_never_regenerate() {
         let tmp = tempfile::tempdir().unwrap();
         let state = tmp.path().join("state");
         fs::create_dir(&state).unwrap();
         fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
-        let id = load_or_create(&state).unwrap().public();
-        assert_eq!(load_or_create(&state).unwrap().public(), id);
         let path = state.join(KEY);
+        assert!(load_provisioned(&state).is_err());
+        assert!(!path.exists());
+
+        // Only a test fixture simulates a trusted installer provisioning.
+        let mut file = fs::OpenOptions::new()
+            .create_new(true).write(true).mode(0o600).open(&path).unwrap();
+        file.write_all(&[23; 32]).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        let id = load_provisioned(&state).unwrap().public();
+        assert_eq!(load_provisioned(&state).unwrap().public(), id);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(load_or_create(&state).is_err());
+        assert!(load_provisioned(&state).is_err());
         fs::remove_file(&path).unwrap();
         std::os::unix::fs::symlink("/etc/passwd", &path).unwrap();
-        assert!(load_or_create(&state).is_err());
+        assert!(load_provisioned(&state).is_err());
+        fs::remove_file(&path).unwrap();
+        assert!(load_provisioned(&state).is_err());
+        assert!(!path.exists());
     }
 }

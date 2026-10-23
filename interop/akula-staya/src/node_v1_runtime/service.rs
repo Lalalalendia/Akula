@@ -20,7 +20,9 @@ pub async fn run_provisioned_iroh() -> Result<(), &'static str> {
     }
     // Root policy must be present BEFORE any public UDP socket opens.
     let host = NodeHost::open_provisioned().map_err(|_| "Node owner policy HOLD")?;
-    let secret = identity::load_or_create(Path::new(STATE))?;
+    let secret = identity::load_provisioned(Path::new(STATE))?;
+    host.verify_iroh_endpoint(*secret.public().as_bytes())
+        .map_err(|_| "Iroh EndpointId is not root-pinned")?;
     let endpoint = Endpoint::builder(presets::Minimal)
         .secret_key(secret)
         .relay_mode(RelayMode::Disabled)
