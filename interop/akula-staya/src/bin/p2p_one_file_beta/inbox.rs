@@ -6,11 +6,12 @@
 use akula_inbox_ledger_lab::{ExpectedTransfer, InboxLedger, LedgerError, LocalStatus, Transport};
 use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 use std::{
-    ffi::OsString,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
 };
+#[cfg(not(windows))]
+use std::ffi::OsString;
 use uuid::Uuid;
 
 /// Consistent local-only root that a future Akula Native Inbox can read.
@@ -50,8 +51,7 @@ pub(super) fn default_root() -> Result<PathBuf, String> {
         }
     }
     #[cfg(windows)]
-    fs::create_dir_all(&root)
-        .map_err(|error| format!("create receiver Inbox: {error}"))?;
+    fs::create_dir_all(&root).map_err(|error| format!("create receiver Inbox: {error}"))?;
     Ok(root)
 }
 
@@ -135,11 +135,23 @@ mod tests {
         let sender = [11u8; 32];
         let receiver = [12u8; 32];
         let first = persist_received(
-            &mut file, &root, bytes.len() as u64, digest, sender, receiver,
-        ).unwrap();
+            &mut file,
+            &root,
+            bytes.len() as u64,
+            digest,
+            sender,
+            receiver,
+        )
+        .unwrap();
         let replay = persist_received(
-            &mut file, &root, bytes.len() as u64, digest, sender, receiver,
-        ).unwrap();
+            &mut file,
+            &root,
+            bytes.len() as u64,
+            digest,
+            sender,
+            receiver,
+        )
+        .unwrap();
         assert_eq!(first, replay);
         let cold = InboxLedger::open(&root).unwrap();
         assert_eq!(cold.count().unwrap(), 1);
@@ -157,15 +169,29 @@ mod tests {
         let sender = [17u8; 32];
         let receiver = [18u8; 32];
         let intent = persist_received(
-            &mut file, &root, bytes.len() as u64, digest, sender, receiver,
-        ).unwrap();
+            &mut file,
+            &root,
+            bytes.len() as u64,
+            digest,
+            sender,
+            receiver,
+        )
+        .unwrap();
         let ledger = InboxLedger::open(&root).unwrap();
         let path = ledger.object_path(intent.id);
         fs::write(&path, b"tampered").unwrap();
         drop(ledger);
-        assert!(persist_received(
-            &mut file, &root, bytes.len() as u64, digest, sender, receiver,
-        ).is_err());
+        assert!(
+            persist_received(
+                &mut file,
+                &root,
+                bytes.len() as u64,
+                digest,
+                sender,
+                receiver,
+            )
+            .is_err()
+        );
         let cold = InboxLedger::open(&root).unwrap();
         assert_eq!(cold.status(intent.id).unwrap(), LocalStatus::NeedsReview);
         assert_eq!(cold.count().unwrap(), 1);
@@ -180,11 +206,23 @@ mod tests {
         let digest = *blake3::hash(bytes).as_bytes();
         let root = dir.path().join("inbox");
         let first = persist_received(
-            &mut file, &root, bytes.len() as u64, digest, [1; 32], [2; 32],
-        ).unwrap();
+            &mut file,
+            &root,
+            bytes.len() as u64,
+            digest,
+            [1; 32],
+            [2; 32],
+        )
+        .unwrap();
         let second = persist_received(
-            &mut file, &root, bytes.len() as u64, digest, [3; 32], [2; 32],
-        ).unwrap();
+            &mut file,
+            &root,
+            bytes.len() as u64,
+            digest,
+            [3; 32],
+            [2; 32],
+        )
+        .unwrap();
         assert_ne!(first.id, second.id);
         assert_eq!(InboxLedger::open(&root).unwrap().count().unwrap(), 2);
     }
