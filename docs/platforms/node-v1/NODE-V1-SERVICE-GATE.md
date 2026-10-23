@@ -71,6 +71,11 @@ and preservation of private identities. The CI policy is synthetic and has
 no matching owner signing key or authorized grants; a systemd localhost
 network restriction prevents use as a public server.
 
+After a successful restart, the CI fixture changes only the root-owned
+policy's public Iroh EndpointId. The installed daemon must refuse to bind
+and log the specific revoked-identity HOLD. This is an isolated negative
+startup test, not a production owner-revocation mechanism.
+
 The test does not prove a signed root-helper installation, independent owner
 approval, real VPS reboot, Windows setup or receiver File Gate import.
 

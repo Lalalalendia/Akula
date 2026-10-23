@@ -14,7 +14,7 @@ permissions:
   contents: read
 concurrency:
   group: node-v1-branch-only-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   linux-node-v1:
     runs-on: ubuntu-24.04

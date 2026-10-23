@@ -88,7 +88,7 @@ sudo install -o root -g "$USER" -m 0640 "$TMP/policy.json" \
   refuse "policy is not root-owned, service-readable and immutable"
 sudo -u "$USER" test -r "$POLICY/owner-policy.json" ||
   refuse "the non-root service cannot read root-owned policy"
-[[ ! -w "$POLICY/owner-policy.json" ]] ||
+sudo -u "$USER" test ! -w "$POLICY/owner-policy.json" ||
   refuse "CI operator has unexpected write authority over policy"
 sudo install -o root -g root -m 0644 \
   "$ROOT/docs/platforms/node-v1/akula-node-v1.service" "$UNIT_FILE"
@@ -140,4 +140,31 @@ for name in node-identity.pk8 node-iroh-seed.bin; do
   [[ "$(sudo stat -c '%a:%h' "$STATE/$name")" == "600:1" ]] ||
     refuse "private key ownership or link changed on restart"
 done
-echo "NODE_V1_SYSTEMD_PASS: non-root, protected unit, fixed UDP, SIGKILL restart, preserved keys"
+# A root-authorized policy revocation must cause a pre-listener HOLD.
+sudo systemctl stop "$UNIT"
+sudo python3 - "$POLICY/owner-policy.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as source:
+    policy = json.load(source)
+assert policy["version"] == 3 and len(policy["iroh_endpoint_public"]) == 32
+policy["iroh_endpoint_public"][0] ^= 1
+with open(path, "w", encoding="utf-8") as destination:
+    json.dump(policy, destination, separators=(",", ":"))
+PY
+sudo systemctl reset-failed "$UNIT" >/dev/null 2>&1 || true
+sudo systemctl start "$UNIT" >/dev/null 2>&1 || true
+SEEN_HOLD=0
+for i in $(seq 1 25); do
+  if sudo journalctl -u "$UNIT" --no-pager -o cat -n 40 |
+    grep -Fq "Iroh EndpointId is not root-pinned"; then
+    SEEN_HOLD=1
+    break
+  fi
+  sleep 0.2
+done
+[[ "$SEEN_HOLD" == 1 ]] || refuse "revoked public endpoint did not produce a specific HOLD"
+if ss -lun | grep -Fq "0.0.0.0:$PORT "; then
+  refuse "revoked Iroh identity opened an unauthenticated public socket"
+fi
+echo "NODE_V1_SYSTEMD_PASS: non-root, protected unit, fixed UDP, SIGKILL restart, preserved keys, revoked endpoint HOLD"
