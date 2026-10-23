@@ -42,7 +42,7 @@ mod wincred {
         }
     }
 
-    pub(super) fn with_profile_keys<R>(
+    pub(crate) fn with_profile_keys<R>(
         profile: &S3PairProfile,
         action: impl FnOnce(&str, &str) -> R,
     ) -> Result<R, VaultError> {
@@ -100,7 +100,7 @@ mod wincred {
         Ok(action(&id, &secret))
     }
 
-    pub(super) fn save_profile_keys(
+    pub(crate) fn save_profile_keys(
         profile: &S3PairProfile, id: &str, secret: &str,
     ) -> Result<(), VaultError> {
         if !(3..=128).contains(&id.len())
