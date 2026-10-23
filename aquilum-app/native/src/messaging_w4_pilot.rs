@@ -57,7 +57,16 @@ fn verify_executable(path:&Path, expected:Option<&str>)->Result<(),String>{
 fn helper()->Result<PathBuf,String>{
     let exe=env::current_exe().map_err(|e|e.to_string())?;
     let dir=exe.parent().ok_or("нет каталога Akula")?;
-    let path=dir.join("akula-w4-lab");
+    // Standalone Akula stores a sibling helper. The AppImage copies the same
+    // SHA-pinned ELF to usr/share so linuxdeploy cannot rewrite its PT_INTERP.
+    let sibling=dir.join("akula-w4-lab");
+    let path=match fs::symlink_metadata(&sibling) {
+        Ok(_) => sibling, // if present, even an invalid symlink must fail closed
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound =>
+            dir.parent().ok_or("нет каталога usr")?
+                .join("share").join("akula-w4").join("akula-w4-lab"),
+        Err(e)=>return Err(format!("проверка файла W4: {e}")),
+    };
     verify_executable(&path,HASH)?;
     Ok(path)
 }
