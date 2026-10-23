@@ -224,15 +224,14 @@ def main():
     for name, fn in funcs:
         try:
             results[name] = fn(token, "/akula_zt_lab_" + runid + "_" + name.lower() + ".bin")
-        except (RuntimeError, ValueError, URLError, KeyError, json.JSONDecodeError) as error:
+        except Exception as error:
             results[name] = {"status": "HOLD", "error_type": type(error).__name__}
     print(json.dumps({"kind": "AKULA_DROPBOX_ZT_P01_P03", "experiment": runid,
                       "account_checked": True, "external_provider_trust": "UNTRUSTED",
                       "results": results, "cleanup": "manual, disposable App folder only"},
                      sort_keys=True, indent=2))
     # No automatic deletions or risky retries. FAIL/HOLD is deliberate.
-    return 0 if all(r["status"].startswith("PASS") or r["status"] == "NO_8M_SERVER_CAP_OBSERVED"
-                    for r in results.values()) else 1
+    return 0 if all(r["status"].startswith("PASS") for r in results.values()) else 1
 
 
 if __name__ == "__main__":
