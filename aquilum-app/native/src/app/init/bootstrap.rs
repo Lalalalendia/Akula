@@ -1,5 +1,4 @@
 use super::super::*;
-
 impl App {
     pub fn new(workspace: Workspace, initial_text: String) -> Self {
         let tree = FileTree::new(workspace.root.clone(), &workspace.data_dir, Arc::clone(&workspace.wake));
@@ -29,6 +28,7 @@ impl App {
             popup: None,
             typing: None,
             graph: graph_page::GraphState::default(),
+            canvas: canvas::CanvasState::default(),
             transfer: transfer::TransferState::default(),
             suggest_layer: None,
             find: None,

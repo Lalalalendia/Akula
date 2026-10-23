@@ -1,5 +1,4 @@
 use super::*;
-
 impl App {
     /// Действие виджета; `window` — размер окна в логических пикселях (для меню у края).
     pub fn on_action(&mut self, root: &mut RenderRoot, id: WidgetId, action: ErasedAction, window: Size) -> Outcome {
@@ -30,6 +29,9 @@ impl App {
         }
         if self.popup.is_some() {
             return self.on_popup_action(root, id, &action);
+        }
+        if self.on_canvas_action(root, id, &action) {
+            return Outcome::default();
         }
         if self.is_graph_widget(id) {
             let title = self.on_graph_action(root, id, &action);
@@ -89,11 +91,9 @@ impl App {
         let title = self.on_main_action(root, id, &action, window);
         Outcome { title, ..Outcome::default() }
     }
-
     pub fn new_note(&mut self, root: &mut RenderRoot) -> bool {
         self.create_note_titled(root, None)
     }
-
     pub(super) fn create_note_titled(&mut self, root: &mut RenderRoot, title: Option<&str>) -> bool {
         let Some(workspace) = self.tree.root().map(Path::to_path_buf) else { return false };
         match file_ops::create_note(&self.workspace.core, &workspace, title) {

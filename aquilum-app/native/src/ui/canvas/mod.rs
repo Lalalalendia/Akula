@@ -1,46 +1,75 @@
 //! Native, read-only JSON Canvas. All pointer gestures affect the camera only.
 mod model;
+mod interaction;
 #[cfg(test)]
 mod scene_tests;
 use model::{Board, Card, Connection, Kind, Side};
-
+pub use interaction::CanvasAction;
+use interaction::CanvasDrag;
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
     AccessCtx, ChildrenIds, EventCtx, LayoutCtx, MeasureCtx, PaintCtx,
-    PointerButton, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef,
-    RegisterCtx, ScrollDelta, Update, UpdateCtx, Widget, render_text,
+    PointerButton, PointerEvent, PropertiesMut, PropertiesRef,
+    RegisterCtx, Update, UpdateCtx, Widget, WidgetMut, render_text,
 };
 use masonry::imaging::Painter;
 use masonry::kurbo::{Affine, Axis, Line as Segment, Point, Rect, RoundedRect, Size, Stroke, Vec2};
 use masonry::layout::{LenReq, Length};
 use masonry::peniko::Color;
-
 use crate::ui::text::{Line, Style};
 use crate::ui::theme;
-
 const MARGIN: f64 = 48.0;
 const MIN_ZOOM: f64 = 0.05;
 const MAX_ZOOM: f64 = 8.0;
-
 pub struct CanvasPage {
     board: Board,
     size: Size,
     zoom: f64,
     origin: Vec2,
     fitted: bool,
-    drag: Option<Point>,
+    drag: Option<CanvasDrag>,
     text: Vec<Vec<Line>>,
     status: Line,
+    controls: [Line; 4],
+    editable: bool,
+    dirty: bool,
+    undo: bool,
+    redo: bool,
+    error: Option<String>,
 }
-
 impl CanvasPage {
     pub fn new(value: &serde_json::Value) -> masonry::core::NewWidget<Self> {
+        masonry::core::NewWidget::new(Self::build(value, false, false, false, false, None))
+    }
+    pub fn editing(
+        value: &serde_json::Value, dirty: bool, undo: bool, redo: bool, error: Option<String>,
+    ) -> masonry::core::NewWidget<Self> {
+        masonry::core::NewWidget::new(Self::build(value, true, dirty, undo, redo, error))
+    }
+
+    fn build(value: &serde_json::Value, editable: bool, dirty: bool, undo: bool, redo: bool, error: Option<String>) -> Self {
         let board = Board::from_json(value);
         let text = board.cards.iter().map(|c| c.lines.iter().map(|_| Line::default()).collect()).collect();
-        masonry::core::NewWidget::new(Self {
+        Self {
             board, size: Size::ZERO, zoom: 1.0, origin: Vec2::ZERO,
             fitted: false, drag: None, text, status: Line::default(),
-        })
+            controls: std::array::from_fn(|_| Line::default()), editable, dirty, undo, redo, error,
+        }
+    }
+
+    pub fn update_state(
+        this: &mut WidgetMut<'_, Self>, value: &serde_json::Value, dirty: bool,
+        undo: bool, redo: bool, error: Option<String>,
+    ) {
+        this.widget.board = Board::from_json(value);
+        this.widget.text = this.widget.board.cards.iter()
+            .map(|card| card.lines.iter().map(|_| Line::default()).collect()).collect();
+        this.widget.drag = None;
+        this.widget.dirty = dirty;
+        this.widget.undo = undo;
+        this.widget.redo = redo;
+        this.widget.error = error;
+        this.ctx.request_paint_only();
     }
 
     fn fit(&mut self) {
@@ -137,51 +166,17 @@ impl CanvasPage {
 }
 
 impl Widget for CanvasPage {
-    type Action = masonry::core::NoAction;
+    type Action = CanvasAction;
 
     fn on_pointer_event(&mut self, ctx: &mut EventCtx<'_>, _props: &mut PropertiesMut<'_>, event: &PointerEvent) {
-        match event {
-            PointerEvent::Down(e) if e.button.is_none_or(|b| b == PointerButton::Primary) => {
-                if e.state.count == 2 {
-                    self.fit();
-                    self.drag = None;
-                    ctx.request_paint_only();
-                    ctx.set_handled();
-                    return;
-                }
-                self.drag = Some(ctx.local_position(e.state.position));
-                ctx.capture_pointer();
-            }
-            PointerEvent::Move(e) => {
-                if let Some(last) = &mut self.drag {
-                    let next = ctx.local_position(e.current.position);
-                    self.origin += next - *last;
-                    *last = next;
-                    ctx.request_paint_only();
-                }
-            }
-            PointerEvent::Up(_) | PointerEvent::Cancel(_) => self.drag = None,
-            PointerEvent::Scroll(PointerScrollEvent { delta, state, .. }) => {
-                let p = ctx.local_position(state.position);
-                match delta {
-                    ScrollDelta::LineDelta(_, y) => self.zoom_at(p, (f64::from(*y) * 0.12).exp()),
-                    ScrollDelta::PixelDelta(d) if state.modifiers.ctrl() || state.modifiers.meta() => {
-                        self.zoom_at(p, (d.y * 0.01).exp());
-                    }
-                    ScrollDelta::PixelDelta(d) => self.origin += Vec2::new(d.x, d.y),
-                    _ => return,
-                }
-                ctx.request_paint_only();
-                ctx.set_handled();
-            }
-            _ => {}
-        }
+        self.pointer(ctx, event);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
         if matches!(event, Update::FontsChanged) {
             for lines in &mut self.text { for line in lines { line.clear(); } }
             self.status.clear();
+            for cache in &mut self.controls { cache.clear(); }
             ctx.request_paint_only();
         }
     }
@@ -242,17 +237,20 @@ impl Widget for CanvasPage {
             });
         }
         let status = format!(
-            "Canvas · {} nodes / {} edges · {:.0}% · read-only{}",
+            "Canvas · {} nodes / {} edges · {:.0}% · {}{}{}",
             self.board.total_cards, self.board.total_connections, self.zoom * 100.0,
-            if self.board.cards.len() < self.board.total_cards || self.board.connections.len() < self.board.total_connections { " · preview limited" } else { "" }
+            if !self.editable { "read-only" } else if self.dirty { "Unsaved" } else { "Saved" },
+            if self.board.cards.len() < self.board.total_cards || self.board.connections.len() < self.board.total_connections { " · preview limited" } else { "" },
+            self.error.as_deref().map_or(String::new(), |error| format!(" · {error}"))
         );
         let shaped = self.status.layout(ctx, &status, (viewport.width() - 28.0).max(1.0), Style::ui(20.0));
         render_text(painter, Affine::translate((14.0, 12.0)), shaped, &[tm.text_secondary.into()], true);
+        if self.editable { self.paint_controls(ctx, painter); }
     }
 
     fn accessibility_role(&self) -> Role { Role::Canvas }
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(format!("Read-only Canvas: {} nodes, {} edges", self.board.total_cards, self.board.total_connections));
+        node.set_label(format!("Canvas: {} nodes, {} edges", self.board.total_cards, self.board.total_connections));
     }
     fn children_ids(&self) -> ChildrenIds { ChildrenIds::new() }
 }
@@ -271,6 +269,8 @@ mod tests {
             text: board.cards.iter().map(|c| c.lines.iter().map(|_| Line::default()).collect()).collect(),
             board, size: Size::new(800.0, 600.0), zoom: 1.0,
             origin: Vec2::ZERO, fitted: false, drag: None, status: Line::default(),
+            controls: std::array::from_fn(|_| Line::default()), editable: false,
+            dirty: false, undo: false, redo: false, error: None,
         }
     }
 

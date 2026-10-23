@@ -1,21 +1,17 @@
 mod readonly;
 
 use std::path::{Path, PathBuf};
-
 use aquilum_core::search::paths::{is_markdown, is_plain_text};
 use masonry::app::RenderRoot;
 use masonry::widgets::IndexedStack;
-
 use super::super::{App, Outcome};
 use crate::note::Note;
 use crate::ui::editor::TextEditor;
 use crate::ui::widgets::Slot;
-
 fn is_structured_file(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas") || ext.eq_ignore_ascii_case("base"))
 }
-
 const MAX_INACTIVE_NOTES: usize = 2;
 const MAX_INACTIVE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -205,13 +201,13 @@ impl App {
         self.note = None;
         self.note_ids = None;
         self.embeds = None;
+        self.open_error = Some((path.to_path_buf(), error.to_owned()));
         let (page, ids) = crate::ui::note::open_error_page(path, error);
         self.open_error_ids = Some(ids);
         if let Some(chrome) = &self.chrome {
             chrome.note_page.edit(root, |mut slot| Slot::set_child(&mut slot, page.erased()));
         }
     }
-
     fn drop_note_page(&mut self, root: &mut RenderRoot) {
         self.embeds = None;
         // Read-only image/structured pages have no NoteIds, but their decoded
@@ -347,6 +343,10 @@ impl App {
     }
 
     pub(in crate::app) fn close_active_tab(&mut self, root: &mut RenderRoot) -> Outcome {
+        if self.canvas_dirty_active() {
+            self.canvas_notify(root, "Canvas has unsaved changes. Save it before closing.");
+            return Outcome::default();
+        }
         self.tabs.close(self.tabs.active_id());
         self.show_active(root);
         Outcome { title: true, ..Outcome::default() }

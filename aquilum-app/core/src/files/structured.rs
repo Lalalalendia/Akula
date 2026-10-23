@@ -51,8 +51,8 @@ fn kind_for(path: &Path) -> Result<Format, StructuredError> {
 }
 
 mod schema;
+pub mod session;
 use schema::validate_canvas;
-
 impl StructuredDocument {
     /// Opening never changes the input file, including whitespace and unknown keys.
     pub fn open(path: &Path) -> Result<Self, StructuredError> {
