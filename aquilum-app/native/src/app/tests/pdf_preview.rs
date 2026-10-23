@@ -166,3 +166,37 @@ fn installed_shiva_pdf_is_searchable_and_opens_from_native_result() {
         "opening the search result must close the search modal");
     println!("AKULA_PDF_NATIVE_SEARCH_E2E=PASS;installed_shiva=1;gate=1;tantivy=1;ui=1;source_unchanged=1");
 }
+
+#[test]
+fn pdf_tree_secondary_click_reaches_native_preview_menu() {
+    let mut h = Harness::new();
+    let pdf = h.vault.path().join("right-click.PDF");
+    fs::write(&pdf, b"%PDF-1.4\ntrusted PDF fixture").unwrap();
+    h.app.tree.paths_changed(&mut h.root, std::slice::from_ref(&pdf));
+    h.settle();
+    let row = h.app.tree.row_id("right-click.PDF")
+        .expect("PDF must be visible as a file-tree row");
+    let at = h.root.get_widget(row).unwrap().ctx().bounding_box().center();
+    let state = PointerState {
+        position: PhysicalPosition::new(at.x, at.y),
+        count: 1,
+        scale_factor: 1.0,
+        ..PointerState::default()
+    };
+    h.root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+        pointer: MOUSE,
+        button: Some(PointerButton::Secondary),
+        state,
+    }));
+    h.deliver();
+    let layer = match &h.app.popup {
+        Some(Popup::FileMenu { layer, clicked, .. }) => {
+            assert_eq!(clicked, &pdf);
+            *layer
+        }
+        _ => panic!("PDF secondary click did not reach the native file context menu"),
+    };
+    h.send(layer, crate::ui::menu::MenuChoice::Item(3));
+    assert!(matches!(h.app.popup, Some(Popup::PdfImport { .. })),
+        "PDF context menu must offer opt-in native text extraction");
+}
