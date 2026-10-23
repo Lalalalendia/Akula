@@ -121,7 +121,7 @@ mod tests {
             "page_cover_url", "cover_url", "book_file", "PAGE_COVER_URL",
             "cover", "Cover", "tags", "Ключ", "İ", "key", "unknown",
         ];
-        let values = ["", "true", "0", "pattern:weave", "Files/x.epub", "a:b", "[x, y]", "☺", " "x" ", "\nmore"];
+        let values = ["", "true", "0", "pattern:weave", "Files/x.epub", "a:b", "[x, y]", "☺", r#" "x" "#, "\nmore"];
         let mut seed = 0x2026_1022_f00d_u64;
 
         for sample in samples {
