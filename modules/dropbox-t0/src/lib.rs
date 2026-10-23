@@ -44,7 +44,7 @@ mod listing_tests {
             "12345678-1234-1234-1234-123456789abc", "test").unwrap();
         let request = prepare_list(&scope).unwrap();
         assert!(request.contains("12345678-1234-1234-1234-123456789abc"));
-        assert!(request.contains("\\"recursive\\":true"));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&request).unwrap()["recursive"], serde_json::json!(true));
         assert!(!request.contains("create_folder"));
         assert_eq!(LIST_ROUTE, "/2/files/list_folder");
     }
