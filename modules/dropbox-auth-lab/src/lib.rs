@@ -1,7 +1,5 @@
 #![forbid(unsafe_code)]
-//! Dropbox OAuth PKCE, loopback callback and token exchange contracts.
-//! No browser opening, credential persistence, cloud writes or File Gate.
-//! The exact loopback address must be registered in Dropbox App Console.
+//! Native PKCE with registered loopback callback; no embedded browser, persisted secrets, cloud writes or File Gate.
 
 pub mod callback;
 pub mod exchange;
