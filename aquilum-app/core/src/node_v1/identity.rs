@@ -20,15 +20,26 @@ pub struct NodeIdentity {
 impl NodeIdentity {
     /// Only an independently approved installer enrollment may create a key.
     pub fn open_or_create(state: &Path) -> Result<Self, NodeV1Error> {
-        Self::load(state, true)
+        Self::load(state, true, false)
+    }
+
+    /// Only a non-root, one-shot installer enrollment can create a *new*
+    /// identity. Existing keys, including previously valid ones, are HOLD.
+    pub fn enroll_first(state: &Path) -> Result<Self, NodeV1Error> {
+        if rustix::process::geteuid().as_raw() == 0 {
+            return Err(NodeV1Error::Hold("Node enrollment refuses root"));
+        }
+        Self::load(state, true, true)
     }
 
     /// A running Node must refuse missing or revoked identity, never rotate.
     pub fn open_provisioned(state: &Path) -> Result<Self, NodeV1Error> {
-        Self::load(state, false)
+        Self::load(state, false, false)
     }
 
-    fn load(state: &Path, allow_create: bool) -> Result<Self, NodeV1Error> {
+    fn load(state: &Path, allow_create: bool, require_absent: bool)
+        -> Result<Self, NodeV1Error>
+    {
         let stat = fs::symlink_metadata(state)?;
         if !stat.file_type().is_dir()
             || stat.uid() != rustix::process::geteuid().as_raw()
@@ -48,7 +59,8 @@ impl NodeIdentity {
             &dir, KEY_FILE, OFlags::RDONLY | OFlags::NOFOLLOW
                 | OFlags::CLOEXEC, Mode::empty(),
         ) {
-            Ok(fd) => File::from(fd),
+            Ok(fd) if !require_absent => File::from(fd),
+            Ok(_) => return Err(NodeV1Error::Hold("Node identity already enrolled")),
             Err(rustix::io::Errno::NOENT) if allow_create => {
                 let bytes = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
                     .map_err(|_| NodeV1Error::Hold("Node key generation failed"))?;
@@ -129,7 +141,8 @@ mod tests {
         fs::create_dir(&state).unwrap();
         fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(NodeIdentity::open_provisioned(&state).is_err());
-        let first = NodeIdentity::open_or_create(&state).unwrap();
+        let first = NodeIdentity::enroll_first(&state).unwrap();
+        assert!(NodeIdentity::enroll_first(&state).is_err());
         let key = first.public_key();
         let signature = first.sign_health([9; 32]).unwrap();
         use ring::signature::{UnparsedPublicKey, ED25519};
@@ -140,6 +153,7 @@ mod tests {
             .verify(&claim, &signature).unwrap();
         drop(first);
         assert_eq!(NodeIdentity::open_provisioned(&state).unwrap().public_key(), key);
+        assert_eq!(NodeIdentity::open_or_create(&state).unwrap().public_key(), key);
         let key_file = state.join(KEY_FILE);
         fs::set_permissions(&key_file, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(NodeIdentity::open_or_create(&state).is_err());

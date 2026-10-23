@@ -34,6 +34,27 @@ A passing Linux CI confirms code and tests, not installed-VPS operation.
   a signed root-owned ELF at \`/opt/akula-node/node\`, private state and
   runtime directories, and exact root policy under \`/etc/akula-node\`.
 
+## One-shot non-root identity enrollment (install prerequisite)
+
+A separate opt-in `akula-node-v1-enroll --enroll-identities` executable
+has a **fixed operation and fixed StateDirectory**. It never accepts a
+path, private key, account name, command, or network address from the UI.
+A signed, owner-approved root installer must first create the dedicated
+non-root service account and private StateDirectory, then invoke this one-shot
+binary under that account. The binary checks that the protected owner policy
+and **both** service keys are absent before writing anything.
+
+The Node receipt key and separate Iroh transport seed are created with
+exclusive creation, NOFOLLOW, 0600 mode and durable file/directory sync.
+Only after independent readback does the command emit their public
+identifiers. A partial crash is HOLD: no silent generation of whichever
+key is missing. The root installer must separately bind both keys and the
+owner's scoped grants into root-owned policy **v3** before systemd can start.
+
+This does **not** authorize enrollment by itself. The signed/root-witnessed
+package approval, pinned host identity, durable CAS and actual installer
+invocation are still unconnected; this binary is not yet installed on a VPS.
+
 ## Installation blockers — do not bypass
 
 1. The existing signed/root-witnessed installer prototype must provision the

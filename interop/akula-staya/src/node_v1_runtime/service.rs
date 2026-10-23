@@ -1,6 +1,7 @@
 //! Explicit non-root Node-V1 Iroh daemon. NO installer or root authority.
 //! Only a separately owner-provisioned systemd unit may start this listener.
 mod identity;
+mod enrollment;
 
 use aquilum_core::node_v1::NodeHost;
 use iroh::{
@@ -19,6 +20,11 @@ const UDP_ADDRESS: &str = "0.0.0.0:43871";
 const MAX_CLIENTS: usize = 8;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// Called only from the fixed non-root one-shot enrollment executable.
+pub fn enroll_for_installer() -> Result<(), &'static str> {
+    enrollment::run_fixed()
+}
 
 pub async fn run_provisioned_iroh() -> Result<(), &'static str> {
     if rustix::process::geteuid().as_raw() == 0 {
