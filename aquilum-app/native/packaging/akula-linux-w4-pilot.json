@@ -10,10 +10,6 @@
     {
       "path": "akula-app",
       "main": true
-    },
-    {
-      "path": "akula-w4-lab",
-      "main": false
     }
   ],
   "binariesDir": "../../../.artifacts/cargo-native/release",
@@ -25,6 +21,9 @@
   "appimage": {
     "linuxdeployPlugins": {
       "gstreamer": "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh"
+    },
+    "files": {
+      "../.artifacts/cargo-native/release/akula-w4-lab": "usr/share/akula-w4/akula-w4-lab"
     }
   }
 }
