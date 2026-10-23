@@ -41,6 +41,11 @@ enum Mode {
         address: SocketAddr,
         destination: PathBuf,
     },
+    // Not CLI-addressable: Native stores verified data only in its Inbox.
+    ReceiveInbox {
+        peer: String,
+        address: SocketAddr,
+    },
 }
 
 fn parse_peer(value: &str) -> Result<EndpointId, String> {
@@ -281,7 +286,21 @@ async fn receive_one(
     local_endpoint_key: [u8; 32],
     check_peer: impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
-    // Receive command already names the exact destination and trusted sender.
+    receive_one_target(
+        connection, Some(destination), inbox_root, local_endpoint_key, check_peer,
+    ).await
+}
+
+// The same authenticated network request and ACK path is shared by
+// operator-CLI receive (explicit destination) and Native receive (Inbox only).
+async fn receive_one_target(
+    connection: &iroh::endpoint::Connection,
+    destination: Option<&Path>,
+    inbox_root: &Path,
+    local_endpoint_key: [u8; 32],
+    check_peer: impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    // Receiver always chooses its own destination; no remote path is trusted.
     check_peer()?;
     let mut tx = connection
         .open_uni()
@@ -302,17 +321,25 @@ async fn receive_one(
         .map_err(|error| format!("read bounded file: {error}"))?;
     // OS revocation is rechecked before physically publishing a new file.
     check_peer()?;
-    save_received_with(&bytes, destination, |stage, size, digest| {
-        inbox::persist_received(
-            stage,
-            inbox_root,
-            size,
-            digest,
-            *connection.remote_id().as_bytes(),
-            local_endpoint_key,
-        )
-        .map(|_| ())
-    })?;
+    if let Some(destination) = destination {
+        save_received_with(&bytes, destination, |stage, size, digest| {
+            inbox::persist_received(
+                stage,
+                inbox_root,
+                size,
+                digest,
+                *connection.remote_id().as_bytes(),
+                local_endpoint_key,
+            )
+            .map(|_| ())
+        })?;
+    } else {
+        let (size, digest, data) = decode_frame(&bytes)?;
+        inbox::persist_received_payload(
+            data, inbox_root, size, digest,
+            *connection.remote_id().as_bytes(), local_endpoint_key,
+        )?;
+    }
     let mut ack = connection
         .open_uni()
         .await
@@ -324,6 +351,32 @@ async fn receive_one(
         .map_err(|error| format!("finish verified receipt: {error}"))?;
     println!("NEW_FILE_VERIFIED=true FILE_GATE_APPLIED=false DURABLE_ACK=false");
     Ok(())
+}
+
+/// Native receive has a numeric, user-supplied direct LAN address for an
+/// independently OS-pinned peer. No relay, hostname or internet endpoint.
+pub fn validate_direct_lan_address(address: SocketAddr) -> Result<(), String> {
+    if address.port() == 0 {
+        return Err("receiver needs a nonzero UDP port".into());
+    }
+    let is_local = match address.ip() {
+        std::net::IpAddr::V4(ip) => ip.is_private() || ip.is_link_local() || ip.is_loopback(),
+        std::net::IpAddr::V6(ip) => {
+            ip.is_unique_local() || ip.is_unicast_link_local() || ip.is_loopback()
+        }
+    };
+    if !is_local {
+        return Err("direct LAN beta requires a local/private numeric IP".into());
+    }
+    Ok(())
+}
+
+/// No user-chosen destination is required: the receiver stores exactly one
+/// checked file in its private permanent Inbox and never imports into Vault.
+pub async fn native_receive_one(peer: String, address: SocketAddr) -> Result<(), String> {
+    parse_peer(&peer)?;
+    validate_direct_lan_address(address)?;
+    run_mode(Mode::ReceiveInbox { peer, address }, |_| {}).await
 }
 
 /// Explicit, one-shot native send. The UI must select exactly one local
@@ -343,7 +396,7 @@ pub async fn native_send_one(
 
 async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result<(), String> {
     let peer = match &mode {
-        Mode::Send { peer, .. } | Mode::Receive { peer, .. } => peer,
+        Mode::Send { peer, .. } | Mode::Receive { peer, .. } | Mode::ReceiveInbox { peer, .. } => peer,
     };
     let expected = selected_peer(peer)?;
     // No automatic enrollment, plaintext private key or default-on service.
@@ -423,6 +476,33 @@ async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result
             connection.close(0u8.into(), b"one-file beta complete");
             outcome
         }
+        Mode::ReceiveInbox { peer, address } => {
+            let addr = EndpointAddr::new(expected).with_ip_addr(address);
+            let connection =
+                tokio::time::timeout(Duration::from_secs(20), endpoint.connect(addr, ALPN))
+                    .await
+                    .map_err(|_| "direct LAN connection timed out")?
+                    .map_err(|error| format!("authenticated QUIC connection: {error}"))?;
+            live_peer(&connection, &peer)?;
+            let inbox_root = inbox::default_root()?;
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(120),
+                receive_one_target(
+                    &connection,
+                    None,
+                    &inbox_root,
+                    *endpoint.id().as_bytes(),
+                    || live_peer(&connection, &peer),
+                ),
+            )
+            .await
+            .map_err(|_| "native Inbox receive timed out")?;
+            if outcome.is_ok() {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            connection.close(0u8.into(), b"native one-file Inbox complete");
+            outcome
+        }
     };
     endpoint.close().await;
     result
@@ -455,6 +535,21 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert!(!listening);
+    }
+
+    #[test]
+    fn native_address_accepts_private_lan_and_rejects_public_or_wildcard() {
+        assert!(validate_direct_lan_address("192.168.1.50:33099".parse().unwrap()).is_ok());
+        assert!(validate_direct_lan_address("127.0.0.1:33099".parse().unwrap()).is_ok());
+        assert!(validate_direct_lan_address("8.8.8.8:33099".parse().unwrap()).is_err());
+        assert!(validate_direct_lan_address("0.0.0.0:33099".parse().unwrap()).is_err());
+        assert!(validate_direct_lan_address("192.168.1.50:0".parse().unwrap()).is_err());
+    }
+
+    #[tokio::test]
+    async fn native_receive_rejects_unverified_peer_before_any_network_use() {
+        let result = native_receive_one("not-an-enrolled-key".into(), "192.168.1.20:45678".parse().unwrap()).await;
+        assert!(result.is_err());
     }
 
     #[test]
