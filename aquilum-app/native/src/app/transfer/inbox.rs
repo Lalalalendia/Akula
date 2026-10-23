@@ -105,9 +105,14 @@ impl App {
         if self.transfer.inbox.view.exporting || self.transfer.inbox.view.loading {
             return false;
         }
-        if !self.transfer.inbox.view.rows.iter().any(|item| {
-            item.id == receipt && item.status_key == "transfer.inboxVerified"
-        }) {
+        if !self
+            .transfer
+            .inbox
+            .view
+            .rows
+            .iter()
+            .any(|item| item.id == receipt && item.status_key == "transfer.inboxVerified")
+        {
             return false;
         }
         let Ok(id) = Uuid::parse_str(receipt) else {
@@ -141,9 +146,7 @@ impl App {
             let result = if let Some(destination) = chosen {
                 user_inbox_root()
                     .map_err(|err| format!("inbox root: {err:?}"))
-                    .and_then(|root| {
-                        save_checked_copy(&root, id, &destination, &protected_roots)
-                    })
+                    .and_then(|root| save_checked_copy(&root, id, &destination, &protected_roots))
                     .map(|()| true)
             } else {
                 Ok(false)
@@ -156,8 +159,8 @@ impl App {
 }
 
 fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
-    let Some(ledger) = InboxLedger::open_existing(root)
-        .map_err(|error| format!("read-only ledger: {error:?}"))?
+    let Some(ledger) =
+        InboxLedger::open_existing(root).map_err(|error| format!("read-only ledger: {error:?}"))?
     else {
         return Ok(InboxView::default());
     };
@@ -207,8 +210,8 @@ fn save_checked_copy(
         return Err("destination must be an absolute new path".into());
     }
     let parent = destination.parent().ok_or("missing destination parent")?;
-    let canonical_parent = fs::canonicalize(parent)
-        .map_err(|error| format!("destination parent: {error}"))?;
+    let canonical_parent =
+        fs::canonicalize(parent).map_err(|error| format!("destination parent: {error}"))?;
     // This is a best-effort fixed-root gate, not a proof against hostile
     // ancestor substitution after this check. Release requires handle custody.
     for protected in std::iter::once(root).chain(protected_roots.iter().map(PathBuf::as_path)) {
@@ -218,8 +221,8 @@ fn save_checked_copy(
             }
         }
     }
-    let Some(ledger) = InboxLedger::open_existing(root)
-        .map_err(|error| format!("read-only ledger: {error:?}"))?
+    let Some(ledger) =
+        InboxLedger::open_existing(root).map_err(|error| format!("read-only ledger: {error:?}"))?
     else {
         return Err("receiver inbox does not exist".into());
     };
@@ -227,13 +230,8 @@ fn save_checked_copy(
     let (mut pinned, intent) = ledger
         .open_verified_file(id)
         .map_err(|error| format!("received object invalid: {error:?}"))?;
-    save_verified_stage_as_new(
-        &mut pinned,
-        intent.bytes,
-        intent.blake3,
-        destination,
-    )
-    .map_err(|error| format!("Save Copy refused: {error:?}"))?;
+    save_verified_stage_as_new(&mut pinned, intent.bytes, intent.blake3, destination)
+        .map_err(|error| format!("Save Copy refused: {error:?}"))?;
     Ok(())
 }
 
@@ -318,7 +316,11 @@ mod tests {
         let mut ledger = InboxLedger::open(&inbox).unwrap();
         ledger.reserve(&intent).unwrap();
         let path = ledger.object_path(intent.id);
-        let mut writer = fs::OpenOptions::new().write(true).create_new(true).open(path).unwrap();
+        let mut writer = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
         writer.write_all(bytes).unwrap();
         writer.sync_all().unwrap();
         drop(writer);

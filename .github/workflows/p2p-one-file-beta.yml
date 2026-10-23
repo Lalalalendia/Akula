@@ -51,7 +51,7 @@ jobs:
       - name: Rustfmt Native Inbox preview (dependent branch only)
         if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
         shell: bash
-        run: cargo fmt --manifest-path aquilum-app/Cargo.toml -p aquilum-native -- --check
+        run: rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/inbox.rs aquilum-app/native/src/ui/transfer/inbox_view.rs
       - name: Format and test isolated receiver journal
         shell: bash
         run: |

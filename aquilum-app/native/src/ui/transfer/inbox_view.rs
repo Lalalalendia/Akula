@@ -30,16 +30,15 @@ pub(super) fn render(view: &InboxView) -> (NewWidget<Flex>, Vec<(WidgetId, Strin
                 .cross_axis_alignment(CrossAxisAlignment::Center)
                 .with(labels, 1.0);
             if received.status_key == "transfer.inboxVerified" && !view.exporting {
-                let save = NewWidget::new(TextButton::new(
-                    t("transfer.inboxSaveCopy"),
-                    Variant::Ghost,
-                ));
+                let save =
+                    NewWidget::new(TextButton::new(t("transfer.inboxSaveCopy"), Variant::Ghost));
                 actions.push((save.id(), received.id.clone()));
                 entry = entry.with_fixed(save);
             }
-            panel = panel.with_fixed(NewWidget::new(entry).with_props(
-                PropertySet::new().with(Padding::all(Length::px(size::SPACE_8))),
-            ));
+            panel = panel.with_fixed(
+                NewWidget::new(entry)
+                    .with_props(PropertySet::new().with(Padding::all(Length::px(size::SPACE_8)))),
+            );
             panel = panel.with_fixed(rule());
         }
     }
