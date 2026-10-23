@@ -3,7 +3,6 @@
 mod core_scan;
 mod dag;
 mod delta;
-// Experimental and opt-in versioned codec; never an S3 writer or File Gate.
 #[cfg(feature = "sync-text-delta")]
 pub(crate) mod text_delta_codec;
 mod download;
@@ -13,7 +12,6 @@ mod fake_vault;
 mod host_admission;
 mod filegate_lock_custody;
 mod filegate_custody_identity;
-// Host custody epoch is S3-independent; legacy unhosted Core::open is blocked.
 #[cfg(feature = "host-custody")]
 mod host_ledger_identity;
 #[cfg(feature = "host-custody")]
@@ -202,12 +200,10 @@ pub use vault::{
     LocalFileEntry, LocalFileSnapshot, PreservationReceipt, VaultFileKind, VaultPort,
     VaultPortError,
 };
-
 /// No sync scheduler or external I/O is started by importing these contracts.
 pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
-
 #[cfg(all(test, not(feature = "sync-engine")))]
 mod disabled_tests {
     #[test]
