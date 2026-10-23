@@ -23,12 +23,11 @@ fn names(model: &TreeModel) -> Vec<(String, usize)> {
 }
 
 #[test]
-fn folders_first_and_hidden_skipped() {
+fn folders_first_and_user_dotfiles_visible() {
     let (_dir, model) = tree();
-    assert_eq!(
-        names(&model),
-        [("Архив".into(), 0), ("Проекты".into(), 0), ("README".into(), 0), ("картинка.png".into(), 0)]
-    );
+    assert_eq!(names(&model)[..2], [("Архив".into(), 0), ("Проекты".into(), 0)]);
+    assert_eq!(names(&model)[2], (".скрытый".into(), 0));
+    assert_eq!(names(&model).len(), 5);
 }
 
 #[test]
@@ -43,7 +42,7 @@ fn click_toggles_folder_and_opens_note() {
     };
     assert!(path.ends_with("README.md"));
     model.press(1, Modifiers::default());
-    assert_eq!(model.rows().len(), 4);
+    assert_eq!(model.rows().len(), 5);
 }
 
 #[test]
@@ -84,13 +83,13 @@ fn sorts_like_obsidian() {
     touch(&dir.path().join("README.md"), 1_000);
     touch(&dir.path().join("картинка.png"), 2_000);
     let order = |m: &TreeModel| m.rows().iter().map(|r| r.name.clone()).collect::<Vec<_>>();
-    assert_eq!(order(&model), ["Архив", "Проекты", "README", "картинка.png"]);
+    assert_eq!(order(&model), ["Архив", "Проекты", ".скрытый", "README", "картинка.png"]);
     assert!(model.set_sort(Sort::NameDesc));
-    assert_eq!(order(&model), ["Проекты", "Архив", "картинка.png", "README"]);
+    assert_eq!(order(&model), ["Проекты", "Архив", "картинка.png", "README", ".скрытый"]);
     assert!(model.set_sort(Sort::ModifiedNew));
-    assert_eq!(order(&model), ["Архив", "Проекты", "картинка.png", "README"]);
+    assert_eq!(order(&model), ["Архив", "Проекты", ".скрытый", "картинка.png", "README"]);
     assert!(model.set_sort(Sort::ModifiedOld));
-    assert_eq!(order(&model), ["Архив", "Проекты", "README", "картинка.png"]);
+    assert_eq!(order(&model), ["Архив", "Проекты", "README", "картинка.png", ".скрытый"]);
     assert!(!model.set_sort(Sort::ModifiedOld));
     model.press(1, Modifiers::default());
     let nested = order(&model);
@@ -110,7 +109,7 @@ fn folder_click_is_target_and_collapse_all_closes_everything() {
     assert_eq!(model.target_folder(), Some(dir.path().join("Архив")));
     assert!(model.rows().len() > 4);
     assert!(model.collapse_all());
-    assert_eq!(model.rows().len(), 4);
+    assert_eq!(model.rows().len(), 5);
     assert!(model.expanded_paths().is_empty());
     assert!(!model.collapse_all());
     let readme = model.rows().iter().position(|r| r.name == "README").unwrap();
