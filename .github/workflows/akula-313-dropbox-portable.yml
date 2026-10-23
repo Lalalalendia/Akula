@@ -1,0 +1,50 @@
+# Unsigned and uninstalled Windows QA binary. Not a release, updater or installer.
+name: Akula 3.13 Dropbox Windows portable QA
+
+on:
+  pull_request:
+    paths:
+      - 'aquilum-app/native/**'
+      - 'aquilum-app/core/src/settings/models.rs'
+      - 'aquilum-app/Cargo.lock'
+      - 'modules/dropbox-*/**'
+      - '.github/workflows/akula-313-dropbox-portable.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows-313-exe:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> target
+          key: 3-13-dropbox-windows-exe
+      - name: Compile Akula 3.13 with actual Dropbox read-only preview
+        run: cargo build --release --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed,dropbox-readonly-preview
+      - name: Package only the unsigned standalone exe with provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist\akula-313-dropbox | Out-Null
+          Copy-Item aquilum-app\target\release\aquilum-native.exe dist\akula-313-dropbox\Akula-3.13-Dropbox-TEST-ONLY.exe
+          $sha = (Get-FileHash dist\akula-313-dropbox\Akula-3.13-Dropbox-TEST-ONLY.exe -Algorithm SHA256).Hash
+          "UNSIGNED / TEST ONLY / NOT A PUBLIC RELEASE" | Set-Content dist\akula-313-dropbox\README.txt
+          "PR commit: ${{ github.sha }}" | Add-Content dist\akula-313-dropbox\README.txt
+          "SHA256: $sha" | Add-Content dist\akula-313-dropbox\README.txt
+          "No automatic Dropbox sync or cloud writes. Use synthetic Vault only." | Add-Content dist\akula-313-dropbox\README.txt
+      - name: Upload isolated Windows QA executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: Akula-3.13-Dropbox-Windows-TEST-ONLY-${{ github.run_id }}
+          path: dist/akula-313-dropbox/*
+          if-no-files-found: error
+          retention-days: 7
