@@ -16,6 +16,8 @@ p2p-inbox-lab = ["p2p-offer-lab"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
+# Opt-in real-process signed proof read-gate lab; no new default runtime.
+node-scope-revocation-lab = ["node-catalog-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
@@ -108,6 +110,11 @@ required-features = ["server-bootstrap-b1a-release-lab"]
 name = "akula-node-lab"
 path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
+
+[[bin]]
+name = "akula-node-policy-lab"
+path = "src/bin/akula_node_policy_lab.rs"
+required-features = ["node-scope-revocation-lab"]
 
 [dependencies]
 akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
