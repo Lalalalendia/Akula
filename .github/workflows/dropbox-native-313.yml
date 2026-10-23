@@ -5,10 +5,13 @@ name: Akula 3.13 installed Dropbox verification
 on:
   pull_request:
     paths:
-      - 'aquilum-app/native/**'
-      - 'aquilum-app/core/src/settings/models.rs'
+      # Only new Dropbox implementation files; existing source files are
+      # already covered by Application checks, without a new CI consumer.
+      - 'aquilum-app/native/src/app/dropbox_preview.rs'
+      - 'aquilum-app/native/src/app/dropbox_provider.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/sync/dropbox.rs'
+      - 'aquilum-app/native/Cargo.toml'
       - 'aquilum-app/Cargo.lock'
-      - 'modules/dropbox-*/**'
       - '.github/workflows/dropbox-native-313.yml'
   workflow_dispatch:
 
