@@ -6,6 +6,11 @@ impl App {
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
             Action::VerifyServer => self.request_server_probe(),
+            Action::ToggleServerAdvanced => {
+                dialog.server_advanced = !dialog.server_advanced;
+                Effect::Content
+            }
+            Action::InstallServer => Effect::None,
             // This handler is reached only for ordinary settings buttons.
             // Review actions require the separately confirmed modal flow.
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,

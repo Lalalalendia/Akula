@@ -21,11 +21,13 @@ impl App {
         let mut ctx = self.settings_context(dialog.section, dialog.copied, dialog.trash_page);
         ctx.sync_selected = dialog.sync_selected.clone();
         ctx.sync_notice = dialog.sync_notice.clone();
+        ctx.server_advanced = dialog.server_advanced;
         let (card, finish) = settings::card(&config, &ctx, dialog.section);
         root.edit_widget(dialog.layer, |mut w| Modal::set_card(&mut w.downcast(), card, &crate::i18n::t("settings.title")));
         let mut fresh = finish(dialog.layer);
         fresh.sync_selected = dialog.sync_selected;
         fresh.sync_notice = dialog.sync_notice;
+        fresh.server_advanced = dialog.server_advanced;
         root.focus_on(Some(fresh.layer));
         if let Some(offset) = offset {
             fresh.content.edit(root, |mut area| ScrollArea::set_offset(&mut area, offset));
@@ -65,6 +67,7 @@ impl App {
         dialog.trash_page = 0;
         dialog.sync_selected = None;
         dialog.sync_notice = None;
+        dialog.server_advanced = false;
         self.interface.set_settings_section(section.key());
         let config = self.workspace.core.settings.get_config();
         let ctx = self.settings_context(section, None, 0);
@@ -83,6 +86,7 @@ impl App {
         let mut ctx = self.settings_context(section, copied, page);
         ctx.sync_selected = dialog.sync_selected.clone();
         ctx.sync_notice = dialog.sync_notice.clone();
+        ctx.server_advanced = dialog.server_advanced;
         let (content, bindings) = settings::content(&config, &ctx, section);
         let Some(Popup::Settings { dialog, .. }) = &mut self.popup else { return };
         let switches = switch_travel(root, &dialog.bindings);

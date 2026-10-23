@@ -8,12 +8,14 @@ pub(super) fn status_row(probe: Option<&ServerProbeView>) -> Row {
         Some(ServerProbeView::Failed) => "settings.server.verificationFailed",
         None => "settings.server.notConnected",
     };
-    info(t("settings.server.state"), Some(t("settings.server.stateHint")),
+    info(t("settings.server.state"), None,
         Control::Status {
             text: t(state_key),
-            tone: if matches!(probe, Some(ServerProbeView::Observed { .. })) {
-                Tone::Secondary
-            } else { Tone::Danger },
+            tone: match probe {
+                Some(ServerProbeView::Failed | ServerProbeView::Unsupported { .. }) => Tone::Danger,
+                Some(ServerProbeView::Observed { .. }) => Tone::Secondary,
+                _ => Tone::Muted,
+            },
         },
     )
 }

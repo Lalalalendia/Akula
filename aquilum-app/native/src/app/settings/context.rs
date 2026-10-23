@@ -32,6 +32,7 @@ impl App {
         };
         Context {
             server_probe,
+            server_advanced: false,
             workspace,
             sync_recovery,
             sync_selected: None,

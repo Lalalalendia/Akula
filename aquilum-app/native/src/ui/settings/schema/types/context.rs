@@ -12,6 +12,7 @@ pub enum ServerProbeView {
 
 pub struct Context {
     pub server_probe: Option<ServerProbeView>,
+    pub server_advanced: bool,
     pub workspace: Option<PathBuf>,
     pub scale: f64,
     pub home_page: String,
@@ -28,7 +29,7 @@ pub struct Context {
 impl Context {
     #[cfg(test)]
     pub fn new(scale: f64) -> Self {
-        Context { server_probe: None, workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
+        Context { server_probe: None, server_advanced: false, workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
     }
 }
 

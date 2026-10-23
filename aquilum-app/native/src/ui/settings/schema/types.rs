@@ -27,6 +27,9 @@ pub use context::*;
 pub enum Action {
     /// Read-only SSH KEX + host inspection; no package/install/approval.
     VerifyServer,
+    ToggleServerAdvanced,
+    /// Blocked until signed installer and owner approval are implemented.
+    InstallServer,
     InspectRecovery(String),
     RequestRecoveryReview(NativeRecoveryDecision),
     OpenTrash,

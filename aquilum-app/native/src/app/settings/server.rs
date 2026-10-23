@@ -10,7 +10,7 @@ use super::{App, Effect, Popup, Section};
 use aquilum_core::server_bootstrap_lab::{MachineArch, SupportedOs};
 use aquilum_core::server_bootstrap_ssh_windows_lab::WindowsOpenSshPinnedProbe;
 use aquilum_core::settings::models::ServerBootstrapDraft;
-use crate::ui::settings::schema::ServerProbeView;
+use crate::ui::settings::schema::{ServerProbeView, probe_target};
 use masonry::app::RenderRoot;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ pub(in crate::app) struct ProbeReport {
 impl App {
     pub(in crate::app) fn request_server_probe(&mut self) -> Effect {
         let draft = self.workspace.core.settings.get_config().server_setup;
-        if !draft.valid_offline_pin() {
+        if probe_target(&draft).is_none() {
             self.server_probe.observation = Some((draft, ServerProbeView::Failed));
             return Effect::Content;
         }
@@ -39,10 +39,14 @@ impl App {
         let wake = Arc::clone(&self.workspace.wake);
         std::thread::spawn(move || {
             let view = (|| {
-                let target = draft.to_unconnected_b0_target()?;
-                let facts = WindowsOpenSshPinnedProbe::inspect_readonly_target(
-                    &target, &draft.host_public_key,
-                ).ok()?;
+                let target = probe_target(&draft)?;
+                let facts = if draft.host_public_key.is_empty() {
+                    WindowsOpenSshPinnedProbe::inspect_readonly_fingerprint_target(&target).ok()?
+                } else {
+                    WindowsOpenSshPinnedProbe::inspect_readonly_target(
+                        &target, &draft.host_public_key,
+                    ).ok()?
+                };
                 let os = match &facts.os {
                     SupportedOs::Ubuntu => "Ubuntu",
                     SupportedOs::Debian => "Debian",

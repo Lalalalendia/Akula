@@ -73,6 +73,12 @@ fn real_windows_openssh_strict_signed_host_kex_and_fixed_diagnostics() {
         &request.target, &host_a,
     ).expect("real signed host A and bounded B0 facts");
     assert_eq!(read_only, facts);
+    // An independently obtained fingerprint alone selects the candidate;
+    // only the subsequent signed ssh.exe host KEX grants read-only access.
+    let fingerprint_only =
+        WindowsOpenSshPinnedProbe::inspect_readonly_fingerprint_target(&request.target)
+            .expect("fingerprint-only signed KEX and bounded read-only preflight");
+    assert_eq!(fingerprint_only, facts);
     assert_eq!(facts.os,SupportedOs::Ubuntu);
     assert_eq!(facts.arch,MachineArch::X86_64);
     assert!(facts.has_systemd && facts.has_sudo_rights);
@@ -96,6 +102,11 @@ fn fake_server_a_cannot_pass_independent_pinned_host_b() {
         WindowsOpenSshPinnedProbe::inspect_readonly_target(&request.target, &host_b)
             .unwrap_err(),
         B0Error::InspectionUnavailable,
+    );
+    assert!(
+        WindowsOpenSshPinnedProbe::inspect_readonly_fingerprint_target(&request.target)
+            .is_err(),
+        "the host A cannot satisfy independently pinned host B fingerprint",
     );
     println!("B0C_WIN_FORGED_SIGNED_KEX_REFUSED_PASS");
 }

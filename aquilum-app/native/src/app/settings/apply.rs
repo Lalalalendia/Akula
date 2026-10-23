@@ -49,7 +49,8 @@ impl App {
                     || before.templates.folder != after.templates.folder
                     || mcp_changed
                     || retention
-                    || before.s3_onboarding != after.s3_onboarding;
+                    || before.s3_onboarding != after.s3_onboarding
+                    || before.server_setup != after.server_setup;
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;

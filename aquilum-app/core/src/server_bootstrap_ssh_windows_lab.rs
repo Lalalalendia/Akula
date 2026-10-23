@@ -26,6 +26,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+mod scan;
+
 const FILE_READ_ATTRIBUTES: u32 = 0x80;
 const READ_CONTROL: u32 = 0x0002_0000;
 const FILE_SHARE_READ: u32 = 0x1;

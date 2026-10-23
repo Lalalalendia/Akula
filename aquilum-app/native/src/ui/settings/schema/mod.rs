@@ -34,6 +34,8 @@ use support::*;
 use system::*;
 use sync::*;
 use server::*;
+#[cfg(all(windows, feature = "server-readonly-preflight"))]
+pub(crate) use server::identity::probe_target;
 use trash::*;
 
 pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block> {
