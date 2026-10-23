@@ -1,6 +1,4 @@
-//! Transfer preparation UI. No transport or file authorization is exposed here.
-//! Rows are in-memory drafts, never a claim that data was sent or verified.
-
+//! Local transfer controls; W4 is an explicit, opt-in experiment.
 use aquilum_core::sync::DeviceId;
 use masonry::accesskit::Role;
 use masonry::core::{NewWidget, PropertySet, WidgetId};
@@ -8,14 +6,12 @@ use masonry::layout::Length;
 use masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
 use masonry::properties::{Gap, Padding};
 use masonry::widgets::Flex;
-
 use super::dialog::{CardSize, Modal, header};
 use super::scroll::ScrollArea;
 use super::tokens::size;
 use super::widgets::{IconButton, TextButton, Variant};
 use super::icons;
 use crate::i18n::{t, t_with};
-
 #[derive(Clone, Debug)]
 pub struct QueueRow {
     pub index: usize,
@@ -23,13 +19,11 @@ pub struct QueueRow {
     pub bytes: u64,
     pub paused: bool,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueueAction {
     Toggle,
     Remove,
 }
-
 mod devices;
 mod identity;
 mod layout;
@@ -56,10 +50,9 @@ pub struct TransferDialog {
 #[cfg(feature = "messaging-w4-pilot")]
 mod w4_pilot;
 #[cfg(feature = "messaging-w4-pilot")]
-pub use w4_pilot::{PilotAction,PilotView};
+pub use w4_pilot::{PilotAction, PilotView};
 mod dialog_view;
 pub use dialog_view::dialog;
-
 #[cfg(test)]
 mod tests {
     use super::*;
