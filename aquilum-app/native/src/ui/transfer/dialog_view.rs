@@ -11,6 +11,8 @@ pub fn dialog(
     error: Option<&str>,
     identity: Option<&IdentityView>,
     inbox: Option<&InboxView>,
+    #[cfg(feature = "p2p-native-send-beta")] sender: Option<&NativeSendView>,
+    #[cfg(feature = "p2p-native-send-beta")] can_send: bool,
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
@@ -64,6 +66,13 @@ pub fn dialog(
     } else {
         (card, Vec::new())
     };
+    #[cfg(feature = "p2p-native-send-beta")]
+    let (card, native_send_actions) = if let Some(sender) = sender {
+        let (section, actions) = native_send_view::render(sender, contacts, can_send);
+        (card.with_fixed(rule()).with_fixed(section), actions)
+    } else {
+        (card, Vec::new())
+    };
     let card = NewWidget::new(
         card.with_fixed(rule())
             .with(queue, 1.0)
@@ -88,6 +97,8 @@ pub fn dialog(
             device_actions,
             identity_actions,
             inbox_save_actions,
+            #[cfg(feature = "p2p-native-send-beta")]
+            native_send_actions,
         },
     )
 }

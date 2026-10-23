@@ -6,6 +6,7 @@ on:
     branches:
       - feature/ak-p2p-beta-persistent-inbox-20261023
       - feature/ak-p2p-native-inbox-preview-20261023
+      - feature/ak-p2p-native-send-onefile-20261024
     paths:
       - 'interop/akula-staya/**'
       - 'modules/drop-inbox-ledger/**'
@@ -14,6 +15,7 @@ on:
       - 'aquilum-app/native/src/ui/transfer/**'
       - 'aquilum-app/native/src/ui/transfer.rs'
       - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/assets/locales/**'
       - 'aquilum-app/Cargo.lock'
       - '.github/workflows/p2p-one-file-beta.yml'
   pull_request:
@@ -29,7 +31,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/feature/ak-p2p-native-') }}
 
 jobs:
   one-file:
@@ -49,11 +51,15 @@ jobs:
         shell: bash
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Rustfmt Native Inbox preview (dependent branch only)
-        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
+        if: (github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023' || github.ref == 'refs/heads/feature/ak-p2p-native-send-onefile-20261024')
         shell: bash
-        run: rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/inbox.rs aquilum-app/native/src/ui/transfer/inbox_view.rs
+        run: |
+          rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/inbox.rs aquilum-app/native/src/ui/transfer/inbox_view.rs
+          if [[ "${GITHUB_REF}" == 'refs/heads/feature/ak-p2p-native-send-onefile-20261024' ]]; then
+            rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/native_send.rs aquilum-app/native/src/ui/transfer/native_send_view.rs
+          fi
       - name: Diagnose Native Inbox lockfile reconciliation (fail if changed)
-        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
+        if: (github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023' || github.ref == 'refs/heads/feature/ak-p2p-native-send-onefile-20261024')
         shell: bash
         run: |
           cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 > /dev/null
@@ -74,22 +80,30 @@ jobs:
         shell: bash
         run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
       - name: Install Native Linux build dependencies (preview only)
-        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023' && runner.os == 'Linux'
+        if: (github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023' || github.ref == 'refs/heads/feature/ak-p2p-native-send-onefile-20261024') && runner.os == 'Linux'
         shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
         run: |
           set -euo pipefail
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
-          sudo apt-get install -y pkg-config libglib2.0-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends pkg-config libglib2.0-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
       - name: Compile Native Inbox preview and Save Copy (dependent branch only)
-        if: github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023'
+        if: (github.ref == 'refs/heads/feature/ak-p2p-native-inbox-preview-20261023' || github.ref == 'refs/heads/feature/ak-p2p-native-send-onefile-20261024')
         shell: bash
         run: |
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-inbox-preview
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-inbox-preview app::transfer::inbox::tests -- --nocapture
+      - name: Native sender compile and tests (dependent research branch only)
+        if: github.ref == 'refs/heads/feature/ak-p2p-native-send-onefile-20261024'
+        shell: bash
+        run: |
+          cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-send-beta
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-send-beta app::transfer::native_send::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-send-beta ui::transfer::native_send_view::tests -- --nocapture
       - name: Strict Clippy for opt-in beta and bridge
         shell: bash
         run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --all-targets -- -D warnings

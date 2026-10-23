@@ -326,8 +326,22 @@ async fn receive_one(
     Ok(())
 }
 
-async fn run() -> Result<(), String> {
-    let mode = parse_mode(env::args().skip(1))?;
+/// Explicit, one-shot native send. The UI must select exactly one local
+/// source and one OS-pinned peer; this API rechecks the pin and source itself.
+/// No background listener, queued sending, Vault access or peer enrollment.
+pub async fn native_send_one(
+    peer: String,
+    source: PathBuf,
+    listening: impl FnOnce(Vec<SocketAddr>),
+) -> Result<(), String> {
+    parse_peer(&peer)?;
+    if !source.is_absolute() {
+        return Err("select an absolute source file".into());
+    }
+    run_mode(Mode::Send { peer, source }, listening).await
+}
+
+async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result<(), String> {
     let peer = match &mode {
         Mode::Send { peer, .. } | Mode::Receive { peer, .. } => peer,
     };
@@ -348,9 +362,13 @@ async fn run() -> Result<(), String> {
     println!("LOCAL_ENDPOINT_ID={}", endpoint.id());
     let result = match mode {
         Mode::Send { peer, source } => {
-            for socket in endpoint.bound_sockets() {
+            let bound = endpoint.bound_sockets();
+            for socket in &bound {
                 println!("LISTEN_UDP={socket} (share the reachable LAN IP and UDP port only)");
             }
+            // Listening callback contains only bound sockets, never a key.
+            // Wildcard 0.0.0.0/:: is not a remote-reachable IP; UI states so.
+            listening(bound);
             let incoming = tokio::time::timeout(Duration::from_secs(180), endpoint.accept())
                 .await
                 .map_err(|_| "no receiving peer within 180 seconds")?
@@ -410,6 +428,11 @@ async fn run() -> Result<(), String> {
     result
 }
 
+async fn run() -> Result<(), String> {
+    let mode = parse_mode(env::args().skip(1))?;
+    run_mode(mode, |_| {}).await
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     if let Err(error) = run().await {
@@ -421,6 +444,18 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn native_send_refuses_malformed_peer_before_lan_bind() {
+        let source = std::env::temp_dir().join("not-opened-source.txt");
+        let mut listening = false;
+        let result = native_send_one("not-a-peer".to_owned(), source, |_| {
+            listening = true;
+        })
+        .await;
+        assert!(result.is_err());
+        assert!(!listening);
+    }
 
     #[test]
     fn strict_explicit_cli_modes() {

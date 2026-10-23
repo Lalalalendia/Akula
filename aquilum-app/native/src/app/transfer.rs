@@ -20,6 +20,8 @@ const MAX_DEVICE_ROWS: usize = 32;
 mod model;
 #[cfg(feature = "p2p-inbox-preview")]
 mod inbox;
+#[cfg(feature = "p2p-native-send-beta")]
+mod native_send;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
@@ -56,6 +58,8 @@ pub(super) struct TransferState {
     pub(super) local_identity: local_identity::LocalIdentityUi,
     #[cfg(feature = "p2p-inbox-preview")]
     pub(super) inbox: inbox::InboxPreview,
+    #[cfg(feature = "p2p-native-send-beta")]
+    pub(super) sender: native_send::NativeSender,
 }
 
 impl App {
@@ -81,7 +85,17 @@ impl App {
         let inbox_view = Some(&self.transfer.inbox.view);
         #[cfg(not(feature = "p2p-inbox-preview"))]
         let inbox_view = None;
-        #[cfg(feature = "p2p-device-contacts-preview")]
+        // Rust cannot conditionally remove individual call arguments.
+        // Keep feature combinations explicit so default-off still compiles.
+        #[cfg(all(feature = "p2p-device-contacts-preview", feature = "p2p-native-send-beta"))]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            &self.transfer.transport_contacts, self.transfer.choosing,
+            self.transfer.error.as_deref(), identity_view, inbox_view,
+            Some(&self.transfer.sender.view),
+            self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
+        );
+        #[cfg(all(feature = "p2p-device-contacts-preview", not(feature = "p2p-native-send-beta")))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
@@ -119,6 +133,10 @@ impl App {
         if self.transfer.inbox.poll() {
             changed = true;
         }
+        #[cfg(feature = "p2p-native-send-beta")]
+        if self.transfer.sender.poll() {
+            changed = true;
+        }
         if changed {
             self.refresh_transfers(root);
         }
@@ -145,6 +163,8 @@ impl App {
         let dismiss = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
             || (id == dialog.close && pressed);
         if dismiss {
+            #[cfg(feature = "p2p-native-send-beta")]
+            self.transfer.sender.cancel();
             dialog::close(root, dialog.layer);
             return Outcome::default();
         }
@@ -172,6 +192,20 @@ impl App {
                 .find(|(button, _)| *button == id)
             {
                 refresh = self.begin_inbox_save(receipt);
+            }
+        }
+        #[cfg(feature = "p2p-native-send-beta")]
+        if pressed && !refresh {
+            if let Some((_, peer)) = dialog.native_send_actions.iter()
+                .find(|(button, _)| *button == id)
+            {
+                refresh = match peer {
+                    transfer_ui::NativeSendAction::Start(peer) => self.begin_native_send(peer),
+                    transfer_ui::NativeSendAction::Cancel => {
+                        self.transfer.sender.cancel();
+                        true
+                    }
+                };
             }
         }
         #[cfg(feature = "p2p-device-ui")]
