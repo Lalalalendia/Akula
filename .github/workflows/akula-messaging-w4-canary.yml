@@ -136,11 +136,17 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 "$candidate" --w4-pilot status |
             grep -Fxq 'AKULA_W4_PILOT_READY helper=verified network=inactive auto_start=no SSH_only=yes'
           echo 'AKULA_W4_INSIDE_INSTALLED_APPIMAGE_PASS helper_hash=verified'
-          sha256sum dist/*.AppImage > dist/APPIMAGE_SHA256.txt
+          (
+            cd dist
+            sha256sum *.AppImage > APPIMAGE_SHA256.txt
+            sha256sum --check APPIMAGE_SHA256.txt
+          )
           mkdir -p dist/docs
           cp docs/messaging/AK-W4-PROD-CANARY-01.md dist/docs/INSTRUCTIONS.md
           cp scripts/messaging/w4-pilot-smoke.sh dist/docs/smoke.sh
-          sha256sum .artifacts/cargo-native/release/akula-w4-lab > dist/docs/W4_HELPER_SHA256.txt
+          printf '%s  %s\n' "$AKULA_W4_SIDECAR_SHA256" \
+            "usr/share/akula-w4/akula-w4-lab" > dist/docs/W4_HELPER_SHA256.txt
+          (cd "$RUNNER_TEMP/squashfs-root" && sha256sum -c "$GITHUB_WORKSPACE/dist/docs/W4_HELPER_SHA256.txt")
           printf '%s\n' "$GITHUB_SHA" > dist/docs/AKULA_SOURCE_COMMIT.txt
           printf '%s\n' 85b95c1d38a9a8b803b5e0ba1d9fcaac521e4dfa > dist/docs/WOW_SOURCE_COMMIT.txt
           echo 'AKULA_W4_CANARY_CANDIDATE_OK (NOT RELEASE)'
