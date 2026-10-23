@@ -10,7 +10,7 @@ use masonry::core::{ErasedAction, WidgetId};
 use masonry::kurbo::Point;
 
 use super::{App, Outcome, Popup};
-use crate::ui::dialog::{self, DialogAnswer};
+use crate::ui::dialog::{self as ui_dialog, DialogAnswer};
 use crate::ui::transfer::{self as transfer_ui, QueueAction};
 use crate::ui::widgets::Pressed;
 
@@ -18,6 +18,9 @@ const MAX_DRAFTS: usize = 32;
 const MAX_DEVICE_ROWS: usize = 32;
 
 mod model;
+mod dialog;
+#[cfg(feature = "messaging-w4-pilot")]
+mod w4_pilot;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
@@ -50,6 +53,8 @@ pub(super) struct TransferState {
     #[cfg(feature = "p2p-device-contacts-preview")]
     transport_contacts: transfer_ui::TransportContactView,
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
+    #[cfg(feature = "messaging-w4-pilot")]
+    pub(super) w4_pilot: w4_pilot::PilotUi,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
 }
@@ -64,36 +69,6 @@ impl App {
         self.show_transfers(root);
     }
 
-    fn show_transfers(&mut self, root: &mut RenderRoot) {
-        let identity_view = {
-            #[cfg(feature = "p2p-device-ui")]
-            { Some(&self.transfer.local_identity.view) }
-            #[cfg(not(feature = "p2p-device-ui"))]
-            { None }
-        };
-        #[cfg(feature = "p2p-device-contacts-preview")]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view,
-        );
-        #[cfg(not(feature = "p2p-device-contacts-preview"))]
-        let (layer, dialog) = transfer_ui::dialog(
-            &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
-        );
-        root.add_layer(layer, Point::ORIGIN);
-        root.focus_on(Some(dialog.layer));
-        self.popup = Some(Popup::Transfers(dialog));
-    }
-
-    fn refresh_transfers(&mut self, root: &mut RenderRoot) {
-        if let Some(Popup::Transfers(dialog)) = self.popup.take() {
-            root.remove_layer(dialog.layer);
-            self.show_transfers(root);
-        }
-    }
-
     pub(super) fn on_transfer_picked(&mut self, root: &mut RenderRoot) {
         let mut changed = false;
         while let Ok(paths) = self.transfer_rx.try_recv() {
@@ -103,6 +78,10 @@ impl App {
         }
         #[cfg(feature = "p2p-device-ui")]
         if self.transfer.local_identity.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "messaging-w4-pilot")]
+        if self.transfer.w4_pilot.poll() {
             changed = true;
         }
         if changed {
@@ -131,7 +110,7 @@ impl App {
         let dismiss = (id == dialog.layer && matches!(action.downcast_ref::<DialogAnswer>(), Some(DialogAnswer::Cancel)))
             || (id == dialog.close && pressed);
         if dismiss {
-            dialog::close(root, dialog.layer);
+            ui_dialog::close(root, dialog.layer);
             return Outcome::default();
         }
         let mut refresh = false;
@@ -160,6 +139,15 @@ impl App {
                 self.transfer.local_identity.action(
                     *command, Arc::clone(&self.workspace.wake),
                 );
+                refresh = true;
+            }
+        }
+        #[cfg(feature = "messaging-w4-pilot")]
+        if pressed && !refresh {
+            if let Some((_, command)) = dialog.w4_actions.iter()
+                .find(|(button, _)| *button == id)
+            {
+                self.transfer.w4_pilot.action(*command, Arc::clone(&self.workspace.wake));
                 refresh = true;
             }
         }

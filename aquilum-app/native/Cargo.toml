@@ -27,6 +27,7 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 
 [features]
 installed = []
+messaging-w4-pilot = []
 memory-probe = []
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]

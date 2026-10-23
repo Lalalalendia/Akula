@@ -124,9 +124,9 @@ mod tests {
             }],
             signature: [0; 64],
         };
-        roster
-            .signature
-            .copy_from_slice(owner.sign(&roster.canonical_claim().unwrap()).as_ref());
+        let claim = roster.canonical_claim().unwrap();
+        let signature = owner.sign(&claim);
+        roster.signature.copy_from_slice(signature.as_ref());
         let trusted_owner = IndependentlyPinnedOwner {
             vault_id,
             owner_public_key: owner.public_key().as_ref().try_into().unwrap(),
@@ -178,9 +178,9 @@ mod tests {
             devices: vec![],
             signature: [0; 64],
         };
-        signed
-            .signature
-            .copy_from_slice(owner.sign(&signed.canonical_claim().unwrap()).as_ref());
+        let claim = signed.canonical_claim().unwrap();
+        let signature = owner.sign(&claim);
+        signed.signature.copy_from_slice(signature.as_ref());
         let too_new = IndependentlyPinnedOwner {
             vault_id,
             owner_public_key: owner.public_key().as_ref().try_into().unwrap(),
