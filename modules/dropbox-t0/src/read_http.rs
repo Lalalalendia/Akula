@@ -409,12 +409,10 @@ mod tests {
         });
         let base = format!("http://{addr}");
         let client = connect_test(Endpoints { api: base.clone(), content: base });
-        let first = client.list_delta(None).unwrap();
-        assert!(first.entries.is_empty());
-        assert!(first.has_more);
-        let next = client.list_delta(Some(&first.cursor)).unwrap();
-        assert_eq!(next.cursor,"c2");
-        assert!(!next.has_more);
+        let snapshot = client.snapshot().unwrap();
+        assert!(snapshot.entries.is_empty());
+        assert_eq!(snapshot.cursor, "c2");
+        assert!(!snapshot.has_more);
         worker.join().unwrap();
     }
 
