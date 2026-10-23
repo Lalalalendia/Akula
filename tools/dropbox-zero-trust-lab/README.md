@@ -8,9 +8,9 @@ are untrusted. A successful API conformance test does not prove that the cloud
 provider will be honest or available in the future.
 
 The script contains no access tokens, uses only Python's standard library,
-performs no deletes, and does not autostart in CI. It writes three random binary
-objects (plus a rejected conflicting attempt) ONLY when `--run` and all
-explicit disposable-account safeguards are provided. It never reads Akula Vault.
+performs no deletes, and does not autostart in CI. It writes only a single,
+explicitly selected synthetic experiment per invocation, with both `--run` and
+`--case P01|P02|P03` plus disposable-account safeguards. It never reads Akula Vault.
 
 ## Required isolated test account
 
@@ -32,10 +32,24 @@ explicit disposable-account safeguards are provided. It never reads Akula Vault.
 export AKULA_DROPBOX_TEST_TOKEN='(set securely from test account)'
 export AKULA_DROPBOX_TEST_ACCOUNT_ID='dbid:(expected disposable account ID)'
 export AKULA_DROPBOX_DISPOSABLE_CONFIRM='YES_DISPOSABLE_APP_FOLDER'
-python3 probe.py --run
+python3 probe.py --run --case P01
 ```
 
 Running without `--run` produces `NOT RUN` and no Dropbox requests.
+Running with `--run` but without `--case` returns `HOLD` before any network request.
+Only **one** case is enabled for each invocation; do not run P02 (8 MiB+1
+synthetic upload) unless the disposable account has adequate free quota and
+its owner explicitly approved that specific experiment.
+
+Before any live test, run the credential-free offline contract suite:
+
+```sh
+python3 -m py_compile probe.py test_probe.py
+python3 -m unittest -v test_probe
+```
+
+The suite contains **11 mocked checks** for P01/P02/P03 and common fail-closed
+behavior. No real Dropbox service is contacted during these tests.
 
 P01: Mint **two distinct** one-use temporary upload links for the same random
 exact path, both using `mode=add`, `autorename=false`, `strict_conflict=true`.
@@ -66,7 +80,7 @@ is SHA-256 over per-4-MiB SHA-256 blocks, not Akula BLAKE3. Byte equality is
 proven independently by readback in this lab; Akula's own cryptographic sender
 signature/AEAD/BLAKE3 and durable Inbox remain **separate required gates**.
 
-For all three experiments, do not report live PASS without actually executing
+For each experiment, do not report live PASS without actually executing
 this harness against the deliberately authorized disposable account. Do not
 run it against a production, shared, or non-App-folder Dropbox credential.
 
