@@ -1,5 +1,6 @@
-//! AK-P2P-BETA-01: one explicitly selected file on a directly reachable LAN.
-//! Opt-in Windows companion, never a background sync or a Vault/File Gate ACK.
+//! AK-P2P-BETA-01: explicit one-file QUIC transfer over direct LAN or user-opted-in n0 Internet.
+//! Native/installed actions require an independently confirmed OS peer pin.
+//! No automatic network listener, background sync or Vault/File Gate ACK.
 use akula_staya_integration::live_identity::{
     require_pinned_live_peer, with_protected_iroh_secret,
 };
@@ -53,6 +54,15 @@ enum Mode {
         peer: String,
         address: Option<SocketAddr>,
     },
+}
+
+// Single routing decision shared by both Native actions and regression tests.
+// A LAN operation must never enable third-party discovery/relay implicitly.
+fn uses_n0(mode: &Mode) -> bool {
+    matches!(
+        mode,
+        Mode::SendInternet { .. } | Mode::ReceiveInbox { address: None, .. }
+    )
 }
 
 fn parse_peer(value: &str) -> Result<EndpointId, String> {
@@ -499,10 +509,7 @@ async fn await_selected_incoming(
 }
 
 async fn run_mode(mode: Mode, listening: impl FnOnce(Vec<SocketAddr>)) -> Result<(), String> {
-    let internet = matches!(
-        &mode,
-        Mode::SendInternet { .. } | Mode::ReceiveInbox { address: None, .. }
-    );
+    let internet = uses_n0(&mode);
     let peer = match &mode {
         Mode::Send { peer, .. }
         | Mode::SendInternet { peer, .. }
@@ -744,14 +751,25 @@ mod tests {
             address: Some("192.168.1.23:5000".parse().unwrap()),
         };
         let explicitly_internet = Mode::ReceiveInbox {
-            peer: id,
+            peer: id.clone(),
             address: None,
         };
-        assert!(!matches!(legacy, Mode::ReceiveInbox { address: None, .. }));
-        assert!(matches!(
-            explicitly_internet,
-            Mode::ReceiveInbox { address: None, .. }
-        ));
+        let source = std::env::temp_dir().join("user-selected-one-file.bin");
+        assert!(!uses_n0(&legacy));
+        assert!(uses_n0(&explicitly_internet));
+        assert!(!uses_n0(&Mode::Send {
+            peer: id.clone(),
+            source: source.clone(),
+        }));
+        assert!(uses_n0(&Mode::SendInternet {
+            peer: id.clone(),
+            source,
+        }));
+        assert!(!uses_n0(&Mode::Receive {
+            peer: id,
+            address: "192.168.1.23:5000".parse().unwrap(),
+            destination: std::env::temp_dir().join("received.bin"),
+        }));
     }
 
     #[test]
