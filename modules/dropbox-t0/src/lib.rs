@@ -1,9 +1,8 @@
 #![forbid(unsafe_code)]
-//! Inert Dropbox T0 transport contract.
-//!
-//! No OAuth credentials, network client, cloud writes, File Gate, scheduler,
-//! Sync Core or journal authority lives in this crate. Only validated request
-//! descriptions and deterministic response classification are exposed.
+//! Inert Dropbox transport and pre-publication receipt contracts.
+//! No OAuth, remote client, native File Gate or Sync Core authority.
+
+pub mod publication;
 
 use serde::Deserialize;
 use serde_json::{json, Value};

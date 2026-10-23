@@ -19,6 +19,9 @@ test('28 owned workflows remain direct for own sources, called only by impacted 
       for(const file of ["aquilum-app/core/src/sync/host_install_unix_root.rs","aquilum-app/core/src/sync/host_install_witness.rs","aquilum-app/core/src/sync/mod.rs","aquilum-app/native/Cargo.toml",".github/workflows/sync-installed-os-owner-witness.yml","docs/sync/adr-0038-unix-root-owned-install-receipt.md"]){
         assert.equal(sources.assess({paths:[file]}).installed_owner_owned,true,file);
       }
+    } else if(['host-custody','sync-protection','text-delta','appimage-beta'].includes(id)){
+      assert.match(body,/^on:\n  workflow_call:/m);
+      assert.doesNotMatch(body,/^  pull_request:/m);
     } else assert.match(body,/^on:\n  workflow_call:\n  pull_request:/m);
     const header=body.split(/\n(?:jobs:|permissions:|concurrency:|env:)/)[0];
     for(const p of ['aquilum-app/core/Cargo.toml','aquilum-app/Cargo.lock','aquilum-app/core/src/lib.rs','aquilum-app/Cargo.toml']){
@@ -26,7 +29,7 @@ test('28 owned workflows remain direct for own sources, called only by impacted 
     }
     const group=body.match(/^  group: (.*)$/m)?.[1];
     if(group)assert.ok(group.includes('github.workflow'),file+' direct/called concurrency separated');
-    if(id!=='installed-owner')assert.match(body,new RegExp(file.replace(/\./g,'\\.'),'m'),file+' watches itself');
+    if(!['installed-owner','host-custody','sync-protection','text-delta','appimage-beta'].includes(id))assert.match(body,new RegExp(file.replace(/\./g,'\\.'),'m'),file+' watches itself');
     assert.match(shared,new RegExp('  route-'+id+':\\n'),file+' included');
     assert.ok(shared.includes('uses: ./.github/workflows/'+file),file+' callable');
     for(const key of keys)assert.ok(shared.includes('inputs.'+key),'input '+key+' used by router');
@@ -81,18 +84,18 @@ test('beta packaging workflows do not build all three OS installers for any Nati
   for(const [filename,ownedScript,ownedManifest] of specs){
     const body=fs.readFileSync(path.join(__dirname,'../workflows',filename),'utf8');
     const policy=parse(body);
-    assert.equal(policy.t,'paths',filename+' remains owned-path PR workflow');
+    assert.equal(policy.t,filename==='appimage-beta.yml'?'none':'paths',filename+' routed PR ownership');
     assert.equal(matches(policy,'aquilum-app/native/src/app/tests/graph.rs'),false,filename);
     assert.equal(matches(policy,'aquilum-app/native/src/updater/macos_transaction.rs'),false,filename);
     assert.equal(matches(policy,'aquilum-app/native/src/main.rs'),false,filename);
     for(const owned of [
       '.github/workflows/'+filename,
       'aquilum-app/native/Cargo.toml',ownedScript,ownedManifest,
-    ])assert.equal(matches(policy,owned),true,filename+' retains '+owned);
+    ])if(filename!=='appimage-beta.yml')assert.equal(matches(policy,owned),true,filename+' retains '+owned);
     assert.match(body,/^  workflow_call:\s*$/m,filename+' still required via shared manifest');
     if(filename==='windows-beta.yml')assert.match(body,/^  workflow_dispatch:\s*$/m,'Windows retains established manual candidate');
     else assert.doesNotMatch(body,/^  workflow_dispatch:\s*$/m,filename+' remains PR-only for unsigned release safety');
-    assert.match(body,/^  pull_request:\s*$/m,filename+' watches packaging');
+    if(filename!=='appimage-beta.yml')assert.match(body,/^  pull_request:\s*$/m,filename+' watches packaging');
     assert.match(body,/^  [a-z-]+:\n    /m,filename+' retains job');
   }
   const main=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
@@ -129,21 +132,27 @@ test('Native Cargo metadata uses existing required S3 and host routes, never an 
   const pure=r.assess({paths:[r.CORE,r.LOCK,r.NATIVE,r.WINDOWS],versionOnly:true});
   assert.equal(pure.native_manifest_risky,false,'pure bump exempts only validated dependency graph');
   assert.equal(pure.installed_owner_owned,false);
-  for(const file of ['sync-host-custody.yml','sync-s3-platform.yml']){
-    const body=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
-    const policy=parse(body);
-    assert.equal(matches(policy,native),false,file+' must not duplicate App checks route');
-    assert.equal(matches(policy,'.github/workflows/'+file),true,file+' self-edits trigger direct proof');
-    assert.equal(matches(policy,'aquilum-app/core/src/app_core.rs'),true,file+' direct source proof retained');
-    assert.match(body,/^  workflow_call:$/m,'required reusable invocation retained');
+  const host=fs.readFileSync(path.join(__dirname,'../workflows/sync-host-custody.yml'),'utf8');
+  assert.equal(parse(host).t,'none','host custody must have no parallel pull_request run');
+  assert.match(host,/^  workflow_call:$/m,'required host callable retained');
+  assert.doesNotMatch(host,/^  pull_request:$/m);
+  for(const path of ['.github/workflows/sync-host-custody.yml','aquilum-app/core/src/app_core.rs']){
+    assert.ok(r.OWNED_SUITES.owned_host_custody.includes(path),path+' retains source ownership');
+    assert.equal(r.assess({paths:[path]}).owned_host_custody,true,path+' required route');
   }
+  const s3=fs.readFileSync(path.join(__dirname,'../workflows/sync-s3-platform.yml'),'utf8');
+  const s3Policy=parse(s3);
+  assert.equal(matches(s3Policy,native),false,'S3 platform shared Native route is not duplicated');
+  for(const path of ['.github/workflows/sync-s3-platform.yml','aquilum-app/core/src/app_core.rs'])
+    assert.equal(matches(s3Policy,path),true,path+' retains standalone S3 proof');
+  assert.match(s3,/^  workflow_call:$/m,'required S3 callable retained');
   assert.match(core,/native_manifest_risky: \$\{\{ steps\.scope\.outputs\.native_manifest_risky \}\}/);
   assert.match(core,/native: \$\{\{ needs\.classify\.outputs\.native_manifest_risky == 'true' \}\}/);
   assert.match(core,/SHARED_RISKY: .*native_manifest_risky/);
   assert.match(shared,/^      native:\n        required: true\n        type: boolean$/m);
-  assert.match(shared,/route-host-custody:\n    name: Impacted shared manifest \/ host-custody\n    if: \$\{\{ inputs\.core \|\| inputs\.native \}\}/);
+  assert.match(shared,/route-host-custody:\n    name: Impacted shared manifest \/ host-custody\n    if: \$\{\{ inputs\.core \|\| inputs\.native \|\| inputs\.owned_host_custody \}\}/);
   assert.match(shared,/route-s3-platform:\n    name: Impacted shared manifest \/ s3-platform\n    if: \$\{\{ inputs\.core \|\| inputs\.lock \|\| inputs\.native \}\}/);
-  assert.match(shared,/route-host-custody",\["core","native"\]/);
+  assert.match(shared,/route-host-custody",\["owned_host_custody","core","native"\]/);
   assert.match(shared,/route-s3-platform",\["core","lock","native"\]/);
 });
 
@@ -184,3 +193,5 @@ test('roster and positive-host ownership survives selective Cargo CI routing',()
   assert.equal(proven.installed_owner_owned,false);
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
 });
+
+test('source path ownership remains in fail-closed shared route',()=>{const own=require('./ci-shared-manifest-route.cjs');for(const [k,v] of Object.entries(own.OWNED_SUITES)){assert.ok(v.length>0);assert.ok(shared.includes('inputs.'+k));assert.ok(shared.includes('"'+k+'"'));}});
