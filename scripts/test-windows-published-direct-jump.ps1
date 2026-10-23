@@ -130,26 +130,35 @@ function Wait-Gui([int]$excluded = -1) {
 
 Invoke-NSIS $oldSetup @('/S')
 Assert-Installed $old
+$oldBinaryHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
 $openArgs = '--vault "' + $vault + '" --open "' + $note + '"'
 Start-Process -FilePath $exe -ArgumentList $openArgs | Out-Null
 $original = Wait-Gui
 Assert-UserData
 Write-Host 'AKULA_PUBLISHED_039_GUI_PASS'
 
+# In-app updater::apply() exits the old application before NSIS replaces it.
+# Reproduce that exact lifecycle; never leave a stale v0.3.9 process running.
+if (!$original.CloseMainWindow()) { throw 'Akula 0.3.9 refused close before update' }
+if (!$original.WaitForExit(25000)) { throw 'Akula 0.3.9 did not exit before update' }
+Assert-UserData
+Write-Host 'AKULA_PUBLISHED_V039_PREUPDATE_EXIT_PASS'
+
 Invoke-NSIS $nextSetup @('/S', '/R', '/UPDATE', '/ARGS')
 Assert-Installed $next
-$upgraded = Wait-Gui $original.Id
+$newBinaryHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+if ($newBinaryHash -ceq $oldBinaryHash) { throw 'Direct upgrade did not replace Akula binary' }
+$upgraded = Wait-Gui
 Assert-UserData
 Write-Host 'AKULA_PUBLISHED_DIRECT_JUMP_PASS from=0.3.9 to=0.3.12 steps=1 intermediates=0 gui=1 notes=1 sha256=1'
 
-# Uninstall and confirm Akula and Aquilum user-owned data remain unmodified.
-foreach ($p in @(Get-Process -Name 'akula-app' -ErrorAction SilentlyContinue)) {
-  $p.Refresh()
-  if ($p.MainWindowHandle -ne 0) { $null = $p.CloseMainWindow() }
-  if (!$p.WaitForExit(25000)) {
-    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-    throw 'Akula did not exit cleanly'
-  }
+# Close the NEW generation and refuse any stray processes before uninstall.
+$upgraded.Refresh()
+if (!$upgraded.CloseMainWindow()) { throw 'Akula 0.3.12 refused close before uninstall' }
+if (!$upgraded.WaitForExit(25000)) { throw 'Akula 0.3.12 did not exit cleanly before uninstall' }
+$remaining = @(Get-Process -Name 'akula-app' -ErrorAction SilentlyContinue)
+if ($remaining.Count -ne 0) {
+  throw "Akula left $($remaining.Count) unexpected processes after GUI shutdown"
 }
 $uninstaller = Join-Path $install 'uninstall.exe'
 if (!(Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Missing Akula uninstaller' }
