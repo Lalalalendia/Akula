@@ -253,3 +253,15 @@ If you cannot or do not want to use n0 infrastructure, use direct
 `listen`/`connect` with a reachable numeric IP:port or a separately
 configured private overlay/VPN. In that case the normal direct-only CLI
 will not use any n0 discovery/relay.
+
+## Native one-file P2P on the standard installed Akula profile
+
+The protected-main integration branch enables `installed -> p2p-native-receive-beta`
+for the regular signed Windows installer and its existing auto-updater. P2P
+networking starts only on explicit user send/receive actions; peer confirmation
+is not a Vault or File Gate grant. LAN uses numeric private UDP addresses,
+Internet mode explicitly opts into n0 rendezvous and relay, and verified bytes
+remain in a separate local Inbox. See
+`docs/sync/AK-P2P-NATIVE-RECEIVE-ONEFILE-01.md` for limits and acceptance gates.
+This integration is not a published release until merged and signed, and still
+requires installed two-machine GUI and Windows directory/SQLite custody review.
