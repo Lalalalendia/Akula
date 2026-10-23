@@ -105,11 +105,7 @@ impl FileTree {
     fn context_menu(&mut self, root: &mut RenderRoot, index: usize, at: Point) -> Option<TreeAction> {
         let row = self.model.rows()[index].clone();
         let note = aquilum_core::search::paths::is_markdown(&row.path) || aquilum_core::search::paths::is_plain_text(&row.path);
-        // PDF is an attachment in the tree, but its opt-in search action
-        // must still be reachable from the native context menu.
-        let pdf = row.path.extension().and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
-        if !row.folder && !note && !pdf {
+        if !row.folder && !note && !row.path.to_string_lossy().to_ascii_lowercase().ends_with(".pdf") {
             return None;
         }
         let targets = self.model.focus(index);
