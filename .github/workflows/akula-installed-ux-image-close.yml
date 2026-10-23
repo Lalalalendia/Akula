@@ -1,0 +1,55 @@
+# AKULA-INSTALLED-UX-IMAGE-CLOSE-01: pinned public Windows 0.3.12 acceptance.
+# Read-only GitHub access; does not publish, sign, or modify release artifacts.
+name: Akula installed 0.3.12 image-tab and close-last-base acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/akula-installed-ux-image-close.yml'
+      - 'scripts/test-windows-published-ux-image-close.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  installed-ux-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AKULA_DISPOSABLE_UX: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Parse fail-closed acceptance script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-published-ux-image-close.ps1'),
+            [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            throw "Installed UX acceptance PowerShell syntax error: $($errors[0])"
+          }
+          Write-Host 'AKULA_INSTALLED_UX_PARSE_PASS'
+
+      - name: Open real image tab and close the only knowledge base in installed Akula
+        shell: pwsh
+        timeout-minutes: 22
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $ps -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File (Join-Path $env:GITHUB_WORKSPACE 'scripts/test-windows-published-ux-image-close.ps1')
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed Windows UX acceptance failed (exit $LASTEXITCODE)"
+          }
