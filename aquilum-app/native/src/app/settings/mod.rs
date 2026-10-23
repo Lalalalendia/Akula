@@ -17,6 +17,13 @@ mod context;
 mod bindings;
 mod refresh;
 mod recovery;
+mod retention;
+mod dialog_context;
+mod types;
+pub(super) use types::Effect;
+pub(super) mod server_state;
+#[cfg(all(windows, feature = "server-readonly-preflight"))]
+pub(super) mod server;
 
 use crate::system;
 use crate::ui::menu::Menu;
@@ -32,14 +39,6 @@ pub(super) struct OpenMenu {
     button: WidgetId,
 }
 
-pub(super) enum Effect {
-    None,
-    Rescale,
-    Panel,
-    Content,
-    Restyle(bool),
-    Everything,
-}
 
 impl App {
     pub(super) fn open_settings(&mut self, root: &mut RenderRoot) {

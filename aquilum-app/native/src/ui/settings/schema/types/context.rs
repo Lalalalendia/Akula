@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use aquilum_core::mcp::McpStatus;
 use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview};
-
 pub struct Context {
+    pub server_probe: Option<super::ServerProbeView>,
+    pub server_advanced: bool,
     pub workspace: Option<PathBuf>,
     pub scale: f64,
     pub home_page: String,
@@ -17,10 +18,9 @@ pub struct Context {
     pub autostart: Option<bool>,
     pub update: Option<crate::updater::Status>,
 }
-
 impl Context {
     #[cfg(test)]
     pub fn new(scale: f64) -> Self {
-        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, #[cfg(feature = "s3-e2e01-review-preview")] s3_bound_publications: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
+        Context { server_probe: None, server_advanced: false, workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, #[cfg(feature = "s3-e2e01-review-preview")] s3_bound_publications: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
     }
 }
