@@ -83,13 +83,24 @@ async function readGitHub(url, token) {
   return response.json();
 }
 
+// The workflow-specific runs endpoint has returned an empty list even when
+// a completed main-branch watchdog exists. Read the branch run list instead,
+// but admit ONLY the exact watchdog workflow path, not a similarly named job.
+function watchdogRuns(runs) {
+  if (!Array.isArray(runs)) throw new Error('missing workflow_runs');
+  return runs.filter(run =>
+    run && run.path === WORKFLOW &&
+    run.head_branch === 'main' && ALLOWED_EVENTS.has(run.event)
+  );
+}
+
 async function checkLatestAudit(repo, token) {
   const root = 'https://api.github.com/repos/' + repo;
-  const data = await readGitHub(root +
-    '/actions/workflows/dependency-security.yml/runs?branch=main&per_page=30', token);
-  if (!Array.isArray(data.workflow_runs)) throw new Error('missing workflow_runs');
-  for (const run of data.workflow_runs) {
-    if (run.head_branch !== 'main' || !ALLOWED_EVENTS.has(run.event)) continue;
+  // GitHub lists newest runs first. If a newer actual scan failed or is still
+  // running, verdict() denies immediately; never fall back to an older PASS.
+  // A truncated 100-run main window with no audit must remain HOLD.
+  const data = await readGitHub(root + '/actions/runs?branch=main&per_page=100', token);
+  for (const run of watchdogRuns(data.workflow_runs)) {
     const page = await readGitHub(root + '/actions/runs/' + run.id + '/jobs?per_page=100', token);
     if (!Array.isArray(page.jobs)) throw new Error('missing watchdog jobs');
     const decision = verdict(run, page.jobs, Date.now());
@@ -150,4 +161,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { mustScanLocally, verdict, MAX_AGE_MS, BOOTSTRAP_FILES };
+module.exports = { mustScanLocally, verdict, watchdogRuns, MAX_AGE_MS, BOOTSTRAP_FILES };

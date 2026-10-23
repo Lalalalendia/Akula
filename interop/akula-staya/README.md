@@ -80,3 +80,49 @@ controller and ephemeral device identities. It is not a real Akula installed
 UI, trusted device enrollment, remote-signed user decision, authenticated
 host IPC, File Gate publish permission, or durable application receipt.
 Do not enable shipping P2P from this result.
+
+## Receiver create-new inbox (Akula P2P INBOX-01)
+
+After an actual Staya QUIC/Bao transfer produces a private staged file,
+`aquilum_core::p2p_inbox_lab::save_verified_stage_as_new` accepts its
+**already opened File handle** plus the root/length from independently
+approved Akula OfferSession. It copies through a 64 KiB buffer into a fresh
+sibling candidate, cold checks source size and BLAKE3, flushes the candidate
+and uses a **same-directory no-clobber hard link** to publish the
+user-selected NEW destination. Existing files/symlinks, changed stage sizes,
+wrong roots, and unsupported hard-link filesystems fail closed; no rename
+fallback. A wrong digest never makes partial destination bytes visible.
+
+This is now exercised with the actual Staya staged bytes in the Windows/Linux
+two-process E2E and also through portable Core unit tests. The verified stage
+remains separate from the user destination; a second attempted save to that
+destination is rejected without mutation.
+
+**Important limits:** this is a Core opt-in feature / test path, not yet a
+button in installed Akula; neither the receiver's selected destination nor
+the sender's QUIC identity is currently driven by the real File transfers
+window. The API cannot prove the provenance of caller-supplied expected
+BLAKE3 roots; the caller MUST use an authenticated accepted OfferSession.
+It does not protect all ancestor path races or guarantee directory metadata
+durability after power loss. A successful copy is not File Gate APPLIED,
+Vault synchronization, or a durable revision ACK.
+
+## AK-P2P-LIVE-ID-01 — live Iroh key and fresh protected peer pin (opt-in)
+
+The standalone `p2p-live-identity` feature derives the actual Iroh
+`SecretKey` from Akula's existing OS-backed `DeviceIdentity`, checking
+the resulting public ID. It exposes `require_pinned_live_peer(connection,
+selected_id)`: this reads cryptographically authenticated Iroh
+`Connection::remote_id()` and delegates to Core's OS-persisted
+`peer_pin::require_pinned_remote` on **every new operation**. No claimed
+network ID or invitation-derived key is accepted as proof.
+
+Linux/Windows tests establish a genuine loopback QUIC connection and prove
+wrong selected IDs and a fresh unconfirmed peer fail closed. Test code does
+not initialize, replace, delete, or leak any user's canonical credentials.
+
+**Not installed:** neither native File transfers nor the Staya provider calls
+this seam yet. No DeviceId/Vault/object authorization, sender consent, local
+IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
+The existing receiver create-new and OS identity code stay opt-in. This work
+cannot enable network file access.

@@ -1,4 +1,6 @@
 mod row;
+mod helpers;
+pub use helpers::{forget_texts, no_vault, same_path};
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +26,7 @@ pub struct WorkspaceDialog {
     pub layer: WidgetId,
     pub close: WidgetId,
     pub open_folder: WidgetId,
+    pub close_active: Option<WidgetId>,
     pub rows: Vec<(WidgetId, PathBuf, uuid::Uuid)>,
 }
 
@@ -46,8 +49,14 @@ pub fn dialog(workspaces: &[(uuid::Uuid, String)], current: Option<&Path>, error
     );
     let open = NewWidget::new(TextButton::new(t("common.openFolder"), Variant::Primary).with_icon(icons::FOLDER_OPEN));
     let open_id = open.id();
-    let footer = NewWidget::new(Flex::row().main_axis_alignment(MainAxisAlignment::End).with_fixed(open))
-        .with_props(PropertySet::new().with(Padding::all(Length::px(size::DIALOG_PADDING))));
+    let close_active = current.map(|_| NewWidget::new(TextButton::new(t("workspaces.closeActive"), Variant::Ghost)));
+    let close_active_id = close_active.as_ref().map(|button| button.id());
+    let mut buttons = Flex::row().main_axis_alignment(MainAxisAlignment::End);
+    if let Some(button) = close_active {
+        buttons = buttons.with_fixed(button);
+    }
+    let footer = NewWidget::new(buttons.with_fixed(open))
+        .with_props(PropertySet::new().with(Gap::new(Length::px(size::GAP_MD))).with(Padding::all(Length::px(size::DIALOG_PADDING))));
     let border = || Rule::new(Axis::Horizontal, || theme::current().border_default);
     let mut card = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
@@ -62,26 +71,10 @@ pub fn dialog(workspaces: &[(uuid::Uuid, String)], current: Option<&Path>, error
     }
     let card = card.with_fixed(border()).with_fixed(footer);
     let layer = Modal::new(NewWidget::new(card), &t("workspaces.title"), CardSize::Window(card_size), Role::Dialog, false);
-    let ids = WorkspaceDialog { layer: layer.id(), close: close_id, open_folder: open_id, rows };
+    let ids = WorkspaceDialog { layer: layer.id(), close: close_id, open_folder: open_id, close_active: close_active_id, rows };
     (layer, ids)
 }
 
 fn card_size(room: Size) -> Size {
     Size::new(room.width.min(size::WORKSPACE_DIALOG_WIDTH), room.height.min(size::WORKSPACE_DIALOG_MAX_HEIGHT))
-}
-
-pub fn no_vault(error: Option<&str>) -> (NewWidget<Flex>, WidgetId) {
-    let open = NewWidget::new(TextButton::new(t("common.openFolder"), Variant::Primary).with_icon(icons::FOLDER_OPEN));
-    let id = open.id();
-    (search::empty_state_with(icons::FOLDER_OPEN, &t("fileTree.noFolder"), error, Some(open.erased())), id)
-}
-
-pub fn same_path(a: &Path, b: &Path) -> bool {
-    let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
-    norm(a) == norm(b)
-}
-
-pub fn forget_texts(path: &Path) -> (String, String) {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    (t("workspaces.forgetTitle"), t_with("workspaces.forgetDescription", &[("name", &name)]))
 }

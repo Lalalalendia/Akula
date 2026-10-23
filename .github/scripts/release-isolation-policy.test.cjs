@@ -95,6 +95,7 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY/);
   assert.match(yaml, /secrets\.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD/);
   assert.match(yaml, /test-windows-beta\.ps1/);
+  assert.match(yaml, /node scripts\/akula-version\.cjs check/);
   assert.match(yaml, /schema = 1/);
   assert.match(yaml, /artifacts = \[ordered\]@\{/);
   assert.match(yaml, /filename = \$package\[0\]\.Name/);
@@ -116,6 +117,10 @@ test('signed Windows beta may publish only after manually approved independent v
   assert.match(publish, /m\.source_commit!==process\.env\.GITHUB_SHA/);
   assert.match(publish, /if gh release view/);
   assert.match(publish, /git ls-remote --exit-code --tags/);
+  assert.match(publish, /gh api .*releases\/latest/);
+  assert.match(publish, /node scripts\/akula-version\.cjs assert-newer/);
+  assert.match(publish, /releases\/generate-notes/);
+  assert.match(publish, /--notes-file/);
   assert.match(publish, /gh release create/);
   assert.match(publish, /--latest/);
 });

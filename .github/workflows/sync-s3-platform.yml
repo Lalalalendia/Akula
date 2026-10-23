@@ -16,7 +16,6 @@ on:
       - "aquilum-app/core/src/sync/guarded_editor.rs"
       - "aquilum-app/core/src/app_core.rs"
       - "aquilum-app/core/src/app_core_installed_host_tests.rs"
-      - "aquilum-app/native/Cargo.toml"
       - "aquilum-app/core/src/files/gate/write.rs"
       - "aquilum-app/core/src/files/gate/moves.rs"
       - "aquilum-app/core/src/files/gate/trash.rs"
