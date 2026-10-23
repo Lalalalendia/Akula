@@ -111,6 +111,12 @@ fn installed_shiva_pdf_is_searchable_and_opens_from_native_result() {
         .expect("search service must initialize");
     assert!(h.app.open(&mut h.root, note.clone()), "preview must open as a native tab");
     assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
+    // Do not leave the PDF preview active: otherwise Enter could be a no-op
+    // and this test would falsely pass without opening the search result.
+    let sentinel = vault.join("a.md");
+    assert!(h.app.open(&mut h.root, sentinel.clone()),
+        "a different existing note must open before exercising result selection");
+    assert_eq!(h.app.tabs.active().path.as_deref(), Some(sentinel.as_path()));
     h.app.open_search(&mut h.root);
     let field = match &h.app.popup {
         Some(Popup::Search(state)) => state.field_id(),
