@@ -279,7 +279,7 @@ version = "0.1.0"
 
 [[package]]
 name = "aquilum-core"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "akula-node-catalog",
  "akula-server-bootstrap-b0",
