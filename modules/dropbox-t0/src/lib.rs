@@ -11,6 +11,53 @@ pub const UPLOAD_ROUTE: &str = "/2/files/upload";
 pub const METADATA_ROUTE: &str = "/2/files/get_metadata";
 pub const CONTINUE_ROUTE: &str = "/2/files/list_folder/continue";
 
+pub const LIST_ROUTE: &str = "/2/files/list_folder";
+pub const LATEST_CURSOR_ROUTE: &str = "/2/files/list_folder/get_latest_cursor";
+
+/// An inert, read-only Dropbox listing request for an existing scoped Vault.
+/// Unlike the upstream Aquilum connector this never creates remote folders.
+pub fn prepare_list(scope: &Scope) -> Result<String, Error> {
+    let path = format!("/akula-sync/v1/vaults/{}", scope.vault_id());
+    if path.is_empty() { return Err(Error::InvalidScope); }
+    Ok(json!({"path": path, "recursive": true, "include_deleted": false}).to_string())
+}
+
+/// Dropbox cursor pages are untrusted: only exact, non-empty cursors are accepted.
+pub fn parse_list_cursor(bytes: &[u8]) -> Result<(String, bool), Error> {
+    #[derive(Deserialize)]
+    struct PageCursor { cursor: String, has_more: bool }
+    let page: PageCursor = serde_json::from_slice(bytes)
+        .map_err(|_| Error::InvalidCursor)?;
+    if page.cursor.is_empty() || page.cursor.len() > 4096
+        || page.cursor.chars().any(char::is_control) {
+        return Err(Error::InvalidCursor);
+    }
+    Ok((page.cursor, page.has_more))
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+    #[test]
+    fn listing_never_requests_folder_creation() {
+        let scope = Scope::new("dbid:alice", "12345",
+            "12345678-1234-1234-1234-123456789abc", "test").unwrap();
+        let request = prepare_list(&scope).unwrap();
+        assert!(request.contains("12345678-1234-1234-1234-123456789abc"));
+        assert!(request.contains("\\"recursive\\":true"));
+        assert!(!request.contains("create_folder"));
+        assert_eq!(LIST_ROUTE, "/2/files/list_folder");
+    }
+    #[test]
+    fn invalid_cursor_fails_closed() {
+        assert_eq!(parse_list_cursor(br#"{"cursor":"","has_more":true}"#),
+            Err(Error::InvalidCursor));
+        assert_eq!(parse_list_cursor(br#"{"cursor":"abc","has_more":false}"#),
+            Ok(("abc".to_owned(), false)));
+    }
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     InvalidScope,
