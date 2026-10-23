@@ -8,7 +8,7 @@ use aquilum_core::settings::models::YandexS3Onboarding;
 #[cfg(feature = "s3-pair-beta")]
 mod imported;
 #[cfg(feature = "s3-pair-beta")]
-pub(crate) use imported::save_imported_keys;
+pub(crate) use imported::{save_profile_keys, with_profile_keys};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultError {
