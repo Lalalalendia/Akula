@@ -1,0 +1,66 @@
+name: LAB Win7 full native build
+on:
+  push:
+    branches: ['lab/win7-release-pe-imports-20261023']
+    paths:
+      - '.github/workflows/akula-win7-full-native.yml'
+      - 'aquilum-app/native/src/output/**'
+      - 'aquilum-app/native/src/touchpad/**'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/src/main.rs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Build entire native Akula for Windows 7
+        shell: pwsh
+        env:
+          RUSTFLAGS: '--cfg windows_slim_errors'
+          CARGO_INCREMENTAL: '0'
+        run: |
+          New-Item -ItemType Directory -Force win7-full-results | Out-Null
+          rustc -Vv | Out-File win7-full-results/compiler.txt
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native'
+          & cargo +nightly build --manifest-path aquilum-app/Cargo.toml --release --locked -p aquilum-native --features installed --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort *> win7-full-results/build.log
+          "exit_code=$LASTEXITCODE" | Out-File win7-full-results/status.txt
+          Get-Content win7-full-results/build.log -Tail 50 | Write-Host
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Inspect complete native EXE static PE imports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = 'win7-full-results'
+          $exe = '.artifacts/cargo-native/x86_64-win7-windows-msvc/release/aquilum-native.exe'
+          if (!(Test-Path $exe)) { throw "No native executable at $exe" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $bytes = (Get-Item $exe).Length
+          "exe_sha256=$hash" | Add-Content "$out/status.txt"
+          "exe_bytes=$bytes" | Add-Content "$out/status.txt"
+          $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $root = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (!$root) { throw 'MSVC toolchain missing' }
+          $toolsets = @(Get-ChildItem (Join-Path $root 'VC/Tools/MSVC') -Directory | Sort-Object Name -Descending)
+          $dumpbin = Join-Path $toolsets[0].FullName 'bin/Hostx64/x64/dumpbin.exe'
+          if (!(Test-Path $dumpbin)) { throw 'dumpbin missing' }
+          & $dumpbin /imports $exe | Set-Content "$out/full-imports.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin imports failed' }
+          & $dumpbin /headers $exe | Set-Content "$out/full-headers.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin headers failed' }
+          python .github/scripts/akula-win7-dumpbin-audit.py --dumpbin "$out/full-imports.txt" --out $out --sha256 $hash --bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw 'Full import parser failed' }
+          Get-Content "$out/full-audit.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Upload compile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-win7-full-compile-evidence
+          path: win7-full-results/
+          retention-days: 7

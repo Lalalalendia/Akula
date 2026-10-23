@@ -48,6 +48,7 @@ mod replay;
 mod session;
 mod system;
 mod tabs;
+// Touchpad is runtime-gated; a single executable preserves Win10 support.
 #[cfg(target_os = "windows")]
 mod touchpad;
 #[cfg(not(target_os = "windows"))]

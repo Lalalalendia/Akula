@@ -1,3 +1,4 @@
+use windows::core::Interface;
 use windows::Win32::Foundation::{HMODULE, HWND, RECT};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
@@ -6,8 +7,8 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_MWA_NO_ALT_ENTER, DXGI_SCALING_NONE,
-    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory2,
+    CreateDXGIFactory1, DXGI_MWA_NO_ALT_ENTER, DXGI_SCALING_NONE,
+    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory1, IDXGIFactory2,
     IDXGISwapChain1,
 };
 
@@ -69,7 +70,13 @@ pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String>
     #[cfg(not(feature = "memory-probe"))]
     let first = D3D_DRIVER_TYPE_WARP;
     let (device, context) = device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE)).map_err(|e| format!("D3D11: {e}"))?;
-    let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }.map_err(|e| format!("DXGI: {e}"))?;
+    // CreateDXGIFactory2 is a mandatory Windows 8.1 import, so the loader
+    // rejects an otherwise Win7-compatible executable before main().
+    // Microsoft documents querying IDXGIFactory2 from CreateDXGIFactory1.
+    // On Windows 7 without DXGI 1.2 this cast fails normally, allowing
+    // the caller to choose the GDI software backend at runtime.
+    let factory1: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.map_err(|e| format!("DXGI 1.1: {e}"))?;
+    let factory: IDXGIFactory2 = factory1.cast().map_err(|e| format!("DXGI 1.2 unavailable: {e}"))?;
     let desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: width,
         Height: height,

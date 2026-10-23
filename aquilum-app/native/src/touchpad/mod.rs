@@ -12,7 +12,8 @@ use windows::Win32::Graphics::DirectManipulation::{
     IDirectManipulationViewportEventHandler,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx};
-use windows::Win32::UI::Input::Pointer::GetPointerType;
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::core::{PCSTR, w};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{DM_POINTERHITTEST, POINTER_INPUT_TYPE, PT_TOUCHPAD};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -56,7 +57,16 @@ unsafe extern "system" fn hit_test(hwnd: HWND, message: u32, wparam: WPARAM, lpa
     if message == DM_POINTERHITTEST {
         let pointer = (wparam.0 & 0xffff) as u32;
         let mut kind = POINTER_INPUT_TYPE::default();
-        if unsafe { GetPointerType(pointer, &mut kind) }.is_ok() && kind == PT_TOUCHPAD {
+        // Optional since Windows 8. Avoid a static USER32 import on Windows 7.
+        type GetPointerTypeFn = unsafe extern "system" fn(u32, *mut POINTER_INPUT_TYPE) -> i32;
+        static FN: std::sync::OnceLock<Option<GetPointerTypeFn>> = std::sync::OnceLock::new();
+        let get_pointer_type = FN.get_or_init(|| unsafe {
+            let module = GetModuleHandleW(w!("user32.dll")).ok()?;
+            let address = GetProcAddress(module, PCSTR(c"GetPointerType".as_ptr().cast()))?;
+            Some(std::mem::transmute::<unsafe extern "system" fn() -> isize, GetPointerTypeFn>(address))
+        });
+        let touchpad = get_pointer_type.is_some_and(|function| unsafe { function(pointer, &mut kind) != 0 });
+        if touchpad && kind == PT_TOUCHPAD {
             let shared = unsafe { &*(data as *const Shared) };
             let _ = unsafe { shared.viewport.SetContact(pointer) };
         }
