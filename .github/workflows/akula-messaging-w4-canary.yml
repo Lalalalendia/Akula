@@ -105,10 +105,24 @@ jobs:
           set -euo pipefail
           cargo install cargo-packager --version 0.11.8 --locked
           mkdir -p dist
+          # Resolve the helper to an absolute, already SHA-pinned file. The
+          # packager changes its current directory when loading its config.
+          # A relative path would accidentally point outside the build tree.
+          python3 - <<'PY'
+          import json, os, pathlib
+          cfg_path = pathlib.Path("aquilum-app/native/packaging/akula-linux-w4-pilot.json")
+          generated = cfg_path.with_name("akula-linux-w4-pilot-ci.json")
+          helper = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / ".artifacts/cargo-native/release/akula-w4-lab"
+          assert helper.is_file(), f"missing verified helper: {helper}"
+          cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+          cfg["appimage"]["files"] = {str(helper.resolve()): "usr/share/akula-w4/akula-w4-lab"}
+          generated.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print("AKULA_W4_PACKAGE_ABSOLUTE_SOURCE_READY")
+          PY
           (
             cd aquilum-app
             cargo packager -p aquilum-native --release --formats appimage \
-              --config native/packaging/akula-linux-w4-pilot.json \
+              --config native/packaging/akula-linux-w4-pilot-ci.json \
               --out-dir "$GITHUB_WORKSPACE/dist"
           )
           test "$(find dist -maxdepth 1 -name '*.AppImage' -type f | wc -l)" -eq 1
