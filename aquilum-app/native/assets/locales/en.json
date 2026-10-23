@@ -242,6 +242,26 @@
       "verifyButton": "Verify SSH (unavailable)",
       "installButton": "Install Node (unavailable)"
     },
+    "cloud": {
+      "catalogTitle": "Cloud connections",
+      "catalogHint": "Choose a provider to open its setup dialog. The status light reflects the last verified connection result, not just stored credentials.",
+      "yandex": "Yandex Object Storage",
+      "amazon": "Amazon S3",
+      "minio": "MinIO",
+      "otherS3": "Other S3",
+      "googleDrive": "Google Drive",
+      "dropbox": "Dropbox",
+      "webdav": "WebDAV",
+      "disconnected": "Not connected",
+      "saved": "Saved · not verified",
+      "checking": "Checking…",
+      "verified": "Connection verified",
+      "review": "Needs review",
+      "unavailable": "Coming soon",
+      "unavailableHint": "This provider is not connected yet. No credentials are requested or saved from this dialog.",
+      "save": "Save and close",
+      "close": "Close"
+    },
     "yandex": {
       "title": "Yandex Object Storage · setup",
       "explanation": "Connection status",
