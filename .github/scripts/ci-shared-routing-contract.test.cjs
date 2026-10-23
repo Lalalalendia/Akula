@@ -5,7 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
 const shared=fs.readFileSync(path.join(__dirname,'../workflows/ci-shared-manifest-labs.yml'),'utf8');
-const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
+const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock","owned_s3_reservation"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
 
 test('28 owned routes preserve direct-only versus required callable owners',()=>{
   assert.equal(routeEntries.length,28);
@@ -350,4 +350,79 @@ test('Pinned Read keeps 46 exact sources on both OS, main required and non-main 
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
   assert.match(body,/^  group: pinned-read-.*github\.workflow/m,
     'direct/called runs retain original concurrency separation');
+});
+
+
+test('Reserved S3 OS acceptance preserves all 14 glob owners for main and non-main targets',()=>{
+  const owned=require('./ci-shared-manifest-route.cjs');
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const body=fs.readFileSync(path.join(__dirname,'../workflows/sync-reserved-s3-transaction.yml'),'utf8');
+  assert.match(body,/^on:\n  workflow_call:\n  pull_request:\n/m);
+  assert.match(body,/^    branches-ignore: \[main\]$/m,'only non-main PRs run direct');
+  assert.doesNotMatch(body,/^    branches:/m,'never restrict direct checks to main');
+  assert.match(body,/^  workflow_dispatch:$/m,'existing manual QA preserved');
+  assert.match(body,/os: \[ubuntu-24\.04, windows-latest\]/,'both OS proof lanes retained');
+  assert.match(body,/^  cancel-in-progress: true$/m,'keep original cancellation policy');
+  const expected=[
+  "aquilum-app/core/src/sync/s3_reserved_replace*.rs",
+  "aquilum-app/core/src/sync/guarded_note_write.rs",
+  "aquilum-app/core/src/sync/guarded_note_write/tests/**",
+  "aquilum-app/core/src/sync/profile_binding.rs",
+  "aquilum-app/core/src/sync/s3_preimage_capture.rs",
+  "aquilum-app/core/src/sync/pinned_read.rs",
+  "aquilum-app/core/src/sync/journal/**",
+  "aquilum-app/core/src/sync/mod.rs",
+  "aquilum-app/core/src/documents/hub.rs",
+  "aquilum-app/core/src/files/gate/write.rs",
+  "aquilum-app/core/src/files/gate/mod.rs",
+  ".github/workflows/sync-reserved-s3-transaction.yml",
+  "docs/sync/p0g2-held-s3-editor-reservation.md",
+  "docs/sync/p0g3a-single-filegate-prewrite.md"
+];
+  assert.equal(expected.length,14,'original 14 path filters remain intact');
+  assert.equal(expected.filter(p=>p.includes('*')).length,3,'all three glob owners preserved');
+  assert.deepEqual(parse(body),{t:'paths',p:expected});
+  assert.deepEqual(owned.OWNED_SUITES.owned_s3_reservation,expected,
+    'required Main PR route matches former direct owners exactly');
+  for(const source of expected){
+    assert.equal(matches(parse(body),source),true,'direct owner preserved '+source);
+    assert.equal(owned.assess({paths:[source]}).owned_s3_reservation,true,
+      'required route for source-only owner '+source);
+    assert.equal(owned.assess({paths:[source,owned.LOCK]}).owned_s3_reservation,true,
+      'required route for mixed source+Cargo change '+source);
+  }
+  const examples=[
+    'aquilum-app/core/src/sync/s3_reserved_replace_test.rs',
+    'aquilum-app/core/src/sync/s3_reserved_replace_windows.rs',
+    'aquilum-app/core/src/sync/guarded_note_write/tests/state.rs',
+    'aquilum-app/core/src/sync/guarded_note_write/tests/deep/state.rs',
+    'aquilum-app/core/src/sync/journal/record.rs',
+    'aquilum-app/core/src/sync/journal/recovery/resume.rs'
+  ];
+  for(const file of examples){
+    assert.equal(matches(parse(body),file),true,'workflow owns glob match '+file);
+    assert.equal(owned.assess({paths:[file]}).owned_s3_reservation,true,
+      'Main PR required owner must match GitHub pattern '+file);
+    assert.equal(owned.assess({paths:[file,owned.LOCK]}).owned_s3_reservation,true,
+      'mixed lock-and-glob must route '+file);
+  }
+  for(const file of [
+    'README.md',
+    'aquilum-app/native/src/main.rs',
+    'aquilum-app/core/src/sync/s3_reserved_other.rs',
+    'aquilum-app/core/src/sync/guarded_note_write/test_extra.rs',
+    'aquilum-app/core/src/sync/journalized.rs'
+  ]){
+    assert.equal(matches(parse(body),file),false,'workflow not owner of '+file);
+    assert.equal(owned.assess({paths:[file]}).owned_s3_reservation,false,
+      'unrelated source cannot activate extra S3 checks '+file);
+  }
+  assert.match(core,/owned_s3_reservation: \$\{\{ steps\.scope\.outputs\.owned_s3_reservation \}\}/);
+  assert.match(core,/owned_s3_reservation: \$\{\{ needs\.classify\.outputs\.owned_s3_reservation == 'true' \}\}/);
+  assert.match(core,/SHARED_RISKY: .*owned_s3_reservation/);
+  assert.match(shared,/route-s3-reservation:\n    name: Impacted shared manifest \/ s3-reservation\n    if: \$\{\{ inputs\.core \|\| inputs\.lock \|\| inputs\.owned_s3_reservation \}\}/);
+  assert.match(shared,/"route-s3-reservation",\["core","lock","owned_s3_reservation"\]/);
+  assert.match(shared,/^      owned_s3_reservation:\n        required: true\n        type: boolean$/m);
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
+    'Main PR gate must still depend on routed S3 checks');
 });
