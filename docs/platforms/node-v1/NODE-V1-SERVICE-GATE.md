@@ -16,6 +16,8 @@ A passing Linux CI confirms code and tests, not installed-VPS operation.
   create it once; the service never generates or rotates this identity.
   Same service UID, 0700 directory, 0600 file, one link and NOFOLLOW apply.
   Missing, corrupt or replaced keys cause HOLD.
+- The Node receipt-signing identity is also never created by the running
+  daemon; only the explicitly approved enrollment phase can initialize it.
 - Root policy schema **v3** pins the exact Iroh EndpointId alongside the
   Node receipt key and exact owner-signed read/write authority. The daemon
   checks this independent pin BEFORE opening the public UDP socket.

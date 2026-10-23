@@ -16,7 +16,9 @@ async fn main() {
         eprintln!("AKULA_NODE_V1_HOLD: fixed operation required");
         std::process::exit(78);
     }
-    if let Err(reason) = akula_staya_integration::node_v1_runtime::service::run_provisioned_iroh().await {
+    if let Err(reason) =
+        akula_staya_integration::node_v1_runtime::service::run_provisioned_iroh().await
+    {
         eprintln!("AKULA_NODE_V1_HOLD: {reason}");
         std::process::exit(78);
     }

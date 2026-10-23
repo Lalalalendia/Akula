@@ -3,9 +3,15 @@
 mod identity;
 
 use aquilum_core::node_v1::NodeHost;
-use iroh::{RelayMode, endpoint::{Endpoint, presets}};
+use iroh::{
+    RelayMode,
+    endpoint::{Endpoint, presets},
+};
 use std::{path::Path, sync::Arc, time::Duration};
-use tokio::{sync::{Mutex, Semaphore}, task::JoinSet};
+use tokio::{
+    sync::{Mutex, Semaphore},
+    task::JoinSet,
+};
 
 const STATE: &str = "/var/lib/akula-node";
 const ALPN: &[u8] = b"akula-node-v1/quic/v1";
@@ -27,9 +33,12 @@ pub async fn run_provisioned_iroh() -> Result<(), &'static str> {
         .secret_key(secret)
         .relay_mode(RelayMode::Disabled)
         .clear_ip_transports()
-        .bind_addr(UDP_ADDRESS).map_err(|_| "Node fixed port invalid")?
+        .bind_addr(UDP_ADDRESS)
+        .map_err(|_| "Node fixed port invalid")?
         .alpns(vec![ALPN.to_vec()])
-        .bind().await.map_err(|_| "Node UDP listener unavailable")?;
+        .bind()
+        .await
+        .map_err(|_| "Node UDP listener unavailable")?;
     let endpoint_id = endpoint.id();
     // These are public identifiers, not signing keys or owner-grant data.
     println!("AKULA_NODE_V1_LISTENING {endpoint_id} udp/43871");
@@ -37,9 +46,8 @@ pub async fn run_provisioned_iroh() -> Result<(), &'static str> {
     let host = Arc::new(Mutex::new(host));
     let quota = Arc::new(Semaphore::new(MAX_CLIENTS));
     let mut sessions = JoinSet::new();
-    let mut term = tokio::signal::unix::signal(
-        tokio::signal::unix::SignalKind::terminate(),
-    ).map_err(|_| "SIGTERM handler unavailable")?;
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|_| "SIGTERM handler unavailable")?;
 
     loop {
         tokio::select! {

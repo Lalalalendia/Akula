@@ -51,7 +51,7 @@ impl NodeHost {
             return Err(NodeV1Error::Hold("Node must not run as root"));
         }
         let state = Path::new("/var/lib/akula-node");
-        let identity = NodeIdentity::open_or_create(state)?;
+        let identity = NodeIdentity::open_provisioned(state)?;
         let trust = RootTrust::open_provisioned(identity.public_key())?;
         let ledger = DurableChallengeFence::open(state, trust.clone())?;
         Ok(Self { identity, trust, ledger, state: state.to_path_buf() })

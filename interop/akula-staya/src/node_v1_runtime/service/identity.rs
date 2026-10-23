@@ -3,7 +3,7 @@
 //! and pin its exact public EndpointId in owner-policy.json (v3).
 
 use iroh::SecretKey;
-use rustix::fs::{open, openat, Mode, OFlags};
+use rustix::fs::{Mode, OFlags, open, openat};
 use std::fs::{self, File};
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -14,33 +14,45 @@ const KEY: &str = "node-iroh-seed.bin";
 pub(super) fn load_provisioned(state: &Path) -> Result<SecretKey, &'static str> {
     let before = fs::symlink_metadata(state).map_err(|_| "state directory unavailable")?;
     let uid = rustix::process::geteuid().as_raw();
-    if !before.is_dir() || before.uid() != uid
-        || before.permissions().mode() & 0o7777 != 0o700
-    {
+    if !before.is_dir() || before.uid() != uid || before.permissions().mode() & 0o7777 != 0o700 {
         return Err("unsafe Iroh key directory");
     }
-    let dir = File::from(open(
-        state,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(|_| "untrusted Iroh key directory")?);
-    let after = dir.metadata().map_err(|_| "Iroh directory metadata unavailable")?;
+    let dir = File::from(
+        open(
+            state,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| "untrusted Iroh key directory")?,
+    );
+    let after = dir
+        .metadata()
+        .map_err(|_| "Iroh directory metadata unavailable")?;
     if before.dev() != after.dev() || before.ino() != after.ino() {
         return Err("Iroh key directory replaced");
     }
-    let mut handle = File::from(openat(
-        &dir, KEY,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(|_| "Iroh identity not enrolled or unsafe")?);
+    let mut handle = File::from(
+        openat(
+            &dir,
+            KEY,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| "Iroh identity not enrolled or unsafe")?,
+    );
     let info = handle.metadata().map_err(|_| "Iroh key metadata failed")?;
-    if !info.is_file() || info.uid() != uid || info.nlink() != 1
-        || info.len() != 32 || info.permissions().mode() & 0o7777 != 0o600
+    if !info.is_file()
+        || info.uid() != uid
+        || info.nlink() != 1
+        || info.len() != 32
+        || info.permissions().mode() & 0o7777 != 0o600
     {
         return Err("unsafe Iroh private key");
     }
     let mut seed = [0u8; 32];
-    handle.read_exact(&mut seed).map_err(|_| "corrupt Iroh identity")?;
+    handle
+        .read_exact(&mut seed)
+        .map_err(|_| "corrupt Iroh identity")?;
     Ok(SecretKey::from_bytes(&seed))
 }
 
@@ -62,7 +74,11 @@ mod tests {
 
         // Only a test fixture simulates a trusted installer provisioning.
         let mut file = fs::OpenOptions::new()
-            .create_new(true).write(true).mode(0o600).open(&path).unwrap();
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
         file.write_all(&[23; 32]).unwrap();
         file.sync_all().unwrap();
         drop(file);
