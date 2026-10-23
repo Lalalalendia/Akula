@@ -19,6 +19,8 @@ impl App {
         let auto_update = workspace.core.settings.get_config().updates.auto;
         let mut app = App {
             workspace,
+            #[cfg(feature = "dropbox-readonly-preview")]
+            dropbox_preview: dropbox_preview::DropboxPreview::new(),
             tree,
             chrome: None,
             interface,
