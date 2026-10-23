@@ -94,7 +94,13 @@ $closeLabel = [string]$locale.workspaces.closeActive
 $openLabel = [string]$locale.common.openFolder
 if (!$closeLabel -or !$openLabel) { throw 'Missing English labels for close base and open folder' }
 function Find-Node([string]$role, [string]$name, [int]$seconds) {
-  $type = [System.Windows.Automation.ControlType]::$role
+  $type = switch ($role) {
+    'Button' { [System.Windows.Automation.ControlType]::Button }
+    'TreeItem' { [System.Windows.Automation.ControlType]::TreeItem }
+    'TabItem' { [System.Windows.Automation.ControlType]::TabItem }
+    'Image' { [System.Windows.Automation.ControlType]::Image }
+    default { throw "Unsupported fixed UIA role: $role" }
+  }
   $condition = [System.Windows.Automation.PropertyCondition]::new(
     [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type)
   for ($attempt = 0; $attempt -lt ($seconds * 4); $attempt++) {
@@ -115,7 +121,13 @@ function Find-Node([string]$role, [string]$name, [int]$seconds) {
   throw "UIA $role '$name' not visible"
 }
 function Count-Node([string]$role, [string]$name) {
-  $type = [System.Windows.Automation.ControlType]::$role
+  $type = switch ($role) {
+    'Button' { [System.Windows.Automation.ControlType]::Button }
+    'TreeItem' { [System.Windows.Automation.ControlType]::TreeItem }
+    'TabItem' { [System.Windows.Automation.ControlType]::TabItem }
+    'Image' { [System.Windows.Automation.ControlType]::Image }
+    default { throw "Unsupported fixed UIA role: $role" }
+  }
   $cond = [System.Windows.Automation.PropertyCondition]::new(
     [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type)
   $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
