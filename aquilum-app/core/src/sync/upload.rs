@@ -200,6 +200,50 @@ mod tests {
     }
 
     #[test]
+    fn payload_meter_full_upload_requires_one_verified_readback() {
+        use crate::sync::fake::MeteredFakeRemoteStore;
+
+        // Count mock RemoteStore payload bytes, NOT QUIC/IP bytes.
+        // This protects the readback invariant; it is not an optimization.
+        let (_dir, mut journal, _unused, mut intent) = fixture();
+        let bytes = vec![b'x'; 1024 * 1024];
+        intent.expected_content_hash = blake3::hash(&bytes).to_hex().to_string();
+        let mut remote = MeteredFakeRemoteStore::default();
+
+        let result = upload_immutable_verified(
+            &mut journal, &mut remote, intent.clone(), &bytes,
+        ).unwrap();
+        assert_eq!(result, UploadOutcome::Committed);
+        let initial = remote.counts();
+        assert_eq!(initial.put_calls, 1);
+        assert_eq!(initial.put_bytes, bytes.len() as u64);
+        assert_eq!(initial.get_calls, 1);
+        assert_eq!(initial.get_bytes, bytes.len() as u64);
+        assert_eq!(initial.head_calls, 3);
+        assert!(journal.baseline(intent.vault_id, intent.document_id)
+            .unwrap().is_some());
+
+        // A confirmed repeat has no remote PUT, GET or HEAD.
+        remote.reset_counts();
+        assert_eq!(
+            upload_immutable_verified(
+                &mut journal, &mut remote, intent.clone(), &bytes,
+            ).unwrap(),
+            UploadOutcome::AlreadyCommitted
+        );
+        let repeat = remote.counts();
+        assert_eq!(repeat.put_bytes, 0);
+        assert_eq!(repeat.get_bytes, 0);
+        assert_eq!(repeat.head_calls, 0);
+
+        eprintln!(
+            "DATA_AUD_MOCK_UPLOAD payload_bytes={} initial_put={} readback_get={} committed_repeat_get={}",
+            bytes.len(), initial.put_bytes, initial.get_bytes,
+            repeat.get_bytes
+        );
+    }
+
+    #[test]
     fn lost_ack_is_resolved_by_remote_readback_not_by_second_put() {
         let (_dir, mut journal, mut remote, intent) = fixture();
         remote.lose_next_write_ack();

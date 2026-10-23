@@ -193,6 +193,87 @@ mod tests {
     }
 
     #[test]
+    fn payload_meter_repeated_stage_and_one_byte_change_read_full_objects() {
+        use super::super::fake::MeteredFakeRemoteStore;
+
+        // This is an in-memory RemoteStore measurement, NOT network wire bytes.
+        // Use the real stage_remote_download path (journal + durable blob cache).
+        let dir = tempfile::tempdir().unwrap();
+        let (mut journal, mut cache) = stores(dir.path());
+        let mut remote = MeteredFakeRemoteStore::default();
+        let original = vec![b'a'; 1024 * 1024];
+        let original_intent = intent(&original);
+        remote.put(
+            &original_intent.remote_object_id,
+            &original,
+            &RemotePrecondition::Absent,
+        ).unwrap();
+        remote.reset_counts();
+
+        let first = stage_remote_download(
+            &mut journal, &mut cache, &remote, original_intent.clone(),
+            original.len() as u64,
+        ).unwrap();
+        let cold = remote.counts();
+        assert!(!first.was_already_staged);
+        assert_eq!(cold.head_calls, 2);
+        assert_eq!(cold.get_calls, 1);
+        assert_eq!(cold.get_bytes, original.len() as u64);
+        assert_eq!(cold.put_bytes, 0);
+        assert!(journal.baseline(original_intent.vault_id, original_intent.document_id)
+            .unwrap().is_none());
+
+        drop(journal);
+        drop(cache);
+        let (mut journal, mut cache) = stores(dir.path());
+        remote.reset_counts();
+
+        let staged_again = stage_remote_download(
+            &mut journal, &mut cache, &remote, original_intent.clone(),
+            original.len() as u64,
+        ).unwrap();
+        let repeated = remote.counts();
+        assert!(staged_again.was_already_staged);
+        // Current conservative code reads the full object AGAIN after restart.
+        // This is a measured optimization candidate, not a reason to skip
+        // independent remote-version and local-file checks.
+        assert_eq!(repeated.head_calls, 2);
+        assert_eq!(repeated.get_calls, 1);
+        assert_eq!(repeated.get_bytes, original.len() as u64);
+        assert_eq!(cache.verified_blob(&original_intent.expected_content_hash)
+            .unwrap(), original);
+
+        let mut changed = original.clone();
+        let middle = changed.len() / 2;
+        changed[middle] ^= 1;
+        let changed_intent = intent(&changed);
+        remote.put(
+            &changed_intent.remote_object_id,
+            &changed,
+            &RemotePrecondition::Absent,
+        ).unwrap();
+        remote.reset_counts();
+        let changed_result = stage_remote_download(
+            &mut journal, &mut cache, &remote, changed_intent.clone(),
+            changed.len() as u64,
+        ).unwrap();
+        let one_byte_edit = remote.counts();
+        assert!(!changed_result.was_already_staged);
+        assert_eq!(one_byte_edit.head_calls, 2);
+        assert_eq!(one_byte_edit.get_calls, 1);
+        assert_eq!(one_byte_edit.get_bytes, changed.len() as u64);
+        assert_ne!(changed_result.content_hash, staged_again.content_hash);
+        assert!(journal.baseline(changed_intent.vault_id, changed_intent.document_id)
+            .unwrap().is_none());
+
+        eprintln!(
+            "DATA_AUD_MOCK_STAGE original_bytes={} first_get={} repeated_get={} one_byte_edit_get={} repeated_head_calls={}",
+            original.len(), cold.get_bytes, repeated.get_bytes,
+            one_byte_edit.get_bytes, repeated.head_calls
+        );
+    }
+
+    #[test]
     fn remote_content_mismatch_does_not_enter_the_cache_or_advance() {
         let dir = tempfile::tempdir().unwrap();
         let (mut journal, mut cache) = stores(dir.path());
