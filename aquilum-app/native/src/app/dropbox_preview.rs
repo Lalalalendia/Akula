@@ -1,5 +1,8 @@
 //! Akula 3.13: explicit, read-only Dropbox test connection from native UI.
 //! Never mutates local files, publishes remote data or changes Sync Core state.
+#[path = "dropbox_provider.rs"]
+mod provider;
+
 use aquilum_core::settings::models::DropboxReadOnlyDraft;
 use akula_dropbox_connect_lab::{resume::resume_readonly, ConnectSession, ConnectionStatus};
 use akula_dropbox_t0::{read_verify::TrustedBlake3, Scope};
