@@ -16,6 +16,10 @@ p2p-inbox-lab = ["p2p-offer-lab"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
+# Offline Node replica lab over the existing Sync DAG; no live writer.
+node-replica-lab = ["node-catalog-lab"]
+# Authenticated local read lab; no production pairing.
+node-replica-auth-lab = ["node-replica-lab"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
