@@ -42,7 +42,7 @@ pub(in crate::ui::settings::schema) fn dropbox_setup(config: &AppConfig, ctx: &C
                 text: ctx.dropbox_preview_status.clone(),
                 tone: if ["REJECTED", "FAILED", "DENIED", "UNAVAILABLE",
                     "MISMATCH", "REVOKED", "INVALID"].iter()
-                    .any(|word| ctx.dropbox_preview_status.contains(word))
+                    .any(|word| ctx.dropbox_preview_status.contains(*word))
                     { Tone::Danger } else { Tone::Secondary },
             }),
         info("Приложение Dropbox".into(),
