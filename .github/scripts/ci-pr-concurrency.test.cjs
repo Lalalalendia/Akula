@@ -17,6 +17,17 @@ test('good scoped cancellation, including quoted on keys',()=>{
   for(const key of ['"on":',"'on':"]) assert.deepEqual(policyErrors(good.replace('on:',key),'test.yml'),[]);
 });
 
+test('nonstandard YAML event indentation is guarded without mistaking nested inputs',()=>{
+  const indented=good.replace(
+    "  pull_request:\n    paths:\n      - 'modules/test/**'",
+    "    pull_request:\n      paths:\n        - 'modules/test/**'"
+  );
+  assert.equal(prTrigger(indented),true,'four-space PR event cannot evade the audit');
+  assert.deepEqual(policyErrors(indented,'indented.yml'),[]);
+  const manual="on:\n  workflow_dispatch:\n    inputs:\n      pull_request:\n        description: nested form input\njobs:\n  example:\n    runs-on: ubuntu-latest\n";
+  assert.equal(prTrigger(manual),false,'nested manual input is not a GitHub event');
+});
+
 test('reject cross-workflow, cross-PR and missing cancellation protection',()=>{
   for(const replacement of ['  group: shared', '  group: $'+'{{ github.ref }}', '  group: $'+'{{ github.event.pull_request.number || github.ref }}']){
     assert.match(policyErrors(good.replace(group,replacement),'lab.yml').join(','),/group must isolate/);
@@ -70,6 +81,13 @@ test('new PR workflows are guarded, and previously protected edited ones cannot 
     write('old.yml',good.replace(cancel,'  cancel-in-progress: false'));
     git('add','.');git('commit','-qm','disable existing cancellation');
     assert.match(audit(base,'HEAD',cwd).errors.join(','),/removed existing PR cancellation/);
+    fs.unlinkSync(path.join(cwd,'.github/workflows/old.yml'));
+    git('add','-A');git('commit','-qm','remove formerly protected PR workflow');
+    assert.deepEqual(
+      changedWorkflows(base,'HEAD',cwd).filter(record => record.status === 'D'),
+      [{status:'D',path:'.github/workflows/old.yml'}]
+    );
+    assert.match(audit(base,'HEAD',cwd).errors.join(','),/deleted previously protected PR workflow/);
   } finally {fs.rmSync(cwd,{recursive:true,force:true});}
 });
 

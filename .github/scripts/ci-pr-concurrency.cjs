@@ -24,10 +24,14 @@ function prEvents(yaml) {
   const on = topBlock(yaml, 'on');
   if (on.length === 0) return [];
   const inline = on[0].replace(/^(['"]?on['"]?):\s*/, '');
+  // YAML permits any positive indentation. Match only the shallowest
+  // event keys so a nested manual input named pull_request is not a trigger.
+  const children = on.slice(1).filter(line => /^\s+[^#\s]/.test(line));
+  const indent = children.length ? Math.min(...children.map(line => line.match(/^\s*/)[0].length)) : 0;
   return ['pull_request', 'pull_request_target'].filter(event => {
-    const entry = new RegExp('^  [\\x27"]?' + event + '[\\x27"]?:');
+    const entry = new RegExp('^\\s{' + indent + '}[\\x27"]?' + event + '[\\x27"]?:');
     const inlineName = new RegExp('\\b' + event + '\\b');
-    return inlineName.test(inline) || on.slice(1).some(line => entry.test(line));
+    return inlineName.test(inline) || (indent > 0 && children.some(line => entry.test(line)));
   });
 }
 function prTrigger(yaml) { return prEvents(yaml).length > 0; }
@@ -81,7 +85,7 @@ function changedWorkflows(base, head = 'HEAD', cwd = process.cwd()) {
   if (fields.length % 2 !== 0) throw Error('Unexpected git diff name-status output');
   const records = [];
   for (let i = 0; i < fields.length; i += 2) {
-    if (!/^[AM]$/.test(fields[i])) continue;
+    if (!/^[AMD]$/.test(fields[i])) continue;
     const path = fields[i + 1];
     if (WORKFLOW.test(path)) records.push({ status: fields[i], path });
   }
@@ -94,6 +98,16 @@ function audit(base, head = 'HEAD', cwd = process.cwd()) {
   let newPr = 0;
   let protectedModified = 0;
   for (const record of records) {
+    if (record.status === 'D') {
+      // A deleted or renamed protected PR workflow is as dangerous as
+      // removing its trigger or cancellation from an existing file.
+      const before = git(cwd, 'show', base + ':' + record.path);
+      if (prTrigger(before) && topBlock(before, 'concurrency').length > 0) {
+        protectedModified++;
+        errors.push(record.path + ': deleted previously protected PR workflow');
+      }
+      continue;
+    }
     const text = git(cwd, 'show', head + ':' + record.path);
     if (record.status === 'A') {
       if (prTrigger(text)) newPr++;
