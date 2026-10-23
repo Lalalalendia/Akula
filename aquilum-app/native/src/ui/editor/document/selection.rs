@@ -10,7 +10,7 @@ impl Document {
         self.selection.as_ref().and_then(|selection| {
             let start = selection.start.max(paragraph.start);
             let end = selection.end.min(paragraph.end);
-            (start < end).then_some(start - paragraph.start..end - paragraph.start)
+            (start < end).then(|| start - paragraph.start..end - paragraph.start)
         })
     }
 
