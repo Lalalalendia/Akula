@@ -171,3 +171,49 @@ fn unreadable_or_invalid_utf8_search_hits_do_not_crash() {
     assert_eq!(removed_result.match_offset, 0);
     assert!(removed_result.snippet.is_empty());
 }
+
+#[test]
+fn a_minus_word_excludes_matching_body_titles_and_paths() {
+    let (_guard, index) = indexed(&[
+        ("Свободная.md", "поиск отчётов"),
+        ("Ошибка.md", "поиск отчётов"),
+        ("Архив/Документ.md", "поиск отчётов"),
+        ("Открыто/Документ.md", "поиск отчётов"),
+    ]);
+    let names: Vec<_> = search(&index, "поиск -ошибка -архив")
+        .into_iter()
+        .map(|result| result.path)
+        .collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.iter().any(|path| path.ends_with("Свободная.md")));
+    assert!(names.iter().any(|path| path.contains("Открыто")));
+    assert!(names.iter().all(|path| !path.contains("Ошибка") && !path.contains("Архив")));
+}
+
+#[test]
+fn an_exclusion_keeps_partial_positive_matches_and_never_lists_all_notes() {
+    let (_guard, index) = indexed(&[
+        ("Первый.md", "физика тика кадр"),
+        ("Второй.md", "физика плавность"),
+        ("Третий.md", "кадр ошибка"),
+    ]);
+    let results = search(&index, "физика кадр -ошибка");
+    assert_eq!(results.len(), 2, "positive terms remain partial matches");
+    assert!(results[0].path.ends_with("Первый.md"));
+    assert!(results[1].path.ends_with("Второй.md"));
+    assert!(search(&index, "-ошибка").is_empty(), "negative-only search must not enumerate the vault");
+    assert!(search(&index, "физика -физика").is_empty());
+    assert_eq!(search(&index, "физика-тика").len(), 2, "a hyphen inside a word is not negation");
+}
+
+#[test]
+fn exclusion_stems_are_normalized_and_do_not_appear_in_result_terms() {
+    let (_guard, index) = indexed(&[
+        ("Свободная.md", "проверка документов"),
+        ("Запрет.md", "проверка документов и ошибки"),
+    ]);
+    let found = index.search(&Request::new("ПРОВЕРКА -ОШИБКИ")).unwrap();
+    assert_eq!(found.results.len(), 1);
+    assert!(found.results[0].path.ends_with("Свободная.md"));
+    assert!(!found.terms.iter().any(|term| term.contains("ошиб")));
+}
