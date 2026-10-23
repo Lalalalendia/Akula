@@ -112,7 +112,14 @@ fn installed_shiva_pdf_is_searchable_and_opens_from_native_result() {
     assert!(h.app.open(&mut h.root, note.clone()), "preview must open as a native tab");
     assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
     h.app.open_search(&mut h.root);
-    h.app.query_changed(&mut h.root, "AKULANATIVEPDFNEEDLE".to_owned());
+    let field = match &h.app.popup {
+        Some(Popup::Search(state)) => state.field_id(),
+        _ => panic!("expected native search popup"),
+    };
+    h.send(
+        field,
+        crate::ui::editor::TextAction::Changed("AKULANATIVEPDFNEEDLE".to_owned()),
+    );
     let mut result = None;
     for _ in 0..600 {
         h.app.on_core_events(&mut h.root);
