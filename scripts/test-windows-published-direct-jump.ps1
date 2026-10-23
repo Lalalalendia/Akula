@@ -42,7 +42,7 @@ function Fetch-Release([string]$v, [string]$source, [string]$pin, [string]$dir, 
   }
   if ($full) {
     $names = @($r.assets | ForEach-Object { $_.name } | Sort-Object) -join '|'
-    $expected = @($name, "$name.sig", 'latest.json', 'latest.json.sig' | Sort-Object) -join '|'
+    $expected = (@($name, "$name.sig", 'latest.json', 'latest.json.sig') | Sort-Object) -join '|'
     if ($names -cne $expected) { throw 'Expected exactly four signed release assets' }
     gh release download $tag --repo $repo --dir $dir
   } else {
