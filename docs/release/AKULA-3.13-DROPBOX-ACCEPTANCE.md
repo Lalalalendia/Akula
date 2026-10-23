@@ -1,31 +1,31 @@
-# Akula 3.13 — Dropbox test integration
+# Akula v0.3.13 — production release acceptance
 
-Status: **development preview, not a published release**. Version in `aquilum-app/native/Cargo.toml`: `0.3.13`. This document is the acceptance boundary, not evidence of a completed integration.
+**Product decision (23 October 2026):** Akula has no separate test distribution channel for this version. The release target is the ordinary public signed Akula release, with Dropbox read-only connection UI included in the standard installed binary. This document does not authorize bypassing signature, version, CI, or protected publication safeguards.
 
-## Scope of the 3.13 experiment
+## Scope shipping to all users
 
-- Reuse merged Dropbox T0/T1 modules, including read-only OAuth PKCE, registered loopback callback, OS-protected refresh token and explicit read-only restart verification (PR #669).
-- Make these flows accessible through a deliberate user-facing integration in Akula. Do not mark complete until a real native UI action calls the real connection code, with no mock credentials or fake success.
-- Use a separate test vault and Dropbox **App Folder**, no production notes. No startup auto-connect.
-- Display explicit states: disconnected, authorizing, verified read-only / publisher not approved, revoked, unavailable OS keyring, wrong account/root/head, network error.
-- Never display, log or persist authorization code, access token, refresh token or OAuth state outside the intended protected storage.
-- **No uploads, deletes, file application, baseline promotion or two-way sync** until publisher signature, freshness/anti-rollback, conflict handling and CAS are separately implemented and tested.
+- Existing desktop functionality and separate Akula package identity.
+- Native Dropbox account setup and user-initiated OAuth PKCE, OS credential store, independent pinned HEAD verification, read-only reconnect and fail-closed error states (PRs #669 and #670).
+- Dropbox read-only feature is a dependency of the ordinary `installed` feature. No special test executable or build feature is needed for end users.
+- Uploads, deletes, automatic file application and **two-way sync remain disabled**. Their correctness and security have not been established; do not advertise them as implemented.
+- Missing account configuration leaves the UI `DISCONNECTED / SYNC_DISABLED`. Ordinary local notes and other app functions remain usable without Dropbox.
 
-## Required acceptance
+## Public release verification
 
-1. Desktop Windows build compiles with actual Dropbox modules and the 3.13 version; Rust unit and security tests pass in CI.
-2. A user explicitly starts OAuth in their system browser and grants only `account_info.read files.metadata.read files.content.read`.
-3. A developer-owned pinned BLAKE3 of synthetic HEAD, account ID and root namespace are verified independently; a successful read stays `PUBLISHER_NOT_APPROVED / SYNC_DISABLED`.
-4. OS Credential Manager stores refresh token, verified through a cold restart and read-only resume; revoke, missing/locked credential store, wrong account/root, wrong HEAD and changed permissions fail closed.
-5. A real Dropbox account is used for manual Windows end-to-end testing; never put secrets in CI, screenshots, logs or Notion.
-6. A Windows 7 acceptance is separate and cannot be inferred from modern Windows or Linux CI.
-7. No release installer is published until Akula signing, installer identity, rollback and release gates are approved.
+1. All canonical versions in `aquilum-app/native/Cargo.toml`, `aquilum-app/core/Cargo.toml`, `aquilum-app/Cargo.lock` and `aquilum-app/native/packaging/akula-windows.json` equal 0.3.13. Also align `akula-linux.json` for later Linux packaging, but do not silently imply that Linux signed publication is approved.
+2. `node scripts/akula-version.cjs check` and standard Rust builds with `--locked --features installed` succeed from the exact PR HEAD, with Dropbox code compiled in by default.
+3. Windows NSIS identity and installed GUI smoke (install → edit → save → restart → uninstall) succeed and preserve existing Akula user data and independent Aquilum installation.
+4. Read-only Dropbox tests and native UI state tests succeed. Real-account Dropbox authorization, OS keyring/revoke and cold restart must be reported honestly as unverified if not performed; no claims of functioning sync.
+5. Merge reviewed PR #670 after required CI, then publish from protected **main** using the existing `.github/workflows/akula-windows-signed-candidate.yml` workflow, `release_version=0.3.13`, `publish_beta=true`. Preserve approval via `akula-release` environment, detached Minisign signatures, independent verification and source/lock provenance. Do **not** reactivate retired `release.yml` or inherited Aquilum workflows.
+6. Confirm GitHub Release `v0.3.13` is public and Latest with verified `Akula_0.3.13_x64-setup.exe`, its detached signature, `latest.json` and `latest.json.sig`; verify updater sees the signed version from an installed previous release.
+7. Windows 7 compatibility remains a separate acceptance requirement; Windows 10/11 CI cannot prove it.
+8. Linux is a normal supported build target, but **its public signed update/release channel is separately gated**. Publish Linux packages only through an Akula-owned verified signing and installed QA path, never through Freaction/Aquilum metadata.
 
-## Implementation work remaining
+## Outstanding work
 
-- Wire standalone `modules/dropbox-connect-lab` into the desktop workspace behind an explicit opt-in feature and native UI controls, without enabling writes.
-- Add end-to-end UI state tests, including cancellation, timeout and restart; verify the native executable actually includes the connector.
-- Provide safe test setup instructions and an isolated Windows beta artifact, respecting `RELEASE-LOCK-01`.
-- Run and document live Dropbox acceptance; only then consider write/sync work in a later gated change.
+- Required CI and signed Windows publisher run on exact main commit.
+- Independent test of real Dropbox account/consent and installed Windows restart.
+- Signed Linux release infrastructure and installed acceptance.
+- Write/sync protocol and two-device conflicts if a later release is to offer complete bidirectional synchronization.
 
-Sources: [PR #669](https://github.com/Lalalalendia/Akula/pull/669), [Dropbox QA in Notion](https://app.notion.com/p/40232a84beec81be9e10d428547df0fb).
+Sources: [PR #670](https://github.com/Lalalendia/Akula/pull/670), [Windows publisher workflow](https://github.com/Lalalendia/Akula/blob/main/.github/workflows/akula-windows-signed-candidate.yml), [Akula version contract](https://github.com/Lalalendia/Akula/blob/main/docs/release/AKULA-VERSIONING-01.md).
