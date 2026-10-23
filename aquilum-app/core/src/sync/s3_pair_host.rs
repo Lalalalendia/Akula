@@ -229,6 +229,36 @@ pub async fn verify_second_pair_remote(
     Ok(())
 }
 
+/// Return true only for a previous import bound to this EXACT local
+/// registered root and the same selected remote scope. Allows a harmless
+/// retry when the directory now contains verified user notes; never grants
+/// permission to attach an unrelated non-empty directory.
+pub fn already_imported_on_registered_root(
+    core: &Core,
+    root: &Path,
+    appdata: &Path,
+    profile: &S3PairProfile,
+) -> bool {
+    if read_pair_profile(root, appdata).ok().flatten().as_ref() != Some(profile) {
+        return false;
+    }
+    let Ok(admission) = RegisteredReadAdmission::open(core, root) else {
+        return false;
+    };
+    let Ok(store) = super::profile_binding::SqliteRegisteredS3Bindings
+        ::open_existing_read_only(&admission, &appdata.join("s3-profiles.sqlite"))
+    else {
+        return false;
+    };
+    let Ok(Some(binding)) = store.load_for_registered(&admission) else {
+        return false;
+    };
+    let (Ok(connection), Ok(namespace)) = (profile.connection(), profile.keyspace()) else {
+        return false;
+    };
+    binding.matches_remote(&connection, &namespace)
+}
+
 /// Second device. The encrypted invitation carries the genesis trust pin.
 /// Bind ONLY to a registered local workspace after verifying the full remote
 /// ancestry; never treat an arbitrary user-provided URL as authenticated.
