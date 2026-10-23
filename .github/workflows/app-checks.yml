@@ -119,6 +119,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # Guard newly added PR workflows BEFORE any expensive Rust or OS jobs
+          # can be scheduled; this uses the existing classifier runner.
+          node --test .github/scripts/ci-pr-concurrency.test.cjs
+          node .github/scripts/ci-pr-concurrency.cjs --base="$BASE_SHA" --head=HEAD
           node --test .github/scripts/ci-rust-scope.test.cjs
           node .github/scripts/ci-rust-scope.cjs --base="$BASE_SHA" --head=HEAD >> "$GITHUB_OUTPUT"
           node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
