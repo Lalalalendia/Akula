@@ -115,11 +115,13 @@ fn refresh_at(endpoint: &str, app_key: &str, saved: &RefreshToken)
     }
     let lifetime = reply.expires_in.checked()
         .ok_or(ResumeError::MalformedResponse)?;
-    let requested: Vec<&str> = READ_SCOPES.split_ascii_whitespace().collect();
-    let granted: Vec<&str> = reply.scope.split_ascii_whitespace().collect();
-    if granted.len() != requested.len()
-        || granted.iter().any(|s| !requested.contains(s))
-    {
+    // Compare multisets, not just membership and count: a duplicate scope
+    // must never stand in for a required scope that is absent.
+    let mut requested: Vec<&str> = READ_SCOPES.split_ascii_whitespace().collect();
+    let mut granted: Vec<&str> = reply.scope.split_ascii_whitespace().collect();
+    requested.sort_unstable();
+    granted.sort_unstable();
+    if granted != requested {
         return Err(ResumeError::ScopeEscalation);
     }
     let access = AccessToken::new(std::mem::take(&mut reply.access_token))
@@ -341,6 +343,21 @@ mod tests {
         assert!(matches!(issue(missing.to_string(),200).0,Err(ResumeError::MalformedResponse)));
         let malicious=response().replace("files.content.read","files.content.read files.content.write");
         assert!(matches!(issue(malicious,200).0,Err(ResumeError::ScopeEscalation)));
+    }
+    #[test]
+    fn repeated_scope_cannot_replace_required_scope_and_order_is_irrelevant() {
+        let mut duplicate: serde_json::Value =
+            serde_json::from_str(&response()).unwrap();
+        duplicate["scope"] = serde_json::json!(
+            "account_info.read files.metadata.read files.metadata.read");
+        assert!(matches!(issue(duplicate.to_string(), 200).0,
+            Err(ResumeError::ScopeEscalation)));
+
+        let mut reordered: serde_json::Value =
+            serde_json::from_str(&response()).unwrap();
+        reordered["scope"] = serde_json::json!(
+            "files.content.read account_info.read files.metadata.read");
+        assert!(issue(reordered.to_string(), 200).0.is_ok());
     }
     #[test]
     fn revoked_or_server_failure_never_retries_refresh() {
