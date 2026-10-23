@@ -317,9 +317,13 @@ impl App {
     }
 
     pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
-        if !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path)
-            && crate::images::kind(&path.to_string_lossy()) != Some(crate::images::MediaKind::Image)
-        {
+        let image = crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image);
+        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
+            return false;
+        }
+        // Validate the image before changing tabs or navigation: no paths
+        // outside this vault, symlinks, oversized or corrupt sources.
+        if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
             return false;
         }
         if let Some(current) = self.note.as_ref().map(|n| n.path.clone()) {
