@@ -39,6 +39,7 @@ function Labels([scriptblock]$Property) {
 $settingsNames = @(Labels { param($c) $c.settings.title })
 $navNames = @(Labels { param($c) $c.settings.nav.sync })
 $saveNames = @(Labels { param($c) $c.settings.cloud.save })
+$bucketNames = @(Labels { param($c) $c.settings.yandex.bucket })
 $closeNames = @(Labels { param($c) $c.settings.cloud.close })
 $yandexNames = @(Labels { param($c) $c.settings.cloud.yandex })
 $amazonNames = @(Labels { param($c) $c.settings.cloud.amazon })
@@ -96,23 +97,48 @@ function Wait-ButtonGone {
     throw ('Provider modal did not close: ' + ($Names -join ' / '))
 }
 function Bucket-Editor([System.Windows.Automation.AutomationElement]$Tree) {
-    $all = $Tree.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition)
+    # The underlying note editor can remain visible in UIA behind the
+    # focus-trapped cloud modal. Tie the target to the localized bucket row,
+    # not to an arbitrary first/last Edit element.
+    $all = $Tree.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    $labels = @()
     $editors = @()
-    for ($n=0; $n -lt $all.Count; $n++) {
-        $item = $all.Item($n)
+    foreach ($item in $all) {
         try {
+            if ($item.Current.IsOffscreen -or !$item.Current.IsEnabled) { continue }
             $rect = $item.Current.BoundingRectangle
-            if (!$item.Current.IsOffscreen -and $item.Current.IsEnabled -and
+            if ($rect.IsEmpty -or $rect.Height -le 0 -or $rect.Width -le 0) { continue }
+            if ($bucketNames -ccontains [string]$item.Current.Name) {
+                $labels += $rect
+            }
+            if ($item.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and
                 $rect.Height -gt 14 -and $rect.Height -lt 100 -and $rect.Width -gt 60) {
                 $editors += $item
             }
         } catch [System.Windows.Automation.ElementNotAvailableException] {}
     }
-    if ($editors.Count -ne 1) {
-        throw "Expected one visible single-line provider editor, found $($editors.Count)"
+    if ($labels.Count -eq 0) { throw 'Cloud bucket label not accessible in the active modal' }
+    $matches = @()
+    foreach ($editor in $editors) {
+        $r = $editor.Current.BoundingRectangle
+        $mid = ($r.Top + $r.Bottom) / 2
+        foreach ($label in $labels) {
+            $labelMid = ($label.Top + $label.Bottom) / 2
+            if ($r.Left -ge $label.Right -and
+                ($r.Left - $label.Right) -lt 700 -and
+                [Math]::Abs($mid - $labelMid) -le 36) {
+                $matches += $editor
+                break
+            }
+        }
     }
-    return $editors[0]
+    if ($matches.Count -ne 1) {
+        throw "Expected one Edit aligned with the localized S3 bucket row; labels=$($labels.Count), edits=$($editors.Count), aligned=$($matches.Count)"
+    }
+    return $matches[0]
 }
+
 function Ensure-Foreground([System.Diagnostics.Process]$Process) {
     $Process.Refresh()
     $hwnd = [IntPtr]$Process.MainWindowHandle

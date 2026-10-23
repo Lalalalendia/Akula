@@ -1,6 +1,7 @@
 pub mod controls;
 pub mod schema;
 
+mod binding;
 mod control;
 mod layout;
 mod cloud;
@@ -18,26 +19,15 @@ use masonry::widgets::{Flex, SizedBox};
 
 use crate::i18n::t;
 use crate::ui::dialog::{CardSize, DialogIds, Modal, header};
-use crate::ui::editor::TextEditor;
 use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{IconButton, ItemButton, Rule};
 use crate::ui::{icons, theme};
 use layout::{block_widget, rows_column};
-use schema::{Action, Context, Number, Row, Section, Setter};
+use schema::{Context, Row, Section};
 
-pub enum Binding {
-    Switch(Setter),
-    Choice(Setter),
-    Dropdown { setter: Setter, options: Vec<String>, selected: usize },
-    Number { setter: Setter, number: Number, minus: Option<WidgetId>, plus: Option<WidgetId> },
-    Step { field: WidgetId, direction: f64 },
-    Text { setter: Setter, commit: bool, value: String },
-    Color(Setter),
-    Commit(Handle<TextEditor>),
-    Button(Action),
-}
+pub use binding::Binding;
 
 pub struct SettingsDialog {
     pub layer: WidgetId,

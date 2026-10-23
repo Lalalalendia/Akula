@@ -11,6 +11,8 @@ use crate::ui::editor::TextAction;
 use super::{App, Outcome, Popup};
 
 mod action;
+mod cloud_action;
+mod menu_action;
 mod apply;
 mod press;
 mod context;
