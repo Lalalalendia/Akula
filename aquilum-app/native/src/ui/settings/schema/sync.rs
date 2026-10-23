@@ -153,6 +153,17 @@ pub(super) fn sync_recovery(ctx: &Context) -> Vec<Block> {
             )));
         }
     }
+    // 3.13 Dropbox integration visibility. This is deliberately read-only:
+    // OAuth onboarding is still a standalone developer probe, not a native
+    // UI action, and must not be represented as a connected account.
+    rows.push(info(
+        "Dropbox (3.13 preview)".to_owned(),
+        Some("Read-only connector exists as a separate QA probe; native authorization and synchronization are not enabled.".to_owned()),
+        Control::Status {
+            text: "DISCONNECTED / SYNC_DISABLED".to_owned(),
+            tone: Tone::Secondary,
+        },
+    ));
     if let Some(notice) = &ctx.sync_notice {
         rows.push(info(t("settings.sync.reviewResult"), None,
             Control::Status { text: notice.clone(), tone: Tone::Secondary }));
