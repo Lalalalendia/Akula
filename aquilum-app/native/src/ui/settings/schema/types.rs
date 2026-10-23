@@ -20,7 +20,7 @@ mod context;
 pub use context::Context;
 
 mod actions;
-pub use actions::Action;
+pub use actions::{Action, CloudProvider};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Button {
