@@ -2,7 +2,12 @@ name: LAB Win7 full native build
 on:
   push:
     branches: ['lab/win7-release-pe-imports-20261023']
-    paths: ['.github/workflows/akula-win7-full-native.yml']
+    paths:
+      - '.github/workflows/akula-win7-full-native.yml'
+      - 'aquilum-app/native/src/output/**'
+      - 'aquilum-app/native/src/touchpad/**'
+      - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/native/src/main.rs'
   workflow_dispatch:
 permissions:
   contents: read
