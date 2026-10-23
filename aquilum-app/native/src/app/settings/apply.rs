@@ -5,6 +5,12 @@ impl App {
         let core = &self.workspace.core;
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
+            Action::VerifyServer => self.request_server_probe(),
+            Action::ToggleServerAdvanced => {
+                dialog.server_advanced = !dialog.server_advanced;
+                Effect::Content
+            }
+            Action::InstallServer => Effect::None,
             // This handler is reached only for ordinary settings buttons.
             // Review actions require the separately confirmed modal flow.
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
@@ -104,7 +110,8 @@ impl App {
                     || before.templates.folder != after.templates.folder
                     || mcp_changed
                     || retention
-                    || before.s3_onboarding != after.s3_onboarding;
+                    || before.s3_onboarding != after.s3_onboarding
+                    || before.server_setup != after.server_setup;
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;
@@ -133,34 +140,6 @@ impl App {
     pub(super) fn refresh_analysis(&mut self, root: &mut RenderRoot) {
         if self.panel_mode() == crate::links::Mode::Analysis {
             self.request_panel(root);
-        }
-    }
-
-    pub(in crate::app) fn cleanup_retention(&self) {
-        let Some(workspace) = self.tree.root().map(Path::to_path_buf) else { return };
-        let core = std::sync::Arc::clone(&self.workspace.core);
-        let (done, wake) = (std::sync::Arc::clone(&self.retention_done), std::sync::Arc::clone(&self.workspace.wake));
-        std::thread::spawn(move || {
-            let config = core.settings.get_config();
-            if let Err(error) = gate::cleanup_retention(&core, &workspace, config.trash.retention_days) {
-                report!("корзина не очищена: {error:?}");
-            }
-            if let Err(error) = core.history.maintain_retention(&workspace, config.history.retention_days) {
-                report!("обслуживание истории остановлено: {error}");
-            }
-            if let Err(error) = core.ui_state.cleanup(config.trash.retention_days, crate::dates::now_ms()) {
-                report!("состояние документов не очищено: {error:?}");
-            }
-            done.store(true, std::sync::atomic::Ordering::Release);
-            wake();
-        });
-    }
-
-    pub(in crate::app) fn on_retention_done(&mut self, root: &mut RenderRoot) {
-        if self.retention_done.swap(false, std::sync::atomic::Ordering::Acquire)
-            && matches!(&self.popup, Some(Popup::Settings { dialog, .. }) if matches!(dialog.section, Section::Trash | Section::History))
-        {
-            self.refresh_settings(root);
         }
     }
 }

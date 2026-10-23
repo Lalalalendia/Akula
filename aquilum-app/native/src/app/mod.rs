@@ -110,6 +110,7 @@ pub struct App {
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
+    server_probe: settings::server_state::ServerProbeState,
     graph: graph_page::GraphState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,

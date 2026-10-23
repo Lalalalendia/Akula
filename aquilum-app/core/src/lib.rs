@@ -23,6 +23,8 @@ pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
 pub mod server_bootstrap_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b0-openssh-lab"))]
 pub mod server_bootstrap_ssh_lab;
+#[cfg(all(target_os = "windows", feature = "server-bootstrap-b0-openssh-lab"))]
+pub mod server_bootstrap_ssh_windows_lab;
 #[cfg(feature = "server-bootstrap-b1a-release-lab")]
 pub mod server_release_lab;
 
@@ -56,6 +58,10 @@ pub mod server_installer_durable_node;
 
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
+#[cfg(all(target_os = "linux", feature = "node-replica-lab"))]
+pub mod node_replica_lab;
+#[cfg(all(target_os = "linux", feature = "node-replica-auth-lab"))]
+pub mod node_replica_auth_lab;
 // Optional, inert P2P offer/consent laboratory; not file authorization.
 #[cfg(feature = "p2p-offer-lab")]
 pub mod p2p_offer_lab;

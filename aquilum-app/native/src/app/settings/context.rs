@@ -14,15 +14,11 @@ impl App {
             .unwrap_or_default();
         // SQLite is opened only for this page, and strictly read-only.
         // Missing/unsupported journals are NOT described as "synchronized".
-        let sync_recovery = if section == Section::Sync {
-            workspace.as_deref().map(|vault| {
-                aquilum_core::sync::native_recovery_overview(
-                    &self.workspace.core, &self.workspace.data_dir, vault,
-                )
-            })
-        } else {
-            None
-        };
+        let sync_recovery = workspace.as_deref().filter(|_| section == Section::Sync).map(|vault| {
+            aquilum_core::sync::native_recovery_overview(
+                &self.workspace.core, &self.workspace.data_dir, vault,
+            )
+        });
         #[cfg(feature = "s3-e2e01-review-preview")]
         let s3_bound_publications = if section == Section::Sync {
             workspace.as_deref().map(|root| {
@@ -34,6 +30,8 @@ impl App {
             None
         };
         Context {
+            server_probe: self.server_probe_view(section),
+            server_advanced: false,
             workspace,
             sync_recovery,
             #[cfg(feature = "s3-e2e01-review-preview")]

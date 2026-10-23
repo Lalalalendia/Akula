@@ -3,6 +3,8 @@ pub mod schema;
 
 mod control;
 mod layout;
+mod dialog;
+pub use dialog::SettingsDialog;
 
 use std::collections::HashMap;
 
@@ -16,7 +18,7 @@ use masonry::properties::{Gap, Padding};
 use masonry::widgets::{Flex, SizedBox};
 
 use crate::i18n::t;
-use crate::ui::dialog::{CardSize, DialogIds, Modal, header};
+use crate::ui::dialog::{CardSize, Modal, header};
 use crate::ui::editor::TextEditor;
 use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
@@ -38,19 +40,6 @@ pub enum Binding {
     Button(Action),
 }
 
-pub struct SettingsDialog {
-    pub layer: WidgetId,
-    pub close: WidgetId,
-    pub content: Handle<ScrollArea<Flex>>,
-    pub nav: Vec<(WidgetId, Section)>,
-    pub section: Section,
-    pub bindings: HashMap<WidgetId, Binding>,
-    pub copied: Option<usize>,
-    pub trash_page: usize,
-    pub sync_selected: Option<aquilum_core::sync::NativeRecoveryCasePreview>,
-    pub sync_notice: Option<String>,
-    pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
-}
 
 fn card_size(room: Size) -> Size {
     let window = Size::new(room.width + size::SPACE_32, room.height + size::SPACE_32);
@@ -98,7 +87,7 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
         .with_fixed(Rule::new(Axis::Horizontal, || theme::current().border_default))
         .with(NewWidget::new(body), 1.0);
     let (copied, trash_page) = (ctx.copied, ctx.trash_page);
-    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None };
+    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, server_advanced: false, sync_selected: None, sync_notice: None, sync_confirm: None };
     (NewWidget::new(card), finish)
 }
 
