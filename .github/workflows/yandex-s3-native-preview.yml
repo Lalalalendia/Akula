@@ -29,8 +29,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: yandex-s3-native-preview-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Keep independent manual runs; cancel only superseded commits of this PR.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   windows-readonly-preview:
