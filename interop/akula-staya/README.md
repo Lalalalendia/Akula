@@ -106,3 +106,23 @@ BLAKE3 roots; the caller MUST use an authenticated accepted OfferSession.
 It does not protect all ancestor path races or guarantee directory metadata
 durability after power loss. A successful copy is not File Gate APPLIED,
 Vault synchronization, or a durable revision ACK.
+
+## AK-P2P-LIVE-ID-01 — live Iroh key and fresh protected peer pin (opt-in)
+
+The standalone `p2p-live-identity` feature derives the actual Iroh
+`SecretKey` from Akula's existing OS-backed `DeviceIdentity`, checking
+the resulting public ID. It exposes `require_pinned_live_peer(connection,
+selected_id)`: this reads cryptographically authenticated Iroh
+`Connection::remote_id()` and delegates to Core's OS-persisted
+`peer_pin::require_pinned_remote` on **every new operation**. No claimed
+network ID or invitation-derived key is accepted as proof.
+
+Linux/Windows tests establish a genuine loopback QUIC connection and prove
+wrong selected IDs and a fresh unconfirmed peer fail closed. Test code does
+not initialize, replace, delete, or leak any user's canonical credentials.
+
+**Not installed:** neither native File transfers nor the Staya provider calls
+this seam yet. No DeviceId/Vault/object authorization, sender consent, local
+IPC control, user-file GET, File Gate apply, durable ACK or two-PC acceptance.
+The existing receiver create-new and OS identity code stay opt-in. This work
+cannot enable network file access.

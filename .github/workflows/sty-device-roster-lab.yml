@@ -1,16 +1,20 @@
 name: Akula owner-signed device roster laboratory
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
       - 'aquilum-app/core/src/sync/device_roster_lab.rs'
-      - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/sty-device-roster-lab.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: akula-roster-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verified-roster:
