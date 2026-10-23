@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub mod http;
 pub mod projection;
 pub mod publish;
+pub mod snapshot;
 pub const API_VERSION: &str = "2026-03-11";
 
 #[derive(Clone, Debug, Eq, PartialEq)]

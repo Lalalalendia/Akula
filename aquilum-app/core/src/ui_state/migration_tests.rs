@@ -72,7 +72,7 @@ fn version_one_allows_new_file_beside_missing_tombstone_after_migration() {
     let version = connection
         .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
         .expect("version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn upgrading_from_five_keeps_the_session_and_adds_the_graph_camera() {
         .expect("version");
 
     assert_eq!(row, ("tab".to_owned(), None, None, None));
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn a_fresh_database_is_created_at_the_latest_version_without_dead_tables() {
     let version = connection
         .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
         .expect("version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(
         !schema_shape(&connection).iter().any(|line| line.contains("document_versions")),
         "новая база не создаёт таблицу, которую потом удаляет миграция"

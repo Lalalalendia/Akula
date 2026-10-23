@@ -1,4 +1,4 @@
-name: Notion API read-only lab
+name: Notion API snapshot lab
 on:
   pull_request:
     branches: [main]
@@ -7,6 +7,8 @@ on:
       - 'aquilum-app/core/src/bin/akula_notion_api_probe.rs'
       - 'aquilum-app/core/src/bin/akula_notion_import_lab.rs'
       - 'aquilum-app/core/src/notion_api_probe/**'
+      - 'aquilum-app/core/src/ui_state/migrations/**'
+      - 'aquilum-app/core/src/ui_state/migration_tests.rs'
       - 'aquilum-app/core/src/lib.rs'
       - 'aquilum-app/core/Cargo.toml'
       - '.github/workflows/notion-api-probe.yml'
@@ -31,7 +33,7 @@ jobs:
       - name: Compile read-only Notion CLI
         working-directory: aquilum-app
         run: cargo build -p aquilum-core --locked --features notion-api-probe --bin akula-notion-api-probe
-      - name: Compile opt-in Notion import CLI
+      - name: Compile opt-in Notion cache and import CLI
         working-directory: aquilum-app
         run: cargo build -p aquilum-core --locked --features notion-api-probe --bin akula-notion-import-lab
       - name: Refuse unconfigured CLI without network or output files
