@@ -4,9 +4,14 @@
 set -Eeuo pipefail
 umask 077
 
-if (( $# != 2 )); then
-  echo 'usage: bash w4-two-node-docker-fixture.sh /absolute/Akula.AppImage SHA256' >&2
+if (( $# != 2 && $# != 3 )); then
+  echo 'usage: bash w4-two-node-docker-fixture.sh /absolute/Akula.AppImage SHA256 [--ssh-only]' >&2
   exit 2
+fi
+ssh_only=0
+if (( $# == 3 )); then
+  [[ "$3" == --ssh-only ]] || { echo 'unrecognized fixture flag' >&2; exit 2; }
+  ssh_only=1
 fi
 app=$1
 digest=$2
@@ -122,6 +127,28 @@ printf '%s\n' 'AKULA_W4_REAL_SSH_FIXTURE_STARTED encrypted_ssh=1 network_namespa
 bash "$root/scripts/qa/w4-two-node-ssh.sh" --preflight \
   "$app" 'w4qa@akula-w4-fixture.invalid' "$digest" |
   grep -Fxq 'AKULA_W4_TWO_NODE_PREFLIGHT_PASS distinct_machine_ids=1 ssh_pinned=1 app_sha256=verified'
+
+if (( ssh_only )); then
+  # Fast CI: real OpenSSH + SFTP + pinned key and distinct machine identity,
+  # but intentionally no W3/W4 transport or production-content claims.
+  remote_dir="$(ssh -nT -o BatchMode=yes w4qa@akula-w4-fixture.invalid \
+    'umask 077; mktemp -d /tmp/akula-w4-smoke.XXXXXXXX')"
+  [[ "$remote_dir" =~ ^/tmp/akula-w4-smoke\.[A-Za-z0-9]{8}$ ]] ||
+    { echo 'unsafe fixture remote directory' >&2; exit 1; }
+  scp -q "$app" "w4qa@akula-w4-fixture.invalid:$remote_dir/app"
+  remote_sha="$(ssh -nT -o BatchMode=yes w4qa@akula-w4-fixture.invalid \
+    "sha256sum '$remote_dir/app' | cut -d' ' -f1")"
+  [[ "$remote_sha" == "$digest" ]] || { echo 'SSH/SFTP SHA mismatch' >&2; exit 1; }
+  ssh -nT -o BatchMode=yes w4qa@akula-w4-fixture.invalid \
+    "chmod 700 '$remote_dir/app'; APPIMAGE_EXTRACT_AND_RUN=1 '$remote_dir/app' --w4-pilot status" \
+    > "$tmp/remote-status.log"
+  grep -Fxq 'AKULA_W4_PILOT_READY helper=verified network=inactive auto_start=no SSH_only=yes' \
+    "$tmp/remote-status.log"
+  ssh -nT -o BatchMode=yes w4qa@akula-w4-fixture.invalid "rm -rf '$remote_dir'"
+  echo 'AKULA_W4_REAL_SSH_PRECHECK_PASS ssh=1 sftp=1 pinned_host_key=1 remote_sha256=1'
+  echo 'AKULA_W4_TEST_LIMITATIONS synthetic_executable=1 signed_W4=NOT_TESTED'
+  exit 0
+fi
 
 report="$tmp/results.txt"
 timeout 160 bash "$root/scripts/qa/w4-two-node-ssh.sh" \
