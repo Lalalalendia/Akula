@@ -6,6 +6,20 @@ use akula_staya_integration::live_identity::{
 use aquilum_core::p2p_device_identity::IdentityError;
 #[cfg(windows)]
 use aquilum_core::p2p_device_identity::{self, peer_pin};
+#[cfg(windows)]
+use akula_staya_integration::roster_observation_lab::{
+    ObservationError, observe_live_pinned_roster_peer,
+};
+#[cfg(windows)]
+use aquilum_core::sync::{
+    DeviceId, VaultId,
+    device_roster_lab::{
+        ClaimedDevice, IndependentlyPinnedOwner, OwnerSignedRoster, RosterStatus,
+        inspect_signed_roster,
+    },
+};
+#[cfg(windows)]
+use ring::signature::{Ed25519KeyPair, KeyPair};
 use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, endpoint::presets};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -175,15 +189,62 @@ async fn protected_identity_accepts_confirmed_live_peer_then_rejects_revoke() {
             "a live, valid QUIC key alone has no permission"
         );
 
+        // The same real TLS peer is also present in a separately witnessed,
+        // owner-signed Vault roster. Membership alone must not bypass OS pin.
+        let owner = Ed25519KeyPair::from_seed_unchecked(&[11; 32]).unwrap();
+        let vault_id = VaultId::new();
+        let device_id = DeviceId::new();
+        let mut roster = OwnerSignedRoster {
+            vault_id,
+            epoch: 7,
+            devices: vec![ClaimedDevice {
+                device_id,
+                device_public_key: *outsider_id.as_bytes(),
+                endpoint_public_key: *outsider_id.as_bytes(),
+                status: RosterStatus::RecordedOnly,
+            }],
+            signature: [0; 64],
+        };
+        let claim = roster.canonical_claim().unwrap();
+        let signature = owner.sign(&claim);
+        roster.signature.copy_from_slice(signature.as_ref());
+        let pin = IndependentlyPinnedOwner {
+            vault_id,
+            owner_public_key: owner.public_key().as_ref().try_into().unwrap(),
+            witnessed_min_epoch: roster.epoch,
+            witnessed_epoch_digest: Some(roster.claim_digest().unwrap()),
+        };
+        let verified = inspect_signed_roster(&roster, &pin).unwrap();
+        assert_eq!(
+            observe_live_pinned_roster_peer(&live, &outsider_hex, &verified, vault_id, device_id),
+            Err(ObservationError::OsPinNotConfirmed),
+            "a signed roster cannot self-authorize transport admission"
+        );
+
         // CI synthetic peer confirmation is NOT a product human pairing.
         peer_pin::confirm_peer(&outsider_hex, &outsider_hex).unwrap();
         assert_eq!(require_pinned_live_peer(&live, &outsider_hex), Ok(()));
+        let observed =
+            observe_live_pinned_roster_peer(&live, &outsider_hex, &verified, vault_id, device_id)
+                .unwrap();
+        assert_eq!(observed.metadata_peer_binding().device_id, device_id);
+        assert_eq!(
+            observed.metadata_peer_binding().endpoint_id,
+            *outsider_id.as_bytes()
+        );
+        assert_eq!(observed.vault_id(), vault_id);
+        assert_eq!(observed.roster_epoch(), 7);
 
         peer_pin::revoke_peer(&outsider_hex).unwrap();
         assert_eq!(
             require_pinned_live_peer(&live, &outsider_hex),
             Err(IdentityError::PeerRevoked),
             "same live QUIC session cannot start a new operation after revoke"
+        );
+        assert_eq!(
+            observe_live_pinned_roster_peer(&live, &outsider_hex, &verified, vault_id, device_id),
+            Err(ObservationError::OsPinNotConfirmed),
+            "a previously valid signed roster cannot bypass a later OS revoke"
         );
         live.close(0u8.into(), b"revoke checked");
         server.close().await;
