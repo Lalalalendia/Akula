@@ -9,10 +9,66 @@ use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 use std::ffi::OsString;
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
+
+// Negative, path-based Windows guard. This rejects stable junction/symlink
+// ancestors, but does NOT establish handle-relative namespace/ACL custody.
+#[cfg(windows)]
+fn check_windows_directory_chain(root: &Path, create_missing: bool) -> Result<(), String> {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+    fn inspect(path: &Path) -> Result<bool, String> {
+        match fs::symlink_metadata(path) {
+            Ok(meta)
+                if meta.is_dir()
+                    && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 =>
+            {
+                Ok(true)
+            }
+            Ok(_) => Err(format!(
+                "receiver Inbox directory is a reparse point or not a directory: {}",
+                path.display()
+            )),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(format!("inspect receiver Inbox directory: {error}")),
+        }
+    }
+
+    if !root.is_absolute() {
+        return Err("receiver Inbox root must be absolute".into());
+    }
+    let mut absent = Vec::new();
+    for ancestor in root.ancestors() {
+        if !inspect(ancestor)? {
+            if !create_missing {
+                return Err("receiver Inbox directory disappeared or is missing".into());
+            }
+            absent.push(ancestor.to_path_buf());
+        }
+    }
+    for directory in absent.into_iter().rev() {
+        match fs::create_dir(&directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(format!("create receiver Inbox directory: {error}")),
+        }
+        if !inspect(&directory)? {
+            return Err("receiver Inbox directory disappeared after creation".into());
+        }
+    }
+    // Recheck the entire chain, not just its final name. This remains a
+    // point-in-time negative check; it cannot defeat hostile ancestor races.
+    for ancestor in root.ancestors() {
+        if !inspect(ancestor)? {
+            return Err("receiver Inbox directory disappeared during inspection".into());
+        }
+    }
+    Ok(())
+}
 
 /// Consistent local-only root that a future Akula Native Inbox can read.
 /// Not taken from any QUIC frame, URL, remote label or provider metadata.
@@ -51,7 +107,7 @@ pub(super) fn default_root() -> Result<PathBuf, String> {
         }
     }
     #[cfg(windows)]
-    fs::create_dir_all(&root).map_err(|error| format!("create receiver Inbox: {error}"))?;
+    check_windows_directory_chain(&root, true)?;
     Ok(root)
 }
 
@@ -134,6 +190,8 @@ pub(super) fn persist_received_payload(
     {
         return Err("rejected invalid native receiver payload".into());
     }
+    #[cfg(windows)]
+    check_windows_directory_chain(inbox_root, false)?;
     let root_metadata =
         fs::symlink_metadata(inbox_root).map_err(|error| format!("receiver root: {error}"))?;
     if !root_metadata.file_type().is_dir() {
@@ -148,7 +206,9 @@ pub(super) fn persist_received_payload(
     }
     let _cleanup = RemoveOnDrop(path.clone());
     let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    // Preserve one read/write OS handle from exclusive creation through the
+    // cold rehash. Never reopen the stage by a mutable path name.
+    options.read(true).write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -161,10 +221,9 @@ pub(super) fn persist_received_payload(
         .map_err(|error| format!("write private receiver stage: {error}"))?;
     file.sync_all()
         .map_err(|error| format!("sync private receiver stage: {error}"))?;
-    drop(file);
-    let mut pinned =
-        File::open(&path).map_err(|error| format!("open private receiver stage: {error}"))?;
-    persist_received(&mut pinned, inbox_root, size, digest, sender, receiver)
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("rewind pinned receiver stage: {error}"))?;
+    persist_received(&mut file, inbox_root, size, digest, sender, receiver)
 }
 
 #[cfg(test)]
@@ -216,6 +275,42 @@ mod tests {
             .is_err()
         );
         assert!(!root.join("objects").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receiver_refuses_junction_ancestor_before_creating_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        let junction = dir.path().join("junction");
+        fs::create_dir(&real).unwrap();
+        let mklink = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&real)
+            .output()
+            .expect("Windows cmd is required for junction regression");
+        assert!(
+            mklink.status.success(),
+            "mklink /J failed: {}",
+            String::from_utf8_lossy(&mklink.stderr)
+        );
+        let target = junction.join("Akula").join("received-inbox");
+        assert!(check_windows_directory_chain(&target, true).is_err());
+        assert!(!real.join("Akula").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receiver_requires_existing_regular_directory_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = dir.path().join("received-inbox");
+        assert!(check_windows_directory_chain(&inbox, false).is_err());
+        fs::create_dir(&inbox).unwrap();
+        check_windows_directory_chain(&inbox, false).unwrap();
+        let file = inbox.join("not-a-directory");
+        fs::write(&file, b"not a directory").unwrap();
+        assert!(check_windows_directory_chain(&file, false).is_err());
     }
 
     fn stage(root: &Path, data: &[u8]) -> File {
