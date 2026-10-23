@@ -86,6 +86,7 @@ impl App {
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             self.transfer.choosing, self.transfer.error.as_deref(), identity_view,
+            #[cfg(feature = "messaging-w4-pilot")] Some(&self.transfer.w4_pilot.view),
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
