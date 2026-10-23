@@ -306,7 +306,9 @@ pub fn read_version(dir: &Path, version: &VersionFile) -> Option<String> {
 
 pub fn has_text(dir: &Path, version: &VersionFile, text: &str) -> bool {
     let path = dir.join(&version.id);
-    fs::metadata(&path).is_ok_and(|m| m.len() <= (text.len() + text.lines().count()) as u64)
+    let minimum = text.len() as u64;
+    let maximum = minimum.saturating_add(memchr::memchr_iter(b'\n', text.as_bytes()).count() as u64);
+    fs::metadata(&path).is_ok_and(|m| (minimum..=maximum).contains(&m.len()))
         && read_text(&path).is_ok_and(|stored| stored == text)
 }
 

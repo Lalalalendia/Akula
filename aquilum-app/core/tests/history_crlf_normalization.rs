@@ -40,3 +40,11 @@ fn missing_history_snapshot_is_not_a_match() {
     let root = tempfile::tempdir().unwrap();
     assert!(!has_text(root.path(), &version(), "one\n"));
 }
+
+#[test]
+fn mixed_cr_and_crlf_history_snapshot_matches_without_trailing_newline() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join(version().id), "first\r\nsecond\rthird\r\nfourth").unwrap();
+    assert!(has_text(root.path(), &version(), "first\nsecond\nthird\nfourth"));
+    assert!(!has_text(root.path(), &version(), "first\nsecond\nthird\nother"));
+}
