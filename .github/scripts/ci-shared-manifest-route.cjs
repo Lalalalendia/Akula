@@ -102,6 +102,14 @@ const OWNED_SUITES=Object.freeze({
     "scripts/windows-accesskit-uia.ps1",
     "aquilum-app/native/packaging/akula-windows.json",
     "aquilum-app/native/Cargo.toml"
+  ],
+  "owned_linux_beta": [
+    ".github/workflows/linux-beta.yml",
+    ".github/scripts/linux-beta-identity.test.cjs",
+    "scripts/linux-beta-smoke.sh",
+    "aquilum-app/native/packaging/akula-linux-nfpm.yaml",
+    "aquilum-app/native/packaging/Akula.desktop",
+    "aquilum-app/native/Cargo.toml"
   ]
 });
 function ownedRoutes(paths){
