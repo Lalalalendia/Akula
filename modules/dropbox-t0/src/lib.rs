@@ -22,6 +22,103 @@ pub fn prepare_list(scope: &Scope) -> Result<String, Error> {
     Ok(json!({"path": path, "recursive": true, "include_deleted": false}).to_string())
 }
 
+/// A validated, read-only Dropbox delta page. Only entries inside the
+/// configured Vault are returned; deleted entries are explicit tombstones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropboxDeltaPage {
+    pub entries: Vec<DropboxDeltaEntry>,
+    pub cursor: String,
+    pub has_more: bool,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropboxDeltaEntry {
+    File(DropboxFileRef),
+    Deleted(ObjectKey),
+}
+
+/// Parse list_folder and list_folder/continue using the same pinned scope.
+/// Never infer an upload/delete action from this untrusted metadata.
+pub fn parse_delta_page(scope: &Scope, bytes: &[u8]) -> Result<DropboxDeltaPage, Error> {
+    #[derive(Deserialize)]
+    struct WirePage {
+        entries: Vec<Value>,
+        cursor: String,
+        has_more: bool,
+    }
+    if bytes.len() > 8 * 1024 * 1024 { return Err(Error::InvalidMetadata); }
+    let page: WirePage = serde_json::from_slice(bytes).map_err(|_| Error::InvalidMetadata)?;
+    if page.entries.len() > 10_000 || page.cursor.is_empty()
+        || page.cursor.len() > 4096 || page.cursor.chars().any(char::is_control)
+    { return Err(Error::InvalidCursor); }
+    let prefix = format!("/akula-sync/v1/vaults/{}/", scope.vault_id());
+    let mut entries = Vec::with_capacity(page.entries.len());
+    let mut seen = std::collections::HashSet::new();
+    for raw in page.entries {
+        let tag = raw.get(".tag").and_then(Value::as_str).ok_or(Error::InvalidMetadata)?;
+        let path = raw.get("path_lower").and_then(Value::as_str)
+            .ok_or(Error::InvalidMetadata)?;
+        // Dropbox paths are case-insensitive. Require the canonical Vault
+        // prefix and refuse unknown or ambiguous logical object names.
+        if !path.to_ascii_lowercase().starts_with(&prefix) {
+            return Err(Error::InvalidMetadata);
+        }
+        let suffix = &path[prefix.len()..];
+        let key = ObjectKey::parse(suffix).map_err(|_| Error::InvalidMetadata)?;
+        if !seen.insert(key.as_str().to_owned()) { return Err(Error::InvalidMetadata); }
+        let entry = match tag {
+            "file" => {
+                let wire = serde_json::to_vec(&raw).map_err(|_| Error::InvalidMetadata)?;
+                DropboxDeltaEntry::File(parse_metadata(scope, &key, &wire)?)
+            }
+            "deleted" => DropboxDeltaEntry::Deleted(key),
+            _ => return Err(Error::InvalidMetadata),
+        };
+        entries.push(entry);
+    }
+    Ok(DropboxDeltaPage { entries, cursor: page.cursor, has_more: page.has_more })
+}
+
+#[cfg(test)]
+mod delta_page_tests {
+    use super::*;
+    fn scope() -> Scope {
+        Scope::new("dbid:alice", "12345",
+            "12345678-1234-1234-1234-123456789abc", "home").unwrap()
+    }
+    fn path() -> String {
+        scope().object_path(&ObjectKey::head()).to_ascii_lowercase()
+    }
+    #[test]
+    fn files_and_tombstones_are_distinct_and_read_only() {
+        let p = path();
+        let page = serde_json::json!({
+            "cursor":"cursor-1","has_more":false,"entries":[
+                {".tag":"file","id":"id:abc","rev":"a1","size":3,
+                    "path_lower":p,"is_downloadable":true}
+            ]
+        });
+        let result = parse_delta_page(&scope(), &serde_json::to_vec(&page).unwrap()).unwrap();
+        assert_eq!(result.entries.len(),1);
+        assert!(matches!(&result.entries[0],DropboxDeltaEntry::File(f) if f.logical_key.is_head()));
+        let tombstone = serde_json::json!({"cursor":"cursor-2","has_more":false,
+            "entries":[{".tag":"deleted","path_lower":path()}]});
+        assert!(matches!(parse_delta_page(&scope(), &serde_json::to_vec(&tombstone).unwrap())
+            .unwrap().entries[0], DropboxDeltaEntry::Deleted(_)));
+    }
+    #[test]
+    fn foreign_paths_duplicate_keys_and_unknown_tags_are_rejected() {
+        let entry = serde_json::json!({".tag":"deleted","path_lower":path()});
+        for entries in [
+            vec![entry.clone(),entry.clone()],
+            vec![serde_json::json!({".tag":"deleted","path_lower":"/other/refs/current.json"})],
+            vec![serde_json::json!({".tag":"folder","path_lower":path()})],
+        ] {
+            let page = serde_json::json!({"cursor":"cursor","has_more":false,"entries":entries});
+            assert!(parse_delta_page(&scope(), &serde_json::to_vec(&page).unwrap()).is_err());
+        }
+    }
+}
+
 /// Dropbox cursor pages are untrusted: only exact, non-empty cursors are accepted.
 pub fn parse_list_cursor(bytes: &[u8]) -> Result<(String, bool), Error> {
     #[derive(Deserialize)]
