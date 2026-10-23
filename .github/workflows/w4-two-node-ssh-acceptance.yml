@@ -1,0 +1,39 @@
+# E2E-01: validate the SSH acceptance coordinator without needing VPS access.
+name: Akula W4 two-node SSH acceptance script
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/w4-two-node-ssh-acceptance.yml"
+      - "scripts/qa/w4-two-node-ssh.sh"
+      - "scripts/qa/test-w4-two-node-ssh.sh"
+      - "docs/qa/AK-W4-TWO-NODE-SSH-01.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-w4-two-node-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ssh-preflight-isolated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Strict Bash syntax for both test scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/qa/w4-two-node-ssh.sh
+          bash -n scripts/qa/test-w4-two-node-ssh.sh
+      - name: Invalid peers, pinned-host enforcement, machine identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/qa/test-w4-two-node-ssh.sh
+          echo 'AKULA_W4_TWO_NODE_CI_PRECHECK_PASS'
