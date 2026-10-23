@@ -6,8 +6,6 @@ on:
       - main
     paths:
       - 'interop/akula-staya/**'
-      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
-      - 'aquilum-app/core/src/p2p_device_identity/**'
       - '.github/workflows/p2p-one-file-beta.yml'
   workflow_dispatch:
 
