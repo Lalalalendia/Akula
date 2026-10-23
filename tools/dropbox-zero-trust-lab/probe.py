@@ -204,10 +204,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true",
                         help="Explicitly enable disposable Dropbox writes")
+    parser.add_argument("--case", choices=("P01", "P02", "P03"),
+                        help="Exactly one explicitly approved experiment per invocation")
     args = parser.parse_args()
     if not args.run:
-        print("NOT RUN. Requires --run and disposable App-folder test credentials.")
+        print("NOT RUN. Requires --run, --case and disposable App-folder test credentials.")
         return 0
+    if not args.case:
+        print("HOLD: specify one --case P01, P02 or P03; no cloud request made")
+        return 2
     token = os.getenv("AKULA_DROPBOX_TEST_TOKEN", "")
     expected = os.getenv("AKULA_DROPBOX_TEST_ACCOUNT_ID", "")
     confirm = os.getenv("AKULA_DROPBOX_DISPOSABLE_CONFIRM", "")
@@ -219,9 +224,9 @@ def main():
         print("HOLD: Dropbox test account mismatch or missing account_info.read scope")
         return 2
     runid = secrets.token_hex(12)
-    funcs = [("P01", p01_two_tickets), ("P02", p02_size_cap), ("P03", p03_lost_ack)]
+    functions = {"P01": p01_two_tickets, "P02": p02_size_cap, "P03": p03_lost_ack}
     results = {}
-    for name, fn in funcs:
+    for name, fn in [(args.case, functions[args.case])]:
         try:
             results[name] = fn(token, "/akula_zt_lab_" + runid + "_" + name.lower() + ".bin")
         except Exception as error:
