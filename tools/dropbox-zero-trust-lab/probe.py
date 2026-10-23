@@ -47,18 +47,30 @@ def checked_https(url: str, allowed_host: str, required_path: str):
         raise ValueError("untrusted URL or provider redirect refused")
 
 
-def request(url: str, data: bytes, headers: dict, host: str, path: str) -> Reply:
+def request(url: str, data: bytes, headers: dict, host: str, path: str,
+            *, max_download_bytes: int = LIMIT) -> Reply:
     checked_https(url, host, path)
+    if path == "/2/files/download":
+        # P02 deliberately probes an 8 MiB + 1 byte object on a disposable account.
+        # Production Inbox retains the stricter LIMIT; this lab permits only +1.
+        if not 0 <= max_download_bytes <= LIMIT + 1:
+            raise ValueError("invalid bounded download limit")
+        max_response = max_download_bytes
+    else:
+        max_response = MAX_JSON
     req = Request(url, data=data, headers=headers, method="POST")
     try:
         with OPENER.open(req, timeout=45) as response:
-            body = response.read(MAX_JSON + 1) if path != "/2/files/download" else response.read(LIMIT + 1)
-            if len(body) > (LIMIT if path == "/2/files/download" else MAX_JSON):
+            body = response.read(max_response + 1)
+            if len(body) > max_response:
                 raise RuntimeError("bounded response size exceeded")
             return Reply(response.status, body, dict(response.headers))
     except HTTPError as error:
         with error:
-            return Reply(error.code, error.read(MAX_JSON + 1), dict(error.headers))
+            body = error.read(MAX_JSON + 1)
+            if len(body) > MAX_JSON:
+                raise RuntimeError("bounded error response size exceeded")
+            return Reply(error.code, body, dict(error.headers))
 
 
 def api(token: str, route: str, payload: dict) -> Reply:
@@ -107,11 +119,27 @@ def download_revision(token: str, rev: str, expected_max: int) -> bytes:
     url = "https://" + CONTENT_HOST + "/2/files/download"
     arg = json.dumps({"path": "rev:" + rev}, separators=(",", ":"))
     r = request(url, b"", {"Authorization": "Bearer " + token,
-                           "Dropbox-API-Arg": arg}, CONTENT_HOST, "/2/files/download")
+                           "Dropbox-API-Arg": arg}, CONTENT_HOST, "/2/files/download",
+                max_download_bytes=expected_max)
     if r.code != 200:
         raise RuntimeError("revision download HTTP " + str(r.code))
     if len(r.data) > expected_max:
         raise RuntimeError("readback exceeded the agreed size")
+    # Dropbox documents full file metadata in the Dropbox-API-Result header.
+    # Treat it as a consistency check, never as cryptographic authorization.
+    raw = next((v for k, v in r.headers.items()
+                if k.lower() == "dropbox-api-result"), None)
+    if not raw:
+        raise RuntimeError("missing revision download metadata")
+    try:
+        header_meta = json.loads(raw)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("invalid revision download metadata") from error
+    if (not isinstance(header_meta, dict)
+            or header_meta.get("rev") != rev
+            or header_meta.get("size") != len(r.data)
+            or header_meta.get("content_hash") != dropbox_content_hash(r.data)):
+        raise RuntimeError("download metadata disagrees with bytes")
     return r.data
 
 
@@ -123,6 +151,11 @@ def dropbox_content_hash(data: bytes) -> str:
 
 def readback(token: str, path: str, expected: bytes) -> dict:
     meta = metadata(token, path)
+    if (meta.get("path_lower") != path.lower()
+            or not isinstance(meta.get("id"), str)
+            or not meta["id"].startswith("id:")
+            or not isinstance(meta.get("rev"), str)):
+        raise RuntimeError("remote object identity/scope mismatch")
     if meta.get("size") != len(expected):
         raise RuntimeError("remote size mismatch")
     if meta.get("content_hash") != dropbox_content_hash(expected):
@@ -180,10 +213,16 @@ def p02_size_cap(token: str, path: str) -> dict:
     payload = secrets.token_bytes(LIMIT + 1)
     status = post_object(issue(token, path), payload).code
     if status == 200:
-        meta = metadata(token, path)
-        return {"status": "NO_8M_SERVER_CAP_OBSERVED" if meta.get("size") == len(payload)
-                else "HOLD", "upload_http": status,
-                "remote_size": meta.get("size"), "agreed_max": LIMIT}
+        # Do not trust Dropbox HTTP 200 or server metadata alone: read exact bytes.
+        # This exceptional +1-byte readback is a disposable laboratory operation.
+        try:
+            verified = readback(token, path, payload)
+        except RuntimeError:
+            return {"status": "HOLD", "upload_http": status, "agreed_max": LIMIT,
+                    "reason": "oversize remote bytes unverified"}
+        return {"status": "NO_8M_SERVER_CAP_OBSERVED", "upload_http": status,
+                "remote_size": verified["bytes"], "agreed_max": LIMIT,
+                "exact_revision_verified": True}
     return {"status": "HOLD", "upload_http": status, "agreed_max": LIMIT,
             "note": "Rejection might be generic account/provider limit, not per-grant size enforcement"}
 
@@ -192,9 +231,17 @@ def p03_lost_ack(token: str, path: str) -> dict:
     payload = secrets.token_bytes(1024)
     # Deliberately discard the application's knowledge of the POST result.
     # This is an app-layer ACK-loss fault, NOT a simulated TCP reset.
-    post_object(issue(token, path), payload)
+    upload_url = issue(token, path)
+    network_ack_lost = False
+    try:
+        # Even HTTP 409/410 does not justify a blind second upload: reconcile.
+        post_object(upload_url, payload)
+    except (OSError, URLError):
+        # Dropbox may have committed bytes before the connection broke.
+        network_ack_lost = True
     verified = readback(token, path, payload)
     return {"status": "PASS_RECONCILED_CLOUD_ONLY", "bytes": verified["bytes"],
+            "network_ack_lost": network_ack_lost,
             "file_id": verified["file_id"], "rev": verified["rev"],
             "app_layer_ack_discarded": True, "blind_retry": False,
             "durable_inbox_receipt": False}
