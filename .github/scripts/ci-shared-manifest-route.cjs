@@ -47,6 +47,56 @@ function versionBumpOnly({paths,coreBefore,coreAfter,nativeBefore,nativeAfter,lo
 }
 // Owner-only OS acceptance always runs for its own sources, not for every shared manifest.
 const INSTALLED_OWNER_PATHS=new Set(["aquilum-app/core/src/sync/host_install_unix_root.rs","aquilum-app/core/src/sync/host_install_witness.rs","aquilum-app/core/src/sync/mod.rs","aquilum-app/native/Cargo.toml",".github/workflows/sync-installed-os-owner-witness.yml","docs/sync/adr-0038-unix-root-owned-install-receipt.md"]);
+
+// Preserve the exact former pull_request.path owners. These source-owned labs
+// run through the required Main PR gate, including mixed source/manifest diffs.
+const OWNED_SUITES=Object.freeze({
+  "owned_host_custody": [
+    "aquilum-app/core/src/app_core.rs",
+    "aquilum-app/core/src/app_core_installed_host_tests.rs",
+    "aquilum-app/core/src/files/gate/write.rs",
+    "aquilum-app/core/src/history/service.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    "aquilum-app/core/src/sync/host_custody_registry.rs",
+    "aquilum-app/core/src/sync/host_admission.rs",
+    "aquilum-app/core/src/sync/local_create_tests.rs",
+    "aquilum-app/core/src/sync/host_ledger_identity.rs",
+    "aquilum-app/core/src/sync/host_cold_identity_tests.rs",
+    "aquilum-app/core/src/sync/host_install_witness.rs",
+    "aquilum-app/core/src/app_core_witness_tests.rs",
+    "aquilum-app/core/src/sync/host_core_epoch_tests.rs",
+    "aquilum-app/native/src/workspace.rs",
+    "aquilum-app/native/src/workspace_installed_witness_tests.rs",
+    ".github/workflows/sync-host-custody.yml"
+  ],
+  "owned_sync_protection": [
+    "aquilum-app/core/src/sync/protection_store.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    ".github/workflows/sync-protection.yml"
+  ],
+  "owned_text_delta": [
+    "aquilum-app/core/src/sync/text_delta_codec.rs",
+    "aquilum-app/core/src/sync/mod.rs",
+    "aquilum-app/core/src/sync/s3_transport/pack_probe.rs",
+    ".github/workflows/sync-text-delta-rust.yml",
+    "docs/sync/text-delta-03-rust-codec.md"
+  ],
+  "owned_appimage": [
+    ".github/workflows/appimage-beta.yml",
+    ".github/scripts/appimage-beta-identity.test.cjs",
+    "scripts/appimage-beta-smoke.sh",
+    "scripts/appimage-real-upgrade-accept.py",
+    "scripts/appimage-real-upgrade-helper.rs",
+    "aquilum-app/native/packaging/akula-linux.json",
+    "aquilum-app/native/packaging/Akula.desktop",
+    "aquilum-app/native/Cargo.toml"
+  ]
+});
+function ownedRoutes(paths){
+  const changed=new Set(paths);
+  return Object.fromEntries(Object.entries(OWNED_SUITES).map(([key,owned])=>
+    [key,owned.some(file=>changed.has(file))]));
+}
 function changes(diff){
   return String(diff||'').split(/\r?\n/)
     .filter(x=>(x.startsWith('+')&&!x.startsWith('+++'))||(x.startsWith('-')&&!x.startsWith('---')))
