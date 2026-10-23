@@ -51,7 +51,7 @@ fn fingerprint_bytes(value: &str) -> Option<[u8; 32]> {
 
 /// A single independent public identity is sufficient for a real signed SSH
 /// KEX, but never constitutes approval to install or trust an unknown host.
-pub(super) fn can_probe(draft: &ServerBootstrapDraft) -> bool {
+pub(crate) fn can_probe(draft: &ServerBootstrapDraft) -> bool {
     !draft.host.is_empty()
         && !draft.ssh_user.is_empty()
         && ServerBootstrapDraft::valid_host(&draft.host)
