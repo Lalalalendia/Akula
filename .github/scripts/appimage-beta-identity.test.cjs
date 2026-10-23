@@ -14,7 +14,7 @@ const file = (name) => readFileSync(path.join(root, name), 'utf8');
 test('AppImage has an independent explicit Akula packager identity', () => {
   const cfg = JSON.parse(file('aquilum-app/native/packaging/akula-linux.json'));
   assert.equal(cfg.productName, 'Akula');
-  assert.equal(cfg.version, '0.3.9');
+  assert.equal(cfg.version, '0.3.13');
   assert.equal(cfg.identifier, 'io.github.lalalendia.akula');
   assert.equal(cfg.homepage, 'https://github.com/Lalalalendia/Akula');
   assert.deepEqual(cfg.binaries, [{ path: 'akula-app', main: true }]);
