@@ -232,7 +232,7 @@ mod tests {
                         break;
                     }
                 }
-                let header = std::str::from_utf8(&request[..header_end]).unwrap();
+                let header = std::str::from_utf8(&request[..header_end]).unwrap().to_owned();
                 assert!(header.starts_with("POST /2/"));
                 assert!(header.to_ascii_lowercase().contains("authorization: bearer fake-token"));
                 let size: usize = header.lines()
