@@ -40,6 +40,10 @@ impl App {
             s3_bound_publications,
             sync_selected: None,
             sync_notice: None,
+            #[cfg(feature = "dropbox-readonly-preview")]
+            dropbox_preview_status: self.dropbox_preview.status.clone(),
+            #[cfg(feature = "dropbox-readonly-preview")]
+            dropbox_preview_busy: self.dropbox_preview.busy,
             scale: self.interface.scale(),
             home_page,
             mcp: Some(self.workspace.core.mcp.status()),
