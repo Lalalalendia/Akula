@@ -92,50 +92,32 @@ test('new PR workflows are guarded, and previously protected edited ones cannot 
 });
 
 
-test('Windows beta migration passes only with exact original owner paths and required Main PR gate',()=>{
+test('only fully routed Windows beta may lose a protected PR trigger',()=>{
   const paths=[
-    '.github/workflows/windows-beta.yml','.github/scripts/windows-beta-identity.test.cjs',
-    'scripts/test-windows-beta.ps1','scripts/build-windows-update-fixture.ps1',
-    'scripts/test-windows-beta-upgrade.ps1','scripts/windows-beta-gui-input.ps1',
-    'scripts/windows-beta-candidate-manifest.ps1','scripts/windows-accesskit-uia.ps1',
-    'aquilum-app/native/packaging/akula-windows.json','aquilum-app/native/Cargo.toml',
+    '.github/workflows/windows-beta.yml',
+    '.github/scripts/windows-beta-identity.test.cjs',
+    'scripts/test-windows-beta.ps1',
+    'scripts/build-windows-update-fixture.ps1',
+    'scripts/test-windows-beta-upgrade.ps1',
+    'scripts/windows-beta-gui-input.ps1',
+    'scripts/windows-beta-candidate-manifest.ps1',
+    'scripts/windows-accesskit-uia.ps1',
+    'aquilum-app/native/packaging/akula-windows.json',
+    'aquilum-app/native/Cargo.toml',
   ];
-  const expression=s=>'
-  assert.throws(()=>changedWorkflows('','HEAD'),/Untrusted Git/);
-  assert.throws(()=>changedWorkflows('--bad','HEAD'),/Untrusted Git/);
-  assert.throws(()=>changedWorkflows('not-a-valid-ref','HEAD'));
-});
-
-
-test('cancellation expression cannot widen or disable PR-only coalescing',()=>{
-  for(const expr of [
-    "github.event_name == 'pull_request' || true",
-    "true || github.event_name == 'pull_request'",
-    "github.event_name == 'pull_request' && false",
-    "github.event_name == 'pull_request' || github.event_name != 'schedule'",
-    "github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'",
-  ]){
-    const candidate=good.replace(cancel,'  cancel-in-progress: $'+'{{ '+expr+' }}');
-    assert.match(policyErrors(candidate,'unsafe.yml').join(','),/PR triggers only/,expr);
-  }
-  const both=good.replace('  workflow_dispatch:','  pull_request_target:\n  workflow_dispatch:');
-  const combined='  cancel-in-progress: $'+"{{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}";
-  assert.deepEqual(policyErrors(both.replace(cancel,combined),'both.yml'),[]);
-  assert.match(policyErrors(both,'both.yml').join(','),/PR triggers only/);
-});
-+'{{ '+s+' }}';
+  const expression=s=>String.fromCharCode(36,123,123)+' '+s+' '+String.fromCharCode(125,125);
   const oldHeader='on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n'
-    +paths.map(x=>"      - '"+x+"'\n").join('')+'\n  workflow_dispatch:\n';
+    +paths.map(p=>"      - '"+p+"'\n").join('')+'\n  workflow_dispatch:\n';
   const newHeader='on:\n  workflow_call:\n'
     +'  # Source ownership is enforced by the required Main PR gate.\n'
     +'  workflow_dispatch:\n';
   const old=oldHeader+'    inputs:\n      ref:\n        required: true\n        default: main\njobs:\n  windows-beta:\n    runs-on: windows-latest\n';
-  const after=old.replace(oldHeader,newHeader);
-  const items=paths.map(x=>'    '+JSON.stringify(x)+',\n').join('');
-  const route='const OWNED_SUITES=Object.freeze({\n  "owned_windows_beta": [\n'
-    +items+'  ]\n});\nfunction ownedRoutes(paths){\n  const changed=new Set(paths);\n'
-    +'  return changed;\n}\nconst x={...ownedRoutes(paths)};\n'
-    +'module.exports={OWNED_SUITES,ownedRoutes,x};\n';
+  const candidate=old.replace(oldHeader,newHeader);
+  const route='const OWNED_SUITES=Object.freeze({\n  "owned_windows_beta": '
+    +JSON.stringify(paths,null,2).replace(/\n/g,'\n  ')
+    +'\n});\nfunction ownedRoutes(paths){\n  const changed=new Set(paths);\n'
+    +'  return {};\n}\nconst flags={...ownedRoutes(paths)};\n'
+    +'module.exports={OWNED_SUITES,ownedRoutes,flags};\n';
   const app=[
     '  classify:',
     '      owned_windows_beta: '+expression('steps.scope.outputs.owned_windows_beta'),
@@ -155,36 +137,39 @@ test('cancellation expression cannot widen or disable PR-only coalescing',()=>{
     '            if [ "$ROUTED_SHARED_RESULT" != success ]; then',
   ].join('\n')+'\n';
   const shared=[
-    '      owned_windows_beta:','        required: true','        type: boolean',
-    '  route-windows-beta:','    name: Impacted shared manifest / windows-beta',
+    '      owned_windows_beta:',
+    '        required: true',
+    '        type: boolean',
+    '  route-windows-beta:',
+    '    name: Impacted shared manifest / windows-beta',
     '    if: '+expression('inputs.lock || inputs.owned_windows_beta'),
     '    uses: ./.github/workflows/windows-beta.yml',
     '    needs: [route-other, route-windows-beta]',
     '          const cases=[["route-windows-beta",["lock","owned_windows_beta"]]];',
   ].join('\n')+'\n';
-  const fixtures={
+  const fixture={
     '.github/scripts/ci-shared-manifest-route.cjs':route,
     '.github/workflows/app-checks.yml':app,
     '.github/workflows/ci-shared-manifest-labs.yml':shared,
   };
-  const read=name=>{if(!Object.hasOwn(fixtures,name))throw Error('missing evidence');return fixtures[name];};
-  assert.equal(allowedWindowsBetaMigration(old,after,read),true,'complete migration must be allowed');
+  const read=path=>fixture[path];
+  assert.equal(allowedWindowsBetaMigration(old,candidate,read),true,'exactly migrated route');
   const bad=[
-    ['removed owner', '.github/scripts/ci-shared-manifest-route.cjs', route.replace('    "scripts/test-windows-beta.ps1",\n','')],
-    ['lost route condition','.github/workflows/ci-shared-manifest-labs.yml',shared.replace('inputs.lock || inputs.owned_windows_beta','inputs.lock')],
-    ['lost boundary dependency','.github/workflows/ci-shared-manifest-labs.yml',shared.replace('route-other, route-windows-beta','route-other')],
-    ['lost route evidence','.github/workflows/ci-shared-manifest-labs.yml',shared.replace('["lock","owned_windows_beta"]','["lock"]')],
-    ['lost shared risk','.github/workflows/app-checks.yml',app.replace('SHARED_RISKY: '+expression("needs.classify.outputs.owned_windows_beta == 'true'"),'SHARED_RISKY: '+expression('false'))],
-    ['lost Main PR dependency','.github/workflows/app-checks.yml',app.replace('needs: [classify, required-tests, native-frames, shared-labs]','needs: [classify, required-tests, native-frames]')],
-    ['lost fail closed','.github/workflows/app-checks.yml',app.replace('if [ "$ROUTED_SHARED_RESULT" != success ]; then','echo ignored')],
+    ['missing source owner','.github/scripts/ci-shared-manifest-route.cjs',route.replace('    "scripts/test-windows-beta.ps1",\n','')],
+    ['missing routing condition','.github/workflows/ci-shared-manifest-labs.yml',shared.replace('inputs.lock || inputs.owned_windows_beta','inputs.lock')],
+    ['missing boundary dependency','.github/workflows/ci-shared-manifest-labs.yml',shared.replace('route-other, route-windows-beta','route-other')],
+    ['missing boundary flag','.github/workflows/ci-shared-manifest-labs.yml',shared.replace('["lock","owned_windows_beta"]','["lock"]')],
+    ['missing Main gate risk','.github/workflows/app-checks.yml',app.replace("SHARED_RISKY: "+expression("needs.classify.outputs.owned_windows_beta == 'true'"),"SHARED_RISKY: "+expression('false'))],
+    ['missing Main gate dependency','.github/workflows/app-checks.yml',app.replace('needs: [classify, required-tests, native-frames, shared-labs]','needs: [classify, required-tests, native-frames]')],
+    ['missing fail-closed check','.github/workflows/app-checks.yml',app.replace('if [ "$ROUTED_SHARED_RESULT" != success ]; then','echo passing')],
   ];
-  for(const [name,file,value] of bad){
-    assert.equal(allowedWindowsBetaMigration(old,after,k=>k===file?value:read(k)),false,name);
+  for(const [name,path,content] of bad){
+    assert.equal(allowedWindowsBetaMigration(old,candidate,key=>key===path?content:read(key)),false,name);
   }
-  assert.equal(allowedWindowsBetaMigration(old,after.replace('runs-on: windows-latest','runs-on: ubuntu-latest'),read),false,'installer body must be bytewise unchanged');
-  assert.equal(allowedWindowsBetaMigration(old,after.replace('workflow_dispatch:','push:'),read),false,'manual candidate retained');
-  assert.equal(allowedWindowsBetaMigration(old.replace("      - 'scripts/test-windows-beta.ps1'\n",''),after,read),false,'no changed old owners');
-  assert.equal(allowedWindowsBetaMigration(old,after,()=>{throw Error('missing evidence');}),false);
+  assert.equal(allowedWindowsBetaMigration(old,candidate.replace('runs-on: windows-latest','runs-on: ubuntu-latest'),read),false,'installer body must not change');
+  assert.equal(allowedWindowsBetaMigration(old,candidate.replace('workflow_dispatch:','push:'),read),false,'manual trigger must stay');
+  assert.equal(allowedWindowsBetaMigration(old.replace("      - 'scripts/test-windows-beta.ps1'\n",''),candidate,read),false,'original paths must be exact');
+  assert.equal(allowedWindowsBetaMigration(old,candidate,()=>{throw Error('missing route');}),false,'missing evidence fails closed');
 });
 
 test('malformed git revision fails closed',()=>{
