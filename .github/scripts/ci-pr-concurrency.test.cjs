@@ -5,7 +5,7 @@ const cp = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {topBlock, prTrigger, policyErrors, allowedWindowsBetaMigration, changedWorkflows, audit} = require('./ci-pr-concurrency.cjs');
+const {topBlock, prTrigger, policyErrors, allowedWindowsBetaMigration, allowedLinuxBetaMigration, changedWorkflows, audit} = require('./ci-pr-concurrency.cjs');
 const group = '  group: $' + '{{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
 const cancel = "  cancel-in-progress: $" + "{{ github.event_name == 'pull_request' }}";
 const good = ['name: Optional lab','on:','  pull_request:','    paths:',"      - 'modules/test/**'",'  workflow_dispatch:','concurrency:',group,cancel,'jobs:','  test:','    runs-on: ubuntu-latest','    steps:','      - run: true'].join('\n')+'\n';
@@ -194,4 +194,67 @@ test('cancellation expression cannot widen or disable PR-only coalescing',()=>{
   const combined='  cancel-in-progress: $'+"{{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}";
   assert.deepEqual(policyErrors(both.replace(cancel,combined),'both.yml'),[]);
   assert.match(policyErrors(both,'both.yml').join(','),/PR triggers only/);
+});
+
+
+test('only byte-exact Linux beta migration may remove a protected PR trigger',()=>{
+  const owned=[
+    '.github/workflows/linux-beta.yml',
+    '.github/scripts/linux-beta-identity.test.cjs',
+    'scripts/linux-beta-smoke.sh',
+    'aquilum-app/native/packaging/akula-linux-nfpm.yaml',
+    'aquilum-app/native/packaging/Akula.desktop',
+    'aquilum-app/native/Cargo.toml',
+  ];
+  const newHeader='on:\n  workflow_call:\n'
+    +'  # PR source owners are enforced by the required Main PR gate.\n'
+    +'\npermissions:\n';
+  const oldHeader='on:\n  workflow_call:\n  pull_request:\n    branches: [main]\n    paths:\n'
+    +owned.map(p=>"      - '"+p+"'\n").join('')
+    +'\npermissions:\n';
+  const candidate=fs.readFileSync(path.join(__dirname,'../workflows/linux-beta.yml'),'utf8');
+  assert.equal(candidate.split(newHeader).length,2,'new Linux trigger is exact');
+  assert.doesNotMatch(candidate,/^  pull_request:/m);
+  const old=candidate.replace(newHeader,oldHeader);
+  const sources=[
+    '.github/scripts/ci-shared-manifest-route.cjs',
+    '.github/workflows/app-checks.yml',
+    '.github/workflows/ci-shared-manifest-labs.yml'
+  ];
+  const contents=Object.fromEntries(sources.map(file=>[file,
+    fs.readFileSync(path.join(__dirname,'../..',file),'utf8')]));
+  const read=file=>contents[file];
+  assert.equal(allowedLinuxBetaMigration(old,candidate,read),true,
+    'six exact owners and required gate prove a safe Linux move');
+  const route=contents[sources[0]], app=contents[sources[1]], shared=contents[sources[2]];
+  const invalid=[
+    ['missing owner',sources[0],route.replace('    "scripts/linux-beta-smoke.sh",\n','')],
+    ['missing owned helper',sources[0],route.replace('...ownedRoutes(paths)','false')],
+    ['missing called route',sources[2],shared.replace('inputs.lock || inputs.owned_linux_beta','inputs.lock')],
+    ['missing boundary flag',sources[2],shared.replace('"route-linux-beta",["lock","owned_linux_beta"]','"route-linux-beta",["lock"]')],
+    ['missing route dependency',sources[2],shared.replace(', route-linux-beta,',', ')],
+    ['missing Main gate dependency',sources[1],app.replace(
+      'needs: [classify, required-tests, native-frames, shared-labs]',
+      'needs: [classify, required-tests, native-frames]')],
+    ['missing Main gate risk',sources[1],app.replace(
+      'if [ "$SHARED_RISKY" = true ]; then','echo unsafe')],
+    ['missing output',sources[1],app.replace(
+      'owned_linux_beta: $'+'{{ steps.scope.outputs.owned_linux_beta }}',
+      'owned_linux_beta: false')],
+  ];
+  for(const [label,key,modified] of invalid){
+    assert.notEqual(modified,contents[key],label+' fixture must change');
+    assert.equal(allowedLinuxBetaMigration(old,candidate,file=>file===key?modified:read(file)),
+      false,label+' must fail closed');
+  }
+  assert.equal(allowedLinuxBetaMigration(old,candidate.replace('runs-on: ubuntu-22.04','runs-on: ubuntu-24.04'),read),
+    false,'installer body changes are forbidden');
+  assert.equal(allowedLinuxBetaMigration(old,candidate.replace('  workflow_call:\n','  workflow_call:\n  workflow_dispatch:\n'),read),
+    false,'new manual release path is forbidden');
+  assert.equal(allowedLinuxBetaMigration(old.replace('branches: [main]','branches: [develop]'),candidate,read),
+    false,'target branches must remain exact');
+  assert.equal(allowedLinuxBetaMigration(old.replace("      - 'scripts/linux-beta-smoke.sh'\n",''),candidate,read),
+    false,'missing previous source must not lose its PR test');
+  assert.equal(allowedLinuxBetaMigration(old,candidate,()=>{throw Error('no evidence');}),
+    false,'missing evidence always fails closed');
 });
