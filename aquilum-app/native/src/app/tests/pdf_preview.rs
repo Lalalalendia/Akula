@@ -132,13 +132,31 @@ fn installed_shiva_pdf_is_searchable_and_opens_from_native_result() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(result.as_deref(), Some(note.as_path()),
-        "actual native search UI did not return the PDF-derived note");
+    let found_path = result.expect("native search did not return the PDF-derived note");
+    // File Gate may use extended-length Windows paths while Tantivy stores
+    // ordinary drive paths. Compare their resolved file identities.
+    let expected = fs::canonicalize(&note)
+        .expect("the File Gate-created PDF preview must still exist");
+    assert_eq!(
+        fs::canonicalize(&found_path)
+            .expect("the search result must resolve to an existing file"),
+        expected,
+        "native search returned a different file than the imported PDF preview",
+    );
     h.app.search_key(
         &mut h.root,
         &Key::Named(NamedKey::Enter),
         Modifiers::empty(),
     ).expect("native search Enter key must be recognized");
-    assert_eq!(h.app.tabs.active().path.as_deref(), Some(note.as_path()));
+    let opened = h.app.tabs.active().path
+        .as_ref().expect("native search Enter must open a tab");
+    assert_eq!(
+        fs::canonicalize(opened)
+            .expect("opened PDF preview tab must resolve to an existing file"),
+        expected,
+        "native Enter opened a file other than the PDF preview search result",
+    );
+    assert!(!matches!(h.app.popup, Some(Popup::Search(_))),
+        "opening the search result must close the search modal");
     println!("AKULA_PDF_NATIVE_SEARCH_E2E=PASS;installed_shiva=1;gate=1;tantivy=1;ui=1;source_unchanged=1");
 }
