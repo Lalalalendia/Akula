@@ -773,6 +773,8 @@
   "workspaces": {
     "title": "Knowledge bases",
     "close": "Close the list of knowledge bases",
+    "closeActive": "Close knowledge base",
+    "closeSaveFailed": "Could not close the base because a note was not saved. Check the editor warning.",
     "empty": "No saved bases yet",
     "emptyHint": "Folders you open appear here and are remembered between launches.",
     "forget": "Remove “{{name}}” from the list",

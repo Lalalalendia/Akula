@@ -5,9 +5,9 @@ const fs=require('node:fs');
 const path=require('node:path');
 const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
 const shared=fs.readFileSync(path.join(__dirname,'../workflows/ci-shared-manifest-labs.yml'),'utf8');
-const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
+const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
 
-test('28 owned workflows remain direct for own sources, called only by impacted shared-manifest route',()=>{
+test('28 owned routes preserve direct-only versus required callable owners',()=>{
   assert.equal(routeEntries.length,28);
   assert.match(shared,/^on:\n  workflow_call:/m);
   for(const [id,file,keys] of routeEntries){
@@ -19,7 +19,7 @@ test('28 owned workflows remain direct for own sources, called only by impacted 
       for(const file of ["aquilum-app/core/src/sync/host_install_unix_root.rs","aquilum-app/core/src/sync/host_install_witness.rs","aquilum-app/core/src/sync/mod.rs","aquilum-app/native/Cargo.toml",".github/workflows/sync-installed-os-owner-witness.yml","docs/sync/adr-0038-unix-root-owned-install-receipt.md"]){
         assert.equal(sources.assess({paths:[file]}).installed_owner_owned,true,file);
       }
-    } else if(['host-custody','sync-protection','text-delta','appimage-beta'].includes(id)){
+    } else if(['host-custody','sync-protection','text-delta','appimage-beta','windows-beta'].includes(id)){
       assert.match(body,/^on:\n  workflow_call:/m);
       assert.doesNotMatch(body,/^  pull_request:/m);
     } else assert.match(body,/^on:\n  workflow_call:\n  pull_request:/m);
@@ -29,7 +29,7 @@ test('28 owned workflows remain direct for own sources, called only by impacted 
     }
     const group=body.match(/^  group: (.*)$/m)?.[1];
     if(group)assert.ok(group.includes('github.workflow'),file+' direct/called concurrency separated');
-    if(!['installed-owner','host-custody','sync-protection','text-delta','appimage-beta'].includes(id))assert.match(body,new RegExp(file.replace(/\./g,'\\.'),'m'),file+' watches itself');
+    if(!['installed-owner','host-custody','sync-protection','text-delta','appimage-beta','windows-beta'].includes(id))assert.match(body,new RegExp(file.replace(/\./g,'\\.'),'m'),file+' watches itself');
     assert.match(shared,new RegExp('  route-'+id+':\\n'),file+' included');
     assert.ok(shared.includes('uses: ./.github/workflows/'+file),file+' callable');
     for(const key of keys)assert.ok(shared.includes('inputs.'+key),'input '+key+' used by router');
@@ -84,18 +84,18 @@ test('beta packaging workflows do not build all three OS installers for any Nati
   for(const [filename,ownedScript,ownedManifest] of specs){
     const body=fs.readFileSync(path.join(__dirname,'../workflows',filename),'utf8');
     const policy=parse(body);
-    assert.equal(policy.t,filename==='appimage-beta.yml'?'none':'paths',filename+' routed PR ownership');
+    assert.equal(policy.t,['appimage-beta.yml','windows-beta.yml'].includes(filename)?'none':'paths',filename+' routed PR ownership');
     assert.equal(matches(policy,'aquilum-app/native/src/app/tests/graph.rs'),false,filename);
     assert.equal(matches(policy,'aquilum-app/native/src/updater/macos_transaction.rs'),false,filename);
     assert.equal(matches(policy,'aquilum-app/native/src/main.rs'),false,filename);
     for(const owned of [
       '.github/workflows/'+filename,
       'aquilum-app/native/Cargo.toml',ownedScript,ownedManifest,
-    ])if(filename!=='appimage-beta.yml')assert.equal(matches(policy,owned),true,filename+' retains '+owned);
+    ])if(!['appimage-beta.yml','windows-beta.yml'].includes(filename))assert.equal(matches(policy,owned),true,filename+' retains '+owned);
     assert.match(body,/^  workflow_call:\s*$/m,filename+' still required via shared manifest');
     if(filename==='windows-beta.yml')assert.match(body,/^  workflow_dispatch:\s*$/m,'Windows retains established manual candidate');
     else assert.doesNotMatch(body,/^  workflow_dispatch:\s*$/m,filename+' remains PR-only for unsigned release safety');
-    if(filename!=='appimage-beta.yml')assert.match(body,/^  pull_request:\s*$/m,filename+' watches packaging');
+    if(!['appimage-beta.yml','windows-beta.yml'].includes(filename))assert.match(body,/^  pull_request:\s*$/m,filename+' watches packaging');
     assert.match(body,/^  [a-z-]+:\n    /m,filename+' retains job');
   }
   const main=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
@@ -195,3 +195,35 @@ test('roster and positive-host ownership survives selective Cargo CI routing',()
 });
 
 test('source path ownership remains in fail-closed shared route',()=>{const own=require('./ci-shared-manifest-route.cjs');for(const [k,v] of Object.entries(own.OWNED_SUITES)){assert.ok(v.length>0);assert.ok(shared.includes('inputs.'+k));assert.ok(shared.includes('"'+k+'"'));}});
+
+
+test('Windows beta standalone and mixed source owners require exactly one signed-off CI route',()=>{
+  const r=require('./ci-shared-manifest-route.cjs');
+  const {parse}=require('./ci-file-ratchet.cjs');
+  const body=fs.readFileSync(path.join(__dirname,'../workflows/windows-beta.yml'),'utf8');
+  assert.equal(parse(body).t,'none','no parallel PR Windows installer');
+  assert.match(body,/^on:\n  workflow_call:\n/m,'reusable caller stays active');
+  assert.match(body,/^  workflow_dispatch:\n    inputs:\n      ref:\n/m,'manual candidate with ref stays active');
+  assert.match(body,/^        default: main$/m);
+  assert.doesNotMatch(body,/^  pull_request:/m);
+  assert.equal(r.OWNED_SUITES.owned_windows_beta.length,10,'preserve all 10 former paths');
+  const owned=['.github/workflows/windows-beta.yml',
+    '.github/scripts/windows-beta-identity.test.cjs',
+    'scripts/test-windows-beta.ps1','scripts/build-windows-update-fixture.ps1',
+    'scripts/test-windows-beta-upgrade.ps1','scripts/windows-beta-gui-input.ps1',
+    'scripts/windows-beta-candidate-manifest.ps1','scripts/windows-accesskit-uia.ps1',
+    'aquilum-app/native/packaging/akula-windows.json','aquilum-app/native/Cargo.toml'];
+  assert.deepEqual(r.OWNED_SUITES.owned_windows_beta,owned);
+  for(const file of owned){
+    assert.equal(r.assess({paths:[file]}).owned_windows_beta,true,file+' source-only routed');
+    assert.equal(r.assess({paths:[file,r.LOCK]}).owned_windows_beta,true,file+' mixed Cargo routed');
+  }
+  assert.equal(r.assess({paths:['README.md']}).owned_windows_beta,false);
+  assert.match(core,/owned_windows_beta: \$\{\{ steps\.scope\.outputs\.owned_windows_beta \}\}/);
+  assert.match(core,/owned_windows_beta: \$\{\{ needs\.classify\.outputs\.owned_windows_beta == 'true' \}\}/);
+  assert.match(core,/SHARED_RISKY: .*owned_windows_beta/);
+  assert.match(shared,/route-windows-beta:\n    name: Impacted shared manifest \/ windows-beta\n    if: \$\{\{ inputs\.lock \|\| inputs\.owned_windows_beta \}\}/);
+  assert.match(shared,/\"route-windows-beta\",\[\"lock\",\"owned_windows_beta\"\]/);
+  assert.match(shared,/^      owned_windows_beta:\n        required: true\n        type: boolean$/m);
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});
