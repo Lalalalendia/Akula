@@ -126,4 +126,23 @@ test('Native package metadata is routed without duplicate direct OS workflows',(
 });
 
 const owned=require('./ci-shared-manifest-route.cjs');
-test('owned tests run once via gate on source-only and mixed manifest diffs',()=>{for(const [k,items] of Object.entries(owned.OWNED_SUITES)){for(const p of items){assert.equal(owned.ownedRoutes([p])[k],true);assert.equal(owned.ownedRoutes([p,LOCK,NATIVE])[k],true);}assert.equal(owned.ownedRoutes(['README.md'])[k],false);}const p=owned.assess({paths:[LOCK,NATIVE,'aquilum-app/core/src/sync/mod.rs']});for(const k of Object.keys(owned.OWNED_SUITES))assert.equal(p[k],true);});
+test('owned tests run once via gate on source-only and mixed manifest diffs',()=>{for(const [k,items] of Object.entries(owned.OWNED_SUITES)){for(const p of items){assert.equal(owned.ownedRoutes([p])[k],true);assert.equal(owned.ownedRoutes([p,LOCK,NATIVE])[k],true);}assert.equal(owned.ownedRoutes(['README.md'])[k],false);}const p=owned.assess({paths:[LOCK,NATIVE,'aquilum-app/core/src/sync/mod.rs']});for(const k of Object.keys(owned.OWNED_SUITES))assert.equal(p[k],k==='owned_b0c_ssh'?false:true);});
+
+test('B0c Windows owner route is fail-closed for source-only and mixed Cargo without broad version-only routing',()=>{
+  const owners=owned.OWNED_SUITES.owned_b0c_ssh;
+  assert.equal(owners.length,14);
+  assert.ok(owners.includes('.github/workflows/core-server-bootstrap-b0c-windows-ssh.yml'));
+  assert.ok(owners.includes('aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs'));
+  assert.equal(owned.assess({paths:[NATIVE]}).owned_b0c_ssh,false,
+    'Native Cargo alone uses the existing native risk flag; not a second B0c route');
+  assert.equal(owned.assess({paths:[NATIVE]}).native_manifest_risky,true);
+  for(const file of owners){
+    const single=owned.assess({paths:[file]});
+    assert.equal(single.owned_b0c_ssh,true,'source-only route '+file);
+    const mixed=owned.assess({paths:[file,NATIVE]});
+    assert.equal(mixed.owned_b0c_ssh,true,'mixed route '+file);
+    assert.equal(mixed.native_manifest_risky,true,'mixed native risk '+file);
+  }
+  assert.equal(owned.assess({paths:[CORE,LOCK,NATIVE,WINDOWS],versionOnly:true}).owned_b0c_ssh,false);
+  assert.equal(owned.assess({paths:['README.md']}).owned_b0c_ssh,false);
+});
