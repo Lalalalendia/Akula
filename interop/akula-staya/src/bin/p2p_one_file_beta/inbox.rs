@@ -8,8 +8,8 @@ use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(windows)]
 use aquilum_core::p2p_inbox_lab::{
     audit_pinned_windows_inbox_storage, create_pinned_windows_inbox_stage,
-    mark_pinned_windows_stage_delete_on_close, publish_pinned_windows_inbox_object,
-    verify_pinned_windows_inbox_object,
+    mark_pinned_windows_stage_delete_on_close, pin_windows_inbox_sqlite_custody,
+    publish_pinned_windows_inbox_object, verify_pinned_windows_inbox_object,
 };
 #[cfg(not(windows))]
 use std::ffi::OsString;
@@ -295,6 +295,12 @@ pub(super) fn persist_received_payload(
     #[cfg(windows)]
     audit_pinned_windows_inbox_storage(inbox_root, &pinned_root, false)
         .map_err(|error| format!("Windows Inbox ACL preflight refused: {error:?}"))?;
+    // Bootstrap and pin objects and the SQLite main file relative to the
+    // original directory, with no FILE_SHARE_DELETE, for the entire receipt.
+    // rusqlite's WAL/SHM and ancestor paths remain outside this lease.
+    #[cfg(windows)]
+    let sqlite_custody = pin_windows_inbox_sqlite_custody(inbox_root, &pinned_root)
+        .map_err(|error| format!("Windows Inbox SQLite custody refused: {error:?}"))?;
     #[cfg(not(windows))]
     let mut file = {
         let mut options = OpenOptions::new();
@@ -344,6 +350,10 @@ pub(super) fn persist_received_payload(
     #[cfg(windows)]
     audit_pinned_windows_inbox_storage(inbox_root, &pinned_root, true)
         .map_err(|error| format!("Windows Inbox ACL postflight refused: {error:?}"))?;
+    #[cfg(windows)]
+    sqlite_custody
+        .verify(inbox_root, &pinned_root)
+        .map_err(|error| format!("Windows Inbox SQLite custody changed: {error:?}"))?;
     // Even if path-based SQLite reported VerifiedLocal, the exact UUID blob
     // must independently survive an NT handle-relative ACL, hard-link and
     // full-byte BLAKE3 inspection before confirming receipt over the network.
