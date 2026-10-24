@@ -49,7 +49,7 @@
         let custody = SqliteCustodyIdentityStore::open(
             &admission, &appdata.join("s3-custody.sqlite"),
         ).unwrap();
-        let mut journal = SqliteSyncJournal::open(&appdata.join("ops.sqlite")).unwrap();
+        let mut journal = SqliteSyncJournal::open(&appdata.join(crate::sync::RECOVERY_JOURNAL_FILENAME)).unwrap();
         let mut cache = SqliteDagStore::open(&appdata.join("blobs.sqlite")).unwrap();
 
         let destination = root.join(intent.path.as_str());
@@ -70,6 +70,22 @@
             JournalPhase::Staged);
         assert!(journal.baseline(intent.vault_id, intent.document_id).unwrap().is_none());
         assert_eq!(journal.local_publication_review_queue().unwrap().len(), 1);
+        // This is the missing Core-to-Native review seam: shared cloud VaultId
+        // is deliberately distinct from the machine-local workspace UUID.
+        assert_eq!(
+            crate::sync::native_recovery_overview(&core, &appdata, &root),
+            crate::sync::NativeRecoveryOverview::NoLocalPublicationClaims,
+        );
+        match crate::sync::native_s3_bound_publication_overview(&core, &appdata, &root) {
+            crate::sync::NativeRecoveryOverview::RequiresReview {
+                total_claims, examples,
+            } => {
+                assert_eq!(total_claims, 1);
+                assert_eq!(examples[0].operation_id, intent.operation_id.to_string());
+                assert_eq!(examples[0].historical_path, intent.path.as_str());
+            }
+            other => panic!("remote S3 claim is hidden from Native review: {other:?}"),
+        }
         println!("AKULA_S3_E2E01_CHILD=UNCONFIRMED_LOCAL_CREATE");
     }
 
@@ -224,7 +240,7 @@
             expected_content_hash: blob_hash.clone(),
             expected_baseline: None,
         };
-        let mut journal = SqliteSyncJournal::open(&app_b.join("ops.sqlite")).unwrap();
+        let mut journal = SqliteSyncJournal::open(&app_b.join(crate::sync::RECOVERY_JOURNAL_FILENAME)).unwrap();
         let mut cache = SqliteDagStore::open(&app_b.join("blobs.sqlite")).unwrap();
         assert!(!root_b.join(relative.as_str()).exists());
         // An over-budget request must fail before the journal is changed,
@@ -337,12 +353,26 @@
 
             // A third independent SQLite opening (parent after child exit)
             // must see only Staged and no synthetic confirmed baseline.
-            let cold_journal = SqliteSyncJournal::open(&app_b.join("ops.sqlite")).unwrap();
+            let cold_journal = SqliteSyncJournal::open(&app_b.join(crate::sync::RECOVERY_JOURNAL_FILENAME)).unwrap();
             assert_eq!(cold_journal.get(operation_id).unwrap().unwrap().phase,
                 JournalPhase::Staged);
             assert!(cold_journal.baseline(vault, record.document_id).unwrap().is_none());
             assert_eq!(cold_journal.local_publication_review_queue().unwrap().len(), 1);
             assert_eq!(fs::read(root_b.join(relative.as_str())).unwrap(), bytes);
+            let cold_core = Core::open(&app_b, Arc::new(|_: CoreEvent| {}));
+            match crate::sync::native_s3_bound_publication_overview(
+                &cold_core, &app_b, &root_b,
+            ) {
+                crate::sync::NativeRecoveryOverview::RequiresReview {
+                    total_claims, examples,
+                } => {
+                    assert_eq!(total_claims, 1);
+                    assert_eq!(examples[0].operation_id, operation_id.to_string());
+                    assert_eq!(examples[0].historical_path, relative.as_str());
+                }
+                other => panic!("cold Native S3 recovery lost the claim: {other:?}"),
+            }
+            assert!(cold_journal.baseline(vault, record.document_id).unwrap().is_none());
             return;
         }
 
@@ -376,7 +406,7 @@
         drop(admission);
         drop(cache);
         drop(journal);
-        let journal = SqliteSyncJournal::open(&app_b.join("ops.sqlite")).unwrap();
+        let journal = SqliteSyncJournal::open(&app_b.join(crate::sync::RECOVERY_JOURNAL_FILENAME)).unwrap();
         let cache = SqliteDagStore::open(&app_b.join("blobs.sqlite")).unwrap();
         assert!(RegisteredReadAdmission::open(&second_core, &root_b).unwrap()
             .create_staged_if_absent_for_registered_s3(

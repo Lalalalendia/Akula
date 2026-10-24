@@ -1,9 +1,4 @@
-use std::path::PathBuf;
-
-use aquilum_core::mcp::McpStatus;
 use aquilum_core::settings::models::AppConfig;
-use aquilum_core::sync::{NativeRecoveryOverview, NativeRecoveryCasePreview, NativeRecoveryDecision};
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Bool(bool),
@@ -20,41 +15,12 @@ pub enum Setter {
     Autostart,
 }
 
-pub struct Context {
-    pub workspace: Option<PathBuf>,
-    pub scale: f64,
-    pub home_page: String,
-    pub mcp: Option<McpStatus>,
-    pub sync_recovery: Option<NativeRecoveryOverview>,
-    pub sync_selected: Option<NativeRecoveryCasePreview>,
-    pub sync_notice: Option<String>,
-    pub copied: Option<usize>,
-    pub trash_page: usize,
-    pub autostart: Option<bool>,
-    pub update: Option<crate::updater::Status>,
-}
-
-impl Context {
-    #[cfg(test)]
-    pub fn new(scale: f64) -> Self {
-        Context { workspace: None, scale, home_page: String::new(), mcp: None, sync_recovery: None, sync_selected: None, sync_notice: None, copied: None, trash_page: 0, autostart: None, update: None }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Action {
-    InspectRecovery(String),
-    RequestRecoveryReview(NativeRecoveryDecision),
-    OpenTrash,
-    Restore(String),
-    TrashPage(usize),
-    CreateTemplates,
-    NewToken,
-    Copy(usize, String),
-    OpenUrl(&'static str),
-    CheckUpdates,
-    InstallUpdate,
-}
+mod context;
+pub use context::Context;
+mod actions;
+pub use actions::{Action, CloudProvider};
+mod server_probe;
+pub use server_probe::ServerProbeView;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Button {

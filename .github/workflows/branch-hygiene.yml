@@ -6,16 +6,20 @@ on:
       - '.github/workflows/branch-hygiene.yml'
       - '.github/scripts/branch-hygiene.cjs'
       - '.github/scripts/branch-hygiene.test.cjs'
+      - '.github/scripts/pr-queue-budget.cjs'
+      - '.github/scripts/pr-queue-budget.test.cjs'
       - '.github/scripts/ci-run-budget.cjs'
       - '.github/scripts/ci-run-budget.test.cjs'
   pull_request_target:
-    types: [closed]
+    types: [opened, reopened, closed]
   push:
     branches: [main]
     paths:
       - '.github/workflows/branch-hygiene.yml'
       - '.github/scripts/branch-hygiene.cjs'
       - '.github/scripts/branch-hygiene.test.cjs'
+      - '.github/scripts/pr-queue-budget.cjs'
+      - '.github/scripts/pr-queue-budget.test.cjs'
       - '.github/scripts/ci-run-budget.cjs'
       - '.github/scripts/ci-run-budget.test.cjs'
   schedule:
@@ -31,7 +35,7 @@ on:
 
 jobs:
   tests:
-    name: Branch-hygiene unit tests
+    name: Branch-hygiene and PR-budget unit tests
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -44,7 +48,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run safety tests
-        run: node --test .github/scripts/branch-hygiene.test.cjs .github/scripts/ci-run-budget.test.cjs
+        run: node --test .github/scripts/branch-hygiene.test.cjs .github/scripts/pr-queue-budget.test.cjs .github/scripts/ci-run-budget.test.cjs
+
+  pr-admission:
+    name: Enforce Akula open PR ceiling
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      (github.event.action == 'opened' || github.event.action == 'reopened')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    # Serialize admission across ALL new/reopened PRs; a per-PR group can race
+    # another PR against the same shrinking ceiling. Never cancel a waiting event.
+    concurrency:
+      group: akula-pr-admission-global
+      cancel-in-progress: false
+    steps:
+      # Trust only the protected default branch; never run the incoming PR head.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const { enforceAdmission } = require('./.github/scripts/pr-queue-budget.cjs');
+            await enforceAdmission({ github, context, core });
 
   audit-or-prune:
     name: Audit branches / safely prune merged ones
@@ -75,6 +107,14 @@ jobs:
           script: |
             const { run } = require('./.github/scripts/branch-hygiene.cjs');
             await run({ github, context, core, mode: process.env.MODE });
+
+      - name: Weekly PR queue ceiling and triage audit (read-only)
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'audit')
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { auditQueue } = require('./.github/scripts/pr-queue-budget.cjs');
+            await auditQueue({ github, context, core });
 
       - name: Weekly CI runtime and fan-out audit (non-blocking)
         # Smoke the real Actions API after telemetry changes land on main.

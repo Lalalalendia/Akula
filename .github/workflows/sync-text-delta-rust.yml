@@ -1,15 +1,8 @@
 name: SYNC-TEXT-DELTA-03 bounded Rust codec (opt-in, no S3)
 
 on:
-  pull_request:
-    paths:
-      - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
-      - 'aquilum-app/core/src/sync/text_delta_codec.rs'
-      - 'aquilum-app/core/src/sync/mod.rs'
-      - 'aquilum-app/core/src/sync/s3_transport/pack_probe.rs'
-      - '.github/workflows/sync-text-delta-rust.yml'
-      - 'docs/sync/text-delta-03-rust-codec.md'
+  workflow_call:
+  # PR path owners are enforced in required central route.
   workflow_dispatch:
 
 permissions:
@@ -17,7 +10,7 @@ permissions:
 
 concurrency:
   # New PR revisions supersede old ones; explicit manual runs remain independent.
-  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: delta-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -48,3 +41,39 @@ jobs:
       - name: Verify legacy S3 V2 parser explicitly rejects new delta envelope
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features sync-s3,sync-text-delta new_text_delta_is_not_a_legacy_pack -- --nocapture
+
+      - name: Test A/B accountancy without a Rust build
+        run: python3 scripts/benchmarks/sync-text-delta-rust-profile.py --self-test-only
+      - name: Measure Rust Full, Splice, Raw Dictionary, and selected policy
+        run: |
+          set -euo pipefail
+          python3 scripts/benchmarks/sync-text-delta-rust-profile.py \
+            --repo . --output results/text-delta-04 --repetitions 7
+          python3 - <<'PY'
+          import csv
+          from pathlib import Path
+          p = Path('results/text-delta-04')
+          rows = list(csv.DictReader((p/'real-git-pairs.csv').open()))
+          summary = list(csv.DictReader((p/'mode-summary.csv').open()))
+          assert 9 <= len(rows) <= 20, len(rows)
+          assert len({r['public_path'] for r in rows}) >= 3
+          assert {r['mode'] for r in summary} == {
+              'full', 'splice', 'dictionary', 'selected'}
+          assert all(r['claim'] == 'isolated-real-git-versions-not-production-sync'
+                     for r in rows + summary)
+          assert all(int(r['selected_wire_bytes']) <= int(r['full_wire_bytes'])
+                     for r in rows)
+          assert all(int(r['mandatory_v1_plus_selected_sidecar_bytes']) ==
+                     int(r['target_raw_bytes']) + int(r['selected_wire_bytes'])
+                     for r in rows)
+          assert all(int(r['rust_test_process_peak_rss_kib']) > 0
+                     and float(r['process_cpu_s_including_git_io_dispatch_not_git_children']) > 0
+                     for r in summary)
+          PY
+      - name: Retain only numeric and public-Git benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-text-delta-04-rust-real-git-profile
+          path: results/text-delta-04/
+          retention-days: 14
+          if-no-files-found: error

@@ -1,11 +1,7 @@
 name: Paired core performance comparison
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, edited]
-    paths:
-      - "aquilum-app/core/**"
-      - ".github/workflows/core-perf-compare.yml"
+  workflow_call:
 
 permissions:
   contents: read

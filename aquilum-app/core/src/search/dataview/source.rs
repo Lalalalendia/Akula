@@ -1,7 +1,7 @@
 use crate::search::paths::relative_slash_path;
 use super::ast::Source;
 use crate::search::error::SearchError;
-use crate::search::fields::paths_with_tag;
+use crate::search::fields::{paths_with_tag, query::all_paths};
 use crate::search::wiki::{candidate_sources, outgoing_links, resolve_many};
 use rusqlite::Connection;
 use std::collections::HashSet;
@@ -16,9 +16,6 @@ pub fn resolve(
     let Some(source) = source else {
         return all_paths(connection);
     };
-    if matches!(source, Source::Once) {
-        return Ok(Vec::new());
-    }
     if is_isolated(source) {
         let selected = select_isolated(connection, root, origin, source)?;
         let mut paths: Vec<String> = selected.into_iter().collect();
@@ -65,21 +62,17 @@ fn select_isolated(
             None => Ok(HashSet::new()),
         },
         Source::And(left, right) => {
-            if is_isolated(left) {
-                let left_set = select_isolated(connection, root, origin, left)?;
-                if left_set.is_empty() {
-                    return Ok(HashSet::new());
-                }
-                let left_vec: Vec<String> = left_set.into_iter().collect();
-                select(connection, root, origin, right, &left_vec)
+            let (isolated, remainder) = if is_isolated(left) {
+                (left, right)
             } else {
-                let right_set = select_isolated(connection, root, origin, right)?;
-                if right_set.is_empty() {
-                    return Ok(HashSet::new());
-                }
-                let right_vec: Vec<String> = right_set.into_iter().collect();
-                select(connection, root, origin, left, &right_vec)
+                (right, left)
+            };
+            let selected = select_isolated(connection, root, origin, isolated)?;
+            if selected.is_empty() {
+                return Ok(HashSet::new());
             }
+            let paths: Vec<String> = selected.into_iter().collect();
+            select(connection, root, origin, remainder, &paths)
         }
         Source::Or(left, right) => {
             let mut left = select_isolated(connection, root, origin, left)?;
@@ -98,22 +91,10 @@ fn select(
     universe: &[String],
 ) -> Result<HashSet<String>, SearchError> {
     match source {
-        Source::Once => Ok(HashSet::new()),
+        Source::Once | Source::Tag(_) | Source::LinksTo(_) | Source::LinksFrom(_) => {
+            select_isolated(connection, root, origin, source)
+        }
         Source::Folder(folder) => Ok(in_folder(root, folder, universe)),
-        Source::Tag(tag) => paths_with_tag(connection, tag),
-        Source::LinksTo(target) => match note_path(connection, root, origin, target)? {
-            Some(path) => Ok(candidate_sources(connection, root, &path)?
-                .into_iter()
-                .collect()),
-            None => Ok(HashSet::new()),
-        },
-        Source::LinksFrom(target) => match note_path(connection, root, origin, target)? {
-            Some(path) => Ok(outgoing_links(connection, root, &path)?
-                .into_iter()
-                .filter_map(|link| link.path)
-                .collect()),
-            None => Ok(HashSet::new()),
-        },
         Source::And(left, right) => {
             let left = select(connection, root, origin, left, universe)?;
             let right = select(connection, root, origin, right, universe)?;
@@ -161,14 +142,6 @@ fn note_path(
         .into_iter()
         .next()
         .flatten())
-}
-
-fn all_paths(connection: &Connection) -> Result<Vec<String>, SearchError> {
-    let mut statement = connection.prepare("SELECT path FROM documents ORDER BY path")?;
-    let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
 }
 
 #[cfg(test)]

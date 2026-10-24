@@ -54,3 +54,35 @@ test('test-only Rust fixture is excluded',()=>fixture(x=>{
  x.write('aquilum-app/core/tests/regression.rs','fn run(){}\n'.repeat(900));
  assert.equal(ratchet.audit(x.cwd,x.base,x.commit()).errors.length,0);
 }));
+
+
+test('Vello profiling workflows do not fan out on generic renderer/pass or DXGI edits',()=>{
+  const names=[
+    'native-damage-profile.yml','native-vello-single-region-gate.yml',
+    'native-vello-natural-stages.yml','native-vello-dual-route.yml',
+    'native-vello-worker-crossover.yml','native-vello-single-region-rss.yml',
+    'native-vello-release-profile.yml'
+  ];
+  const entries=names.map(n=>{
+    const body=fs.readFileSync(path.join(__dirname,'../workflows',n),'utf8');
+    assert.match(body,/^  workflow_dispatch:\s*$/m,'manual profiler preserved: '+n);
+    return [n,ratchet.parse(body)];
+  });
+  const consumers=p=>entries.filter(([,policy])=>ratchet.matches(policy,p)).map(([name])=>name);
+  for(const [name,policy] of entries)assert.equal(ratchet.matches(policy,'.github/workflows/'+name),true,
+    'changed diagnostic workflows still self-test: '+name);
+  for(const source of [
+    'aquilum-app/native/src/render/renderer/pass.rs',
+    'aquilum-app/native/src/output/dxgi.rs',
+    'aquilum-app/native/src/output/transfer.rs',
+    'aquilum-app/native/src/render/scroll.rs'
+  ])assert.deepEqual(consumers(source),[],'unrelated perf fanout on '+source);
+  assert.deepEqual(consumers('aquilum-app/native/src/render/damage/mod.rs'),['native-damage-profile.yml']);
+  assert.deepEqual(consumers('aquilum-app/native/src/render/renderer/mod.rs'),['native-vello-single-region-gate.yml']);
+  assert.deepEqual(consumers('aquilum-app/native/src/app/tests/perf/worker_router.rs'),
+    ['native-vello-single-region-gate.yml','native-vello-dual-route.yml','native-vello-single-region-rss.yml']);
+  assert.deepEqual(consumers('aquilum-app/native/src/app/tests/perf/vello_release.rs'),['native-vello-release-profile.yml']);
+  const gate=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
+  assert.match(gate,/name: Native frame fidelity/);
+  assert.match(gate,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
+});

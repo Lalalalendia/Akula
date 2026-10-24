@@ -1,9 +1,13 @@
 pub mod controls;
 pub mod schema;
 
+mod binding;
 mod control;
 mod layout;
-
+mod cloud;
+pub use cloud::{CloudPopup, provider_modal};
+mod dialog;
+pub use dialog::SettingsDialog;
 use std::collections::HashMap;
 
 use aquilum_core::settings::models::AppConfig;
@@ -16,41 +20,17 @@ use masonry::properties::{Gap, Padding};
 use masonry::widgets::{Flex, SizedBox};
 
 use crate::i18n::t;
-use crate::ui::dialog::{CardSize, DialogIds, Modal, header};
-use crate::ui::editor::TextEditor;
+use crate::ui::dialog::{CardSize, Modal, header};
 use crate::ui::handle::Handle;
 use crate::ui::scroll::ScrollArea;
 use crate::ui::tokens::size;
 use crate::ui::widgets::{IconButton, ItemButton, Rule};
 use crate::ui::{icons, theme};
 use layout::{block_widget, rows_column};
-use schema::{Action, Context, Number, Row, Section, Setter};
+use schema::{Context, Row, Section};
 
-pub enum Binding {
-    Switch(Setter),
-    Choice(Setter),
-    Dropdown { setter: Setter, options: Vec<String>, selected: usize },
-    Number { setter: Setter, number: Number, minus: Option<WidgetId>, plus: Option<WidgetId> },
-    Step { field: WidgetId, direction: f64 },
-    Text { setter: Setter, commit: bool, value: String },
-    Color(Setter),
-    Commit(Handle<TextEditor>),
-    Button(Action),
-}
+pub use binding::Binding;
 
-pub struct SettingsDialog {
-    pub layer: WidgetId,
-    pub close: WidgetId,
-    pub content: Handle<ScrollArea<Flex>>,
-    pub nav: Vec<(WidgetId, Section)>,
-    pub section: Section,
-    pub bindings: HashMap<WidgetId, Binding>,
-    pub copied: Option<usize>,
-    pub trash_page: usize,
-    pub sync_selected: Option<aquilum_core::sync::NativeRecoveryCasePreview>,
-    pub sync_notice: Option<String>,
-    pub sync_confirm: Option<(DialogIds, aquilum_core::sync::NativeRecoveryDecision)>,
-}
 
 fn card_size(room: Size) -> Size {
     let window = Size::new(room.width + size::SPACE_32, room.height + size::SPACE_32);
@@ -98,11 +78,14 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
         .with_fixed(Rule::new(Axis::Horizontal, || theme::current().border_default))
         .with(NewWidget::new(body), 1.0);
     let (copied, trash_page) = (ctx.copied, ctx.trash_page);
-    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, sync_confirm: None };
+    let finish = move |layer| SettingsDialog { layer, close: close_id, content: content_handle, nav: nav_ids, section, bindings, copied, trash_page, sync_selected: None, sync_notice: None, server_advanced: false, yandex_notice: ctx.yandex_notice.clone(), sync_confirm: None, cloud_popup: None };
     (NewWidget::new(card), finish)
 }
 
 pub fn content(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<Flex>, HashMap<WidgetId, Binding>) {
+    if section == Section::Sync {
+        return cloud::catalog(config, ctx);
+    }
     let mut bindings = HashMap::new();
     let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);
     for block in schema::blocks(section, config, ctx) {
