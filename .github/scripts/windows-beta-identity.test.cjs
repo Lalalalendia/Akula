@@ -184,6 +184,19 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
     'UI readback must never simulate success by writing to the note');
 });
 
+test('installed search journey uses Windows PowerShell 5.1-compatible key casts', () => {
+  const search = read('scripts/windows-beta-search-user-journey.ps1');
+  assert.match(search, /RUNNER_ENVIRONMENT.*github-hosted/);
+  assert.match(search, /PSEdition.*Desktop/);
+  for (const virtualKey of ['0x4f', '0x0d', '0x41', '0x43']) {
+    assert.ok(search.includes('[System.UInt16]' + virtualKey),
+      'Windows PowerShell 5.1 must type its virtual key: ' + virtualKey);
+  }
+  assert.doesNotMatch(search, /\[ushort\]/i,
+    'ushort is not a built-in type alias in Windows PowerShell 5.1');
+  assert.match(search, /AKULA_INSTALLED_SEARCH_JOURNEY_PASS/);
+});
+
 test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
   const provenance = read('scripts/windows-beta-candidate-manifest.ps1');
   const smoke = workflow.indexOf('Install, verify UIA Copy, edit, restart and uninstall beside Aquilum sentinel');

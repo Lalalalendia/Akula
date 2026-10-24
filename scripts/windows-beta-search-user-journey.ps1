@@ -75,7 +75,7 @@ try {
     }
     if (!$ready) { throw 'Search QA did not start from the expected original note' }
     $hwnd = Focus-VerifiedWindow -Process $proc
-    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $proc.Id, [ushort]0x4f) # actual Ctrl+O
+    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $proc.Id, [System.UInt16]0x4f) # actual Ctrl+O
     Start-Sleep -Milliseconds 350
     Send-AkulaBetaText -Process $proc -Text $Marker
 
@@ -113,7 +113,7 @@ try {
     if ([AkulaBetaGuiInput]::GetForegroundWindow() -ne $hwnd) {
         throw 'Search result activation target lost foreground identity'
     }
-    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [ushort]0x0d, $false) # Enter
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [System.UInt16]0x0d, $false) # Enter
     $opened = $false
     for ($i = 0; $i -lt 70; $i++) {
         Start-Sleep -Milliseconds 200
@@ -130,9 +130,9 @@ try {
     $sentinel = 'AKULA_SEARCH_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
     Set-Clipboard -Value $sentinel -ErrorAction Stop
     $hwnd = Focus-VerifiedWindow -Process $proc
-    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $proc.Id, [ushort]0x41) # Ctrl+A
+    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $proc.Id, [System.UInt16]0x41) # Ctrl+A
     Start-Sleep -Milliseconds 300
-    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $proc.Id, [ushort]0x43) # Ctrl+C
+    [AkulaBetaGuiInput]::PressCtrlShortcut($hwnd, $proc.Id, [System.UInt16]0x43) # Ctrl+C
     $copied = $null
     for ($attempt = 0; $attempt -lt 35; $attempt++) {
         Start-Sleep -Milliseconds 200
