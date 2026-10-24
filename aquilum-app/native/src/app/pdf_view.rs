@@ -2,7 +2,9 @@
 //! PDF source bytes are read-only. Worker is not yet an OS security sandbox.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use masonry::app::RenderRoot;
 use masonry::core::ErasedAction;
@@ -15,8 +17,9 @@ const MAX_PNG: u64 = 64 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(25);
 pub(super) struct State {
     views: HashMap<Uuid, View>,
-    pub(super) tx: Sender<ResultPage>,
-    pub(super) rx: Receiver<ResultPage>,
+    jobs: Sender<RenderRequest>,
+    rx: Receiver<ResultPage>,
+    desired: Arc<AtomicU64>,
     generation: u64,
 }
 pub(super) struct View {
@@ -48,10 +51,22 @@ impl View {
         true
     }
 }
-pub(super) struct ResultPage {
+struct RenderRequest {
+    tab: Uuid,
+    generation: u64,
+    path: PathBuf,
+    page: usize,
+    width: u32,
+    rotation: i32,
+    wake: Arc<dyn Fn() + Send + Sync>,
+}
+struct ResultPage {
     tab: Uuid,
     generation: u64,
     image: Result<(Vec<u8>, usize), String>,
+}
+fn superseded(desired: &AtomicU64, generation: u64) -> bool {
+    desired.load(Ordering::Acquire) != generation
 }
 
 pub(super) fn is_pdf(path: &Path) -> bool {
@@ -77,14 +92,40 @@ pub(super) fn trusted_source(vault: &Path, source: &Path) -> bool {
 
 impl State {
     pub(super) fn new() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-        Self { views: HashMap::new(), tx, rx, generation: 0 }
+        let (results, rx) = std::sync::mpsc::channel::<ResultPage>();
+        let (jobs, pending) = std::sync::mpsc::channel::<RenderRequest>();
+        let desired = Arc::new(AtomicU64::new(0));
+        let cancel = Arc::clone(&desired);
+        // Exactly one PDFium child at a time, regardless of rapid navigation.
+        std::thread::Builder::new().name("akula-pdf-render".into()).spawn(move || {
+            while let Ok(mut request) = pending.recv() {
+                // Keep only the newest pending request when pages are flipped quickly.
+                while let Ok(next) = pending.try_recv() { request = next; }
+                if superseded(&cancel, request.generation) { continue; }
+                let image = render(
+                    &request.path, request.page, request.width, request.rotation,
+                    &cancel, request.generation,
+                );
+                if superseded(&cancel, request.generation) { continue; }
+                if results.send(ResultPage {
+                    tab: request.tab, generation: request.generation, image,
+                }).is_err() { break; }
+                (request.wake)();
+            }
+        }).expect("PDF render worker thread");
+        Self { views: HashMap::new(), jobs, rx, desired, generation: 0 }
     }
     pub(super) fn clear(&mut self) {
         self.views.clear();
         self.generation = self.generation.wrapping_add(1);
+        self.desired.store(self.generation, Ordering::Release);
     }
     pub(super) fn open(&mut self, tab: Uuid, path: &Path, wake: &std::sync::Arc<dyn Fn() + Send + Sync>) {
+        // Only the visible PDF retains a decoded page image. A 16-Mpixel
+        // raster can consume 64 MiB: never retain one per inactive tab.
+        for (id, other) in &mut self.views {
+            if *id != tab { other.image = None; }
+        }
         let view = self.views.entry(tab).or_insert_with(|| View {
             path: path.to_path_buf(), current: 0, total: 1, zoom: 1.0, rotation: 0, scroll: 0.0,
             image: None, loading: false, error: None, generation: 0,
@@ -111,16 +152,17 @@ impl State {
         view.generation = generation;
         view.loading = true;
         view.error = None;
-        let path = view.path.clone();
-        let page = view.current;
-        let rotation = view.rotation;
-        let width = (1200.0 * view.zoom).round().clamp(320.0, 3200.0) as u32;
-        let tx = self.tx.clone();
-        let wake = std::sync::Arc::clone(wake);
-        std::thread::spawn(move || {
-            let image = render(&path, page, width, rotation);
-            if tx.send(ResultPage { tab, generation, image }).is_ok() { wake(); }
-        });
+        self.desired.store(generation, Ordering::Release);
+        let job = RenderRequest {
+            tab, generation, path: view.path.clone(), page: view.current,
+            rotation: view.rotation,
+            width: (1200.0 * view.zoom).round().clamp(320.0, 3200.0) as u32,
+            wake: Arc::clone(wake),
+        };
+        if self.jobs.send(job).is_err() {
+            view.loading = false;
+            view.error = Some("PDF render queue was closed".into());
+        }
     }
     pub(super) fn act(&mut self, tab: Uuid, action: pdf::Action, wake: &std::sync::Arc<dyn Fn() + Send + Sync>) {
         let Some(view) = self.views.get_mut(&tab) else { return };
@@ -162,6 +204,11 @@ impl State {
             let Some(view) = self.views.get_mut(&done.tab) else { continue };
             if view.generation != done.generation { continue; }
             view.loading = false;
+            if done.tab != active {
+                // No hidden, already-decoded PDF bitmaps accumulating in RAM.
+                view.image = None;
+                continue;
+            }
             match done.image {
                 Ok((png, total)) => {
                     view.total = total;
@@ -177,16 +224,22 @@ impl State {
     }
 }
 
-fn render(path: &Path, page: usize, width: u32, rotation: i32) -> Result<(Vec<u8>, usize), String> {
+fn render(
+    path: &Path, page: usize, width: u32, rotation: i32,
+    desired: &AtomicU64, generation: u64,
+) -> Result<(Vec<u8>, usize), String> {
     let data_dir = std::env::temp_dir().join(format!("akula-pdf-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&data_dir).map_err(|e| e.to_string())?;
     let png = data_dir.join("page.png");
     let state = data_dir.join("status.txt");
-    let result = run_worker(path, page, width, rotation, &png, &state);
+    let result = run_worker(path, page, width, rotation, &png, &state, desired, generation);
     let _ = std::fs::remove_dir_all(&data_dir);
     result
 }
-fn run_worker(path: &Path, page: usize, width: u32, rotation: i32, png: &Path, status: &Path) -> Result<(Vec<u8>, usize), String> {
+fn run_worker(
+    path: &Path, page: usize, width: u32, rotation: i32, png: &Path,
+    status: &Path, desired: &AtomicU64, generation: u64,
+) -> Result<(Vec<u8>, usize), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut child = std::process::Command::new(exe)
         .arg("--pdf-worker").arg(path).arg(page.to_string()).arg(width.to_string())
@@ -195,6 +248,11 @@ fn run_worker(path: &Path, page: usize, width: u32, rotation: i32, png: &Path, s
         .stderr(std::process::Stdio::null()).spawn().map_err(|e| e.to_string())?;
     let started = Instant::now();
     let result = loop {
+        if superseded(desired, generation) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("PDF render superseded by another request".into());
+        }
         match child.try_wait() {
             Ok(Some(exit)) => break exit.success(),
             Ok(None) if started.elapsed() < TIMEOUT => std::thread::sleep(Duration::from_millis(25)),
@@ -258,6 +316,15 @@ mod tests {
         assert!(is_pdf(Path::new("x.PDF")));
         assert!(!is_pdf(Path::new("x.pdf.exe")));
     }
+    #[test]
+    fn only_latest_page_generation_is_eligible_for_delivery() {
+        let current = AtomicU64::new(8);
+        assert!(!superseded(&current, 8));
+        current.store(9, Ordering::Release);
+        assert!(superseded(&current, 8));
+        assert!(!superseded(&current, 9));
+    }
+
     #[test]
     fn reusing_tab_for_new_pdf_clears_stale_page_and_pending_render() {
         let mut view = View {
