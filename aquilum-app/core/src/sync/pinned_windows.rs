@@ -31,6 +31,8 @@ const FILE_OPEN_IF: u32 = 3;
 const FILE_OPEN: u32 = 1;
 const FILE_CREATE: u32 = 2;
 const FILE_ADD_FILE_OR_WRITE_DATA: u32 = 0x0000_0002;
+#[cfg(feature = "p2p-inbox-lab")]
+const FILE_ADD_SUBDIRECTORY: u32 = 0x0000_0004;
 const DELETE_ACCESS: u32 = 0x0001_0000;
 const STATUS_OBJECT_NAME_COLLISION: u32 = 0xc000_0035;
 const STATUS_OBJECT_NAME_NOT_FOUND: u32 = 0xc000_0034;
@@ -233,6 +235,30 @@ pub(super) fn open_root_for_create(root: &Path) -> Result<File, VaultPortError> 
     let mut options = OpenOptions::new();
     options.access_mode(FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
         | FILE_READ_ATTRIBUTES | SYNCHRONIZE);
+    options.share_mode(SHARE_ALL);
+    options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let handle = options.open(root).map_err(io)?;
+    let meta = handle.metadata().map_err(io)?;
+    reject_reparse(&meta)?;
+    if !meta.is_dir() {
+        return Err(VaultPortError::UnsafePath);
+    }
+    Ok(handle)
+}
+
+/// P2P-only creation authority. Unlike generic File Gate stage roots,
+/// the first Inbox receipt may also need to create the `objects` directory.
+/// Request that explicit Windows FILE_ADD_SUBDIRECTORY right without
+/// broadening open_root_for_create for other callers.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_root_for_p2p_inbox_create(
+    root: &Path,
+) -> Result<File, VaultPortError> {
+    let mut options = OpenOptions::new();
+    options.access_mode(
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+            | FILE_ADD_SUBDIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+    );
     options.share_mode(SHARE_ALL);
     options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
     let handle = options.open(root).map_err(io)?;
