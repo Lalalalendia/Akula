@@ -26,7 +26,8 @@ signingIdentity = "-"
 linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/432af639725bc8b99df12351e86bb2e8a6b3585f/linuxdeploy-plugin-gstreamer.sh" }
 
 [features]
-installed = ["p2p-native-receive-beta"]
+# Public install includes read-only Dropbox authorization; cloud writes remain disabled.
+installed = ["dropbox-readonly-preview", "p2p-native-receive-beta"]
 messaging-w4-pilot = []
 memory-probe = []
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
@@ -40,6 +41,8 @@ p2p-native-receive-beta = ["p2p-native-send-beta"]
 # S3-E2E-01: optional read-only dashboard of registered S3 receive claims.
 # Does not expose S3 writes, apply, file mutation or baseline actions.
 s3-e2e01-review-preview = ["aquilum-core/sync-s3"]
+# Dropbox remains read-only; full sync is a separate guarded release feature.
+dropbox-readonly-preview = ["dep:akula-dropbox-connect-lab", "dep:akula-dropbox-secret-store", "dep:akula-dropbox-t0"]
 # Manual QA preview; no user write/sync capability yet.
 yandex-s3-connection-preview = ["aquilum-core/sync-s3", "dep:tokio"]
 # User-enabled S3 pairing BETA: no activation in default installer.
@@ -56,6 +59,9 @@ tokio = { version = "1", features = ["rt", "time", "macros"], optional = true }
 aquilum-core = { path = "../core", features = ["host-custody"] }
 akula-inbox-ledger-lab = { path = "../../modules/drop-inbox-ledger", optional = true }
 akula-staya-integration = { path = "../../interop/akula-staya", features = ["p2p-one-file-lan-beta"], optional = true }
+akula-dropbox-connect-lab = { path = "../../modules/dropbox-connect-lab", optional = true }
+akula-dropbox-secret-store = { path = "../../modules/dropbox-secret-store", features = ["system-store"], optional = true }
+akula-dropbox-t0 = { path = "../../modules/dropbox-t0", optional = true }
 # Основная ветка xilem: Masonry без релиза больше года, бэкенды под vello_cpu только там.
 # Ревизия зафиксирована, обновлять пачками.
 masonry = { git = "https://github.com/linebender/xilem", rev = "271a27a6d4a930f7878d404f9014e3c50a3a9b88", default-features = false }

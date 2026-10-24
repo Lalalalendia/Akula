@@ -10,7 +10,7 @@ pub struct Context {
     #[cfg(feature = "s3-e2e01-review-preview")]
     pub s3_bound_publications: Option<NativeRecoveryOverview>,
     pub sync_selected: Option<NativeRecoveryCasePreview>,
-    pub sync_notice: Option<String>,
+    pub sync_notice: Option<String>, #[cfg(feature = "dropbox-readonly-preview")] pub dropbox_preview_status: String, #[cfg(feature = "dropbox-readonly-preview")] pub dropbox_preview_busy: bool,
     pub yandex_keys: Option<bool>,
     pub yandex_probe: crate::yandex_probe_session::ProbeView,
     pub yandex_probe_busy: bool,

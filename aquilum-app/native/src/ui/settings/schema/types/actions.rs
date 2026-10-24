@@ -1,5 +1,4 @@
 use aquilum_core::sync::NativeRecoveryDecision;
-
 /// The catalog is provider discovery, not permission to use a provider.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CloudProvider {
@@ -11,7 +10,6 @@ pub enum CloudProvider {
     Dropbox,
     WebDav,
 }
-
 impl CloudProvider {
     pub const ALL: [Self; 7] = [
         Self::Yandex,
@@ -22,7 +20,6 @@ impl CloudProvider {
         Self::Dropbox,
         Self::WebDav,
     ];
-
     pub fn label(self) -> String {
         crate::i18n::t(match self {
             Self::Yandex => "settings.cloud.yandex",
@@ -35,10 +32,13 @@ impl CloudProvider {
         })
     }
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     OpenCloudProvider(CloudProvider),
+    #[cfg(feature = "dropbox-readonly-preview")] DropboxLoginAccount, #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeAccount,
+    #[cfg(feature = "dropbox-readonly-preview")] DropboxForgetAccount,
+    #[cfg(feature = "dropbox-readonly-preview")] DropboxConnectReadOnly,
+    #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeReadOnly,
     InspectRecovery(String),
     RequestRecoveryReview(NativeRecoveryDecision),
     OpenTrash,

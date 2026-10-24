@@ -54,13 +54,13 @@ impl Drop for RefreshReply {
     fn drop(&mut self) { self.access_token.zeroize(); }
 }
 
-struct ShortLivedAccess {
-    token: AccessToken,
+pub(super) struct ShortLivedAccess {
+    pub(super) token: AccessToken,
     #[allow(dead_code)]
     expires_in_seconds: u64,
 }
 
-fn refresh_once(app_key: &str, saved: &RefreshToken)
+pub(super) fn refresh_once(app_key: &str, saved: &RefreshToken)
     -> Result<ShortLivedAccess, ResumeError>
 {
     refresh_at(TOKEN_ENDPOINT, app_key, saved)

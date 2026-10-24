@@ -2,7 +2,7 @@
 //! Explicit read-only Dropbox onboarding and restart verification.
 //! Only independently pinned head bytes; no publisher trust or file mutation.
 
-pub mod resume;
+pub mod account; pub mod resume;
 
 use akula_dropbox_auth_lab::{
     callback::{BoundLogin, CallbackError},
