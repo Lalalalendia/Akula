@@ -93,6 +93,8 @@ const OWNED_SUITES=Object.freeze({
   ],
   "owned_text_delta": [
     "aquilum-app/core/src/sync/text_delta_codec.rs",
+    "aquilum-app/core/src/sync/text_delta_codec/tests.rs",
+    "aquilum-app/core/src/sync/text_delta_codec_profile_tests.rs",
     "aquilum-app/core/src/sync/mod.rs",
     "aquilum-app/core/src/sync/s3_transport/pack_probe.rs",
     ".github/workflows/sync-text-delta-rust.yml",

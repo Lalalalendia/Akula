@@ -146,3 +146,20 @@ test('B0c Windows owner route is fail-closed for source-only and mixed Cargo wit
   assert.equal(owned.assess({paths:[CORE,LOCK,NATIVE,WINDOWS],versionOnly:true}).owned_b0c_ssh,false);
   assert.equal(owned.assess({paths:['README.md']}).owned_b0c_ssh,false);
 });
+
+
+test('text delta split test owners always route required opt-in codec on source-only and mixed diffs',()=>{
+  const files=[
+    'aquilum-app/core/src/sync/text_delta_codec.rs',
+    'aquilum-app/core/src/sync/text_delta_codec/tests.rs',
+    'aquilum-app/core/src/sync/text_delta_codec_profile_tests.rs',
+  ];
+  for(const path of files){
+    assert.ok(owned.OWNED_SUITES.owned_text_delta.includes(path));
+    assert.equal(owned.assess({paths:[path]}).owned_text_delta,true,path);
+    assert.equal(owned.assess({paths:[path,NATIVE]}).owned_text_delta,true,path+' mixed');
+    assert.equal(owned.assess({paths:[path,NATIVE]}).native_manifest_risky,true);
+  }
+  assert.equal(owned.assess({paths:['README.md']}).owned_text_delta,false);
+  assert.equal(owned.assess({paths:[CORE,LOCK,NATIVE,WINDOWS],versionOnly:true}).owned_text_delta,false);
+});
