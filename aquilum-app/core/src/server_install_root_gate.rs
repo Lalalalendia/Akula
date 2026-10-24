@@ -180,6 +180,13 @@ mod tests {
                 10 => review.review_nonce[0] ^= 1,
                 _ => unreachable!(),
             }
+            if variant <= 7 {
+                // A root signer can sign a different *valid* candidate;
+                // that must still be refused against independently pinned scope.
+                let signer = Ed25519KeyPair::from_seed_unchecked(&[0x91; 32]).unwrap();
+                proof.signature = signer.sign(&proof.canonical_signed_bytes())
+                    .as_ref().try_into().unwrap();
+            }
             assert_eq!(
                 assess_pre_enrolled_helper(&review, &pins, Some(&proof), NOW),
                 HOLD,
