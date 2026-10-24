@@ -74,6 +74,8 @@ jobs:
         run: node tests/test_range_reader.cjs
       - name: Remove abandoned OPFS files without touching fresh outputs
         run: node tests/test_opfs_cleanup.cjs
+      - name: Verify resumable output
+        run: node tests/test_resume.cjs
       - name: Six simulated client scenarios
         run: node tests/test_e2e_simulated.js
       - name: Install browser testing dependencies
