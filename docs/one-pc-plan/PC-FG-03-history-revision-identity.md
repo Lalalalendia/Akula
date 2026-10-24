@@ -1,7 +1,9 @@
 # PC-FG-03 — history revision identity and exact restore
 
-**Task:** FG-04, immutable revision identity, BLAKE3, exact restore/revert.  
-**Notion:** [PC-FG-03](https://app.notion.com/p/40332a84beec8182900af091e5cc6814)  
+**Task:** FG-04, immutable revision identity, BLAKE3, exact restore/revert.
+
+**Notion:** [PC-FG-03](https://app.notion.com/p/40332a84beec8182900af091e5cc6814)
+
 **Disposition:** reproduced on the local Windows workstation using a synthetic note. This report covers an additional, uncommitted native-test run; the separate Draft PR #707 is tracked independently. No merge, installed-UI acceptance, or physical-device testing is claimed.
 
 ## Change

@@ -1,9 +1,13 @@
 # PC-FG-05 — подтверждённый импорт через единый File Gate
 
-Дата: 2026-10-24  
-План: [AKULA-ONE-PC-PLAN-01](https://app.notion.com/p/40332a84beec8199b005f7a239210763)  
-Задача: [PC-FG-05](https://app.notion.com/p/40332a84beec816fbda0fc040e7d1d40)  
-Репозиторий: `D:\mobakula`, ветка `main`  
+Дата: 2026-10-24
+
+План: [AKULA-ONE-PC-PLAN-01](https://app.notion.com/p/40332a84beec8199b005f7a239210763)
+
+Задача: [PC-FG-05](https://app.notion.com/p/40332a84beec816fbda0fc040e7d1d40)
+
+Репозиторий: `D:\mobakula`, ветка `main`
+
 Локальный HEAD: `530fe3d6794ee28d2c7098af1266ff5340903543`
 
 ## Объём и результат

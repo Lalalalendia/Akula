@@ -1,7 +1,9 @@
 # PC-DESK-01 — офлайн Markdown и восстановление истории
 
-**Notion:** [PC-DESK-01](https://app.notion.com/p/40332a84beec816e8f6dfcaff17b28a8) · [единый план](https://app.notion.com/p/40332a84beec8199b005f7a239210763)  
-**Проверка:** 24.10.2026, один физический Windows ПК, изолированные временные папки.  
+**Notion:** [PC-DESK-01](https://app.notion.com/p/40332a84beec816e8f6dfcaff17b28a8) · [единый план](https://app.notion.com/p/40332a84beec8199b005f7a239210763)
+
+**Проверка:** 24.10.2026, один физический Windows ПК, изолированные временные папки.
+
 **Git:** `main`, исходный и итоговый `HEAD` — `530fe3d6794ee28d2c7098af1266ff5340903543`; локальный `origin/main` совпадает.
 
 ## Результат
