@@ -97,6 +97,13 @@ jobs:
         shell: pwsh
         run: |
           cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-owner-windows-signer,server-bootstrap-b0-openssh-lab
+      - name: Verify native Windows administrator HOLD without granting install
+        shell: pwsh
+        run: |
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features server-readonly-preflight --bin aquilum-native -- app::settings::server::facts::tests --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'native server capability classification failed' }
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features server-readonly-preflight --bin aquilum-native -- ui::settings::schema::tests::server::b1_e2e_01_native_verify_button_never_grants_install --exact --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'native SSH HOLD user interface failed' }
       - name: Verify Windows protected owner identity test (no real enrollment)
         shell: pwsh
         run: |

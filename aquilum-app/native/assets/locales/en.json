@@ -245,6 +245,7 @@
       "probing": "Checking SSH and server compatibility…",
       "verifiedReadOnly": "Server verified · Node not installed",
       "unsupported": "Server is not suitable for installing Node",
+      "adminAuthorizationRequired": "SSH verified · administrator authorization required for installation",
       "verificationFailed": "Could not verify server or its host key",
       "observedFacts": "Server information",
       "observedFactsHint": "Collected after authenticated SSH key exchange",
