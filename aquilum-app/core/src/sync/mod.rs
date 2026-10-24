@@ -75,6 +75,7 @@ mod pinned_read;
 mod filegate_windows_acl;
 #[cfg(windows)]
 mod pinned_windows;
+pub(crate) mod p2p_stage;
 mod protocol;
 mod provider;
 mod s3;
@@ -205,9 +206,4 @@ pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
 #[cfg(all(test, not(feature = "sync-engine")))]
-mod disabled_tests {
-    #[test]
-    fn compiled_contracts_do_not_enable_cloud_sync_by_default() {
-        assert!(!super::SYNC_ENGINE_FEATURE_ENABLED);
-    }
-}
+mod disabled_tests;
