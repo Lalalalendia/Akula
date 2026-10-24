@@ -136,6 +136,100 @@ pub(crate) fn mark_pinned_p2p_inbox_stage_delete_on_close(
     pinned_windows::mark_p2p_stage_delete_on_close(opened_stage)
 }
 
+/// Publish exactly one verified P2P Inbox blob using only the already
+/// authorized NT root and objects directory HANDLES. This replaces the
+/// path-based scratch + hard_link writer on Windows, never File Gate/Vault.
+/// SQLite remains path-based and is a separate release blocker.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn publish_pinned_p2p_inbox_object(
+    root: &std::path::Path,
+    pinned_root: &std::fs::File,
+    stage: &mut std::fs::File,
+    transfer_id: uuid::Uuid,
+    expected_bytes: u64,
+    expected_blake3: [u8; 32],
+) -> Result<(), VaultPortError> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    if transfer_id.is_nil() || expected_bytes == 0
+        || expected_bytes > 8 * 1024 * 1024 || expected_blake3 == [0u8; 32]
+    {
+        return Err(VaultPortError::UnsafePath);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    let objects = pinned_windows::open_p2p_objects_dir_for_create(pinned_root)?;
+    filegate_windows_acl::audit_owner_dacl(&objects)?;
+    let inspected_objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    if pinned_windows::file_identity(&objects)?
+        != pinned_windows::file_identity(&inspected_objects)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+
+    // On every pre-publication error, mark the exclusive temporary file for
+    // removal by its ORIGINAL HANDLE, not by the mutable filename.
+    struct UnpublishedStage(Option<std::fs::File>);
+    impl Drop for UnpublishedStage {
+        fn drop(&mut self) {
+            if let Some(stage) = self.0.as_ref() {
+                let _ = pinned_windows::mark_p2p_stage_delete_on_close(stage);
+            }
+        }
+    }
+
+    let before = stage.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?;
+    if !before.is_file() || before.len() != expected_bytes {
+        return Err(VaultPortError::FileChanged);
+    }
+    stage.seek(SeekFrom::Start(0)).map_err(|e| VaultPortError::Io(e.to_string()))?;
+
+    let scratch_name = format!(".akula-inbox-{}.part", uuid::Uuid::new_v4());
+    let candidate = pinned_windows::create_stage_child(&objects, &scratch_name)?;
+    let mut guard = UnpublishedStage(Some(candidate));
+    let candidate = guard.0.as_mut().ok_or(VaultPortError::FileChanged)?;
+    let mut hasher = blake3::Hasher::new();
+    let mut copied = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = stage.read(&mut buffer).map_err(|e| VaultPortError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        copied = copied.checked_add(n as u64).ok_or(VaultPortError::FileChanged)?;
+        if copied > expected_bytes {
+            return Err(VaultPortError::FileChanged);
+        }
+        hasher.update(&buffer[..n]);
+        candidate.write_all(&buffer[..n]).map_err(|e| VaultPortError::Io(e.to_string()))?;
+    }
+    if copied != expected_bytes
+        || stage.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?.len() != expected_bytes
+        || *hasher.finalize().as_bytes() != expected_blake3
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    candidate.sync_all().map_err(|e| VaultPortError::Io(e.to_string()))?;
+    let leaf = format!("{}.blob", transfer_id.hyphenated());
+    // NT FileRenameInformation is atomically no-replace, anchored to objects.
+    // The temporary filename is not used for either publication or cleanup.
+    pinned_windows::rename_staged_no_replace(candidate, &objects, &leaf)?;
+    // Renamed file is now the permanent object: never delete it on Drop.
+    drop(guard.0.take());
+
+    let live_objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    if pinned_windows::file_identity(&objects)?
+        != pinned_windows::file_identity(&live_objects)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    Ok(())
+}
+
 /// P2P-only readback of the exact received object using NT handles rather
 /// than reopening its caller-visible pathname. The object must have exactly
 /// one NTFS hard link, restrictive OWNER/DACL and the expected actual bytes.
