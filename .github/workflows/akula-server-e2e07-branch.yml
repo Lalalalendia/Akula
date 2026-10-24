@@ -49,11 +49,35 @@ jobs:
           set -euo pipefail
           cargo check --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --no-default-features
-      - name: Format check ONLY modified standalone Core modules
+      - name: Enforce file-scoped rustfmt, print exact applicable patch
         shell: bash
         run: |
           set -euo pipefail
-          rustfmt --edition 2021 --config skip_children=true --check \
-            aquilum-app/core/src/server_owner_approval_wire.rs \
-            aquilum-app/core/src/server_release_lab/review.rs \
+          paths=(
+            aquilum-app/core/src/server_owner_approval_wire.rs
+            aquilum-app/core/src/server_release_lab/review.rs
             aquilum-app/core/src/server_release_lab/review/tests.rs
+          )
+          rustfmt --edition 2021 --config skip_children=true "${paths[@]}"
+          git diff --check
+          git diff -- "${paths[@]}"
+          if ! git diff --quiet -- "${paths[@]}"; then
+            echo 'Formatting needed for exactly these source files.'
+            exit 1
+          fi
+
+  windows-pinned-review-build:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app
+      - name: Compile signed-KEX plus B0/B1a immutable Node review
+        shell: pwsh
+        run: |
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-install-review,server-bootstrap-b0-openssh-lab

@@ -252,6 +252,15 @@ impl Drop for PinnedKnownHosts {
 /// Actual signed SSH KEX and read-only facts, never installation authority.
 /// Private identity is deliberately supplied only by an already running
 /// Windows OpenSSH ssh-agent. No Akula setting contains a private key.
+/// Read-only KEX/preflight and independent release review errors.
+/// Neither variant authorizes remote installation or sudo.
+#[cfg(feature = "server-install-review")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallReviewProbeError {
+    Host(B0Error),
+    Release(crate::server_release_lab::review::ReviewError),
+}
+
 pub struct WindowsOpenSshPinnedProbe {
     target: ServerTarget,
     id: Uuid,
@@ -275,6 +284,48 @@ impl WindowsOpenSshPinnedProbe {
         )?;
         transport.handshake_public_key(target)?;
         transport.inspect_host()
+    }
+
+    /// Verify actual OS SSH KEX and typed Debian/Ubuntu preflight, then
+    /// independently verify B1a signed Node bytes for an immutable UI plan.
+    ///
+    /// A fingerprint-only settings profile can discover a candidate key via
+    /// OS ssh-keyscan; it is accepted ONLY if SHA256 matches the independently
+    /// pinned fingerprint and OpenSSH authenticates a signed KEX.
+    ///
+    /// Neither this call nor the returned PreparedReview is owner-signed
+    /// B1b1b approval, remote installation authority or systemd activation.
+    #[cfg(feature = "server-install-review")]
+    pub fn prepare_signed_node_review<R: Read>(
+        input: &B0Input,
+        independently_pinned_host_public: Option<&str>,
+        release: &crate::server_release_lab::SignedRelease,
+        trusted_signer: &crate::server_release_lab::TrustedReleaseSigner,
+        independently_persisted_floor: crate::server_release_lab::ReleaseFloor,
+        node_package: &mut R,
+        now_unix: u64,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<crate::server_release_lab::review::PreparedReview, InstallReviewProbeError> {
+        if cancelled() {
+            return Err(InstallReviewProbeError::Host(B0Error::Cancelled));
+        }
+        let public = match independently_pinned_host_public {
+            Some(key) => key.to_string(),
+            None => scan::discover_matching_ed25519(&input.target)
+                .map_err(InstallReviewProbeError::Host)?,
+        };
+        let mut probe = Self::new(input, &public)
+            .map_err(InstallReviewProbeError::Host)?;
+        let plan = crate::server_bootstrap_lab::preview(
+            input, &mut probe, &cancelled,
+        ).map_err(InstallReviewProbeError::Host)?;
+        if cancelled() {
+            return Err(InstallReviewProbeError::Host(B0Error::Cancelled));
+        }
+        crate::server_release_lab::review::prepare_signed_review(
+            plan, release, trusted_signer, independently_persisted_floor,
+            node_package, now_unix,
+        ).map_err(InstallReviewProbeError::Release)
     }
 
     pub fn new(input: &B0Input, trusted_host_public: &str) -> Result<Self, B0Error> {

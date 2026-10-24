@@ -44,3 +44,12 @@ The ordinary installed Windows Akula is intentionally **unchanged** by this modu
 - Exportable **public-only** Node pairing config and two installed Windows/File Gate recipient acceptance.
 
 Do not create per-module public release previews or treat laboratory markers as user acceptance. Continue on the same integrated feature branch until the full slice is wired, then run the exact-head CI and actual owner-authorized VPS acceptance. Nothing in this document grants access to a server.
+
+### B1-E2E-02 transport + owner-signing compatibility (working branch)
+
+- Windows Core now exposes `WindowsOpenSshPinnedProbe::prepare_signed_node_review` only behind `server-install-review`: it uses **actual System32 OpenSSH signed KEX**, the B0 fixed read-only OS facts, and B1a detached Ed25519 package signature/size/digest. Fingerprint-only input first probes candidate public key, but still demands the independently supplied SHA-256 pin and a real signed OpenSSH handshake. This is **not connected to a production Install button**.
+- `server_owner_approval_wire::OwnerApprovalWireV1` is the single portable B1b1b canonical signing encoder used by Linux's existing `SignedApprovalClaim::canonical_bytes()` and available for future Windows owner signing. Same original signature domain and field order; legacy parity test guards against an incompatible second protocol.
+- Local `InertUserConsent::matches_owner_claim` compares install ID, plan, SSH host, package, manifest and nonce with a future owner-signed B1b1b claim. **It does not authenticate the prior floor or witness**. Those remain independent root-owned Linux checks before CAS and /opt.
+- Branch gate runs the Linux B0/B1a review and owner-signature parity tests, a default Core build, and a Windows pinned SSH + review compile. Formatting is scoped to newly authored Rust code rather than the entire vendor workspace.
+
+**Remaining release HOLD**: No owner signing key provisioned on Windows, no production release key/floor, no fixed SSH mutation/privileged root helper, no systemd activation transaction, no installed Windows UI confirmation, no real VPS reboot or Windows B File Gate end-to-end. Neither an owner-signature test fixture nor a signed review is permission to deploy to an actual server.
