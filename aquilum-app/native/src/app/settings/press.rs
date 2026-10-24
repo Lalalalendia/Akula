@@ -6,8 +6,7 @@ impl App {
         let core = &self.workspace.core;
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
-            // This handler is reached only for ordinary settings buttons.
-            // Review actions require the separately confirmed modal flow.
+            // Review actions require a separate confirmation, not this handler.
             Action::OpenCloudProvider(_) => Effect::None,
             #[cfg(feature = "notion-offline-preview")]
             Action::NotionOpenRoot(_) | Action::NotionOpenPage(_) | Action::NotionPageBatch(_) | Action::NotionTextChunk(_) => Effect::None,
@@ -109,8 +108,7 @@ impl App {
                 dialog.yandex_notice = Some(t(key));
                 Effect::Content
             }
-            // The preview is never compiled into ordinary installed builds.
-            // Worker reads keys itself; the GUI captures ONLY the bucket.
+            // Preview is opt-in; the worker owns keys, not the UI.
             #[cfg(all(target_os = "windows", feature = "yandex-s3-connection-preview"))]
             Action::CheckYandexConnection if dialog.section == Section::Sync => {
                 let bucket = core.settings.get_config().s3_onboarding.bucket;

@@ -54,17 +54,14 @@ impl App {
             return self.keep(dialog, None, Effect::Content, root);
         }
         if pressed && cloud.save == Some(id) {
-            // Save also commits the current contents of fields even if the
-            // user clicked Save without pressing Enter in each field.
+            // Save commits typed fields even without an Enter keypress.
             let texts = cloud.bindings.iter().filter_map(|(id, binding)| {
                 let Binding::Text { setter, .. } = binding else { return None };
                 let text = root.get_widget(*id)?
                     .downcast::<TextEditor>()?.inner().text();
                 Some((*setter, text))
             }).collect::<Vec<_>>();
-            // The compact S3 page exposes one ordinary text field: bucket.
-            // Reject an invalid typed bucket instead of closing the popup
-            // while the setter silently kept the previous valid bucket.
+            // Refuse invalid S3 buckets before closing the dialog.
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             if texts.len() == 1 && !aquilum_core::settings::models::YandexS3Onboarding::valid_bucket(&texts[0].1) {
                 dialog.yandex_notice = Some(crate::i18n::t("settings.yandex.keysNeedBucket"));

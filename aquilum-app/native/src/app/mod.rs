@@ -1,9 +1,7 @@
-mod actions;
-mod commands;
+mod actions; mod commands;
 mod book;
 mod core_events; #[cfg(feature = "dropbox-readonly-preview")] mod dropbox_preview;
-mod embeds;
-mod file_menu;
+mod embeds; mod file_menu;
 mod find;
 mod editor_requests;
 mod graph_page;

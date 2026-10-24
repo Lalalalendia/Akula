@@ -2,7 +2,6 @@ use super::*;
 mod tick;
 #[cfg(feature = "notion-offline-preview")]
 mod notion;
-
 impl App {
     pub fn title(&self) -> String {
         let product = if cfg!(any(target_os = "windows", target_os = "linux")) { "Akula" } else { "Aquilum" };
@@ -11,7 +10,6 @@ impl App {
             None => product.to_owned(),
         }
     }
-
     pub fn deadline(&self) -> Option<Instant> {
         [self.note.as_ref().and_then(Note::deadline), self.view_due, self.hold].into_iter().flatten().min()
     }
