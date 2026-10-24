@@ -116,7 +116,7 @@ fn lookup(
     Ok(rows)
 }
 
-fn all_paths(connection: &Connection) -> Result<Vec<String>, SearchError> {
+pub(in crate::search) fn all_paths(connection: &Connection) -> Result<Vec<String>, SearchError> {
     let mut statement = connection.prepare("SELECT path FROM documents ORDER BY path")?;
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))?
