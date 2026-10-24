@@ -229,3 +229,52 @@ fn cancel_expiry_and_clock_rollback_fail_closed() {
         Err(ReviewError::AlreadyUsed),
     );
 }
+
+#[test]
+fn local_review_cannot_approve_changed_owner_wire_scope() {
+    use crate::server_owner_approval_wire::{OwnerApprovalWireV1, OwnerFloorWire};
+    let (plan, signed, trusted, artifact) = fixture();
+    let mut review = prepare(plan, &signed, &trusted, &artifact).unwrap();
+    let echo = review.expected_echo();
+    let target = review.shown_plan().target.clone();
+    let package = review.shown_plan().package.clone();
+    let consent = review.consume_local_click(&echo, &target, &package, NOW + 1).unwrap();
+    let (install_id, plan_digest, host_key, package_digest, manifest) = consent.scope();
+    let mut intent = OwnerApprovalWireV1 {
+        approver_id: "independent-test-owner".into(),
+        install_id,
+        plan_digest,
+        ssh_host_sha256: host_key,
+        manifest_fingerprint: manifest,
+        previous: OwnerFloorWire {
+            generation: 0, sequence: 0, version: [0; 3],
+            manifest_fingerprint: [0; 32], chain_tip: [0; 32],
+        },
+        proposed: OwnerFloorWire {
+            generation: 1, sequence: 9, version: [0, 3, 13],
+            manifest_fingerprint: manifest, chain_tip: [0x77; 32],
+        },
+        staged_package_sha256: package_digest,
+        staged_package_size: artifact.len() as u64,
+        expected_witness_revision: 0,
+        approval_nonce: consent.nonce(),
+        issued_at_unix: NOW,
+        expires_at_unix: NOW + 120,
+    };
+    assert!(consent.matches_owner_claim(&intent));
+    intent.approval_nonce[0] ^= 1;
+    assert!(!consent.matches_owner_claim(&intent));
+    intent.approval_nonce[0] ^= 1;
+    intent.previous.generation = 5;
+    // The independently pinned previous CAS head MUST also be checked by
+    // the Linux root witness; client local review does not authenticate it.
+    assert!(consent.matches_owner_claim(&intent));
+    intent.ssh_host_sha256[0] ^= 1;
+    assert!(!consent.matches_owner_claim(&intent));
+    intent.ssh_host_sha256[0] ^= 1;
+    intent.manifest_fingerprint[0] ^= 1;
+    assert!(!consent.matches_owner_claim(&intent));
+    intent.manifest_fingerprint[0] ^= 1;
+    intent.proposed.manifest_fingerprint[0] ^= 1;
+    assert!(!consent.matches_owner_claim(&intent));
+}

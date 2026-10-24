@@ -85,6 +85,21 @@ impl InertUserConsent {
     }
 
     pub fn nonce(&self) -> [u8; 16] { self.review_nonce }
+
+    /// A Windows owner signer may only sign an independently obtained B1b1b
+    /// floor/receipt claim that agrees with the actual reviewed B0/B1a scope.
+    /// This is a local scope check, NOT root witness authorization.
+    pub fn matches_owner_claim(
+        &self, claim: &crate::server_owner_approval_wire::OwnerApprovalWireV1,
+    ) -> bool {
+        claim.install_id == *self.install_id.as_bytes()
+            && claim.plan_digest == self.plan_hash
+            && claim.ssh_host_sha256 == self.ssh_host_key_sha256
+            && claim.staged_package_sha256 == self.package_sha256
+            && claim.manifest_fingerprint == self.manifest_fingerprint
+            && claim.approval_nonce == self.review_nonce
+            && claim.proposed.manifest_fingerprint == self.manifest_fingerprint
+    }
 }
 
 fn hex_digest(value: &str) -> Result<[u8; 32], ReviewError> {
