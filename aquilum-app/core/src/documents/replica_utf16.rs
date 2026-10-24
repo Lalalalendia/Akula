@@ -60,5 +60,4 @@ impl Replica {
         let text: &Branch = self.text.as_ref();
         (offset.branch == BranchPtr::from(text)).then_some(offset.index as usize)
     }
-
- }
+}
