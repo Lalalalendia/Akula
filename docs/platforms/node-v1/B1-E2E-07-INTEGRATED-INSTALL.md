@@ -72,3 +72,32 @@ The existing B0 Windows SSH probe's `sudo -n -l` establishes at most that *some 
 - If neither prerequisite is demonstrated, result **Needs admin authorization / HOLD**. Do not enable the Install button just because `has_sudo_rights=true`.
 
 This versioned disclosure is a necessary prerequisite, not proof of deployment authorization. The owner signature, protected CAS witness, actual /opt and non-root systemd state remain authoritative only after a separate root transaction on an explicitly authorized host.
+
+### Pre-enrolled root-helper presence proof (working branch; still HOLD)
+
+The opt-in Core module `server_install_root_gate` now makes the *absence* of
+privileged installer authority explicit instead of interpreting `sudo -n -l`
+as an installation grant. It accepts only a short-lived Ed25519 attestation
+under the domain `Akula B1-E2E-07 preenrolled root helper evidence v1`,
+verified against an **independently pinned** root-attestor key and bound to
+the specific InstallId, B0 v2 plan digest, independently authenticated SSH
+host fingerprint, signed package digest, UI review nonce, root-helper ELF
+digest, owner public key and root policy digest. The root attestor must be
+enrolled through an independent OS-admin-authorized root procedure: none of
+these trust pins may be learned from an untrusted VPS response.
+
+The only positive output is `AuthenticatedPresenceOnly`: evidence that
+the pre-enrolled signer answered this review, **not** verified privilege to
+install, actual OS ownership, a root CAS operation, or consent to start a
+service. Missing proof, invalid pins, mismatched scope, modified signatures,
+expired/future or overlong validity all yield `NeedsAdminAuthorization`.
+No command, chosen executable path, remote source file, root execution or
+socket is introduced. The normal installed Akula UI and its disabled
+`Install Node` control are not changed.
+
+**Still unimplemented:** initial helper enrollment on a truly clean VPS,
+actual independent OS-root owner/mode and fixed helper-identity verification,
+approved noninteractive admin escalation, production helper invocation,
+release-authority pinning, B1d0 commit and systemd activation. The pre-enrolled
+presence proof must not be used to bypass any of those gates. B1-E2E-07
+remains HOLD until the whole signed Windows→VPS→Windows workflow is tested.
