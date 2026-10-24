@@ -59,7 +59,10 @@ fn first_enrollment_is_root_only_and_single_use() {
     for name in [POLICY_FINAL, MARKER_FINAL] {
         assert_eq!(
             fs::metadata(dir.path().join("trust").join(name))
-                .unwrap().permissions().mode() & 0o7777,
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
             0o600,
         );
     }
@@ -74,7 +77,9 @@ fn first_enrollment_is_root_only_and_single_use() {
 
 #[test]
 fn absent_witness_or_wrong_candidate_rejects_before_any_publication() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     let dir = tempdir().unwrap();
     let root = dir.path().join("trust");
     let trust = setup(&root, false);
@@ -95,7 +100,9 @@ fn absent_witness_or_wrong_candidate_rejects_before_any_publication() {
 
 #[test]
 fn interrupted_or_foreign_enrollment_is_hold_without_auto_repair() {
-    if rustix::process::geteuid().as_raw() != 0 { return; }
+    if rustix::process::geteuid().as_raw() != 0 {
+        return;
+    }
     let dir = tempdir().unwrap();
     let root = dir.path().join("trust");
     let trust = setup(&root, true);

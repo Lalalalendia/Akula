@@ -39,7 +39,8 @@ fn syscall(error: rustix::io::Errno) -> AdminEnrollError {
 }
 fn no_object(dir: &File, name: &str) -> Result<(), AdminEnrollError> {
     match openat(
-        dir, name,
+        dir,
+        name,
         OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
         Mode::empty(),
     ) {
@@ -48,15 +49,21 @@ fn no_object(dir: &File, name: &str) -> Result<(), AdminEnrollError> {
         Err(_) => Err(AdminEnrollError::IncompleteOrAlreadyEnrolled),
     }
 }
-fn publish_one(dir: &File, pending: &str, final_name: &str, data: &[u8])
-    -> Result<(), AdminEnrollError>
-{
-    let mut file = File::from(openat(
-        dir, pending,
-        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL
-            | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::RUSR | Mode::WUSR,
-    ).map_err(syscall)?);
+fn publish_one(
+    dir: &File,
+    pending: &str,
+    final_name: &str,
+    data: &[u8],
+) -> Result<(), AdminEnrollError> {
+    let mut file = File::from(
+        openat(
+            dir,
+            pending,
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::RUSR | Mode::WUSR,
+        )
+        .map_err(syscall)?,
+    );
     if !root_file_ok(&file.metadata()?, 0o600, MAX_POLICY_SIZE)
         || data.len() as u64 > MAX_POLICY_SIZE
     {
@@ -65,8 +72,7 @@ fn publish_one(dir: &File, pending: &str, final_name: &str, data: &[u8])
     file.write_all(data)?;
     file.sync_all()?;
     drop(file);
-    renameat_with(dir, pending, dir, final_name, RenameFlags::NOREPLACE)
-        .map_err(syscall)?;
+    renameat_with(dir, pending, dir, final_name, RenameFlags::NOREPLACE).map_err(syscall)?;
     dir.sync_all()?;
     Ok(())
 }
@@ -74,10 +80,7 @@ fn publish_one(dir: &File, pending: &str, final_name: &str, data: &[u8])
 /// This private transactional primitive is tested in a disposable root-owned
 /// directory. Production may call it ONLY after verifying the fixed /root
 /// candidate, OS-owned witness and independently authorized administrator.
-fn enroll_once_from_admin_bytes(
-    trust: &File,
-    candidate: &[u8],
-) -> Result<(), AdminEnrollError> {
+fn enroll_once_from_admin_bytes(trust: &File, candidate: &[u8]) -> Result<(), AdminEnrollError> {
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(AdminEnrollError::Read(RootEnrollmentError::NotRoot));
     }
@@ -86,7 +89,9 @@ fn enroll_once_from_admin_bytes(
     }
     // Never create trust over an unprovisioned or CI-only witness identity.
     if read_root_file(trust, "enrollment", 128)? != WITNESS_ENROLLMENT {
-        return Err(AdminEnrollError::Read(RootEnrollmentError::InvalidEnrollment));
+        return Err(AdminEnrollError::Read(
+            RootEnrollmentError::InvalidEnrollment,
+        ));
     }
     let _policy = RootEnrolledV3::parse(candidate)?;
     for leaf in [POLICY_PENDING, POLICY_FINAL, MARKER_PENDING, MARKER_FINAL] {
@@ -111,19 +116,26 @@ pub fn admin_enroll_fixed_root_once() -> Result<(), AdminEnrollError> {
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(AdminEnrollError::Read(RootEnrollmentError::NotRoot));
     }
-    let slash = File::from(open(
-        Path::new("/"),
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(syscall)?);
+    let slash = File::from(
+        open(
+            Path::new("/"),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(syscall)?,
+    );
     if !root_dir_ok(&slash.metadata()?, 0o755) {
         return Err(AdminEnrollError::Read(RootEnrollmentError::UntrustedPath));
     }
-    let home = File::from(openat(
-        &slash, "root",
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(syscall)?);
+    let home = File::from(
+        openat(
+            &slash,
+            "root",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(syscall)?,
+    );
     if !root_dir_ok(&home.metadata()?, 0o700) {
         return Err(AdminEnrollError::Read(RootEnrollmentError::UntrustedPath));
     }
@@ -131,8 +143,8 @@ pub fn admin_enroll_fixed_root_once() -> Result<(), AdminEnrollError> {
     RootEnrolledV3::parse(&candidate)?;
     // Validate existing protected witness authority before publishing B0
     // policy. A temporary test seed or an absent journal is not enrollment.
-    let _witness = OsWitnessLab::open_provisioned_first_install()
-        .map_err(AdminEnrollError::Witness)?;
+    let _witness =
+        OsWitnessLab::open_provisioned_first_install().map_err(AdminEnrollError::Witness)?;
     let trust = open_fixed_trust_fd()?;
     enroll_once_from_admin_bytes(&trust, &candidate)
 }
