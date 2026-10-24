@@ -270,6 +270,23 @@ pub(super) fn open_optional_child(parent: &File, name: &str)
     )
 }
 
+/// Audit-only read of one existing SQLite/Inbox component relative to the
+/// pinned root handle. READ_CONTROL is mandatory for GetSecurityInfo; unlike
+/// generic read probes, this cannot silently skip owner/DACL validation.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_optional_inbox_audit_child(
+    parent: &File,
+    name: &str,
+    leaf_file: bool,
+) -> Result<Option<File>, VaultPortError> {
+    open_child_access_optional(
+        parent, name, leaf_file,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES
+            | READ_CONTROL_ACCESS | SYNCHRONIZE,
+        FILE_OPEN,
+    )
+}
+
 fn open_child_access(
     parent: &File, name: &str, leaf: bool, desired_access: u32,
     disposition: u32,
