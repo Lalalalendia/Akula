@@ -1,0 +1,27 @@
+name: Flash SWF4 native Rust proof
+
+on:
+  pull_request:
+    paths:
+      - 'modules/flash-port/**'
+      - '.github/workflows/flash-port-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flash-port-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  flash-port:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format standalone crate
+        run: cargo fmt --manifest-path modules/flash-port/Cargo.toml --all -- --check
+      - name: Test SWF to executable Rust
+        run: cargo test --manifest-path modules/flash-port/Cargo.toml --all-targets
