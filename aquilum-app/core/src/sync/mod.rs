@@ -76,7 +76,9 @@ pub(crate) fn create_pinned_p2p_inbox_stage(
 ) -> Result<(std::fs::File, std::fs::File), VaultPortError> {
     let inspected = pinned_windows::open_root(root)?;
     filegate_windows_acl::audit_owner_dacl(&inspected)?;
-    let writable = pinned_windows::open_root_for_create(root)?;
+    // P2P Inbox, unlike a generic File Gate stage, may need to create
+    // the initially absent "objects" directory through the pinned NT root.
+    let writable = pinned_windows::open_root_for_p2p_inbox_create(root)?;
     if pinned_windows::file_identity(&inspected)? != pinned_windows::file_identity(&writable)? {
         return Err(VaultPortError::FileChanged);
     }
