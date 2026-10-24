@@ -320,7 +320,8 @@ try {
     $pdfPage = Wait-ViewerPage -Page 1
     $pdfPage.SetFocus()
     [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [uint16]0x27, $false)
-    [void](Wait-ViewerPage -Page 2)
+    $pdfPage = Wait-ViewerPage -Page 2
+    $pdfPage.SetFocus()
     [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [uint16]0x25, $false)
     [void](Wait-ViewerPage -Page 1)
     if ((Get-FileHash -LiteralPath $nativeViewerSource -Algorithm SHA256).Hash -ne $nativeViewerHash) {
