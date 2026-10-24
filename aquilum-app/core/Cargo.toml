@@ -13,6 +13,8 @@ default = []
 messaging-core-lab = []
 # W4 signed receipt and durable local journal (opt-in, no remote trust).
 messaging-w4-lab = ["messaging-core-lab"]
+# Opt-in durable device-to-W4 receipt signer registry.
+messaging-key-ledger-lab = ["messaging-w4-lab"]
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Opt-in verified receiver staged-file create-new, no Vault apply.

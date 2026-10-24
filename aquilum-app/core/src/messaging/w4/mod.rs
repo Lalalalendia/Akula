@@ -1,6 +1,4 @@
-//! Experimental W4 receipt verifier and SQLite outbox inside Akula Core.
-//! Wire format follows calex794/wow/src/receipt_w4.rs (v1, 137 bytes).
-//! NOT an encryption module, remote key enrolment service, inbox or chat UI.
+//! WOW W4 v1 (137 bytes): experimental signed receipts/SQLite outbox, not transport or trust.
 
 use ring::signature::{UnparsedPublicKey, ED25519};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -15,8 +13,7 @@ const SIGNED_LEN: usize = 73;
 pub const RECEIPT_LEN: usize = 137;
 pub const MAX_ENVELOPE: usize = 16_384;
 
-/// ONLY an independently authorized Akula device registry may implement this.
-/// A network-observed signing key MUST NEVER automatically become trusted.
+/// Only independently approved device keys are trusted; never network-observed keys.
 pub trait TrustedRecipientKeys {
     fn key_for(&self, recipient: DeviceId, epoch: u64) -> Option<[u8; 32]>;
 }
@@ -306,6 +303,9 @@ impl W4Outbox {
         }
     }
 }
+
+#[cfg(feature = "messaging-key-ledger-lab")]
+pub mod key_ledger;
 
 #[cfg(test)]
 mod tests;
