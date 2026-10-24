@@ -2,8 +2,11 @@
 //! Export pins the complete directory chain, but SQLite WAL and candidate
 //! namespace integrity still require independent release acceptance.
 use super::InboxError;
-use std::{fs::{File, OpenOptions}, os::windows::fs::{MetadataExt, OpenOptionsExt},
-    path::{Component, Path}};
+use std::{
+    fs::{File, OpenOptions},
+    os::windows::fs::{MetadataExt, OpenOptionsExt},
+    path::{Component, Path},
+};
 
 /// Windows-only private staging. Returns the directory handle as well as
 /// the exclusively created file; retain both through the receiver operation.
@@ -40,7 +43,6 @@ pub fn pin_windows_inbox_read(root: &Path) -> Result<PinnedWindowsInboxRead, Inb
     })
 }
 
-
 /// Pin every absolute destination ancestor without FILE_SHARE_DELETE.
 /// The target folder cannot be renamed out from under this guard; reject
 /// directory junctions/reparse points before allowing an Inbox export.
@@ -57,12 +59,16 @@ pub fn pin_windows_export_parent(parent: &Path) -> Result<PinnedWindowsExportPar
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
     if !parent.is_absolute()
-        || parent.components().any(|part| matches!(part, Component::ParentDir))
+        || parent
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
     {
         return Err(InboxError::InvalidDestination);
     }
-    let mut ancestors = parent.ancestors()
-        .filter(|path| !path.as_os_str().is_empty()).collect::<Vec<_>>();
+    let mut ancestors = parent
+        .ancestors()
+        .filter(|path| !path.as_os_str().is_empty())
+        .collect::<Vec<_>>();
     if ancestors.is_empty() || ancestors.len() > 128 {
         return Err(InboxError::InvalidDestination);
     }
@@ -70,7 +76,8 @@ pub fn pin_windows_export_parent(parent: &Path) -> Result<PinnedWindowsExportPar
     let mut chain = Vec::with_capacity(ancestors.len());
     for directory in ancestors {
         let mut options = OpenOptions::new();
-        options.read(true)
+        options
+            .read(true)
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
         let opened = options.open(directory)?;

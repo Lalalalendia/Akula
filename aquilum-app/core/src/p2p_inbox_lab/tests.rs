@@ -159,8 +159,10 @@ fn pinned_export_parent_prevents_rename_until_guard_is_dropped() {
     let moved = dir.path().join("moved");
     fs::create_dir(&selected).unwrap();
     let guard = pin_windows_export_parent(&selected).unwrap();
-    assert!(fs::rename(&selected, &moved).is_err(),
-        "live guarded export parent was renamed while pinned");
+    assert!(
+        fs::rename(&selected, &moved).is_err(),
+        "live guarded export parent was renamed while pinned"
+    );
     drop(guard);
     fs::rename(&selected, &moved).unwrap();
     assert!(moved.is_dir());

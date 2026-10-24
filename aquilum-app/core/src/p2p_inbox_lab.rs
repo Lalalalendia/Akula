@@ -16,8 +16,10 @@ use uuid::Uuid;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{create_pinned_windows_inbox_stage, pin_windows_export_parent,
-    pin_windows_inbox_read, PinnedWindowsExportParent, PinnedWindowsInboxRead};
+pub use windows::{
+    PinnedWindowsExportParent, PinnedWindowsInboxRead, create_pinned_windows_inbox_stage,
+    pin_windows_export_parent, pin_windows_inbox_read,
+};
 
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
