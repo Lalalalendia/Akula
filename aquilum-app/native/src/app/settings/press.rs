@@ -215,6 +215,7 @@ impl App {
                 Action::ImportS3Pair | Action::SyncS3PairOnce => Effect::None,
             Action::StoreYandexKeys | Action::RemoveYandexKeys |
                 Action::CheckYandexConnection => Effect::None,
+            other => self.handle_server_button(dialog, other),
         }
     }
 }

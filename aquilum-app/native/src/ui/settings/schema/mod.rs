@@ -22,6 +22,8 @@ pub use appearance::reader_quick;
 pub use data::templates_path;
 pub use mcp::new_token;
 pub use section::Section;
+#[cfg(all(windows, feature = "server-readonly-preflight"))]
+pub(crate) use server::identity::probe_target;
 pub use types::*;
 
 use appearance::*;
@@ -45,7 +47,7 @@ pub fn blocks(section: Section, config: &AppConfig, ctx: &Context) -> Vec<Block>
         Section::Sync => std::iter::once(yandex_setup(config, ctx)).chain(sync_recovery(ctx)).chain(std::iter::once(dropbox_setup(config, ctx))).collect(),
         #[cfg(not(feature = "dropbox-readonly-preview"))]
         Section::Sync => std::iter::once(yandex_setup(config, ctx)).chain(sync_recovery(ctx)).collect(),
-        Section::Server => vec![server_setup(config)],
+        Section::Server => vec![server_setup(config, ctx)],
         Section::History => history(config),
         Section::Trash => trash(config, ctx),
         Section::System => system(config, ctx),

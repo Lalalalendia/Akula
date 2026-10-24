@@ -23,6 +23,8 @@ impl App {
         self.on_link_titles(root);
         self.on_graph_results(root);
         self.on_update(root);
+        #[cfg(all(windows, feature = "server-readonly-preflight"))]
+        self.on_server_probe(root);
         self.on_retention_done(root);
         #[cfg(feature = "dropbox-readonly-preview")] self.poll_dropbox_settings(root);
         self.undo_failed_renames(root);

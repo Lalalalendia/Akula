@@ -49,7 +49,8 @@ impl App {
                     || before.templates.folder != after.templates.folder
                     || mcp_changed
                     || retention
-                    || before.s3_onboarding != after.s3_onboarding;
+                    || before.s3_onboarding != after.s3_onboarding
+                    || before.server_setup != after.server_setup;
                 let new_yandex_bucket = after.s3_onboarding.bucket.clone();
                 let dropbox_changed = before.dropbox_readonly != after.dropbox_readonly;
                 if let Err(error) = core.settings.update_config(after) {
