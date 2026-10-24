@@ -274,21 +274,13 @@ async function fetchChunk(index) {
       return bytes;
     } catch (e) { statistics.peerFailures++; writeLog(`P2P часть ${index}: ${e.message}, пробую другой источник`); }
   }
-  const offset = expected.offset, end = offset + expected.size - 1;
-  const request = await fetch(manifest.origin_url, { headers: { Range: `bytes=${offset}-${end}` }, cache: 'no-store' });
-  const singleWholeFile = manifest.chunks.length === 1 && offset === 0;
-  if (request.status !== 206 && !(singleWholeFile && request.status === 200)) {
-    throw Error(`Источник не поддерживает требуемый диапазон: HTTP ${request.status}`);
-  }
-  if (request.status === 206 && request.headers.get('Content-Range') !== `bytes ${offset}-${end}/${manifest.size}`) {
-    throw Error('Источник вернул неверный Content-Range');
-  }
-  const arr = new Uint8Array(await request.arrayBuffer());
-  statistics.httpBytes += arr.length;
-  if (!await verifyChunk(index, arr)) {
-    statistics.integrityFailures++;
-    throw Error(`Ошибка контрольной суммы HTTP, часть ${index}`);
-  }
+  const hexHash = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
+    v => v.toString(16).padStart(2, '0')).join('');
+  const arr = await window.AkulaCheckedRangeGet({
+    url:manifest.origin_url, offset:expected.offset, size:expected.size,
+    totalSize:manifest.size, expectedSha256:expected.sha256,
+    hashHex:hexHash, onBytes:n=>{statistics.httpBytes+=n;}
+  });
   statistics.fromHttp++;
   cacheChunk(index, arr);
   drawStats();
