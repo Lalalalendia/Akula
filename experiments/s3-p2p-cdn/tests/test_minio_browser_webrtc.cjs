@@ -26,8 +26,26 @@ async function getMetrics() {
   return result;
 }
 
+const FORCE_TURN_RELAY = process.env.AKULA_TEST_FORCE_RELAY === '1';
+const TURN_TEST_URL = 'turn:127.0.0.1:3478?transport=udp';
+const TURN_TEST_USERNAME = 'akula-test';
+const TURN_TEST_PASSWORD = 'akula-test-only-password';
+
 async function openTab(browser, name, log) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  if (FORCE_TURN_RELAY) {
+    // Test-only override before client.js executes. A relay candidate is mandatory.
+    await context.addInitScript(({ url, username, credential }) => {
+      const OriginalRTC = window.RTCPeerConnection;
+      window.RTCPeerConnection = class ForceRelayRTCPeerConnection extends OriginalRTC {
+        constructor(configuration = {}) {
+          super({ ...configuration,
+            iceServers: [{ urls: url, username, credential }],
+            iceTransportPolicy: 'relay' });
+        }
+      };
+    }, { url: TURN_TEST_URL, username: TURN_TEST_USERNAME, credential: TURN_TEST_PASSWORD });
+  }
   const page = await context.newPage();
   page.on('console', msg => log.push(`${name}: console ${msg.type()}: ${msg.text()}`));
   page.on('pageerror', e => log.push(`${name}: pageerror ${e.message}`));
@@ -48,6 +66,44 @@ async function readFile(page) {
   const end = await page.evaluate(() => ({ ...window.__akula.metrics }));
   return Object.fromEntries(['httpBytes', 'p2pBytes', 'uploadBytes', 'fromHttp',
     'fromPeers', 'integrityFailures', 'peerFailures'].map(k => [k, end[k] - start[k]]));
+}
+
+async function inspectIce(page) {
+  return page.evaluate(async () => {
+    const records = [];
+    for (const peer of window.__akula.peers.values()) {
+      if (peer.channel?.readyState !== 'open') continue;
+      const stats = await peer.rtc.getStats();
+      let pair;
+      for (const stat of stats.values()) {
+        if (stat.type === 'transport' && stat.selectedCandidatePairId) {
+          pair = stats.get(stat.selectedCandidatePairId);
+          break;
+        }
+        if (stat.type === 'candidate-pair' && stat.state === 'succeeded' && stat.nominated) pair = stat;
+      }
+      const local = pair?.localCandidateId ? stats.get(pair.localCandidateId) : undefined;
+      const remote = pair?.remoteCandidateId ? stats.get(pair.remoteCandidateId) : undefined;
+      records.push({ connectionState: peer.rtc.connectionState,
+        iceConnectionState: peer.rtc.iceConnectionState,
+        localCandidateType: local?.candidateType ?? null,
+        remoteCandidateType: remote?.candidateType ?? null,
+        relayProtocol: local?.relayProtocol ?? null,
+        bytesSent: pair?.bytesSent ?? null,
+        bytesReceived: pair?.bytesReceived ?? null,
+        roundTripTime: pair?.currentRoundTripTime ?? null });
+    }
+    return records;
+  });
+}
+
+function assertRoute(records, label) {
+  assert.ok(records.length > 0, label + ': no active RTCDataChannel routes');
+  assert.ok(records.some(x => x.localCandidateType !== null), label + ': no selected ICE pair');
+  if (FORCE_TURN_RELAY) {
+    assert.ok(records.every(x => x.localCandidateType === 'relay'),
+      label + ': forced TURN must select relay candidates; got ' + JSON.stringify(records));
+  }
 }
 
 async function run() {
@@ -71,6 +127,8 @@ async function run() {
     await B.page.waitForFunction(() => window.__akula.metrics.peerCount > 0,
       undefined, { timeout: 60000 });
     const b = await readFile(B.page);
+    const bIce = await inspectIce(B.page);
+    assertRoute(bIce, 'browser B');
     const afterB = await getMetrics();
     assert.equal(b.httpBytes, 0);
     assert.equal(b.p2pBytes, manifest.size);
@@ -103,6 +161,8 @@ async function run() {
     await repaired.page.waitForFunction(() => window.__akula.metrics.peerCount > 0,
       undefined, { timeout: 60000 });
     const d = await readFile(repaired.page);
+    const repairIce = await inspectIce(repaired.page);
+    assertRoute(repairIce, 'browser E');
     const afterRepair = await getMetrics();
     const invalidSize = manifest.chunks[0].size;
     assert.equal(d.integrityFailures, 1, 'Corrupted peer bytes MUST be rejected');
@@ -112,7 +172,10 @@ async function run() {
       'Only the damaged range should be transferred by MinIO');
 
     const report = {
-      scenario: 'REAL_MINIO_S3_HTTPS_TO_BROWSER_P2P_FALLBACK_AND_CORRUPTION',
+      scenario: FORCE_TURN_RELAY
+        ? 'REAL_MINIO_S3_HTTPS_TO_BROWSER_P2P_VIA_TURN_RELAY'
+        : 'REAL_MINIO_S3_HTTPS_TO_BROWSER_P2P_FALLBACK_AND_CORRUPTION',
+      ice: { forcedRelay: FORCE_TURN_RELAY, secondBrowser: bIce, corruptionRecovery: repairIce },
       source: manifest.origin_url, fixtureBytes: manifest.size,
       contentId: manifest.content_id, a, b, c, seed, d,
       minioOrigin: { firstBrowserBytes: afterA.origin_bytes - before.origin_bytes,
@@ -123,7 +186,8 @@ async function run() {
       passed: true,
       limitations: 'Local disposable MinIO behind test TLS gateway; browsers on one CI runner. NOT AWS S3, independent WAN/NAT/TURN or production TLS.',
     };
-    fs.writeFileSync(path.join(RESULTS, 'minio-real-browser-result.json'), JSON.stringify(report, null, 2));
+    fs.writeFileSync(path.join(RESULTS, FORCE_TURN_RELAY
+      ? 'minio-turn-browser-result.json' : 'minio-real-browser-result.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
   } catch (err) {
     for (let i=0; i<peers.length; i++) {
