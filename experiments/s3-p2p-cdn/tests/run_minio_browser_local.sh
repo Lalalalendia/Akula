@@ -45,6 +45,18 @@ TRACKER_PID=
 cleanup() {
   EXIT_STATUS=$?
   trap - EXIT
+  # Preserve synthetic evidence before deleting the disposable workspace.
+  # GitHub Actions uploads files from the checkout, not from the temp directory.
+  EVIDENCE_DIR="$ROOT/test-results/minio-ci"
+  mkdir -p "$EVIDENCE_DIR" || EXIT_STATUS=1
+  if [[ -d "$WORK/test-results" ]]; then
+    cp -a "$WORK/test-results/." "$EVIDENCE_DIR/" || EXIT_STATUS=1
+  fi
+  for name in server.log minio-gateway.log; do
+    if [[ -f "$WORK/$name" ]]; then
+      cp "$WORK/$name" "$EVIDENCE_DIR/$name" || EXIT_STATUS=1
+    fi
+  done
   for pid in "$GATEWAY_PID" "$TRACKER_PID"; do
     if [[ -n "$pid" ]]; then kill "$pid" >/dev/null 2>&1 || true; fi
   done
@@ -56,7 +68,7 @@ cleanup() {
     printf '\nPASS real MinIO-to-browser-to-WebRTC test; disposable resources removed.\n'
     rm -rf -- "$WORK"
   else
-    printf '\nFAIL exit=%s; synthetic-only logs/fixture retained at: %s\n' "$EXIT_STATUS" "$WORK" >&2
+    printf '\nFAIL exit=%s; synthetic evidence in: %s; workspace retained at: %s\n' "$EXIT_STATUS" "$EVIDENCE_DIR" "$WORK" >&2
     for log in "$WORK/server.log" "$WORK/minio-gateway.log"; do
       if [[ -f "$log" ]]; then
         printf '\n--- %s (last 40 lines) ---\n' "$log" >&2
@@ -64,6 +76,7 @@ cleanup() {
       fi
     done
   fi
+  exit "$EXIT_STATUS"
 }
 trap cleanup EXIT
 
@@ -123,6 +136,7 @@ if [[ "$ready" != true ]]; then
 fi
 printf 'Running real Chromium P2P and MinIO origin-byte assertions...\n'
 node tests/test_minio_browser_webrtc.cjs
+test -s test-results/minio-real-browser-result.json
 printf '\nOrigin byte counter after test:\n'
 curl --insecure --silent --fail https://127.0.0.1:9443/metrics
 printf '\n'
