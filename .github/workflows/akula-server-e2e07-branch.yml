@@ -49,6 +49,15 @@ jobs:
           cargo test --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-install-review --lib \
             server_install_root_gate::tests -- --nocapture
+      - name: Verify signed first-root stage data and OS-owned crypto verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/server-bootstrap -p 'test_root_stage_v1.py' -v
+          sudo -n /usr/bin/python3 -I -m unittest discover -s scripts/server-bootstrap -p 'test_root_stage_v1.py' -v
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-install-review --lib \
+            server_first_root_stage::tests -- --nocapture
       - name: Verify legacy Linux B1b1b owner signatures and CAS scope
         shell: bash
         run: |
@@ -70,6 +79,8 @@ jobs:
             aquilum-app/core/src/server_owner_approval_wire.rs
             aquilum-app/core/src/server_install_root_gate.rs
             aquilum-app/core/src/server_install_root_gate/tests.rs
+            aquilum-app/core/src/server_first_root_stage.rs
+            aquilum-app/core/src/server_first_root_stage/tests.rs
             aquilum-app/core/src/server_owner_windows.rs
             aquilum-app/core/src/server_release_lab/review.rs
             aquilum-app/core/src/server_release_lab/review/tests.rs

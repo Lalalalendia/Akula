@@ -29,6 +29,8 @@ pub mod server_bootstrap_ssh_windows_lab;
 pub mod server_release_lab;
 #[cfg(feature = "server-install-review")]
 pub mod server_install_root_gate;
+#[cfg(feature = "server-install-review")]
+pub mod server_first_root_stage;
 
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b-custody-lab"))]
 pub mod server_staging_lab;
