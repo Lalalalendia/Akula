@@ -453,6 +453,45 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn windows_pinned_objects_writer_is_no_replace_and_removes_failed_scratch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        // The legacy ledger creates its trusted, private schema and objects
+        // directory; the P2P writer itself never opens a global object path.
+        drop(InboxLedger::open(&root).unwrap());
+        let (pinned_root, mut stage) =
+            create_pinned_windows_inbox_stage(&root, "fixed-stage.bin").unwrap();
+        let bytes = b"one verified pinned NT object";
+        let digest = *blake3::hash(bytes).as_bytes();
+        let id = Uuid::new_v4();
+        stage.write_all(bytes).unwrap();
+        stage.sync_all().unwrap();
+        stage.seek(SeekFrom::Start(0)).unwrap();
+
+        publish_pinned_windows_inbox_object(
+            &root, &pinned_root, &mut stage, id, bytes.len() as u64, digest,
+        )
+        .unwrap();
+        let output = root.join("objects").join(format!("{}.blob", id.hyphenated()));
+        assert_eq!(fs::read(&output).unwrap(), bytes);
+
+        // Even the same authenticated UUID is not permitted to overwrite an
+        // already published leaf. The pre-existing bytes must remain intact.
+        assert!(publish_pinned_windows_inbox_object(
+            &root, &pinned_root, &mut stage, id, bytes.len() as u64, digest,
+        )
+        .is_err());
+        assert_eq!(fs::read(&output).unwrap(), bytes);
+        let partials = fs::read_dir(root.join("objects"))
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".part"));
+        assert!(!partials, "failed NT no-replace must clean its temporary object");
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn windows_pinned_stage_cleanup_never_deletes_replaced_name() {
         for explicit_success in [false, true] {
             let dir = tempfile::tempdir().unwrap();
