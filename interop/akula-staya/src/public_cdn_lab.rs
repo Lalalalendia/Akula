@@ -82,8 +82,19 @@ fn valid_origin(url: &str) -> bool {
         return !host.is_empty() && !host.contains('@') && !host.contains('\\')
             && !host.chars().any(char::is_whitespace);
     }
-    // Only the test harness may use this path. A production S3 adapter MUST
-    // independently allowlist its HTTPS origin; it never follows arbitrary URLs.
+    // Only the explicitly opted-in MinIO integration build may accept an
+    // insecure, exact-loopback URL. Production still rejects ordinary HTTP.
+    #[cfg(feature = "public-cdn-local-minio-test")]
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        if parsed.scheme() == "http" && parsed.host_str() == Some("127.0.0.1")
+            && parsed.port().is_some() && parsed.username().is_empty()
+            && parsed.password().is_none() && parsed.fragment().is_none()
+            && parsed.path() != "/"
+        {
+            return true;
+        }
+    }
+    // Local browser-harness path, not an external network source.
     url.starts_with("/origin/") && !url.contains("..") && !url.contains('?')
 }
 
