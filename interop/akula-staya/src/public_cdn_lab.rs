@@ -110,7 +110,7 @@ impl PublisherPinnedManifest {
             || data.name.is_empty()
             || data.name.len() > 255
             || data.name.chars().any(char::is_control)
-            || data.name.contains(['/', '\\'])
+            || data.name.contains('/') || data.name.contains('\\')
             || data.name == "."
             || data.name == ".."
             || !valid_origin(&data.origin_url)
