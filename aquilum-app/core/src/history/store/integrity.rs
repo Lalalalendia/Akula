@@ -175,6 +175,35 @@ mod tests {
         assert!(read_version(temp.path(), &version).is_none());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn sealed_versions_keep_working_beyond_windows_legacy_path_limit() {
+        use std::os::windows::ffi::OsStrExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let mut dir = temp.path().to_path_buf();
+        // Keep the unsealed baseline path below 260 UTF-16 units while a
+        // 256-bit seal makes the same directory's new filename exceed 260.
+        while dir.as_os_str().encode_wide().count() < 196 {
+            dir.push("history_path_01");
+        }
+        fs::create_dir_all(&dir).unwrap();
+        let legacy = write_version(&dir, "dev", &snapshot("typing", Source::Me)).unwrap();
+        assert!(
+            legacy.as_os_str().encode_wide().count() < 250,
+            "the control write must not require a long path"
+        );
+        let sealed = write_version(&dir, "dev", &snapshot("fixed", Source::Agent))
+            .expect("sealed history write beyond MAX_PATH must remain possible");
+        assert!(
+            sealed.as_os_str().encode_wide().count() > 260,
+            "fixture must actually cross the Windows legacy path boundary"
+        );
+        let id = sealed.file_name().unwrap().to_str().unwrap();
+        let entry = versions(&dir).into_iter().find(|v| v.id == id).unwrap();
+        assert_eq!(read_version(&dir, &entry).as_deref(), Some("fixed"));
+    }
+
     #[test]
     fn malformed_marker_is_not_reclassified_as_legacy() {
         let temp = tempfile::tempdir().unwrap();
