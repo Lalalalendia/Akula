@@ -100,3 +100,8 @@ This report has been published in the documentation-only one-PC evidence PR [#69
 - Локально, на Windows и полном изменённом checkout (основание `530fe3d6794ee28d2c7098af1266ff5340903543`): межпроцессные тесты **2 passed**, File Gate suite **31 passed**, rustfmt **PASS**, `git diff --check` **PASS**. Checkout содержал изменения соседних задач; эти результаты не подменяют CI точного дерева PR #703.
 
 **Действие:** повторить Application checks на том же HEAD после успешного watchdog, затем проверить результат Main PR gate/no-growth. PR остаётся Draft; слияние не заявляется.
+
+
+## Повторная попытка Application checks — 24.10.2026, 12:06 UTC
+
+После SUCCESS watchdog #40090177003 запущен повтор failed jobs workflow [Application checks #40089888780](https://github.com/Lalalalendia/Akula/actions/runs/40089888780), attempt 2, на том же exact HEAD `8445864f28123fb026d4881a59c5554f3b5829dc`. На момент записи job `Classify required CI lanes` находится в очереди; итог Main PR gate/no-growth ещё не получен. Статус PC-FG-01 остаётся «Ожидает CI».
