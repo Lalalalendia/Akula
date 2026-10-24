@@ -310,7 +310,7 @@ try {
             $proc.Refresh()
             if ($proc.HasExited) { throw 'Akula exited during native PDF page navigation' }
             $pageImage = Find-Accessible -Root $window -Name ('PDF  ' + $nativeViewerName) -ExpectedType ([System.Windows.Automation.ControlType]::Image) -Prefix
-            if ($null -ne $pageImage -and $pageImage.Current.Name.Contains(("$Page/2"))) {
+            if ($null -ne $pageImage -and $pageImage.Current.Name.Contains(("$Page/2")) -and $pageImage.Current.Name.Contains(([string]::Concat(@([char]1080,[char]1079,[char]1086,[char]1073,[char]1088,[char]1072,[char]1078,[char]1077,[char]1085,[char]1080,[char]1077,[char]32,[char]1075,[char]1086,[char]1090,[char]1086,[char]1074,[char]1086))))) {
                 return $pageImage
             }
             Start-Sleep -Milliseconds 200
