@@ -1,0 +1,57 @@
+name: Isolated S3-P2P MinIO to Chromium WebRTC E2E
+on:
+  push:
+    branches:
+      - lab/s3-p2p-minio-browser-20261024
+    paths:
+      - '.github/workflows/s3-p2p-minio-browser.yml'
+      - 'experiments/s3-p2p-cdn/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: s3-p2p-minio-browser-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  minio-chromium-webrtc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: experiments/s3-p2p-cdn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt 'boto3>=1.34,<2'
+      - name: Static syntax checks
+        run: |
+          bash -n tests/run_minio_browser_local.sh
+          python -m py_compile tests/setup_minio_browser.py tests/minio_tls_gateway.py server.py
+          node --check web/client.js
+          node --check web/range_reader.js
+          node --check tests/test_minio_browser_webrtc.cjs
+          node --check tests/test_e2e_simulated.js
+      - name: Run S3 gateway and protocol unit tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_server.py tests/test_minio_gateway_contract.py
+          node tests/test_range_reader.cjs
+      - name: Install isolated Chromium
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Real MinIO origin, Chromium P2P and corrupt-chunk repair
+        run: bash tests/run_minio_browser_local.sh
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-p2p-minio-browser-evidence
+          path: |
+            experiments/s3-p2p-cdn/test-results/
+          if-no-files-found: warn
