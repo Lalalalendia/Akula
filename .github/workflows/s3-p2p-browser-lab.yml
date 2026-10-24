@@ -129,3 +129,48 @@ jobs:
             experiments/s3-p2p-cdn/server.log
             experiments/s3-p2p-cdn/test-results/
           if-no-files-found: warn
+  large-file-memory:
+    name: Real Chromium 1 GiB memory gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: experiments/s3-p2p-cdn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare browser dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Run isolated 1 GiB origin and Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/browser-1g.bin'), 1024*1024*1024)"
+          python create_manifest.py data/browser-1g.bin --source-url /origin/demo.bin --out browser-manifest.json
+          python server.py --port 8766 --demo-file data/browser-1g.bin --manifest browser-manifest.json > browser-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:8766/manifest.json >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = 1
+          AKULA_LAB_SIZE=1073741824 AKULA_LAB_MODE=full node tests/test_persistent_chromium.cjs
+      - name: Preserve browser memory evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-p2p-1g-chromium-memory
+          path: |
+            experiments/s3-p2p-cdn/browser-server.log
+            experiments/s3-p2p-cdn/test-results/browser-full-result.json
+          if-no-files-found: warn
