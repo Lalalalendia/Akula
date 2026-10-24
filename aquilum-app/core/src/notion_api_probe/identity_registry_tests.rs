@@ -108,8 +108,12 @@ fn missing_and_ambiguous_targets_never_create_invented_reverse_links() {
     });
     source.objects.push(obj("block",B,json!({"object":"block","id":B})));
     let result=normalize(&source,DIGEST).unwrap();
-    assert_eq!(result.review().unresolved_edge_count,2);
+    // Duplicate B identity makes BOTH its relation and its parent edge
+    // ambiguous; the missing external target is a third unresolved edge.
+    assert_eq!(result.review().unresolved_edge_count,3);
     let payload:Envelope=serde_json::from_slice(&result.bytes).unwrap();
+    assert_eq!(payload.payload.edges.iter().filter(|e|e.from==B
+        &&e.resolution==Resolution::Ambiguous).count(),2);
     let ambiguous=payload.payload.edges.iter().find(|e|
         e.from==B&&e.to==A&&e.kind=="relation").unwrap();
     assert_eq!(ambiguous.resolution,Resolution::Ambiguous);
