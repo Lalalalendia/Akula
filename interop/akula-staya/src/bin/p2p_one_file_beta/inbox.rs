@@ -476,7 +476,9 @@ mod tests {
     #[test]
     fn windows_sqlite_custody_blocks_rename_and_preserves_parent_identity() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("received-inbox");
+        let parent = dir.path().join("Akula");
+        fs::create_dir(&parent).unwrap();
+        let root = parent.join("received-inbox");
         fs::create_dir(&root).unwrap();
         let (pinned_root, stage) =
             create_pinned_windows_inbox_stage(&root, "sqlite-lease.stage").unwrap();
@@ -492,6 +494,9 @@ mod tests {
         assert!(fs::rename(&database, root.join("moved.sqlite3")).is_err());
         assert!(fs::rename(&objects, root.join("moved-objects")).is_err());
         assert!(fs::rename(&root, dir.path().join("moved-inbox")).is_err());
+        // The immediate parent must not be swapped while the SQLite VFS is
+        // opening path-based database/WAL names.
+        assert!(fs::rename(&parent, dir.path().join("moved-Akula")).is_err());
         lease.verify(&root, &pinned_root).unwrap();
         drop(lease);
         mark_pinned_windows_stage_delete_on_close(&stage).unwrap();
