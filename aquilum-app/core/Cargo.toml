@@ -172,6 +172,13 @@ aws-sdk-sts = { version = "=1.119.0", optional = true, default-features = false,
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 url = { version = "2", optional = true }
 
+# One-shot administrator-only trust enrollment binary, never shipped in
+# ordinary Akula packages and never invoked by the desktop client.
+[[bin]]
+name = "akula-root-b0v3-enroll-lab"
+path = "src/bin/akula_root_b0v3_enroll_lab.rs"
+required-features = ["server-root-b0v3-gate-lab"]
+
 [[bin]]
 name = "akula-p2p-identity"
 path = "src/bin/akula_p2p_identity.rs"

@@ -271,6 +271,13 @@ fn parse_local_os_id(release: &str) -> Option<SupportedOs> {
 /// A path passed by SSH, the user, environment or an untrusted manifest is
 /// never accepted as a production root authorization source.
 pub fn load_provisioned_root_v3_policy() -> Result<RootEnrolledV3, RootEnrollmentError> {
+    let trust = open_fixed_trust_fd()?;
+    RootEnrolledV3::from_trust_fd(&trust)
+}
+
+/// Both the read-only verifier and the explicit administrator-only
+/// enrollment command use the same fixed, fully validated path traversal.
+fn open_fixed_trust_fd() -> Result<File, RootEnrollmentError> {
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(RootEnrollmentError::NotRoot);
     }
@@ -306,8 +313,11 @@ pub fn load_provisioned_root_v3_policy() -> Result<RootEnrolledV3, RootEnrollmen
         }
         current = next;
     }
-    RootEnrolledV3::from_trust_fd(&current)
+    Ok(current)
 }
+
+mod enrollment;
+pub use enrollment::admin_enroll_fixed_root_once;
 
 #[cfg(test)]
 mod tests;

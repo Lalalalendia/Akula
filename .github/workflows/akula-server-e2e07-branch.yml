@@ -94,6 +94,16 @@ jobs:
           test -n "$test_bin" && test -x "$test_bin"
           "$test_bin" server_root_v3_trust::tests --nocapture
           sudo -n -- "$test_bin" server_root_v3_trust::tests --nocapture
+          # One-time admin enrollment uses root-owned disposable directories.
+          "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::enrollment::tests --nocapture
+      - name: Compile fixed administrator-only B0 v3 enrollment binary (do not run)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab \
+            --bin akula-root-b0v3-enroll-lab
       - name: Confirm default Core compiles without installer authority
         shell: bash
         run: |
@@ -113,6 +123,9 @@ jobs:
             aquilum-app/core/src/server_root_v3_trust.rs
             aquilum-app/core/src/server_root_v3_trust/tests.rs
             aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
+            aquilum-app/core/src/server_root_v3_trust/enrollment.rs
+            aquilum-app/core/src/server_root_v3_trust/enrollment/tests.rs
+            aquilum-app/core/src/bin/akula_root_b0v3_enroll_lab.rs
             aquilum-app/core/src/server_first_root_stage.rs
             aquilum-app/core/src/server_first_root_stage/tests.rs
             aquilum-app/core/src/server_bootstrap_ssh_windows_lab/root_stage.rs

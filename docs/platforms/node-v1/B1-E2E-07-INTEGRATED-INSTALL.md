@@ -373,3 +373,40 @@ publisher key, admin root enrollment ceremony, remote privileged install
 command, systemd activation or VPS run has been introduced**. This is a
 code-level fail-closed authorization improvement; B1-E2E-07 stays HOLD
 until a separately trusted enrollment and complete live E2E succeed.
+
+### One-time root administrative B0 v3 enrollment (experimental, no VPS writes)
+
+A separate opt-in, fixed-command binary
+`akula-root-b0v3-enroll-lab` supports only a **manual root-admin
+bootstrap ceremony**. It takes no SSH-supplied input, command arguments,
+paths, keys, or environment configuration. Its only candidate is the
+preexisting root-owned 0600
+`/root/akula-b0v3-policy.candidate`, which must have been independently
+reviewed and written by an authorized administrator after verifying the
+signed enrollment binary and publisher/owner/host/helper public identities
+out of band. The candidate is the strict 512-byte-bounded B0 v3 policy
+record already used by the read-only root-policy loader.
+
+Before any mutation it requires real effective UID0, exact trusted
+root-owned / and /root path ownership and modes, an already enrolled
+B1d0 OS witness with its own persistent root-owned journal and key, and
+the same fixed `/var/lib/akula/server-bootstrap/trust` hierarchy that
+the production read-only verifier later re-opens. The candidate policy
+is validated before publication, the old B1d0 enrollment marker must
+exist, and **every** new final or pending B0 v3 policy/marker name must
+be absent. The tool creates only the exact root-owned 0600 files
+`b0v3.policy` and `b0v3.enrollment` using O_EXCL, fsync, and NOREPLACE
+renames; publication of the enrollment marker occurs last. A crash,
+collision, symlink or replay leaves HOLD and requires independent manual
+root repair; no automatic overwrite, bootstrapping, sudo privilege gain
+or retry exists. No test keys may be used for real enrollment.
+
+This command is NOT included in default releases, does not grant the
+desktop application root permissions, and cannot be called by client
+SSH/IPC. CI only compiles the opt-in command and tests the root-only
+transaction in disposable owner-controlled directories, plus negatives
+for wrong marker, malformed public policy, symlinks and interrupted
+writes. There is still no independently reviewed production publisher
+key or packaged verified administrator binary, no signed owner
+enrollment proposal on Windows and no real VPS install. The B1-E2E-07
+release gate remains HOLD.
