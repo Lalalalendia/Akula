@@ -6,8 +6,8 @@
 //! substitute for the independently enrolled root trust.
 use crate::server_bootstrap_lab::{MachineArch, SupportedOs};
 use crate::server_installer_pinned_release_lab::RootVerifiedFd;
-use crate::server_owner_approval_wire::OwnerApprovalWireV1;
 use crate::server_owner_approval_lab::TrustedOwnerApprover;
+use crate::server_owner_approval_wire::OwnerApprovalWireV1;
 use crate::server_root_v3_guard::{
     verify_root_b0_v3_scope, CheckedRootV3Scope, RootIndependentPins, RootPlanError,
 };
@@ -232,8 +232,8 @@ impl RootEnrolledV3 {
 
 /// Root examines the host independently of the submitted B0 preflight.
 /// A non-systemd environment refuses before any production CAS mutation.
-pub(crate) fn observed_root_host(
-) -> Result<(SupportedOs, MachineArch, bool), RootEnrollmentError> {
+pub(crate) fn observed_root_host() -> Result<(SupportedOs, MachineArch, bool), RootEnrollmentError>
+{
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(RootEnrollmentError::NotRoot);
     }
