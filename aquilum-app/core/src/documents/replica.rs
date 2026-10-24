@@ -93,7 +93,9 @@ impl Replica {
         let candidate = Self { doc, text };
         candidate.apply_update(&self.state(), "stage")?;
         for edits in batches {
-            utf16_boundary::validate_utf16_edits(&candidate.text(), edits)?;
+            if !edits.is_empty() {
+                utf16_boundary::validate_utf16_edits(&candidate.text(), edits)?;
+            }
             candidate.apply_edits(edits, "stage");
         }
         let update = candidate.doc.transact().encode_state_as_update_v1(&baseline);
