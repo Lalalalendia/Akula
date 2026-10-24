@@ -206,6 +206,29 @@ impl FileGateInterprocessLock {
 }
 
 #[cfg(test)]
+pub(super) fn pause_file_gate_after_primary_before_history() {
+    const MARKER_ENV: &str = "AKULA_FILEGATE_TEST_PAUSE_MARKER";
+    const RELEASE_ENV: &str = "AKULA_FILEGATE_TEST_PAUSE_RELEASE";
+
+    let Some(marker) = std::env::var_os(MARKER_ENV) else {
+        return;
+    };
+    let release =
+        std::env::var_os(RELEASE_ENV).expect("File Gate test pause marker requires a release path");
+    let marker = PathBuf::from(marker);
+    let release = PathBuf::from(release);
+    std::fs::write(&marker, b"after-primary").expect("write File Gate test pause marker");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !release.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for File Gate test pause release"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::app_core::{Core, CoreEvent};
     use crate::files::gate;

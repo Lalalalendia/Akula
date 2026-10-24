@@ -6,7 +6,7 @@ use crate::files::error::FileCommandError;
 use crate::files::models::FileWriteResult;
 use crate::history::{NoteWrite, Source};
 use crate::search::paths::{is_markdown, is_note};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 
 pub fn write(
@@ -31,7 +31,7 @@ pub fn write(
                 let result = write_file_atomic_impl(path, content, expected_hash)?;
                 file_gate_guard.release_process_lock();
                 #[cfg(test)]
-                pause_file_gate_after_primary_before_history();
+                super::interprocess_lock::pause_file_gate_after_primary_before_history();
                 let write = NoteWrite {
                     disk_before: before, text: content, hash: &result.hash,
                     source, name: version_name,
@@ -76,7 +76,7 @@ pub fn write(
         let result = write_file_atomic_impl(path, content, expected_hash)?;
         file_gate_guard.release_process_lock();
         #[cfg(test)]
-        pause_file_gate_after_primary_before_history();
+        super::interprocess_lock::pause_file_gate_after_primary_before_history();
         #[cfg(feature = "save-stage-probe")]
         let profile_primary = profile_start.elapsed();
         let write = NoteWrite {
@@ -299,29 +299,6 @@ fn write_checked_history_under_gate(
     // Only a point-in-time history observation. No native receipt, no
     // baseline commit, and no filesystem power-loss durability claim.
     Ok((result, evidence))
-}
-
-#[cfg(test)]
-fn pause_file_gate_after_primary_before_history() {
-    const MARKER_ENV: &str = "AKULA_FILEGATE_TEST_PAUSE_MARKER";
-    const RELEASE_ENV: &str = "AKULA_FILEGATE_TEST_PAUSE_RELEASE";
-
-    let Some(marker) = std::env::var_os(MARKER_ENV) else {
-        return;
-    };
-    let release =
-        std::env::var_os(RELEASE_ENV).expect("File Gate test pause marker requires a release path");
-    let marker = PathBuf::from(marker);
-    let release = PathBuf::from(release);
-    std::fs::write(&marker, b"after-primary").expect("write File Gate test pause marker");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while !release.exists() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for File Gate test pause release"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
 }
 
 pub fn create(
