@@ -53,8 +53,13 @@ pub fn verify_pinned_windows_inbox_object(
     expected_root: [u8; 32],
 ) -> Result<(), InboxError> {
     crate::sync::verify_pinned_p2p_inbox_object(
-        root, pinned_root, transfer_id, expected_bytes, expected_root,
-    ).map_err(|_| InboxError::InvalidDestination)
+        root,
+        pinned_root,
+        transfer_id,
+        expected_bytes,
+        expected_root,
+    )
+    .map_err(|_| InboxError::InvalidDestination)
 }
 
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
