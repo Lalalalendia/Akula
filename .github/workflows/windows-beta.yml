@@ -83,6 +83,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $release | Out-Null
           Copy-Item -LiteralPath $built -Destination (Join-Path $release 'shiva-pdf-preview.exe') -Force
           Write-Host "AKULA_PDF_SHIVA_BUNDLED pin=$actual"
+      - name: Acquire hash-pinned PDFium for installed PDF page rendering
+        shell: pwsh
+        run: ./scripts/install-pdfium-pinned.ps1 -OutputDirectory (Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release')
       - name: Package independent Akula identity
         shell: pwsh
         working-directory: aquilum-app
