@@ -153,6 +153,11 @@ pub(super) fn persist_received(
     let intent = expected_transfer(size, digest, authenticated_sender, local_receiver);
     let mut ledger = InboxLedger::open(inbox_root)
         .map_err(|error| format!("open receiver Inbox ledger: {error:?}"))?;
+    // Keep the root, objects and DB NT handles live throughout object publication.
+    // This is a negative identity/ACL check, NOT complete SQLite WAL custody.
+    #[cfg(windows)]
+    let _inbox_guard = aquilum_core::p2p_inbox_lab::pin_windows_inbox_read(inbox_root)
+        .map_err(|error| format!("Windows Inbox ledger custody refused: {error:?}"))?;
     // Already checked by the real QUIC TLS identity boundary. Metadata from
     // network frames alone is not a sender device/recipient grant.
     let state = ledger

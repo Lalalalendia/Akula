@@ -27,6 +27,28 @@ pub fn create_pinned_windows_inbox_stage(
         .map_err(|_| InboxError::InvalidDestination)
 }
 
+/// Keep root, objects and SQLite HANDLEs live for the entire read/copy.
+/// This only rejects observed ACL, reparse and identity anomalies; it does
+/// not yet certify SQLite WAL namespace or same-user race immunity.
+#[cfg(windows)]
+pub struct PinnedWindowsInboxRead {
+    _root: File,
+    _objects: File,
+    _sqlite: File,
+}
+
+#[cfg(windows)]
+pub fn pin_windows_inbox_read(root: &Path) -> Result<PinnedWindowsInboxRead, InboxError> {
+    let (root, objects, sqlite) =
+        crate::sync::p2p_stage::pin_p2p_read_snapshot(root)
+            .map_err(|_| InboxError::InvalidDestination)?;
+    Ok(PinnedWindowsInboxRead {
+        _root: root,
+        _objects: objects,
+        _sqlite: sqlite,
+    })
+}
+
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 

@@ -164,6 +164,9 @@ fn read_checked_inbox(root: &Path) -> Result<InboxView, String> {
     else {
         return Ok(InboxView::default());
     };
+    #[cfg(windows)]
+    let _pinned = aquilum_core::p2p_inbox_lab::pin_windows_inbox_read(root)
+        .map_err(|error| format!("Windows Inbox read custody refused: {error:?}"))?;
     let total = ledger
         .count()
         .map_err(|error| format!("count inbox: {error:?}"))?;
@@ -226,6 +229,9 @@ fn save_checked_copy(
     else {
         return Err("receiver inbox does not exist".into());
     };
+    #[cfg(windows)]
+    let _inbox_guard = aquilum_core::p2p_inbox_lab::pin_windows_inbox_read(root)
+        .map_err(|error| format!("Windows Inbox export custody refused: {error:?}"))?;
     // Recheck the complete same opened file before attempting a new destination.
     let (mut pinned, intent) = ledger
         .open_verified_file(id)
