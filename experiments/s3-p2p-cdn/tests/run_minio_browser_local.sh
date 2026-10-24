@@ -144,7 +144,7 @@ if [[ "${AKULA_TEST_TURN_RELAY:-0}" == "1" ]]; then
     exit 2
   fi
   printf 'Starting test-only local TURN relay...\n'
-  turnserver --no-cli --no-tls --no-dtls --no-multicast-peers --no-loopback-peers \
+  turnserver --no-cli --no-tls --no-dtls --no-multicast-peers --allow-loopback-peers \
     --listening-ip 127.0.0.1 --relay-ip 127.0.0.1 --listening-port 3478 \
     --min-port 49160 --max-port 49220 --lt-cred-mech \
     --user akula-test:akula-test-only-password --realm akula.test \
