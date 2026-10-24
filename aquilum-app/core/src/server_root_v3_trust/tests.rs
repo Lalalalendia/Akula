@@ -321,3 +321,18 @@ fn disposable_uid0_policy_checks_the_actual_b1a_fd_publisher_and_owner() {
         )
         .is_err());
 }
+
+#[test]
+fn root_os_probe_never_accepts_distro_family_or_duplicate_id() {
+    assert_eq!(parse_local_os_id("NAME=Ubuntu\nID=ubuntu\n"), Some(SupportedOs::Ubuntu));
+    assert_eq!(parse_local_os_id("ID=\"debian\"\n"), Some(SupportedOs::Debian));
+    for invalid in [
+        "ID=fedora\nID_LIKE=debian\n",
+        "ID=alpine\n",
+        "PRETTY_NAME=Ubuntu\n",
+        "ID=ubuntu\nID=debian\n",
+        "ID_LIKE=ubuntu\n",
+    ] {
+        assert_eq!(parse_local_os_id(invalid), None, "{invalid}");
+    }
+}

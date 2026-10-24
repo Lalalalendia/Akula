@@ -72,6 +72,15 @@ jobs:
           cargo test --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-root-b0v3-gate-lab --lib \
             server_root_v3_guard::tests -- --nocapture
+      - name: Prove old provisioned B1d0 writer is unreachable without root B0 v3 gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-bootstrap-b1d0-durable-node
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            server_installer_durable_node::provisioned_gate::root_production_gate_tests -- --nocapture
       - name: Verify independently enrolled root V3 trust reader with user and UID0 isolation
         shell: bash
         run: |
@@ -103,6 +112,7 @@ jobs:
             aquilum-app/core/src/server_root_v3_guard/tests.rs
             aquilum-app/core/src/server_root_v3_trust.rs
             aquilum-app/core/src/server_root_v3_trust/tests.rs
+            aquilum-app/core/src/server_installer_durable_node/provisioned_gate.rs
             aquilum-app/core/src/server_first_root_stage.rs
             aquilum-app/core/src/server_first_root_stage/tests.rs
             aquilum-app/core/src/server_bootstrap_ssh_windows_lab/root_stage.rs

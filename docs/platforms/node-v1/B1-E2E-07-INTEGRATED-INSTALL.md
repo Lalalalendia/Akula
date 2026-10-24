@@ -338,3 +338,38 @@ It proves read-only acceptance of an exactly matching verified FD and
 refusal of a changed enrolled publisher or a changed owner signature.
 Production keys are still unprovisioned; this does not create a root install
 opcode, trusted bootstrap ceremony, service launcher or live VPS acceptance.
+
+
+### B1-E2E-07 — production B1d0 writer now gates on root-owned v3 review
+
+The previous `commit_first_provisioned_opt` accepted a caller-provided
+`TrustedOwnerApprover` and `ExternalApprovalScope` without loading the
+new root-owned B0 v3 policy. Therefore the separately tested root-policy
+validator could be bypassed. This is corrected by **removing the legacy
+production wrapper** from the B1d0-only build. The only provisioned writer
+is compiled under the opt-in `server-root-b0v3-gate-lab` feature in a
+separate, size-limited `provisioned_gate.rs` Rust module.
+
+Before touching the fixed `/opt` directory or advancing CAS, this entry:
+(1) opens the independently enrolled root-owned B1d0 witness and checks
+the exact checkpoint; (2) reads the fixed root-owned B0 v3 policy rather
+than accepting an SSH-provided owner key; (3) observes the local OS from
+`/etc/os-release`, compiled architecture and live systemd directory,
+refusing unsupported or container-only hosts; (4) derives a single portable
+owner wire from the **same signed B1d0 claim**, checks the complete
+canonical B0 v3 plan, Ed25519 owner signature, independently enrolled
+publisher key, pinned helper and SSH host digests, B1a signed FD size and
+manifest; (5) compares the verified scope to B1d0's exact transaction
+binding and only then enters the existing destination-locked B1d0
+`commit_in`, which independently rechecks owner signature, floor, CAS
+revision and one-use nonce. The trusted owner supplied to B1d0 is now
+derived exclusively from OS enrollment, never from caller data.
+
+The new module has a pure negative test for install ID, plan digest,
+package SHA, owner nonce and SSH host divergence, and a canonical legacy
+owner-wire encoding test. The previous CI proves root-policy reading and
+real Node ELF CAS in isolated test-only environments. **No production
+publisher key, admin root enrollment ceremony, remote privileged install
+command, systemd activation or VPS run has been introduced**. This is a
+code-level fail-closed authorization improvement; B1-E2E-07 stays HOLD
+until a separately trusted enrollment and complete live E2E succeed.

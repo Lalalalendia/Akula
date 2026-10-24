@@ -7,6 +7,7 @@
 use crate::server_bootstrap_lab::{MachineArch, SupportedOs};
 use crate::server_installer_pinned_release_lab::RootVerifiedFd;
 use crate::server_owner_approval_wire::OwnerApprovalWireV1;
+use crate::server_owner_approval_lab::TrustedOwnerApprover;
 use crate::server_root_v3_guard::{
     verify_root_b0_v3_scope, CheckedRootV3Scope, RootIndependentPins, RootPlanError,
 };
@@ -30,6 +31,7 @@ pub enum RootEnrollmentError {
     InvalidPolicy,
     ReleaseIdentityMismatch,
     InvalidVerifiedRelease,
+    UnsupportedHost,
     Review(RootPlanError),
 }
 impl From<std::io::Error> for RootEnrollmentError {
@@ -128,6 +130,15 @@ pub struct RootEnrolledV3 {
     release_pub: [u8; 32],
 }
 impl RootEnrolledV3 {
+    /// Return only the independently enrolled owner authority, never an
+    /// SSH-supplied TrustedOwnerApprover.
+    pub(crate) fn trusted_owner(&self) -> TrustedOwnerApprover {
+        TrustedOwnerApprover {
+            approver_id: self.owner_id.clone(),
+            public_key_ed25519: self.owner_pub,
+        }
+    }
+
     fn parse(data: &[u8]) -> Result<Self, RootEnrollmentError> {
         if !data.starts_with(DOMAIN) || data.len() > MAX_POLICY_SIZE as usize {
             return Err(RootEnrollmentError::InvalidPolicy);
@@ -217,6 +228,43 @@ impl RootEnrolledV3 {
         verify_root_b0_v3_scope(plan_json, approval, signature, pins, now_unix)
             .map_err(RootEnrollmentError::Review)
     }
+}
+
+/// Root examines the host independently of the submitted B0 preflight.
+/// A non-systemd environment refuses before any production CAS mutation.
+pub(crate) fn observed_root_host(
+) -> Result<(SupportedOs, MachineArch, bool), RootEnrollmentError> {
+    if rustix::process::geteuid().as_raw() != 0 {
+        return Err(RootEnrollmentError::NotRoot);
+    }
+    let release = std::fs::read_to_string("/etc/os-release")?;
+    let os = parse_local_os_id(&release).ok_or(RootEnrollmentError::UnsupportedHost)?;
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => MachineArch::X86_64,
+        _ => return Err(RootEnrollmentError::UnsupportedHost),
+    };
+    let has_systemd = Path::new("/run/systemd/system").is_dir();
+    if !has_systemd {
+        return Err(RootEnrollmentError::UnsupportedHost);
+    }
+    Ok((os, arch, has_systemd))
+}
+
+fn parse_local_os_id(release: &str) -> Option<SupportedOs> {
+    let mut result = None;
+    for line in release.lines() {
+        if let Some(value) = line.strip_prefix("ID=") {
+            if result.is_some() {
+                return None;
+            }
+            result = match value.trim_matches('"') {
+                "ubuntu" => Some(SupportedOs::Ubuntu),
+                "debian" => Some(SupportedOs::Debian),
+                _ => return None,
+            };
+        }
+    }
+    result
 }
 
 /// Only the fixed independently provisioned /var/lib/.../trust location.
