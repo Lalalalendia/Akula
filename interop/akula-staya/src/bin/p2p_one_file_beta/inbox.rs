@@ -410,6 +410,35 @@ mod tests {
     }
 
     #[cfg(windows)]
+    #[test]
+    fn windows_pinned_stage_cleanup_never_deletes_replaced_name() {
+        for explicit_success in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("received-inbox");
+            fs::create_dir(&root).unwrap();
+            let (pinned_root, mut stage) =
+                create_pinned_windows_inbox_stage(&root, "pending.stage").unwrap();
+            stage.write_all(b"actual original stage").unwrap();
+            stage.sync_all().unwrap();
+            let mut cleanup = PinnedStageCleanup(Some(stage.try_clone().unwrap()));
+            let original_name = root.join("pending.stage");
+            let renamed_original = root.join("moved-original.stage");
+            // Simulate a same-user replacement of the former pathname while
+            // the originally created DELETE_ACCESS stage HANDLE remains open.
+            fs::rename(&original_name, &renamed_original).unwrap();
+            fs::write(&original_name, b"unrelated replacement").unwrap();
+            if explicit_success {
+                cleanup.finish().unwrap();
+            }
+            drop(cleanup);
+            drop(stage);
+            drop(pinned_root);
+            assert_eq!(fs::read(&original_name).unwrap(), b"unrelated replacement");
+            assert!(!renamed_original.exists(), "only the opened stage may be removed");
+        }
+    }
+
+    #[cfg(windows)]
     fn grant_everyone_full_control(path: &Path, directory: bool) {
         // A file has no children: (OI)(CI) is a directory inheritance
         // directive, not reliable evidence of an effective file write ACE.
