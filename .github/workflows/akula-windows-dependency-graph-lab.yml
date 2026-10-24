@@ -51,7 +51,7 @@ jobs:
             entries=set()
             unmatched=[]
             for line in p.stdout.splitlines():
-              m=re.match(r'^([A-Za-z0-9_-]+) v([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][^\\s]+)?)',line.strip())
+              m=re.match(r'^([A-Za-z0-9_-]+) v([0-9]+(?:\.[0-9]+){1,3}(?:[-+][^\s]+)?)',line.strip())
               if m:
                 entries.add(m.group(1)+'@'+m.group(2))
               elif line.strip():
@@ -62,7 +62,7 @@ jobs:
             rows[key]={'target':target,'features':features,'edges':edges,'count':len(entries),'packages':sorted(entries),'command':' '.join(cmd)}
             print('PROFILE',key,'packages',len(entries),flush=True)
           lock=pathlib.Path('aquilum-app/Cargo.lock').read_text(encoding='utf-8')
-          full=set(a+'@'+b for a,b in re.findall(r'(?m)^\\[\\[package\\]\\]\\nname = "([^"]+)"\\nversion = "([^"]+)"',lock))
+          full=set(a+'@'+b for a,b in re.findall(r'(?m)^\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"',lock))
           if len(full)<700 or len(full)>800:
             print('BAD_LOCK_COUNT',len(full),file=sys.stderr);sys.exit(4)
           sets={key:set(val['packages']) for key,val in rows.items()}
@@ -93,7 +93,7 @@ jobs:
             'windows_installed_duplicate_names':duplicate,
             'windows_installed_named_packages':presence
           }
-          pathlib.Path('akula-dependency-profile.json').write_text(json.dumps(evidence,indent=2,ensure_ascii=False)+'\\n',encoding='utf-8')
+          pathlib.Path('akula-dependency-profile.json').write_text(json.dumps(evidence,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
           summary={
             'sha':evidence['source_sha'],
             'lock':len(full),
@@ -116,16 +116,16 @@ jobs:
           print('AKULA_INSTALLED_EXTRA='+json.dumps(extra_in_installed),flush=True)
           print('AKULA_S3_EXTRA='+json.dumps(extra_s3),flush=True)
           md=['## Akula dependency profile / Windows installed',
-              'Source commit: \`'+str(evidence['source_sha'])+'\`',
+              'Source commit: `'+str(evidence['source_sha'])+'`',
               '',
               '| Graph | Unique crate versions |',
               '|---|---:|']
           for k,v in rows.items(): md.append('| '+k+' | '+str(v['count'])+' |')
-          md += ['', 'Full \`Cargo.lock\`: '+str(len(full))+'. Windows installed normal absent in lock: '+str(len(unused))+'.',
+          md += ['', 'Full `Cargo.lock`: '+str(len(full))+'. Windows installed normal absent in lock: '+str(len(unused))+'.',
                   'Installed feature-only additions: '+str(len(extra_in_installed))+'. S3 beta additions: '+str(len(extra_s3))+'.',
                   '', 'Measurements describe *resolved dependency graphs*, not linked DLL count, executable bytes or RAM.']
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:
-            f.write('\\n'.join(md)+'\\n')
+            f.write('\n'.join(md)+'\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
