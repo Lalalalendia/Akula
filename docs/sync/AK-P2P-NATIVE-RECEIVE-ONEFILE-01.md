@@ -214,3 +214,31 @@ stage was opened with DELETE access and deletion occurs at handle close.
 persistent targets via global paths. Same-user namespace custody and
 power-loss signed delivery are not established. No merge, independent
 installer or auto-update activation before installed physical WAN tests.
+
+## 24 October: SQLite WAL/SHM compatibility and negative ACL tests
+
+Previous [exact-head Windows CI #40094390236](https://github.com/Lalalalendia/Akula/actions/runs/40094390236)
+passed the real QUIC/Inbox and N0 tests while the `installed` profile
+still ran; no full PASS was claimed for that run.
+
+WAL-mode SQLite creates `received-inbox.sqlite3-wal` and
+`received-inbox.sqlite3-shm` during a live writer connection. A normal
+last-client close/checkpoint is allowed to remove them. **Do not keep
+FILE_SHARE_DELETE-denying handles on these two companions**: the protected
+NT no-delete lease continues to cover only the main DB, objects/root and
+immediate parent. During an active receipt Akula's existing independent
+owner/DACL and one-hardlink pre/postflight audits still reject insecure
+existing WAL/SHM files before a successful network receipt.
+
+Two additional scoped Windows tests use disposable synthetic SQLite
+receipts: (1) with a no-delete lease still active, a live WAL writer must
+create WAL/SHM, close cleanly, and cold-reopen the same pending receipt;
+SQLite alone owns its checkpoint and file cleanup; and (2) a deliberately
+world-writable existing WAL or SHM must be rejected by the ACL audit
+while its writer is open. This does **not** prove full VFS file-handle
+custody or eliminate attacks during the time between audits.
+
+[Code checkpoint abbc71dc](https://github.com/Lalalalendia/Akula/commit/abbc71dcf82a9046b68ed5802b41856e6cf1f4c0);
+[CI #40095402976](https://github.com/Lalalalendia/Akula/actions/runs/40095402976)
+created and awaiting full result. Do not merge Draft, enable auto-update
+or claim an authenticated durable ACK based only on these checks.
