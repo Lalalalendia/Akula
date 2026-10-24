@@ -31,6 +31,9 @@ pub mod milestone;
 pub mod service;
 pub mod store;
 
+#[cfg(test)]
+mod integrity_tests;
+
 pub use milestone::Source;
 pub use service::{HistoryService, NoteWrite};
 pub use store::{version_at, AQUILUM_FOLDER};
