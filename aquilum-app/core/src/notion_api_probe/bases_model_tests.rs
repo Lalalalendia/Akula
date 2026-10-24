@@ -204,3 +204,67 @@ fn verified_sqlite_is_read_only_and_rejects_stale_digest() {
     assert_eq!(model.source_digest,digest);
     assert!(from_verified_cache(&db,ROOT,DIGEST).is_err());
 }
+
+#[test]
+fn independently_owned_bases_survive_token_and_cache_loss() {
+    use crate::{
+        app_core::{Core, CoreEvent},
+        notion_api_probe::{projection::prepare_import, publish, structured_bundle},
+    };
+    use std::{fs, sync::Arc};
+    let mut source=fixture();
+    let ids=source.objects.iter().filter(|o|o.kind=="page")
+        .map(|o|o.id.clone()).collect::<Vec<_>>();
+    for id in ids {
+        source.objects.push(RawObject {
+            kind:"markdown".into(),id:id.clone(),
+            json:json!({"markdown":format!("Body for {id}")}),
+        });
+    }
+    let temp=tempfile::tempdir().unwrap();
+    let app=temp.path().join("app");
+    let vault=temp.path().join("vault");
+    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(&vault).unwrap();
+    let db=app.join("ui-state.sqlite3");
+    let digest={
+        let mut store=SnapshotStore::open(&db).unwrap();
+        store.publish(&source,77).unwrap().digest
+    };
+    let checked=structured_bundle::prepare_from_cached(&db,ROOT,&digest).unwrap();
+    let notes=prepare_import(&source).unwrap();
+    assert!(notes.publish_allowed);
+    let core=Core::open(&app,Arc::new(|_:CoreEvent|{}));
+    core.ui_state.resolve_workspace(vault.to_str().unwrap(),1).unwrap();
+    assert!(publish::publish_approved(&core,&vault,&notes,true).unwrap().completed);
+    let receipt=structured_bundle::publish_approved(&core,&vault,&checked,true).unwrap();
+    let path=vault.join(receipt.relative_path);
+    let before=from_independent_bundle(&path).unwrap();
+    assert_eq!(before.bases.len(),2);
+    assert_eq!(before.rows.len(),4);
+    assert_eq!(before.views.len(),2);
+    assert_eq!(before.source_digest,digest);
+    assert!(!before.native_edit_supported);
+    let _=fs::remove_file(&db);
+    let after=from_independent_bundle(&path).unwrap();
+    assert_eq!(after.bases.len(),before.bases.len());
+    assert_eq!(after.rows.len(),before.rows.len());
+    assert_eq!(after.views.len(),before.views.len());
+    assert_eq!(after.source_digest,before.source_digest);
+    fs::write(&path,b"local modification").unwrap();
+    assert!(from_independent_bundle(&path).is_err());
+}
+#[test]
+fn modern_database_container_does_not_create_an_empty_duplicate_schema() {
+    let mut source=fixture();
+    source.objects.push(RawObject{
+        kind:"database".into(),
+        id:"66666666-6666-4666-8666-666666666666".into(),
+        json:json!({"object":"database",
+            "data_sources":[{"id":DS1},{"id":DS2}]}),
+    });
+    let model=compose(&source,DIGEST).unwrap();
+    assert_eq!(model.bases.len(),2,"data sources carry schema; database is a wrapper");
+    assert_eq!(model.rows.len(),4);
+    assert_eq!(model.fields_needing_review,0);
+}

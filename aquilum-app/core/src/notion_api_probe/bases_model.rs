@@ -8,7 +8,7 @@
 //! and source relations remain inert; typed values are snapshots only.
 use super::{
     identity_registry::{node_id, property_id},
-    snapshot::SnapshotStore, RawObject, SourcePreview, API_VERSION,
+    snapshot::SnapshotStore, structured_bundle, RawObject, SourcePreview, API_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -225,6 +225,12 @@ fn compose(source: &SourcePreview, digest: &str) -> Result<BasesModel,String> {
             return Err("duplicated Notion entity in bases model".into());
         }
         if object.kind=="data_source" || object.kind=="database" {
+            // Modern Notion databases may only be containers for named data
+            // sources. Do not invent an empty editable schema for the wrapper.
+            if object.kind=="database"
+                && !object.json.get("properties").is_some_and(Value::is_object)
+                && object.json.get("data_sources").is_some_and(Value::is_array)
+            { continue; }
             let (fields,available)=columns(&source.root,&object.kind,&object.id,&object.json)?;
             let model=BaseSchema{
                 akula_id:node_id(&source.root,&object.kind,&object.id),
@@ -311,3 +317,11 @@ pub fn from_verified_cache(path: &Path, root: &str, digest: &str)
 #[cfg(test)]
 #[path="bases_model_tests.rs"]
 mod tests;
+
+/// Build the same local typed model after Notion access and the app-state
+/// cache have disappeared. The independent JSON bundle was committed by
+/// Core File Gate and checked against its own BLAKE3 payload digest.
+pub fn from_independent_bundle(path: &Path) -> Result<BasesModel,String> {
+    let (preview,digest)=structured_bundle::verified_portable_preview(path)?;
+    compose(&preview,&digest)
+}

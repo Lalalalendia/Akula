@@ -222,6 +222,43 @@ pub fn inspect_existing(path: &Path) -> Result<BundleReview, String> {
     Ok(review)
 }
 
+
+/// Recover typed API objects from the **independent Akula-owned** File Gate
+/// bundle. Never consult a Notion token, the live API or ui-state.sqlite3.
+/// Raw formulas/rollups and views remain source snapshots (not executable).
+pub fn verified_portable_preview(path: &Path) -> Result<(super::SourcePreview, String), String> {
+    let metadata=fs::symlink_metadata(path)
+        .map_err(|_| "cannot inspect independent Notion bundle")?;
+    if !metadata.is_file() || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_BUNDLE_BYTES as u64
+    { return Err("unsafe or oversized offline Notion bundle".into()); }
+    let bytes=fs::read(path).map_err(|_| "cannot read offline Notion bundle")?;
+    let review=verify_bundle_bytes(&bytes)?;
+    if path.file_name()!=Path::new(&review.relative_path).file_name() {
+        return Err("offline Notion bundle filename differs from approved root/digest".into());
+    }
+    let envelope:Envelope=serde_json::from_slice(&bytes)
+        .map_err(|_| "cannot parse verified Notion bundle")?;
+    let payload=envelope.payload;
+    let preview=super::SourcePreview {
+        format:"akula_notion_independent_portable_01",
+        api_version:API_VERSION,
+        root:payload.root,
+        workspace_complete:false,
+        root_traversal_complete:true,
+        requests:0,
+        objects:payload.objects.into_iter().map(|o|RawObject{
+            kind:o.kind,id:o.id,json:o.json
+        }).collect(),
+        links:payload.edges.into_iter().map(|edge|Link{
+            from:edge.from,to:edge.to,kind:edge.kind,property_id:edge.property_id
+        }).collect(),
+        unresolved_target_ids:Vec::new(),
+        warnings:Vec::new(),
+    };
+    Ok((preview,payload.source_digest))
+}
+
 /// Only after note import has completed and the operator approved this exact
 /// root/target. Creates an immutable JSON sidecar; it cannot replace notes or
 /// existing structured JSON. This is source preservation, NOT native Bases.
