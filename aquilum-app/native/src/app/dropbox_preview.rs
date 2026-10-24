@@ -394,12 +394,22 @@ fn open_browser(url: &str) -> bool {
 #[cfg(target_os = "windows")]
 fn open_browser_system(url: &str) -> bool {
     use windows::core::{w, PCWSTR};
+    use windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+        COINIT_DISABLE_OLE1DDE,
+    };
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
     // Use the user's registered HTTPS handler directly. explorer.exe can
     // open File Explorer instead of navigating to the OAuth authorization.
     // No cmd.exe, PowerShell, shell interpolation or browser-specific path.
+    // ShellExecute may delegate to COM shell extensions; this dedicated
+    // worker initializes a single-threaded apartment per Microsoft guidance.
+    let com_ready = unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)
+    }.is_ok();
+    if !com_ready { return false; }
     let mut wide: Vec<u16> = url.encode_utf16().collect();
     wide.push(0);
     // SAFETY: the URL is an approved HTTPS endpoint; UTF-16 remains alive
@@ -410,6 +420,8 @@ fn open_browser_system(url: &str) -> bool {
             PCWSTR::null(), SW_SHOWNORMAL,
         )
     };
+    // One CoUninitialize per successful CoInitializeEx on this worker.
+    unsafe { CoUninitialize() };
     (launched.0 as isize) > 32
 }
 
