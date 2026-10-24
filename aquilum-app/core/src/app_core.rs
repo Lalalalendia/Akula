@@ -554,12 +554,15 @@ impl Core {
         self.mcp.apply(self, &self.settings.get_config().mcp)
     }
 
-    /// Stops background work before the host exits: unsaved edits are written, MCP and the
-    /// watcher stop.
+    /// Stop all background file writers before the host exits. Shutdown must
+    /// join the search indexer too: a stale Tantivy IndexWriter can otherwise
+    /// hold a lock after a GUI window is gone (e.g. via the search dialog's
+    /// remaining Arc<Core>), preventing the next app session from indexing.
     pub fn shutdown(&self) {
         self.documents.flush_all(self);
         self.mcp.shutdown();
         self.watcher.stop();
+        self.search.shutdown();
     }
 
     pub fn known_roots(&self) -> Vec<PathBuf> {
