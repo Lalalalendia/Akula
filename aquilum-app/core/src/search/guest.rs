@@ -3,10 +3,8 @@ use super::models::SearchIndexStatus;
 use super::paths::same_path;
 use super::service::{workspace_root, OpenIndex, SearchService};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-
 const IDLE_LIMIT: Duration = Duration::from_secs(300);
 
 pub struct Guest {
@@ -32,9 +30,7 @@ impl Guest {
 impl SearchService {
     pub fn open_guest(&self, workspace: &str) -> Result<SearchIndexStatus, SearchError> {
         let _guard = self.prepare_lock.lock().map_err(SearchError::task)?;
-        if self.stopped.load(Ordering::Acquire) {
-            return Err(SearchError::task("search service already shut down"));
-        }
+        self.ensure_running()?;
         let root = workspace_root(workspace)?;
         if let Some(status) = self.status_for_root(&root) {
             return Ok(status);

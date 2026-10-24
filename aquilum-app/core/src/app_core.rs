@@ -554,10 +554,7 @@ impl Core {
         self.mcp.apply(self, &self.settings.get_config().mcp)
     }
 
-    /// Stop all background file writers before the host exits. Shutdown must
-    /// join the search indexer too: a stale Tantivy IndexWriter can otherwise
-    /// hold a lock after a GUI window is gone (e.g. via the search dialog's
-    /// remaining Arc<Core>), preventing the next app session from indexing.
+    /// Stop file and search index workers before starting another session.
     pub fn shutdown(&self) {
         self.documents.flush_all(self);
         self.mcp.shutdown();
