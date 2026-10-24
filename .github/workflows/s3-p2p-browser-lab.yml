@@ -23,6 +23,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Check browser harness syntax before expensive tests
+        run: |
+          node --check tests/test_persistent_chromium.cjs
+          node --check tests/test_resume.cjs
+          node --check tests/test_e2e_simulated.js
       - name: Python dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Python protocol tests
