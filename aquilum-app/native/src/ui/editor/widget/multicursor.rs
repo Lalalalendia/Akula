@@ -117,4 +117,33 @@ mod tests {
         editor.apply_multicursor_delete(false);
         assert_eq!(editor.doc.whole(), "ab  c");
     }
+
+    #[test]
+    fn overlapping_selections_must_replace_the_full_union() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (2, 5);
+        editor.extra_cursors.push((4, 8));
+        assert!(editor.apply_multicursor_typing("X"));
+        assert_eq!(editor.doc.whole(), "abXij");
+    }
+
+    #[test]
+    fn chained_overlaps_must_replace_the_full_union_once() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (1, 4);
+        editor.extra_cursors.push((3, 6));
+        editor.extra_cursors.push((5, 8));
+        assert!(editor.apply_multicursor_typing("Z"));
+        assert_eq!(editor.doc.whole(), "aZij");
+    }
+
+    #[test]
+    fn overlapping_selections_must_delete_the_full_union() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (2, 5);
+        editor.extra_cursors.push((4, 8));
+        assert!(editor.apply_multicursor_delete(true));
+        assert_eq!(editor.doc.whole(), "abij");
+    }
+
 }
