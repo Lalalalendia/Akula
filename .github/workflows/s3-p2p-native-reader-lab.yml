@@ -33,3 +33,34 @@ jobs:
           test -e interop/akula-staya/src/public_cdn_lab.rs
           test -e interop/akula-staya/PUBLIC_CDN_NATIVE_LAB.md
           ! grep -Fq 'interop/akula-staya' aquilum-app/Cargo.toml
+
+  minio-range-native:
+    name: Real MinIO 64MiB native Range
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91
+      - name: Start isolated MinIO
+        shell: bash
+        run: |
+          docker run -d --rm --name akula-native-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=akula_ci -e MINIO_ROOT_PASSWORD=akula_ci_test_only \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          docker logs akula-native-minio
+          exit 1
+      - name: Upload immutable fixture and generate pinned SHA256 manifest
+        working-directory: interop/akula-staya/public-cdn-check
+        run: |
+          python -m pip install boto3
+          python prepare_minio.py
+      - name: Real bounded Rust GET on MinIO
+        working-directory: interop/akula-staya/public-cdn-check
+        run: cargo test --features public-cdn-local-minio-test --test minio_real -- --nocapture
+      - name: Stop ephemeral MinIO
+        if: always()
+        run: docker stop akula-native-minio >/dev/null 2>&1 || true
