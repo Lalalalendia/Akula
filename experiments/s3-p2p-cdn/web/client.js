@@ -313,31 +313,43 @@ async function retrieve() {
   try {
     await joinReady;
     if ([...peers.values()].some(p => p.have.size > 0)) await waitForPeer();
-    const parts = new Array(manifest.chunks.length);
-    let next = 0, complete = 0;
-    const worker = async () => {
-      while (next < parts.length) {
-        const n = next++;
-        if (hasCache(n)) {
-          parts[n] = cached.get(n);
-        } else {
-          parts[n] = await fetchChunk(n);
+    const output = await window.AkulaOpenOutput(manifest.size);
+    const fullHash = new window.IncrementalSha256();
+    try {
+      let next = 0;
+      const windowSize = Math.min(4, Math.max(1, manifest.chunks.length));
+      const inflight = new Map();
+      const getPart = n => {
+        if (!inflight.has(n)) {
+          const promise = hasCache(n) ? Promise.resolve(cached.get(n)) : fetchChunk(n);
+          inflight.set(n, promise);
         }
-        complete++;
-        $('progress').value = parts.length ? 100 * complete / parts.length : 100;
-        $('status').textContent = `Проверено ${complete}/${parts.length} частей`;
+        return inflight.get(n);
+      };
+      for (let j = 0; j < windowSize; j++) if (j < manifest.chunks.length) getPart(j);
+      for (let n = 0; n < manifest.chunks.length; n++) {
+        const bytes = await getPart(n);
+        inflight.delete(n);
+        if (!await verifyChunk(n, bytes)) throw Error('Ошибка проверки части перед записью');
+        await output.write(bytes);
+        fullHash.update(bytes);
+        next++;
+        const following = n + windowSize;
+        if (following < manifest.chunks.length) getPart(following);
+        $('progress').value = 100 * next / manifest.chunks.length;
+        $('status').textContent = `Проверено ${next}/${manifest.chunks.length} частей`;
       }
-    };
-    await Promise.all(Array.from({ length: Math.min(4, Math.max(1, parts.length)) }, worker));
-    const blob = new Blob(parts, { type: 'application/octet-stream' });
-    const fileHash = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
-    const fullHex = [...fileHash].map(v => v.toString(16).padStart(2, '0')).join('');
-    if (fullHex !== manifest.content_id) throw Error('Не совпадает SHA-256 всего файла');
-    if (saveUrl) URL.revokeObjectURL(saveUrl);
-    saveUrl = URL.createObjectURL(blob);
-    $('save').href = saveUrl;
-    $('save').download = manifest.name;
-    $('save').hidden = false;
+      if (fullHash.digestHex() !== manifest.content_id) throw Error('Не совпадает SHA-256 всего файла');
+      const blob = await output.finish();
+      if (saveUrl) URL.revokeObjectURL(saveUrl);
+      saveUrl = URL.createObjectURL(blob);
+      $('save').href = saveUrl;
+      $('save').download = manifest.name;
+      $('save').hidden = false;
+    } catch (error) {
+      await output.discard();
+      throw error;
+    }
     $('progress').value = 100;
     const seconds = ((performance.now() - started) / 1000).toFixed(2);
     const http = statistics.httpBytes - baseline.httpBytes;
