@@ -58,6 +58,9 @@ async def _aiohttp_workflow():
                 async with session.get(f'{base}/manifest.json') as r:
                     assert r.status == 200
                     assert (await r.json())['content_id'] == manifest['content_id']
+                async with session.get(f'{base}/range_reader.js') as r:
+                    assert r.status == 200
+                    assert 'AkulaCheckedRangeGet' in await r.text()
                 async with session.get(f'{base}/origin/demo.bin', headers={'Range': 'bytes=100-105'}) as r:
                     assert r.status == 206
                     assert r.headers['Content-Range'] == f'bytes 100-105/{len(data)}'
