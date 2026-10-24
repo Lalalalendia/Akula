@@ -1,5 +1,7 @@
 use super::*;
 mod tick;
+#[cfg(feature = "notion-offline-preview")]
+mod notion;
 
 impl App {
     pub fn title(&self) -> String {

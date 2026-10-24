@@ -1,12 +1,13 @@
 //! Bounded, token-free offline Notion status for the experimental native tile.
-//! Never opens a Notion HTTP client or touches user Vault / File Gate.
 #[cfg(not(debug_assertions))]
 compile_error!("notion-offline-preview is QA-only and may not ship in a release build");
 
+mod session;
+mod defaults;
+pub use session::*;
 use std::io::ErrorKind;
 use std::path::Path;
 use aquilum_core::notion_api_probe::snapshot::SnapshotStore;
-
 #[derive(Clone, Debug)]
 pub struct CachedRoot {
     pub id: String,

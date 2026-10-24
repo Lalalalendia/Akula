@@ -135,6 +135,8 @@ pub struct App {
     panel_body: Option<Body>,
     retention_done: Arc<std::sync::atomic::AtomicBool>,
     yandex_probe: crate::yandex_probe_session::ProbeSession,
+    #[cfg(feature = "notion-offline-preview")]
+    notion_session: crate::notion_offline::NotionSession,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
     s3_pair: crate::s3_pair_session::PairSession,
     controls: Option<(WidgetId, Handle<WindowButton>)>,

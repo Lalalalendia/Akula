@@ -4,6 +4,10 @@ pub use cloud_provider::CloudProvider;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     OpenCloudProvider(CloudProvider),
+    #[cfg(feature = "notion-offline-preview")] NotionOpenRoot(String),
+    #[cfg(feature = "notion-offline-preview")] NotionOpenPage(String),
+    #[cfg(feature = "notion-offline-preview")] NotionPageBatch(usize),
+    #[cfg(feature = "notion-offline-preview")] NotionTextChunk(usize),
     #[cfg(feature = "dropbox-readonly-preview")] DropboxLoginAccount, #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxForgetAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxConnectReadOnly,

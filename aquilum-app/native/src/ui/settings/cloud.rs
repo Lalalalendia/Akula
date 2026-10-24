@@ -266,7 +266,7 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider, staged: &[(S
             super::layout::block_widget(block, &mut bindings)
         }
         #[cfg(feature = "notion-offline-preview")]
-        CloudProvider::Notion => notion::body(ctx),
+        CloudProvider::Notion => notion::body(ctx, &mut bindings),
         _ => NewWidget::new(Flex::column()
             .cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_fixed(selectable(&t("settings.cloud.unavailableHint"), |t| t.text_secondary, None, Leading::Times(1.4))))

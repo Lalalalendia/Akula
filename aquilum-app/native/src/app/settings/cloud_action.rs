@@ -14,8 +14,6 @@ impl App {
         &mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction,
         mut dialog: SettingsDialog, mut cloud: CloudPopup,
     ) -> Outcome {
-        // A provider dialog owns a transient draft. Pressing Enter must
-        // not silently persist it before the user clicks Save.
         if let Some(text_action) = action.downcast_ref::<TextAction>()
             && let Some(Binding::Text { setter, .. }) = cloud.bindings.get(&id)
         {
@@ -28,10 +26,6 @@ impl App {
             dialog.cloud_popup = Some(cloud);
             return self.keep(dialog, None, Effect::None, root);
         }
-        // InputBox emits Committed when its child loses focus (including
-        // clicking Cancel). Inside this provider modal the commit belongs
-        // to the *draft*, not to AppConfig. The general settings handler
-        // persists on Committed and must never receive this event here.
         if action.downcast_ref::<Committed>().is_some() {
             let draft = match cloud.bindings.get(&id) {
                 Some(Binding::Commit(field)) => {
@@ -108,11 +102,19 @@ impl App {
             root.focus_on(Some(dialog.layer));
             return self.keep(dialog, None, Effect::Content, root);
         }
+        #[cfg(feature = "notion-offline-preview")]
+        if pressed && let Some(Binding::Button(button)) = cloud.bindings.get(&id)
+            && self.handle_notion_action(button)
+        {
+            let config = self.workspace.core.settings.get_config();
+            let ctx = self.settings_context(dialog.section, dialog.copied, dialog.trash_page);
+            cloud.rebuild(root, &config, &ctx);
+            dialog.cloud_popup = Some(cloud);
+            return self.keep(dialog, None, Effect::None, root);
+        }
         let (mut effect, _) = self.on_binding(root, &mut cloud.bindings, id, action);
         if pressed && let Some(Binding::Button(button)) = cloud.bindings.get(&id) {
             let button = button.clone();
-            // A saved provider never implicitly targets a different
-            // bucket from the text currently visible in this dialog.
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             if cloud.provider == crate::ui::settings::schema::CloudProvider::Yandex {
                 let draft = cloud.bindings.iter().find_map(|(field, binding)| {
