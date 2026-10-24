@@ -144,6 +144,10 @@ pub(super) fn for_page(page: &Value, source_id: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "typed_frontmatter_dataview.rs"]
+mod dataview_integration;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::search::fields::{note_fields, Field, FieldKind};
