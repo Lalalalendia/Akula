@@ -126,6 +126,16 @@ pub(crate) fn audit_pinned_p2p_inbox_storage(
     Ok(())
 }
 
+/// P2P stage deletion is anchored to the exact HANDLE created under the
+/// protected Inbox root. A hostile rename/replacement of the former stage
+/// name must never allow clean-up to delete an unrelated user file.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn mark_pinned_p2p_inbox_stage_delete_on_close(
+    opened_stage: &std::fs::File,
+) -> Result<(), VaultPortError> {
+    pinned_windows::mark_p2p_stage_delete_on_close(opened_stage)
+}
+
 /// P2P-only readback of the exact received object using NT handles rather
 /// than reopening its caller-visible pathname. The object must have exactly
 /// one NTFS hard link, restrictive OWNER/DACL and the expected actual bytes.
