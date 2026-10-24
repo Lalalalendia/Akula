@@ -94,13 +94,13 @@ sudo -n unshare --mount --propagation private -- bash -c '
   export AKULA_B1D0_REAL_ELF="$2"
   # The old direct B1d0 proof must still pass independently.
   direct_proof="$("$3" --exact b1d0_actual_built_linux_node_elf_uses_one_root_signed_fd_and_opt_receipt --nocapture)"
-  printf '%s\n' "$direct_proof"
+  printf "%s\n" "$direct_proof"
   [[ "$direct_proof" == *B1D0_SIGNED_REAL_AKULA_NODE_ELF_DIRECT_OPT_HOLD_PASS* ]] ||
     { echo "B1D0_FAIL: missing direct signed ELF proof" >&2; exit 1; }
   # New integration: the actual B0 v3 plan hash and pinned host are carried
   # through detached owner signature, durable CAS, /opt and process reopen.
   v3_proof="$("$3" --exact b1d0_actual_node_v1_elf_v3_review_owner_scope_cas_reopen_hold --nocapture)"
-  printf '%s\n' "$v3_proof"
+  printf "%s\n" "$v3_proof"
   [[ "$v3_proof" == *B1D0_B0_V3_SIGNED_REAL_NODE_OWNER_CAS_REOPEN_HOLD_PASS* ]] ||
     { echo "B1D0_FAIL: missing B0 v3 bound owner-CAS proof" >&2; exit 1; }
   test ! -e /opt/akula-b1d0-ci-node
