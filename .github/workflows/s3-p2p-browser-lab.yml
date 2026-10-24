@@ -90,31 +90,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/demo.bin'), 64*1024*1024)"
-          python create_manifest.py data/demo.bin --source-url /origin/demo.bin --out browser-manifest.json
-          python server.py --port 8766 --manifest browser-manifest.json > browser-server.log 2>&1 &
-          echo $! > browser-server.pid
+          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/browser-64m.bin'), 64*1024*1024)"
+          python create_manifest.py data/browser-64m.bin --source-url /origin/demo.bin --out browser-manifest.json
+          python server.py --port 8766 --demo-file data/browser-64m.bin --manifest browser-manifest.json > browser-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8766/manifest.json >/dev/null; then break; fi
             sleep 1
           done
           AKULA_LAB_SIZE=67108864 AKULA_LAB_MODE=resume node tests/test_persistent_chromium.cjs
-          kill "$(cat browser-server.pid)" || true
       - name: Real Chromium 1 GiB streaming and memory sampling
         shell: bash
         run: |
           set -euo pipefail
-          rm -f data/demo.bin
-          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/demo.bin'), 1024*1024*1024)"
-          python create_manifest.py data/demo.bin --source-url /origin/demo.bin --out browser-manifest.json
-          python server.py --port 8766 --manifest browser-manifest.json > browser-server.log 2>&1 &
-          echo $! > browser-server.pid
+          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/browser-1g.bin'), 1024*1024*1024)"
+          python create_manifest.py data/browser-1g.bin --source-url /origin/demo.bin --out browser-manifest.json
+          python server.py --port 8766 --demo-file data/browser-1g.bin --manifest browser-manifest.json > browser-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8766/manifest.json >/dev/null; then break; fi
             sleep 1
           done
           AKULA_LAB_SIZE=1073741824 AKULA_LAB_MODE=full node tests/test_persistent_chromium.cjs
-          kill "$(cat browser-server.pid)" || true
       - name: Evidence and logs
         if: always()
         uses: actions/upload-artifact@v4
