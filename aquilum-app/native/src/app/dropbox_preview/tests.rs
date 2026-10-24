@@ -144,3 +144,25 @@ fn repeat_oauth_consent_is_bound_to_exact_saved_public_identity() {
     draft.root_namespace_id.clear();
     assert_eq!(existing_account_scope(draft), None);
 }
+
+#[test]
+fn consent_browser_launch_rejects_paths_other_hosts_and_unsafe_schemes() {
+    let valid = "https://www.dropbox.com/oauth2/authorize?client_id=akula&response_type=code&state=sample";
+    assert!(dropbox_consent_url(valid));
+    for bad in [
+        "https://www.dropbox.com/oauth2/authorize",
+        "https://www.dropbox.com.evil.example/oauth2/authorize?client_id=x",
+        "http://www.dropbox.com/oauth2/authorize?client_id=x",
+        "https://www.dropbox.com/oauth2/authorize/other?client_id=x",
+        "file:///C:/Users",
+        "shell:Downloads",
+        "https://www.dropbox.com/oauth2/authorize?state=a\r\nb",
+        "https://www.dropbox.com/oauth2/authorize?state=with space",
+    ] {
+        assert!(!dropbox_consent_url(bad), "bad OAuth destination accepted");
+    }
+    assert!(!dropbox_consent_url(&format!(
+        "https://www.dropbox.com/oauth2/authorize?state={}",
+        "a".repeat(8192)
+    )));
+}

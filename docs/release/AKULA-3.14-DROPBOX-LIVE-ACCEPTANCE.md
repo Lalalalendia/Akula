@@ -30,7 +30,11 @@ files or impersonate a production user.
 
 1. Open Akula → Settings → Cloud → Dropbox. Confirm the modal opens and starts
    `DISCONNECTED / SYNC_DISABLED`.
-2. Click `Войти в Dropbox`. Complete consent in the system browser within
+2. Click `Войти в Dropbox`. The **default HTTPS browser** must open the
+   `https://www.dropbox.com/oauth2/authorize` page, never File Explorer.
+   The original signed v0.3.14 still uses `explorer.exe`; this corrected
+   Win32 ShellExecuteW behavior applies only to a future reviewed build.
+   Complete consent in the system browser within
    120 seconds. Confirm a status `ACCOUNT_AUTHORIZED / VAULT_NOT_APPROVED /
    SYNC_DISABLED`. No VaultId or independent HEAD pin is required for login.
 3. Close all Akula processes and reopen the **same installed** application.

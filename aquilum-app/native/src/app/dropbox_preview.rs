@@ -16,10 +16,11 @@ use akula_dropbox_secret_store::{
     CredentialScope, CredentialVault,
 };
 use std::{
-    process::{Command, Stdio},
     sync::{mpsc::{channel, Receiver, Sender}, Arc},
     time::Duration,
 };
+#[cfg(not(target_os = "windows"))]
+use std::process::{Command, Stdio};
 
 // Only the account proof may update the saved public account/root identifiers.
 // A Vault result is never converted to write/sync authority.
@@ -378,16 +379,44 @@ fn existing_account_scope(draft: DropboxReadOnlyDraft) -> Option<AccountIdentity
     })
 }
 
+// Fail closed unless the URL is the exact Dropbox HTTPS consent endpoint.
+// Never delegate an arbitrary URI scheme or local path to the operating system.
+fn dropbox_consent_url(url: &str) -> bool {
+    url.starts_with("https://www.dropbox.com/oauth2/authorize?")
+        && url.len() <= 8192
+        && url.bytes().all(|b| b.is_ascii_graphic())
+}
+
 fn open_browser(url: &str) -> bool {
-    let binary = if cfg!(target_os = "windows") {
-        "explorer.exe"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
+    dropbox_consent_url(url) && open_browser_system(url)
+}
+
+#[cfg(target_os = "windows")]
+fn open_browser_system(url: &str) -> bool {
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    // Use the user's registered HTTPS handler directly. explorer.exe can
+    // open File Explorer instead of navigating to the OAuth authorization.
+    // No cmd.exe, PowerShell, shell interpolation or browser-specific path.
+    let mut wide: Vec<u16> = url.encode_utf16().collect();
+    wide.push(0);
+    // SAFETY: the URL is an approved HTTPS endpoint; UTF-16 remains alive
+    // and NUL-terminated for the duration of this synchronous Win32 call.
+    let launched = unsafe {
+        ShellExecuteW(
+            None, w!("open"), PCWSTR(wide.as_ptr()), PCWSTR::null(),
+            PCWSTR::null(), SW_SHOWNORMAL,
+        )
     };
-    // Argument is passed directly, without shell interpretation. OAuth URL
-    // and children stdout/stderr are never included in application logs.
+    (launched.0 as isize) > 32
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_browser_system(url: &str) -> bool {
+    let binary = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    // No shell interpretation or OAuth URL/authorization-code logging.
     Command::new(binary).arg(url)
         .stdout(Stdio::null()).stderr(Stdio::null())
         .spawn().is_ok()
