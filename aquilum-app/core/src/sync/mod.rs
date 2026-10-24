@@ -126,6 +126,77 @@ pub(crate) fn audit_pinned_p2p_inbox_storage(
     Ok(())
 }
 
+/// P2P-only readback of the exact received object using NT handles rather
+/// than reopening its caller-visible pathname. The object must have exactly
+/// one NTFS hard link, restrictive OWNER/DACL and the expected actual bytes.
+/// This complements, but does not replace, SQLite/namespace custody.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn verify_pinned_p2p_inbox_object(
+    root: &std::path::Path,
+    pinned_root: &std::fs::File,
+    transfer_id: uuid::Uuid,
+    expected_bytes: u64,
+    expected_blake3: [u8; 32],
+) -> Result<(), VaultPortError> {
+    use std::io::Read;
+
+    if expected_bytes == 0 || expected_bytes > 8 * 1024 * 1024
+        || expected_blake3 == [0u8; 32]
+    {
+        return Err(VaultPortError::UnsafePath);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    let objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    filegate_windows_acl::audit_owner_dacl(&objects)?;
+    // The filename is derived only from a locally authenticated transfer ID,
+    // never from a remote filename, JSON display label or user-supplied path.
+    let leaf = format!("{}.blob", transfer_id.hyphenated());
+    let mut object = pinned_windows::open_optional_inbox_audit_child(
+        &objects, &leaf, true,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    filegate_windows_acl::audit_owner_dacl(&object)?;
+    if pinned_windows::file_identity_with_links(&object)?.2 != 1 {
+        return Err(VaultPortError::UnsafePath);
+    }
+    if object.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?.len()
+        != expected_bytes
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    let mut hasher = blake3::Hasher::new();
+    let mut bytes = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = object.read(&mut buffer).map_err(|e| VaultPortError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        bytes = bytes.checked_add(n as u64).ok_or(VaultPortError::FileChanged)?;
+        if bytes > expected_bytes {
+            return Err(VaultPortError::FileChanged);
+        }
+        hasher.update(&buffer[..n]);
+    }
+    if bytes != expected_bytes || *hasher.finalize().as_bytes() != expected_blake3 {
+        return Err(VaultPortError::FileChanged);
+    }
+    // Refuse an obvious replacement of the objects path during readback.
+    // A malicious same-user actor can still race after this point, hence this
+    // is intentionally not called a durable authenticated delivery receipt.
+    let still_objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    if pinned_windows::file_identity(&objects)?
+        != pinned_windows::file_identity(&still_objects)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    Ok(())
+}
+
 mod protocol;
 mod provider;
 mod s3;
