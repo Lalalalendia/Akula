@@ -91,6 +91,27 @@ if ($reply -notmatch '^PDF_VIEW_V1 [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$') { thro
 $png = [IO.File]::ReadAllBytes($rendered)
 if ($png.Length -lt 100 -or [BitConverter]::ToString($png, 0, 8) -ne '89-50-4E-47-0D-0A-1A-0A') { throw 'PDF page renderer did not produce actual PNG pixels' }
 Write-Host "AKULA_PDFIUM_INSTALLED_RENDER=PASS;$reply"
+# Multi-page raster proof: two different page indices MUST produce distinct
+# decoded pixels, and an out-of-range request MUST fail without rewriting PDF.
+$multi = Join-Path $probeDir 'two-page.pdf'
+python scripts/pdf-preview/generate-two-page-fixture.py --out $multi
+if ($LASTEXITCODE -ne 0) { throw 'Could not generate multi-page PDF fixture' }
+$originalMultiHash = (Get-FileHash -LiteralPath $multi -Algorithm SHA256).Hash
+$distinct = @()
+for ($pageIndex = 0; $pageIndex -lt 2; $pageIndex++) {
+  $dest = Join-Path $probeDir "two-page-$pageIndex.png"
+  $meta = Join-Path $probeDir "two-page-$pageIndex.status"
+  & $exe --pdf-worker $multi $pageIndex 800 0 $dest $meta
+  if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $dest -PathType Leaf)) { throw "Cannot render PDF page $pageIndex" }
+  if ((Get-Content -LiteralPath $meta -Raw).Trim() -notmatch '^PDF_VIEW_V1 2 [1-9][0-9]* [1-9][0-9]*$') { throw "Wrong PDF page count $pageIndex" }
+  $distinct += (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+}
+if ($distinct[0] -eq $distinct[1]) { throw 'Distinct PDF pages rendered identically' }
+& $exe --pdf-worker $multi 2 800 0 (Join-Path $probeDir 'invalid.png') (Join-Path $probeDir 'invalid.status')
+if ($LASTEXITCODE -eq 0) { throw 'Out-of-range PDF page was accepted' }
+if ((Get-FileHash -LiteralPath $multi -Algorithm SHA256).Hash -ne $originalMultiHash) { throw 'Rendering modified the PDF source' }
+Write-Host 'AKULA_PDFIUM_MULTIPAGE=PASS;pages=2;different_pixels=1;invalid_index_rejected=1;source_unchanged=1'
+
 
 # Run the full native application integration path against this *installed*
 # sidecar: File Gate, idempotence, Tantivy search UI cards and result opening.
