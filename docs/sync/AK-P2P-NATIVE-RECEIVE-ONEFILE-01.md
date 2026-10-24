@@ -242,3 +242,36 @@ custody or eliminate attacks during the time between audits.
 [CI #40095402976](https://github.com/Lalalalendia/Akula/actions/runs/40095402976)
 created and awaiting full result. Do not merge Draft, enable auto-update
 or claim an authenticated durable ACK based only on these checks.
+
+## 24 October: cold read-only SQLite receipt verification before network OK
+
+[Exact-head Windows CI #40096506340](https://github.com/Lalalalendia/Akula/actions/runs/40096506340)
+passed fully on `9fdec890`, including full NT ancestor custody, WAL/SHM,
+real QUIC, n0 and the `installed` graph. This is a local CI acceptance
+only, **not** a two-device Internet or power-loss test.
+
+The Windows native receiver now *independently reopens* the same SQLite
+Inbox in read-only/query-only mode **after the writing connection closes**
+and before sending receiver OK. It requires an exact match for the
+already-authenticated `ExpectedTransfer`: UUID, sender, recipient, source,
+length, digest and committed `state=1`. A missing, pending or edited row
+fails closed even if the original writer returned `VerifiedLocal`.
+The final blob's bytes and ACL are separately checked through pinned NT
+handles. The extra database check is one bounded indexed UUID lookup;
+it does not copy or rehash the blob again and does not repair SQL state.
+
+A standalone cross-platform ledger regression edits the sender and state
+through an independent SQLite connection after commit, then requires
+the cold read-only check to reject both modifications. A Windows receiver
+test forbids a network OK for a cold uncommitted row. Both tests run inside
+the existing exact-head Windows P2P job, without a new CI workflow.
+[Current checkpoint 722e7030](https://github.com/Lalalalendia/Akula/commit/722e7030b53c2aa0c87ed530a296fea23c48b721);
+[CI #40097644361](https://github.com/Lalalalendia/Akula/actions/runs/40097644361)
+**pending**, results not yet accepted.
+
+This narrows detection of same-user SQLite **metadata** tampering; it does
+not prevent another same-user process from changing the DB/WAL bytes after
+the last check or around the ACK. Full VFS/hostile-process isolation,
+durable authenticated acknowledgement after power loss, an installed
+two-physical-device WAN/relay acceptance, and ordinary signed update are
+still release HOLD. `main` remains unchanged.
