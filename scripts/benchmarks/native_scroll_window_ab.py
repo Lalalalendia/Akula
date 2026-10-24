@@ -24,14 +24,15 @@ TRIALS = (1, 2, 3)
 MODES = ("fixed2", "adaptive2")
 
 
-def fixture(cover: bool) -> str:
+def fixture(cover: bool, emoji_colrv1: bool = False) -> str:
     header = "---\ncover: true\ntype: book\nPage_cover: pattern:polka\n---\n" if cover else ""
+    emoji = "😁 😃 😄 😅 😆 😇 😊 😍 😎 🙂 " * 8 if emoji_colrv1 else ""
     paragraphs = "".join(
         f"## Section {n}\n"
         f"Text {n}: Akula scrolling Unicode and кириллица. "
         "Some **bold** and *italic* Markdown, [[Akula]] links, "
         "and a long sentence that must wrap across the editor column. "
-        "The second line keeps the document scrollable.\n\n"
+        f"The second line keeps the document scrollable.{(' ' + emoji) if emoji else ''}\n\n"
         for n in range(300)
     )
     return header + paragraphs
@@ -54,7 +55,7 @@ def run_one(binary: Path, out: Path, trial: int, mode: str, scene: str,
     vault.mkdir(parents=True, exist_ok=True)
     data.mkdir(parents=True, exist_ok=True)
     note = vault / "scroll-fixture.md"
-    content = fixture(cover)
+    content = fixture(cover, emoji_colrv1=scene.startswith("colr_"))
     note.write_text(content, encoding="utf-8")
     source_digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
     replay_file, metrics_file, log = (root / "replay.json", root / "metrics.json", root / "process.log")
