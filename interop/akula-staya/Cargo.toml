@@ -29,6 +29,7 @@ sender-arm-lab = []
 public-cdn-reader-lab = ["dep:sha2", "dep:serde", "dep:serde_json"]
 public-cdn-s3-lab = ["public-cdn-reader-lab", "dep:reqwest"]
 public-cdn-local-minio-test = ["public-cdn-s3-lab"]
+public-cdn-bao-lab = ["public-cdn-reader-lab", "dep:iroh-blobs", "dep:tokio", "staya-transfer/bao"]
 # Explicit Windows two-PC OS-backed QUIC HELLO/OK. Never sends user bytes.
 os-pinned-lan-probe = ["p2p-live-identity", "dep:tokio"]
 
@@ -48,6 +49,7 @@ staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev =
 blake3 = "=1.8.5"
 sha2 = { version = "0.10", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+iroh-blobs = { version = "=0.103.1", default-features = false, optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 ring = { version = "=0.17.14", optional = true }
