@@ -42,6 +42,7 @@ PYTHON="$(command -v python3)"
 EXIT_STATUS=0
 GATEWAY_PID=
 TRACKER_PID=
+TURN_PID=
 cleanup() {
   EXIT_STATUS=$?
   trap - EXIT
@@ -52,12 +53,12 @@ cleanup() {
   if [[ -d "$WORK/test-results" ]]; then
     cp -a "$WORK/test-results/." "$EVIDENCE_DIR/" || EXIT_STATUS=1
   fi
-  for name in server.log minio-gateway.log; do
+  for name in server.log minio-gateway.log turn.log; do
     if [[ -f "$WORK/$name" ]]; then
       cp "$WORK/$name" "$EVIDENCE_DIR/$name" || EXIT_STATUS=1
     fi
   done
-  for pid in "$GATEWAY_PID" "$TRACKER_PID"; do
+  for pid in "$GATEWAY_PID" "$TRACKER_PID" "$TURN_PID"; do
     if [[ -n "$pid" ]]; then kill "$pid" >/dev/null 2>&1 || true; fi
   done
   for pid in "$GATEWAY_PID" "$TRACKER_PID"; do
@@ -137,6 +138,22 @@ fi
 printf 'Running real Chromium P2P and MinIO origin-byte assertions...\n'
 node tests/test_minio_browser_webrtc.cjs
 test -s test-results/minio-real-browser-result.json
+if [[ "${AKULA_TEST_TURN_RELAY:-0}" == "1" ]]; then
+  if ! command -v turnserver >/dev/null 2>&1; then
+    printf 'MISSING_DEPENDENCY: turnserver (coturn)\n' >&2
+    exit 2
+  fi
+  printf 'Starting test-only local TURN relay...\n'
+  turnserver --no-cli --no-tls --no-dtls --no-multicast-peers --no-loopback-peers \
+    --listening-ip 127.0.0.1 --relay-ip 127.0.0.1 --listening-port 3478 \
+    --min-port 49160 --max-port 49220 --lt-cred-mech \
+    --user akula-test:akula-test-only-password --realm akula.test \
+    --log-file turn.log --simple-log -v &
+  TURN_PID=$!
+  sleep 2
+  AKULA_TEST_FORCE_RELAY=1 node tests/test_minio_browser_webrtc.cjs
+  test -s test-results/minio-turn-browser-result.json
+fi
 printf '\nOrigin byte counter after test:\n'
 curl --insecure --silent --fail https://127.0.0.1:9443/metrics
 printf '\n'
