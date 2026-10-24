@@ -31,6 +31,23 @@ pub(super) struct View {
     pub(super) error: Option<String>,
     pub(super) generation: u64,
 }
+impl View {
+    // Reusing one Akula tab for another PDF must not show the old raster.
+    // A new request gets a fresh generation; older replies are discarded.
+    fn retarget(&mut self, path: &Path) -> bool {
+        if self.path == path { return false; }
+        self.path = path.to_path_buf();
+        self.current = 0;
+        self.total = 1;
+        self.zoom = 1.0;
+        self.rotation = 0;
+        self.scroll = 0.0;
+        self.image = None;
+        self.loading = false;
+        self.error = None;
+        true
+    }
+}
 pub(super) struct ResultPage {
     tab: Uuid,
     generation: u64,
@@ -72,10 +89,7 @@ impl State {
             path: path.to_path_buf(), current: 0, total: 1, zoom: 1.0, rotation: 0, scroll: 0.0,
             image: None, loading: false, error: None, generation: 0,
         });
-        if view.path != path {
-            view.path = path.to_path_buf();
-            view.current = 0; view.image = None; view.error = None;
-        }
+        view.retarget(path);
         if view.image.is_none() && !view.loading && view.error.is_none() {
             self.request(tab, wake);
         }
@@ -243,5 +257,24 @@ mod tests {
     fn pdf_suffix_is_case_insensitive_and_not_arbitrary_file() {
         assert!(is_pdf(Path::new("x.PDF")));
         assert!(!is_pdf(Path::new("x.pdf.exe")));
+    }
+    #[test]
+    fn reusing_tab_for_new_pdf_clears_stale_page_and_pending_render() {
+        let mut view = View {
+            path: PathBuf::from("old.pdf"), current: 8, total: 15,
+            zoom: 2.0, rotation: 3, scroll: 700.0,
+            image: None, loading: true, error: Some("old error".into()), generation: 42,
+        };
+        assert!(view.retarget(Path::new("new.pdf")));
+        assert_eq!(view.path, PathBuf::from("new.pdf"));
+        assert_eq!(view.current, 0);
+        assert_eq!(view.total, 1);
+        assert_eq!(view.zoom, 1.0);
+        assert_eq!(view.rotation, 0);
+        assert_eq!(view.scroll, 0.0);
+        assert!(!view.loading, "old worker must not block next PDF request");
+        assert!(view.image.is_none());
+        assert!(view.error.is_none());
+        assert!(!view.retarget(Path::new("new.pdf")), "same PDF keeps tab state");
     }
 }
