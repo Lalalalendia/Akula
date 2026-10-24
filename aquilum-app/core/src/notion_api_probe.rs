@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub mod http;
 pub mod projection;
 pub mod publish;
+pub mod cached_import;
 pub mod snapshot;
 pub mod refresh;
 pub mod sync_policy;

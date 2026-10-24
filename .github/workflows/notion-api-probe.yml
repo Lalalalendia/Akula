@@ -63,6 +63,42 @@ jobs:
           grep -q "not cached" "$errors"
           test ! -e "$app/ui-state.sqlite3"
 
+      - name: Deny cached import when snapshot is missing or approval is absent
+        working-directory: aquilum-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(mktemp -d)"
+          vault="$(mktemp -d)"
+          output="$(mktemp)"
+          errors="$(mktemp)"
+          trap 'rm -rf "$app" "$vault" "$output" "$errors"' EXIT
+          unset AKULA_NOTION_READ_TOKEN
+          root="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          digest="$(printf '0%.0s' {1..64})"
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --cached-preview \
+              "$root" "$app" >"$output" 2>"$errors"; then
+            echo "Missing cache unexpectedly passed" >&2
+            exit 1
+          fi
+          test ! -s "$output"
+          test ! -e "$app/ui-state.sqlite3"
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --publish-cached \
+              "$root" "$app" "$vault" "$digest" --approve-create-only >"$output" 2>"$errors"; then
+            echo "Missing cached source unexpectedly published" >&2
+            exit 1
+          fi
+          test ! -e "$vault/Notion-import"
+          if cargo run -q -p aquilum-core --locked --features notion-api-probe \
+              --bin akula-notion-import-lab -- --publish-cached \
+              "$root" "$app" "$vault" "$digest" >"$output" 2>"$errors"; then
+            echo "Missing explicit approval unexpectedly published" >&2
+            exit 1
+          fi
+          test ! -e "$vault/Notion-import"
+
       - name: Refuse unconfigured CLI without network or output files
         working-directory: aquilum-app
         shell: bash
