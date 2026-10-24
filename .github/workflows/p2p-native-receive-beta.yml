@@ -10,6 +10,10 @@ on:
       - 'aquilum-app/native/src/ui/transfer/**'
       - 'aquilum-app/native/src/ui/transfer.rs'
       - 'aquilum-app/native/Cargo.toml'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
+      - 'aquilum-app/core/src/sync/mod.rs'
+      - 'aquilum-app/core/src/sync/pinned_windows.rs'
+      - 'aquilum-app/core/src/sync/filegate_windows_acl.rs'
       - 'aquilum-app/native/assets/locales/**'
       - 'aquilum-app/Cargo.lock'
       - '.github/workflows/p2p-native-receive-beta.yml'
@@ -48,6 +52,7 @@ jobs:
         run: |
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/native_receive.rs aquilum-app/native/src/ui/transfer/native_receive_view.rs
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/peer_pair.rs aquilum-app/native/src/ui/transfer/peer_pair.rs
+          rustfmt --check --edition 2024 --config skip_children=true aquilum-app/core/src/p2p_inbox_lab.rs aquilum-app/core/src/sync/mod.rs aquilum-app/core/src/sync/pinned_windows.rs
           cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Verify shipping lockfile remains resolved
         shell: bash
@@ -67,6 +72,8 @@ jobs:
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_receiver_refuses_junction_ancestor -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_receiver_requires_existing_regular_directory_chain -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_receiver_rejects_inbox_with_everyone_full_control -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_receiver_refuses_insecure_objects_acl_before_second_network_receipt -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_receiver_refuses_insecure_sqlite_acl_before_second_network_receipt -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta actual_iroh_native_received_inbox_only_roundtrip_without_user_credentials -- --nocapture
       - name: Verify real opt-in n0 Internet discovery, QUIC payload and reopened Inbox
         shell: bash
