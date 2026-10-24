@@ -43,6 +43,18 @@ async function sample(page,label) {
   evidence.observed.push(reading);
   return reading;
 }
+function summarizeMemory() {
+  const rss=evidence.observed.map(x=>x.rssMiB).filter(Number.isFinite);
+  const heap=evidence.observed.map(x=>x.jsHeapMiB).filter(Number.isFinite);
+  evidence.memorySummary={
+    samples:evidence.observed.length,
+    samplesWithRss:rss.length,
+    samplesWithJsHeap:heap.length,
+    maxAggregateRssMiB:rss.length?Math.max(...rss):null,
+    maxJsHeapMiB:heap.length?Math.max(...heap):null,
+    note:'Aggregate resident memory from ps includes shared process pages; it is not unique-set-size.'
+  };
+}
 const start=Date.now();
 async function open() {
   const context=await chromium.launchPersistentContext(profile,{
@@ -149,6 +161,10 @@ try{
   evidence.finalFile=await verifyFile(page);
   assert.equal(evidence.finalFile.size,SIZE);
   assert.equal(evidence.finalFile.sha256,evidence.finalFile.expected);
+  evidence.durationMs=Date.now()-start;
+  summarizeMemory();
+  assert.ok(evidence.memorySummary.samplesWithRss>0,
+    'RSS samples missing: memory test cannot be called complete');
   evidence.passed=true;
   console.log(JSON.stringify(evidence,null,2));
 }catch(e){
@@ -156,6 +172,7 @@ try{
   console.error(evidence.error);
   throw e;
 }finally{
+  if(!evidence.memorySummary) summarizeMemory();
   fs.writeFileSync(path.join(OUTPUT,'browser-'+MODE+'-result.json'),
     JSON.stringify(evidence,null,2)+'\n');
   try{await ctx?.close();}catch(_){}
