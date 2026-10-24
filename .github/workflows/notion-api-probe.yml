@@ -18,6 +18,9 @@ on:
       - '.github/workflows/notion-api-probe.yml'
       - 'aquilum-app/core/src/notion_api_probe/**'
       - 'aquilum-app/core/src/ui_state/migrations/**'
+      - 'aquilum-app/core/src/ui_state/migration_tests.rs'
+      - 'aquilum-app/core/src/bin/akula_notion_import_lab.rs'
+      - 'aquilum-app/core/src/notion_api_probe.rs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -61,6 +64,7 @@ jobs:
           fi
           test ! -s "$output"
           grep -q "not cached" "$errors"
+          test ! -e "$app/ui-state.sqlite3"
 
       - name: Refuse unconfigured CLI without network or output files
         working-directory: aquilum-app

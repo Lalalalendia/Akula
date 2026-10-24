@@ -56,7 +56,7 @@ fn run() -> Result<(), String> {
     // An offline read never touches the Notion token or opens an HTTP client.
     if let Mode::Offline(app) = &mode {
         let app = app_data(app)?;
-        let store = SnapshotStore::open(&app.join("ui-state.sqlite3"))?;
+        let store = SnapshotStore::open_read_only(&app.join("ui-state.sqlite3"))?;
         let cached = store.load(&root)?
             .ok_or("Notion root not cached; an online first read is required")?;
         let links = cached.info.link_count;
