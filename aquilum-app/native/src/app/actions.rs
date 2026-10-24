@@ -7,7 +7,7 @@ impl App {
             root.remove_layer(id);
             return Outcome::default();
         }
-        if self.on_suggest_pick(root, id, &action) || self.on_find_action(root, id, &action) || self.on_sash(root, id, &action) {
+        if self.on_pdf_action(root, &action) || self.on_suggest_pick(root, id, &action) || self.on_find_action(root, id, &action) || self.on_sash(root, id, &action) {
             return Outcome::default();
         }
         if matches!(self.popup, Some(Popup::Settings { .. })) {

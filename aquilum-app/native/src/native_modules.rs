@@ -30,7 +30,7 @@ mod navigation;
 mod note;
 mod output;
 mod paths;
-mod pdf;
+mod pdf; mod pdf_worker;
 mod rank;
 mod rope;
 mod stats;
