@@ -84,6 +84,48 @@ pub(crate) fn create_pinned_p2p_inbox_stage(
     Ok((writable, stage))
 }
 
+/// P2P-only negative guard for the local Inbox after stage creation, before
+/// any path-based SQLite/object operation, and again before reporting success.
+/// Each child is opened by one NT component relative to the *same pinned root*
+/// with READ_CONTROL. This rejects unsafe owner/DACL, reparse directories and
+/// hard-linked SQLite files. Path-based SQLite/open remains a known gap; this
+/// guard is not a complete defense against hostile same-user rename races.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn audit_pinned_p2p_inbox_storage(
+    root: &std::path::Path,
+    pinned_root: &std::fs::File,
+    require_complete: bool,
+) -> Result<(), VaultPortError> {
+    let inspected = pinned_windows::open_root(root)?;
+    if pinned_windows::file_identity(&inspected)? != pinned_windows::file_identity(pinned_root)? {
+        return Err(VaultPortError::FileChanged);
+    }
+    filegate_windows_acl::audit_owner_dacl(&inspected)?;
+    for (name, leaf_file, mandatory) in [
+        ("objects", false, true),
+        ("received-inbox.sqlite3", true, true),
+        ("received-inbox.sqlite3-wal", true, false),
+        ("received-inbox.sqlite3-shm", true, false),
+    ] {
+        let opened = pinned_windows::open_optional_inbox_audit_child(
+            &inspected,
+            name,
+            leaf_file,
+        )?;
+        let Some(opened) = opened else {
+            if mandatory && require_complete {
+                return Err(VaultPortError::FileChanged);
+            }
+            continue;
+        };
+        filegate_windows_acl::audit_owner_dacl(&opened)?;
+        if leaf_file && pinned_windows::file_identity_with_links(&opened)?.2 != 1 {
+            return Err(VaultPortError::UnsafePath);
+        }
+    }
+    Ok(())
+}
+
 mod protocol;
 mod provider;
 mod s3;
