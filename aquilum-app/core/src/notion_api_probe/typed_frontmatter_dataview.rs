@@ -148,3 +148,79 @@ fn api_cache_to_dataview_filters_by_data_source_and_sorts_numeric_fields() {
     assert_eq!(found.total, 1);
     assert_eq!(cell_text(&found.rows[0]), B);
 }
+
+#[test]
+fn file_gate_import_is_searchable_through_actual_sqlite_dataview_index() {
+    use crate::app_core::{Core, CoreEvent};
+    use crate::notion_api_probe::{
+        cached_import::approved_cached_preview, publish, structured_bundle,
+    };
+    use std::{fs, sync::Arc, time::{Duration, Instant}};
+
+    let temp = tempfile::tempdir().unwrap();
+    let app = temp.path().join("app");
+    let vault = temp.path().join("vault");
+    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(&vault).unwrap();
+    let cache = app.join("ui-state.sqlite3");
+    let digest = {
+        let mut store = SnapshotStore::open(&cache).unwrap();
+        store.publish(&snapshot(), 400).unwrap().digest
+    };
+    let preview = approved_cached_preview(&cache, A, &digest).unwrap();
+    let bundle = structured_bundle::prepare_from_cached(&cache, A, &digest).unwrap();
+    assert_eq!(preview.candidates.len(), 4);
+    assert_eq!(bundle.review().edge_count, 2);
+    assert_eq!(bundle.review().object_counts.get("data_source"), Some(&2));
+
+    let core = Core::open(&app, Arc::new(|_: CoreEvent| {}));
+    core.ui_state.resolve_workspace(vault.to_str().unwrap(), 1).unwrap();
+    assert!(publish::publish_approved(&core, &vault, &preview, false).is_err());
+    assert!(!vault.join("Notion-import").exists());
+    let first = publish::publish_approved(&core, &vault, &preview, true).unwrap();
+    assert!(first.completed);
+    assert_eq!(first.created.len(), 4);
+    let structured = structured_bundle::publish_approved(&core, &vault, &bundle, true).unwrap();
+    let verified_bundle = structured_bundle::inspect_existing(&vault.join(&structured.relative_path))
+        .expect("independent typed JSON survives File Gate and readback");
+    assert_eq!(verified_bundle.source_digest, digest);
+    assert_eq!(verified_bundle.edge_count, 2);
+    let repeated = publish::publish_approved(&core, &vault, &preview, true).unwrap();
+    assert!(repeated.completed && repeated.created.is_empty());
+    assert_eq!(repeated.existing_untouched.len(), 4);
+
+    // Unlike the pure parser test above, this query uses the on-disk SQLite
+    // metadata populated by SearchService's real asynchronous indexing worker.
+    let root = vault.to_str().unwrap();
+    core.search.prepare(root).unwrap();
+    let score = key("Score", &json!({"id":"score-prop"})).unwrap();
+    let labels = key("Labels", &json!({"id":"labels-prop"})).unwrap();
+    let query = format!(
+        "TABLE WITHOUT ID {score} WHERE notion_data_source_id = \"{DS}\" SORT {score} DESC"
+    );
+    let origin = vault.join(format!("Notion-import/{A}.md"));
+    let origin = origin.to_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let table = loop {
+        let attempt = core.search.run_dataview_query(root, origin, &query, 0);
+        if let Ok(found) = &attempt {
+            if found.total == 2 { break found.clone(); }
+        }
+        assert!(Instant::now() < deadline, "File Gate import was not indexed: {attempt:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(table.total, 2);
+    assert_eq!(cell_text(&table.rows[0]), "42.5");
+    assert_eq!(cell_text(&table.rows[1]), "8");
+
+    let filtered = format!(
+        "TABLE WITHOUT ID file.name WHERE notion_data_source_id = \"{DS}\" \
+         AND contains({labels}, \"Research\")"
+    );
+    let selected = core.search.run_dataview_query(root, origin, &filtered, 0).unwrap();
+    assert_eq!(selected.total, 1);
+    assert_eq!(cell_text(&selected.rows[0]), B);
+    core.search.deactivate().unwrap();
+    assert_eq!(fs::read_to_string(vault.join(format!("Notion-import/{A}.md"))).unwrap(),
+        preview.candidates.iter().find(|p| p.source_id == A).unwrap().markdown);
+}
