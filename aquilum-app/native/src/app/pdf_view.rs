@@ -47,7 +47,7 @@ pub(super) fn trusted_source(vault: &Path, source: &Path) -> bool {
         return false;
     }
     match (vault.canonicalize(), source.canonicalize()) {
-        (Ok(root), Ok(path)) if path.starts_with(root) => {
+        (Ok(root), Ok(path)) if path.starts_with(&root) => {
             std::fs::File::open(&path).ok().and_then(|mut f| {
                 use std::io::Read;
                 let mut head = [0; 5];
