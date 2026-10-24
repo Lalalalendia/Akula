@@ -4,6 +4,8 @@ use crate::render::Renderer;
 #[cfg(feature = "memory-probe")]
 mod analysis;
 mod atlas;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod avx2;
 #[cfg(feature = "memory-probe")]
 mod big;
 mod cost;

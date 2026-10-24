@@ -1,0 +1,85 @@
+name: AVX2 integrated editor frame parity (Linux and Windows)
+
+on:
+  pull_request:
+    paths:
+      - "aquilum-app/native/src/app/tests/perf/avx2.rs"
+      - "aquilum-app/native/src/app/tests/perf/mod.rs"
+      - ".github/workflows/native-avx2-integrated.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avx2-integrated-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrated:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: avx2-integrated
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Report CPU, OS, and toolchain
+        shell: bash
+        working-directory: aquilum-app
+        run: |
+          {
+            echo "HEAD=$(git rev-parse HEAD)"
+            echo "RUNNER_OS=$RUNNER_OS"
+            uname -a
+            rustc --version
+            cargo --version
+            if test -f /proc/cpuinfo; then
+              grep -m1 'model name' /proc/cpuinfo || true
+              grep -m1 'flags' /proc/cpuinfo || true
+            fi
+          } | tee integrated-env.txt
+      - name: Full Akula scroll and animation frames under both SIMD backends
+        shell: bash
+        working-directory: aquilum-app
+        env:
+          AQ_OUT: ${{ github.workspace }}/avx2-diff
+        run: |
+          set -euo pipefail
+          mkdir -p "$AQ_OUT"
+          cargo test --release --locked -p aquilum-native --bin aquilum-native \
+            avx2_integrated_ -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee integrated-perf.log
+          if grep -q 'SKIP-AVX2-INTEGRATED' integrated-perf.log; then
+            if [ "$RUNNER_OS" != "Windows" ]; then
+              echo "::error::Linux parity benchmark requires an AVX2-capable runner"
+              exit 1
+            fi
+            echo "::warning::Windows runner lacks AVX2; compatibility is not proven on this runner"
+            exit 0
+          fi
+          test "$(grep -c 'PASS-AVX2-INTEGRATED' integrated-perf.log)" -eq 3
+          grep -E 'PASS-AVX2-INTEGRATED|BENCH-AVX2-EDITOR' integrated-perf.log | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload platform-specific reproducibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avx2-integrated-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            aquilum-app/integrated-env.txt
+            aquilum-app/integrated-perf.log
+            avx2-diff/*.png
+          retention-days: 30
