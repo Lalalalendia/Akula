@@ -63,11 +63,22 @@ fn fixture()->SourcePreview {
             row(ROOT,DS1,8),row(PAGE_B,DS1,42),
             row(PAGE_C,DS2,21),row(PAGE_D,DS2,99),
             view(VIEW_A,DS1,"table"),view(VIEW_B,DS1,"board"),
-            RawObject {kind:"markdown".into(),id:ROOT.into(),
-                json:json!({"markdown":"Body and task list"})},
             RawObject {kind:"page".into(),id:"55555555-5555-4555-8555-555555555555".into(),
                 json:json!({"object":"page","id":"55555555-5555-4555-8555-555555555555",
                     "parent":{"type":"page_id","page_id":ROOT}})},
+            // SnapshotStore requires one, and only one, Markdown payload for
+            // every page (including a standalone page in the same root).
+            RawObject {kind:"markdown".into(),id:ROOT.into(),
+                json:json!({"markdown":"Body and task list"})},
+            RawObject {kind:"markdown".into(),id:PAGE_B.into(),
+                json:json!({"markdown":"Second row body"})},
+            RawObject {kind:"markdown".into(),id:PAGE_C.into(),
+                json:json!({"markdown":"Third row body"})},
+            RawObject {kind:"markdown".into(),id:PAGE_D.into(),
+                json:json!({"markdown":"Fourth row body"})},
+            RawObject {kind:"markdown".into(),
+                id:"55555555-5555-4555-8555-555555555555".into(),
+                json:json!({"markdown":"Standalone note body"})},
         ],
         links:vec![
             super::super::Link{from:ROOT.into(),to:PAGE_B.into(),
@@ -212,15 +223,7 @@ fn independently_owned_bases_survive_token_and_cache_loss() {
         notion_api_probe::{projection::prepare_import, publish, structured_bundle},
     };
     use std::{fs, sync::Arc};
-    let mut source=fixture();
-    let ids=source.objects.iter().filter(|o|o.kind=="page")
-        .map(|o|o.id.clone()).collect::<Vec<_>>();
-    for id in ids {
-        source.objects.push(RawObject {
-            kind:"markdown".into(),id:id.clone(),
-            json:json!({"markdown":format!("Body for {id}")}),
-        });
-    }
+    let source=fixture();
     let temp=tempfile::tempdir().unwrap();
     let app=temp.path().join("app");
     let vault=temp.path().join("vault");
