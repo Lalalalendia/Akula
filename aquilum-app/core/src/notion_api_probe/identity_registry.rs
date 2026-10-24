@@ -134,8 +134,11 @@ fn stable(scope: &str, parts: &[&str]) -> String {
     }
     format!("akn_{}", hash.finalize().to_hex())
 }
-fn node_id(root: &str, kind: &str, id: &str) -> String {
+pub(super) fn node_id(root: &str, kind: &str, id: &str) -> String {
     stable(root, &["node", kind, id])
+}
+pub(super) fn property_id(root: &str, owner_kind: &str, owner: &str, id: &str) -> String {
+    stable(root, &["property", owner_kind, owner, id])
 }
 fn relative_path(root: &str, digest: &str) -> String {
     format!("{DIR}/{root}-{digest}.notion-identities.json")
@@ -218,7 +221,7 @@ fn normalize(source: &SourcePreview, digest: &str) -> Result<PreparedRegistry, S
             if property_index.contains_key(&key) {
                 return Err("duplicate schema property ID in one Notion source".into());
             }
-            let akula_id = stable(root, &["property", &object.kind, &object.id, id]);
+            let akula_id = property_id(root, &object.kind, &object.id, id);
             property_index.insert(key, akula_id.clone());
             properties.push(SchemaProperty {
                 owner_id:object.id.clone(), owner_kind:object.kind.clone(),
