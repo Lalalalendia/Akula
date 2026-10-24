@@ -16,11 +16,8 @@ include!("native_modules.rs");
 
 pub use args::Args;
 fn main() {
-    if let Some(exit_code) = pdf_worker::maybe_run() {
-        std::process::exit(exit_code);
-    }
-    args::run_w4_pilot_if_requested();
-    #[cfg(target_os = "windows")]
+    if let Some(exit_code) = pdf_worker::maybe_run() { std::process::exit(exit_code); }
+    args::run_w4_pilot_if_requested();    #[cfg(target_os = "windows")]
     unsafe {
         #[link(name = "winmm")]
         unsafe extern "system" {
