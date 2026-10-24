@@ -291,7 +291,10 @@ fn read_checked_text_preview(root: &Path, id: Uuid) -> Result<Option<String>, St
         return Ok(None);
     }
     let mut bytes = Vec::with_capacity(intent.bytes as usize);
-    pinned.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    (&mut pinned)
+        .take(MAX_TEXT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
     if bytes.len() as u64 != intent.bytes
         || pinned.metadata().map_err(|error| error.to_string())?.len() != intent.bytes
         || *blake3::hash(&bytes).as_bytes() != intent.blake3
