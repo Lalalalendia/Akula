@@ -56,3 +56,7 @@ This is a native unit test over a synthetic note on one Windows PC. It does not 
 - The separate test-only [Draft PR #707](https://github.com/Lalalalendia/Akula/pull/707) is open at `90c3be0234332766ac177016adf89dd50fb831cf`. Application checks run [#40096716276](https://github.com/Lalalalendia/Akula/actions/runs/40096716276) was queued when checked; exact-head CI and review are not yet accepted. No PR was merged.
 - The native test patch and unrelated pre-existing local changes remain in the worktree at `530fe3d6794ee28d2c7098af1266ff5340903543`.
 
+## CI follow-up — 2026-10-24T13:17:50Z
+
+The exact-head Application checks for PR #707 now show the `history_revision_identity_contract` test passing (1/1) and the separate Native frame fidelity job passing. The Required Rust tests and policy checks job failed in an unrelated macOS updater transaction test: `updater::macos_transaction::tests::fresh_user_install_has_one_shared_lock` could not reacquire its BSD lock (`Resource temporarily unavailable`, OS error 11). That job reported 731 passed, 1 failed, and 66 ignored. The Main PR gate remained queued, so exact-head acceptance was still open at this check. PR #707 remained Draft and unmerged; no retry was dispatched.
+
