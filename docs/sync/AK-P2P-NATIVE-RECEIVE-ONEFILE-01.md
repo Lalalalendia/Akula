@@ -130,3 +130,27 @@ unchanged. The stacked PR chain must enter protected main, CI must pass,
 and the normal owner-approved signed release must publish a newer version.
 No bypass of signature, Windows path-custody or updater integrity checks.
 Peer confirmation is local-only, not a durable delivery ACK.
+
+## 24 October: pinned Windows Inbox object + SQLite ACL negative gate
+
+The Native receiver now re-audits the **same NT root directory identity**
+before opening the path-based Inbox ledger and again before reporting a
+verified receipt. An existing `objects` directory, `received-inbox.sqlite3`
+and optional `-wal`/`-shm` files are individually opened using NT
+RootDirectory-relative one-component opens with explicit READ_CONTROL.
+Their owner and DACL must satisfy Akula's conservative Windows File Gate
+audit; reparse points and multiply hard-linked SQLite files fail closed.
+After publication, both the objects directory and SQLite file must exist
+and pass the same check. A failing postflight never becomes a sender ACK.
+
+New Windows regressions grant Everyone Full Control to an existing Inbox
+objects directory or SQLite database and verify that a second received
+file is refused with no additional ledger record. The tests are part of
+the existing single exact-HEAD P2P Windows workflow, not a new CI matrix.
+
+**Scope limitation:** `rusqlite` and object creation/cold-open remain
+path-based between these audits, so a malicious same-user actor can still
+race ancestor or child replacement. This does NOT establish full
+handle-relative custody, hostile process isolation, or a durable signed
+delivery receipt. Do not merge/publish P2P until those release gates and
+two installed-Windows-PC Internet E2E have been accepted.
