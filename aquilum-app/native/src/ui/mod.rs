@@ -23,7 +23,7 @@ pub mod motion;
 pub mod palette;
 pub mod reader;
 pub mod suggest;
-pub mod viewer;
+pub mod viewer; pub mod pdf;
 pub mod tokens;
 pub mod widgets;
 pub mod workspaces;
