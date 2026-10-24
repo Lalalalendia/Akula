@@ -205,8 +205,9 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--manifest", type=Path, default=HERE / "manifest.json")
     parser.add_argument("--demo-size", type=int, default=8 * 1024 * 1024)
+    parser.add_argument("--demo-file", type=Path, default=HERE / "data/demo.bin")
     args = parser.parse_args()
-    demo = HERE / "data/demo.bin"
+    demo = args.demo_file
     if not args.manifest.exists():
         ensure_demo(demo, args.demo_size)
         generated = make_manifest(demo, "/origin/demo.bin")
