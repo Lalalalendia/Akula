@@ -1,0 +1,143 @@
+name: Clippy expanded groups diagnostic (branch-only)
+on:
+  push:
+    branches:
+      - audit/clippy-extended-20261024
+    paths:
+      - .github/workflows/clippy-extended-diagnostic-20261024.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-clippy-extended-audit-20261024
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Compare Clippy ${{ matrix.scope }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scope: core-default
+            package: aquilum-core
+            features: ''
+          - scope: core-p2p
+            package: aquilum-core
+            features: p2p-offer-lab,p2p-inbox-lab,device-roster-lab
+          - scope: core-s3
+            package: aquilum-core
+            features: sync-s3
+          - scope: native-default
+            package: aquilum-native
+            features: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: clippy-exp-audit-${{ matrix.scope }}
+      - name: Install native Linux build dependencies
+        if: matrix.scope == 'native-default'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Compare default and expanded Clippy on exact commit
+        env:
+          CLIPPY_AUDIT_SCOPE: ${{ matrix.scope }}
+          CLIPPY_AUDIT_PACKAGE: ${{ matrix.package }}
+          CLIPPY_AUDIT_FEATURES: ${{ matrix.features }}
+        run: |
+          python3 - <<'PY'
+          import collections
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import sys
+          import time
+          
+          scope = os.environ["CLIPPY_AUDIT_SCOPE"]
+          package = os.environ["CLIPPY_AUDIT_PACKAGE"]
+          features = os.environ.get("CLIPPY_AUDIT_FEATURES", "")
+          outdir = pathlib.Path(os.environ["RUNNER_TEMP"]) / "akula-clippy-audit" / scope
+          outdir.mkdir(parents=True, exist_ok=True)
+          command = ["cargo", "clippy", "--manifest-path", "aquilum-app/Cargo.toml", "--locked", "-p", package]
+          command += ["--bin", "aquilum-native"] if package == "aquilum-native" else ["--lib"]
+          if features:
+              command += ["--features", features]
+          command += ["--message-format=json"]
+          
+          def run_stage(label, extra):
+              args = command + extra
+              started = time.monotonic()
+              with (outdir / (label + ".jsonl")).open("w", encoding="utf-8") as stdout:
+                  with (outdir / (label + ".stderr")).open("w", encoding="utf-8") as stderr:
+                      result = subprocess.run(args, stdout=stdout, stderr=stderr, check=False)
+              elapsed = round(time.monotonic() - started, 2)
+              print(f"CLIPPY_STAGE scope={scope} stage={label} exit={result.returncode} seconds={elapsed}", flush=True)
+              return {"exit_code": result.returncode, "seconds": elapsed, "args": args}
+          
+          def inspect(path):
+              found = {}
+              all_errors = 0
+              for line in path.open("r", encoding="utf-8"):
+                  try:
+                      item = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  if item.get("reason") != "compiler-message":
+                      continue
+                  msg = item.get("message") or {}
+                  if msg.get("level") == "error":
+                      all_errors += 1
+                  code = (msg.get("code") or {}).get("code") or ""
+                  if not code.startswith("clippy::") or msg.get("level") not in ("warning", "error"):
+                      continue
+                  spans = msg.get("spans") or []
+                  loc = next((x for x in spans if x.get("is_primary")), spans[0] if spans else {})
+                  key = (code, loc.get("file_name", ""), loc.get("line_start", 0), loc.get("column_start", 0), msg.get("message", ""))
+                  found[key] = {"code": code, "file": key[1], "line": key[2], "column": key[3], "message": key[4], "level": msg.get("level")}
+              return found, all_errors
+          
+          baseline = run_stage("baseline", [])
+          extended = run_stage("extended", ["--", "-W", "clippy::pedantic", "-W", "clippy::nursery", "-W", "clippy::cargo"])
+          old, baseline_errors = inspect(outdir / "baseline.jsonl")
+          new, extended_errors = inspect(outdir / "extended.jsonl")
+          added = [d for key, d in new.items() if key not in old]
+          removed = [d for key, d in old.items() if key not in new]
+          count = lambda rows: dict(collections.Counter(x["code"] for x in rows).most_common())
+          summary = {
+              "scope": scope, "package": package, "features": features,
+              "head_sha": os.environ.get("GITHUB_SHA", ""),
+              "rustc": subprocess.run(["rustc", "--version"], capture_output=True, text=True).stdout.strip(),
+              "clippy": subprocess.run(["cargo", "clippy", "--version"], capture_output=True, text=True).stdout.strip(),
+              "baseline": {**baseline, "unique_clippy_diagnostics": len(old), "rustc_error_messages": baseline_errors, "codes": count(old.values())},
+              "extended": {**extended, "unique_clippy_diagnostics": len(new), "rustc_error_messages": extended_errors, "codes": count(new.values())},
+              "added_unique_diagnostics": len(added), "removed_unique_diagnostics": len(removed),
+              "added_by_code": count(added), "added_examples": added[:30],
+              "valid_comparison": baseline["exit_code"] == 0 and extended["exit_code"] == 0,
+          }
+          (outdir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+          print("CLIPPY_AUDIT_RESULT=" + json.dumps({k: v for k, v in summary.items() if k not in ("added_examples",)}, ensure_ascii=False), flush=True)
+          for x in added[:15]:
+              print(f"CLIPPY_NEW {x['code']} {x['file']}:{x['line']} {x['message']}", flush=True)
+          if not summary["valid_comparison"]:
+              print("CLIPPY_AUDIT_INCOMPLETE: at least one compiler pass failed; counts are not an accepted comparison", flush=True)
+              sys.exit(1)
+          PY
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-clippy-audit-${{ matrix.scope }}-${{ github.sha }}
+          path: ${{ runner.temp }}/akula-clippy-audit/${{ matrix.scope }}/
+          if-no-files-found: warn
+          retention-days: 14
