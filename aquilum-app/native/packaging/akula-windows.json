@@ -25,5 +25,8 @@
     "installerIcon": "../icons/icon.ico"
   },
   "name": "aquilum-native",
-  "binariesDir": "../../../.artifacts/cargo-native/release"
+  "binariesDir": "../../../.artifacts/cargo-native/release",
+  "resources": [
+    "../../../.artifacts/cargo-native/release/pdfium.dll"
+  ]
 }
