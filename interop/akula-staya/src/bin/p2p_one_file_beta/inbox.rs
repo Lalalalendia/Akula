@@ -357,6 +357,86 @@ mod tests {
         assert!(!root.join("untrusted.stage").exists());
     }
 
+    #[cfg(windows)]
+    fn grant_everyone_full_control(path: &Path) {
+        let grant = std::process::Command::new("icacls")
+            .arg(path)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .expect("icacls is required for Windows P2P Inbox ACL regression");
+        assert!(
+            grant.status.success(),
+            "icacls refused: {}",
+            String::from_utf8_lossy(&grant.stderr)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receiver_refuses_insecure_objects_acl_before_second_network_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let original = b"verified first receipt";
+        persist_received_payload(
+            original,
+            &root,
+            original.len() as u64,
+            *blake3::hash(original).as_bytes(),
+            [41; 32],
+            [51; 32],
+        )
+        .unwrap();
+        grant_everyone_full_control(&root.join("objects"));
+        let other = b"second file must not enter exposed objects";
+        assert!(
+            persist_received_payload(
+                other,
+                &root,
+                other.len() as u64,
+                *blake3::hash(other).as_bytes(),
+                [42; 32],
+                [51; 32],
+            )
+            .is_err()
+        );
+        let cold = InboxLedger::open(&root).unwrap();
+        assert_eq!(cold.count().unwrap(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receiver_refuses_insecure_sqlite_acl_before_second_network_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let original = b"verified first sqlite receipt";
+        persist_received_payload(
+            original,
+            &root,
+            original.len() as u64,
+            *blake3::hash(original).as_bytes(),
+            [61; 32],
+            [71; 32],
+        )
+        .unwrap();
+        grant_everyone_full_control(&root.join("received-inbox.sqlite3"));
+        let other = b"second receipt must not enter exposed sqlite";
+        assert!(
+            persist_received_payload(
+                other,
+                &root,
+                other.len() as u64,
+                *blake3::hash(other).as_bytes(),
+                [62; 32],
+                [71; 32],
+            )
+            .is_err()
+        );
+        let cold = InboxLedger::open(&root).unwrap();
+        assert_eq!(cold.count().unwrap(), 1);
+    }
+
     fn stage(root: &Path, data: &[u8]) -> File {
         let path = root.join("verified-stage.bin");
         fs::write(&path, data).unwrap();
