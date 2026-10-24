@@ -63,6 +63,9 @@ jobs:
       - name: Real bounded Rust GET on MinIO
         working-directory: interop/akula-staya/public-cdn-check
         run: cargo test --features public-cdn-local-minio-test --test minio_real -- --nocapture
+      - name: Real 64 MiB MinIO to authenticated Iroh Bao peer
+        working-directory: interop/akula-staya/public-cdn-check
+        run: cargo test --features public-cdn-local-minio-test,bao --test minio_to_iroh_64m -- --nocapture
       - name: Stop ephemeral MinIO
         if: always()
         run: docker stop akula-native-minio >/dev/null 2>&1 || true
