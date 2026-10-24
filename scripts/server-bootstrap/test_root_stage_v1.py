@@ -116,6 +116,23 @@ class RootStageTests(unittest.TestCase):
                         stage.receive_verified(io.BytesIO(modified), self.public,
                                                int(time.time()), scratch)
 
+    @unittest.skipUnless(os.geteuid() == 0, "disposable root CI only")
+    def test_actual_root_entrypoint_publishes_only_protected_hold(self):
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        parent = os.path.join(self.tmp.name, "disposable-parent")
+        os.mkdir(parent, 0o700)
+        self.assertEqual(os.stat(parent).st_uid, 0)
+        with patch.object(stage, "PINNED_BOOTSTRAP_ED25519_HEX", self.public.hex()):
+            with patch.object(stage, "open_parent_root", lambda: os.open(parent, stage.O_DIR)):
+                with redirect_stdout(io.StringIO()) as out:
+                    stage.root_stage(io.BytesIO(self.bundle()))
+                self.assertEqual(out.getvalue(), "AKULA_ROOT_STAGE_VERIFIED_HOLD\n")
+        fixed = os.path.join(parent, "bootstrap-v1", "helper.staged")
+        self.assertEqual(os.stat(fixed).st_uid, 0)
+        self.assertEqual(stat.S_IMODE(os.stat(fixed).st_mode), 0o400)
+        self.assertFalse(os.access(fixed, os.X_OK))
+
     def test_production_entrypoint_is_locked_without_issued_key(self):
         run = subprocess.run([sys.executable, "-I", str(SOURCE)],
                              input=self.bundle(), stdout=subprocess.PIPE,

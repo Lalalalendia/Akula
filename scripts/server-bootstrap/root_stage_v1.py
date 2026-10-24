@@ -209,6 +209,28 @@ def publish_hold(parent_fd, scratch, manifest, signature, sha, trust_key):
         for source, leaf in [("manifest", "manifest"), ("signature", "signature"),
                              ("helper", "helper.staged")]:
             copy_root_file(dest, leaf, os.path.join(scratch, source))
+        # The published root-owned file is independently reread before a
+        # durable success marker; an interrupted copy is a permanent HOLD.
+        read_fd = os.open("helper.staged", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dest)
+        try:
+            before = os.fstat(read_fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+                    or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o400):
+                raise Hold("published helper has unsafe inode custody")
+            observed = hashlib.sha256()
+            copied = 0
+            while True:
+                block = os.read(read_fd, 65536)
+                if not block:
+                    break
+                copied += len(block)
+                observed.update(block)
+            after = os.fstat(read_fd)
+            if (observed.digest() != sha or copied != before.st_size
+                    or before.st_ino != after.st_ino or before.st_ctime_ns != after.st_ctime_ns):
+                raise Hold("root stage readback mismatch")
+        finally:
+            os.close(read_fd)
         create_file(dest, "release.ed25519", trust_key)
         create_file(dest, "HOLD", b"AKULA_ROOT_BOOTSTRAP_SIGNED_STAGE_ONLY_V1\n" + sha.hex().encode() + b"\n")
         os.fsync(dest)

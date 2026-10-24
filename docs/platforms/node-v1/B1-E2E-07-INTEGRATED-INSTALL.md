@@ -123,3 +123,11 @@ On the server the fixed root operation rechecks the B1a canonical manifest with 
 **Production remains locked:** The script deliberately contains **no release trust key** until a legitimate independently reviewed signing ceremony and a signed helper artifact exist. There is no production Windows sudo invocation, real owner approval, registered root helper, trusted-key distribution, actual B1d0 /opt CAS commit, systemd activation or VPS acceptance. The current code adds bounded, root-side signed-data custody and tests, not permission to deploy. B1-E2E-07 remains HOLD.
 
 The branch gate runs the root-stage fixture with ordinary and disposable CI root identity, plus a Core B1a frame producer test in the same existing workflow; no separate PR or general CI fanout is created.
+
+
+The staging implementation also reopens and rehashes the *root-owned published*
+`helper.staged` inode before writing its durable HOLD marker. Owner UID0,
+a single link, mode 0400, unchanged inode and complete SHA-256 must all agree.
+A disposable test executes the complete fixed root entrypoint as **actual UID0**
+with a temporary CI-only signer and root directory override; production path
+and real VPS are not used. No signed release key is distributed by this test.
