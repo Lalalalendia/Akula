@@ -78,9 +78,12 @@ fn read_bounded<R: Read + Send + 'static>(reader: R) -> thread::JoinHandle<Vec<u
     })
 }
 
-fn exited(status: ExitStatus, stdout: &[u8], stderr: &[u8], sent: bool)
-    -> Result<RootStageRemoteReport, RootStageTransportError>
-{
+fn exited(
+    status: ExitStatus,
+    stdout: &[u8],
+    stderr: &[u8],
+    sent: bool,
+) -> Result<RootStageRemoteReport, RootStageTransportError> {
     if !status.success() || !sent {
         return Err(RootStageTransportError::RemoteRefused);
     }
@@ -179,8 +182,7 @@ mod tests {
 
     #[test]
     fn python_source_is_one_remote_shell_argument_not_a_user_path() {
-        let source = "PINNED_BOOTSTRAP_ED25519_HEX = \"123\"\n# ' ; $(touch /tmp/pwn) \n"
-            .repeat(5);
+        let source = "PINNED_BOOTSTRAP_ED25519_HEX = \"123\"\n# ' ; $(touch /tmp/pwn) \n".repeat(5);
         let command = fixed_root_command(&source).unwrap();
         assert!(command.starts_with("exec /usr/bin/sudo -n -- /usr/bin/python3 -I -c '"));
         assert!(command.contains("'\"'\"'"));

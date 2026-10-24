@@ -68,10 +68,15 @@ pub fn prepare_root_stage_bundle(
     package: &[u8],
     now_unix: u64,
 ) -> Result<VerifiedRootStageBundle, RootStageError> {
-    let expected_key = PRODUCTION_BOOTSTRAP_PUBKEY
-        .ok_or(RootStageError::UntrustedBootstrapSigner)?;
+    let expected_key =
+        PRODUCTION_BOOTSTRAP_PUBKEY.ok_or(RootStageError::UntrustedBootstrapSigner)?;
     prepare_with_fixed_anchor(
-        signed, pinned, expected_key, previous_floor, package, now_unix,
+        signed,
+        pinned,
+        expected_key,
+        previous_floor,
+        package,
+        now_unix,
     )
 }
 
@@ -122,7 +127,8 @@ fn prepare_with_fixed_anchor(
         &format!("PINNED_BOOTSTRAP_ED25519_HEX = \"{hex}\""),
         1,
     );
-    let mut frame = Vec::with_capacity(FRAME_DOMAIN.len() + 2 + manifest.len() + 64 + package.len());
+    let mut frame =
+        Vec::with_capacity(FRAME_DOMAIN.len() + 2 + manifest.len() + 64 + package.len());
     frame.extend_from_slice(FRAME_DOMAIN);
     frame.extend_from_slice(&(manifest.len() as u16).to_be_bytes());
     frame.extend_from_slice(&manifest);
