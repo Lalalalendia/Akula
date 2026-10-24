@@ -1,4 +1,4 @@
-mod damage;
+pub(crate) mod damage;
 pub mod fade;
 mod layer;
 pub mod live;

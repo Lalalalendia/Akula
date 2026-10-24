@@ -87,7 +87,6 @@ impl Output {
         self.fresh
     }
 
-
     pub fn present(&mut self, dirty: &[Area]) {
         let _zone = aq_trace::zone("вывод");
         let Some(gpu) = &mut self.gpu else { return };
@@ -99,6 +98,7 @@ impl Output {
         if copy.is_empty() {
             return;
         }
+        #[cfg(not(feature = "installed"))] let copy = super::transfer::wac02_copy(copy, dirty, gpu.back, gpu.stale.len());
         gpu.back = (gpu.back + 1) % gpu.stale.len();
         let mut rects: Vec<_> = copy.iter().map(|a| rect(*a)).collect();
         let result = unsafe {

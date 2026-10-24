@@ -109,7 +109,7 @@ impl Renderer {
         }
         let bounds = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let layers = self.tracker.live.iter().filter_map(|&(id, rect, transform, shape)| Some(Layer { id, area: area_of(rect, bounds)?, transform, shape })).collect();
-        self.refresh_live(layers, &mut damage, full, seconds);
+        self.refresh_live(layers, &mut damage, full, seconds); #[cfg(all(target_os = "windows", not(feature = "installed")))] crate::output::transfer::report_scroll(&damage.moves);
         #[cfg(not(feature = "installed"))]
         if stage_on {
             // Damage can contain overlapping rectangles. Count scheduled
