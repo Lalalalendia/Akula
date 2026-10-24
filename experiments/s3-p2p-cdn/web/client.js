@@ -305,10 +305,20 @@ async function retrieve() {
   try {
     await joinReady;
     if ([...peers.values()].some(p => p.have.size > 0)) await waitForPeer();
-    const output = await window.AkulaOpenOutput(manifest.size);
+    const supportsResume = !!(navigator.storage?.getDirectory && navigator.locks?.request);
     const fullHash = new window.IncrementalSha256();
+    const verifyHex = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),
+      v=>v.toString(16).padStart(2,'0')).join('');
+    return await (supportsResume ? window.AkulaWithResumeLock(manifest.content_id,runDownload) : runDownload());
+    async function runDownload() {
+    const output = supportsResume
+      ? await window.AkulaOpenResumableOutput(manifest,{
+          hashChunk:verifyHex,hasher:fullHash,
+          onRecoveredChunk:()=>{},
+        })
+      : await window.AkulaOpenOutput(manifest.size);
     try {
-      let next = 0;
+      let next = supportsResume ? output.recoveredChunks : 0;
       const windowSize = Math.min(4, Math.max(1, manifest.chunks.length));
       const inflight = new Map();
       const getPart = n => {
@@ -318,8 +328,8 @@ async function retrieve() {
         }
         return inflight.get(n);
       };
-      for (let j = 0; j < windowSize; j++) if (j < manifest.chunks.length) getPart(j);
-      for (let n = 0; n < manifest.chunks.length; n++) {
+      for (let j = 0; j < windowSize; j++) if (next+j < manifest.chunks.length) getPart(next+j);
+      for (let n = next; n < manifest.chunks.length; n++) {
         const bytes = await getPart(n);
         inflight.delete(n);
         if (!await verifyChunk(n, bytes)) throw Error('Ошибка проверки части перед записью');
@@ -339,7 +349,8 @@ async function retrieve() {
       $('save').download = manifest.name;
       $('save').hidden = false;
     } catch (error) {
-      await output.discard();
+      if (supportsResume) await output.pause();
+      else await output.discard();
       throw error;
     }
     $('progress').value = 100;
@@ -349,6 +360,7 @@ async function retrieve() {
     $('status').textContent = `Готово, SHA-256 совпадает. HTTP ${pretty(http)}, P2P ${pretty(p2p)}, ${seconds} с`;
     writeLog($('status').textContent);
     announceSoon();
+    }
   } catch (e) {
     $('status').textContent = `Ошибка: ${e.message}`;
     writeLog($('status').textContent);
