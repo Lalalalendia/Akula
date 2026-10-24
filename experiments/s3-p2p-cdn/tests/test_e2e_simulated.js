@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const { webcrypto, randomUUID } = require('node:crypto');
 const { performance } = require('node:perf_hooks');
 const script = fs.readFileSync(path.resolve(__dirname, '../web/client.js'), 'utf8');
+const rangeScript = fs.readFileSync(path.resolve(__dirname, '../web/range_reader.js'), 'utf8');
 
 class Emitter {
   listeners = new Map();
@@ -76,10 +77,13 @@ function tab(label) {
   const context=vm.createContext({
     document:doc, location:{protocol:'http:',host:'127.0.0.1:8765'},
     WebSocket, RTCPeerConnection:FakePC, crypto:webcrypto,
-    Blob, URL, Uint8Array, ArrayBuffer, Set, Map, Promise, Headers, fetch:(u,opts)=>fetch(new URL(u,"http://127.0.0.1:8765/").href,opts), performance, Date,
+    Blob, URL, Uint8Array, ArrayBuffer, Set, Map, Promise, Headers, AbortController, Response, fetch:(u,opts)=>fetch(new URL(u,"http://127.0.0.1:8765/").href,opts), performance, Date,
     setTimeout, clearTimeout, console:{log:(...xs)=>output.push(xs.join(' '))},
     window:{RTCPeerConnection:FakePC,crypto:webcrypto},
   });
+  // VM globalThis and window must be the same object, as in browsers.
+  context.window = context;
+  vm.runInContext(rangeScript,context,{filename:'range_reader.js'});
   vm.runInContext(script,context,{filename:'client.js'});
   return {label,elements,context,output, get api(){return context.window.__akula;},get el(){return doc.getElementById.bind(doc);}};
 }
