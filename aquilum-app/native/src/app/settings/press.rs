@@ -213,8 +213,8 @@ impl App {
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             Action::ConfigureS3Pair | Action::ExportS3Pair |
                 Action::ImportS3Pair | Action::SyncS3PairOnce => Effect::None,
-            Action::StoreYandexKeys | Action::RemoveYandexKeys |
-                Action::CheckYandexConnection => Effect::None,
+            Action::StoreYandexKeys | Action::RemoveYandexKeys | Action::CheckYandexConnection => Effect::None,
+            other => self.handle_server_button(dialog, other),
         }
     }
 }

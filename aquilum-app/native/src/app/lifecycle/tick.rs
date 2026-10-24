@@ -2,8 +2,7 @@ use super::super::*;
 
 impl App {
     pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
-        // winit wake + nonblocking mpsc drain: never perform S3 network I/O
-        // from GUI. A stale result has already been rejected by ProbeSession.
+        // Drain background S3 and SSH observations without network I/O on the GUI thread.
         if self.yandex_probe.poll()
             && matches!(&self.popup, Some(Popup::Settings { dialog, .. })
                 if dialog.section == crate::ui::settings::schema::Section::Sync)
@@ -17,6 +16,8 @@ impl App {
         {
             self.refresh_settings(root);
         }
+        #[cfg(all(windows, feature = "server-readonly-preflight"))]
+        self.on_server_probe(root);
         if self.view_due.is_some_and(|t| t <= now) {
             self.flush_view();
         }
@@ -30,5 +31,4 @@ impl App {
             self.refresh_save_error(root);
         }
     }
-
 }

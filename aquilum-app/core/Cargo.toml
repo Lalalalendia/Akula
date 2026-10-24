@@ -16,6 +16,14 @@ p2p-inbox-lab = ["p2p-offer-lab"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
 node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
+# Offline Node replica lab over the existing Sync DAG; no live writer.
+node-replica-lab = ["node-catalog-lab"]
+# Authenticated local read lab; no production pairing.
+node-replica-auth-lab = ["node-replica-lab"]
+# Non-shipping Node V1 host: root-pinned owner policy and durable one-use reads.
+node-v1 = ["node-replica-auth-lab", "device-roster-lab"]
+# Integration-test-only owner policy under temporary paths; release builds refuse it.
+node-v1-transport-tests = ["node-v1"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
 server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
@@ -110,6 +118,11 @@ required-features = ["server-bootstrap-b1a-release-lab"]
 name = "akula-node-lab"
 path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
+
+[[bin]]
+name = "akula-node"
+path = "src/bin/akula_node.rs"
+required-features = ["node-v1"]
 
 [dependencies]
 akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
