@@ -144,7 +144,6 @@ impl App {
             }
         });
     }
-
 }
 
 #[cfg(test)]
