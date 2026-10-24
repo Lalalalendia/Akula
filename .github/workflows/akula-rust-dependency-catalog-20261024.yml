@@ -1,0 +1,89 @@
+name: Akula Rust dependency catalog Windows
+on:
+  push:
+    branches:
+      - lab/akula-windows-dependency-graph-20261024
+    paths:
+      - .github/workflows/akula-rust-dependency-catalog-20261024.yml
+permissions:
+  contents: read
+concurrency:
+  group: akula-dependency-catalog-20261024
+  cancel-in-progress: true
+jobs:
+  catalog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Catalog exact Windows runtime dependency graph
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv, io, json, re, subprocess
+          from collections import Counter, defaultdict
+          from pathlib import Path
+          root='aquilum-app/Cargo.toml'
+          def run(args):
+              p=subprocess.run(args,text=True,capture_output=True,timeout=1200)
+              if p.returncode: raise RuntimeError(' '.join(args)+'\n'+p.stderr[-3000:])
+              return p.stdout
+          tree=run(['cargo','tree','--locked','--manifest-path',root,'-p','aquilum-native','--target','x86_64-pc-windows-msvc','--features','installed','--edges','normal','--prefix','depth','--format','{p}'])
+          traces={}; parents=defaultdict(set); stack=[]
+          for line in tree.splitlines():
+              m=re.match(r'^(\d+)([A-Za-z0-9_-]+) v([^\s]+)',line)
+              if not m:
+                  if line.strip(): raise RuntimeError('Unexpected tree line: '+line[:200])
+                  continue
+              depth=int(m[1]); key=m[2]+'@'+m[3]
+              if depth>len(stack): raise RuntimeError('Bad tree depth')
+              path=stack[:depth]+[key]
+              if key not in traces or len(path)<len(traces[key]): traces[key]=path
+              if depth: parents[key].add(stack[depth-1])
+              stack=path
+          if len(traces)!=349: raise RuntimeError('Changed source: expected 349, got '+str(len(traces)))
+          lock=Path('aquilum-app/Cargo.lock').read_text()
+          if len(re.findall(r'^\[\[package\]\]$',lock,re.M))!=718: raise RuntimeError('Changed lock count')
+          info=json.loads(run(['cargo','metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-msvc','--features','installed','--manifest-path',root]))
+          packages=defaultdict(list)
+          for p in info['packages']: packages[p['name']+'@'+p['version']].append(p)
+          names=Counter(x.rsplit('@',1)[0] for x in traces)
+          direct={'aquilum-core':'Ядро','winit':'Окна','masonry':'Интерфейс','vello_cpu':'Отрисовка','rfd':'Диалоги','arboard':'Буфер обмена','krilla':'PDF','image':'Изображения','png':'Изображения','skrifa':'Шрифты','rayon':'Параллельная обработка','tokio':'Сеть/задачи','pulldown-cmark':'Markdown','accesskit_windows':'Доступность Windows','akula-dropbox-connect-lab':'Dropbox','akula-dropbox-auth-lab':'Dropbox','akula-dropbox-secret-store':'Dropbox','akula-dropbox-t0':'Dropbox'}
+          fields=['Пакет','Версия','Описание авторов','Область по точке входа (ориентир)','Вводящая прямая зависимость','Путь от приложения','Непосредственные родители','Число версий имени','Повторяющиеся версии','Источник','Лицензия','Репозиторий','Документация','Статус проверки']
+          buffer=io.StringIO(newline=''); writer=csv.writer(buffer); writer.writerow(fields)
+          description_count=0; license_count=0
+          for key in sorted(traces):
+              found=packages.get(key,[])
+              if len(found)!=1: raise RuntimeError('Cargo metadata missing/ambiguous '+key+' '+str(len(found)))
+              p=found[0]; name,version=key.rsplit('@',1); path=traces[key]
+              entry=path[1].split('@')[0] if len(path)>1 else name
+              desc=(p.get('description') or '').replace('\n',' ').replace('\r',' ').strip()
+              license=(p.get('license') or p.get('license_file') or '')
+              if desc: description_count+=1
+              if license: license_count+=1
+              src=p.get('source') or ''
+              source='crates.io' if src.startswith('registry+') else ('Git' if src.startswith('git+') else 'Локальный')
+              writer.writerow([name,version,desc,direct.get(entry,'Прочее / через '+entry),entry,' -> '.join(path),'; '.join(sorted(parents[key])),names[name],'да' if names[name]>1 else 'нет',source,license,p.get('repository') or p.get('homepage') or '',p.get('documentation') or '', 'Описано из Cargo metadata; ручной аудит не проведён'])
+          payload=buffer.getvalue()
+          Path('akula-dependency-catalog.csv').write_text(payload,encoding='utf-8-sig')
+          summary={'packages':len(traces),'unique_names':len(names),'duplicate_names':sum(n>1 for n in names.values()),'extra_versions':sum(n-1 for n in names.values()),'author_descriptions':description_count,'missing_author_descriptions':len(traces)-description_count,'licenses_declared':license_count,'missing_licenses':len(traces)-license_count,'duplicates':{n:sorted(x.rsplit('@',1)[1] for x in traces if x.startswith(n+'@')) for n,c in names.items() if c>1},'source_sha':run(['git','rev-parse','HEAD']).strip()}
+          Path('akula-dependency-catalog-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('AKULA_DEP_SUMMARY_JSON='+json.dumps(summary,ensure_ascii=False),flush=True)
+          print('AKULA_DEP_CSV_START',flush=True)
+          for line in payload.splitlines(): print('AKULA_DEP_ROW='+line,flush=True)
+          print('AKULA_DEP_CSV_END',flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: akula-windows-349-catalog
+          path: |
+            akula-dependency-catalog.csv
+            akula-dependency-catalog-summary.json
+          if-no-files-found: error
+          retention-days: 30
