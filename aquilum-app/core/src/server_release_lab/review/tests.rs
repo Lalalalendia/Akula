@@ -1,5 +1,7 @@
 use super::*;
-use crate::server_bootstrap_lab::{preview, preview_node_v2, B0Error, B0Input, PreviewTransport, ReadOnlyHostFacts};
+use crate::server_bootstrap_lab::{
+    preview, preview_node_v2, B0Error, B0Input, PreviewTransport, ReadOnlyHostFacts,
+};
 use crate::server_release_lab::{
     ReleaseManifestV1, SignedRelease, TargetPlatform, TrustedReleaseSigner, Version,
 };
@@ -370,10 +372,12 @@ fn legacy_loopback_only_plan_is_never_admissible_for_public_node() {
     use crate::server_bootstrap_lab::ProposedChange;
     let (plan, signed, trusted, artifact) = fixture();
     assert_eq!(plan.schema_version, 2);
-    assert!(plan.proposed_changes.contains(
-        &ProposedChange::BindPublicUdp43871WithoutChangingFirewall,
-    ));
-    assert!(!plan.proposed_changes.contains(&ProposedChange::EnableLocalLoopbackOnly));
+    assert!(plan
+        .proposed_changes
+        .contains(&ProposedChange::BindPublicUdp43871WithoutChangingFirewall,));
+    assert!(!plan
+        .proposed_changes
+        .contains(&ProposedChange::EnableLocalLoopbackOnly));
 
     let input = B0Input {
         install_id: plan.install_id,
@@ -390,8 +394,9 @@ fn legacy_loopback_only_plan_is_never_admissible_for_public_node() {
     ));
 
     let mut dropped = plan.clone();
-    dropped.proposed_changes.retain(|change| *change
-        != ProposedChange::BindPublicUdp43871WithoutChangingFirewall);
+    dropped
+        .proposed_changes
+        .retain(|change| *change != ProposedChange::BindPublicUdp43871WithoutChangingFirewall);
     dropped.plan_blake3 = dropped.computed_digest();
     assert!(!dropped.verify_unchanged());
     assert!(matches!(
