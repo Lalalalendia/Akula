@@ -39,10 +39,21 @@ for item in "chromium:$CHROMIUM_CONTAINER:9331" "firefox:$FIREFOX_CONTAINER:9332
   echo "Started $engine in isolated namespace ($name)"
 done
 
-A_PID=$(docker inspect --format '{{.State.Pid}}' "$CHROMIUM_CONTAINER")
-B_PID=$(docker inspect --format '{{.State.Pid}}' "$FIREFOX_CONTAINER")
-A_NS=$(readlink "/proc/$A_PID/ns/net")
-B_NS=$(readlink "/proc/$B_PID/ns/net")
+# GitHub-hosted runner users cannot always read /proc/<root-owned-pid>/ns/net.
+# Read each inode from inside the container instead; both identifiers use the
+# same kernel namespace inode space and do not require privileged host access.
+for container in "$CHROMIUM_CONTAINER" "$FIREFOX_CONTAINER"; do
+  state=$(docker inspect --format '{{.State.Status}}' "$container")
+  echo "Container $container state=$state"
+  if [[ "$state" != "running" ]]; then
+    docker logs "$container" >&2 || true
+    echo "ERROR: browser container exited before namespace verification" >&2
+    exit 1
+  fi
+done
+A_NS=$(docker exec "$CHROMIUM_CONTAINER" readlink /proc/self/ns/net)
+B_NS=$(docker exec "$FIREFOX_CONTAINER" readlink /proc/self/ns/net)
+echo "Namespace identifiers: Chromium=$A_NS Firefox=$B_NS"
 A_IP=$(docker inspect --format "{{with index .NetworkSettings.Networks \"${NETWORK}\"}}{{.IPAddress}}{{end}}" "$CHROMIUM_CONTAINER")
 B_IP=$(docker inspect --format "{{with index .NetworkSettings.Networks \"${NETWORK}\"}}{{.IPAddress}}{{end}}" "$FIREFOX_CONTAINER")
 if [[ "$A_NS" == "$B_NS" || "$A_IP" == "$B_IP" || -z "$A_IP" || -z "$B_IP" ]]; then
