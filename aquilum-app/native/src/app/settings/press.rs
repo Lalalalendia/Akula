@@ -9,7 +9,7 @@ impl App {
             // Provider actions use their own guarded modal handlers.
             Action::OpenCloudProvider(_) => Effect::None,
             #[cfg(feature = "notion-offline-preview")]
-            Action::NotionConnect | Action::NotionRefresh(_) | Action::NotionForget(_) | Action::NotionOpenRoot(_) | Action::NotionOpenPage(_) | Action::NotionPageBatch(_) | Action::NotionTextChunk(_) => Effect::None,
+            Action::NotionConnect | Action::NotionRefresh(_) | Action::NotionForget(_) | Action::NotionOpenRoot(_) | Action::NotionOpenPage(_) | Action::NotionPageBatch(_) | Action::NotionTextChunk(_) | Action::NotionReviewImport(_) | Action::NotionPublishImport(_) => Effect::None,
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
             #[cfg(feature = "dropbox-readonly-preview")]
             a @ (Action::DropboxLoginAccount | Action::DropboxResumeAccount | Action::DropboxForgetAccount | Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly) => self.press_dropbox(a, dialog.section),

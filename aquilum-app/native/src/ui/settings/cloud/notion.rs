@@ -16,11 +16,11 @@ pub(super) fn body(
 ) -> NewWidget<Flex> {
     let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(selectable(
-            "Notion — подключение и локальная копия",
+            "Notion — подключение, просмотр и перенос в Акулу",
             |t| t.text_primary, None, Leading::Times(1.3),
         ))
         .with_fixed(selectable(
-            "Notion — источник данных. Загрузка только по вашему запросу; запись обратно в Notion и в Vault отключена.",
+            "Notion — источник данных. Подключение и обновление только по запросу; импорт в выбранную базу Акулы — после отдельного подтверждения.",
             |t| t.text_muted, None, Leading::Times(1.4),
         ));
     if !ctx.notion_sync.busy {
@@ -70,6 +70,54 @@ pub(super) fn body(
     }
 
     let status = &ctx.notion_selection;
+    if let Some(root) = selected_root
+        && status.state == LoadState::Ready
+        && status.root.as_deref() == Some(root.as_str())
+    {
+        let importing = &ctx.notion_import;
+        if let Some(workspace) = ctx.workspace.as_deref() {
+            column = column.with_fixed(selectable(
+                &format!("Целевая база Акулы: {}", workspace.display()),
+                |t| t.text_secondary, None, Leading::Times(1.3),
+            ));
+            if !importing.busy && !ctx.notion_sync.busy {
+                column = column.with_fixed(action_button(
+                    "Проверить снимок для независимого импорта".into(),
+                    Action::NotionReviewImport(root.clone()), bindings,
+                ));
+            }
+            if importing.ready_for(root, workspace) && !ctx.notion_sync.busy {
+                column = column.with_fixed(selectable(
+                    &format!("Проверено: {} страниц, {} связей; снимок {}",
+                        importing.pages, importing.links,
+                        importing.digest.as_deref().unwrap_or("").chars().take(12).collect::<String>()),
+                    |t| t.text_primary, None, Leading::Times(1.3),
+                ));
+                column = column.with_fixed(action_button(
+                    "Импортировать Markdown в выбранную базу (без замены файлов)".into(),
+                    Action::NotionPublishImport(root.clone()), bindings,
+                ));
+            }
+        } else {
+            column = column.with_fixed(selectable(
+                "Для импорта выберите рабочую базу Акулы.",
+                |t| t.text_secondary, None, Leading::Times(1.3),
+            ));
+        }
+        if importing.root.as_deref() == Some(root.as_str()) {
+            column = column.with_fixed(selectable(
+                importing.stage.label(),
+                |t| t.text_secondary, None, Leading::Times(1.3),
+            ));
+            if importing.created > 0 || importing.conflicts > 0 {
+                column = column.with_fixed(selectable(
+                    &format!("Создано: {}; уже существовало: {}; конфликты: {}",
+                        importing.created, importing.existing, importing.conflicts),
+                    |t| t.text_secondary, None, Leading::Times(1.3),
+                ));
+            }
+        }
+    }
     match status.state {
         LoadState::Idle => {}
         LoadState::Loading => {
@@ -169,6 +217,8 @@ mod tests {
         assert!(actions.contains(&&Action::NotionOpenRoot(root)));
         assert!(actions.contains(&&Action::NotionOpenPage(page)));
         assert!(actions.contains(&&Action::NotionConnect));
+        assert!(!actions.contains(&&Action::NotionReviewImport(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into())));
         assert!(actions.contains(&&Action::NotionRefresh(
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string())));
         assert!(actions.iter().all(|action| matches!(action,

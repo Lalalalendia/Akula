@@ -10,6 +10,7 @@ on:
       - 'aquilum-app/native/src/notion_offline/**'
       - 'aquilum-app/native/src/notion_credentials.rs'
       - 'aquilum-app/native/src/notion_sync.rs'
+      - 'aquilum-app/native/src/notion_import.rs'
       - 'aquilum-app/native/src/app/settings/notion.rs'
       - 'aquilum-app/native/src/app/lifecycle/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
@@ -25,6 +26,7 @@ on:
       - 'aquilum-app/native/src/notion_offline/**'
       - 'aquilum-app/native/src/notion_credentials.rs'
       - 'aquilum-app/native/src/notion_sync.rs'
+      - 'aquilum-app/native/src/notion_import.rs'
       - 'aquilum-app/native/src/app/settings/notion.rs'
       - 'aquilum-app/native/src/app/lifecycle/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
@@ -80,6 +82,9 @@ jobs:
       - name: Native Notion tile and other provider regressions
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview ui::settings::cloud
+      - name: Native verified API cache import UI and fail-closed worker
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_import::tests
       - name: Core read-only cached root catalog regression
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features notion-api-probe read_only_catalog_lists_only_caches

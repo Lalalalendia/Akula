@@ -20,7 +20,7 @@ pub struct Context {
     pub yandex_keys: Option<bool>,
     #[cfg(feature = "notion-offline-preview")] pub notion_offline: crate::notion_offline::NotionOfflineView,
     #[cfg(feature = "notion-offline-preview")] pub notion_selection: crate::notion_offline::SelectionView,
-    #[cfg(feature = "notion-offline-preview")] pub notion_sync: crate::notion_sync::SyncView,
+    #[cfg(feature = "notion-offline-preview")] pub notion_sync: crate::notion_sync::SyncView, #[cfg(feature = "notion-offline-preview")] pub notion_import: crate::notion_import::ImportView,
     pub yandex_probe: crate::yandex_probe_session::ProbeView,
     pub yandex_probe_busy: bool,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]

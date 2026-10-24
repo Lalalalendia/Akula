@@ -44,7 +44,7 @@ impl App {
             #[cfg(feature = "s3-e2e01-review-preview")]
             s3_bound_publications,
             yandex_keys,
-            #[cfg(feature = "notion-offline-preview")] notion_offline: if section == Section::Sync { crate::notion_offline::NotionOfflineView::read(&self.workspace.data_dir) } else { Default::default() }, #[cfg(feature = "notion-offline-preview")] notion_selection: self.notion_session.view(), #[cfg(feature = "notion-offline-preview")] notion_sync: self.notion_sync.view(),
+            #[cfg(feature = "notion-offline-preview")] notion_offline: if section == Section::Sync { crate::notion_offline::NotionOfflineView::read(&self.workspace.data_dir) } else { Default::default() }, #[cfg(feature = "notion-offline-preview")] notion_selection: self.notion_session.view(), #[cfg(feature = "notion-offline-preview")] notion_sync: self.notion_sync.view(), #[cfg(feature = "notion-offline-preview")] notion_import: self.notion_import.view(),
             yandex_probe: self.yandex_probe.view_for(&bucket),
             yandex_probe_busy: self.yandex_probe.busy(),
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]

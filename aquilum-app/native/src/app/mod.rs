@@ -134,7 +134,7 @@ pub struct App {
     #[cfg(feature = "notion-offline-preview")]
     notion_session: crate::notion_offline::NotionSession,
     #[cfg(feature = "notion-offline-preview")]
-    notion_sync: crate::notion_sync::RefreshSession,
+    notion_sync: crate::notion_sync::RefreshSession, #[cfg(feature = "notion-offline-preview")] notion_import: crate::notion_import::ImportSession,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
     s3_pair: crate::s3_pair_session::PairSession,
     controls: Option<(WidgetId, Handle<WindowButton>)>,

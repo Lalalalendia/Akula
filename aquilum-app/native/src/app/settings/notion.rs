@@ -61,6 +61,42 @@ impl App {
                 self.notion_session.text_chunk(*first);
                 true
             }
+            Action::NotionReviewImport(root) => {
+                if self.notion_sync.busy() || self.notion_import.busy()
+                    || self.notion_session.view().root.as_deref() != Some(root.as_str())
+                    || self.notion_session.view().state != crate::notion_offline::LoadState::Ready
+                { return true; }
+                if let Some(target) = &self.workspace.root {
+                    if self.notion_import.review(self.workspace.data_dir.clone(),
+                        root.clone(), target.clone()).is_err() {
+                        self.notion_import.refused();
+                    }
+                } else { self.notion_import.refused(); }
+                true
+            }
+            Action::NotionPublishImport(root) => {
+                if self.notion_sync.busy() || self.notion_import.busy() { return true; }
+                let Some(target) = self.workspace.root.as_deref() else { return true; };
+                let view = self.notion_import.view();
+                if !view.ready_for(root, target) { return true; }
+                let confirmed = rfd::MessageDialog::new()
+                    .set_title("Akula — независимый импорт Notion")
+                    .set_description(format!(
+                        "Создать {} Markdown-заметок и локальные ссылки в выбранной базе?\n\nБаза: {}\nИсточник: {}\nСнимок BLAKE3: {}\n\nСуществующие заметки не будут заменены. Типизированные базы, медиа и представления пока не переносятся. Содержимое Notion не изменится.",
+                        view.pages, target.display(), root,
+                        view.digest.as_deref().unwrap_or("неизвестно"),
+                    ))
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show() == rfd::MessageDialogResult::Yes;
+                if confirmed && self.notion_import.publish(
+                    Arc::clone(&self.workspace.core), self.workspace.data_dir.clone(),
+                    root.clone(), target.to_path_buf()
+                ).is_err() {
+                    self.notion_import.refused();
+                }
+                true
+            }
             _ => false,
         }
     }

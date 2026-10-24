@@ -53,7 +53,7 @@ impl App {
             retention_done: Arc::default(),
             yandex_probe,
             #[cfg(feature = "notion-offline-preview")] notion_session: crate::notion_offline::NotionSession::new(Arc::clone(&workspace_wake)),
-            #[cfg(feature = "notion-offline-preview")] notion_sync: crate::notion_sync::RefreshSession::new(Arc::clone(&workspace_wake)),
+            #[cfg(feature = "notion-offline-preview")] notion_sync: crate::notion_sync::RefreshSession::new(Arc::clone(&workspace_wake)), #[cfg(feature = "notion-offline-preview")] notion_import: crate::notion_import::ImportSession::new(Arc::clone(&workspace_wake)),
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             s3_pair: crate::s3_pair_session::PairSession::new(Arc::clone(&workspace_wake)),
             controls: None,

@@ -7,7 +7,9 @@ impl App {
         if let Some(root_id) = refreshed {
             self.notion_session.open(self.workspace.data_dir.clone(), root_id);
         }
-        if (sync_changed || self.notion_session.poll())
+        let selection_changed = self.notion_session.poll();
+        let import_changed = self.notion_import.poll();
+        if (sync_changed || selection_changed || import_changed)
             && matches!(&self.popup, Some(Popup::Settings { dialog, .. })
                 if dialog.section == crate::ui::settings::schema::Section::Sync)
         {

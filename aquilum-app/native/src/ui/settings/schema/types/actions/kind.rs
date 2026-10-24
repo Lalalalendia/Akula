@@ -9,7 +9,7 @@ pub enum Action {
     #[cfg(feature = "notion-offline-preview")] NotionForget(String),
     #[cfg(feature = "notion-offline-preview")] NotionOpenPage(String),
     #[cfg(feature = "notion-offline-preview")] NotionPageBatch(usize),
-    #[cfg(feature = "notion-offline-preview")] NotionTextChunk(usize),
+    #[cfg(feature = "notion-offline-preview")] NotionTextChunk(usize), #[cfg(feature = "notion-offline-preview")] NotionReviewImport(String), #[cfg(feature = "notion-offline-preview")] NotionPublishImport(String),
     #[cfg(feature = "dropbox-readonly-preview")] DropboxLoginAccount, #[cfg(feature = "dropbox-readonly-preview")] DropboxResumeAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxForgetAccount,
     #[cfg(feature = "dropbox-readonly-preview")] DropboxConnectReadOnly,
