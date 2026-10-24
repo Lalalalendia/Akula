@@ -24,9 +24,15 @@ const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
 const READ_CONTROL_ACCESS: u32 = 0x0002_0000;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const SHARE_ALL: u32 = 0x0000_0007;
+#[cfg(feature = "p2p-inbox-lab")]
+const SHARE_READ_WRITE: u32 = 0x0000_0003;
+#[cfg(feature = "p2p-inbox-lab")]
+const FILE_OPEN_IF: u32 = 3;
 const FILE_OPEN: u32 = 1;
 const FILE_CREATE: u32 = 2;
 const FILE_ADD_FILE_OR_WRITE_DATA: u32 = 0x0000_0002;
+#[cfg(feature = "p2p-inbox-lab")]
+const FILE_ADD_SUBDIRECTORY: u32 = 0x0000_0004;
 const DELETE_ACCESS: u32 = 0x0001_0000;
 const STATUS_OBJECT_NAME_COLLISION: u32 = 0xc000_0035;
 const STATUS_OBJECT_NAME_NOT_FOUND: u32 = 0xc000_0034;
@@ -143,6 +149,49 @@ extern "system" {
     ) -> i32;
 }
 
+// P2P staging cleanup uses FILE_DISPOSITION_INFORMATION = 13. It marks
+// exactly the already-opened stage FileObject for deletion on last close,
+// never a path which might have been replaced by another process.
+#[cfg(feature = "p2p-inbox-lab")]
+const FILE_DISPOSITION_INFORMATION_CLASS: u32 = 13;
+#[cfg(feature = "p2p-inbox-lab")]
+#[repr(C)]
+struct NtDispositionInfo {
+    delete_file: u8,
+}
+
+/// Mark an exclusively created P2P stage for deletion via its original NT
+/// HANDLE. The caller must only close the handle after this succeeds: no
+/// further read, write, metadata query or rename is allowed.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn mark_p2p_stage_delete_on_close(stage: &File) -> Result<(), VaultPortError> {
+    let mut info = NtDispositionInfo { delete_file: 1 };
+    let mut iosb = NtIoStatusBlock {
+        status_or_pointer: 0,
+        information: 0,
+    };
+    // SAFETY: stage was created by create_stage_child with DELETE_ACCESS.
+    // The one-byte FILE_DISPOSITION_INFORMATION and IO_STATUS_BLOCK stay
+    // alive through the synchronous NT call; handle is valid and live.
+    let status = unsafe {
+        NtSetInformationFile(
+            stage.as_raw_handle(),
+            &mut iosb,
+            (&mut info as *mut NtDispositionInfo).cast::<c_void>(),
+            std::mem::size_of::<NtDispositionInfo>() as u32,
+            FILE_DISPOSITION_INFORMATION_CLASS,
+        )
+    };
+    if status < 0 {
+        Err(VaultPortError::Io(format!(
+            "pinned NT stage disposition failed (NTSTATUS 0x{:08x})",
+            status as u32
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 #[repr(C)]
 struct NtRenameInfo {
     replace_if_exists: u8,
@@ -197,6 +246,30 @@ pub(super) fn open_root_for_create(root: &Path) -> Result<File, VaultPortError> 
     Ok(handle)
 }
 
+/// P2P-only creation authority. Unlike generic File Gate stage roots,
+/// the first Inbox receipt may also need to create the `objects` directory.
+/// Request that explicit Windows FILE_ADD_SUBDIRECTORY right without
+/// broadening open_root_for_create for other callers.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_root_for_p2p_inbox_create(
+    root: &Path,
+) -> Result<File, VaultPortError> {
+    let mut options = OpenOptions::new();
+    options.access_mode(
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+            | FILE_ADD_SUBDIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+    );
+    options.share_mode(SHARE_ALL);
+    options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let handle = options.open(root).map_err(io)?;
+    let meta = handle.metadata().map_err(io)?;
+    reject_reparse(&meta)?;
+    if !meta.is_dir() {
+        return Err(VaultPortError::UnsafePath);
+    }
+    Ok(handle)
+}
+
 /// Only ONE already-validated portable name component is accepted.
 /// OBJ_DONT_REPARSE rejects traversal; reparse points and hard links are not
 /// trusted as directories. FILE_CREATE (stage only) refuses any existing name.
@@ -217,6 +290,21 @@ pub(super) fn open_child_dir_for_create(
     open_child_access(parent, name, false,
         FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
         | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN)
+}
+
+/// P2P Inbox: open the existing objects directory through the pinned
+/// root for creating one new blob. READ_CONTROL is necessary for an actual
+/// owner/DACL audit on the returned directory handle.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_p2p_objects_dir_for_create(
+    pinned_inbox: &File,
+) -> Result<File, VaultPortError> {
+    open_child_access(
+        pinned_inbox, "objects", false,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+            | FILE_READ_ATTRIBUTES | READ_CONTROL_ACCESS | SYNCHRONIZE,
+        FILE_OPEN,
+    )
 }
 
 /// Create a hidden in-progress file exclusively relative to its pinned parent.
@@ -257,6 +345,43 @@ pub(super) fn create_probe_lock_child(
     )
 }
 
+/// Hold the original root directory open without FILE_SHARE_DELETE so
+/// an unrelated process cannot rename/delete this directory during the
+/// path-based SQLite transaction. The already pinned write-root HANDLE is
+/// independently compared by the caller before accepting this lease.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_p2p_inbox_root_no_delete(root: &Path) -> Result<File, VaultPortError> {
+    let mut options = OpenOptions::new();
+    options.access_mode(
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES
+            | READ_CONTROL_ACCESS | SYNCHRONIZE,
+    );
+    options.share_mode(SHARE_READ_WRITE);
+    options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let file = options.open(root).map_err(io)?;
+    let meta = file.metadata().map_err(io)?;
+    reject_reparse(&meta)?;
+    if !meta.is_dir() {
+        return Err(VaultPortError::UnsafePath);
+    }
+    Ok(file)
+}
+
+/// NT FILE_OPEN_IF creates only a missing child and never truncates an
+/// existing SQLite or objects component. No-delete sharing pins its NT name
+/// against replacement while path-based rusqlite is working.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn pin_p2p_inbox_child_no_delete(
+    pinned_root: &File, name: &str, file: bool,
+) -> Result<File, VaultPortError> {
+    let desired = FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES
+        | READ_CONTROL_ACCESS | SYNCHRONIZE
+        | if file { FILE_ADD_FILE_OR_WRITE_DATA } else { FILE_ADD_FILE_OR_WRITE_DATA };
+    open_child_access_optional_sharing(
+        pinned_root, name, file, desired, FILE_OPEN_IF, SHARE_READ_WRITE,
+    )?.ok_or(VaultPortError::FileChanged)
+}
+
 /// Inspection-only, relative to the pinned directory HANDLE. Only the
 /// native STATUS_OBJECT_NAME_NOT_FOUND status means absent; all other NT
 /// errors and reparse/special-object aliases fail closed.
@@ -266,6 +391,23 @@ pub(super) fn open_optional_child(parent: &File, name: &str)
     open_child_access_optional(
         parent, name, true,
         FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+    )
+}
+
+/// Audit-only read of one existing SQLite/Inbox component relative to the
+/// pinned root handle. READ_CONTROL is mandatory for GetSecurityInfo; unlike
+/// generic read probes, this cannot silently skip owner/DACL validation.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_optional_inbox_audit_child(
+    parent: &File,
+    name: &str,
+    leaf_file: bool,
+) -> Result<Option<File>, VaultPortError> {
+    open_child_access_optional(
+        parent, name, leaf_file,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES
+            | READ_CONTROL_ACCESS | SYNCHRONIZE,
         FILE_OPEN,
     )
 }
@@ -281,6 +423,15 @@ fn open_child_access(
 fn open_child_access_optional(
     parent: &File, name: &str, leaf: bool, desired_access: u32,
     disposition: u32,
+) -> Result<Option<File>, VaultPortError> {
+    open_child_access_optional_sharing(
+        parent, name, leaf, desired_access, disposition, SHARE_ALL,
+    )
+}
+
+fn open_child_access_optional_sharing(
+    parent: &File, name: &str, leaf: bool, desired_access: u32,
+    disposition: u32, share_access: u32,
 ) -> Result<Option<File>, VaultPortError> {
     if name.is_empty() || name == "." || name == ".."
         || name.chars().any(|ch| matches!(ch, '/' | '\\' | ':' | '\0'))
@@ -324,7 +475,7 @@ fn open_child_access_optional(
             &mut status_block,
             ptr::null(),
             0,
-            SHARE_ALL,
+            share_access,
             disposition,
             opts,
             ptr::null_mut(),

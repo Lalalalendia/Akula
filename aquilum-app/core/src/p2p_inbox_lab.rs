@@ -13,6 +13,115 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Windows-only private staging. Returns the directory handle as well as
+/// the exclusively created file; retain both through the receiver operation.
+/// Audits owner/DACL on an independently opened root and compares live NT
+/// identities before creating a child relative to the writable directory handle.
+/// The later SQLite/object publication is still path-based and NOT certified.
+#[cfg(windows)]
+pub fn create_pinned_windows_inbox_stage(
+    root: &Path,
+    name: &str,
+) -> Result<(File, File), InboxError> {
+    crate::sync::create_pinned_p2p_inbox_stage(root, name)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
+/// Fail closed for known insecure Windows Inbox objects and SQLite ACLs.
+/// The stage's pinned root HANDLE is the trust anchor; the current pathname
+/// must resolve to that same NT directory identity. This remains a negative
+/// check only: SQLite and object publication are not handle-relative yet.
+#[cfg(windows)]
+pub fn audit_pinned_windows_inbox_storage(
+    root: &Path,
+    pinned_root: &File,
+    require_complete: bool,
+) -> Result<(), InboxError> {
+    crate::sync::audit_pinned_p2p_inbox_storage(root, pinned_root, require_complete)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
+/// Keep the Windows Inbox root, objects and SQLite main file open with
+/// no FILE_SHARE_DELETE while rusqlite uses its legacy path-based connection.
+/// This is not a full SQLite VFS/ancestor/WAL custody guarantee.
+#[cfg(windows)]
+pub struct WindowsInboxSqliteCustody(crate::sync::P2pInboxSqliteCustody);
+
+#[cfg(windows)]
+impl WindowsInboxSqliteCustody {
+    pub fn verify(&self, root: &Path, pinned_root: &File) -> Result<(), InboxError> {
+        self.0
+            .verify(root, pinned_root)
+            .map_err(|_| InboxError::InvalidDestination)
+    }
+}
+
+/// Ensure the SQLite base file and objects directory are bootstrapped through
+/// NT root-relative FILE_OPEN_IF, and keep their names pinned during writes.
+#[cfg(windows)]
+pub fn pin_windows_inbox_sqlite_custody(
+    root: &Path,
+    pinned_root: &File,
+) -> Result<WindowsInboxSqliteCustody, InboxError> {
+    crate::sync::pin_p2p_inbox_sqlite_custody(root, pinned_root)
+        .map(WindowsInboxSqliteCustody)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
+/// Windows-only permanent Inbox publication: copy and re-hash the already
+/// opened verified stage into an exclusively created NT file beneath the
+/// pinned objects HANDLE; atomically rename that same HANDLE without replace.
+/// No path-based object stage/create/hard-link and no Vault write authority.
+#[cfg(windows)]
+pub fn publish_pinned_windows_inbox_object(
+    root: &Path,
+    pinned_root: &File,
+    stage: &mut File,
+    transfer_id: Uuid,
+    expected_bytes: u64,
+    expected_root: [u8; 32],
+) -> Result<(), InboxError> {
+    crate::sync::publish_pinned_p2p_inbox_object(
+        root,
+        pinned_root,
+        stage,
+        transfer_id,
+        expected_bytes,
+        expected_root,
+    )
+    .map_err(|_| InboxError::InvalidDestination)
+}
+
+/// Verify one finished Inbox blob by its locally derived UUID through
+/// root-relative Windows NT opens and read-only BLAKE3. A path-based SQLite
+/// receipt cannot by itself satisfy this final safety gate.
+#[cfg(windows)]
+pub fn verify_pinned_windows_inbox_object(
+    root: &Path,
+    pinned_root: &File,
+    transfer_id: uuid::Uuid,
+    expected_bytes: u64,
+    expected_root: [u8; 32],
+) -> Result<(), InboxError> {
+    crate::sync::verify_pinned_p2p_inbox_object(
+        root,
+        pinned_root,
+        transfer_id,
+        expected_bytes,
+        expected_root,
+    )
+    .map_err(|_| InboxError::InvalidDestination)
+}
+
+/// Request deferred removal of an exclusively-created Windows Inbox stage
+/// using its original NT HANDLE. No string path is ever resolved at cleanup.
+/// On success the caller must only drop/close that stage's file handles.
+#[cfg(windows)]
+pub fn mark_pinned_windows_stage_delete_on_close(stage: &File) -> Result<(), InboxError> {
+    crate::sync::mark_pinned_p2p_inbox_stage_delete_on_close(stage)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 

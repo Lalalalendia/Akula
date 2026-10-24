@@ -22,10 +22,14 @@ mod model;
 mod inbox;
 #[cfg(feature = "p2p-native-send-beta")]
 mod native_send;
+#[cfg(feature = "p2p-native-receive-beta")]
+mod native_receive;
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contacts;
 #[cfg(feature = "p2p-device-ui")]
 mod local_identity;
+#[cfg(feature = "p2p-device-ui")]
+mod peer_pair;
 
 /// A display-only identity observation. The first-party owner registry still
 /// needs to supply a verified snapshot. No production path populates this
@@ -56,10 +60,14 @@ pub(super) struct TransferState {
     pub(super) selected_peer: Option<(DeviceId, [u8; 32])>,
     #[cfg(feature = "p2p-device-ui")]
     pub(super) local_identity: local_identity::LocalIdentityUi,
+    #[cfg(feature = "p2p-device-ui")]
+    pub(super) peer_pair: peer_pair::PeerUi,
     #[cfg(feature = "p2p-inbox-preview")]
     pub(super) inbox: inbox::InboxPreview,
     #[cfg(feature = "p2p-native-send-beta")]
     pub(super) sender: native_send::NativeSender,
+    #[cfg(feature = "p2p-native-receive-beta")]
+    pub(super) receiver: native_receive::NativeReceiver,
 }
 
 impl App {
@@ -81,17 +89,43 @@ impl App {
             #[cfg(not(feature = "p2p-device-ui"))]
             { None }
         };
+        let peer_view = {
+            #[cfg(feature = "p2p-device-ui")]
+            {
+                if matches!(
+                    self.transfer.local_identity.view.phase,
+                    transfer_ui::IdentityPhase::Ready(_)
+                ) {
+                    Some(&self.transfer.peer_pair.view)
+                } else {
+                    None
+                }
+            }
+            #[cfg(not(feature = "p2p-device-ui"))]
+            {
+                None
+            }
+        };
         #[cfg(feature = "p2p-inbox-preview")]
         let inbox_view = Some(&self.transfer.inbox.view);
         #[cfg(not(feature = "p2p-inbox-preview"))]
         let inbox_view = None;
         // Rust cannot conditionally remove individual call arguments.
         // Keep feature combinations explicit so default-off still compiles.
-        #[cfg(all(feature = "p2p-device-contacts-preview", feature = "p2p-native-send-beta"))]
+        #[cfg(feature = "p2p-native-receive-beta")]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view, inbox_view,
+            self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
+            Some(&self.transfer.sender.view),
+            self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
+            Some(&self.transfer.receiver.view),
+        );
+        #[cfg(all(feature = "p2p-device-contacts-preview", feature = "p2p-native-send-beta", not(feature = "p2p-native-receive-beta")))]
+        let (layer, dialog) = transfer_ui::dialog(
+            &self.transfer.rows(), &self.transfer.device_rows(),
+            &self.transfer.transport_contacts, self.transfer.choosing,
+            self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
             Some(&self.transfer.sender.view),
             self.transfer.drafts.len() == 1 && !self.transfer.drafts[0].paused,
         );
@@ -99,12 +133,12 @@ impl App {
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
             &self.transfer.transport_contacts, self.transfer.choosing,
-            self.transfer.error.as_deref(), identity_view, inbox_view,
+            self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
         );
         #[cfg(not(feature = "p2p-device-contacts-preview"))]
         let (layer, dialog) = transfer_ui::dialog(
             &self.transfer.rows(), &self.transfer.device_rows(),
-            self.transfer.choosing, self.transfer.error.as_deref(), identity_view, inbox_view,
+            self.transfer.choosing, self.transfer.error.as_deref(), identity_view, peer_view, inbox_view,
         );
         root.add_layer(layer, Point::ORIGIN);
         root.focus_on(Some(dialog.layer));
@@ -129,12 +163,27 @@ impl App {
         if self.transfer.local_identity.poll() {
             changed = true;
         }
+        #[cfg(feature = "p2p-device-ui")]
+        if self.transfer.peer_pair.poll() {
+            // Refresh the same protected OS contacts after a confirmed pin
+            // or revocation; transfer buttons must reflect the new authority.
+            #[cfg(feature = "p2p-device-contacts-preview")]
+            self.transfer.refresh_transport_contacts();
+            changed = true;
+        }
         #[cfg(feature = "p2p-inbox-preview")]
         if self.transfer.inbox.poll() {
             changed = true;
         }
         #[cfg(feature = "p2p-native-send-beta")]
         if self.transfer.sender.poll() {
+            changed = true;
+        }
+        #[cfg(feature = "p2p-native-receive-beta")]
+        if self.transfer.receiver.poll() {
+            if self.transfer.receiver.view.success {
+                self.begin_inbox_preview();
+            }
             changed = true;
         }
         if changed {
@@ -165,6 +214,8 @@ impl App {
         if dismiss {
             #[cfg(feature = "p2p-native-send-beta")]
             self.transfer.sender.cancel();
+            #[cfg(feature = "p2p-native-receive-beta")]
+            self.transfer.receiver.cancel();
             dialog::close(root, dialog.layer);
             return Outcome::default();
         }
@@ -188,10 +239,15 @@ impl App {
         }
         #[cfg(feature = "p2p-inbox-preview")]
         if pressed && !refresh {
-            if let Some((_, receipt)) = dialog.inbox_save_actions.iter()
+            if let Some((_, command)) = dialog.inbox_actions.iter()
                 .find(|(button, _)| *button == id)
             {
-                refresh = self.begin_inbox_save(receipt);
+                refresh = match command {
+                    transfer_ui::InboxAction::SaveCopy(receipt) => self.begin_inbox_save(receipt),
+                    transfer_ui::InboxAction::Preview(receipt) => {
+                        self.begin_inbox_text_preview(receipt)
+                    }
+                };
             }
         }
         #[cfg(feature = "p2p-native-send-beta")]
@@ -201,8 +257,28 @@ impl App {
             {
                 refresh = match peer {
                     transfer_ui::NativeSendAction::Start(peer) => self.begin_native_send(peer),
+                    transfer_ui::NativeSendAction::StartInternet(peer) => {
+                        self.begin_native_send_internet(peer)
+                    }
                     transfer_ui::NativeSendAction::Cancel => {
                         self.transfer.sender.cancel();
+                        true
+                    }
+                };
+            }
+        }
+        #[cfg(feature = "p2p-native-receive-beta")]
+        if pressed && !refresh {
+            if let Some((_, command)) = dialog.native_receive_actions.iter()
+                .find(|(button, _)| *button == id)
+            {
+                refresh = match command {
+                    transfer_ui::NativeReceiveAction::Start(peer) => self.begin_native_receive(peer),
+                    transfer_ui::NativeReceiveAction::StartInternet(peer) => {
+                        self.begin_native_receive_internet(peer)
+                    }
+                    transfer_ui::NativeReceiveAction::Cancel => {
+                        self.transfer.receiver.cancel();
                         true
                     }
                 };
@@ -217,6 +293,17 @@ impl App {
                     *command, Arc::clone(&self.workspace.wake),
                 );
                 refresh = true;
+            }
+        }
+        #[cfg(feature = "p2p-device-ui")]
+        if !refresh {
+            if let Some(controls) = &dialog.peer_controls {
+                refresh = self.transfer.peer_pair.handle(
+                    controls,
+                    id,
+                    action,
+                    Arc::clone(&self.workspace.wake),
+                );
             }
         }
         self.popup = Some(Popup::Transfers(dialog));

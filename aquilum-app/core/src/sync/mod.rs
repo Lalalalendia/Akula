@@ -67,6 +67,411 @@ mod pinned_read;
 mod filegate_windows_acl;
 #[cfg(windows)]
 mod pinned_windows;
+// P2P-only, default-off receiver stage creation. Reuse the existing NT
+// handle-relative create primitive and conservative owner/DACL audit.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn create_pinned_p2p_inbox_stage(
+    root: &std::path::Path,
+    name: &str,
+) -> Result<(std::fs::File, std::fs::File), VaultPortError> {
+    let inspected = pinned_windows::open_root(root)?;
+    filegate_windows_acl::audit_owner_dacl(&inspected)?;
+    // P2P Inbox, unlike a generic File Gate stage, may need to create
+    // the initially absent "objects" directory through the pinned NT root.
+    let writable = pinned_windows::open_root_for_p2p_inbox_create(root)?;
+    if pinned_windows::file_identity(&inspected)? != pinned_windows::file_identity(&writable)? {
+        return Err(VaultPortError::FileChanged);
+    }
+    let stage = pinned_windows::create_stage_child(&writable, name)?;
+    Ok((writable, stage))
+}
+
+/// P2P-only negative guard for the local Inbox after stage creation, before
+/// any path-based SQLite/object operation, and again before reporting success.
+/// Each child is opened by one NT component relative to the *same pinned root*
+/// with READ_CONTROL. This rejects unsafe owner/DACL, reparse directories and
+/// hard-linked SQLite files. Path-based SQLite/open remains a known gap; this
+/// guard is not a complete defense against hostile same-user rename races.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn audit_pinned_p2p_inbox_storage(
+    root: &std::path::Path,
+    pinned_root: &std::fs::File,
+    require_complete: bool,
+) -> Result<(), VaultPortError> {
+    let inspected = pinned_windows::open_root(root)?;
+    if pinned_windows::file_identity(&inspected)? != pinned_windows::file_identity(pinned_root)? {
+        return Err(VaultPortError::FileChanged);
+    }
+    filegate_windows_acl::audit_owner_dacl(&inspected)?;
+    for (name, leaf_file, mandatory) in [
+        ("objects", false, true),
+        ("received-inbox.sqlite3", true, true),
+        ("received-inbox.sqlite3-wal", true, false),
+        ("received-inbox.sqlite3-shm", true, false),
+    ] {
+        let opened = pinned_windows::open_optional_inbox_audit_child(
+            &inspected,
+            name,
+            leaf_file,
+        )?;
+        let Some(opened) = opened else {
+            if mandatory && require_complete {
+                return Err(VaultPortError::FileChanged);
+            }
+            continue;
+        };
+        filegate_windows_acl::audit_owner_dacl(&opened)?;
+        if leaf_file && pinned_windows::file_identity_with_links(&opened)?.2 != 1 {
+            return Err(VaultPortError::UnsafePath);
+        }
+    }
+    Ok(())
+}
+
+/// P2P stage deletion is anchored to the exact HANDLE created under the
+/// protected Inbox root. A hostile rename/replacement of the former stage
+/// name must never allow clean-up to delete an unrelated user file.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn mark_pinned_p2p_inbox_stage_delete_on_close(
+    opened_stage: &std::fs::File,
+) -> Result<(), VaultPortError> {
+    pinned_windows::mark_p2p_stage_delete_on_close(opened_stage)
+}
+
+/// Publish exactly one verified P2P Inbox blob using only the already
+/// authorized NT root and objects directory HANDLES. This replaces the
+/// path-based scratch + hard_link writer on Windows, never File Gate/Vault.
+/// SQLite remains path-based and is a separate release blocker.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn publish_pinned_p2p_inbox_object(
+    root: &std::path::Path,
+    pinned_root: &std::fs::File,
+    stage: &mut std::fs::File,
+    transfer_id: uuid::Uuid,
+    expected_bytes: u64,
+    expected_blake3: [u8; 32],
+) -> Result<(), VaultPortError> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    if transfer_id.is_nil() || expected_bytes == 0
+        || expected_bytes > 8 * 1024 * 1024 || expected_blake3 == [0u8; 32]
+    {
+        return Err(VaultPortError::UnsafePath);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    let objects = pinned_windows::open_p2p_objects_dir_for_create(pinned_root)?;
+    filegate_windows_acl::audit_owner_dacl(&objects)?;
+    let inspected_objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    if pinned_windows::file_identity(&objects)?
+        != pinned_windows::file_identity(&inspected_objects)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+
+    // On every pre-publication error, mark the exclusive temporary file for
+    // removal by its ORIGINAL HANDLE, not by the mutable filename.
+    struct UnpublishedStage(Option<std::fs::File>);
+    impl Drop for UnpublishedStage {
+        fn drop(&mut self) {
+            if let Some(stage) = self.0.as_ref() {
+                let _ = pinned_windows::mark_p2p_stage_delete_on_close(stage);
+            }
+        }
+    }
+
+    let before = stage.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?;
+    if !before.is_file() || before.len() != expected_bytes {
+        return Err(VaultPortError::FileChanged);
+    }
+    stage.seek(SeekFrom::Start(0)).map_err(|e| VaultPortError::Io(e.to_string()))?;
+
+    let scratch_name = format!(".akula-inbox-{}.part", uuid::Uuid::new_v4());
+    let candidate = pinned_windows::create_stage_child(&objects, &scratch_name)?;
+    let mut guard = UnpublishedStage(Some(candidate));
+    let candidate = guard.0.as_mut().ok_or(VaultPortError::FileChanged)?;
+    let mut hasher = blake3::Hasher::new();
+    let mut copied = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = stage.read(&mut buffer).map_err(|e| VaultPortError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        copied = copied.checked_add(n as u64).ok_or(VaultPortError::FileChanged)?;
+        if copied > expected_bytes {
+            return Err(VaultPortError::FileChanged);
+        }
+        hasher.update(&buffer[..n]);
+        candidate.write_all(&buffer[..n]).map_err(|e| VaultPortError::Io(e.to_string()))?;
+    }
+    if copied != expected_bytes
+        || stage.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?.len() != expected_bytes
+        || *hasher.finalize().as_bytes() != expected_blake3
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    candidate.sync_all().map_err(|e| VaultPortError::Io(e.to_string()))?;
+    let leaf = format!("{}.blob", transfer_id.hyphenated());
+    // NT FileRenameInformation is atomically no-replace, anchored to objects.
+    // The temporary filename is not used for either publication or cleanup.
+    pinned_windows::rename_staged_no_replace(candidate, &objects, &leaf)?;
+    // Renamed file is now the permanent object: never delete it on Drop.
+    drop(guard.0.take());
+
+    let live_objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    if pinned_windows::file_identity(&objects)?
+        != pinned_windows::file_identity(&live_objects)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    Ok(())
+}
+
+/// Keep the full absolute ancestor directory chain (drive/share root to the
+/// immediate parent), Inbox root, objects and main SQLite file pinned without
+/// FILE_SHARE_DELETE for the entire receipt. This is name custody only:
+/// WAL/SHM, same-user byte writes, power loss and VFS races remain separate.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) struct P2pInboxSqliteCustody {
+    ancestors: Vec<(std::path::PathBuf, std::fs::File)>,
+    root: std::fs::File,
+    objects: std::fs::File,
+    db: std::fs::File,
+}
+
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn pin_p2p_inbox_sqlite_custody(
+    root_path: &std::path::Path,
+    pinned_root: &std::fs::File,
+) -> Result<P2pInboxSqliteCustody, VaultPortError> {
+    if !root_path.is_absolute() {
+        return Err(VaultPortError::UnsafePath);
+    }
+    // Acquire from the volume/share root downward. The parent of each child
+    // is already pinned against rename before its own name is resolved.
+    // NT root-relative opens additionally compare the intended child with
+    // the path-opened directory; reparse components are rejected.
+    let mut ancestors: Vec<(std::path::PathBuf, std::fs::File)> = Vec::new();
+    let paths: Vec<_> = root_path.ancestors().skip(1).collect();
+    for path in paths.into_iter().rev() {
+        if !path.is_absolute() {
+            return Err(VaultPortError::UnsafePath);
+        }
+        let pinned = pinned_windows::open_p2p_inbox_root_no_delete(path)?;
+        let current = pinned_windows::open_root(path)?;
+        if pinned_windows::file_identity(&pinned)?
+            != pinned_windows::file_identity(&current)?
+        {
+            return Err(VaultPortError::FileChanged);
+        }
+        if let Some((_, enclosing)) = ancestors.last() {
+            let leaf = path.file_name().and_then(|s| s.to_str())
+                .ok_or(VaultPortError::UnsafePath)?;
+            let relative = pinned_windows::open_optional_inbox_audit_child(
+                enclosing, leaf, false,
+            )?.ok_or(VaultPortError::FileChanged)?;
+            if pinned_windows::file_identity(&relative)?
+                != pinned_windows::file_identity(&pinned)?
+            {
+                return Err(VaultPortError::FileChanged);
+            }
+        }
+        ancestors.push((path.to_path_buf(), pinned));
+    }
+    let (_, parent) = ancestors.last().ok_or(VaultPortError::UnsafePath)?;
+    let root_leaf = root_path.file_name().and_then(|s| s.to_str())
+        .ok_or(VaultPortError::UnsafePath)?;
+    let relative_root = pinned_windows::open_optional_inbox_audit_child(
+        parent, root_leaf, false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    let original = pinned_windows::open_p2p_inbox_root_no_delete(root_path)?;
+    if pinned_windows::file_identity(&relative_root)?
+        != pinned_windows::file_identity(&original)?
+        || pinned_windows::file_identity(&original)?
+            != pinned_windows::file_identity(pinned_root)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    filegate_windows_acl::audit_owner_dacl(&original)?;
+    // In particular, this first-use bootstrap does not call
+    // fs::create_dir or Connection::open on a potentially replaced name.
+    let objects = pinned_windows::pin_p2p_inbox_child_no_delete(
+        pinned_root, "objects", false,
+    )?;
+    filegate_windows_acl::audit_owner_dacl(&objects)?;
+    let db = pinned_windows::pin_p2p_inbox_child_no_delete(
+        pinned_root, "received-inbox.sqlite3", true,
+    )?;
+    filegate_windows_acl::audit_owner_dacl(&db)?;
+    if pinned_windows::file_identity_with_links(&db)?.2 != 1 {
+        return Err(VaultPortError::UnsafePath);
+    }
+    let custody = P2pInboxSqliteCustody {
+        ancestors,
+        root: original,
+        objects,
+        db,
+    };
+    custody.verify(root_path, pinned_root)?;
+    Ok(custody)
+}
+
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+impl P2pInboxSqliteCustody {
+    pub(crate) fn verify(
+        &self,
+        root_path: &std::path::Path,
+        pinned_root: &std::fs::File,
+    ) -> Result<(), VaultPortError> {
+        // A no-delete HANDLE is held for every ancestor, not just the
+        // immediate Akula parent; every current namespace view must still
+        // identify the very same directory after the SQLite transaction.
+        for (index, (path, pinned)) in self.ancestors.iter().enumerate() {
+            let current = pinned_windows::open_root(path)?;
+            if pinned_windows::file_identity(pinned)?
+                != pinned_windows::file_identity(&current)?
+            {
+                return Err(VaultPortError::FileChanged);
+            }
+            if index > 0 {
+                let parent = &self.ancestors[index - 1].1;
+                let leaf = path.file_name().and_then(|s| s.to_str())
+                    .ok_or(VaultPortError::UnsafePath)?;
+                let relative = pinned_windows::open_optional_inbox_audit_child(
+                    parent, leaf, false,
+                )?.ok_or(VaultPortError::FileChanged)?;
+                if pinned_windows::file_identity(pinned)?
+                    != pinned_windows::file_identity(&relative)?
+                {
+                    return Err(VaultPortError::FileChanged);
+                }
+            }
+        }
+        // Verify both the original HANDLE identities and current path views
+        // after the SQLite commit, before sending any remote receipt OK.
+        if pinned_windows::file_identity(&self.root)?
+            != pinned_windows::file_identity(pinned_root)?
+        {
+            return Err(VaultPortError::FileChanged);
+        }
+        filegate_windows_acl::audit_owner_dacl(&self.root)?;
+        for (name, pinned, is_file) in [
+            ("objects", &self.objects, false),
+            ("received-inbox.sqlite3", &self.db, true),
+        ] {
+            let current = pinned_windows::open_optional_inbox_audit_child(
+                pinned_root, name, is_file,
+            )?.ok_or(VaultPortError::FileChanged)?;
+            if pinned_windows::file_identity(pinned)?
+                != pinned_windows::file_identity(&current)?
+            {
+                return Err(VaultPortError::FileChanged);
+            }
+            filegate_windows_acl::audit_owner_dacl(&current)?;
+        }
+        if pinned_windows::file_identity_with_links(&self.db)?.2 != 1 {
+            return Err(VaultPortError::UnsafePath);
+        }
+        // Compare the final child relative to its already-pinned immediate
+        // parent as well as through the ambient path. This does not prevent
+        // arbitrary byte writes by another process with the same account.
+        let (_, parent) = self.ancestors.last().ok_or(VaultPortError::UnsafePath)?;
+        let leaf = root_path.file_name().and_then(|s| s.to_str())
+            .ok_or(VaultPortError::UnsafePath)?;
+        let anchored_root = pinned_windows::open_optional_inbox_audit_child(
+            parent, leaf, false,
+        )?.ok_or(VaultPortError::FileChanged)?;
+        if pinned_windows::file_identity(&anchored_root)?
+            != pinned_windows::file_identity(&self.root)?
+        {
+            return Err(VaultPortError::FileChanged);
+        }
+        let reopened_root = pinned_windows::open_root(root_path)?;
+        if pinned_windows::file_identity(&reopened_root)?
+            != pinned_windows::file_identity(&self.root)?
+        {
+            return Err(VaultPortError::FileChanged);
+        }
+        Ok(())
+    }
+}
+
+/// P2P-only readback of the exact received object using NT handles rather
+/// than reopening its caller-visible pathname. The object must have exactly
+/// one NTFS hard link, restrictive OWNER/DACL and the expected actual bytes.
+/// This complements, but does not replace, SQLite/namespace custody.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn verify_pinned_p2p_inbox_object(
+    root: &std::path::Path,
+    pinned_root: &std::fs::File,
+    transfer_id: uuid::Uuid,
+    expected_bytes: u64,
+    expected_blake3: [u8; 32],
+) -> Result<(), VaultPortError> {
+    use std::io::Read;
+
+    if expected_bytes == 0 || expected_bytes > 8 * 1024 * 1024
+        || expected_blake3 == [0u8; 32]
+    {
+        return Err(VaultPortError::UnsafePath);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    let objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    filegate_windows_acl::audit_owner_dacl(&objects)?;
+    // The filename is derived only from a locally authenticated transfer ID,
+    // never from a remote filename, JSON display label or user-supplied path.
+    let leaf = format!("{}.blob", transfer_id.hyphenated());
+    let mut object = pinned_windows::open_optional_inbox_audit_child(
+        &objects, &leaf, true,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    filegate_windows_acl::audit_owner_dacl(&object)?;
+    if pinned_windows::file_identity_with_links(&object)?.2 != 1 {
+        return Err(VaultPortError::UnsafePath);
+    }
+    if object.metadata().map_err(|e| VaultPortError::Io(e.to_string()))?.len()
+        != expected_bytes
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    let mut hasher = blake3::Hasher::new();
+    let mut bytes = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = object.read(&mut buffer).map_err(|e| VaultPortError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        bytes = bytes.checked_add(n as u64).ok_or(VaultPortError::FileChanged)?;
+        if bytes > expected_bytes {
+            return Err(VaultPortError::FileChanged);
+        }
+        hasher.update(&buffer[..n]);
+    }
+    if bytes != expected_bytes || *hasher.finalize().as_bytes() != expected_blake3 {
+        return Err(VaultPortError::FileChanged);
+    }
+    // Refuse an obvious replacement of the objects path during readback.
+    // A malicious same-user actor can still race after this point, hence this
+    // is intentionally not called a durable authenticated delivery receipt.
+    let still_objects = pinned_windows::open_optional_inbox_audit_child(
+        pinned_root, "objects", false,
+    )?.ok_or(VaultPortError::FileChanged)?;
+    if pinned_windows::file_identity(&objects)?
+        != pinned_windows::file_identity(&still_objects)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    audit_pinned_p2p_inbox_storage(root, pinned_root, true)?;
+    Ok(())
+}
+
 mod protocol;
 mod provider;
 mod s3;

@@ -34,7 +34,22 @@ pub enum QueueAction {
 #[derive(Clone, Debug)]
 pub enum NativeSendAction {
     Start(String),
+    StartInternet(String),
     Cancel,
+}
+
+#[cfg(feature = "p2p-native-receive-beta")]
+#[derive(Clone, Debug)]
+pub enum NativeReceiveAction {
+    Start(String),
+    StartInternet(String),
+    Cancel,
+}
+
+#[derive(Clone, Debug)]
+pub enum InboxAction {
+    Preview(String),
+    SaveCopy(String),
 }
 
 /// Read-only view model; only the opt-in receiver-side worker populates rows.
@@ -54,6 +69,8 @@ pub struct InboxView {
     pub loading: bool,
     pub error: Option<String>,
     pub exporting: bool,
+    pub previewing: bool,
+    pub preview: Option<(String, String)>,
     pub notice_key: Option<&'static str>,
 }
 
@@ -67,16 +84,29 @@ pub struct NativeSendView {
     pub success: bool,
 }
 
+#[cfg(feature = "p2p-native-receive-beta")]
+#[derive(Clone, Debug, Default)]
+pub struct NativeReceiveView {
+    pub busy: bool,
+    pub canceling: bool,
+    pub success: bool,
+    pub message: Option<String>,
+}
+
 mod devices;
 mod identity;
+mod peer_pair;
 mod layout;
 mod queue_view;
 mod inbox_view;
 #[cfg(feature = "p2p-native-send-beta")]
 mod native_send_view;
+#[cfg(feature = "p2p-native-receive-beta")]
+mod native_receive_view;
 use layout::{card_size, details, display_size, hint, rule};
 pub use devices::{DeviceRow, DeviceStatus};
 pub use identity::{IdentityAction, IdentityPhase, IdentityView};
+pub use peer_pair::{PeerAction, PeerControls, PeerPhase, PeerView};
 #[cfg(feature = "p2p-device-contacts-preview")]
 mod contact_preview;
 #[cfg(feature = "p2p-device-contacts-preview")]
@@ -89,9 +119,12 @@ pub struct TransferDialog {
     pub actions: Vec<(WidgetId, usize, QueueAction)>,
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
-    pub inbox_save_actions: Vec<(WidgetId, String)>,
+    pub peer_controls: Option<PeerControls>,
+    pub inbox_actions: Vec<(WidgetId, InboxAction)>,
     #[cfg(feature = "p2p-native-send-beta")]
     pub native_send_actions: Vec<(WidgetId, NativeSendAction)>,
+    #[cfg(feature = "p2p-native-receive-beta")]
+    pub native_receive_actions: Vec<(WidgetId, NativeReceiveAction)>,
 }
 
 mod dialog_view;

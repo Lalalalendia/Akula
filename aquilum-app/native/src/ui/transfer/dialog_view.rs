@@ -1,8 +1,8 @@
 //! Transfer dialog construction, leaving transfer.rs as a compact API.
 use super::*;
 
-/// Draft controls remain inert. The optional received-Inbox Save Copy button
-/// invokes only an explicit local no-clobber export, never QUIC or Vault ACL.
+/// Draft controls remain inert. Inbox preview is verified, bounded and
+/// read-only; Save Copy uses explicit local no-clobber export, never Vault ACL.
 pub fn dialog(
     rows: &[QueueRow],
     devices: &[DeviceRow],
@@ -10,9 +10,11 @@ pub fn dialog(
     choosing: bool,
     error: Option<&str>,
     identity: Option<&IdentityView>,
+    peer: Option<&PeerView>,
     inbox: Option<&InboxView>,
     #[cfg(feature = "p2p-native-send-beta")] sender: Option<&NativeSendView>,
     #[cfg(feature = "p2p-native-send-beta")] can_send: bool,
+    #[cfg(feature = "p2p-native-receive-beta")] receiver: Option<&NativeReceiveView>,
 ) -> (NewWidget<Modal>, TransferDialog) {
     let close = NewWidget::new(IconButton::new(icons::X, t("transfer.close")));
     let close_id = close.id();
@@ -33,6 +35,7 @@ pub fn dialog(
 
     let (info, device_actions) = devices::render(devices, error);
     let mut identity_actions = Vec::new();
+    let mut peer_controls = None;
     let footer = NewWidget::new(
         Flex::row()
             .main_axis_alignment(MainAxisAlignment::End)
@@ -55,7 +58,17 @@ pub fn dialog(
         identity_actions = actions;
         card = card.with_fixed(rule()).with_fixed(panel);
     }
-    let (card, inbox_save_actions) = if let Some(inbox) = inbox {
+    if let Some(peer) = peer {
+        let (panel, controls) = peer_pair::render(peer);
+        peer_controls = Some(controls);
+        // Multiple devices, drafts and Inbox items must not push key-input
+        // controls outside a modal; the peer section is independently scrollable.
+        card = card.with_fixed(rule()).with(
+            NewWidget::new(ScrollArea::new(panel)),
+            1.0,
+        );
+    }
+    let (card, inbox_actions) = if let Some(inbox) = inbox {
         let (panel, buttons) = inbox_view::render(inbox);
         (
             card.with_fixed(rule())
@@ -69,6 +82,13 @@ pub fn dialog(
     #[cfg(feature = "p2p-native-send-beta")]
     let (card, native_send_actions) = if let Some(sender) = sender {
         let (section, actions) = native_send_view::render(sender, contacts, can_send);
+        (card.with_fixed(rule()).with_fixed(section), actions)
+    } else {
+        (card, Vec::new())
+    };
+    #[cfg(feature = "p2p-native-receive-beta")]
+    let (card, native_receive_actions) = if let Some(receiver) = receiver {
+        let (section, actions) = native_receive_view::render(receiver, contacts);
         (card.with_fixed(rule()).with_fixed(section), actions)
     } else {
         (card, Vec::new())
@@ -96,9 +116,12 @@ pub fn dialog(
             actions,
             device_actions,
             identity_actions,
-            inbox_save_actions,
+            peer_controls,
+            inbox_actions,
             #[cfg(feature = "p2p-native-send-beta")]
             native_send_actions,
+            #[cfg(feature = "p2p-native-receive-beta")]
+            native_receive_actions,
         },
     )
 }

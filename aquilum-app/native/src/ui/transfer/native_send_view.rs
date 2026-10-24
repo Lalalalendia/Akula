@@ -12,7 +12,8 @@ pub(super) fn render(
     let mut panel = Flex::column()
         .cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(details(&t("transfer.nativeSendTitle")))
-        .with_fixed(hint(&t("transfer.nativeSendWarning")));
+        .with_fixed(hint(&t("transfer.nativeSendWarning")))
+        .with_fixed(hint(&t("transfer.nativeInternetDisclosure")));
     if !exactly_one {
         panel = panel.with_fixed(hint(&t("transfer.nativeSendChoose")));
     }
@@ -45,9 +46,20 @@ pub(super) fn render(
                 button.id(),
                 NativeSendAction::Start(contact.full_endpoint_id.clone()),
             ));
+            let internet = NewWidget::new(TextButton::new(
+                t("transfer.nativeSendInternetButton"),
+                Variant::Ghost,
+            ));
+            actions.push((
+                internet.id(),
+                NativeSendAction::StartInternet(contact.full_endpoint_id.clone()),
+            ));
             let short: String = contact.full_endpoint_id.chars().take(16).collect();
             panel = panel.with_fixed(NewWidget::new(
-                Flex::row().with(details(&short), 1.0).with_fixed(button),
+                Flex::row()
+                    .with(details(&short), 1.0)
+                    .with_fixed(button)
+                    .with_fixed(internet),
             ));
         }
     }
@@ -86,5 +98,20 @@ mod tests {
         assert!(actions.is_empty());
         let (_, actions) = render(&NativeSendView::default(), &contacts, false);
         assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn verified_contact_has_explicit_separate_internet_action() {
+        let contacts = TransportContactView {
+            rows: vec![TransportContactRow {
+                full_endpoint_id: "b".repeat(64),
+                revoked: false,
+            }],
+            error: None,
+        };
+        let (_, actions) = render(&NativeSendView::default(), &contacts, true);
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(&actions[0].1, NativeSendAction::Start(_)));
+        assert!(matches!(&actions[1].1, NativeSendAction::StartInternet(_)));
     }
 }
