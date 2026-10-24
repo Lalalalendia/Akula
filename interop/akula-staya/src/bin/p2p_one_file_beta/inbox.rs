@@ -8,7 +8,7 @@ use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(windows)]
 use aquilum_core::p2p_inbox_lab::{
     audit_pinned_windows_inbox_storage, create_pinned_windows_inbox_stage,
-    verify_pinned_windows_inbox_object,
+    mark_pinned_windows_stage_delete_on_close, verify_pinned_windows_inbox_object,
 };
 #[cfg(not(windows))]
 use std::ffi::OsString;
@@ -20,6 +20,46 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
+
+// The Windows stage is removed by its originally opened file HANDLE, never
+// by an ambient path that a same-user actor could rename and replace. On a
+// failed receive, Drop still attempts deletion; successful receipts require
+// a confirmed disposition before returning an ACK.
+#[cfg(windows)]
+struct PinnedStageCleanup(Option<File>);
+
+#[cfg(windows)]
+impl PinnedStageCleanup {
+    fn finish(&mut self) -> Result<(), String> {
+        if let Some(stage) = self.0.as_ref() {
+            mark_pinned_windows_stage_delete_on_close(stage)
+                .map_err(|error| format!("Windows pinned stage delete refused: {error:?}"))?;
+            // NtSetInformationFile(FileDispositionInformation) permits only
+            // closing the marked FileObject; never inspect it again.
+            self.0.take();
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl Drop for PinnedStageCleanup {
+    fn drop(&mut self) {
+        if let Some(stage) = self.0.as_ref() {
+            let _ = mark_pinned_windows_stage_delete_on_close(stage);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+struct RemoveOnDrop(PathBuf);
+
+#[cfg(not(windows))]
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
 
 // Negative, path-based Windows guard. This rejects stable junction/symlink
 // ancestors, but does NOT establish handle-relative namespace/ACL custody.
@@ -204,19 +244,22 @@ pub(super) fn persist_received_payload(
         return Err("native receiver root is not a real directory".into());
     }
     let stage_name = format!(".akula-native-received-{}.stage", Uuid::new_v4());
+    #[cfg(not(windows))]
     let path = inbox_root.join(&stage_name);
-    struct RemoveOnDrop(PathBuf);
-    impl Drop for RemoveOnDrop {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
-        }
-    }
+    #[cfg(not(windows))]
     let _cleanup = RemoveOnDrop(path.clone());
     // Windows: the opened parent HANDLE and new stage HANDLE remain live
     // through verification; no ambient pathname is used to create this stage.
     #[cfg(windows)]
     let (pinned_root, mut file) = create_pinned_windows_inbox_stage(inbox_root, &stage_name)
         .map_err(|error| format!("Windows pinned Inbox stage refused: {error:?}"))?;
+    #[cfg(windows)]
+    let mut stage_cleanup = PinnedStageCleanup(Some(file.try_clone().map_err(|error| {
+        // A rare handle-duplication failure cannot result in a remote ACK.
+        // Best-effort delete the original stage by HANDLE, never by pathname.
+        let _ = mark_pinned_windows_stage_delete_on_close(&file);
+        format!("duplicate pinned Windows stage cleanup handle: {error}")
+    })?));
     // Before opening SQLite or its objects path, refuse insecure existing
     // components. New components may not exist until the first receipt.
     #[cfg(windows)]
@@ -254,6 +297,8 @@ pub(super) fn persist_received_payload(
     #[cfg(windows)]
     verify_pinned_windows_inbox_object(inbox_root, &pinned_root, saved.id, size, digest)
         .map_err(|error| format!("Windows Inbox pinned blob verification refused: {error:?}"))?;
+    #[cfg(windows)]
+    stage_cleanup.finish()?;
     Ok(saved)
 }
 
