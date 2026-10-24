@@ -87,7 +87,7 @@ class RootStageTests(unittest.TestCase):
             os.close(fd)
         root = os.path.join(parent, "bootstrap-v1")
         self.assertEqual(set(os.listdir(root)),
-                         {"manifest", "signature", "helper.staged", "release.ed25519", "HOLD"})
+                         {"manifest", "signature", "helper.staged", "release.pub", "release.ed25519", "HOLD"})
         with open(os.path.join(root, "helper.staged"), "rb") as stream:
             self.assertEqual(stream.read(), fake_elf())
         st = os.stat(os.path.join(root, "helper.staged"))
@@ -147,6 +147,42 @@ class RootStageTests(unittest.TestCase):
         self.assertEqual(os.stat(fixed).st_uid, 0)
         self.assertEqual(stat.S_IMODE(os.stat(fixed).st_mode), 0o400)
         self.assertFalse(os.access(fixed, os.X_OK))
+
+    @unittest.skipUnless(os.geteuid() == 0, "disposable UID0 reinspection only")
+    def test_root_reopen_verifies_signature_and_refuses_changed_bytes(self):
+        manifest, signature, digest = self.receive(self.bundle())
+        parent = os.path.join(self.tmp.name, "parent")
+        os.mkdir(parent, 0o700)
+        directory = os.open(parent, stage.O_DIR)
+        try:
+            stage.publish_hold(directory, self.scratch,
+                               manifest, signature, digest, self.public)
+            self.assertEqual(
+                stage.inspect_published_hold(directory, self.public, int(time.time())),
+                digest,
+            )
+            fixed = os.path.join(parent, "bootstrap-v1", "helper.staged")
+            os.chmod(fixed, 0o600)
+            with open(fixed, "r+b") as stream:
+                stream.seek(100)
+                stream.write(b"X")
+            os.chmod(fixed, 0o400)
+            with self.assertRaises(stage.Hold):
+                stage.inspect_published_hold(directory, self.public, int(time.time()))
+        finally:
+            os.close(directory)
+
+    @unittest.skipIf(os.geteuid() == 0, "must exercise nonroot inspection")
+    def test_nonroot_cannot_reclassify_stage_as_healthy(self):
+        parent = os.path.join(self.tmp.name, "parent")
+        os.mkdir(parent, 0o700)
+        fd = os.open(parent, stage.O_DIR)
+        try:
+            with self.assertRaises(stage.Hold):
+                stage.inspect_published_hold(fd, self.public, int(time.time()))
+        finally:
+            os.close(fd)
+        self.assertEqual(os.listdir(parent), [])
 
     def test_production_entrypoint_is_locked_without_issued_key(self):
         run = subprocess.run([sys.executable, "-I", str(SOURCE)],

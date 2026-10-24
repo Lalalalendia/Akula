@@ -65,7 +65,7 @@ fn fixed_root_command(source: &str) -> Result<String, RootStageTransportError> {
         return Err(RootStageTransportError::NoTrustedFixedSource);
     }
     Ok(format!(
-        "exec sudo -n -- /usr/bin/python3 -I -c {}",
+        "exec /usr/bin/sudo -n -- /usr/bin/python3 -I -c {}",
         shell_single_quote(source),
     ))
 }
@@ -182,7 +182,7 @@ mod tests {
         let source = "PINNED_BOOTSTRAP_ED25519_HEX = \"123\"\n# ' ; $(touch /tmp/pwn) \n"
             .repeat(5);
         let command = fixed_root_command(&source).unwrap();
-        assert!(command.starts_with("exec sudo -n -- /usr/bin/python3 -I -c '"));
+        assert!(command.starts_with("exec /usr/bin/sudo -n -- /usr/bin/python3 -I -c '"));
         assert!(command.contains("'\"'\"'"));
         assert!(!command.contains("/tmp/akula.sh"));
     }

@@ -169,3 +169,25 @@ No normal Akula installer or `main` is changed. Allowlisting
 `sudo python -c` in sudoers remains unsafe; a genuinely unprivileged VPS
 cannot be bootstrapped by this code without independently granted admin
 authority.
+
+### Root-stage read-only reinspection across restarts
+
+The fixed root-stage source now supports a separate `inspect_published_hold`
+routine. Only an already privileged root process holding a trusted root-owned
+0700 parent directory handle can re-open the exact `bootstrap-v1` directory.
+Inspection is **read-only**: it checks owner UID0 and modes, rejects unexpected
+or missing files, symlinks, changed or multiply-linked files, rechecks the
+canonical B1a signer and validity window, compares the stored Ed25519 key with
+the independently supplied pinned key, rehashes the full helper, verifies
+Linux x86-64 ELF identity, re-verifies the detached Ed25519 signature using
+OS OpenSSL and checks the exact `HOLD` marker. The published public PEM is
+now persisted as a 0400 root-owned file for verification without modifications.
+No staged ELF is executed; a consistent reinspection does NOT imply permission
+to install Node, start systemd or trust an unsigned SSH success message.
+
+Positive reinspection and modified-helper refusal are tested using isolated
+UID0 test directories, while the nonroot test refuses before creating files.
+The Windows SSH remote command also calls `/usr/bin/sudo` by an explicit
+OS path rather than relying on the remote account's PATH to resolve `sudo`.
+This does NOT turn arbitrary `sudo python -c` into restricted privilege:
+an operator must already possess independently authorized root access.

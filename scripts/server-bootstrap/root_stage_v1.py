@@ -78,7 +78,7 @@ def create_file(folder, leaf, body, mode=0o400):
         os.close(fd)
 
 
-def pinned_openssl_verify(folder, key):
+def pinned_openssl_verify(folder, key, existing_public=False):
     if len(key) != 32 or key == bytes(32):
         raise Hold("missing pinned release signing identity")
     tool = "/usr/bin/openssl"
@@ -89,7 +89,12 @@ def pinned_openssl_verify(folder, key):
     pem = (b"-----BEGIN PUBLIC KEY-----\n"
            + base64.encodebytes(spki).replace(b"\n", b"") + b"\n"
            + b"-----END PUBLIC KEY-----\n")
-    create_file(folder, "release.pub", pem)
+    if existing_public:
+        # The published PEM must exactly match the independent pinned key.
+        if read_owned_bytes(folder, "release.pub", 1024) != pem:
+            raise Hold("published signing anchor differs from client pin")
+    else:
+        create_file(folder, "release.pub", pem)
     args = [tool, "pkeyutl", "-verify", "-pubin", "-inkey", "release.pub",
             "-rawin", "-in", "manifest", "-sigfile", "signature"]
     try:
@@ -210,7 +215,7 @@ def publish_hold(parent_fd, scratch, manifest, signature, sha, trust_key):
     dest = os.open("bootstrap-v1", O_DIR, dir_fd=parent_fd)
     try:
         for source, leaf in [("manifest", "manifest"), ("signature", "signature"),
-                             ("helper", "helper.staged")]:
+                             ("helper", "helper.staged"), ("release.pub", "release.pub")]:
             copy_root_file(dest, leaf, os.path.join(scratch, source))
         # The published root-owned file is independently reread before a
         # durable success marker; an interrupted copy is a permanent HOLD.
@@ -240,6 +245,106 @@ def publish_hold(parent_fd, scratch, manifest, signature, sha, trust_key):
         os.fsync(parent_fd)
     finally:
         os.close(dest)
+
+
+def read_owned_bytes(folder, name, maximum):
+    """Read a bounded, root-owned, immutable inode without following links."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     dir_fd=folder)
+        try:
+            prior = os.fstat(fd)
+            if (not stat.S_ISREG(prior.st_mode) or prior.st_uid != 0
+                    or prior.st_nlink != 1 or stat.S_IMODE(prior.st_mode) != 0o400
+                    or prior.st_size > maximum):
+                raise Hold("untrusted published root-owned file")
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                contents = stream.read(maximum + 1)
+            after = os.fstat(fd)
+            if (len(contents) != prior.st_size or prior.st_ino != after.st_ino
+                    or prior.st_dev != after.st_dev
+                    or prior.st_ctime_ns != after.st_ctime_ns):
+                raise Hold("published root-owned file changed while reading")
+            return contents
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise Hold("missing or unsafe published root-owned file") from exc
+
+
+def inspect_published_hold(parent_fd, trust_pubkey, now):
+    """After a restart, independently revalidate signed *data*, never execute.
+
+    This only returns a digest for a locally consistent HOLD; it is NOT an
+    authority to run the helper, install Node or activate systemd.
+    """
+    if os.geteuid() != 0:
+        raise Hold("root-owned inspection requires UID0")
+    parent = os.fstat(parent_fd)
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0
+            or stat.S_IMODE(parent.st_mode) != 0o700):
+        raise Hold("untrusted root-stage parent")
+    try:
+        folder = os.open("bootstrap-v1", O_DIR, dir_fd=parent_fd)
+    except OSError as exc:
+        raise Hold("no trusted completed root stage") from exc
+    try:
+        st = os.fstat(folder)
+        if (not stat.S_ISDIR(st.st_mode) or st.st_uid != 0
+                or stat.S_IMODE(st.st_mode) != 0o700):
+            raise Hold("untrusted root-stage directory")
+        expected = {"manifest", "signature", "helper.staged",
+                    "release.pub", "release.ed25519", "HOLD"}
+        if set(os.listdir(folder)) != expected:
+            raise Hold("unexpected, incomplete or interrupted stage")
+        manifest = read_owned_bytes(folder, "manifest", MAX_MANIFEST_BYTES)
+        if len(read_owned_bytes(folder, "signature", 64)) != 64:
+            raise Hold("wrong signature length")
+        if read_owned_bytes(folder, "release.ed25519", 32) != trust_pubkey:
+            raise Hold("root-stage signing key changed")
+        size, signed_digest = decode_manifest(manifest, now)
+        hold = (b"AKULA_ROOT_BOOTSTRAP_SIGNED_STAGE_ONLY_V1\n"
+                + signed_digest.hex().encode() + b"\n")
+        if read_owned_bytes(folder, "HOLD", 256) != hold:
+            raise Hold("root-stage HOLD marker mismatch")
+        # Verify the exact bytes and ELF identity again after process reboot,
+        # never trust a previous success print or a cached SHA record.
+        try:
+            fd = os.open("helper.staged", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         dir_fd=folder)
+            try:
+                before = os.fstat(fd)
+                if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+                        or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o400
+                        or before.st_size != size):
+                    raise Hold("published executable candidate has unsafe custody")
+                hashed = hashlib.sha256()
+                header = b""
+                received = 0
+                while True:
+                    piece = os.read(fd, 65536)
+                    if not piece:
+                        break
+                    if len(header) < 20:
+                        header += piece[:20 - len(header)]
+                    received += len(piece)
+                    hashed.update(piece)
+                after = os.fstat(fd)
+                if (received != size or hashed.digest() != signed_digest
+                        or before.st_ino != after.st_ino
+                        or before.st_dev != after.st_dev
+                        or before.st_ctime_ns != after.st_ctime_ns
+                        or len(header) < 20 or header[:7] != b"\x7fELF\x02\x01\x01"
+                        or header[18:20] != b"\x3e\x00"):
+                    raise Hold("published helper no longer matches signed release")
+            finally:
+                os.close(fd)
+        except OSError as exc:
+            raise Hold("published helper cannot be safely inspected") from exc
+        pinned_openssl_verify(folder, trust_pubkey, existing_public=True)
+        return signed_digest
+    finally:
+        os.close(folder)
 
 
 def root_stage(stream):
