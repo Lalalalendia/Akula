@@ -102,10 +102,10 @@ pub struct BasesModel {
     pub source_relation_edges: usize,
 }
 impl BasesModel {
-    pub fn rows_for_base(&self, akula_id: &str) -> impl Iterator<Item = &BaseRow> {
+    pub fn rows_for_base<'a>(&'a self, akula_id: &'a str) -> impl Iterator<Item = &'a BaseRow> + 'a {
         self.rows.iter().filter(move |r| r.akula_base_id.as_deref() == Some(akula_id))
     }
-    pub fn views_for_base(&self, akula_id: &str) -> impl Iterator<Item = &BaseView> {
+    pub fn views_for_base<'a>(&'a self, akula_id: &'a str) -> impl Iterator<Item = &'a BaseView> + 'a {
         self.views.iter().filter(move |v| v.akula_base_id.as_deref() == Some(akula_id))
     }
     pub fn needs_review(&self) -> bool {
