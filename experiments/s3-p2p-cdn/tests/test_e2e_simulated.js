@@ -84,6 +84,9 @@ function tab(label) {
     setTimeout, clearTimeout, console:{log:(...xs)=>output.push(xs.join(' '))},
     window:{RTCPeerConnection:FakePC,crypto:webcrypto},
   });
+  // Browser global window aliases globalThis; the VM must have the same invariant.
+  // Otherwise companion scripts register on globalThis but the client reads window.*.
+  context.window = context;
   vm.runInContext(hashScript,context,{filename:'sha256_stream.js'});
   vm.runInContext(outputScript,context,{filename:'bounded_output.js'});
   vm.runInContext(rangeScript,context,{filename:'range_reader.js'});
