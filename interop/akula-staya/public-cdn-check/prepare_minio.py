@@ -14,6 +14,13 @@ with pathlib.Path("minio-fixture.bin").open("wb") as f:
   f.write(block);h.update(block)
   parts.append({"offset":i*chunk,"size":chunk,"sha256":hashlib.sha256(block).hexdigest()})
 client.upload_file("minio-fixture.bin",bucket,key)
+# Public read is intentionally scoped to ONE synthetic disposable object.
+# No anonymous LIST, PUT or DELETE and no credentials in the native GET client.
+policy={"Version":"2012-10-17","Statement":[{
+ "Sid":"AllowReadOnlySyntheticFixture","Effect":"Allow","Principal":"*",
+ "Action":["s3:GetObject"],"Resource":[f"arn:aws:s3:::{bucket}/{key}"]
+}]}
+client.put_bucket_policy(Bucket=bucket,Policy=json.dumps(policy,separators=(",",":")))
 origin=f"{endpoint}/{bucket}/{key}"
 data={"version":1,"content_id":h.hexdigest(),"name":"synthetic-64m.bin","size":size,"chunk_size":chunk,"origin_url":origin,"chunks":parts}
 raw=json.dumps(data,separators=(",",":"),ensure_ascii=False).encode()
