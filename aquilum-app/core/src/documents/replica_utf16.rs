@@ -1,6 +1,10 @@
 //! UTF-16 scalar-boundary checks before passing edits to Yrs 0.28.0.
 //! Upstream #714: split-surrogate positions can mutate the wrong character or panic.
-use super::{failure, ReplicaError, TextEdit};
+use super::{failure, Replica, ReplicaError, TextEdit};
+use yrs::branch::{Branch, BranchPtr};
+use yrs::updates::decoder::Decode;
+use yrs::updates::encoder::Encode;
+use yrs::{Assoc, IndexedSequence, StickyIndex, Text, Transact};
 
 pub(super) fn validate_utf16_edits(source: &str, edits: &[TextEdit]) -> Result<(), ReplicaError> {
     if edits.is_empty() {
@@ -41,3 +45,20 @@ pub(super) fn validate_utf16_edits(source: &str, edits: &[TextEdit]) -> Result<(
     }
     Ok(())
 }
+
+impl Replica {
+    pub fn encode_position(&self, index: usize) -> Option<Vec<u8>> {
+        let transaction = self.doc.transact();
+        let index = index.min(self.text.len(&transaction) as usize) as u32;
+        self.text.sticky_index(&transaction, index, Assoc::After).map(|position| position.encode_v1())
+    }
+
+    pub fn resolve_position(&self, encoded: &[u8]) -> Option<usize> {
+        let position = StickyIndex::decode_v1(encoded).ok()?;
+        let transaction = self.doc.transact();
+        let offset = position.get_offset(&transaction)?;
+        let text: &Branch = self.text.as_ref();
+        (offset.branch == BranchPtr::from(text)).then_some(offset.index as usize)
+    }
+
+ }
