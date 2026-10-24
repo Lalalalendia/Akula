@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Isolated, user-authorized read-only Notion API and local cache lab.
+notion-api-probe = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Opt-in verified receiver staged-file create-new, no Vault apply.
@@ -161,3 +163,13 @@ rustix = { version = "=0.38.44", features = ["fs", "process"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_System_Threading"] }
+
+[[bin]]
+name = "akula-notion-api-probe"
+path = "src/bin/akula_notion_api_probe.rs"
+required-features = ["notion-api-probe"]
+
+[[bin]]
+name = "akula-notion-import-lab"
+path = "src/bin/akula_notion_import_lab.rs"
+required-features = ["notion-api-probe"]

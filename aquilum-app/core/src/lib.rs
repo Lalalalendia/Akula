@@ -10,6 +10,8 @@ pub mod markdown;
 pub mod mcp;
 pub mod plugins;
 pub mod migration;
+#[cfg(feature = "notion-api-probe")]
+pub mod notion_api_probe;
 pub mod search;
 pub mod settings;
 pub mod sync;
@@ -25,10 +27,8 @@ pub mod server_bootstrap_lab;
 pub mod server_bootstrap_ssh_lab;
 #[cfg(feature = "server-bootstrap-b1a-release-lab")]
 pub mod server_release_lab;
-
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b-custody-lab"))]
 pub mod server_staging_lab;
-
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1-floor-lab"))]
 pub mod server_release_floor_lab;
 
