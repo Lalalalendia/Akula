@@ -275,3 +275,37 @@ the last check or around the ACK. Full VFS/hostile-process isolation,
 durable authenticated acknowledgement after power loss, an installed
 two-physical-device WAN/relay acceptance, and ordinary signed update are
 still release HOLD. `main` remains unchanged.
+
+## 24 October: child-process abrupt-exit recovery matrix (not power-loss proof)
+
+After the new read-only exact-intent check, this slice exercises recovery
+from an **actual terminated process**, not just dropping an InboxLedger
+connection in one test process. A standalone ledger test launches its own
+Rust test executable in a child process with a fixed synthetic, locally
+authenticated P2P receipt. The child opens SQLite in WAL/FULL synchronous
+mode, performs exactly one of three stages, then terminates with
+`std::process::exit(77)` **without running the SQLite destructor**:
+
+1. `reserve` committed, no blob: cold status must remain `Pending`.
+2. Blob created and file `sync_all` completed but no `confirm`:
+   cold status must remain `Pending` and the immutable blob remains
+   recoverable; never claim delivered solely because bytes are present.
+3. Both verified blob and `confirm` SQL transaction committed: a fresh
+   read-only SQLite connection must observe `VerifiedLocal` with the exact
+   authenticated row and a fresh writable open must preserve it.
+
+The parent checks the child exit code, cold read-only state and subsequent
+writable recovery in distinct directories. This is a **process-crash
+recovery test only**: it neither pulls power from a machine nor proves that
+Windows/filesystem device caches, NT rename directory entries and SQLite
+WAL checkpoint survive a real outage. The wire protocol still prints
+`DURABLE_ACK=false` and must not market its local receipt as signed
+power-loss-durable delivery.
+
+Added this check to the *existing one-job* exact-head Windows P2P workflow,
+without a new runner matrix; standalone ledger source is already included
+in that job's changed-path filter. [Checkpoint 4562b0a2](https://github.com/Lalalalendia/Akula/commit/4562b0a2a26986237064c05752ba24f54272f1d4);
+[CI #40098679773](https://github.com/Lalalalendia/Akula/actions/runs/40098679773)
+queued, not yet accepted. [Prior #40097723690](https://github.com/Lalalalendia/Akula/actions/runs/40097723690)
+passed QUIC/n0 and cold SQLite checks but its `installed` step had not
+completed at the time the next commit was made; do not claim full PASS.
