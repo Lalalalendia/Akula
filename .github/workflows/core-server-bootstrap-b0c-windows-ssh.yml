@@ -3,7 +3,7 @@ name: Akula B0c Windows real pinned OpenSSH KEX
 on:
   workflow_call:
   pull_request:
-    branches: [main]
+    branches-ignore: [main]
     paths:
       - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs"
       - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs"

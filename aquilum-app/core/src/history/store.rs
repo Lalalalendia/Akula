@@ -707,7 +707,11 @@ mod tests {
 
         let found = versions(&dir);
 
-        assert!(written.to_string_lossy().ends_with("_aaaa_restore-0000000010000.md"));
+        let digest = blake3::hash("старое".as_bytes()).to_hex();
+        assert_eq!(
+            written.file_name().unwrap().to_str().unwrap(),
+            format!("{:013}_aaaa_restore-0000000010000~b3-{digest}.md", 20_000)
+        );
         assert_eq!((found[0].source, found[0].from_ms), (Source::Restore(10_000), Some(10_000)));
     }
 
