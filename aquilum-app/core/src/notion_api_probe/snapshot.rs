@@ -114,6 +114,68 @@ impl SnapshotStore {
         }))
     }
 
+    /// Bounded read-only enumeration for a native UI catalog. A listed root is
+    /// a cached source, not evidence of current access or working sync.
+    pub fn list_sources(&self) -> Result<Vec<SnapshotInfo>, String> {
+        const MAX_ROOTS: usize = 64;
+        let mut ids = Vec::new();
+        {
+            let mut stmt = self.database.connection.prepare(
+                "SELECT root_id FROM notion_cache_sources ORDER BY saved_at_ms DESC, root_id
+                 LIMIT 65",
+            ).map_err(|_| "cannot prepare Notion source catalog")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))
+                .map_err(|_| "cannot list cached Notion sources")?;
+            for row in rows {
+                ids.push(row.map_err(|_| "invalid cached Notion source")?);
+                if ids.len() > MAX_ROOTS {
+                    return Err("too many Notion cache roots for bounded native catalog".into());
+                }
+            }
+        }
+        ids.into_iter().map(|root| {
+            self.status(&root)?.ok_or_else(|| "cached Notion root disappeared".into())
+        }).collect()
+    }
+
+    /// Metadata-only preview of a few cached pages. Does not claim that the
+    /// entire source has been reverified; callers must label it as a preview.
+    pub fn preview_page_titles(
+        &self, root: &str, limit: usize,
+    ) -> Result<Vec<String>, String> {
+        if limit == 0 || limit > 8 {
+            return Err("Notion UI preview limit must be between 1 and 8".into());
+        }
+        let root = canonical_root(root)?;
+        let mut stmt = self.database.connection.prepare(
+            "SELECT raw_json FROM notion_cache_objects
+             WHERE root_id = ?1 AND kind = 'page' AND length(raw_json) <= 65536
+             ORDER BY (object_id = ?1) DESC, object_id LIMIT ?2",
+        ).map_err(|_| "cannot prepare Notion page title preview")?;
+        let rows = stmt.query_map(params![root, limit as i64], |row| {
+            row.get::<_, String>(0)
+        }).map_err(|_| "cannot query cached Notion titles")?;
+        let mut names = Vec::new();
+        for row in rows {
+            let raw = row.map_err(|_| "invalid Notion cached title row")?;
+            let value: Value = serde_json::from_str(&raw)
+                .map_err(|_| "Notion cached title is corrupt")?;
+            let name = value.get("properties").and_then(Value::as_object)
+                .and_then(|props| props.values().find(|p| p.get("type").and_then(Value::as_str) == Some("title")))
+                .and_then(|p| p.get("title")).and_then(Value::as_array)
+                .map(|runs| runs.iter().filter_map(|run| {
+                    run.get("plain_text").and_then(Value::as_str)
+                }).collect::<String>())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "(untitled page)".into());
+            let display = name.chars()
+                .filter(|c| !c.is_control())
+                .take(96).collect::<String>();
+            names.push(display);
+        }
+        Ok(names)
+    }
+
     /// Do not serve a partial or corrupt cached copy as a complete snapshot.
     pub fn load(&self, root: &str) -> Result<Option<CachedSnapshot>, String> {
         let Some(info) = self.status(root)? else { return Ok(None) };
@@ -497,6 +559,26 @@ mod tests {
         assert!(super::super::projection::prepare_import(&saved).unwrap()
             .candidates.iter().any(|c| c.markdown.contains("Changed by Notion")));
         assert_eq!(store.status(B).unwrap(), Some(separate));
+    }
+
+    #[test]
+    fn read_only_catalog_lists_only_caches_without_making_connections() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ui-state.sqlite3");
+        {
+            let mut writer = SnapshotStore::open(&path).unwrap();
+            writer.publish(&fixture(A), 10).unwrap();
+            writer.publish(&fixture(B), 20).unwrap();
+        }
+        let reader = SnapshotStore::open_read_only(&path).unwrap();
+        let roots = reader.list_sources().unwrap();
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0].root, B);
+        assert_eq!(roots[1].root, A);
+        assert_eq!(reader.preview_page_titles(A, 2).unwrap(),
+            vec!["Record 0", "Record 1"]);
+        assert!(reader.preview_page_titles(A, 9).is_err());
+        assert_eq!(reader.status(A).unwrap().unwrap().object_count, 8);
     }
 
     #[test]

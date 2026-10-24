@@ -28,6 +28,8 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 [features]
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
 installed = ["dropbox-readonly-preview"]
+# QA-only source preview. No token storage, sync worker, or Vault writes.
+notion-offline-preview = ["aquilum-core/notion-api-probe"]
 messaging-w4-pilot = []
 memory-probe = []
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.

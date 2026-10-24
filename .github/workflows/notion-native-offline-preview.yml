@@ -1,0 +1,66 @@
+# Opt-in, offline-only native Notion catalog. No OAuth, network or installer.
+# Route only new feature-owned files to avoid global CI fanout.
+name: Notion native offline catalog QA
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/notion-native-offline-preview.yml'
+      - 'aquilum-app/native/src/notion_offline.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud/health.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider.rs'
+  push:
+    branches: ['lab/notion-local-source-mainline-20261024']
+    paths:
+      - '.github/workflows/notion-native-offline-preview.yml'
+      - 'aquilum-app/native/src/notion_offline.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
+      - 'aquilum-app/native/src/ui/settings/cloud/health.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider.rs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notion-native-offline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  native-offline:
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: notion-offline-native
+      - name: Prove no Notion feature in ordinary installed build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cargo = Get-Content -Raw aquilum-app/native/Cargo.toml
+          if ($cargo -notmatch 'notion-offline-preview\s*=\s*\["aquilum-core/notion-api-probe"\]') {
+            throw 'Expected explicit offline Notion-only native feature'
+          }
+          if ($cargo -match '(?m)^installed\s*=.*notion-offline-preview') {
+            throw 'Normal installer must not enable experimental Notion UI'
+          }
+          $entry = Get-Content -Raw aquilum-app/native/src/notion_offline.rs
+          if ($entry -notmatch '(?s)#\[cfg\(not\(debug_assertions\)\)\]\s*compile_error!') {
+            throw 'Notion QA preview must fail closed on release profiles'
+          }
+      - name: Compile native offline Notion GUI
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-native --features notion-offline-preview
+      - name: Native offline no-token and corrupt-cache regression
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_offline::tests
+      - name: Native Notion tile and other provider regressions
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview ui::settings::cloud::tests
+      - name: Core read-only cached root catalog regression
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features notion-api-probe read_only_catalog_lists_only_caches
