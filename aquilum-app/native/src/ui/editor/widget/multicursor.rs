@@ -71,9 +71,22 @@ impl TextEditor {
             return false;
         }
         let mut ranges: Vec<Range<usize>> = self.extra_cursors.iter().chain([&(self.anchor, self.focus)]).map(|&(a, f)| a.min(f)..a.max(f)).collect();
-        ranges.sort_unstable_by_key(|range| (range.start, range.end));
-        ranges.dedup_by(|next, previous| next.start < previous.end || next == previous);
-        let edits = ranges.into_iter().filter_map(|range| edit(&self.doc, range)).collect();
+        // Prefer the widest selection when two ranges begin at the same byte.
+        ranges.sort_unstable_by_key(|range| (range.start, std::cmp::Reverse(range.end)));
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if let Some(previous) = merged.last_mut() {
+                // Merge overlapping selections instead of losing the part
+                // extending past the earlier range. Keep adjacent selections
+                // separate and coalesce identical empty cursors.
+                if range.start < previous.end || range == *previous {
+                    previous.end = previous.end.max(range.end);
+                    continue;
+                }
+            }
+            merged.push(range);
+        }
+        let edits = merged.into_iter().filter_map(|range| edit(&self.doc, range)).collect();
         self.dispatch(edits, None, kind);
         for (anchor, focus) in std::iter::once((&mut self.anchor, &mut self.focus)).chain(self.extra_cursors.iter_mut().map(|(a, f)| (a, f))) {
             let end = (*anchor).max(*focus);
@@ -116,5 +129,66 @@ mod tests {
         editor.add_cursor_at(accent);
         editor.apply_multicursor_delete(false);
         assert_eq!(editor.doc.whole(), "ab  c");
+    }
+
+    #[test]
+    fn overlapping_selections_replace_entire_union_once() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (2, 5);
+        editor.extra_cursors.push((4, 8));
+        assert!(editor.apply_multicursor_typing("X"));
+        assert_eq!(editor.doc.whole(), "abXij");
+        assert!(editor.undo(false));
+        assert_eq!(editor.doc.whole(), "abcdefghij");
+        assert!(editor.undo(true));
+        assert_eq!(editor.doc.whole(), "abXij");
+    }
+
+    #[test]
+    fn chained_and_reversed_selections_replace_entire_union() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (4, 1);
+        editor.extra_cursors.push((6, 3));
+        editor.extra_cursors.push((5, 8));
+        assert!(editor.apply_multicursor_typing("Z"));
+        assert_eq!(editor.doc.whole(), "aZij");
+    }
+
+    #[test]
+    fn overlapping_selections_delete_entire_union() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (2, 5);
+        editor.extra_cursors.push((4, 8));
+        assert!(editor.apply_multicursor_delete(true));
+        assert_eq!(editor.doc.whole(), "abij");
+        assert!(editor.undo(false));
+        assert_eq!(editor.doc.whole(), "abcdefghij");
+    }
+
+    #[test]
+    fn nested_selections_do_not_duplicate_edits() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (2, 8);
+        editor.extra_cursors.push((3, 5));
+        assert!(editor.apply_multicursor_typing("Q"));
+        assert_eq!(editor.doc.whole(), "abQij");
+    }
+
+    #[test]
+    fn touching_selections_are_distinct_edits() {
+        let mut editor = TextEditor::new("abcdefghij");
+        (editor.anchor, editor.focus) = (2, 4);
+        editor.extra_cursors.push((4, 6));
+        assert!(editor.apply_multicursor_typing("X"));
+        assert_eq!(editor.doc.whole(), "abXXghij");
+    }
+
+    #[test]
+    fn identical_cursors_insert_only_once() {
+        let mut editor = TextEditor::new("abcd");
+        (editor.anchor, editor.focus) = (2, 2);
+        editor.extra_cursors.push((2, 2));
+        assert!(editor.apply_multicursor_typing("X"));
+        assert_eq!(editor.doc.whole(), "abXcd");
     }
 }
