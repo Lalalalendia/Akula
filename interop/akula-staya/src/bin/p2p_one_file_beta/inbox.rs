@@ -452,6 +452,61 @@ mod tests {
         assert_eq!(cold.count().unwrap(), 1);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_receiver_refuses_insecure_blob_acl_on_duplicate_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let bytes = b"verified object is not allowed to become public";
+        let digest = *blake3::hash(bytes).as_bytes();
+        let initial = persist_received_payload(
+            bytes, &root, bytes.len() as u64, digest, [81; 32], [91; 32],
+        )
+        .unwrap();
+        let ledger = InboxLedger::open(&root).unwrap();
+        let object = ledger.object_path(initial.id);
+        drop(ledger);
+        grant_everyone_full_control(&object, false);
+        // Path-based SQLite can still find the correct bytes, but the
+        // root-relative final object ACL check must fail before a new ACK.
+        assert!(
+            persist_received_payload(
+                bytes, &root, bytes.len() as u64, digest, [81; 32], [91; 32],
+            )
+            .is_err()
+        );
+        assert_eq!(InboxLedger::open(&root).unwrap().count().unwrap(), 1);
+        assert_eq!(fs::read(object).unwrap(), bytes);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receiver_refuses_hardlinked_blob_on_duplicate_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let bytes = b"verified object is not allowed to have an outside alias";
+        let digest = *blake3::hash(bytes).as_bytes();
+        let initial = persist_received_payload(
+            bytes, &root, bytes.len() as u64, digest, [82; 32], [92; 32],
+        )
+        .unwrap();
+        let ledger = InboxLedger::open(&root).unwrap();
+        let object = ledger.object_path(initial.id);
+        drop(ledger);
+        let other_link = root.join("alias-outside-objects.bin");
+        fs::hard_link(&object, &other_link).unwrap();
+        assert!(
+            persist_received_payload(
+                bytes, &root, bytes.len() as u64, digest, [82; 32], [92; 32],
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&other_link).unwrap(), bytes);
+        assert_eq!(InboxLedger::open(&root).unwrap().count().unwrap(), 1);
+    }
+
     fn stage(root: &Path, data: &[u8]) -> File {
         let path = root.join("verified-stage.bin");
         fs::write(&path, data).unwrap();
