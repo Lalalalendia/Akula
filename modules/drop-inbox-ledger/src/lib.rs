@@ -552,6 +552,57 @@ mod tests {
     }
 
     #[test]
+    fn cold_read_only_receipt_rejects_edited_sender_and_uncommitted_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let (expected, bytes) = intent(Transport::P2p);
+        {
+            let mut ledger = InboxLedger::open(dir.path()).unwrap();
+            assert_eq!(ledger.reserve(&expected).unwrap(), LocalStatus::Pending);
+            publish_fixture(&ledger, &expected, &bytes);
+            assert_eq!(
+                ledger.confirm(&expected).unwrap(),
+                LocalStatus::VerifiedLocal
+            );
+        }
+        let cold = InboxLedger::open_existing(dir.path()).unwrap().unwrap();
+        cold.verify_committed_intent(&expected).unwrap();
+        drop(cold);
+
+        // Another process with the same Windows account can update SQLite
+        // bytes directly. The file may still hash correctly, so an ACK must
+        // compare every committed row field with the authenticated intent.
+        let database = dir.path().join("received-inbox.sqlite3");
+        let changed = Connection::open(&database).unwrap();
+        changed
+            .execute(
+                "UPDATE received_inbox SET sender = ?1 WHERE transfer_id = ?2",
+                params![&[44u8; 32][..], expected.id.to_string()],
+            )
+            .unwrap();
+        drop(changed);
+        let cold = InboxLedger::open_existing(dir.path()).unwrap().unwrap();
+        assert!(matches!(
+            cold.verify_committed_intent(&expected),
+            Err(LedgerError::ConflictingIntent)
+        ));
+        drop(cold);
+
+        let changed = Connection::open(&database).unwrap();
+        changed
+            .execute(
+                "UPDATE received_inbox SET sender = ?1, state = 0 WHERE transfer_id = ?2",
+                params![&expected.sender_key[..], expected.id.to_string()],
+            )
+            .unwrap();
+        drop(changed);
+        let cold = InboxLedger::open_existing(dir.path()).unwrap().unwrap();
+        assert!(matches!(
+            cold.verify_committed_intent(&expected),
+            Err(LedgerError::InvalidLocalObject)
+        ));
+    }
+
+    #[test]
     fn cold_restart_checks_disk_not_just_the_sqlite_row() {
         let dir = tempfile::tempdir().unwrap();
         let (v, data) = intent(Transport::P2p);
