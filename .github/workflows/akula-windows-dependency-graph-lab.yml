@@ -1,0 +1,135 @@
+name: Akula Windows dependency graph lab
+on:
+  push:
+    branches:
+      - lab/akula-windows-dependency-graph-20261024
+    paths:
+      - .github/workflows/akula-windows-dependency-graph-lab.yml
+permissions:
+  contents: read
+concurrency:
+  group: akula-one-shot-windows-dep-graph
+  cancel-in-progress: true
+jobs:
+  analyze-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Measure resolved runtime and build dependency graphs with real Cargo
+        shell: bash
+        run: |
+          python - <<'PY'
+          import collections, json, os, pathlib, re, subprocess, sys
+          root='aquilum-app/Cargo.toml'
+          target_win='x86_64-pc-windows-msvc'
+          target_linux='x86_64-unknown-linux-gnu'
+          plans=[
+            ('windows-default',target_win,[], 'normal'),
+            ('windows-installed',target_win,['installed'],'normal'),
+            ('windows-installed-build',target_win,['installed'],'normal,build'),
+            ('windows-installed-s3',target_win,['installed','s3-pair-beta'],'normal'),
+            ('windows-installed-s3-build',target_win,['installed','s3-pair-beta'],'normal,build'),
+            ('linux-installed',target_linux,['installed'],'normal')
+          ]
+          rows={}
+          for key,target,features,edges in plans:
+            cmd=['cargo','tree','--locked','--manifest-path',root,'-p','aquilum-native','--target',target,'--edges',edges,'--prefix','none','--format','{p}']
+            if features:
+              cmd+=['--features',','.join(features)]
+            p=subprocess.run(cmd,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=1000)
+            if p.returncode:
+              print('CARGO_TREE_FAILURE',key,p.returncode,cmd,file=sys.stderr)
+              print(p.stderr[-5000:],file=sys.stderr)
+              sys.exit(p.returncode)
+            entries=set()
+            unmatched=[]
+            for line in p.stdout.splitlines():
+              m=re.match(r'^([A-Za-z0-9_-]+) v([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][^\\s]+)?)',line.strip())
+              if m:
+                entries.add(m.group(1)+'@'+m.group(2))
+              elif line.strip():
+                unmatched.append(line[:140])
+            if unmatched or not entries or not any(s.startswith('aquilum-native@') for s in entries):
+              print('UNPARSED_CARGO_TREE',key,'matched',len(entries),'unmatched',unmatched[:15],file=sys.stderr)
+              sys.exit(3)
+            rows[key]={'target':target,'features':features,'edges':edges,'count':len(entries),'packages':sorted(entries),'command':' '.join(cmd)}
+            print('PROFILE',key,'packages',len(entries),flush=True)
+          lock=pathlib.Path('aquilum-app/Cargo.lock').read_text(encoding='utf-8')
+          full=set(a+'@'+b for a,b in re.findall(r'(?m)^\\[\\[package\\]\\]\\nname = "([^"]+)"\\nversion = "([^"]+)"',lock))
+          if len(full)<700 or len(full)>800:
+            print('BAD_LOCK_COUNT',len(full),file=sys.stderr);sys.exit(4)
+          sets={key:set(val['packages']) for key,val in rows.items()}
+          def diff(a,b): return sorted(sets[a]-sets[b])
+          basic=sets['windows-installed']
+          extra_in_installed=diff('windows-installed','windows-default')
+          extra_s3=diff('windows-installed-s3','windows-installed')
+          new_build=diff('windows-installed-build','windows-installed')
+          unused=sorted(full-basic)
+          counts=collections.Counter(x.split('@')[0] for x in basic)
+          duplicate={k:v for k,v in sorted(counts.items()) if v>1}
+          focus=['aws-config','aws-sdk-s3','aws-sdk-sts','aws-sigv4','keyring','winit','masonry','vello_cpu','tantivy','rusqlite','gstreamer','windows','accesskit_windows','accesskit_macos','accesskit_unix','zbus']
+          presence={n:sorted(x for x in basic if x.startswith(n+'@')) for n in focus}
+          evidence={
+            'source_sha':os.environ.get('GITHUB_SHA'),
+            'toolchain':subprocess.check_output(['rustc','--version'],text=True).strip(),
+            'host_runner':'windows-latest',
+            'method':'Cargo tree --locked -p aquilum-native --target <platform> -e normal or normal,build; no binaries were built',
+            'lock_package_count':len(full),
+            'lock_unique_names':len({x.split('@')[0] for x in full}),
+            'profiles':rows,
+            'delta':{
+              'windows_installed_over_default':extra_in_installed,
+              's3_beta_over_windows_installed':extra_s3,
+              'build_over_normal_windows_installed':new_build,
+              'full_lock_not_in_windows_installed_normal':unused
+            },
+            'windows_installed_duplicate_names':duplicate,
+            'windows_installed_named_packages':presence
+          }
+          pathlib.Path('akula-dependency-profile.json').write_text(json.dumps(evidence,indent=2,ensure_ascii=False)+'\\n',encoding='utf-8')
+          summary={
+            'sha':evidence['source_sha'],
+            'lock':len(full),
+            'win_default':len(sets['windows-default']),
+            'win_installed_normal':len(sets['windows-installed']),
+            'win_installed_normal_build':len(sets['windows-installed-build']),
+            'win_installed_plus_s3':len(sets['windows-installed-s3']),
+            'win_installed_plus_s3_build':len(sets['windows-installed-s3-build']),
+            'linux_installed_normal':len(sets['linux-installed']),
+            'installed_extra_over_default':len(extra_in_installed),
+            's3_extra':len(extra_s3),
+            'build_extra':len(new_build),
+            'lock_absent_windows_installed_normal':len(unused),
+            'duplicate_package_names_windows_installed':len(duplicate),
+            'names_windows_installed':len({x.split('@')[0] for x in basic}),
+            'aws_sdk_s3_in_installed':bool(presence['aws-sdk-s3']),
+            'gstreamer_in_windows_installed':bool(presence['gstreamer'])
+          }
+          print('AKULA_DEP_MATRIX_JSON='+json.dumps(summary,sort_keys=True),flush=True)
+          print('AKULA_INSTALLED_EXTRA='+json.dumps(extra_in_installed),flush=True)
+          print('AKULA_S3_EXTRA='+json.dumps(extra_s3),flush=True)
+          md=['## Akula dependency profile / Windows installed',
+              'Source commit: \`'+str(evidence['source_sha'])+'\`',
+              '',
+              '| Graph | Unique crate versions |',
+              '|---|---:|']
+          for k,v in rows.items(): md.append('| '+k+' | '+str(v['count'])+' |')
+          md += ['', 'Full \`Cargo.lock\`: '+str(len(full))+'. Windows installed normal absent in lock: '+str(len(unused))+'.',
+                  'Installed feature-only additions: '+str(len(extra_in_installed))+'. S3 beta additions: '+str(len(extra_s3))+'.',
+                  '', 'Measurements describe *resolved dependency graphs*, not linked DLL count, executable bytes or RAM.']
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:
+            f.write('\\n'.join(md)+'\\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: akula-windows-dependency-graph
+          path: akula-dependency-profile.json
+          if-no-files-found: error
+          retention-days: 30
