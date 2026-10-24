@@ -11,8 +11,11 @@ use std::sync::Arc;
 #[test]
 fn sealed_history_tamper_is_rejected_without_rewriting_the_primary() {
     let tmp = tempfile::tempdir().unwrap();
-    let vault = tmp.path().join("vault");
-    let appdata = tmp.path().join("appdata");
+    // Windows can spell temp folders with 8.3 aliases (RUNNER~1).
+    // Use the same canonical root for File Gate and HistoryService.
+    let root = aquilum_core::search::paths::canonical_path(tmp.path());
+    let vault = root.join("vault");
+    let appdata = root.join("appdata");
     fs::create_dir_all(&vault).unwrap();
     fs::create_dir_all(&appdata).unwrap();
     let events: Arc<dyn EventSink> = Arc::new(|_: CoreEvent| {});
@@ -20,6 +23,11 @@ fn sealed_history_tamper_is_rejected_without_rewriting_the_primary() {
     core.ui_state
         .resolve_workspace(vault.to_str().unwrap(), 1_700_000_000_000)
         .unwrap();
+    assert_eq!(
+        core.known_roots(),
+        vec![vault.clone()],
+        "File Gate and history must resolve the same canonical workspace"
+    );
 
     let note = vault.join("History.md");
     let mut current_hash = None;
@@ -29,9 +37,13 @@ fn sealed_history_tamper_is_rejected_without_rewriting_the_primary() {
             &core, &note, value, current_hash.as_deref(), Source::Agent, None,
         ).unwrap();
         current_hash = Some(saved.hash);
+        let history = core.history.page(&|| core.known_roots(), &note, 0, 5);
+        assert_eq!(
+            history.total, index + 1,
+            "each accepted File Gate save must also publish its history version"
+        );
         if index == 1 {
-            b_id = core.history.page(&|| core.known_roots(), &note, 0, 5)
-                .versions.first().map(|v| v.id.clone());
+            b_id = history.versions.first().map(|v| v.id.clone());
         }
     }
     let b_id = b_id.unwrap();
