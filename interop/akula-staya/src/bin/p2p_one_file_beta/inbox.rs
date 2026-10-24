@@ -8,7 +8,8 @@ use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(windows)]
 use aquilum_core::p2p_inbox_lab::{
     audit_pinned_windows_inbox_storage, create_pinned_windows_inbox_stage,
-    mark_pinned_windows_stage_delete_on_close, verify_pinned_windows_inbox_object,
+    mark_pinned_windows_stage_delete_on_close, publish_pinned_windows_inbox_object,
+    verify_pinned_windows_inbox_object,
 };
 #[cfg(not(windows))]
 use std::ffi::OsString;
@@ -185,6 +186,38 @@ fn expected_transfer(
     }
 }
 
+// The ledger owns intent validation and immutable receipt/replay semantics.
+// A writer only publishes bytes in a locally selected, new-only destination.
+fn persist_received_with_publisher<F>(
+    pinned_stage: &mut File,
+    inbox_root: &Path,
+    size: u64,
+    digest: [u8; 32],
+    authenticated_sender: [u8; 32],
+    local_receiver: [u8; 32],
+    publisher: F,
+) -> Result<ExpectedTransfer, String>
+where
+    F: FnOnce(&mut File, &Path, Uuid) -> Result<(), LedgerError>,
+{
+    let intent = expected_transfer(size, digest, authenticated_sender, local_receiver);
+    let transfer_id = intent.id;
+    let mut ledger = InboxLedger::open(inbox_root)
+        .map_err(|error| format!("open receiver Inbox ledger: {error:?}"))?;
+    let state = ledger
+        .receive_with_writer(&intent, |destination| {
+            publisher(pinned_stage, destination, transfer_id)
+        })
+        .map_err(|error| format!("Inbox rejected local object: {error:?}"))?;
+    if state != LocalStatus::VerifiedLocal {
+        return Err("receiver Inbox refused an unverified local object".into());
+    }
+    Ok(intent)
+}
+
+/// Legacy explicit-destination CLI retains the independent no-replace writer.
+/// The installed/native Windows Inbox deliberately uses a separate, pinned NT
+/// object publisher via persist_received_with_publisher.
 pub(super) fn persist_received(
     pinned_stage: &mut File,
     inbox_root: &Path,
@@ -193,14 +226,15 @@ pub(super) fn persist_received(
     authenticated_sender: [u8; 32],
     local_receiver: [u8; 32],
 ) -> Result<ExpectedTransfer, String> {
-    let intent = expected_transfer(size, digest, authenticated_sender, local_receiver);
-    let mut ledger = InboxLedger::open(inbox_root)
-        .map_err(|error| format!("open receiver Inbox ledger: {error:?}"))?;
-    // Already checked by the real QUIC TLS identity boundary. Metadata from
-    // network frames alone is not a sender device/recipient grant.
-    let state = ledger
-        .receive_with_writer(&intent, |destination| {
-            save_verified_stage_as_new(pinned_stage, size, digest, destination)
+    persist_received_with_publisher(
+        pinned_stage,
+        inbox_root,
+        size,
+        digest,
+        authenticated_sender,
+        local_receiver,
+        |stage, destination, _| {
+            save_verified_stage_as_new(stage, size, digest, destination)
                 .map(|_| ())
                 .map_err(|error| match error {
                     InboxError::Io(source) => LedgerError::Io(source),
@@ -209,12 +243,8 @@ pub(super) fn persist_received(
                     }
                     _ => LedgerError::InvalidLocalObject,
                 })
-        })
-        .map_err(|error| format!("Inbox rejected local object: {error:?}"))?;
-    if state != LocalStatus::VerifiedLocal {
-        return Err("receiver Inbox refused an unverified local object".into());
-    }
-    Ok(intent)
+        },
+    )
 }
 
 /// The Native recipient has **no** user destination. Persist a verified
@@ -284,6 +314,18 @@ pub(super) fn persist_received_payload(
         .map_err(|error| format!("sync private receiver stage: {error}"))?;
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("rewind pinned receiver stage: {error}"))?;
+    #[cfg(windows)]
+    let saved = persist_received_with_publisher(
+        &mut file, inbox_root, size, digest, sender, receiver,
+        |stage, _destination, transfer_id| {
+            // The ledger's already-authenticated UUID is the only leaf name.
+            // The object is written/renamed solely through pinned NT handles.
+            publish_pinned_windows_inbox_object(
+                inbox_root, &pinned_root, stage, transfer_id, size, digest,
+            ).map_err(|_| LedgerError::InvalidLocalObject)
+        },
+    )?;
+    #[cfg(not(windows))]
     let saved = persist_received(&mut file, inbox_root, size, digest, sender, receiver)?;
     // Verify that freshly created SQLite and objects now belong to the same
     // pinned root, with non-writable-by-others ACLs. A failed audit never
