@@ -41,6 +41,22 @@ pub fn audit_pinned_windows_inbox_storage(
         .map_err(|_| InboxError::InvalidDestination)
 }
 
+/// Verify one finished Inbox blob by its locally derived UUID through
+/// root-relative Windows NT opens and read-only BLAKE3. A path-based SQLite
+/// receipt cannot by itself satisfy this final safety gate.
+#[cfg(windows)]
+pub fn verify_pinned_windows_inbox_object(
+    root: &Path,
+    pinned_root: &File,
+    transfer_id: uuid::Uuid,
+    expected_bytes: u64,
+    expected_root: [u8; 32],
+) -> Result<(), InboxError> {
+    crate::sync::verify_pinned_p2p_inbox_object(
+        root, pinned_root, transfer_id, expected_bytes, expected_root,
+    ).map_err(|_| InboxError::InvalidDestination)
+}
+
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
