@@ -9,6 +9,7 @@ const { performance } = require('node:perf_hooks');
 const script = fs.readFileSync(path.resolve(__dirname, '../web/client.js'), 'utf8');
 const hashScript = fs.readFileSync(path.resolve(__dirname, '../web/sha256_stream.js'), 'utf8');
 const outputScript = fs.readFileSync(path.resolve(__dirname, '../web/bounded_output.js'), 'utf8');
+const rangeScript = fs.readFileSync(path.resolve(__dirname, '../web/range_reader.js'), 'utf8');
 
 class Emitter {
   listeners = new Map();
@@ -84,6 +85,7 @@ function tab(label) {
   });
   vm.runInContext(hashScript,context,{filename:'sha256_stream.js'});
   vm.runInContext(outputScript,context,{filename:'bounded_output.js'});
+  vm.runInContext(rangeScript,context,{filename:'range_reader.js'});
   vm.runInContext(script,context,{filename:'client.js'});
   return {label,elements,context,output, get api(){return context.window.__akula;},get el(){return doc.getElementById.bind(doc);}};
 }
