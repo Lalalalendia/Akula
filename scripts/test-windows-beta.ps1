@@ -259,8 +259,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Installed real Windows PDF pointer path; separate from native Rust harness.
+$viewerFixture = Join-Path $probeDir 'native-viewer-two-page.pdf'
+python scripts/pdf-preview/generate-two-page-fixture.py --out $viewerFixture
+if ($LASTEXITCODE -ne 0) { throw 'Failed to create native PDF viewer test fixture' }
 $pdfPointerScript = Join-Path $PSScriptRoot 'windows-pdf-os-pointer.ps1'
-& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $pdfPointerScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -FixturePdf $sourcePdf -ViewerFixturePdf $viewerFixture
 if ($LASTEXITCODE -ne 0) {
   throw "Installed Akula PDF OS-pointer acceptance failed: PowerShell exit $LASTEXITCODE"
 }
