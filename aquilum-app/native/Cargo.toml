@@ -27,9 +27,11 @@ linuxdeployPlugins = { gstreamer = "https://raw.githubusercontent.com/linuxdeplo
 
 [features]
 # Public install includes read-only Dropbox authorization; cloud writes remain disabled.
-installed = ["dropbox-readonly-preview", "p2p-native-receive-beta"]
+installed = ["dropbox-readonly-preview", "server-readonly-preflight", "p2p-native-receive-beta"]
 messaging-w4-pilot = []
 memory-probe = []
+# User-visible Windows read-only SSH verification. No install grant.
+server-readonly-preflight = ["aquilum-core/server-bootstrap-b0-openssh-lab"]
 # Non-shipping read-only OS-backed Iroh contacts; no send actions.
 p2p-device-contacts-preview = ["aquilum-core/p2p-device-identity"]
 # Opt-in local Iroh public identity UI; uses the same protected peer contacts.

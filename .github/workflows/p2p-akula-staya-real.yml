@@ -80,6 +80,33 @@ jobs:
           test -f "$BIN"
           export STAYA_PREVIEW_BIN="$BIN"
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab --test real_quic -- --nocapture
+      - name: NODE-E2E-02a offline signed Node replica over real Staya QUIC/Bao
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/.external/staya-transfer/interop/release/target/debug/staya-direct-preview"
+          test -f "$BIN"
+          export STAYA_PREVIEW_BIN="$BIN"
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-replica-transport-lab --test node_replica_real_quic -- --nocapture
+      - name: NODE-LIVE-ID-01 authenticated Iroh remote_id and exact owner read grant
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-live-read-lab --test node_live_identity -- --nocapture
+      - name: NODE-V1 signed local Put/Get, replay and cold reopened SQLite
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 node_v1:: -- --nocapture
+      - name: NODE-V1 A-to-Node-to-B actual authenticated Iroh QUIC
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-e2e-tests --test node_v1_real_quic -- --nocapture
       - name: Build two Windows diagnostic executables from the verified source
         if: runner.os == 'Windows'
         shell: bash
