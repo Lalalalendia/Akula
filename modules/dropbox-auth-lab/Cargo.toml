@@ -11,7 +11,7 @@ description = "Isolated Dropbox PKCE contracts without network or secrets storag
 [dependencies]
 base64 = "0.22"
 getrandom = "0.3"
-sha2 = "0.10"
+sha2 = "0.11"
 subtle = "2.6"
 url = "2.5"
 zeroize = "1.9"

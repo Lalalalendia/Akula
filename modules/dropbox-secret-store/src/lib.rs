@@ -73,7 +73,7 @@ impl CredentialScope {
             hash.update((component.len() as u64).to_le_bytes());
             hash.update(component.as_bytes());
         }
-        Ok(Self { username: format!("v1_{:x}", hash.finalize()) })
+        Ok(Self { username: format!("v1_{}", hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()) })
     }
 
     pub fn is_same_scope(&self, other: &Self) -> bool {

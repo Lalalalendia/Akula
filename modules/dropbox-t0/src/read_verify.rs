@@ -53,7 +53,7 @@ pub fn dropbox_content_hash(bytes: &[u8]) -> String {
     for part in bytes.chunks(DROPBOX_HASH_BLOCK) {
         outer.update(Sha256::digest(part));
     }
-    format!("{:x}", outer.finalize())
+    outer.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()
 }
 
 /// Download-by-revision arguments. Not a pathname read and never a remote write.

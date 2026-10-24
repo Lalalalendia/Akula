@@ -40,7 +40,7 @@ impl AccountCredentialScope {
             digest.update((part.len() as u64).to_le_bytes());
             digest.update(part.as_bytes());
         }
-        Ok(Self { username: format!("account_{:x}", digest.finalize()) })
+        Ok(Self { username: format!("account_{}", digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()) })
     }
 }
 
