@@ -124,11 +124,21 @@ pub fn save_verified_stage_as_new(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    // A caller chooses the destination. Reject a symlinked immediate parent,
-    // but do not claim that all ancestor path races are solved by this check.
+    // Static path checks reject observed reparse points, but do not close
+    // ancestor-swap races. Windows release acceptance remains on HOLD.
     let parent_info = fs::symlink_metadata(parent)?;
     if !parent_info.is_dir() || parent_info.file_type().is_symlink() {
         return Err(InboxError::InvalidDestination);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        for ancestor in parent.ancestors() {
+            let meta = fs::symlink_metadata(ancestor)?;
+            if !meta.is_dir() || meta.file_attributes() & 0x0000_0400 != 0 {
+                return Err(InboxError::InvalidDestination);
+            }
+        }
     }
     // Catch existing destinations including dangling symlinks. hard_link below
     // enforces the same no-replace rule atomically if another writer races us.

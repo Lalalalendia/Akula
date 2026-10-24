@@ -118,3 +118,35 @@ fn symlinked_destination_parent_is_refused() {
     ));
     assert!(!outside.join("unexpected.bin").exists());
 }
+
+#[cfg(windows)]
+#[test]
+fn nested_junction_destination_parent_is_rejected_without_writing() {
+    use std::os::windows::fs::MetadataExt;
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside");
+    let nested = outside.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    let junction = dir.path().join("redirect");
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&outside)
+        .status()
+        .unwrap();
+    assert!(status.success(), "Windows junction fixture could not be created");
+    assert_ne!(
+        fs::symlink_metadata(&junction).unwrap().file_attributes() & 0x0000_0400,
+        0,
+        "fixture must be a real NT reparse directory"
+    );
+    let mut stage = opened(dir.path(), b"pinned");
+    let path = junction.join("nested").join("disallowed.bin");
+    assert!(matches!(
+        save_verified_stage_as_new(&mut stage, 6, *blake3::hash(b"pinned").as_bytes(), &path),
+        Err(InboxError::InvalidDestination)
+    ));
+    assert!(!nested.join("disallowed.bin").exists());
+}
