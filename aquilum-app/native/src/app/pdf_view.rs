@@ -131,6 +131,11 @@ impl State {
             image: None, loading: false, error: None, generation: 0,
         });
         view.retarget(path);
+        // A previous tab's newer generation cancels this tab's old
+        // in-flight request. Reactivating it must queue a fresh render.
+        if view.loading && superseded(&self.desired, view.generation) {
+            view.loading = false;
+        }
         if view.image.is_none() && !view.loading && view.error.is_none() {
             self.request(tab, wake);
         }
