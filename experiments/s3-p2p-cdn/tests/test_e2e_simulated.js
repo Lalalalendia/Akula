@@ -80,7 +80,7 @@ function tab(label) {
   const context=vm.createContext({
     document:doc, location:{protocol:'http:',host:'127.0.0.1:8765'},
     WebSocket, RTCPeerConnection:FakePC, crypto:webcrypto,
-    Blob, URL, Uint8Array, ArrayBuffer, Set, Map, Promise, Headers, fetch:(u,opts)=>fetch(new URL(u,"http://127.0.0.1:8765/").href,opts), performance, Date,
+    Blob, URL, Uint8Array, ArrayBuffer, Set, Map, Promise, Headers, AbortController, fetch:(u,opts)=>fetch(new URL(u,"http://127.0.0.1:8765/").href,opts), performance, Date,
     setTimeout, clearTimeout, console:{log:(...xs)=>output.push(xs.join(' '))},
     window:{RTCPeerConnection:FakePC,crypto:webcrypto},
   });
