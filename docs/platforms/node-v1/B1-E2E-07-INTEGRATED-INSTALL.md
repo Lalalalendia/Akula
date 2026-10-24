@@ -288,3 +288,33 @@ Only an exactly bound, independently pinned owner claim is passed to the
 existing durable B1d0 one-shot commit, after which its receipt is reopened
 as HOLD. This integration remains inside a disposable mount namespace with
 CI-only keys, not a VPS product pathway.
+
+### Read-only root-owned B0 v3 trust enrollment loader
+
+New optional Linux module `server_root_v3_trust` reads only the fixed
+`/var/lib/akula/server-bootstrap/trust` hierarchy using OS UID0,
+`O_NOFOLLOW`, expected owner and exact modes on each ancestor, an independent
+B1d0 enrollment marker and a **separate** B0 v3 policy-enrollment marker.
+The bounded, canonical `b0v3.policy` record stores owner identity and
+Ed25519 public key, pinned SSH host digest, independently pinned helper
+digest, publisher identity and publisher Ed25519 key. These values can no
+longer be substituted by the SSH-supplied plan. The loader is read-only;
+no policy files are created or enrolled by it.
+
+`RootEnrolledV3::verify_review` also requires an already verified, stable
+B1a root-owned `RootVerifiedFd` and matches the signed release publisher
+against the independently enrolled publisher key. The actual Node digest,
+byte count and manifest identity are obtained from that verified FD;
+the full B0 v3 JSON and owner approval then pass through
+`verify_root_b0_v3_scope`. Incorrect owner, modified input, wrong publisher
+or stale witness remains a HOLD. All of these checks only produce inert
+scope evidence; no IPC, root commit, command execution or UI activation
+has been introduced.
+
+The test uses a temporary UID0-owned directory for positive and hostile
+symlink/mode/corrupt-marker proofs; a nonroot test must reject before
+reading protected trust. Production key enrollment, local real host
+discovery, witness locked-transaction admission, signed root receipt,
+systemd and VPS installation are still unimplemented. The production
+loader can only work after a separate trusted administrator action has
+created the exact enrollment; this commit does not perform that action.

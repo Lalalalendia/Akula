@@ -1,7 +1,7 @@
 use super::*;
 use crate::server_bootstrap_lab::{
-    preview_node_v3, B0Error, B0Input, PackagePin, PreviewTransport,
-    ReadOnlyHostFacts, ServerTarget,
+    preview_node_v3, B0Error, B0Input, PackagePin, PreviewTransport, ReadOnlyHostFacts,
+    ServerTarget,
 };
 use crate::server_owner_approval_wire::OwnerFloorWire;
 use ring::digest::{digest, SHA256};
@@ -15,9 +15,7 @@ const MANIFEST: [u8; 32] = [0x77; 32];
 
 struct SignedKexFixture(Vec<u8>);
 impl PreviewTransport for SignedKexFixture {
-    fn handshake_public_key(
-        &mut self, _: &ServerTarget,
-    ) -> Result<Vec<u8>, B0Error> {
+    fn handshake_public_key(&mut self, _: &ServerTarget) -> Result<Vec<u8>, B0Error> {
         Ok(self.0.clone())
     }
 
@@ -68,13 +66,7 @@ fn fixture() -> (
             trusted_signer_id: "akula-ci-release".into(),
         },
     };
-    let plan = preview_node_v3(
-        &input,
-        HELPER_SHA,
-        &mut SignedKexFixture(key),
-        || false,
-    )
-    .unwrap();
+    let plan = preview_node_v3(&input, HELPER_SHA, &mut SignedKexFixture(key), || false).unwrap();
     let plan_hash = blake3::Hash::from_hex(&plan.plan_blake3).unwrap();
     let previous = OwnerFloorWire {
         generation: 0,
@@ -144,8 +136,16 @@ fn changed_or_duplicate_json_is_not_an_install_plan() {
     let bad = [
         [vec![b' '], raw.clone()].concat(),
         [raw.clone(), vec![b' ']].concat(),
-        [raw[..raw.len() - 1].to_vec(), b",\"unexpected\":true}".to_vec()].concat(),
-        [raw[..raw.len() - 1].to_vec(), b",\"schema_version\":3}".to_vec()].concat(),
+        [
+            raw[..raw.len() - 1].to_vec(),
+            b",\"unexpected\":true}".to_vec(),
+        ]
+        .concat(),
+        [
+            raw[..raw.len() - 1].to_vec(),
+            b",\"schema_version\":3}".to_vec(),
+        ]
+        .concat(),
         vec![b'X'; MAX_CANONICAL_PLAN_BYTES + 1],
     ];
     for (i, case) in bad.iter().enumerate() {
