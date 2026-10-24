@@ -5,13 +5,10 @@
 //! the independently signed B1a package, and a later durable owner signature.
 //! Only the first two can be represented here. A click does not become a
 //! privileged operation, systemd activation, or permission to access a vault.
-use crate::server_bootstrap_lab::{
-    DryRunPlan, MachineArch, PackagePin, ServerTarget, SupportedOs,
-};
 use super::{
-    verify_signed_release, ReleaseError, ReleaseFloor, SignedRelease,
-    TrustedReleaseSigner,
+    verify_signed_release, ReleaseError, ReleaseFloor, SignedRelease, TrustedReleaseSigner,
 };
+use crate::server_bootstrap_lab::{DryRunPlan, MachineArch, PackagePin, ServerTarget, SupportedOs};
 use std::io::Read;
 use uuid::Uuid;
 
@@ -78,19 +75,24 @@ impl InertUserConsent {
     /// Returning these bytes alone MUST NOT grant installer permissions.
     pub fn scope(&self) -> ([u8; 16], [u8; 32], [u8; 32], [u8; 32], [u8; 32]) {
         (
-            *self.install_id.as_bytes(), self.plan_hash,
-            self.ssh_host_key_sha256, self.package_sha256,
+            *self.install_id.as_bytes(),
+            self.plan_hash,
+            self.ssh_host_key_sha256,
+            self.package_sha256,
             self.manifest_fingerprint,
         )
     }
 
-    pub fn nonce(&self) -> [u8; 16] { self.review_nonce }
+    pub fn nonce(&self) -> [u8; 16] {
+        self.review_nonce
+    }
 
     /// A Windows owner signer may only sign an independently obtained B1b1b
     /// floor/receipt claim that agrees with the actual reviewed B0/B1a scope.
     /// This is a local scope check, NOT root witness authorization.
     pub fn matches_owner_claim(
-        &self, claim: &crate::server_owner_approval_wire::OwnerApprovalWireV1,
+        &self,
+        claim: &crate::server_owner_approval_wire::OwnerApprovalWireV1,
     ) -> bool {
         claim.install_id == *self.install_id.as_bytes()
             && claim.plan_digest == self.plan_hash
@@ -154,15 +156,13 @@ pub fn prepare_signed_review<R: Read>(
         return Err(ReviewError::InvalidPreview);
     }
     let hash = hex_digest(&plan.plan_blake3)?;
-    let verified = verify_signed_release(
-        release, trusted, independently_stored_floor, now_unix,
-    )?;
+    let verified = verify_signed_release(release, trusted, independently_stored_floor, now_unix)?;
     let manifest = verified.manifest();
     // Do not permit a candidate manifest to relabel its signed identity as
     // the B0 package or to point at a different signed executable.
     let version = format!(
-        "{}.{}.{}", manifest.version.major, manifest.version.minor,
-        manifest.version.patch,
+        "{}.{}.{}",
+        manifest.version.major, manifest.version.minor, manifest.version.patch,
     );
     if plan.package.version != version
         || plan.package.trusted_signer_id != manifest.signer_id
@@ -178,7 +178,8 @@ pub fn prepare_signed_review<R: Read>(
     {
         return Err(ReviewError::InvalidPackage);
     }
-    let expires_at_unix = now_unix.checked_add(REVIEW_TTL_SECONDS)
+    let expires_at_unix = now_unix
+        .checked_add(REVIEW_TTL_SECONDS)
         .ok_or(ReviewError::InvalidClock)?
         .min(manifest.expires_unix);
     if expires_at_unix <= now_unix {
@@ -200,8 +201,12 @@ pub fn prepare_signed_review<R: Read>(
 }
 
 impl PreparedReview {
-    pub fn shown_plan(&self) -> &DryRunPlan { &self.plan }
-    pub fn expires_at_unix(&self) -> u64 { self.expires_at_unix }
+    pub fn shown_plan(&self) -> &DryRunPlan {
+        &self.plan
+    }
+    pub fn expires_at_unix(&self) -> u64 {
+        self.expires_at_unix
+    }
 
     /// Use this echo only after a user reviews the exact immutable screen.
     /// It has no privilege beyond this in-memory review session.
@@ -215,7 +220,9 @@ impl PreparedReview {
         }
     }
 
-    pub fn cancel(&mut self) { self.used = true; }
+    pub fn cancel(&mut self) {
+        self.used = true;
+    }
 
     /// The current host and package must still match the signed SSH preview.
     /// A changed target or replay consumes the review attempt, never retries.

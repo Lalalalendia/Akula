@@ -78,9 +78,11 @@ impl OwnerApprovalWireV1 {
 
     pub fn validate_time_and_shape(&self, now_unix: u64) -> Result<(), WireError> {
         let id = self.approver_id.as_bytes();
-        if id.is_empty() || id.len() > 64
-            || !id.iter().all(|c| c.is_ascii_alphanumeric()
-                || matches!(*c, b'.' | b'-' | b'_'))
+        if id.is_empty()
+            || id.len() > 64
+            || !id
+                .iter()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(*c, b'.' | b'-' | b'_'))
             || self.install_id == [0; 16]
             || self.plan_digest == [0; 32]
             || self.ssh_host_sha256 == [0; 32]
@@ -91,7 +93,9 @@ impl OwnerApprovalWireV1 {
         {
             return Err(WireError::MalformedClaim);
         }
-        let duration = self.expires_at_unix.checked_sub(self.issued_at_unix)
+        let duration = self
+            .expires_at_unix
+            .checked_sub(self.issued_at_unix)
             .ok_or(WireError::MalformedClaim)?;
         if duration == 0 || duration > MAX_VALIDITY_SECONDS {
             return Err(WireError::MalformedClaim);
@@ -108,7 +112,9 @@ impl OwnerApprovalWireV1 {
     /// Portable owner signature check, never a privileged install decision.
     /// Root MUST also compare floor, stage, host, owner policy and atomic CAS.
     pub fn verify_detached(
-        &self, signature_bytes: &[u8; 64], independently_pinned_key: &[u8; 32],
+        &self,
+        signature_bytes: &[u8; 64],
+        independently_pinned_key: &[u8; 32],
         now_unix: u64,
     ) -> Result<(), WireError> {
         self.validate_time_and_shape(now_unix)?;
@@ -130,8 +136,11 @@ mod tests {
 
     fn candidate() -> OwnerApprovalWireV1 {
         let previous = OwnerFloorWire {
-            generation: 0, sequence: 0, version: [0; 3],
-            manifest_fingerprint: [0; 32], chain_tip: [0; 32],
+            generation: 0,
+            sequence: 0,
+            version: [0; 3],
+            manifest_fingerprint: [0; 32],
+            chain_tip: [0; 32],
         };
         OwnerApprovalWireV1 {
             approver_id: "akula-owner-test".into(),
@@ -141,8 +150,11 @@ mod tests {
             manifest_fingerprint: [0x44; 32],
             previous,
             proposed: OwnerFloorWire {
-                generation: 1, sequence: 7, version: [0, 3, 13],
-                manifest_fingerprint: [0x44; 32], chain_tip: [0x55; 32],
+                generation: 1,
+                sequence: 7,
+                version: [0, 3, 13],
+                manifest_fingerprint: [0x44; 32],
+                chain_tip: [0x55; 32],
             },
             staged_package_sha256: [0x66; 32],
             staged_package_size: 32768,
@@ -181,25 +193,41 @@ mod tests {
                 "field variant {variant}",
             );
         }
-        assert_eq!(claim.verify_detached(&signature, &[0; 32], NOW),
-            Err(WireError::UntrustedOwner));
-        assert_eq!(claim.verify_detached(&signature, &public, NOW + 60),
-            Err(WireError::Expired));
+        assert_eq!(
+            claim.verify_detached(&signature, &[0; 32], NOW),
+            Err(WireError::UntrustedOwner)
+        );
+        assert_eq!(
+            claim.verify_detached(&signature, &public, NOW + 60),
+            Err(WireError::Expired)
+        );
     }
 
     #[test]
     fn invalid_owner_signing_claim_fails_before_signature_check() {
         let mut bad = candidate();
         bad.approver_id = "../root".into();
-        assert_eq!(bad.validate_time_and_shape(NOW), Err(WireError::MalformedClaim));
+        assert_eq!(
+            bad.validate_time_and_shape(NOW),
+            Err(WireError::MalformedClaim)
+        );
         let mut bad = candidate();
         bad.approval_nonce = [0; 16];
-        assert_eq!(bad.validate_time_and_shape(NOW), Err(WireError::MalformedClaim));
+        assert_eq!(
+            bad.validate_time_and_shape(NOW),
+            Err(WireError::MalformedClaim)
+        );
         let mut bad = candidate();
         bad.expires_at_unix = NOW + MAX_VALIDITY_SECONDS + 100;
-        assert_eq!(bad.validate_time_and_shape(NOW), Err(WireError::MalformedClaim));
+        assert_eq!(
+            bad.validate_time_and_shape(NOW),
+            Err(WireError::MalformedClaim)
+        );
         let mut bad = candidate();
         bad.issued_at_unix = NOW + 2;
-        assert_eq!(bad.validate_time_and_shape(NOW), Err(WireError::NotYetValid));
+        assert_eq!(
+            bad.validate_time_and_shape(NOW),
+            Err(WireError::NotYetValid)
+        );
     }
 }

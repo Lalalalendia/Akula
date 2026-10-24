@@ -37,6 +37,8 @@ pub mod server_owner_approval_lab;
 // Shared Windows/Linux canonical B1 owner signing bytes; not install authority.
 #[cfg(any(feature = "server-install-review", all(target_os = "linux", feature = "server-bootstrap-b1b1b-approval-lab")))]
 pub mod server_owner_approval_wire;
+#[cfg(all(target_os = "windows", feature = "server-owner-windows-signer"))]
+pub mod server_owner_windows;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b1c-witness-lab"))]
 pub mod server_witness_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1b3a-helper-ipc-lab"))]

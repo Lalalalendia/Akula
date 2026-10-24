@@ -53,3 +53,9 @@ Do not create per-module public release previews or treat laboratory markers as 
 - Branch gate runs the Linux B0/B1a review and owner-signature parity tests, a default Core build, and a Windows pinned SSH + review compile. Formatting is scoped to newly authored Rust code rather than the entire vendor workspace.
 
 **Remaining release HOLD**: No owner signing key provisioned on Windows, no production release key/floor, no fixed SSH mutation/privileged root helper, no systemd activation transaction, no installed Windows UI confirmation, no real VPS reboot or Windows B File Gate end-to-end. Neither an owner-signature test fixture nor a signed review is permission to deploy to an actual server.
+
+### Separate Windows owner-key custody (opt-in, unreleased)
+
+The independent `server-owner-windows-signer` feature contains a distinct owner Ed25519 identity, never the Iroh/P2P device key or release-signing key. It is explicitly enrolled once into the Windows Credential Manager under a fixed dedicated target; normal loading refuses missing/malformed records and never silently rotates keys. The private seed is zeroized in memory and never appears in app settings, logs, exported configuration or a remote installer request. Existing same-user malware and Windows account compromise are outside this software store's resistance: this is **not a non-exportable TPM-backed key**.
+
+Signing requires the in-memory one-use `InertUserConsent` and the exact B1b1b owner claim (InstallId, host fingerprint, plan, package, manifest, review nonce, expiry). It still **does not install**; production root must independently trust/pin the owner public key, accept the real CAS floor, verify signed release, execute a fixed root-only helper and attest the installed service. The normal installed Akula UI does not initialize this owner key or enable `InstallServer`. Production root trust enrollment and a genuine per-user UI click remain missing.

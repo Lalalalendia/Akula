@@ -55,6 +55,7 @@ jobs:
           set -euo pipefail
           paths=(
             aquilum-app/core/src/server_owner_approval_wire.rs
+            aquilum-app/core/src/server_owner_windows.rs
             aquilum-app/core/src/server_release_lab/review.rs
             aquilum-app/core/src/server_release_lab/review/tests.rs
           )
@@ -80,4 +81,9 @@ jobs:
       - name: Compile signed-KEX plus B0/B1a immutable Node review
         shell: pwsh
         run: |
-          cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-install-review,server-bootstrap-b0-openssh-lab
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-owner-windows-signer,server-bootstrap-b0-openssh-lab
+      - name: Verify Windows protected owner identity test (no real enrollment)
+        shell: pwsh
+        run: |
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-owner-windows-signer,server-bootstrap-b0-openssh-lab --lib server_owner_windows::tests -- --nocapture
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-owner-windows-signer,server-bootstrap-b0-openssh-lab --lib server_release_lab::review::tests::windows_owner_key_signs_only_the_reviewed_claim -- --nocapture

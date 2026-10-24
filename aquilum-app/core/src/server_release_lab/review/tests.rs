@@ -1,13 +1,10 @@
 use super::*;
-use crate::server_bootstrap_lab::{
-    preview, B0Error, B0Input, PreviewTransport, ReadOnlyHostFacts,
-};
+use crate::server_bootstrap_lab::{preview, B0Error, B0Input, PreviewTransport, ReadOnlyHostFacts};
 use crate::server_release_lab::{
-    ReleaseManifestV1, SignedRelease, TargetPlatform, TrustedReleaseSigner,
-    Version,
+    ReleaseManifestV1, SignedRelease, TargetPlatform, TrustedReleaseSigner, Version,
 };
-use ring::signature::{Ed25519KeyPair, KeyPair};
 use ring::digest::{digest, SHA256};
+use ring::signature::{Ed25519KeyPair, KeyPair};
 use std::io::Cursor;
 
 const NOW: u64 = 1_600_000_000;
@@ -17,9 +14,7 @@ struct VerifiedKexFixture {
     wire: Vec<u8>,
 }
 impl PreviewTransport for VerifiedKexFixture {
-    fn handshake_public_key(
-        &mut self, _: &ServerTarget,
-    ) -> Result<Vec<u8>, B0Error> {
+    fn handshake_public_key(&mut self, _: &ServerTarget) -> Result<Vec<u8>, B0Error> {
         Ok(self.wire.clone())
     }
 
@@ -41,7 +36,11 @@ fn fixture() -> (DryRunPlan, SignedRelease, TrustedReleaseSigner, Vec<u8>) {
     let package = PACKAGE.to_vec();
     let manifest = ReleaseManifestV1 {
         platform: TargetPlatform::LinuxX86_64,
-        version: Version { major: 0, minor: 3, patch: 13 },
+        version: Version {
+            major: 0,
+            minor: 3,
+            patch: 13,
+        },
         release_sequence: 9,
         package_size: package.len() as u64,
         package_sha256: digest(&SHA256, &package).as_ref().try_into().unwrap(),
@@ -74,20 +73,25 @@ fn fixture() -> (DryRunPlan, SignedRelease, TrustedReleaseSigner, Vec<u8>) {
             trusted_signer_id: manifest.signer_id,
         },
     };
-    let plan = preview(
-        &input, &mut VerifiedKexFixture { wire }, || false,
-    ).expect("read-only pinned KEX fixture must generate a B0 plan");
+    let plan = preview(&input, &mut VerifiedKexFixture { wire }, || false)
+        .expect("read-only pinned KEX fixture must generate a B0 plan");
     assert!(plan.verify_unchanged());
     (plan, signed, trusted, package)
 }
 
 fn prepare(
-    plan: DryRunPlan, signed: &SignedRelease,
-    trusted: &TrustedReleaseSigner, artifact: &[u8],
+    plan: DryRunPlan,
+    signed: &SignedRelease,
+    trusted: &TrustedReleaseSigner,
+    artifact: &[u8],
 ) -> Result<PreparedReview, ReviewError> {
     prepare_signed_review(
-        plan, signed, trusted, ReleaseFloor::initial(),
-        &mut Cursor::new(artifact), NOW,
+        plan,
+        signed,
+        trusted,
+        ReleaseFloor::initial(),
+        &mut Cursor::new(artifact),
+        NOW,
     )
 }
 
@@ -98,9 +102,9 @@ fn signed_package_and_exact_review_click_are_single_use() {
     let echo = review.expected_echo();
     let target = review.shown_plan().target.clone();
     let package = review.shown_plan().package.clone();
-    let consent = review.consume_local_click(
-        &echo, &target, &package, NOW + 10,
-    ).expect("local click");
+    let consent = review
+        .consume_local_click(&echo, &target, &package, NOW + 10)
+        .expect("local click");
     let scope = consent.scope();
     assert_eq!(scope.0, *echo.install_id.as_bytes());
     assert_eq!(scope.1, echo.plan_hash);
@@ -167,11 +171,20 @@ fn wrong_signature_manifest_or_artifact_never_builds_review() {
     ));
     let mut wrong_floor = ReleaseFloor::initial();
     wrong_floor.sequence = 10;
-    wrong_floor.version = Version { major: 0, minor: 3, patch: 14 };
+    wrong_floor.version = Version {
+        major: 0,
+        minor: 3,
+        patch: 14,
+    };
     assert!(prepare_signed_review(
-        plan, &signed, &trusted, wrong_floor,
-        &mut Cursor::new(package), NOW,
-    ).is_err());
+        plan,
+        &signed,
+        &trusted,
+        wrong_floor,
+        &mut Cursor::new(package),
+        NOW,
+    )
+    .is_err());
 }
 
 #[test]
@@ -238,7 +251,9 @@ fn local_review_cannot_approve_changed_owner_wire_scope() {
     let echo = review.expected_echo();
     let target = review.shown_plan().target.clone();
     let package = review.shown_plan().package.clone();
-    let consent = review.consume_local_click(&echo, &target, &package, NOW + 1).unwrap();
+    let consent = review
+        .consume_local_click(&echo, &target, &package, NOW + 1)
+        .unwrap();
     let (install_id, plan_digest, host_key, package_digest, manifest) = consent.scope();
     let mut intent = OwnerApprovalWireV1 {
         approver_id: "independent-test-owner".into(),
@@ -247,12 +262,18 @@ fn local_review_cannot_approve_changed_owner_wire_scope() {
         ssh_host_sha256: host_key,
         manifest_fingerprint: manifest,
         previous: OwnerFloorWire {
-            generation: 0, sequence: 0, version: [0; 3],
-            manifest_fingerprint: [0; 32], chain_tip: [0; 32],
+            generation: 0,
+            sequence: 0,
+            version: [0; 3],
+            manifest_fingerprint: [0; 32],
+            chain_tip: [0; 32],
         },
         proposed: OwnerFloorWire {
-            generation: 1, sequence: 9, version: [0, 3, 13],
-            manifest_fingerprint: manifest, chain_tip: [0x77; 32],
+            generation: 1,
+            sequence: 9,
+            version: [0, 3, 13],
+            manifest_fingerprint: manifest,
+            chain_tip: [0x77; 32],
         },
         staged_package_sha256: package_digest,
         staged_package_size: artifact.len() as u64,
@@ -277,4 +298,55 @@ fn local_review_cannot_approve_changed_owner_wire_scope() {
     intent.manifest_fingerprint[0] ^= 1;
     intent.proposed.manifest_fingerprint[0] ^= 1;
     assert!(!consent.matches_owner_claim(&intent));
+}
+
+#[cfg(all(target_os = "windows", feature = "server-owner-windows-signer"))]
+#[test]
+fn windows_owner_key_signs_only_the_reviewed_claim() {
+    use crate::server_owner_approval_wire::{OwnerApprovalWireV1, OwnerFloorWire, WireError};
+    use crate::server_owner_windows::{OwnerIdentity, OwnerIdentityError};
+    let (plan, signed, trusted, artifact) = fixture();
+    let mut review = prepare(plan, &signed, &trusted, &artifact).unwrap();
+    let echo = review.expected_echo();
+    let target = review.shown_plan().target.clone();
+    let package = review.shown_plan().package.clone();
+    let consent = review.consume_local_click(&echo, &target, &package, NOW + 1).unwrap();
+    let owner = OwnerIdentity::from_test_seed([0x99; 32]);
+    let (id, plan_hash, host, package_sha, manifest) = consent.scope();
+    let claim = OwnerApprovalWireV1 {
+        approver_id: owner.signer_id().into(),
+        install_id: id,
+        plan_digest: plan_hash,
+        ssh_host_sha256: host,
+        manifest_fingerprint: manifest,
+        previous: OwnerFloorWire {
+            generation: 0, sequence: 0, version: [0; 3],
+            manifest_fingerprint: [0; 32], chain_tip: [0; 32],
+        },
+        proposed: OwnerFloorWire {
+            generation: 1, sequence: 9, version: [0, 3, 13],
+            manifest_fingerprint: manifest, chain_tip: [0x66; 32],
+        },
+        staged_package_sha256: package_sha,
+        staged_package_size: artifact.len() as u64,
+        expected_witness_revision: 0,
+        approval_nonce: consent.nonce(),
+        issued_at_unix: NOW,
+        expires_at_unix: NOW + 60,
+    };
+    let signature = owner.sign_consented_claim(&consent, &claim, NOW + 2).unwrap();
+    assert_eq!(claim.verify_detached(&signature, &owner.public_key_ed25519(), NOW + 2),
+        Ok(()));
+    let mut wrong = claim.clone();
+    wrong.ssh_host_sha256[0] ^= 1;
+    assert_eq!(
+        owner.sign_consented_claim(&consent, &wrong, NOW + 2),
+        Err(OwnerIdentityError::InvalidScope),
+    );
+    assert_eq!(claim.verify_detached(&signature, &[0; 32], NOW + 2),
+        Err(WireError::UntrustedOwner));
+    assert_eq!(
+        owner.sign_consented_claim(&consent, &claim, NOW + 60),
+        Err(OwnerIdentityError::InvalidClaim(WireError::Expired)),
+    );
 }
