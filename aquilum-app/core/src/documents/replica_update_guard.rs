@@ -4,7 +4,13 @@
 //! establishes that the wire payload contains enough bytes (upstream #675).
 //! This checks only provable length invariants; it is NOT a full Yrs validator.
 //! Raw updates from untrusted peers still require an upstream decoder fix.
-use super::{failure, ReplicaError};
+use super::{failure, update_decoder, ReplicaError};
+use yrs::Update;
+
+pub(super) fn decode(update: &[u8]) -> Result<Update, ReplicaError> {
+    check(update)?;
+    update_decoder::decode(update).map_err(failure)
+}
 
 fn varuint(bytes: &[u8], cursor: &mut usize, max_octets: usize) -> Option<u64> {
     let mut number = 0u64;
@@ -97,6 +103,15 @@ mod tests {
         let mut delete_ranges = vec![0, 1, 0];
         delete_ranges.extend(huge);
         assert!(check(&delete_ranges).is_err());
+    }
+
+    #[test]
+    fn rejects_known_malformed_pending_update_without_poisoning_replica() {
+        let bad = [1, 1, 0, 0, 0x52, 0, 0, 0, 0, 0];
+        let replica = Replica::new();
+        assert!(replica.apply_update(&bad, "remote").is_err());
+        assert_eq!(replica.text(), "");
+        assert!(replica.state().len() > 0);
     }
 
     #[test]
