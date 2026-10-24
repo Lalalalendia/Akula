@@ -86,15 +86,42 @@ async function run() {
     assert.equal(afterC.origin_bytes - afterB.origin_bytes, manifest.size,
       'Third browser must fallback to MinIO after upload consent withdrawn');
 
+    // Corrupt one cached chunk AFTER it was checked. The browser must not
+    // accept the malicious P2P payload; only that 256 KiB should come from S3.
+    const hostile = await openTab(browser, 'D-hostile-seed', logs); peers.push(hostile);
+    await hostile.page.locator('#share').check();
+    const seed = await readFile(hostile.page);
+    assert.equal(seed.httpBytes, manifest.size);
+    assert.equal(seed.p2pBytes, 0);
+    const afterSeed = await getMetrics();
+    await hostile.page.evaluate(() => {
+      const first = window.__akula.cache.get(0);
+      if (!first || !first.length) throw new Error('Missing cached first chunk');
+      first[0] ^= 0xff;
+    });
+    const repaired = await openTab(browser, 'E-corrupt-part-recovery', logs); peers.push(repaired);
+    await repaired.page.waitForFunction(() => window.__akula.metrics.peerCount > 0,
+      undefined, { timeout: 60000 });
+    const d = await readFile(repaired.page);
+    const afterRepair = await getMetrics();
+    const invalidSize = manifest.chunks[0].size;
+    assert.equal(d.integrityFailures, 1, 'Corrupted peer bytes MUST be rejected');
+    assert.equal(d.httpBytes, invalidSize, 'Only the rejected chunk should be read from MinIO');
+    assert.equal(d.p2pBytes, manifest.size - invalidSize, 'Remaining chunks must come from peer');
+    assert.equal(afterRepair.origin_bytes - afterSeed.origin_bytes, invalidSize,
+      'Only the damaged range should be transferred by MinIO');
+
     const report = {
-      scenario: 'REAL_MINIO_S3_HTTPS_TO_BROWSER_P2P_AND_FALLBACK',
+      scenario: 'REAL_MINIO_S3_HTTPS_TO_BROWSER_P2P_FALLBACK_AND_CORRUPTION',
       source: manifest.origin_url, fixtureBytes: manifest.size,
-      contentId: manifest.content_id, a, b, c,
+      contentId: manifest.content_id, a, b, c, seed, d,
       minioOrigin: { firstBrowserBytes: afterA.origin_bytes - before.origin_bytes,
         secondBrowserAdditionalBytes: afterB.origin_bytes - afterA.origin_bytes,
-        thirdBrowserAdditionalBytes: afterC.origin_bytes - afterB.origin_bytes },
+        thirdBrowserAdditionalBytes: afterC.origin_bytes - afterB.origin_bytes,
+        poisonedSeederBytes: afterSeed.origin_bytes - afterC.origin_bytes,
+        onlyCorruptRangeRepairBytes: afterRepair.origin_bytes - afterSeed.origin_bytes },
       passed: true,
-      limitations: 'Local disposable MinIO behind test TLS gateway; both Chromium browsers on one CI runner. NOT AWS S3, independent WAN/NAT/TURN or production TLS.',
+      limitations: 'Local disposable MinIO behind test TLS gateway; browsers on one CI runner. NOT AWS S3, independent WAN/NAT/TURN or production TLS.',
     };
     fs.writeFileSync(path.join(RESULTS, 'minio-real-browser-result.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
