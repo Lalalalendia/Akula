@@ -76,13 +76,21 @@ impl<'a> PinnedBaoIroh<'a> {
                 .map_err(|_| "cannot open existing QUIC connection")?;
             send.write_all(&message).await.map_err(|_| "Bao request send failed")?;
             send.finish().map_err(|_| "Bao request finish failed")?;
-            recv.read_to_end(MAX_BAO_PROOF_BYTES + 1).await
+            recv.read_to_end(MAX_BAO_PROOF_BYTES + 8 + 1).await
                 .map_err(|_| "invalid bounded Bao proof response")
         };
         let response = tokio::time::timeout(Duration::from_secs(25), exchange)
             .await.map_err(|_| "Bao GET timed out")??;
-        if response.len() > MAX_BAO_PROOF_BYTES {
-            return Err("Bao proof over resource budget");
+        // iroh-blobs prefixes an actual Bao GET response with the
+        // 8-byte little-endian FULL object length. It is not Bao proof data.
+        if response.len() < 8 || response.len() > MAX_BAO_PROOF_BYTES + 8 {
+            return Err("Bao frame over resource budget");
+        }
+        let wire_size = u64::from_le_bytes(
+            response[..8].try_into().map_err(|_| "truncated Bao length prefix")?
+        );
+        if wire_size != self.object_size {
+            return Err("Bao framed object size disagrees with pinned manifest");
         }
         let manifest = Manifest {
             id: ContentId(self.root_blake3),
@@ -92,7 +100,7 @@ impl<'a> PinnedBaoIroh<'a> {
             .map_err(|_| "invalid Bao range")?;
         let proof_request = TransferRequest::new(manifest, range)
             .map_err(|_| "invalid Bao manifest")?;
-        let verified = verify_bao_range(&proof_request, &response)
+        let verified = verify_bao_range(&proof_request, &response[8..])
             .map_err(|_| "Bao cryptographic verification failed")?;
         let bytes = verified.into_bytes();
         // Independently pin browser SHA-256 even for a valid BLAKE3 proof.
