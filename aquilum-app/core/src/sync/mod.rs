@@ -238,6 +238,10 @@ pub(crate) fn publish_pinned_p2p_inbox_object(
 /// reparenting remain outside this boundary. Never claim signed durability.
 #[cfg(all(windows, feature = "p2p-inbox-lab"))]
 pub(crate) struct P2pInboxSqliteCustody {
+    // The immediate parent is independently pinned without SHARE_DELETE.
+    // This protects the usual LOCALAPPDATA/Akula rename during a receipt,
+    // but does not yet pin all ancestors up to the drive root.
+    parent: std::fs::File,
     root: std::fs::File,
     objects: std::fs::File,
     db: std::fs::File,
@@ -248,7 +252,17 @@ pub(crate) fn pin_p2p_inbox_sqlite_custody(
     root_path: &std::path::Path,
     pinned_root: &std::fs::File,
 ) -> Result<P2pInboxSqliteCustody, VaultPortError> {
+    let parent_path = root_path.parent().ok_or(VaultPortError::UnsafePath)?;
+    // Hold the parent first: an Akula directory replacement can otherwise
+    // race between resolving the initial root and SQLite path-based open.
+    let parent = pinned_windows::open_p2p_inbox_root_no_delete(parent_path)?;
     let original = pinned_windows::open_p2p_inbox_root_no_delete(root_path)?;
+    let parent_readback = pinned_windows::open_root(parent_path)?;
+    if pinned_windows::file_identity(&parent_readback)?
+        != pinned_windows::file_identity(&parent)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
     if pinned_windows::file_identity(&original)?
         != pinned_windows::file_identity(pinned_root)?
     {
@@ -269,6 +283,7 @@ pub(crate) fn pin_p2p_inbox_sqlite_custody(
         return Err(VaultPortError::UnsafePath);
     }
     let custody = P2pInboxSqliteCustody {
+        parent,
         root: original,
         objects,
         db,
@@ -284,6 +299,15 @@ impl P2pInboxSqliteCustody {
         root_path: &std::path::Path,
         pinned_root: &std::fs::File,
     ) -> Result<(), VaultPortError> {
+        // The parent must still resolve to the exact original directory,
+        // without a rename window between original and child resolution.
+        let parent_path = root_path.parent().ok_or(VaultPortError::UnsafePath)?;
+        let current_parent = pinned_windows::open_root(parent_path)?;
+        if pinned_windows::file_identity(&self.parent)?
+            != pinned_windows::file_identity(&current_parent)?
+        {
+            return Err(VaultPortError::FileChanged);
+        }
         // Verify both the original HANDLE identities and current path views
         // after the SQLite commit, before sending any remote receipt OK.
         if pinned_windows::file_identity(&self.root)?
