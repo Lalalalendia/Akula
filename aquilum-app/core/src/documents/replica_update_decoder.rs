@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use yrs::encoding::read::{Error, Read};
 use yrs::updates::decoder::{Decode, Decoder, DecoderV1};
-use yrs::{Any, ClientID, Update, ID};
+use yrs::{Any, ClientID, ID, Update};
 
 struct CheckedDecoder<'a>(DecoderV1<'a>);
 
