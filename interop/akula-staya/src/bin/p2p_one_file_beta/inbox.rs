@@ -474,6 +474,35 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn windows_sqlite_custody_blocks_rename_and_preserves_parent_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let (pinned_root, stage) =
+            create_pinned_windows_inbox_stage(&root, "sqlite-lease.stage").unwrap();
+        let lease = pin_windows_inbox_sqlite_custody(&root, &pinned_root).unwrap();
+        let objects = root.join("objects");
+        let database = root.join("received-inbox.sqlite3");
+        assert!(database.is_file());
+        assert!(objects.is_dir());
+
+        // No FILE_SHARE_DELETE on the opened real file/directory handles.
+        // A cooperating process cannot replace either name while rusqlite
+        // uses the path-based SQLite connection.
+        assert!(fs::rename(&database, root.join("moved.sqlite3")).is_err());
+        assert!(fs::rename(&objects, root.join("moved-objects")).is_err());
+        assert!(fs::rename(&root, dir.path().join("moved-inbox")).is_err());
+        lease.verify(&root, &pinned_root).unwrap();
+        drop(lease);
+        mark_pinned_windows_stage_delete_on_close(&stage).unwrap();
+        drop(stage);
+        drop(pinned_root);
+        assert!(database.is_file());
+        assert!(objects.is_dir());
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn windows_pinned_objects_writer_is_no_replace_and_removes_failed_scratch() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("received-inbox");
