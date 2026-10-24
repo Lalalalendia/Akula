@@ -68,6 +68,8 @@ jobs:
         shell: bash
         run: |
           cargo check --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta
+          # The standalone ledger has its own workspace: compile/run its
+          # tamper regression explicitly, then exercise Native's receiver OK.
           cargo test --manifest-path modules/drop-inbox-ledger/Cargo.toml cold_read_only_receipt_rejects_edited_sender_and_uncommitted_state -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta native_address_accepts_private_lan -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta native_internet_entrypoints_reject_bad_peer_before_n0_network -- --nocapture
