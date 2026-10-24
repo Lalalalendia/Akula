@@ -22,6 +22,8 @@ pub mod sender_arm_lab;
 pub mod public_cdn_lab;
 #[cfg(feature = "public-cdn-s3-lab")]
 pub mod public_cdn_s3_lab;
+#[cfg(feature = "public-cdn-bao-lab")]
+pub mod public_cdn_bao_lab;
 
 use staya_transfer::{
     ContentId, Manifest,
