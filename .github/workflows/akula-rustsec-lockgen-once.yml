@@ -21,9 +21,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo metadata --manifest-path aquilum-app/Cargo.toml --no-deps --format-version 1 > /dev/null
-          cargo metadata --locked --manifest-path aquilum-app/Cargo.toml --all-features --no-deps --format-version 1 > /dev/null
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 > /dev/null
+          cargo metadata --locked --manifest-path aquilum-app/Cargo.toml --all-features --format-version 1 > /dev/null
           echo "Cargo metadata --locked PASS"
+          git diff -- aquilum-app/Cargo.lock
           git diff --stat -- aquilum-app/Cargo.lock
           echo "AKULA_LOCK_BEGIN"
           base64 -w 120 aquilum-app/Cargo.lock
