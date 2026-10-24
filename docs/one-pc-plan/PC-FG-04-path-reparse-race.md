@@ -154,3 +154,5 @@ Log: `.artifacts/one-pc-checks/PC-FG-04-20261024-current/file-gate-recheck-20261
 
 Локальный отчёт опубликован в GitHub в отдельной evidence-ветке `codex/pc-fg-04-path-reparse-evidence-20261024`. Ветка содержит только этот отчёт; исходники File Gate из текущего смешанного незакоммиченного worktree в неё не включались. Для PC-FG-04 отдельный PR не создавался; обязательные exact-head CI и Main PR gate остаются непроверенными. Результаты и ссылка на GitHub внесены в [карточку PC-FG-04 в Notion](https://app.notion.com/p/40332a84beec81b3ba37ee0e623e4431).
 
+Сверка исходной базы после публикации показала, что локальный `main` HEAD `530fe3d6794ee28d2c7098af1266ff5340903543` отстаёт на 39 коммитов от текущего GitHub `main` `ef87aa1b64a4be876ebce774780fe23bf2afda3a`. Поэтому source changes из смешанного worktree не переносились в GitHub; сначала требуется изолировать и согласовать PC-FG-04-патч с актуальным `main`.
+
