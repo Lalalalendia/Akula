@@ -167,6 +167,40 @@ mod win {
         Ok(action(&token))
     }
 
+    #[cfg(test)]
+    #[test]
+    fn disposable_windows_credential_roundtrip_is_root_scoped_and_removable() {
+        // This test creates only a synthetic credential for its unique UUID.
+        // It never invokes CredUI, Notion API, or a user's actual account.
+        let a = uuid::Uuid::new_v4().to_string();
+        let other = uuid::Uuid::new_v4().to_string();
+        let credential_name = target(&a).unwrap();
+        struct Cleanup(String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = remove(&self.0); }
+        }
+        let _cleanup = Cleanup(a.clone());
+        let mut target_wide = wide(&credential_name);
+        let mut root_wide = wide(&a);
+        let mut token = Zeroizing::new(
+            format!("synthetic-notion-{}", uuid::Uuid::new_v4()).into_bytes()
+        );
+        let record = CREDENTIALW {
+            Type: CRED_TYPE_GENERIC,
+            TargetName: PWSTR(target_wide.as_mut_ptr()),
+            UserName: PWSTR(root_wide.as_mut_ptr()),
+            CredentialBlobSize: token.len() as u32,
+            CredentialBlob: token.as_mut_ptr(),
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            ..Default::default()
+        };
+        unsafe { CredWriteW(&record, 0) }.unwrap();
+        assert_eq!(super::with_token(&a, |x| x.as_bytes() == token.as_slice()), Ok(true));
+        assert_eq!(super::with_token(&other, |_| ()), Err(CredentialError::Missing));
+        remove(&a).unwrap();
+        assert_eq!(super::with_token(&a, |_| ()), Err(CredentialError::Missing));
+    }
+
     pub(super) fn remove(root: &str) -> Result<(), CredentialError> {
         let id = wide(&target(root)?);
         match unsafe { CredDeleteW(PCWSTR(id.as_ptr()), CRED_TYPE_GENERIC, None) } {
