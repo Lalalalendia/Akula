@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Arc;
+use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use masonry::app::RenderRoot;
 use masonry::core::ErasedAction;
@@ -17,7 +17,7 @@ const MAX_PNG: u64 = 64 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(25);
 pub(super) struct State {
     views: HashMap<Uuid, View>,
-    jobs: Sender<RenderRequest>,
+    pending: Arc<(Mutex<PendingRender>, Condvar)>,
     rx: Receiver<ResultPage>,
     desired: Arc<AtomicU64>,
     generation: u64,
@@ -60,6 +60,12 @@ struct RenderRequest {
     rotation: i32,
     wake: Arc<dyn Fn() + Send + Sync>,
 }
+#[derive(Default)]
+struct PendingRender {
+    // A single replaceable slot, not an unbounded backlog of outdated pages.
+    request: Option<RenderRequest>,
+    closed: bool,
+}
 struct ResultPage {
     tab: Uuid,
     generation: u64,
@@ -93,14 +99,22 @@ pub(super) fn trusted_source(vault: &Path, source: &Path) -> bool {
 impl State {
     pub(super) fn new() -> Self {
         let (results, rx) = std::sync::mpsc::channel::<ResultPage>();
-        let (jobs, pending) = std::sync::mpsc::channel::<RenderRequest>();
+        let pending = Arc::new((Mutex::new(PendingRender::default()), Condvar::new()));
+        let queue = Arc::clone(&pending);
         let desired = Arc::new(AtomicU64::new(0));
         let cancel = Arc::clone(&desired);
-        // Exactly one PDFium child at a time, regardless of rapid navigation.
+        // Exactly one PDFium child and at most one waiting request.
         std::thread::Builder::new().name("akula-pdf-render".into()).spawn(move || {
-            while let Ok(mut request) = pending.recv() {
-                // Keep only the newest pending request when pages are flipped quickly.
-                while let Ok(next) = pending.try_recv() { request = next; }
+            loop {
+                let request = {
+                    let (lock, available) = &*queue;
+                    let mut slot = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    while slot.request.is_none() && !slot.closed {
+                        slot = available.wait(slot).unwrap_or_else(std::sync::PoisonError::into_inner);
+                    }
+                    if slot.closed { break; }
+                    slot.request.take().expect("PDF request present")
+                };
                 if superseded(&cancel, request.generation) { continue; }
                 let image = render(
                     &request.path, request.page, request.width, request.rotation,
@@ -113,12 +127,14 @@ impl State {
                 (request.wake)();
             }
         }).expect("PDF render worker thread");
-        Self { views: HashMap::new(), jobs, rx, desired, generation: 0 }
+        Self { views: HashMap::new(), pending, rx, desired, generation: 0 }
     }
     pub(super) fn clear(&mut self) {
         self.views.clear();
         self.generation = self.generation.wrapping_add(1);
         self.desired.store(self.generation, Ordering::Release);
+        let (lock, _) = &*self.pending;
+        lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner).request = None;
     }
     pub(super) fn open(&mut self, tab: Uuid, path: &Path, wake: &std::sync::Arc<dyn Fn() + Send + Sync>) {
         // Only the visible PDF retains a decoded page image. A 16-Mpixel
@@ -164,9 +180,15 @@ impl State {
             width: (1200.0 * view.zoom).round().clamp(320.0, 3200.0) as u32,
             wake: Arc::clone(wake),
         };
-        if self.jobs.send(job).is_err() {
+        let (lock, available) = &*self.pending;
+        let mut slot = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.closed {
             view.loading = false;
             view.error = Some("PDF render queue was closed".into());
+        } else {
+            // Replace, do not append: rapid navigation retains constant queue memory.
+            slot.request = Some(job);
+            available.notify_one();
         }
     }
     pub(super) fn act(&mut self, tab: Uuid, action: pdf::Action, wake: &std::sync::Arc<dyn Fn() + Send + Sync>) {
@@ -313,6 +335,17 @@ impl App {
         { self.show_pdf_readonly(root, &path); }
     }
 }
+impl Drop for State {
+    fn drop(&mut self) {
+        self.desired.store(u64::MAX, Ordering::Release);
+        let (lock, available) = &*self.pending;
+        let mut slot = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        slot.closed = true;
+        slot.request = None;
+        available.notify_one();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +353,22 @@ mod tests {
     fn pdf_suffix_is_case_insensitive_and_not_arbitrary_file() {
         assert!(is_pdf(Path::new("x.PDF")));
         assert!(!is_pdf(Path::new("x.pdf.exe")));
+    }
+    #[test]
+    fn pending_queue_replaces_obsolete_pages_in_constant_space() {
+        let mut slot = PendingRender::default();
+        let make = |generation| RenderRequest {
+            tab: Uuid::nil(), generation,
+            path: PathBuf::from("fixture.pdf"),
+            page: generation as usize, width: 900, rotation: 0,
+            wake: Arc::new(|| {}),
+        };
+        slot.request = Some(make(1));
+        slot.request = Some(make(5000));
+        let latest = slot.request.take().expect("latest page retained");
+        assert_eq!(latest.generation, 5000);
+        assert_eq!(latest.page, 5000);
+        assert!(slot.request.is_none());
     }
     #[test]
     fn only_latest_page_generation_is_eligible_for_delivery() {
