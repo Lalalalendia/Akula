@@ -27,6 +27,8 @@ node-v1-runtime = ["node-live-read-lab", "aquilum-core/node-v1", "dep:tokio", "d
 sender-arm-lab = []
 # Lab-only public S3/P2P verified reader; no listener, file grant or Sync mutations.
 public-cdn-reader-lab = ["dep:sha2", "dep:serde", "dep:serde_json"]
+public-cdn-s3-lab = ["public-cdn-reader-lab", "dep:reqwest"]
+public-cdn-local-minio-test = ["public-cdn-s3-lab"]
 # Explicit Windows two-PC OS-backed QUIC HELLO/OK. Never sends user bytes.
 os-pinned-lan-probe = ["p2p-live-identity", "dep:tokio"]
 
@@ -45,6 +47,7 @@ aquilum-core = { path = "../../aquilum-app/core", features = ["p2p-inbox-lab"] }
 staya-transfer = { git = "https://github.com/Lalalalendia/staya-transfer", rev = "ccfe82dc6125e2810e95043a6a4ac55954b710e0", default-features = false }
 blake3 = "=1.8.5"
 sha2 = { version = "0.10", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 ring = { version = "=0.17.14", optional = true }
