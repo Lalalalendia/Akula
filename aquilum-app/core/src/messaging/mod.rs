@@ -270,3 +270,6 @@ impl OutboundMessage {
 mod scale_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "messaging-w4-lab")]
+pub mod w4;
