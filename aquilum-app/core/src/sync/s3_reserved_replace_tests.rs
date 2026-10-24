@@ -847,7 +847,7 @@ fn p0g3d08_os_process_probe_entrypoint() {
             assert!(journal.read_existing_replace_attempt(operation)
                 .unwrap().is_some(), "post-V8 VM force-off lost consumed V7 fence");
         }
-        "oracle-hold" | "oracle-deny" => {
+        "oracle-hold" | "oracle-deny" | "oracle-deny-no-original" => {
             use crate::sync::cold_oracle_report::{ColdOracleReport, ColdOracleVerdict};
             let inspected = inspect_cold_s3_replace_with_history_classified(
                 &admission, &bindings, &journal, &originals, operation,
@@ -875,8 +875,15 @@ fn p0g3d08_os_process_probe_entrypoint() {
     assert_eq!(Some(baseline.revision_id), recorded.intent.expected_baseline);
     assert_eq!(baseline.content_hash,
         blake3::hash(b"unchanged private original").to_hex().to_string());
-    assert_eq!(originals.read_bound_preimage(operation)
-        .unwrap().unwrap().original.bytes, b"unchanged private original");
+    let original = originals.read_bound_preimage(operation).unwrap();
+    if mode == "oracle-deny-no-original" {
+        // Only this explicit destructive LAB fixture lacks the original.
+        // Normal recovery and every other negative oracle MUST retain it.
+        assert!(original.is_none(), "missing-original fixture unexpectedly retained evidence");
+    } else {
+        assert_eq!(original.expect("normal oracle must retain the original")
+            .original.bytes, b"unchanged private original");
+    }
 }
 
 // Deliberately isolate environment variables to an OS child. The parent
@@ -916,6 +923,8 @@ fn p0g3d09_run_oracle_child(
     assert!(matches!(expected_verdict, "LOCALLY_CONSISTENT_HOLD" | "DENY"));
     let mode = if expected_verdict == "LOCALLY_CONSISTENT_HOLD" {
         "oracle-hold"
+    } else if expected_reason == "PROTECTED_ORIGINAL_UNAVAILABLE" {
+        "oracle-deny-no-original"
     } else {
         "oracle-deny"
     };
@@ -1476,3 +1485,5 @@ fn p0g3d08d_partial_persistence_domains_fail_closed_after_v8() {
         drop(keep_fixture);
     }
 }
+
+include!("s3_reserved_replace_g102b_tests.rs");
