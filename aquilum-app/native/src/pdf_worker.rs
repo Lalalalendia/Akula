@@ -254,7 +254,7 @@ mod tests {
     use super::*;
     #[test]
     fn pdf_worker_requires_explicit_invocation() {
-        let args = vec!["Akula".into(), "--not-pdf-worker".into()];
+        let args: Vec<std::ffi::OsString> = vec!["Akula".into(), "--not-pdf-worker".into()];
         assert_eq!(args[1], std::ffi::OsString::from("--not-pdf-worker"));
         assert!(MAX_INPUT <= 256 * 1024 * 1024);
     }
