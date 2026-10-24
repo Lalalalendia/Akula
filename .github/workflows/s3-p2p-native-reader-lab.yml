@@ -21,6 +21,8 @@ jobs:
       - name: Compile isolated real S3 and Bao adapters
         run: |
           cargo check --manifest-path interop/akula-staya/public-cdn-check/Cargo.toml --features s3,bao --lib
+      - name: Real direct Iroh Bao integration test
+        run: cargo test --manifest-path interop/akula-staya/public-cdn-check/Cargo.toml --features bao --test bao_iroh_real
       - name: Reject suspicious S3 test-only support in ordinary feature build
         shell: bash
         run: |
