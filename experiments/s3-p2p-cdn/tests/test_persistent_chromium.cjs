@@ -99,7 +99,7 @@ try{
       try {await route.continue();}catch(_){} 
     });
     await page.locator('#download').click();
-    await page.waitForFunction(()=>Number(document.querySelector('#progress')?.value)>=25,
+    await page.waitForFunction(()=>Number(document.querySelector('#progress')?.value)>=40,
       undefined,{timeout:120000});
     const mid=await persisted(page);
     assert(mid.size>=8*1024*1024 && mid.size<SIZE,
