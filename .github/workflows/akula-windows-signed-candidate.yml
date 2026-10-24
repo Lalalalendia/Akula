@@ -1,0 +1,373 @@
+# RELEASE-AKULA-WINDOWS-SIGNED-CANDIDATE-01
+# Manual, protected and main-only. Builds a REAL installer, signs the bytes
+# and metadata under the owner's key, verifies both independently. Publishing
+# requires a separate explicit owner opt-in and protected environment review.
+name: Akula Windows signed candidate (review only)
+run-name: Akula Windows v${{ inputs.release_version }} - ${{ inputs.publish_beta && 'PUBLISH' || 'VERIFY' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Exact Akula version from native Cargo.toml, for example 0.3.10
+        type: string
+        required: true
+      publish_beta:
+        description: Publish independently verified signed Akula Windows candidate to GitHub Releases
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    environment: akula-release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify pinned source and standalone identity
+        shell: pwsh
+        env:
+          AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:GITHUB_SHA -or $env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'Source checkout is not the approved main dispatch HEAD'
+          }
+          $requested = $env:AKULA_REQUESTED_VERSION
+          if ($requested -cnotmatch '^\d+\.\d+\.\d+$') {
+            throw 'Requested Akula release version must be a three-part numeric version'
+          }
+          $nativeToml = Get-Content -LiteralPath 'aquilum-app/native/Cargo.toml' -Raw
+          $nativeVersion = [regex]::Match($nativeToml, '(?m)^version\s*=\s*"([^"]+)"')
+          if (!$nativeVersion.Success -or $nativeVersion.Groups[1].Value -cne $requested) {
+            throw "Workflow display version $requested does not match the native Akula Cargo version"
+          }
+          node --test .github/scripts/windows-beta-identity.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows identity boundary failed' }
+          node scripts/akula-version.cjs check
+          if ($LASTEXITCODE -ne 0) { throw 'Akula Windows version contract failed' }
+
+      - uses: actions/checkout@v7
+        with:
+          repository: Lalalalendia/shiva
+          ref: 40b72a90b1dac39812c77c7321e57d613a81cb51
+          path: _shiva-preview
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          key: akula-windows-publisher-candidate
+      - name: Install pinned NSIS packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+
+      - name: Compile pinned Shiva CLI as Akula's PDF sidecar
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git -C _shiva-preview rev-parse HEAD).Trim()
+          if ($actual -cne '40b72a90b1dac39812c77c7321e57d613a81cb51') { throw 'Shiva PDF source commit drifted' }
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE '.artifacts/shiva-preview'
+          cargo build --release --manifest-path _shiva-preview/Cargo.toml -p cli
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Shiva PDF companion compilation failed' }
+          $built = Join-Path $env:CARGO_TARGET_DIR 'release/shiva.exe'
+          $release = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          if (!(Test-Path -LiteralPath $built -PathType Leaf)) { throw 'Shiva executable absent' }
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          Copy-Item -LiteralPath $built -Destination (Join-Path $release 'shiva-pdf-preview.exe') -Force
+          Write-Host "AKULA_PDF_SHIVA_BUNDLED pin=$actual"
+      - name: Build signed Akula with S3 pairing, Shiva PDF sidecar and NSIS
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # S3 pairing remains user-initiated in the single signed Akula.
+          cargo build --release --locked -p aquilum-native --features installed,s3-pair-beta
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
+          $bin = Join-Path $env:GITHUB_WORKSPACE '.artifacts/cargo-native/release'
+          Copy-Item -LiteralPath (Join-Path $bin 'aquilum-native.exe') -Destination (Join-Path $bin 'akula-app.exe') -Force
+          $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          cargo packager -p aquilum-native --release --formats nsis --config native/packaging/akula-windows.json --out-dir $out
+          if ($LASTEXITCODE -ne 0) { throw 'Akula NSIS packaging failed' }
+          $list = @(Get-ChildItem -LiteralPath $out -Filter '*-setup.exe' -File)
+          if ($list.Count -ne 1 -or $list[0].Name -notmatch '^(Akula|akula-app)_[0-9]+\.[0-9]+\.[0-9]+_x64-setup\.exe$') {
+            throw 'Unexpected installer identity or package count'
+          }
+          if ($list[0].Name.StartsWith('akula-app_')) {
+            Rename-Item -LiteralPath $list[0].FullName -NewName ($list[0].Name -replace '^akula-app_', 'Akula_')
+          }
+
+      - name: Execute native installed Windows editor and Aquilum coexistence smoke
+        shell: pwsh
+        timeout-minutes: 18
+        run: ./scripts/test-windows-beta.ps1
+
+      - name: Sign tested Windows NSIS bytes and exact metadata
+        shell: pwsh
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+          AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:CARGO_PACKAGER_SIGN_PRIVATE_KEY) -or
+              [string]::IsNullOrWhiteSpace($env:CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD)) {
+            throw 'Protected Akula signing secrets not configured'
+          }
+          $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          $package = @(Get-ChildItem -LiteralPath $out -Filter 'Akula_*-setup.exe' -File)
+          if ($package.Count -ne 1) { throw 'Expected one installer after GUI acceptance' }
+          $metadata = cargo metadata --locked --no-deps --format-version 1 --manifest-path aquilum-app/Cargo.toml | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
+          $versions = @($metadata.packages | Where-Object { $_.name -eq 'aquilum-native' })
+          if ($versions.Count -ne 1) { throw 'Expected unique native Akula Cargo version' }
+          $version = $versions[0].version
+          if ($version -cne $env:AKULA_REQUESTED_VERSION) {
+            throw 'The built Cargo version does not match the workflow run version'
+          }
+          if ($package[0].Name -cne "Akula_${version}_x64-setup.exe") {
+            throw 'Installer filename differs from source Cargo version'
+          }
+          cargo packager signer sign $package[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Akula package signature failed' }
+          $sigFile = $package[0].FullName + '.sig'
+          if (!(Test-Path -LiteralPath $sigFile -PathType Leaf)) { throw 'Detached NSIS signature missing' }
+          $signature = (Get-Content -LiteralPath $sigFile -Raw).Trim()
+          $hash = (Get-FileHash -LiteralPath $package[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $lock = (Get-FileHash -LiteralPath 'aquilum-app/Cargo.lock' -Algorithm SHA256).Hash.ToLowerInvariant()
+          # SignedCandidate v1 binds a product and artifact table.
+          # A Windows-only candidate MUST NOT claim unbuilt Linux packages.
+          $manifest = [ordered]@{
+            schema = 1
+            product = 'Akula'
+            version = $version
+            source_commit = $env:GITHUB_SHA
+            cargo_lock_sha256 = $lock
+            artifacts = [ordered]@{
+              'windows-x86_64' = [ordered]@{
+                filename = $package[0].Name
+                sha256 = $hash
+                size = $package[0].Length
+              }
+            }
+          }
+          $json = $manifest | ConvertTo-Json -Compress -Depth 8
+          [IO.File]::WriteAllText((Join-Path $out 'latest.json'), $json + [Environment]::NewLine)
+          cargo packager signer sign (Join-Path $out 'latest.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Akula signed metadata creation failed' }
+          if (!(Test-Path (Join-Path $out 'latest.json.sig'))) { throw 'Signed release metadata missing' }
+          Write-Host "AKULA_WINDOWS_SIGNED_CANDIDATE_CREATED version=$version key_id=D7A66B6D4046F6C5 no_release=1"
+
+      - name: Test v0.3.13 to signed v0.3.14 in-place upgrade before publishing
+        if: ${{ inputs.release_version == '0.3.14' }}
+        shell: pwsh
+        timeout-minutes: 12
+        env:
+          AKULA_0313_CANDIDATE_DISPOSABLE: '1'
+        run: ./scripts/test-windows-0313-to-0314-candidate.ps1
+
+      - name: Transfer candidate solely for independent verification
+        uses: actions/upload-artifact@v7
+        with:
+          name: akula-windows-signed-stage-NOT-RELEASE
+          path: |
+            dist/Akula_*-setup.exe
+            dist/Akula_*-setup.exe.sig
+            dist/latest.json
+            dist/latest.json.sig
+          if-no-files-found: error
+          retention-days: 3
+
+  independent-verification:
+    if: github.ref == 'refs/heads/main'
+    needs: windows-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: akula-windows-signed-stage-NOT-RELEASE
+          path: dist
+      - name: Verify public key, both detached signatures, source, URL and installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+          umask 077
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const data=fs.readFileSync('aquilum-app/native/src/updater/release.rs','utf8');
+          const found=data.match(/pub\(super\) const PUBLIC_KEY: &str = "([^"]+)";/);
+          if(!found) throw Error('No Akula pinned trusted publisher key');
+          const pub=Buffer.from(found[1],'base64');
+          if(!pub.toString('utf8').startsWith('untrusted comment: minisign public key: D7A66B6D4046F6C5\n'))
+            throw Error('Wrong owner public key');
+          fs.writeFileSync(process.env.RUNNER_TEMP+'/akula-trusted.pub',pub,{mode:0o600});
+          NODE
+          node - <<'NODE'
+          const fs=require('node:fs'), path=require('node:path'),crypto=require('node:crypto');
+          const m=JSON.parse(fs.readFileSync('dist/latest.json','utf8'));
+          if(Object.keys(m).sort().join(',')!=='artifacts,cargo_lock_sha256,product,schema,source_commit,version')
+            throw Error('Unexpected contract fields in signed release metadata');
+          if(m.product!=='Akula'||!/^\d+\.\d+\.\d+$/.test(m.version)
+            ||m.source_commit!==process.env.GITHUB_SHA||!(/^[a-f0-9]{64}$/.test(m.cargo_lock_sha256)))
+            throw Error('Wrong signed release provenance');
+          const source=crypto.createHash('sha256').update(fs.readFileSync('aquilum-app/Cargo.lock')).digest('hex');
+          if(m.cargo_lock_sha256!==source)throw Error('Signed release has wrong Cargo.lock digest');
+          if(m.schema!==1 || !m.artifacts || Object.keys(m.artifacts).length!==1 ||
+             !Object.hasOwn(m.artifacts,'windows-x86_64'))
+            throw Error('Signed review-only manifest must contain only its built Windows asset');
+          const asset=m.artifacts['windows-x86_64'];
+          const filename='Akula_'+m.version+'_x64-setup.exe';
+          if(asset.filename!==filename || Object.keys(asset).sort().join(',')!=='filename,sha256,size')
+            throw Error('Wrong platform, filename or fields in signed manifest');
+          const sourceRelease=fs.readFileSync('aquilum-app/native/src/updater/release.rs','utf8');
+          if(!sourceRelease.includes('https://github.com/Lalalalendia/Akula/releases/latest/download/latest.json'))
+            throw Error('Akula installer lookup must never use an external publisher');
+          const bytes=fs.readFileSync(path.join('dist',filename));
+          if(asset.size!==bytes.length||asset.sha256!==crypto.createHash('sha256').update(bytes).digest('hex'))
+            throw Error('Signed manifest bytes do not match actual NSIS artifact');
+          if(!fs.readFileSync('dist/'+filename+'.sig','utf8').trim())
+            throw Error('Detached installer signature missing');
+          fs.writeFileSync(process.env.RUNNER_TEMP+'/approved-filename',filename+'\n');
+          NODE
+          setup="$(cat "$RUNNER_TEMP/approved-filename")"
+          for target in "dist/$setup" 'dist/latest.json'; do
+            base64 -d "$target.sig" > "$RUNNER_TEMP/$(basename "$target").minisig"
+            minisign -Vm "$target" -x "$RUNNER_TEMP/$(basename "$target").minisig" -p "$RUNNER_TEMP/akula-trusted.pub" -Q
+          done
+          printf 'invalid\n' >> dist/latest.json
+          if minisign -Vm dist/latest.json -x "$RUNNER_TEMP/latest.json.minisig" -p "$RUNNER_TEMP/akula-trusted.pub" -Q; then
+            echo 'Tampered release metadata was accepted' >&2
+            exit 1
+          fi
+          echo 'AKULA_WINDOWS_SIGNED_CANDIDATE_PASS real_installer=1 signed_manifest=1 independent_verify=1 tamper_refused=1 no_release=1' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove verification copies
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/akula-trusted.pub" "$RUNNER_TEMP/"*.minisig "$RUNNER_TEMP/approved-filename"
+
+  publish-windows-beta:
+    # Only an explicit owner-approved manual dispatch on protected main may
+    # publish the SAME four signed bytes accepted by independent-verification.
+    if: ${{ github.ref == 'refs/heads/main' && inputs.publish_beta == true }}
+    needs: independent-verification
+    runs-on: ubuntu-24.04
+    environment: akula-release
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: akula-windows-signed-stage-NOT-RELEASE
+          path: dist
+      - name: Verify exact signed package again and reject existing release/tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AKULA_REQUESTED_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+          node - <<'NODE'
+          const fs=require('node:fs'), path=require('node:path'), crypto=require('node:crypto');
+          const source=fs.readFileSync('aquilum-app/native/src/updater/release.rs','utf8');
+          const match=source.match(/pub\(super\) const PUBLIC_KEY: &str = "([^"]+)";/);
+          if(!match) throw Error('Akula trusted publisher key absent');
+          const pub=Buffer.from(match[1],'base64');
+          if(!pub.toString('utf8').startsWith('untrusted comment: minisign public key: D7A66B6D4046F6C5\n'))
+            throw Error('Wrong Akula signed publisher root');
+          fs.writeFileSync(process.env.RUNNER_TEMP+'/akula-release.pub',pub,{mode:0o600});
+          const m=JSON.parse(fs.readFileSync('dist/latest.json','utf8'));
+          if(m.version!==process.env.AKULA_REQUESTED_VERSION)
+            throw Error('Requested workflow version differs from publisher-signed manifest');
+          if(m.schema!==1 || m.product!=='Akula' || m.source_commit!==process.env.GITHUB_SHA)
+            throw Error('Unexpected signed product/source');
+          if(!/^\d+\.\d+\.\d+$/.test(m.version)) throw Error('Invalid Akula version');
+          if(Object.keys(m.artifacts).join(',')!=='windows-x86_64')
+            throw Error('A Windows-only release may not claim unbuilt platforms');
+          const a=m.artifacts['windows-x86_64'],filename='Akula_'+m.version+'_x64-setup.exe';
+          if(a.filename!==filename) throw Error('Wrong signed Windows filename');
+          const exe=fs.readFileSync(path.join('dist',filename));
+          if(exe.length!==a.size || crypto.createHash('sha256').update(exe).digest('hex')!==a.sha256)
+            throw Error('Publisher-signed package digest does not match candidate');
+          const cargo=fs.readFileSync('aquilum-app/native/Cargo.toml','utf8');
+          if(!cargo.includes('version = "'+m.version+'"')) throw Error('Signed version not in approved source');
+          const lock=crypto.createHash('sha256').update(fs.readFileSync('aquilum-app/Cargo.lock')).digest('hex');
+          if(m.cargo_lock_sha256!==lock) throw Error('Signed source lock mismatch');
+          fs.writeFileSync(process.env.RUNNER_TEMP+'/akula-version',m.version+'\n');
+          NODE
+          version="$(cat "$RUNNER_TEMP/akula-version")"
+          package="Akula_${version}_x64-setup.exe"
+          for artifact in "dist/$package" 'dist/latest.json'; do
+            base64 -d "$artifact.sig" > "$RUNNER_TEMP/$(basename "$artifact").minisig"
+            minisign -Vm "$artifact" -x "$RUNNER_TEMP/$(basename "$artifact").minisig" -p "$RUNNER_TEMP/akula-release.pub" -Q
+          done
+          tag="v${version}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists; publication never overwrites" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Signed release tag $tag already exists" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_ENV"
+          echo "file=$package" >> "$GITHUB_ENV"
+      - name: Prove newer release version and generate exact-tag change notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          previous="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq ".tag_name")"
+          node scripts/akula-version.cjs assert-newer "$previous"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="v${version}" -f target_commitish="$GITHUB_SHA" \
+            -f previous_tag_name="$previous" --jq ".body" > "$RUNNER_TEMP/akula-release-notes.md"
+          test -s "$RUNNER_TEMP/akula-release-notes.md"
+          cat >> "$RUNNER_TEMP/akula-release-notes.md" <<'NOTES'
+
+          ---
+          Signed Akula Windows NSIS update. Automatic NSIS crash rollback is
+          not provided: reinstall the previous signed Akula version if needed.
+          Akula is a separate product from Aquilum; Linux/macOS are not
+          authorized by this Windows-only release.
+          NOTES
+      - name: Publish manually approved signed Windows beta as latest Akula release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "v${version}" \
+            "dist/${file}" "dist/${file}.sig" dist/latest.json dist/latest.json.sig \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Akula v${version}" --latest \
+            --notes-file "$RUNNER_TEMP/akula-release-notes.md"
+          echo "AKULA_SIGNED_WINDOWS_BETA_PUBLISHED version=${version} source=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

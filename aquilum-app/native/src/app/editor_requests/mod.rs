@@ -72,7 +72,7 @@ impl App {
         }
     }
 
-    fn open_viewer(&mut self, root: &mut RenderRoot, image: masonry::peniko::ImageBrush) {
+    pub(super) fn open_viewer(&mut self, root: &mut RenderRoot, image: masonry::peniko::ImageBrush) {
         let viewer = crate::ui::viewer::Viewer::new(image);
         let layer = viewer.id();
         root.add_layer(viewer, Point::ORIGIN);

@@ -7,6 +7,8 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-isolation-policy.yml'
+      - '.github/workflows/akula-publisher-key-proof.yml'
+      - '.github/workflows/akula-windows-signed-candidate.yml'
       - '.github/scripts/release-isolation-policy.test.cjs'
       - 'docs/release/legacy-aquilum-release.yml'
       - 'docs/release/AKULA-RELEASE-LOCK-01.md'
@@ -20,6 +22,12 @@ on:
 
 permissions:
   contents: read
+
+# Coalesce superseded PR commits without cancelling manual or push runs.
+# A unique run_id suffix for non-PR events preserves every manual run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   release-isolation:

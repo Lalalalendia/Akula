@@ -1,4 +1,4 @@
-use crate::search::paths::is_markdown;
+use crate::search::paths::{is_hidden_name, is_markdown};
 use super::attachments::MEDIA_EXTENSIONS;
 use super::error::FileCommandError;
 use super::models::{FileItem, FileItemType};
@@ -28,7 +28,7 @@ pub fn read_directory_impl(path: &Path) -> Result<Vec<FileItem>, FileCommandErro
             Err(_) => continue,
         };
 
-        if name.starts_with('.') || file_type.is_symlink() {
+        if is_hidden_name(&entry.file_name()) || file_type.is_symlink() {
             continue;
         }
 

@@ -1,6 +1,6 @@
 [package]
 name = "aquilum-core"
-version = "0.3.9"
+version = "0.3.14"
 description = "Aquilum core: documents, files, search, history and settings without any UI"
 authors = ["Dmitriy Chaplinskiy"]
 license = "AGPL-3.0-only"
@@ -9,15 +9,29 @@ workspace = ".."
 
 [features]
 default = []
+# Opt-in pure messaging state machine; no network, storage, UI or workers.
+messaging-core-lab = []
+# Metadata-only negotiation lab: no transport, staging, or File Gate.
+p2p-offer-lab = []
+# Opt-in verified receiver staged-file create-new, no Vault apply.
+p2p-inbox-lab = ["p2p-offer-lab"]
 # Independent opt-in Linux read-only Node catalog contract. No server socket.
-node-catalog-lab = []
+node-catalog-lab = ["dep:akula-node-catalog"]
 node-lab = ["node-catalog-lab"]
+# Offline Node replica lab over the existing Sync DAG; no live writer.
+node-replica-lab = ["node-catalog-lab"]
+# Authenticated local read lab; no production pairing.
+node-replica-auth-lab = ["node-replica-lab"]
+# Non-shipping Node V1 host: root-pinned owner policy and durable one-use reads.
+node-v1 = ["node-replica-auth-lab", "device-roster-lab"]
+# Integration-test-only owner policy under temporary paths; release builds refuse it.
+node-v1-transport-tests = ["node-v1"]
 # Inert, portable preview contract; NO SSH client, credentials, sudo or remote mutations.
-server-bootstrap-b0-lab = []
+server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 # Developer-only actual pinned OpenSSH KEX probe; no remote installation.
 server-bootstrap-b0-openssh-lab = ["server-bootstrap-b0-lab"]
 # Pure offline release-signature gate; never executes or installs a package.
-server-bootstrap-b1a-release-lab = []
+server-bootstrap-b1a-release-lab = ["dep:akula-server-release-b1a"]
 # Linux-only inert staging laboratory; requires B1a verifier, no executable install.
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.
@@ -42,6 +56,9 @@ server-bootstrap-b1b4b1-witness-ipc-lab = ["server-bootstrap-b1b4b-os-witness-la
 # Test-only signed FD -> fixed root-owned Node file transaction after owner/CAS.
 # Does not launch Node or expose install IPC to Akula application.
 server-bootstrap-b1c0-fixed-node-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
+# Fixed /opt first-install file commit with a root-owned durable receipt and
+# conservative HOLD on startup or crash. No public installer RPC or auto-start.
+server-bootstrap-b1d0-durable-node = ["server-bootstrap-b1c0-fixed-node-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
@@ -49,6 +66,10 @@ save-stage-probe = []
 sync-engine = []
 # Installer-wide local File Gate enrollment epoch; no network or AWS SDK.
 host-custody = []
+# OS-protected transport key, no peer grants.
+p2p-device-identity = ["dep:windows"]
+# Owner-signed read-only roster lab; not pairing, identity or Vault grants.
+device-roster-lab = []
 # Pure, bounded and explicitly opt-in text delta representation. Not a sync sender.
 sync-text-delta = ["dep:zstd"]
 # Separately selected packaged build: force every default Core::open through
@@ -60,8 +81,10 @@ sync-installed-host-witness = ["sync-installed-host"]
 # Extra, non-shipping Unix OS-owner preflight. Refuses all protected host
 # admission on Windows until a real installer/Broker DACL verifier exists.
 sync-installed-host-unix-root-witness = ["sync-installed-host-witness"]
-# Real S3 transport is opt-in; it cannot activate file mutation or UI workers.
-sync-s3 = ["sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio", "dep:url"]
+# Offline S3 invitation V1 parsing only: no AWS SDK, network or host custody.
+sync-s3-invite = ["dep:url"]
+# Real S3 transport remains opt-in, including the portable invite V1 contract.
+sync-s3 = ["sync-s3-invite", "sync-engine", "host-custody", "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:tokio"]
 
 [[example]]
 name = "akula_b1b3c_fixture"
@@ -98,7 +121,15 @@ name = "akula-node-lab"
 path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
+[[bin]]
+name = "akula-node"
+path = "src/bin/akula_node.rs"
+required-features = ["node-v1"]
+
 [dependencies]
+akula-node-catalog = { path = "../../modules/node-catalog", optional = true }
+akula-server-release-b1a = { path = "../../modules/bootstrap-b1a", optional = true }
+akula-server-bootstrap-b0 = { path = "../../modules/bootstrap-b0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"
@@ -122,15 +153,28 @@ memchr = "2"
 zstd = { version = "=0.13.3", optional = true }
 
 # Official AWS Rust SDK used only for opt-in S3 provider capability tests.
-aws-config = { version = "1.12.0", optional = true }
-aws-sdk-s3 = { version = "1.152.0", optional = true }
+# RUSTSEC-2026-0387: block optional SigV4a until the SDK migrates away from
+# vulnerable crypto-bigint 0.5.x. Region-scoped SigV4 stays enabled.
+# AWS legacy "rustls" features compile hyper 0.14 + rustls 0.21 as
+# well as the modern stack. Preserve SSO and process credential providers;
+# disable only legacy HTTPS defaults. Requires exact Cargo.lock and TLS tests.
+aws-config = { version = "1.12.0", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process", "sso"] }
+aws-sdk-s3 = { version = "1.152.0", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "http-1x"] }
 # Already locked by aws-config: use the same official STS provider for AWS-only identity proof.
-aws-sdk-sts = { version = "=1.119.0", optional = true }
+aws-sdk-sts = { version = "=1.119.0", optional = true, default-features = false, features = ["default-https-client", "rt-tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 url = { version = "2", optional = true }
+
+[[bin]]
+name = "akula-p2p-identity"
+path = "src/bin/akula_p2p_identity.rs"
+required-features = ["p2p-device-identity"]
 
 [dev-dependencies]
 tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "=0.38.44", features = ["fs", "process"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_System_Threading"] }

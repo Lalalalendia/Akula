@@ -4,9 +4,6 @@ on:
   pull_request:
     paths:
       - 'aquilum-app/native/src/render/damage/mod.rs'
-      - 'aquilum-app/native/src/render/renderer/mod.rs'
-      - 'aquilum-app/native/src/render/renderer/pass.rs'
-      - 'aquilum-app/native/src/app/tests/perf/mod.rs'
       - 'aquilum-app/native/src/app/tests/perf/damage_profile.rs'
       - '.github/workflows/native-damage-profile.yml'
   workflow_dispatch:

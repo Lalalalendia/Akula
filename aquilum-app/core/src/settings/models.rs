@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Bm25fParams {
@@ -21,7 +20,6 @@ impl Default for Bm25fParams {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AnalysisSettings {
@@ -41,7 +39,6 @@ impl Default for AnalysisSettings {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SearchIndexSettings {
@@ -57,7 +54,6 @@ impl Default for SearchIndexSettings {
         }
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FontSettings {
@@ -249,6 +245,157 @@ impl YandexS3Onboarding {
     }
 }
 
+mod dropbox;
+pub use dropbox::{DropboxReadOnlyDraft, AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT};
+
+/// Public-only preparation for *the user's own server*. No SSH private
+/// key, password, token, sudo credential or remote installation authority is
+/// accepted or serialized. Enter the public host key AND its SHA256 value
+/// from an independent provider console; an SSH peer cannot self-enroll.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ServerBootstrapDraft {
+    pub host: String,
+    pub ssh_user: String,
+    pub ssh_port: u16,
+    pub host_public_key: String,
+    /// OpenSSH SHA256:<base64-no-padding> over canonical ssh-ed25519 wire.
+    pub host_key_fingerprint: String,
+}
+impl Default for ServerBootstrapDraft {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            ssh_user: String::new(),
+            ssh_port: 22,
+            host_public_key: String::new(),
+            host_key_fingerprint: String::new(),
+        }
+    }
+}
+impl ServerBootstrapDraft {
+    pub fn valid_host(s: &str) -> bool {
+        if s.is_empty() { return true; }
+        if s.len() > 253 || !s.is_ascii() || s.contains("..") { return false; }
+        s.split('.').all(|label| {
+            !label.is_empty() && label.len() <= 63
+                && label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+                && label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+                && label.bytes().all(|c|
+                    c.is_ascii_alphanumeric() || c == b'-')
+        })
+    }
+    pub fn valid_user(s: &str) -> bool {
+        if s.is_empty() { return true; }
+        s != "root" && s.len() <= 32 && s.as_bytes().first().is_some_and(|c|
+            c.is_ascii_lowercase() || *c == b'_')
+            && s.bytes().all(|c| c.is_ascii_lowercase()
+                || c.is_ascii_digit() || c == b'_' || c == b'-')
+    }
+    pub fn valid_port(port: u16) -> bool { port != 0 }
+
+    /// Parse canonical 51-byte OpenSSH ed25519 host key. Exact two-field
+    /// format excludes pasted private keys, comments, options and shell text.
+    fn wire(value: &str) -> Option<[u8; 51]> {
+        let mut parts = value.split_ascii_whitespace();
+        if parts.next() != Some("ssh-ed25519") { return None; }
+        let b64 = parts.next()?;
+        if parts.next().is_some() || b64.len() != 68 { return None; }
+        fn digit(v: u8) -> Option<u32> {
+            match v {
+                b'A'..=b'Z' => Some((v - b'A') as u32),
+                b'a'..=b'z' => Some((v - b'a' + 26) as u32),
+                b'0'..=b'9' => Some((v - b'0' + 52) as u32),
+                b'+' => Some(62),
+                b'/' => Some(63),
+                _ => None,
+            }
+        }
+        let mut wire = [0u8; 51];
+        for (i, group) in b64.as_bytes().chunks_exact(4).enumerate() {
+            let (a,b,c,d) = (
+                digit(group[0])?, digit(group[1])?,
+                digit(group[2])?, digit(group[3])?,
+            );
+            let offset = i * 3;
+            wire[offset] = ((a << 2) | (b >> 4)) as u8;
+            wire[offset+1] = ((b << 4) | (c >> 2)) as u8;
+            wire[offset+2] = ((c << 6) | d) as u8;
+        }
+        if &wire[..4] != b"\0\0\0\x0b"
+            || &wire[4..15] != b"ssh-ed25519"
+            || &wire[15..19] != b"\0\0\0\x20"
+        { return None; }
+        Some(wire)
+    }
+    pub fn valid_public_key(value: &str) -> bool {
+        value.is_empty() || Self::wire(value).is_some()
+    }
+    pub fn valid_fingerprint(value: &str) -> bool {
+        if value.is_empty() { return true; }
+        value.len() == 50 && value.starts_with("SHA256:")
+            && value.as_bytes()[7..].iter().all(|c|
+                c.is_ascii_alphanumeric() || matches!(*c, b'+' | b'/'))
+    }
+    fn b64_no_pad(bytes: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut result = String::with_capacity((bytes.len() * 4 + 2) / 3);
+        for part in bytes.chunks(3) {
+            let a = part[0];
+            let b = part.get(1).copied().unwrap_or(0);
+            let c = part.get(2).copied().unwrap_or(0);
+            result.push(TABLE[(a >> 2) as usize] as char);
+            result.push(TABLE[(((a & 3) << 4) | (b >> 4)) as usize] as char);
+            if part.len() >= 2 {
+                result.push(TABLE[(((b & 15) << 2) | (c >> 6)) as usize] as char);
+            }
+            if part.len() == 3 {
+                result.push(TABLE[(c & 63) as usize] as char);
+            }
+        }
+        result
+    }
+    /// Map the *offline-only* native draft to the portable B0 typed target.
+    /// The result is NOT the peer identity learned in an SSH key exchange
+    /// and grants no installation privilege. Preview transport must still
+    /// reverify signed host KEX against this exact SHA-256.
+    #[cfg(feature = "server-bootstrap-b0-lab")]
+    pub fn to_unconnected_b0_target(
+        &self,
+    ) -> Option<crate::server_bootstrap_lab::ServerTarget> {
+        if !self.valid_offline_pin() { return None; }
+        let wire = Self::wire(&self.host_public_key)?;
+        let sha: [u8; 32] = ring::digest::digest(&ring::digest::SHA256, &wire)
+            .as_ref().try_into().ok()?;
+        let target = crate::server_bootstrap_lab::ServerTarget {
+            host: self.host.clone(),
+            ssh_port: self.ssh_port,
+            ssh_user: self.ssh_user.clone(),
+            trusted_key_sha256: sha,
+        };
+        target.validate().ok()?;
+        Some(target)
+    }
+    /// TRUE means the operator-entered independent host-key pair is coherent
+    /// for a future read-only preflight; it does NOT authenticate any server
+    /// or authorize privileged installation.
+    pub fn valid_offline_pin(&self) -> bool {
+        if self.host.is_empty() || self.ssh_user.is_empty()
+            || !Self::valid_host(&self.host)
+            || !Self::valid_user(&self.ssh_user)
+            || !Self::valid_port(self.ssh_port)
+            || !Self::valid_fingerprint(&self.host_key_fingerprint)
+        { return false; }
+        let Some(wire) = Self::wire(&self.host_public_key) else { return false };
+        let sha = ring::digest::digest(&ring::digest::SHA256, &wire);
+        let expected = format!("SHA256:{}", Self::b64_no_pad(sha.as_ref()));
+        ring::constant_time::verify_slices_are_equal(
+            expected.as_bytes(), self.host_key_fingerprint.as_bytes(),
+        ).is_ok()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
@@ -264,6 +411,8 @@ pub struct AppConfig {
     pub files: FilesSettings,
     pub updates: UpdateSettings,
     pub s3_onboarding: YandexS3Onboarding,
+    pub dropbox_readonly: DropboxReadOnlyDraft,
+    pub server_setup: ServerBootstrapDraft,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -339,5 +488,64 @@ mod yandex_onboarding_tests {
                         "this-alias-is-way-too-long-to-be-a-profile"] {
             assert!(!YandexS3Onboarding::valid_profile_name(invalid), "{invalid}");
         }
+    }
+}
+
+
+#[cfg(test)]
+mod server_setup_tests {
+    use super::{AppConfig, ServerBootstrapDraft};
+    #[test]
+    fn independent_pinned_public_host_identity_validates_without_network() {
+        let mut wire = Vec::from(&b"\0\0\0\x0bssh-ed25519\0\0\0\x20"[..]);
+        wire.extend_from_slice(&[7u8;32]);
+        assert_eq!(wire.len(),51);
+        let public = format!("ssh-ed25519 {}",ServerBootstrapDraft::b64_no_pad(&wire));
+        let hash = ring::digest::digest(&ring::digest::SHA256,&wire);
+        let fingerprint = format!("SHA256:{}",
+            ServerBootstrapDraft::b64_no_pad(hash.as_ref()));
+        let mut draft = ServerBootstrapDraft {
+            host: "vps.example.org".into(),
+            ssh_user: "ubuntu".into(),
+            ssh_port: 22,
+            host_public_key: public,
+            host_key_fingerprint: fingerprint,
+        };
+        assert!(draft.valid_offline_pin());
+        #[cfg(feature = "server-bootstrap-b0-lab")]
+        {
+            let target = draft.to_unconnected_b0_target().unwrap();
+            assert_eq!(target.host, "vps.example.org");
+            assert_eq!(target.ssh_user, "ubuntu");
+            assert_eq!(target.ssh_port, 22);
+            assert_eq!(target.trusted_key_sha256.as_slice(), hash.as_ref());
+        }
+        let replacement = if &draft.host_key_fingerprint[9..10] == "A" { "B" } else { "A" };
+        draft.host_key_fingerprint.replace_range(9..10, replacement);
+        assert!(!draft.valid_offline_pin(), "independently supplied digest mismatch");
+        assert!(!ServerBootstrapDraft::valid_public_key(
+            "-----BEGIN OPENSSH PRIVATE KEY-----"));
+    }
+    #[test]
+    fn legacy_settings_and_nonsecret_server_draft_round_trip() {
+        let mut config: AppConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.server_setup.ssh_port,22);
+        config.server_setup.host = "my-vps.example".into();
+        config.server_setup.ssh_user = "ubuntu".into();
+        let encoded=serde_json::to_string(&config).unwrap();
+        assert!(encoded.contains("serverSetup"));
+        assert!(encoded.contains("my-vps.example"));
+        assert!(!encoded.contains("privateKey"));
+        assert!(!encoded.contains("password"));
+        assert_eq!(serde_json::from_str::<AppConfig>(&encoded).unwrap()
+            .server_setup,config.server_setup);
+        for host in ["http://bad.com","foo/bar","foo;id","-danger","evil host"] {
+            assert!(!ServerBootstrapDraft::valid_host(host));
+        }
+        for user in ["root","root;id","-i","../../id","Ubuntu","user name"] {
+            assert!(!ServerBootstrapDraft::valid_user(user));
+        }
+        assert!(!ServerBootstrapDraft::valid_fingerprint("MD5:some-key"));
+        assert!(!ServerBootstrapDraft::valid_port(0));
     }
 }

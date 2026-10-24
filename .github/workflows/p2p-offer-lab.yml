@@ -1,0 +1,70 @@
+name: Akula P2P offer contract laboratory
+
+on:
+  workflow_call:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/p2p_offer_lab.rs'
+
+      - '.github/workflows/p2p-offer-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2p-offer-${{ github.event.pull_request.number || github.run_id }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  offer-contract:
+    name: Strict offer consent Rust laboratory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-p2p-offer-v1
+      - name: Format only this P2P module
+        working-directory: aquilum-app
+        run: rustfmt --edition 2021 --check core/src/p2p_offer_lab.rs
+      - name: Test optional consent contract
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features p2p-offer-lab p2p_offer_lab::tests -- --nocapture
+      - name: Check new P2P module diagnostics independently of legacy Core warnings
+        working-directory: aquilum-app
+        run: |
+          set -e
+          cargo clippy --locked -p aquilum-core --lib --features p2p-offer-lab --message-format=json -- -W clippy::all > p2p-clippy.jsonl
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          failures = []
+          legacy = 0
+          for line in Path("p2p-clippy.jsonl").read_text().splitlines():
+              try:
+                  item = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if item.get("reason") != "compiler-message":
+                  continue
+              message = item["message"]
+              if message.get("level") not in ("warning", "error"):
+                  continue
+              spans = message.get("spans", [])
+              if any("p2p_offer_lab.rs" in span.get("file_name", "")
+                     for span in spans if span.get("is_primary")):
+                  failures.append(message["message"])
+              else:
+                  legacy += 1
+          for diagnostic in failures:
+              print("NEW P2P DIAGNOSTIC:", diagnostic)
+          print(f"Unmodified Core diagnostics left visible: {legacy}")
+          if failures:
+              raise SystemExit(1)
+          print("P2P-owned source lint: PASS")
+          PY

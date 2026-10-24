@@ -3,6 +3,7 @@ mod dialogs;
 mod external;
 mod folder_colors;
 mod graph;
+mod image_files;
 mod harness;
 mod keys;
 #[cfg(feature = "memory-probe")]
@@ -11,6 +12,7 @@ mod misc;
 mod navigation;
 mod notes;
 mod panels;
+mod pdf_preview;
 mod perf;
 mod reader;
 mod snapshots;

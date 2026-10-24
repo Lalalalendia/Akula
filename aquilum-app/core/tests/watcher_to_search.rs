@@ -43,6 +43,12 @@ fn native_workspace_watcher_to_search_roundtrip() {
     let directory = tempfile::tempdir().unwrap();
     let workspace = directory.path().join("Vault");
     fs::create_dir_all(&workspace).unwrap();
+    let user_dot_dir = workspace.join(".заметки");
+    fs::create_dir(&user_dot_dir).unwrap();
+    let internal_dir = workspace.join(".git");
+    fs::create_dir(&internal_dir).unwrap();
+    let private = internal_dir.join("private.md");
+    fs::write(&private, "watcherservicesecretunique").unwrap();
     // Force the initial scan to build a real index before monitoring edits.
     fs::write(workspace.join("Baseline.md"), "# Baseline\nseedcontent\n").unwrap();
 
@@ -99,6 +105,28 @@ fn native_workspace_watcher_to_search_roundtrip() {
         !search_contains(&search, &workspace_name, modify_term, &note)
     });
     println!("REAL_WATCHER os={} stage=delete elapsed_ms={:.3}", std::env::consts::OS, deleted.as_secs_f64() * 1_000.0);
+    // Real OS-level notification from a user-owned dot folder must reach Search.
+    // A service folder already contained a Markdown file during the initial scan.
+    assert!(!search_contains(&search, &workspace_name, "watcherservicesecretunique", &private));
+    let dot_note = user_dot_dir.join("Идея.md");
+    let dot_created_term = "userdotwatchcreateduniquegamma";
+    let dot_modified_term = "userdotwatchmodifieduniquedelta";
+    fs::write(&dot_note, format!("# User dot folder\n{dot_created_term}\n")).unwrap();
+    let dot_created = wait_for("user dot folder native create", TIMEOUT, || {
+        search_contains(&search, &workspace_name, dot_created_term, &dot_note)
+    });
+    println!("REAL_WATCHER os={} stage=user_dot_create elapsed_ms={:.3}", std::env::consts::OS, dot_created.as_secs_f64() * 1_000.0);
+    fs::write(&dot_note, format!("# User dot folder\n{dot_modified_term}\n")).unwrap();
+    let dot_modified = wait_for("user dot folder native modify", TIMEOUT, || {
+        search_contains(&search, &workspace_name, dot_modified_term, &dot_note)
+            && !search_contains(&search, &workspace_name, dot_created_term, &dot_note)
+    });
+    println!("REAL_WATCHER os={} stage=user_dot_modify elapsed_ms={:.3}", std::env::consts::OS, dot_modified.as_secs_f64() * 1_000.0);
+    fs::remove_file(&dot_note).unwrap();
+    let dot_deleted = wait_for("user dot folder native delete", TIMEOUT, || {
+        !search_contains(&search, &workspace_name, dot_modified_term, &dot_note)
+    });
+    println!("REAL_WATCHER os={} stage=user_dot_delete elapsed_ms={:.3}", std::env::consts::OS, dot_deleted.as_secs_f64() * 1_000.0);
     assert!(delivered.load(Ordering::Relaxed) >= 1, "native watcher must deliver at least one event");
     println!(
         "REAL_WATCHER os={} stage=summary callbacks={} initial_to_cleanup_ms={:.3} native_notifications=true search_updates_verified=true",
