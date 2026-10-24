@@ -2,7 +2,6 @@
 use super::{App, Effect, Section, Action, Context, SettingsDialog};
 use aquilum_core::settings::models::ServerBootstrapDraft;
 use crate::ui::settings::schema::ServerProbeView;
-use masonry::app::RenderRoot;
 #[cfg(all(windows, feature = "server-readonly-preflight"))]
 use super::server::ProbeReport;
 #[cfg(all(windows, feature = "server-readonly-preflight"))]
