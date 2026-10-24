@@ -22,10 +22,12 @@ mod host;
 mod metrics;
 #[cfg(feature = "memory-probe")]
 mod memory_probe;
-
 #[cfg(feature = "memory-probe")]
 #[global_allocator]
 static ALLOCATOR: memory_probe::Counting = memory_probe::Counting;
+#[cfg(feature = "notion-offline-preview")] mod notion_offline;
+#[cfg(feature = "notion-offline-preview")] mod notion_credentials;
+#[cfg(feature = "notion-offline-preview")] mod notion_sync; #[cfg(feature = "notion-offline-preview")] mod notion_import;
 mod navigation;
 mod note;
 mod output;
@@ -45,12 +47,10 @@ mod touchpad;
 #[cfg(not(target_os = "windows"))]
 mod touchpad {
     pub struct Touchpad;
-
     impl Touchpad {
         pub fn attach(_: &dyn winit::window::Window) -> Option<Self> {
             None
         }
-
         pub fn active(&self) -> bool {
             false
         }

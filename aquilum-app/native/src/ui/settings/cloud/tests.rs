@@ -1,6 +1,4 @@
 use super::*;
-
-
 #[test]
 fn cloud_tiles_never_confuse_stored_keys_with_working_sync() {
     let mut ctx = Context::new(1.0);
@@ -34,18 +32,20 @@ fn every_provider_is_navigable_and_only_supported_providers_have_forms() {
     let config = AppConfig::default();
     let ctx = Context::new(1.0);
     let (_, bindings) = catalog(&config, &ctx);
-    let actions = bindings.values().filter_map(|binding| {
-        match binding {
-            Binding::Button(Action::OpenCloudProvider(provider)) => Some(*provider),
-            _ => None,
-        }
-    }).collect::<Vec<_>>();
-    assert_eq!(actions.len(), CloudProvider::ALL.len());
+    assert_eq!(bindings.len(), CloudProvider::ALL.len());
     for provider in CloudProvider::ALL {
-        assert!(actions.contains(&provider));
+        assert!(bindings.values().any(|b|
+            matches!(b, Binding::Button(Action::OpenCloudProvider(p)) if *p == provider)));
         let built = card(&config, &ctx, provider, &[]);
         let supported = provider == CloudProvider::Yandex
             || (cfg!(feature = "dropbox-readonly-preview") && provider == CloudProvider::Dropbox);
+        #[cfg(feature = "notion-offline-preview")]
+        if provider == CloudProvider::Notion {
+            assert!(built.save.is_none());
+            assert!(built.bindings.values().any(|b| matches!(b,
+                Binding::Button(Action::NotionConnect))));
+            continue;
+        }
         assert_eq!(built.save.is_some(), supported);
         assert_eq!(!built.bindings.is_empty(), supported);
     }

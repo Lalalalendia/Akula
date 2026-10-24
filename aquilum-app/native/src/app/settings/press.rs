@@ -6,9 +6,10 @@ impl App {
         let core = &self.workspace.core;
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
-            // This handler is reached only for ordinary settings buttons.
-            // Review actions require the separately confirmed modal flow.
+            // Provider actions use their own guarded modal handlers.
             Action::OpenCloudProvider(_) => Effect::None,
+            #[cfg(feature = "notion-offline-preview")]
+            Action::NotionConnect | Action::NotionRefresh(_) | Action::NotionForget(_) | Action::NotionOpenRoot(_) | Action::NotionOpenPage(_) | Action::NotionPageBatch(_) | Action::NotionTextChunk(_) | Action::NotionReviewImport(_) | Action::NotionPublishImport(_) => Effect::None,
             Action::InspectRecovery(_) | Action::RequestRecoveryReview(_) => Effect::None,
             #[cfg(feature = "dropbox-readonly-preview")]
             a @ (Action::DropboxLoginAccount | Action::DropboxResumeAccount | Action::DropboxForgetAccount | Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly) => self.press_dropbox(a, dialog.section),
@@ -78,8 +79,7 @@ impl App {
                         "settings.yandex.keysInvalid",
                     Err(_) => "settings.yandex.keysStoreFailed",
                 };
-                // Only a fixed localized outcome is reported to the UI.
-                // Never print a key, username or raw Windows error.
+                // Report only a fixed localized status; never expose raw credentials.
                 dialog.yandex_notice = Some(t(key));
                 Effect::Content
             }

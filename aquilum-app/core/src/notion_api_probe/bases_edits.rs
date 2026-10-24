@@ -1,0 +1,265 @@
+//! QA-only local write overlay for imported Akula Bases.
+//!
+//! Never mutate the original Notion API JSON, imported Markdown or a token.
+//! Local edits are separate and use Core File Gate's atomic expected-hash CAS.
+//! No automatic rebase when the source snapshot changes; no live views/formulas.
+use super::{bases_model::{self, BaseRow, BaseSchema, BasesModel}, identity_registry::node_id};
+use crate::{app_core::Core, files::gate, history::Source};
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeSet, fs, io::ErrorKind, path::{Path, PathBuf}};
+use uuid::Uuid;
+
+const FORMAT: &str = "akula_bases_local_edits_v1";
+const DIR: &str = "Notion-import";
+const MAX_FILE: usize = 2 * 1024 * 1024;
+const MAX_CELLS: usize = 20_000;
+const MAX_TEXT: usize = 32 * 1024;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag="kind", content="value",rename_all="snake_case")]
+pub enum LocalValue {
+    Text(String), Number(f64), Checkbox(bool),
+    Select(String), MultiSelect(Vec<String>), Relation(Vec<String>),
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CellOverride {
+    pub row_id: String,
+    pub property_id: String,
+    pub value: LocalValue,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Edits {
+    pub format: String,
+    pub source_root: String,
+    pub baseline_digest: String,
+    pub revision: u64,
+    pub overrides: Vec<CellOverride>,
+}
+impl Edits {
+    pub fn local_value(&self,row_id:&str,property_id:&str)->Option<&LocalValue>{
+        self.overrides.iter().find(|c|c.row_id==row_id && c.property_id==property_id)
+            .map(|c|&c.value)
+    }
+}
+pub struct ReadEdits {
+    pub state: Edits,
+    pub expected_disk_hash: String,
+}
+#[derive(Clone, Debug)]
+pub enum Change {
+    Set{row_id:String,property_id:String,value:LocalValue},
+    /// Revert local override to the untouched source snapshot value.
+    Revert{row_id:String,property_id:String},
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct EditReceipt {
+    pub relative_path: String,
+    pub revision: u64,
+    pub disk_hash: String,
+    pub overrides: usize,
+    pub created: bool,
+    pub source_unchanged: bool,
+}
+fn valid_uuid(id:&str)->bool {
+    Uuid::parse_str(id).is_ok_and(|u|u.to_string()==id)
+}
+fn valid_digest(d:&str)->bool {
+    d.len()==64 && d.bytes().all(|x|x.is_ascii_digit()||(b'a'..=b'f').contains(&x))
+}
+fn valid_selection(x:&str)->bool{
+    !x.trim().is_empty()&&x.len()<=256&&!x.chars().any(char::is_control)
+}
+fn relative(source:&str)->String {format!("{DIR}/{source}.akula-bases-edits.json")}
+fn validate_folder(root:&Path)->Result<(),String>{
+    let folder=root.join(DIR);
+    let m=fs::symlink_metadata(&folder)
+        .map_err(|_|"Notion import folder is unavailable")?;
+    if !m.is_dir()||m.file_type().is_symlink(){
+        return Err("unsafe Notion import folder".into());
+    }
+    Ok(())
+}
+fn registered(core:&Core,workspace:&Path)->Result<PathBuf,String>{
+    let root=fs::canonicalize(workspace).map_err(|_|"Akula Vault is unavailable")?;
+    if !root.is_dir(){return Err("Akula Vault is not a directory".into());}
+    let roots=core.ui_state.workspace_roots()
+        .map_err(|_|"cannot verify registered Vaults")?;
+    if roots.iter().filter(|p|fs::canonicalize(p).ok()
+        .as_deref()==Some(root.as_path())).count()!=1{
+        return Err("selected Akula Vault is not uniquely registered".into());
+    }
+    validate_folder(&root)?;
+    Ok(root)
+}
+fn source_model(root:&Path,source:&str,digest:&str)->Result<BasesModel,String>{
+    if !valid_uuid(source)||!valid_digest(digest){
+        return Err("invalid Notion source identity or checksum".into());
+    }
+    validate_folder(root)?;
+    let path=root.join(format!("{DIR}/{source}-{digest}.notion.json"));
+    let model=bases_model::from_independent_bundle(&path)?;
+    if model.source_root!=source||model.source_digest!=digest||model.needs_review(){
+        return Err("incomplete or mismatched source model; review before edits".into());
+    }
+    Ok(model)
+}
+fn row<'a>(model:&'a BasesModel,row_id:&str)->Result<&'a BaseRow,String>{
+    model.rows.iter().find(|r|r.akula_id==row_id&&r.akula_base_id.is_some())
+        .ok_or_else(||"unknown or unbound Akula row".into())
+}
+fn schema<'a>(model:&'a BasesModel,r:&BaseRow)->Result<&'a BaseSchema,String>{
+    model.bases.iter().find(|b|Some(b.akula_id.as_str())==r.akula_base_id.as_deref()
+        &&b.schema_available).ok_or_else(||"row source schema not found".into())
+}
+fn value_type_matches(kind:&str,value:&LocalValue)->bool{
+    match (kind,value){
+        ("title"|"rich_text"|"url"|"email"|"phone_number",LocalValue::Text(t))=>
+            t.len()<=MAX_TEXT,
+        ("number",LocalValue::Number(n))=>n.is_finite(),
+        ("checkbox",LocalValue::Checkbox(_))=>true,
+        ("select",LocalValue::Select(s))=>valid_selection(s),
+        ("multi_select",LocalValue::MultiSelect(v))=>
+            v.len()<=100&&v.iter().all(|s|valid_selection(s))
+                &&v.iter().collect::<BTreeSet<_>>().len()==v.len(),
+        ("relation",LocalValue::Relation(v))=>
+            v.len()<=100&&v.iter().collect::<BTreeSet<_>>().len()==v.len(),
+        _=>false, // formula, rollup, timestamps etc are read-only snapshots
+    }
+}
+fn validate_cell(model:&BasesModel,row_id:&str,prop_id:&str,value:&LocalValue)
+    ->Result<(),String>
+{
+    let r=row(model,row_id)?;
+    let base=schema(model,r)?;
+    let field=base.columns.iter().find(|c|
+        c.akula_property_id.as_deref()==Some(prop_id))
+        .ok_or("unknown Akula property identity")?;
+    if !value_type_matches(&field.source_type,value){
+        return Err("unsupported source field or wrong local value type".into());
+    }
+    if let LocalValue::Relation(targets)=value {
+        let relation=field.source_definition.get("relation");
+        let target=relation.and_then(|v|v.get("data_source_id"))
+            .and_then(serde_json::Value::as_str)
+            .map(|id|node_id(&model.source_root,"data_source",id))
+            .or_else(||relation.and_then(|v|v.get("database_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(|id|node_id(&model.source_root,"database",id)))
+            .ok_or("relation target data source unavailable")?;
+        if !model.bases.iter().any(|s|s.akula_id==target)
+            ||!targets.iter().all(|id|model.rows.iter().any(|r|
+                r.akula_id==*id&&r.akula_base_id.as_deref()==Some(&target))){
+            return Err("relation target absent, ambiguous or outside the imported root".into());
+        }
+    }
+    Ok(())
+}
+fn validate(model:&BasesModel,edits:&Edits)->Result<(),String>{
+    if edits.format!=FORMAT||edits.source_root!=model.source_root
+        ||edits.baseline_digest!=model.source_digest
+        ||edits.revision==0||edits.overrides.len()>MAX_CELLS{
+        return Err("local Bases revision requires repair or explicit source rebase".into());
+    }
+    let mut unique=BTreeSet::new();
+    for c in &edits.overrides{
+        if !unique.insert((&c.row_id,&c.property_id)){
+            return Err("duplicate edited cell identity".into());
+        }
+        validate_cell(model,&c.row_id,&c.property_id,&c.value)?;
+    }
+    Ok(())
+}
+fn read(path:&Path,model:&BasesModel)->Result<Option<ReadEdits>,String>{
+    let metadata=match fs::symlink_metadata(path){
+        Ok(m)=>m,
+        Err(e) if e.kind()==ErrorKind::NotFound=>return Ok(None),
+        Err(_)=>return Err("cannot inspect Akula local edit file".into()),
+    };
+    if !metadata.is_file()||metadata.file_type().is_symlink()
+        ||metadata.len()>MAX_FILE as u64{
+        return Err("unsafe or oversized Akula local edit file".into());
+    }
+    let bytes=fs::read(path).map_err(|_|"cannot read Akula local edits")?;
+    if bytes.len()>MAX_FILE {return Err("local edits exceed QA byte budget".into());}
+    let state:Edits=serde_json::from_slice(&bytes)
+        .map_err(|_|"invalid Akula local edits JSON")?;
+    validate(model,&state)?;
+    Ok(Some(ReadEdits{state,expected_disk_hash:blake3::hash(&bytes).to_hex().to_string()}))
+}
+/// Read local overrides without the Notion token or Akula's appdata cache.
+pub fn open(workspace:&Path,source:&str,digest:&str)->Result<Option<ReadEdits>,String>{
+    let root=fs::canonicalize(workspace).map_err(|_|"Akula Vault unavailable")?;
+    let model=source_model(&root,source,digest)?;
+    read(&root.join(relative(source)),&model)
+}
+/// A single File Gate write is the atomic unit. Mutations to one batch are
+/// validated before publishing ANY new bytes. Stale disk hashes fail closed.
+pub fn apply_approved(core:&Core,workspace:&Path,source:&str,digest:&str,
+    expected_disk_hash:Option<&str>,changes:&[Change],approved:bool)
+    ->Result<EditReceipt,String>
+{
+    if !approved{return Err("Akula Bases edits require explicit confirmation".into());}
+    if changes.is_empty()||changes.len()>256{
+        return Err("local edit batch must be bounded and nonempty".into());
+    }
+    let root=registered(core,workspace)?;
+    let model=source_model(&root,source,digest)?;
+    let path=root.join(relative(source));
+    let current=read(&path,&model)?;
+    let (mut state,expected,created)=match current{
+        Some(existing)=>{
+            if expected_disk_hash!=Some(existing.expected_disk_hash.as_str()){
+                return Err("local revision changed: reload before editing".into());
+            }
+            (existing.state,Some(existing.expected_disk_hash),false)
+        }
+        None=>{
+            if expected_disk_hash.is_some(){
+                return Err("local edit file absent: stale expected hash".into());
+            }
+            (Edits{format:FORMAT.into(),source_root:source.into(),
+                baseline_digest:digest.into(),revision:0,overrides:Vec::new()},None,true)
+        }
+    };
+    for change in changes{
+        match change{
+            Change::Set{row_id,property_id,value}=>{
+                validate_cell(&model,row_id,property_id,value)?;
+                if let Some(c)=state.overrides.iter_mut().find(|c|
+                    c.row_id==*row_id&&c.property_id==*property_id){
+                    c.value=value.clone();
+                }else{
+                    state.overrides.push(CellOverride{row_id:row_id.clone(),
+                        property_id:property_id.clone(),value:value.clone()});
+                }
+            }
+            Change::Revert{row_id,property_id}=>{
+                let len=state.overrides.len();
+                state.overrides.retain(|c|c.row_id!=*row_id||c.property_id!=*property_id);
+                if len==state.overrides.len(){
+                    return Err("no local override exists to revert".into());
+                }
+            }
+        }
+    }
+    state.revision=state.revision.checked_add(1).ok_or("local revision exhausted")?;
+    state.overrides.sort_by(|a,b|(&a.row_id,&a.property_id)
+        .cmp(&(&b.row_id,&b.property_id)));
+    validate(&model,&state)?;
+    let json=serde_json::to_string(&state).map_err(|_|"cannot encode local edits")?;
+    if json.len()>MAX_FILE{return Err("local edit file exceeds QA byte budget".into());}
+    let saved=match expected.as_deref(){
+        Some(hash)=>gate::write(core,&path,&json,Some(hash),Source::Me,Some("Akula Bases edit")),
+        None=>gate::create(core,&path,&json,Source::Me,Some("Akula Bases edit")),
+    }.map_err(|_|"File Gate refused local Bases edit (conflict/HOLD)")?;
+    let after=read(&path,&model)?.ok_or("local edits missing after File Gate write")?;
+    if after.expected_disk_hash!=saved.hash||after.state.revision!=state.revision{
+        return Err("local edits changed during readback; review before retry".into());
+    }
+    Ok(EditReceipt{relative_path:relative(source),revision:state.revision,
+        disk_hash:saved.hash,overrides:state.overrides.len(),created,
+        source_unchanged:true})
+}
+#[cfg(test)]
+#[path="bases_edits_tests.rs"]
+mod tests;

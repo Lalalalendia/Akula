@@ -1,20 +1,16 @@
-mod actions;
-mod commands;
+mod actions; mod commands;
 mod book;
 mod core_events; #[cfg(feature = "dropbox-readonly-preview")] mod dropbox_preview;
-mod embeds;
-mod file_menu;
+mod embeds; mod file_menu;
 mod find;
 mod editor_requests;
 mod graph_page;
-mod history;
-mod home;
+mod history; mod home;
 mod init;
 mod lifecycle;
 mod media;
 mod pdf_preview;
-mod note_page;
-mod panel;
+mod note_page; mod panel;
 #[cfg(feature = "memory-probe")]
 mod probe;
 mod reader;
@@ -135,6 +131,10 @@ pub struct App {
     panel_body: Option<Body>,
     retention_done: Arc<std::sync::atomic::AtomicBool>,
     yandex_probe: crate::yandex_probe_session::ProbeSession,
+    #[cfg(feature = "notion-offline-preview")]
+    notion_session: crate::notion_offline::NotionSession,
+    #[cfg(feature = "notion-offline-preview")]
+    notion_sync: crate::notion_sync::RefreshSession, #[cfg(feature = "notion-offline-preview")] notion_import: crate::notion_import::ImportSession,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
     s3_pair: crate::s3_pair_session::PairSession,
     controls: Option<(WidgetId, Handle<WindowButton>)>,
