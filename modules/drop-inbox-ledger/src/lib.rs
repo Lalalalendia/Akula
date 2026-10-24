@@ -602,6 +602,99 @@ mod tests {
         ));
     }
 
+    // Fixed metadata so the restarted parent and abrupt-exit child agree
+    // without a provider-controlled manifest or a shared mutable fixture.
+    fn abrupt_exit_intent() -> (ExpectedTransfer, &'static [u8]) {
+        let bytes: &'static [u8] = b"Akula Inbox crash-recovery fixture";
+        (
+            ExpectedTransfer {
+                id: Uuid::from_bytes([0x6d; 16]),
+                sender_key: [53; 32],
+                recipient_key: [54; 32],
+                source: Transport::P2p,
+                bytes: bytes.len() as u64,
+                blake3: *blake3::hash(bytes).as_bytes(),
+            },
+            bytes,
+        )
+    }
+
+    #[test]
+    fn received_inbox_abrupt_exit_child() {
+        let Some(root) = std::env::var_os("AKULA_INBOX_ABRUPT_EXIT_ROOT") else {
+            // Normal cargo test runs this helper without side effects.
+            return;
+        };
+        let phase = std::env::var("AKULA_INBOX_ABRUPT_EXIT_PHASE")
+            .expect("parent must specify a crash phase");
+        let (expected, bytes) = abrupt_exit_intent();
+        let mut ledger = InboxLedger::open(Path::new(&root)).unwrap();
+        assert_eq!(ledger.reserve(&expected).unwrap(), LocalStatus::Pending);
+        if phase == "published" || phase == "committed" {
+            publish_fixture(&ledger, &expected, bytes);
+        }
+        if phase == "committed" {
+            assert_eq!(
+                ledger.confirm(&expected).unwrap(),
+                LocalStatus::VerifiedLocal
+            );
+        } else {
+            assert!(phase == "reserved" || phase == "published");
+        }
+        // Terminate the whole child process *without dropping the live SQLite
+        // connection*: do not let SQLite perform a graceful WAL checkpoint.
+        // This simulates a process crash, NOT power loss or storage-cache flush.
+        std::process::exit(77);
+    }
+
+    #[test]
+    fn received_inbox_abrupt_exit_recovery_matrix() {
+        for (phase, expected_status) in [
+            ("reserved", LocalStatus::Pending),
+            ("published", LocalStatus::Pending),
+            ("committed", LocalStatus::VerifiedLocal),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("--exact")
+                .arg("tests::received_inbox_abrupt_exit_child")
+                .arg("--nocapture")
+                .env("AKULA_INBOX_ABRUPT_EXIT_ROOT", dir.path())
+                .env("AKULA_INBOX_ABRUPT_EXIT_PHASE", phase)
+                .status()
+                .unwrap();
+            assert_eq!(
+                child.code(),
+                Some(77),
+                "child did not terminate at requested phase: {phase}"
+            );
+            // New process / new read-only connection must not promote an
+            // interrupted reserve or published-but-uncommitted blob to OK.
+            let (expected, bytes) = abrupt_exit_intent();
+            let cold = InboxLedger::open_existing(dir.path()).unwrap().unwrap();
+            assert_eq!(cold.count().unwrap(), 1);
+            assert_eq!(cold.status(expected.id).unwrap(), expected_status);
+            if phase == "committed" {
+                cold.verify_committed_intent(&expected).unwrap();
+            } else {
+                assert!(matches!(
+                    cold.verify_committed_intent(&expected),
+                    Err(LedgerError::InvalidLocalObject)
+                ));
+            }
+            drop(cold);
+            if phase != "reserved" {
+                let object = dir.path().join("objects").join(format!("{}.blob", expected.id));
+                assert_eq!(fs::read(object).unwrap(), bytes);
+            }
+            // A fresh writable connection must be able to recover the
+            // interrupted WAL lifecycle without weakening SQLite constraints.
+            let reopened = InboxLedger::open(dir.path()).unwrap();
+            assert_eq!(reopened.status(expected.id).unwrap(), expected_status);
+            assert_eq!(reopened.count().unwrap(), 1);
+        }
+    }
+
     #[test]
     fn cold_restart_checks_disk_not_just_the_sqlite_row() {
         let dir = tempfile::tempdir().unwrap();
