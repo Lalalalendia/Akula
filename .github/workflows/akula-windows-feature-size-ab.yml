@@ -1,0 +1,99 @@
+# Diagnostic only: no release, no product changes and no security bypass.
+name: Akula Windows base versus installed size
+on:
+  push:
+    branches:
+      - lab/akula-win-release-footprint-20261024
+    paths:
+      - .github/workflows/akula-windows-feature-size-ab.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-size-ab-one-shot
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - name: Compare direct Windows active dependency duplicates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'akula-size-ab'
+          New-Item -Path $dir -ItemType Directory -Force | Out-Null
+          cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --target x86_64-pc-windows-msvc --edges normal --duplicates --prefix none | Out-File -FilePath (Join-Path $dir 'duplicates.txt') -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo duplicate dependency analysis failed' }
+      - name: Build both exact-source Windows release binaries and compare bytes
+        shell: pwsh
+        working-directory: aquilum-app
+        timeout-minutes: 65
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'akula-size-ab'
+          $sha = (git rev-parse HEAD).Trim()
+          $results = @()
+          foreach ($mode in @('default', 'installed')) {
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            if ($mode -eq 'default') {
+              cargo build --release --locked -p aquilum-native
+            } else {
+              cargo build --release --locked -p aquilum-native --features installed
+            }
+            $code = $LASTEXITCODE
+            $sw.Stop()
+            if ($code -ne 0) { throw ("Cargo release build failed for mode " + $mode) }
+            if (!(Test-Path -LiteralPath $exe)) { throw ("Missing compiled EXE for " + $mode) }
+            $f = Get-Item -LiteralPath $exe
+            $row = [ordered]@{
+              mode = $mode
+              size_bytes = [int64]$f.Length
+              size_mib = [math]::Round($f.Length / 1048576.0, 3)
+              sha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+              build_elapsed_s = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+            }
+            $results += [pscustomobject]$row
+            Write-Host ("AKULA_AB_" + $mode.ToUpperInvariant() + "=" + ($row | ConvertTo-Json -Compress))
+          }
+          $delta = [int64]$results[1].size_bytes - [int64]$results[0].size_bytes
+          $pct = if ($results[0].size_bytes -gt 0) { [math]::Round(100.0 * $delta / $results[0].size_bytes, 2) } else { 0 }
+          $profile = [ordered]@{
+            source_sha = $sha
+            rustc_version = (rustc --version)
+            target = 'x86_64-pc-windows-msvc'
+            baseline_is_same_source = $true
+            modes = $results
+            installed_minus_default_bytes = $delta
+            installed_minus_default_mib = [math]::Round($delta / 1048576.0, 3)
+            installed_over_default_pct = $pct
+            caveat = 'Unpackaged release EXE only; build elapsed times depend on cache/order. Does not measure RAM or installer. No shipping feature changed.'
+          }
+          $profile | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'comparison.json') -Encoding utf8
+          Write-Host ("AKULA_SIZE_AB_JSON=" + ($profile | ConvertTo-Json -Depth 6 -Compress))
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value '## Akula Windows EXE default vs installed (Dropbox)'
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Source SHA: " + $sha)
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Default EXE: " + $results[0].size_mib + " MiB")
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Installed EXE: " + $results[1].size_mib + " MiB")
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ("- Difference: " + [math]::Round($delta / 1048576.0, 3) + " MiB (" + $pct + "%)")
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value '- EXE size is not memory or packaged installer size.'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: akula-windows-size-ab
+          path: akula-size-ab/
+          if-no-files-found: warn
+          retention-days: 30
