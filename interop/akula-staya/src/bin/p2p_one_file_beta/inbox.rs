@@ -8,6 +8,7 @@ use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(windows)]
 use aquilum_core::p2p_inbox_lab::{
     audit_pinned_windows_inbox_storage, create_pinned_windows_inbox_stage,
+    verify_pinned_windows_inbox_object,
 };
 #[cfg(not(windows))]
 use std::ffi::OsString;
@@ -247,6 +248,12 @@ pub(super) fn persist_received_payload(
     #[cfg(windows)]
     audit_pinned_windows_inbox_storage(inbox_root, &pinned_root, true)
         .map_err(|error| format!("Windows Inbox ACL postflight refused: {error:?}"))?;
+    // Even if path-based SQLite reported VerifiedLocal, the exact UUID blob
+    // must independently survive an NT handle-relative ACL, hard-link and
+    // full-byte BLAKE3 inspection before confirming receipt over the network.
+    #[cfg(windows)]
+    verify_pinned_windows_inbox_object(inbox_root, &pinned_root, saved.id, size, digest)
+        .map_err(|error| format!("Windows Inbox pinned blob verification refused: {error:?}"))?;
     Ok(saved)
 }
 
