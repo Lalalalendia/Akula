@@ -476,7 +476,9 @@ mod tests {
     #[test]
     fn windows_sqlite_custody_blocks_rename_and_preserves_parent_identity() {
         let dir = tempfile::tempdir().unwrap();
-        let parent = dir.path().join("Akula");
+        let outer = dir.path().join("Outer");
+        fs::create_dir(&outer).unwrap();
+        let parent = outer.join("Akula");
         fs::create_dir(&parent).unwrap();
         let root = parent.join("received-inbox");
         fs::create_dir(&root).unwrap();
@@ -497,6 +499,9 @@ mod tests {
         // The immediate parent must not be swapped while the SQLite VFS is
         // opening path-based database/WAL names.
         assert!(fs::rename(&parent, dir.path().join("moved-Akula")).is_err());
+        // This is above the immediate parent. A single-parent-only lease
+        // would let this rename succeed while SQLite used the old path.
+        assert!(fs::rename(&outer, dir.path().join("moved-Outer")).is_err());
         lease.verify(&root, &pinned_root).unwrap();
         drop(lease);
         mark_pinned_windows_stage_delete_on_close(&stage).unwrap();
