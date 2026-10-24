@@ -1,0 +1,48 @@
+name: Clippy twelve logic regression
+on:
+  push:
+    branches:
+      - audit/clippy-12-logic-20261024
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-clippy-logic-regression-01
+      - name: Install native Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Run focused multiline selection and history tests
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-native --bin aquilum-native overlapping_selections -- --nocapture
+          cargo test --locked -p aquilum-native --bin aquilum-native chained_overlaps -- --nocapture
+          cargo test --locked -p aquilum-native --bin aquilum-native block_merge_checks -- --nocapture
+  core-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-clippy-logic-core-01
+      - name: Verify revision and journal fail-closed cases
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-core wrong_original_path_bytes_and_os_identity_never_claim -- --nocapture
+          cargo test --locked -p aquilum-core m1d_recovery_evidence_requires_consistent_classification_and_ticket -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 additive_gate_rejects_cross_vault_and_wrong_revision_or_path -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 reject_wrong_hash_or_stale_selected_revision -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 forged_pack_digest_member_or_length_cannot_validate -- --nocapture
+          cargo test --locked -p aquilum-core --features sync-s3 rejects_invalid_bytes_and_missing_parent_without_treating_as_empty -- --nocapture
