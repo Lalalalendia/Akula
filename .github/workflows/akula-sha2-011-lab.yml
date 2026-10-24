@@ -1,0 +1,144 @@
+name: Akula SHA2 0.11 isolated dependency experiment
+on:
+  push:
+    branches:
+      - lab/sha2-011-duplicate-trim-20261024
+    paths:
+      - .github/workflows/akula-sha2-011-lab.yml
+permissions:
+  contents: read
+concurrency:
+  group: akula-sha2-011-readonly-experiment
+  cancel-in-progress: true
+jobs:
+  resolution-and-vectors:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Baseline Windows dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --target x86_64-pc-windows-msvc -e normal --prefix none --format '{p}' > /tmp/akula-sha2-before-tree.txt
+      - name: Update exactly four SHA2 manifests in ephemeral checkout
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          paths = [
+            "aquilum-app/native/Cargo.toml",
+            "modules/dropbox-auth-lab/Cargo.toml",
+            "modules/dropbox-secret-store/Cargo.toml",
+            "modules/dropbox-t0/Cargo.toml",
+          ]
+          for path in paths:
+              p=Path(path)
+              s=p.read_text(encoding="utf-8")
+              old='sha2 = "0.10"'
+              if s.count(old)!=1: raise SystemExit(f"Expected exactly one SHA2 0.10 declaration: {path}")
+              p.write_text(s.replace(old,'sha2 = "0.11"'),encoding="utf-8")
+              print("SHA2_MANIFEST_011",path,flush=True)
+          PY
+      - name: Resolve genuine Cargo.lock and check all features
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 > /dev/null
+          cargo metadata --locked --manifest-path aquilum-app/Cargo.toml --all-features --format-version 1 > /dev/null
+          cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --target x86_64-pc-windows-msvc -e normal --prefix none --format '{p}' > /tmp/akula-sha2-after-tree.txt
+          python - <<'PY'
+          import json,re,subprocess
+          from pathlib import Path
+          def packages(p):
+              out=set()
+              for s in Path(p).read_text(encoding="utf-8").splitlines():
+                  m=re.match(r"^([A-Za-z0-9_-]+) v([^\s]+)",s.strip())
+                  if m:out.add(m[1]+"@"+m[2])
+              return out
+          before=packages("/tmp/akula-sha2-before-tree.txt")
+          after=packages("/tmp/akula-sha2-after-tree.txt")
+          if len(before)!=349 or not after:raise RuntimeError("Unexpected baseline or empty candidate: "+str((len(before),len(after))))
+          old_legacy=sorted(x for x in before if x.startswith("sha2@0.10"))
+          if len(old_legacy)!=1:raise RuntimeError("Old SHA2 missing from baseline")
+          if any(x.startswith("sha2@0.10") for x in after):raise RuntimeError("Old SHA2 still in Windows normal graph")
+          if "sha2@0.11.1" not in after:raise RuntimeError("Expected pinned modern SHA2 to remain")
+          lock=Path("aquilum-app/Cargo.lock").read_text(encoding="utf-8")
+          lockn=len(re.findall(r"^\[\[package\]\]$",lock,flags=re.M))
+          orig=subprocess.check_output(["git","show","HEAD:aquilum-app/Cargo.lock"],text=True)
+          orig_n=len(re.findall(r"^\[\[package\]\]$",orig,flags=re.M))
+          report={
+            "source_sha":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
+            "before_windows_normal":len(before),
+            "after_windows_normal":len(after),
+            "removed_windows":sorted(before-after),
+            "added_windows":sorted(after-before),
+            "before_workspace_lock":orig_n,
+            "after_workspace_lock":lockn,
+            "real_cargo_resolved":True,
+            "before_sha2":old_legacy,
+            "after_sha2":[x for x in sorted(after) if x.startswith("sha2@")],
+          }
+          Path("akula-sha2-experiment-summary.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+          print("AKULA_SHA2_DIFF_JSON="+json.dumps(report,ensure_ascii=False),flush=True)
+          if len(after)>len(before):raise RuntimeError("Experiment increases Windows normal dependencies")
+          PY
+      - name: Run Dropbox PKCE, secret-store and hash verification tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/dropbox-auth-lab/Cargo.toml --all-targets
+          cargo test --manifest-path modules/dropbox-secret-store/Cargo.toml --all-targets
+          cargo test --manifest-path modules/dropbox-t0/Cargo.toml --all-targets
+          cargo test --manifest-path modules/dropbox-connect-lab/Cargo.toml --all-targets
+      - name: Archive Cargo-generated lockfile and full graph
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-sha2-011-linux-cargo-proof
+          path: |
+            aquilum-app/Cargo.lock
+            akula-sha2-experiment-summary.json
+          if-no-files-found: warn
+          retention-days: 14
+  windows-application:
+    needs: resolution-and-vectors
+    runs-on: windows-2025
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-windows-memory-pilot-v1
+          cache-workspace-crates: true
+          save-if: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Reconstruct same four manifest changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -c "from pathlib import Path; p=['aquilum-app/native/Cargo.toml','modules/dropbox-auth-lab/Cargo.toml','modules/dropbox-secret-store/Cargo.toml','modules/dropbox-t0/Cargo.toml']; [(lambda f: f.write_text(f.read_text().replace('sha2 = '+chr(34)+'0.10'+chr(34),'sha2 = '+chr(34)+'0.11'+chr(34))))(Path(x)) for x in p]"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot update four manifests' }
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not resolve Cargo.lock' }
+          cargo metadata --locked --manifest-path aquilum-app/Cargo.toml --all-features --format-version 1 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo.lock is not reproducible' }
+      - name: Compile genuine Windows installed-mode application
+        shell: pwsh
+        working-directory: aquilum-app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo check --locked -p aquilum-native --features installed
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installed code is incompatible with sha2 0.11' }
