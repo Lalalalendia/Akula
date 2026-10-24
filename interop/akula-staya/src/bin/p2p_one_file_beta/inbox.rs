@@ -508,6 +508,93 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn windows_sqlite_custody_preserves_wal_and_shm_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("Akula");
+        fs::create_dir(&parent).unwrap();
+        let root = parent.join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let (pinned_root, stage) =
+            create_pinned_windows_inbox_stage(&root, "wal-lifecycle.stage").unwrap();
+        let custody = pin_windows_inbox_sqlite_custody(&root, &pinned_root).unwrap();
+
+        let ledger = InboxLedger::open(&root).unwrap();
+        let bytes = b"synthetic SQLite WAL lifecycle";
+        let intent = expected_transfer(
+            bytes.len() as u64,
+            *blake3::hash(bytes).as_bytes(),
+            [21; 32],
+            [22; 32],
+        );
+        assert_eq!(ledger.reserve(&intent).unwrap(), LocalStatus::Pending);
+        // A live WAL-mode writer should create both companion files.
+        let wal = root.join("received-inbox.sqlite3-wal");
+        let shm = root.join("received-inbox.sqlite3-shm");
+        assert!(wal.is_file(), "WAL must be present during active writer");
+        assert!(shm.is_file(), "SHM must be present during active writer");
+        audit_pinned_windows_inbox_storage(&root, &pinned_root, true).unwrap();
+        custody.verify(&root, &pinned_root).unwrap();
+
+        // The no-delete custody must not block SQLite's last-client
+        // checkpoint or its optional removal of WAL/SHM on clean close.
+        drop(ledger);
+        for companion in [&wal, &shm] {
+            if companion.exists() {
+                fs::remove_file(companion).unwrap();
+            }
+        }
+        custody.verify(&root, &pinned_root).unwrap();
+        drop(custody);
+        let cold = InboxLedger::open(&root).unwrap();
+        assert_eq!(cold.count().unwrap(), 1);
+        assert_eq!(cold.status(intent.id).unwrap(), LocalStatus::Pending);
+        drop(cold);
+        mark_pinned_windows_stage_delete_on_close(&stage).unwrap();
+        drop(stage);
+        drop(pinned_root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_sqlite_wal_and_shm_public_acl_fail_closed() {
+        for suffix in ["-wal", "-shm"] {
+            let dir = tempfile::tempdir().unwrap();
+            let parent = dir.path().join("Akula");
+            fs::create_dir(&parent).unwrap();
+            let root = parent.join("received-inbox");
+            fs::create_dir(&root).unwrap();
+            let (pinned_root, stage) =
+                create_pinned_windows_inbox_stage(&root, "wal-dacl.stage").unwrap();
+            let custody = pin_windows_inbox_sqlite_custody(&root, &pinned_root).unwrap();
+            let ledger = InboxLedger::open(&root).unwrap();
+            let bytes = b"synthetic WAL security regression";
+            let intent = expected_transfer(
+                bytes.len() as u64,
+                *blake3::hash(bytes).as_bytes(),
+                [31; 32],
+                [32; 32],
+            );
+            assert_eq!(ledger.reserve(&intent).unwrap(), LocalStatus::Pending);
+            let companion = root.join(format!("received-inbox.sqlite3{suffix}"));
+            assert!(companion.is_file(), "SQLite companion must exist for ACL test");
+            audit_pinned_windows_inbox_storage(&root, &pinned_root, true).unwrap();
+            // The SQLite VFS may legitimately delete this file on close,
+            // so audit its effective ACL *while the connection is open*.
+            grant_everyone_full_control(&companion, false);
+            assert!(
+                audit_pinned_windows_inbox_storage(&root, &pinned_root, true).is_err(),
+                "public {suffix} ACL must prevent a successful network receipt"
+            );
+            drop(ledger);
+            drop(custody);
+            mark_pinned_windows_stage_delete_on_close(&stage).unwrap();
+            drop(stage);
+            drop(pinned_root);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn windows_pinned_objects_writer_is_no_replace_and_removes_failed_scratch() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("received-inbox");
