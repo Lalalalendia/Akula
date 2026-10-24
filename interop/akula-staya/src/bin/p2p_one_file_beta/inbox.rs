@@ -5,7 +5,9 @@
 
 use akula_inbox_ledger_lab::{ExpectedTransfer, InboxLedger, LedgerError, LocalStatus, Transport};
 #[cfg(windows)]
-use aquilum_core::p2p_inbox_lab::create_pinned_windows_inbox_stage;
+use aquilum_core::p2p_inbox_lab::{
+    audit_pinned_windows_inbox_storage, create_pinned_windows_inbox_stage,
+};
 use aquilum_core::p2p_inbox_lab::{InboxError, save_verified_stage_as_new};
 #[cfg(not(windows))]
 use std::ffi::OsString;
@@ -212,8 +214,13 @@ pub(super) fn persist_received_payload(
     // Windows: the opened parent HANDLE and new stage HANDLE remain live
     // through verification; no ambient pathname is used to create this stage.
     #[cfg(windows)]
-    let (_pinned_root, mut file) = create_pinned_windows_inbox_stage(inbox_root, &stage_name)
+    let (pinned_root, mut file) = create_pinned_windows_inbox_stage(inbox_root, &stage_name)
         .map_err(|error| format!("Windows pinned Inbox stage refused: {error:?}"))?;
+    // Before opening SQLite or its objects path, refuse insecure existing
+    // components. New components may not exist until the first receipt.
+    #[cfg(windows)]
+    audit_pinned_windows_inbox_storage(inbox_root, &pinned_root, false)
+        .map_err(|error| format!("Windows Inbox ACL preflight refused: {error:?}"))?;
     #[cfg(not(windows))]
     let mut file = {
         let mut options = OpenOptions::new();
@@ -233,7 +240,14 @@ pub(super) fn persist_received_payload(
         .map_err(|error| format!("sync private receiver stage: {error}"))?;
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("rewind pinned receiver stage: {error}"))?;
-    persist_received(&mut file, inbox_root, size, digest, sender, receiver)
+    let saved = persist_received(&mut file, inbox_root, size, digest, sender, receiver)?;
+    // Verify that freshly created SQLite and objects now belong to the same
+    // pinned root, with non-writable-by-others ACLs. A failed audit never
+    // becomes a verified remote ACK, even if SQLite already wrote local bytes.
+    #[cfg(windows)]
+    audit_pinned_windows_inbox_storage(inbox_root, &pinned_root, true)
+        .map_err(|error| format!("Windows Inbox ACL postflight refused: {error:?}"))?;
+    Ok(saved)
 }
 
 #[cfg(test)]
