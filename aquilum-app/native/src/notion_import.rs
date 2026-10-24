@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc::{self, Receiver, Sender}};
 use aquilum_core::{Core, notion_api_probe::{
     cached_import::{approved_cached_preview, read_verified_cached, CachedImportReview},
-    publish::publish_approved,
+    publish::publish_approved, structured_bundle,
 }};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -18,7 +18,7 @@ impl Stage {
             Self::Reviewing => "Проверяю снимок API в отдельном потоке...",
             Self::Ready => "Снимок проверен. Для импорта требуется отдельное подтверждение.",
             Self::Publishing => "Создаю независимые заметки через File Gate...",
-            Self::Complete => "Markdown-заметки импортированы; свойства баз и медиа пока не перенесены.",
+            Self::Complete => "Markdown и исходные типизированные объекты API сохранены. Полноценные базы Акулы и медиа ещё не восстановлены.",
             Self::NeedsReview => "Импорт приостановлен: источник, база или права требуют проверки.",
         }
     }
@@ -36,6 +36,7 @@ pub struct ImportView {
     pub created: usize,
     pub existing: usize,
     pub conflicts: usize,
+    pub structured_saved: bool,
 }
 
 impl ImportView {
@@ -53,6 +54,7 @@ struct Summary {
     existing: usize,
     conflicts: usize,
     completed: bool,
+    structured_saved: bool,
 }
 enum ResultKind { Review(CachedImportReview), Published(Summary) }
 struct Completion {
@@ -143,15 +145,24 @@ impl ImportSession {
         let source = root.clone();
         let chosen = target.clone();
         self.start(root, target, Stage::Publishing, move || {
-            let preview = approved_cached_preview(
-                &data_dir.join("ui-state.sqlite3"), &source, &digest
-            ).map_err(|_| ())?;
+            let cache = data_dir.join("ui-state.sqlite3");
+            // Prebuild and validate the complete typed JSON source BEFORE any
+            // Markdown File Gate mutation. Exact digest fences a concurrent refresh.
+            let bundle = structured_bundle::prepare_from_cached(&cache, &source, &digest)
+                .map_err(|_| ())?;
+            let preview = approved_cached_preview(&cache, &source, &digest)
+                .map_err(|_| ())?;
             let report = publish_approved(&core, &chosen, &preview, true).map_err(|_| ())?;
+            // Only publish structured data after a complete, conflict-free note
+            // import. Its create-only receipt is required for COMPLETE status.
+            let structured_saved = report.completed
+                && structured_bundle::publish_approved(&core, &chosen, &bundle, true).is_ok();
             Ok(ResultKind::Published(Summary {
                 created: report.created.len(),
                 existing: report.existing_untouched.len(),
                 conflicts: report.conflicts_untouched.len(),
-                completed: report.completed,
+                completed: report.completed && structured_saved,
+                structured_saved,
             }))
         })
     }
@@ -179,6 +190,7 @@ impl ImportSession {
                     self.view.created = summary.created;
                     self.view.existing = summary.existing;
                     self.view.conflicts = summary.conflicts;
+                    self.view.structured_saved = summary.structured_saved;
                     self.view.stage = if summary.completed {
                         Stage::Complete
                     } else { Stage::NeedsReview };
@@ -250,6 +262,7 @@ mod tests {
         s.start(ROOT.into(), target, Stage::Publishing, || {
             Ok(ResultKind::Published(Summary {
                 created: 1, existing: 0, conflicts: 1, completed: false,
+                structured_saved: false,
             }))
         }).unwrap();
         rx.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -257,5 +270,6 @@ mod tests {
         assert_eq!(s.view().stage, Stage::NeedsReview);
         assert_eq!(s.view().created, 1);
         assert_eq!(s.view().conflicts, 1);
+        assert!(!s.view().structured_saved);
     }
 }

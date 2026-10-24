@@ -94,7 +94,7 @@ pub(super) fn body(
                     |t| t.text_primary, None, Leading::Times(1.3),
                 ));
                 column = column.with_fixed(action_button(
-                    "Импортировать Markdown в выбранную базу (без замены файлов)".into(),
+                    "Создать заметки и сохранить типизированные данные API (без замены файлов)".into(),
                     Action::NotionPublishImport(root.clone()), bindings,
                 ));
             }
@@ -111,8 +111,9 @@ pub(super) fn body(
             ));
             if importing.created > 0 || importing.conflicts > 0 {
                 column = column.with_fixed(selectable(
-                    &format!("Создано: {}; уже существовало: {}; конфликты: {}",
-                        importing.created, importing.existing, importing.conflicts),
+                    &format!("Создано: {}; уже существовало: {}; конфликты: {}; структурный JSON: {}",
+                        importing.created, importing.existing, importing.conflicts,
+                        if importing.structured_saved { "проверен" } else { "не подтверждён" }),
                     |t| t.text_secondary, None, Leading::Times(1.3),
                 ));
             }
