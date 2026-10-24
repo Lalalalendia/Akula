@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Opt-in offline ZIP/directory inventory only; no File Gate or native UI.
+notion-export-probe = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.
 p2p-offer-lab = []
 # Opt-in verified receiver staged-file create-new, no Vault apply.
@@ -120,6 +122,11 @@ path = "src/bin/akula_node_lab.rs"
 required-features = ["node-lab"]
 
 [[bin]]
+name = "akula-notion-export-probe"
+path = "src/bin/akula_notion_export_probe.rs"
+required-features = ["notion-export-probe"]
+
+[[bin]]
 name = "akula-node"
 path = "src/bin/akula_node.rs"
 required-features = ["node-v1"]
@@ -132,6 +139,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 atomic-write-file = "0.3.0"
 blake3 = "1.8.5"
+# Already transitively locked; used only for strict, read-only ZIP inspection.
+crc32fast = "1.5.0"
+flate2 = "1.1.9"
 # M1d-f1: inert OS-key-provided AEAD archive envelope; no SQLite activation.
 ring = "0.17.14"
 zeroize = "1.9.0"
