@@ -66,6 +66,28 @@ impl SnapshotStore {
         Ok(Self { database })
     }
 
+    /// Open a committed cache without creating or migrating any UI-state file.
+    /// The offline reader requires no token, database writer or network.
+    pub fn open_read_only(ui_state_path: &Path) -> Result<Self, String> {
+        let meta = std::fs::symlink_metadata(ui_state_path)
+            .map_err(|_| "Notion root not cached; local SQLite file is missing")?;
+        if !meta.is_file() || meta.file_type().is_symlink() {
+            return Err("Notion cache path must be an existing regular file".into());
+        }
+        let connection = rusqlite::Connection::open_with_flags(
+            ui_state_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ).map_err(|_| "cannot open existing Notion cache read-only")?;
+        connection.execute_batch("PRAGMA query_only = ON;")
+            .map_err(|_| "cannot protect offline Notion cache connection")?;
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(|_| "cannot read offline Notion cache schema")?;
+        if version != 9 {
+            return Err("offline Notion cache requires a verified SQLite v9 schema".into());
+        }
+        Ok(Self { database: UiStateDatabase { connection } })
+    }
+
     /// Read-only offline metadata, with no Notion token or network connection.
     pub fn status(&self, root: &str) -> Result<Option<SnapshotInfo>, String> {
         let root = canonical_root(root)?;
@@ -435,6 +457,46 @@ mod tests {
         assert_eq!(cached.links.len(), 2);
         assert_eq!(cached.objects.iter().find(|o| o.kind == "markdown" && o.id == A)
             .unwrap().json["markdown"], "Text 0");
+    }
+
+    #[test]
+    fn offline_cache_open_does_not_create_or_mutate_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.sqlite3");
+        assert!(SnapshotStore::open_read_only(&path).is_err());
+        assert!(!path.exists());
+        let mut writable = SnapshotStore::open(&path).unwrap();
+        let before = writable.publish(&fixture(A), 100).unwrap();
+        drop(writable);
+        let read_only = SnapshotStore::open_read_only(&path).unwrap();
+        assert_eq!(read_only.load(A).unwrap().unwrap().info, before);
+        assert!(read_only.database.connection.execute(
+            "DELETE FROM notion_cache_objects WHERE root_id = ?1", [A],
+        ).is_err());
+        drop(read_only);
+        let writable = SnapshotStore::open(&path).unwrap();
+        assert_eq!(writable.status(A).unwrap(), Some(before));
+    }
+
+    #[test]
+    fn successful_refresh_replaces_changed_content_and_links_for_one_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = SnapshotStore::open(&dir.path().join("ui-state.sqlite3")).unwrap();
+        let previous = store.publish(&fixture(A), 100).unwrap();
+        let separate = store.publish(&fixture(B), 100).unwrap();
+        let mut update = fixture(A);
+        update.objects.iter_mut()
+            .find(|o| o.kind == "markdown" && o.id == A).unwrap()
+            .json = json!({"markdown":"Changed by Notion"});
+        update.links.pop();
+        let refreshed = store.publish(&update, 101).unwrap();
+        assert_ne!(previous.digest, refreshed.digest);
+        assert_eq!(refreshed.link_count, 1);
+        assert_eq!(store.load(A).unwrap().unwrap().links.len(), 1);
+        let saved = store.load(A).unwrap().unwrap().into_preview();
+        assert!(super::super::projection::prepare_import(&saved).unwrap()
+            .candidates.iter().any(|c| c.markdown.contains("Changed by Notion")));
+        assert_eq!(store.status(B).unwrap(), Some(separate));
     }
 
     #[test]
