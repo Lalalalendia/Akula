@@ -191,3 +191,22 @@ The Windows SSH remote command also calls `/usr/bin/sudo` by an explicit
 OS path rather than relying on the remote account's PATH to resolve `sudo`.
 This does NOT turn arbitrary `sudo python -c` into restricted privilege:
 an operator must already possess independently authorized root access.
+
+### Production publisher trust anchor: no caller-supplied root authority
+
+Security audit found that the first root-stage bundle factory previously
+accepted a `TrustedReleaseSigner` argument without comparing its Ed25519
+public key to a separately provisioned publisher anchor. A self-signed
+candidate could therefore supply both its key and its signature. The
+production `prepare_root_stage_bundle` now has an explicit, immutable
+`PRODUCTION_BOOTSTRAP_PUBKEY` gate. It is intentionally **None** until a
+reviewed Akula publishing ceremony pins a real public key in signed source.
+The public factory always returns `UntrustedBootstrapSigner` while that
+publisher authority is unprovisioned, even if a caller supplies a matching
+candidate signature. A private test factory accepts only an independently
+fixed test key to exercise signed B1a frames and negative cases in CI.
+
+No runtime SSH value, environment variable, package contents, test key or
+caller argument may provision the production root trust anchor. The signed
+helper distribution, key ceremony and rotation policy still require a
+separate audited release decision. Staging and UI installation remain HOLD.

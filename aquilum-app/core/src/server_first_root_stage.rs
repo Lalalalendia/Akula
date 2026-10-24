@@ -9,6 +9,11 @@ use std::sync::Arc;
 
 const FRAME_DOMAIN: &[u8] = b"AKULA_ROOT_STAGE_V1\0";
 const BOOTSTRAP_SIGNER: &str = "akula-root-bootstrap-v1";
+/// Deliberately UNPROVISIONED. The production public key must be reviewed,
+/// pinned in signed Akula release source and matched against an independently
+/// signed publisher artifact. Never load this from an SSH response, manifest,
+/// environment variable, or caller argument.
+const PRODUCTION_BOOTSTRAP_PUBKEY: Option<[u8; 32]> = None;
 const MAX_BOOTSTRAP_BYTES: usize = 64 * 1024 * 1024;
 const PIN_PLACEHOLDER: &str = "PINNED_BOOTSTRAP_ED25519_HEX = \"\"";
 const SOURCE: &str = include_str!("../../../scripts/server-bootstrap/root_stage_v1.py");
@@ -54,6 +59,8 @@ impl VerifiedRootStageBundle {
     }
 }
 
+/// Production cannot be prepared until a publisher trust key is pinned
+/// independently of the candidate signer passed to this function.
 pub fn prepare_root_stage_bundle(
     signed: &SignedRelease,
     pinned: &TrustedReleaseSigner,
@@ -61,9 +68,28 @@ pub fn prepare_root_stage_bundle(
     package: &[u8],
     now_unix: u64,
 ) -> Result<VerifiedRootStageBundle, RootStageError> {
+    let expected_key = PRODUCTION_BOOTSTRAP_PUBKEY
+        .ok_or(RootStageError::UntrustedBootstrapSigner)?;
+    prepare_with_fixed_anchor(
+        signed, pinned, expected_key, previous_floor, package, now_unix,
+    )
+}
+
+/// The factory cannot be called from a production code path with a caller-
+/// chosen key. Tests exercise this private path against an independent known
+/// fixture key rather than weakening the production release gate.
+fn prepare_with_fixed_anchor(
+    signed: &SignedRelease,
+    pinned: &TrustedReleaseSigner,
+    expected_key: [u8; 32],
+    previous_floor: ReleaseFloor,
+    package: &[u8],
+    now_unix: u64,
+) -> Result<VerifiedRootStageBundle, RootStageError> {
     if pinned.signer_id != BOOTSTRAP_SIGNER
         || signed.manifest.signer_id != BOOTSTRAP_SIGNER
-        || pinned.ed25519_public == [0; 32]
+        || expected_key == [0; 32]
+        || pinned.ed25519_public != expected_key
     {
         return Err(RootStageError::UntrustedBootstrapSigner);
     }
@@ -87,7 +113,7 @@ pub fn prepare_root_stage_bundle(
         return Err(RootStageError::BadSource);
     }
     let mut hex = String::with_capacity(64);
-    for byte in pinned.ed25519_public {
+    for byte in expected_key {
         use std::fmt::Write as _;
         write!(&mut hex, "{byte:02x}").map_err(|_| RootStageError::BadSource)?;
     }

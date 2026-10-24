@@ -34,10 +34,35 @@ fn fixture() -> (SignedRelease, TrustedReleaseSigner, Vec<u8>) {
     )
 }
 
+fn prepare_fixture(
+    signed: &SignedRelease,
+    pinned: &TrustedReleaseSigner,
+    previous_floor: ReleaseFloor,
+    package: &[u8],
+    now_unix: u64,
+) -> Result<VerifiedRootStageBundle, RootStageError> {
+    let key = Ed25519KeyPair::from_seed_unchecked(&[0x37; 32]).unwrap();
+    let anchor = key.public_key().as_ref().try_into().unwrap();
+    prepare_with_fixed_anchor(
+        signed, pinned, anchor, previous_floor, package, now_unix,
+    )
+}
+
+#[test]
+fn production_anchor_is_missing_and_cannot_be_substituted_at_runtime() {
+    let (signed, trusted, helper) = fixture();
+    assert_eq!(
+        prepare_root_stage_bundle(
+            &signed, &trusted, ReleaseFloor::initial(), &helper, NOW,
+        ).err(),
+        Some(RootStageError::UntrustedBootstrapSigner),
+    );
+}
+
 #[test]
 fn approved_bytes_emit_only_fixed_signed_root_stage_data() {
     let (signed, trusted, helper) = fixture();
-    let data = prepare_root_stage_bundle(
+    let data = prepare_fixture(
         &signed, &trusted, ReleaseFloor::initial(), &helper, NOW,
     )
     .unwrap();
@@ -57,25 +82,25 @@ fn altered_helper_key_signature_or_role_cannot_create_frame() {
     let (signed, trusted, helper) = fixture();
     let mut changed_helper = helper.clone();
     changed_helper[100] ^= 1;
-    assert!(prepare_root_stage_bundle(
+    assert!(prepare_fixture(
         &signed, &trusted, ReleaseFloor::initial(), &changed_helper, NOW,
     )
     .is_err());
     let mut changed_signature = signed.clone();
     changed_signature.signature[0] ^= 1;
-    assert!(prepare_root_stage_bundle(
+    assert!(prepare_fixture(
         &changed_signature, &trusted, ReleaseFloor::initial(), &helper, NOW,
     )
     .is_err());
     let mut wrong_key = trusted.clone();
     wrong_key.ed25519_public[0] ^= 1;
-    assert!(prepare_root_stage_bundle(
+    assert!(prepare_fixture(
         &signed, &wrong_key, ReleaseFloor::initial(), &helper, NOW,
     )
     .is_err());
     wrong_key.signer_id = "ordinary-node".into();
     assert_eq!(
-        prepare_root_stage_bundle(&signed, &wrong_key, ReleaseFloor::initial(), &helper, NOW)
+        prepare_fixture(&signed, &wrong_key, ReleaseFloor::initial(), &helper, NOW)
             .err(),
         Some(RootStageError::UntrustedBootstrapSigner),
     );
