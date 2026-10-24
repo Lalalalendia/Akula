@@ -1070,6 +1070,132 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn real_quic_lost_ack_retries_same_inbox_without_duplicate() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        // Real QUIC and exactly two connections, but disposable local peers
+        // and synthetic bytes; this does not simulate real WAN or power loss.
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("selected-source.txt");
+        let inbox_root = dir.path().join("received-inbox");
+        fs::create_dir(&inbox_root).unwrap();
+        let bytes = b"Akula one-file transfer with a deliberately lost local ACK";
+        fs::write(&source, bytes).unwrap();
+
+        let sender = Endpoint::builder(presets::Minimal)
+            .secret_key(iroh::SecretKey::generate())
+            .alpns(vec![ALPN.to_vec()])
+            .relay_mode(RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+        let sender_id = sender.id();
+        let port = sender
+            .bound_sockets()
+            .into_iter()
+            .find(|socket| socket.is_ipv4())
+            .expect("IPv4 loopback is required for QUIC retry test")
+            .port();
+        let direct = EndpointAddr::new(sender_id)
+            .with_ip_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+        let receiver = Endpoint::builder(presets::Minimal)
+            .secret_key(iroh::SecretKey::generate())
+            .alpns(vec![ALPN.to_vec()])
+            .relay_mode(RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+        let receiver_id = receiver.id();
+
+        let sender_task = tokio::spawn(async move {
+            for attempt in 0..2 {
+                let incoming = tokio::time::timeout(Duration::from_secs(25), sender.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let connection = incoming.accept().unwrap().await.unwrap();
+                assert_eq!(connection.remote_id(), receiver_id);
+                let result = tokio::time::timeout(
+                    Duration::from_secs(25),
+                    send_one(&connection, &source, || Ok(())),
+                )
+                .await
+                .unwrap();
+                if attempt == 0 {
+                    assert!(result.is_err(), "missing ACK must not report delivery");
+                } else {
+                    result.unwrap();
+                }
+                connection.close(0u8.into(), b"sender retry step complete");
+            }
+            sender.close().await;
+        });
+
+        let first = tokio::time::timeout(
+            Duration::from_secs(25),
+            receiver.connect(direct.clone(), ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(first.remote_id(), sender_id);
+        let mut request = first.open_uni().await.unwrap();
+        request.write_all(REQUEST).await.unwrap();
+        request.finish().unwrap();
+        let mut stream = first.accept_uni().await.unwrap();
+        let frame = stream.read_to_end(MAX_FRAME_BYTES).await.unwrap();
+        let (size, digest, payload) = decode_frame(&frame).unwrap();
+        let saved = inbox::persist_received_payload(
+            payload,
+            &inbox_root,
+            size,
+            digest,
+            *sender_id.as_bytes(),
+            *receiver_id.as_bytes(),
+        )
+        .unwrap();
+        // The receiver has *already* verified/published the blob. Abruptly
+        // close the QUIC connection before writing its ordinary local ACK.
+        first.close(1u8.into(), b"inject lost ACK after local commit");
+
+        let second = tokio::time::timeout(
+            Duration::from_secs(25),
+            receiver.connect(direct, ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(25),
+            receive_one_target(
+                &second,
+                None,
+                &inbox_root,
+                *receiver_id.as_bytes(),
+                || Ok(()),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        second.close(0u8.into(), b"retry ACK delivered");
+        receiver.close().await;
+        tokio::time::timeout(Duration::from_secs(25), sender_task)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let cold = akula_inbox_ledger_lab::InboxLedger::open(&inbox_root).unwrap();
+        assert_eq!(cold.count().unwrap(), 1);
+        assert_eq!(
+            cold.status(saved.id).unwrap(),
+            akula_inbox_ledger_lab::LocalStatus::VerifiedLocal
+        );
+        assert_eq!(fs::read(cold.object_path(saved.id)).unwrap(), bytes);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_iroh_native_received_inbox_only_roundtrip_without_user_credentials() {
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
