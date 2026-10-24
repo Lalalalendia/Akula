@@ -17,7 +17,7 @@ STATE_KEY = web.AppKey("p2p_state", dict)
 
 
 def ensure_demo(path: Path, length: int = 8 * 1024 * 1024):
-    if path.exists():
+    if path.exists() and path.stat().st_size == length:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     seed = bytes(range(256)) * 256  # deterministic 64KiB, clearly synthetic bytes
