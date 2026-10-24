@@ -262,6 +262,21 @@ pub(super) fn open_child_dir_for_create(
         | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN)
 }
 
+/// P2P Inbox: open the existing objects directory through the pinned
+/// root for creating one new blob. READ_CONTROL is necessary for an actual
+/// owner/DACL audit on the returned directory handle.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_p2p_objects_dir_for_create(
+    pinned_inbox: &File,
+) -> Result<File, VaultPortError> {
+    open_child_access(
+        pinned_inbox, "objects", false,
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_ADD_FILE_OR_WRITE_DATA
+            | FILE_READ_ATTRIBUTES | READ_CONTROL_ACCESS | SYNCHRONIZE,
+        FILE_OPEN,
+    )
+}
+
 /// Create a hidden in-progress file exclusively relative to its pinned parent.
 /// DELETE access is required to rename the SAME opened handle later.
 pub(super) fn create_stage_child(
