@@ -18,6 +18,14 @@ jobs:
       - name: Check feature-gated native public reader
         run: |
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features public-cdn-reader-lab --lib public_cdn_lab
+      - name: Compile isolated real S3 and Bao adapters
+        run: |
+          cargo check --manifest-path interop/akula-staya/Cargo.toml --features public-cdn-s3-lab,public-cdn-bao-lab --lib
+      - name: Reject suspicious S3 test-only support in ordinary feature build
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -Fq 'public-cdn-bao-lab = ["public-cdn-reader-lab"' aquilum-app/core/Cargo.toml
       - name: Check repository stays non-shipping
         shell: bash
         run: |
