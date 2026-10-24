@@ -1,9 +1,8 @@
 use super::merge::TextEdit;
 use std::fmt;
-use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{
-    Doc, GetString, IndexedSequence, OffsetKind, Options, ReadTxn, StateVector, Text, TextRef, Transact, Update,
+    Doc, GetString, IndexedSequence, OffsetKind, Options, ReadTxn, StateVector, Text, TextRef, Transact,
 };
 
 const TEXT_NAME: &str = "codemirror";
@@ -25,6 +24,8 @@ fn failure(error: impl fmt::Display) -> ReplicaError {
 mod utf16_boundary;
 #[path = "replica_update_guard.rs"]
 mod update_guard;
+#[path = "replica_update_decoder.rs"]
+mod update_decoder;
 
 pub struct Replica {
     doc: Doc,
@@ -55,8 +56,7 @@ impl Replica {
     }
 
     pub fn apply_update(&self, update: &[u8], origin: &str) -> Result<(), ReplicaError> {
-        update_guard::check(update)?;
-        let update = Update::decode_v1(update).map_err(failure)?;
+        let update = update_guard::decode(update)?;
         self.doc.transact_mut_with(origin).apply_update(update).map_err(failure)
     }
 
