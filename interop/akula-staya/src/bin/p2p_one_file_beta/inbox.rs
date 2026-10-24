@@ -439,6 +439,25 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn windows_cold_receiver_never_acks_an_uncommitted_sqlite_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("received-inbox");
+        fs::create_dir(&root).unwrap();
+        let bytes = b"pending is not an acknowledged receipt";
+        let expected = expected_transfer(
+            bytes.len() as u64,
+            *blake3::hash(bytes).as_bytes(),
+            [11; 32],
+            [12; 32],
+        );
+        let ledger = InboxLedger::open(&root).unwrap();
+        assert_eq!(ledger.reserve(&expected).unwrap(), LocalStatus::Pending);
+        drop(ledger);
+        assert!(verify_cold_received_intent(&root, &expected).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn windows_receiver_refuses_junction_ancestor_before_creating_inbox() {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().join("real");
