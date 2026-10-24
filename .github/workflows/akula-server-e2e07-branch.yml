@@ -26,6 +26,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: aquilum-app
+      - name: Verify B0 v2 public UDP scope and v1 compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path modules/bootstrap-b0/Cargo.toml --lib \
+            node_plan_v2_tests -- --nocapture
       - name: Verify B1a package, B0 review and portable owner wire
         shell: bash
         run: |

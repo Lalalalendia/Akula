@@ -139,8 +139,17 @@ pub enum ProposedChange {
     CreateDedicatedServiceAccount,
     CreateOwnedRuntimeAndStateDirectories,
     WriteRestrictedSystemdUnit,
-    EnableLocalLoopbackOnly,
+    EnableLocalLoopbackOnly, // Legacy B0 v1 preview; NOT a Node-V1 install scope.
     VerifyRestartAndSyntheticReadback,
+    // B1-E2E-07 V2: explicitly disclose actual service privileges and endpoint.
+    RequireIndependentlyPinnedRootBootstrap,
+    VerifySeparateOwnerSignatureAndDurableCas,
+    CommitSignedNodeIntoRootOwnedOpt,
+    EnrollPersistentNodeAndReceiptIdentities,
+    PinRootOwnedOwnerPolicyV3,
+    BindPublicUdp43871WithoutChangingFirewall,
+    StartNonRootSystemdService,
+    VerifyRebootAndSignedReceipt,
 }
 
 const FIXED_ACTIONS: [ProposedChange; 6] = [
@@ -150,6 +159,20 @@ const FIXED_ACTIONS: [ProposedChange; 6] = [
     ProposedChange::WriteRestrictedSystemdUnit,
     ProposedChange::EnableLocalLoopbackOnly,
     ProposedChange::VerifyRestartAndSyntheticReadback,
+];
+const NODE_V2_ACTIONS: [ProposedChange; 12] = [
+    ProposedChange::VerifySignedPinnedPackage,
+    ProposedChange::RequireIndependentlyPinnedRootBootstrap,
+    ProposedChange::VerifySeparateOwnerSignatureAndDurableCas,
+    ProposedChange::CommitSignedNodeIntoRootOwnedOpt,
+    ProposedChange::CreateDedicatedServiceAccount,
+    ProposedChange::CreateOwnedRuntimeAndStateDirectories,
+    ProposedChange::EnrollPersistentNodeAndReceiptIdentities,
+    ProposedChange::PinRootOwnedOwnerPolicyV3,
+    ProposedChange::WriteRestrictedSystemdUnit,
+    ProposedChange::BindPublicUdp43871WithoutChangingFirewall,
+    ProposedChange::StartNonRootSystemdService,
+    ProposedChange::VerifyRebootAndSignedReceipt,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -186,14 +209,22 @@ impl DryRunPlan {
     }
 
     pub fn computed_digest(&self) -> String {
-        let mut hash = blake3::Hasher::new_derive_key("Akula Bootstrap B0 readonly plan v1");
+        let domain = match self.schema_version {
+            2 => "Akula Node B1-E2E-07 signed owner review plan v2",
+            _ => "Akula Bootstrap B0 readonly plan v1",
+        };
+        let mut hash = blake3::Hasher::new_derive_key(domain);
         hash.update(&self.canonical_bytes());
         hash.finalize().to_hex().to_string()
     }
 
     pub fn verify_unchanged(&self) -> bool {
-        self.schema_version == 1 && self.proposed_changes == FIXED_ACTIONS
-            && self.computed_digest() == self.plan_blake3
+        let fixed = match self.schema_version {
+            1 => self.proposed_changes == FIXED_ACTIONS,
+            2 => self.proposed_changes == NODE_V2_ACTIONS,
+            _ => false,
+        };
+        fixed && self.computed_digest() == self.plan_blake3
     }
 }
 
@@ -265,4 +296,96 @@ pub fn preview<T: PreviewTransport>(
     };
     plan.plan_blake3 = plan.computed_digest();
     Ok(plan)
+}
+
+/// Node-V1's actual public listener is UDP 43871, NOT loopback-only.
+/// This separate read-only v2 preview retains the verified SSH host facts
+/// but binds the correct privileged action set under a distinct hash domain.
+/// Historical B0 v1 preview/digests remain compatible with older consumers.
+///
+/// No user approval, root helper, port listener, firewall write, or install
+/// occurs here; the installed Akula MUST not enable InstallServer from this.
+pub fn preview_node_v2<T: PreviewTransport>(
+    input: &B0Input,
+    transport: &mut T,
+    cancelled: impl Fn() -> bool,
+) -> Result<DryRunPlan, B0Error> {
+    let mut plan = preview(input, transport, &cancelled)?;
+    if cancelled() { return Err(B0Error::Cancelled); }
+    plan.schema_version = 2;
+    plan.proposed_changes = NODE_V2_ACTIONS.to_vec();
+    plan.plan_blake3 = plan.computed_digest();
+    Ok(plan)
+}
+
+#[cfg(test)]
+mod node_plan_v2_tests {
+    use super::*;
+
+    struct StaticKex {
+        wire: Vec<u8>,
+    }
+    impl PreviewTransport for StaticKex {
+        fn handshake_public_key(&mut self, _: &ServerTarget) -> Result<Vec<u8>, B0Error> {
+            Ok(self.wire.clone())
+        }
+        fn inspect_host(&mut self) -> Result<ReadOnlyHostFacts, B0Error> {
+            Ok(ReadOnlyHostFacts {
+                os: SupportedOs::Ubuntu,
+                arch: MachineArch::X86_64,
+                has_systemd: true,
+                has_sudo_rights: true,
+                cpu_count: 4,
+                ram_mib: 4096,
+                free_disk_mib: 8192,
+            })
+        }
+    }
+
+    #[test]
+    fn node_v2_discloses_public_udp_and_separates_legacy_plan_digest() {
+        let wire = vec![0x91; 32];
+        let input = B0Input {
+            install_id: Uuid::from_bytes([1; 16]),
+            target: ServerTarget {
+                host: "vps.example.org".into(),
+                ssh_port: 22,
+                ssh_user: "ubuntu".into(),
+                trusted_key_sha256: digest::digest(&digest::SHA256, &wire)
+                    .as_ref().try_into().unwrap(),
+            },
+            package: PackagePin {
+                version: "0.3.13".into(),
+                package_sha256: [0x44; 32],
+                trusted_signer_id: "test-release-anchor".into(),
+            },
+        };
+        let old = preview(&input, &mut StaticKex { wire: wire.clone() }, || false).unwrap();
+        let v2 = preview_node_v2(&input, &mut StaticKex { wire }, || false).unwrap();
+        assert!(old.verify_unchanged() && v2.verify_unchanged());
+        assert_eq!((old.schema_version, v2.schema_version), (1, 2));
+        assert_ne!(old.plan_blake3, v2.plan_blake3);
+        assert_eq!(v2.proposed_changes.as_slice(), NODE_V2_ACTIONS.as_slice());
+        assert!(v2.proposed_changes.contains(
+            &ProposedChange::BindPublicUdp43871WithoutChangingFirewall
+        ));
+        assert!(!v2.proposed_changes.contains(&ProposedChange::EnableLocalLoopbackOnly));
+        assert!(old.proposed_changes.contains(&ProposedChange::EnableLocalLoopbackOnly));
+        for index in 0..v2.proposed_changes.len() {
+            let mut changed = v2.clone();
+            changed.proposed_changes.remove(index);
+            changed.plan_blake3 = changed.computed_digest();
+            assert!(!changed.verify_unchanged(), "missing action {index}");
+        }
+        let mut downgrade = v2.clone();
+        downgrade.schema_version = 1;
+        downgrade.plan_blake3 = downgrade.computed_digest();
+        assert!(!downgrade.verify_unchanged());
+        let mut wrong_key = v2;
+        wrong_key.target.trusted_key_sha256[0] ^= 1;
+        wrong_key.plan_blake3 = wrong_key.computed_digest();
+        // A changed target can be internally consistent but is no longer the
+        // originally reviewed plan. Detached owner signatures bind its digest.
+        assert_ne!(wrong_key.plan_blake3, old.plan_blake3);
+    }
 }

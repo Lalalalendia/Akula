@@ -125,7 +125,8 @@ fn hex_digest(value: &str) -> Result<[u8; 32], ReviewError> {
 
 fn preview_valid(plan: &DryRunPlan) -> bool {
     let facts = &plan.inspected_host;
-    plan.verify_unchanged()
+    plan.schema_version == 2
+        && plan.verify_unchanged()
         && plan.target.validate().is_ok()
         && plan.package.validate().is_ok()
         && !plan.install_id.is_nil()

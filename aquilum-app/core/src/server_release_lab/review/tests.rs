@@ -1,5 +1,5 @@
 use super::*;
-use crate::server_bootstrap_lab::{preview, B0Error, B0Input, PreviewTransport, ReadOnlyHostFacts};
+use crate::server_bootstrap_lab::{preview, preview_node_v2, B0Error, B0Input, PreviewTransport, ReadOnlyHostFacts};
 use crate::server_release_lab::{
     ReleaseManifestV1, SignedRelease, TargetPlatform, TrustedReleaseSigner, Version,
 };
@@ -73,7 +73,7 @@ fn fixture() -> (DryRunPlan, SignedRelease, TrustedReleaseSigner, Vec<u8>) {
             trusted_signer_id: manifest.signer_id,
         },
     };
-    let plan = preview(&input, &mut VerifiedKexFixture { wire }, || false)
+    let plan = preview_node_v2(&input, &mut VerifiedKexFixture { wire }, || false)
         .expect("read-only pinned KEX fixture must generate a B0 plan");
     assert!(plan.verify_unchanged());
     (plan, signed, trusted, package)
@@ -310,7 +310,9 @@ fn windows_owner_key_signs_only_the_reviewed_claim() {
     let echo = review.expected_echo();
     let target = review.shown_plan().target.clone();
     let package = review.shown_plan().package.clone();
-    let consent = review.consume_local_click(&echo, &target, &package, NOW + 1).unwrap();
+    let consent = review
+        .consume_local_click(&echo, &target, &package, NOW + 1)
+        .unwrap();
     let owner = OwnerIdentity::from_test_seed([0x99; 32]);
     let (id, plan_hash, host, package_sha, manifest) = consent.scope();
     let claim = OwnerApprovalWireV1 {
@@ -320,12 +322,18 @@ fn windows_owner_key_signs_only_the_reviewed_claim() {
         ssh_host_sha256: host,
         manifest_fingerprint: manifest,
         previous: OwnerFloorWire {
-            generation: 0, sequence: 0, version: [0; 3],
-            manifest_fingerprint: [0; 32], chain_tip: [0; 32],
+            generation: 0,
+            sequence: 0,
+            version: [0; 3],
+            manifest_fingerprint: [0; 32],
+            chain_tip: [0; 32],
         },
         proposed: OwnerFloorWire {
-            generation: 1, sequence: 9, version: [0, 3, 13],
-            manifest_fingerprint: manifest, chain_tip: [0x66; 32],
+            generation: 1,
+            sequence: 9,
+            version: [0, 3, 13],
+            manifest_fingerprint: manifest,
+            chain_tip: [0x66; 32],
         },
         staged_package_sha256: package_sha,
         staged_package_size: artifact.len() as u64,
@@ -334,19 +342,60 @@ fn windows_owner_key_signs_only_the_reviewed_claim() {
         issued_at_unix: NOW,
         expires_at_unix: NOW + 60,
     };
-    let signature = owner.sign_consented_claim(&consent, &claim, NOW + 2).unwrap();
-    assert_eq!(claim.verify_detached(&signature, &owner.public_key_ed25519(), NOW + 2),
-        Ok(()));
+    let signature = owner
+        .sign_consented_claim(&consent, &claim, NOW + 2)
+        .unwrap();
+    assert_eq!(
+        claim.verify_detached(&signature, &owner.public_key_ed25519(), NOW + 2),
+        Ok(())
+    );
     let mut wrong = claim.clone();
     wrong.ssh_host_sha256[0] ^= 1;
     assert_eq!(
         owner.sign_consented_claim(&consent, &wrong, NOW + 2),
         Err(OwnerIdentityError::InvalidScope),
     );
-    assert_eq!(claim.verify_detached(&signature, &[0; 32], NOW + 2),
-        Err(WireError::UntrustedOwner));
+    assert_eq!(
+        claim.verify_detached(&signature, &[0; 32], NOW + 2),
+        Err(WireError::UntrustedOwner)
+    );
     assert_eq!(
         owner.sign_consented_claim(&consent, &claim, NOW + 60),
         Err(OwnerIdentityError::InvalidClaim(WireError::Expired)),
     );
+}
+
+#[test]
+fn legacy_loopback_only_plan_is_never_admissible_for_public_node() {
+    use crate::server_bootstrap_lab::ProposedChange;
+    let (plan, signed, trusted, artifact) = fixture();
+    assert_eq!(plan.schema_version, 2);
+    assert!(plan.proposed_changes.contains(
+        &ProposedChange::BindPublicUdp43871WithoutChangingFirewall,
+    ));
+    assert!(!plan.proposed_changes.contains(&ProposedChange::EnableLocalLoopbackOnly));
+
+    let input = B0Input {
+        install_id: plan.install_id,
+        target: plan.target.clone(),
+        package: plan.package.clone(),
+    };
+    let wire = b"SSH-server-public-key-fixture-never-real".to_vec();
+    let legacy = preview(&input, &mut VerifiedKexFixture { wire }, || false).unwrap();
+    assert!(legacy.verify_unchanged());
+    assert_eq!(legacy.schema_version, 1);
+    assert!(matches!(
+        prepare(legacy, &signed, &trusted, &artifact),
+        Err(ReviewError::InvalidPreview),
+    ));
+
+    let mut dropped = plan.clone();
+    dropped.proposed_changes.retain(|change| *change
+        != ProposedChange::BindPublicUdp43871WithoutChangingFirewall);
+    dropped.plan_blake3 = dropped.computed_digest();
+    assert!(!dropped.verify_unchanged());
+    assert!(matches!(
+        prepare(dropped, &signed, &trusted, &artifact),
+        Err(ReviewError::InvalidPreview),
+    ));
 }

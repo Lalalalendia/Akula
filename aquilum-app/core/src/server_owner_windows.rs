@@ -57,31 +57,39 @@ impl OwnerIdentity {
         Ok(Self { seed, public })
     }
 
-    pub fn public_key_ed25519(&self) -> [u8; 32] { self.public }
+    pub fn public_key_ed25519(&self) -> [u8; 32] {
+        self.public
+    }
 
     #[cfg(test)]
     pub(crate) fn from_test_seed(seed: [u8; 32]) -> Self {
         Self::from_seed(Zeroizing::new(seed)).expect("test seed")
     }
-    pub fn signer_id(&self) -> &'static str { OWNER_ID }
+    pub fn signer_id(&self) -> &'static str {
+        OWNER_ID
+    }
 
     /// Sign only the exact once-reviewed host/release/CAS scope. Root still
     /// independently verifies the actual owner key, floor, stage and nonce.
     pub fn sign_consented_claim(
-        &self, reviewed: &InertUserConsent,
-        claim: &OwnerApprovalWireV1, now_unix: u64,
+        &self,
+        reviewed: &InertUserConsent,
+        claim: &OwnerApprovalWireV1,
+        now_unix: u64,
     ) -> Result<[u8; 64], OwnerIdentityError> {
-        claim.validate_time_and_shape(now_unix)
+        claim
+            .validate_time_and_shape(now_unix)
             .map_err(OwnerIdentityError::InvalidClaim)?;
-        if claim.approver_id != OWNER_ID
-            || !reviewed.matches_owner_claim(claim)
-        {
+        if claim.approver_id != OWNER_ID || !reviewed.matches_owner_claim(claim) {
             return Err(OwnerIdentityError::InvalidScope);
         }
         let signer = Ed25519KeyPair::from_seed_unchecked(&self.seed[..])
             .map_err(|_| OwnerIdentityError::CredentialCorrupt)?;
-        signer.sign(&claim.canonical_bytes()).as_ref()
-            .try_into().map_err(|_| OwnerIdentityError::CredentialCorrupt)
+        signer
+            .sign(&claim.canonical_bytes())
+            .as_ref()
+            .try_into()
+            .map_err(|_| OwnerIdentityError::CredentialCorrupt)
     }
 }
 
@@ -109,7 +117,9 @@ fn parse(bytes: &[u8]) -> Result<OwnerIdentity, OwnerIdentityError> {
 struct CredentialBuffer(*mut CREDENTIALW);
 impl Drop for CredentialBuffer {
     fn drop(&mut self) {
-        if self.0.is_null() { return; }
+        if self.0.is_null() {
+            return;
+        }
         // Scrub only the owned bounded blob; no secret content in diagnostics.
         unsafe {
             let credential = &mut *self.0;
@@ -117,7 +127,8 @@ impl Drop for CredentialBuffer {
                 && credential.CredentialBlobSize as usize <= 2560
             {
                 ptr::write_bytes(
-                    credential.CredentialBlob, 0,
+                    credential.CredentialBlob,
+                    0,
                     credential.CredentialBlobSize as usize,
                 );
             }
@@ -133,15 +144,16 @@ fn wide(value: &str) -> Vec<u16> {
 fn read_named(target: &str) -> Result<OwnerIdentity, OwnerIdentityError> {
     let name = wide(target);
     let mut raw: *mut CREDENTIALW = ptr::null_mut();
-    match unsafe {
-        CredReadW(PCWSTR(name.as_ptr()), CRED_TYPE_GENERIC, None, &mut raw)
-    } {
-        Err(error) if error.code() == ERROR_NOT_FOUND.to_hresult() =>
-            return Err(OwnerIdentityError::NotInitialized),
+    match unsafe { CredReadW(PCWSTR(name.as_ptr()), CRED_TYPE_GENERIC, None, &mut raw) } {
+        Err(error) if error.code() == ERROR_NOT_FOUND.to_hresult() => {
+            return Err(OwnerIdentityError::NotInitialized)
+        }
         Err(_) => return Err(OwnerIdentityError::CredentialStore),
         Ok(()) => {}
     }
-    if raw.is_null() { return Err(OwnerIdentityError::CredentialStore); }
+    if raw.is_null() {
+        return Err(OwnerIdentityError::CredentialStore);
+    }
     let owned = CredentialBuffer(raw);
     let entry = unsafe { &*owned.0 };
     if entry.Type != CRED_TYPE_GENERIC
@@ -151,16 +163,12 @@ fn read_named(target: &str) -> Result<OwnerIdentity, OwnerIdentityError> {
         return Err(OwnerIdentityError::CredentialCorrupt);
     }
     let mut bytes = Zeroizing::new([0u8; RECORD_LEN]);
-    let raw = unsafe {
-        std::slice::from_raw_parts(entry.CredentialBlob, RECORD_LEN)
-    };
+    let raw = unsafe { std::slice::from_raw_parts(entry.CredentialBlob, RECORD_LEN) };
     bytes.copy_from_slice(raw);
     parse(&bytes[..])
 }
 
-fn write_named(target: &str, identity: &OwnerIdentity)
-    -> Result<(), OwnerIdentityError>
-{
+fn write_named(target: &str, identity: &OwnerIdentity) -> Result<(), OwnerIdentityError> {
     let mut value = record(identity);
     let mut name = wide(target);
     let credential = CREDENTIALW {
@@ -171,16 +179,14 @@ fn write_named(target: &str, identity: &OwnerIdentity)
         Persist: CRED_PERSIST_LOCAL_MACHINE,
         ..CREDENTIALW::default()
     };
-    unsafe { CredWriteW(&credential, 0) }
-        .map_err(|_| OwnerIdentityError::CredentialStore)
+    unsafe { CredWriteW(&credential, 0) }.map_err(|_| OwnerIdentityError::CredentialStore)
 }
 
 struct EnrollmentLock(HANDLE);
 impl EnrollmentLock {
     fn acquire() -> Result<Self, OwnerIdentityError> {
-        let handle = unsafe {
-            CreateMutexW(None, false, w!("Local\\AkulaServerOwnerEnrollV1"))
-        }.map_err(|_| OwnerIdentityError::CredentialStore)?;
+        let handle = unsafe { CreateMutexW(None, false, w!("Local\\AkulaServerOwnerEnrollV1")) }
+            .map_err(|_| OwnerIdentityError::CredentialStore)?;
         let outcome = unsafe { WaitForSingleObject(handle, 30_000) };
         if outcome.0 != 0 && outcome.0 != 0x80 {
             let _ = unsafe { CloseHandle(handle) };
@@ -212,7 +218,8 @@ pub fn initialize() -> Result<OwnerIdentity, OwnerIdentityError> {
         Err(error) => return Err(error),
     }
     let mut seed = Zeroizing::new([0u8; 32]);
-    SystemRandom::new().fill(&mut seed[..])
+    SystemRandom::new()
+        .fill(&mut seed[..])
         .map_err(|_| OwnerIdentityError::SeedUnavailable)?;
     let identity = OwnerIdentity::from_seed(seed)?;
     write_named(TARGET, &identity)?;
@@ -231,14 +238,20 @@ mod tests {
     fn private_owner_seed_is_separate_and_corrupted_records_fail_closed() {
         let identity = OwnerIdentity::from_seed(Zeroizing::new([0x99; 32])).unwrap();
         let bytes = record(&identity);
-        assert_eq!(parse(&bytes[..]).unwrap().public_key_ed25519(),
-            identity.public_key_ed25519());
+        assert_eq!(
+            parse(&bytes[..]).unwrap().public_key_ed25519(),
+            identity.public_key_ed25519()
+        );
         let mut changed = bytes.clone();
         changed[8] ^= 1;
-        assert!(matches!(parse(&changed[..]),
-            Err(OwnerIdentityError::CredentialCorrupt)));
-        assert!(matches!(parse(&bytes[..71]),
-            Err(OwnerIdentityError::CredentialCorrupt)));
+        assert!(matches!(
+            parse(&changed[..]),
+            Err(OwnerIdentityError::CredentialCorrupt)
+        ));
+        assert!(matches!(
+            parse(&bytes[..71]),
+            Err(OwnerIdentityError::CredentialCorrupt)
+        ));
         assert_eq!(identity.signer_id(), "akula-owner-v1");
     }
 }

@@ -316,7 +316,7 @@ impl WindowsOpenSshPinnedProbe {
         };
         let mut probe = Self::new(input, &public)
             .map_err(InstallReviewProbeError::Host)?;
-        let plan = crate::server_bootstrap_lab::preview(
+        let plan = crate::server_bootstrap_lab::preview_node_v2(
             input, &mut probe, &cancelled,
         ).map_err(InstallReviewProbeError::Host)?;
         if cancelled() {
