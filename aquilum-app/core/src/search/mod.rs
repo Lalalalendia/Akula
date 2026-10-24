@@ -21,6 +21,10 @@ pub mod paths;
 pub mod progress;
 pub mod query;
 pub mod schema;
+// Standalone opt-in acceptance laboratory; not wired into native, MCP or Sync.
+pub mod semantic_probe;
+// Opt-in durable queue experiment; no daemon, RPC, watcher or model wired up.
+mod semantic_jobs;
 pub mod service;
 pub mod suggest;
 pub mod sync;
