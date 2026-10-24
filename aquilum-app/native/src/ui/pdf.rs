@@ -219,7 +219,7 @@ mod tests {
             image: None, name: "file.pdf".into(), current: 4, total: 10,
             zoom: 1.0, rotation: 1, scroll: 0.0, loading: false, error: None,
         };
-        let page = PdfPage::new(state);
-        assert_ne!(page.id(), masonry::core::WidgetId::next());
+        let page = PdfPage { display: state, frame: Rect::ZERO, header: Line::default(), helper: Line::default() };
+        assert!(page.title().contains("5/10"));
     }
 }
