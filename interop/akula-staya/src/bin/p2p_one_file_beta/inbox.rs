@@ -247,6 +247,22 @@ pub(super) fn persist_received(
     )
 }
 
+/// Open the committed SQLite row again through a new, read-only
+/// connection. The original ledger connection has already closed; its
+/// in-memory VerifiedLocal result alone is never sufficient for receiver OK.
+/// Independently pin/rehash the blob through Windows NT handles afterward.
+#[cfg(windows)]
+fn verify_cold_received_intent(
+    inbox_root: &Path,
+    expected: &ExpectedTransfer,
+) -> Result<(), String> {
+    let cold = InboxLedger::open_existing(inbox_root)
+        .map_err(|error| format!("cold read-only receiver Inbox refused: {error:?}"))?
+        .ok_or("cold receiver Inbox database is missing")?;
+    cold.verify_committed_intent(expected)
+        .map_err(|error| format!("cold committed receiver intent changed: {error:?}"))
+}
+
 /// The Native recipient has **no** user destination. Persist a verified
 /// frame exclusively in the bounded, separately audited SQLite Inbox.
 /// A private, new-only stage is removed on success and every failure.
@@ -360,6 +376,11 @@ pub(super) fn persist_received_payload(
     #[cfg(windows)]
     verify_pinned_windows_inbox_object(inbox_root, &pinned_root, saved.id, size, digest)
         .map_err(|error| format!("Windows Inbox pinned blob verification refused: {error:?}"))?;
+    // Reopen the durable row separately before returning a network OK.
+    // This detects tampering with sender, recipient, size, digest, transport
+    // and committed state after the original SQLite connection closed.
+    #[cfg(windows)]
+    verify_cold_received_intent(inbox_root, &saved)?;
     #[cfg(windows)]
     stage_cleanup.finish()?;
     Ok(saved)
