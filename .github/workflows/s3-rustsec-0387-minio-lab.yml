@@ -1,0 +1,11 @@
+name: S3 SigV4a security acceptance (temporary lab)
+on:
+  push:
+    branches: [lab/s3-rustsec-0387-minio-acceptance]
+
+permissions:
+  contents: read
+
+jobs:
+  minio-regression:
+    uses: ./.github/workflows/sync-s3-minio.yml
