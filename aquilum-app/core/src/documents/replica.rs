@@ -1,11 +1,9 @@
 use super::merge::TextEdit;
 use std::fmt;
 use yrs::updates::decoder::Decode;
-use yrs::branch::{Branch, BranchPtr};
 use yrs::updates::encoder::Encode;
 use yrs::{
-    Assoc, Doc, GetString, IndexedSequence, OffsetKind, Options, ReadTxn, StateVector, StickyIndex, Text, TextRef,
-    Transact, Update,
+    Doc, GetString, IndexedSequence, OffsetKind, Options, ReadTxn, StateVector, Text, TextRef, Transact, Update,
 };
 
 const TEXT_NAME: &str = "codemirror";
@@ -22,6 +20,9 @@ impl fmt::Display for ReplicaError {
 fn failure(error: impl fmt::Display) -> ReplicaError {
     ReplicaError(error.to_string())
 }
+
+#[path = "replica_utf16.rs"]
+mod utf16_boundary;
 
 pub struct Replica {
     doc: Doc,
@@ -89,24 +90,13 @@ impl Replica {
         let candidate = Self { doc, text };
         candidate.apply_update(&self.state(), "stage")?;
         for edits in batches {
+            if !edits.is_empty() {
+                utf16_boundary::validate_utf16_edits(&candidate.text(), edits)?;
+            }
             candidate.apply_edits(edits, "stage");
         }
         let update = candidate.doc.transact().encode_state_as_update_v1(&baseline);
         Ok(update)
-    }
-
-    pub fn encode_position(&self, index: usize) -> Option<Vec<u8>> {
-        let transaction = self.doc.transact();
-        let index = index.min(self.text.len(&transaction) as usize) as u32;
-        self.text.sticky_index(&transaction, index, Assoc::After).map(|position| position.encode_v1())
-    }
-
-    pub fn resolve_position(&self, encoded: &[u8]) -> Option<usize> {
-        let position = StickyIndex::decode_v1(encoded).ok()?;
-        let transaction = self.doc.transact();
-        let offset = position.get_offset(&transaction)?;
-        let text: &Branch = self.text.as_ref();
-        (offset.branch == BranchPtr::from(text)).then_some(offset.index as usize)
     }
 
     pub fn state(&self) -> Vec<u8> {

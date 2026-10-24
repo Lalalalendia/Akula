@@ -227,6 +227,31 @@ fn refuses_a_change_set_for_another_length_without_applying_any_of_the_batch() {
 }
 
 #[test]
+fn utf16_surrogate_split_is_rejected_before_durable_journal_append() {
+    let io = FakeIo::with_file("a😀b");
+    let mut session = DocumentSession::open(&[], &io).expect("open");
+    let initial_updates = io.appended.get();
+    let version = session.version();
+
+    let invalid = edits_to_json(
+        &[TextEdit { from: 2, to: 2, insert: "X".into() }],
+        4,
+    );
+    assert!(session.push("editor", version, &[invalid], &io).is_err());
+    assert_eq!(io.appended.get(), initial_updates);
+    assert_eq!(session.text(), "a😀b");
+    assert_eq!(session.version(), version);
+
+    let valid = edits_to_json(
+        &[TextEdit { from: 1, to: 3, insert: "🎉".into() }],
+        4,
+    );
+    assert!(session.push("editor", version, &[valid], &io).expect("valid edit"));
+    assert_eq!(session.text(), "a🎉b");
+    assert_eq!(io.appended.get(), initial_updates + 1);
+}
+
+#[test]
 fn pull_returns_what_happened_after_the_given_version() {
     let io = FakeIo::with_file("abc");
     let mut session = DocumentSession::open(&[], &io).expect("open");
