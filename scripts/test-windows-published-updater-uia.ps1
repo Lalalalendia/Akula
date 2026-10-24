@@ -20,7 +20,7 @@ $newVersion = '0.3.14'
 $oldSource = '23383c52a6a63fb2e2f6b71d567e41e9018cda22'
 $newSource = '39c159f1724d76b5b5f9453b0404ac7a6f0f248f'
 $oldSha = '1526b83305707204e57e2937d9db8499e539c37fa6a3117854514454349c1fc8'
-$newSha = '' # Derived from published release and cross-checked against manifest.
+$newSha = 'e91f97eff69717b442fa6288036a1a9ea8b129ebfdd056b5290fbb2eb9b85c11' # Immutable public installer digest.
 $install = Join-Path $env:LOCALAPPDATA 'Akula'
 $exe = Join-Path $install 'akula-app.exe'
 $dataDir = Join-Path $env:APPDATA 'io.github.lalalendia.akula'
@@ -58,13 +58,20 @@ if ($LASTEXITCODE -ne 0 -or $latest.tag_name -cne 'v0.3.14' -or
 
 # Verify the actual publicly published target; never fabricate a future
 # release digest. The INSTALLED updater must independently verify Minisign.
-$newSha = ([string]$newAsset.digest).Substring(7)
+if (([string]$newAsset.digest).Substring(7) -cne $newSha) {
+  throw 'Published v0.3.14 installer digest changed since approval'
+}
 $targetName = 'Akula_' + $newVersion + '_x64-setup.exe'
 $proofDir = Join-Path $base 'published-0314-metadata'
 New-Item -ItemType Directory -Force -Path $proofDir | Out-Null
 gh release download ('v' + $newVersion) --repo $repo --dir $proofDir --pattern 'latest.json' --pattern 'latest.json.sig' --pattern ($targetName + '.sig')
 if ($LASTEXITCODE -ne 0) { throw 'Published v0.3.14 signatures or manifest unavailable' }
-$manifest = Get-Content -LiteralPath (Join-Path $proofDir 'latest.json') -Raw | ConvertFrom-Json
+$manifestFile = Join-Path $proofDir 'latest.json'
+if ((Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+    '2b0e066ff8e17d221e7e78bc3c342696c7e02852909e80bce216df13593cf7f9') {
+  throw 'Public v0.3.14 manifest differs from approved published SHA-256'
+}
+$manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
 $win = $manifest.artifacts.'windows-x86_64'
 if ($manifest.schema -ne 1 -or $manifest.product -cne 'Akula' -or
     $manifest.version -cne $newVersion -or $manifest.source_commit -cne $newSource -or
@@ -75,12 +82,16 @@ if ($manifest.schema -ne 1 -or $manifest.product -cne 'Akula' -or
 }
 $published = gh api "repos/$repo/releases/tags/v$newVersion" | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Published release unavailable' }
+$expectedSignatureDigests = @{}
+$expectedSignatureDigests['latest.json.sig'] = '97db502596de701258398d0299620742b8a8445c1764bbb1458ec2123a7485c7'
+$expectedSignatureDigests[$targetName + '.sig'] = 'b7181ee7808467af396362bf898c633411fdfa118ed86998b25755b136de3212'
 foreach ($name in @('latest.json.sig', ($targetName + '.sig'))) {
   $assets = @($published.assets | Where-Object { $_.name -ceq $name })
   $file = Join-Path $proofDir $name
+  $expectedHash = $expectedSignatureDigests[$name]
   if ($assets.Count -ne 1 -or !(Test-Path -LiteralPath $file -PathType Leaf) -or
-      (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-      ([string]$assets[0].digest).Substring(7) -or
+      ([string]$assets[0].digest) -cne ('sha256:' + $expectedHash) -or
+      (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedHash -or
       (Get-Item $file).Length -ne $assets[0].size) {
     throw "Public release signature asset mismatch: $name"
   }
