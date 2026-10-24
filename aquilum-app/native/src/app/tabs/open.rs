@@ -129,7 +129,7 @@ impl App {
             self.tree.set_active(root, Some(path));
             self.show_page(root, 0);
             return;
-        }
+        }        if super::super::pdf_view::is_pdf(&path) { self.leave_note(); self.drop_note_page(root); self.show_pdf_readonly(root, &path); self.tree.set_active(root, Some(path)); self.show_page(root, 0); return; }
         if is_structured_file(&path) {
             self.leave_note();
             self.show_structured_readonly(root, &path);
@@ -318,11 +318,11 @@ impl App {
 
     pub(crate) fn open_in_with_offset(&mut self, root: &mut RenderRoot, path: PathBuf, new_tab: bool, offset: Option<usize>) -> bool {
         let image = crate::images::kind(&path.to_string_lossy()) == Some(crate::images::MediaKind::Image);
-        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) {
+        if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !super::super::pdf_view::is_pdf(&path) {
             return false;
         }
         // Validate the image before changing tabs or navigation: no paths
-        // outside this vault, symlinks, oversized or corrupt sources.
+        // outside this vault, symlinks, oversized or corrupt sources.        if super::super::pdf_view::is_pdf(&path) && !self.tree.root().is_some_and(|vault| super::super::pdf_view::trusted_source(vault, &path)) { return false; }
         if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
             return false;
         }
