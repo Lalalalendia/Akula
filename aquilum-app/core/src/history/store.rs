@@ -10,6 +10,9 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
+mod integrity;
+use integrity::parse_version;
+
 pub const AQUILUM_FOLDER: &str = ".aquilum";
 const QUANTUM_FOLDER: &str = ".quantum";
 const HISTORY_FOLDER: &str = "history";
@@ -242,7 +245,7 @@ pub(super) fn write_version(
 ) -> Result<PathBuf, FileCommandError> {
     #[cfg(feature = "save-stage-probe")]
     let profile_start = std::time::Instant::now();
-    let label = snapshot.source.file_label();
+    let label = integrity::version_label(snapshot);
     // Distinct source labels can otherwise share a millisecond, causing history
     // ordering to disagree with the order in which versions were written.
     let taken = versions(dir)
@@ -301,7 +304,7 @@ pub fn versions(dir: &Path) -> Vec<VersionFile> {
 }
 
 pub fn read_version(dir: &Path, version: &VersionFile) -> Option<String> {
-    read_text(&dir.join(&version.id)).ok()
+    integrity::read_version(dir, version)
 }
 
 pub fn has_text(dir: &Path, version: &VersionFile, text: &str) -> bool {
@@ -324,6 +327,11 @@ pub(super) fn update_version_text(
     version_id: &str,
     text: &str,
 ) -> Result<(), FileCommandError> {
+    if integrity::is_sealed_name(version_id) {
+        return Err(FileCommandError::Io {
+            message: "sealed history version may not be overwritten".to_owned(),
+        });
+    }
     write_history_snapshot_atomic_impl(&dir.join(version_id), text)
 }
 
@@ -457,24 +465,6 @@ fn files(dir: &Path) -> impl Iterator<Item = (String, PathBuf)> {
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .map(|entry| (entry.file_name().to_string_lossy().into_owned(), entry.path()))
-}
-
-fn parse_version(name: String) -> Option<VersionFile> {
-    let (at_ms, device, source) = {
-        let mut parts = name.strip_suffix(VERSION_EXTENSION)?.splitn(3, '_');
-        let at_ms = parts.next()?.parse().ok()?;
-        let device = parts.next()?.to_owned();
-        (at_ms, device, Source::from_label(parts.next()?)?)
-    };
-    Some(VersionFile {
-        id: name,
-        at_ms,
-        device,
-        from_ms: source.origin_ms(),
-        source,
-        name: None,
-        is_current: false,
-    })
 }
 
 fn millis(at: SystemTime) -> u64 {
