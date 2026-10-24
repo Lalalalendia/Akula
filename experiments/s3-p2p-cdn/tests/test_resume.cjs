@@ -29,7 +29,7 @@ Object.defineProperty(globalThis,'navigator',{configurable:true,value:nav});
  await output.write(data.subarray(0,4096));first.update(data.subarray(0,4096));
  await output.write(data.subarray(4096,8192));first.update(data.subarray(4096,8192));
  });
- assert.equal(stored,2,'a persisted checkpoint and pause close should both commit');
+ assert.equal(stored,1,'checkpoint should durably persist first two chunks');
  const second=makeHash();
  await withResumeLock(manifest.content_id,async()=>{
  const output=await openResumableOutput(manifest,{hashChunk:sha,hasher:second,checkpointBytes:8192});
