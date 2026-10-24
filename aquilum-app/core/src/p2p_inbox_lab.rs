@@ -62,6 +62,15 @@ pub fn verify_pinned_windows_inbox_object(
     .map_err(|_| InboxError::InvalidDestination)
 }
 
+/// Request deferred removal of an exclusively-created Windows Inbox stage
+/// using its original NT HANDLE. No string path is ever resolved at cleanup.
+/// On success the caller must only drop/close that stage's file handles.
+#[cfg(windows)]
+pub fn mark_pinned_windows_stage_delete_on_close(stage: &File) -> Result<(), InboxError> {
+    crate::sync::mark_pinned_p2p_inbox_stage_delete_on_close(stage)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
