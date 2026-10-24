@@ -75,23 +75,7 @@ mod pinned_read;
 mod filegate_windows_acl;
 #[cfg(windows)]
 mod pinned_windows;
-// P2P-only private staging, reusing the existing NT handle-relative
-// creation and conservative owner/DACL audit without granting Vault rights.
-#[cfg(all(windows, feature = "p2p-inbox-lab"))]
-pub(crate) fn create_pinned_p2p_inbox_stage(
-    root: &std::path::Path,
-    name: &str,
-) -> Result<(std::fs::File, std::fs::File), VaultPortError> {
-    let inspected = pinned_windows::open_root(root)?;
-    filegate_windows_acl::audit_owner_dacl(&inspected)?;
-    let writable = pinned_windows::open_root_for_create(root)?;
-    if pinned_windows::file_identity(&inspected)? != pinned_windows::file_identity(&writable)? {
-        return Err(VaultPortError::FileChanged);
-    }
-    let stage = pinned_windows::create_stage_child(&writable, name)?;
-    Ok((writable, stage))
-}
-
+pub(crate) mod p2p_stage;
 mod protocol;
 mod provider;
 mod s3;
@@ -222,9 +206,4 @@ pub const SYNC_ENGINE_FEATURE_ENABLED: bool = cfg!(feature = "sync-engine");
 /// Local custody checks can compile without an S3 SDK or sync scheduler.
 pub const HOST_CUSTODY_FEATURE_ENABLED: bool = cfg!(feature = "host-custody");
 #[cfg(all(test, not(feature = "sync-engine")))]
-mod disabled_tests {
-    #[test]
-    fn compiled_contracts_do_not_enable_cloud_sync_by_default() {
-        assert!(!super::SYNC_ENGINE_FEATURE_ENABLED);
-    }
-}
+mod disabled_tests;

@@ -45,6 +45,10 @@ jobs:
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/native_receive.rs aquilum-app/native/src/ui/transfer/native_receive_view.rs
           rustfmt --check --edition 2024 aquilum-app/native/src/app/transfer/peer_pair.rs aquilum-app/native/src/ui/transfer/peer_pair.rs
           rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer.rs aquilum-app/native/src/app/transfer/dialog.rs aquilum-app/native/src/ui/transfer.rs aquilum-app/native/src/ui/transfer/dialog_view.rs
+          # Check the new leaf modules without reformatting unrelated legacy W4 code.
+          rustfmt --check --config skip_children=true --edition 2024 aquilum-app/native/src/app/transfer/actions.rs aquilum-app/native/src/app/transfer/dialog/context.rs aquilum-app/native/src/ui/transfer/types.rs aquilum-app/native/src/ui/transfer/dialog_view/panels.rs
+          rustfmt --check --config skip_children=true --edition 2021 aquilum-app/core/src/sync/p2p_stage.rs aquilum-app/core/src/sync/disabled_tests.rs aquilum-app/core/src/p2p_inbox_lab/tests.rs
+          cargo fmt --manifest-path modules/drop-inbox-ledger/Cargo.toml -- --check
           cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Verify shipping lockfile remains resolved
         shell: bash
