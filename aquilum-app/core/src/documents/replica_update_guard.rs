@@ -12,17 +12,15 @@ pub(super) fn decode(update: &[u8]) -> Result<Update, ReplicaError> {
     update_decoder::decode(update).map_err(failure)
 }
 
-fn varuint(bytes: &[u8], cursor: &mut usize, max_octets: usize) -> Option<u64> {
+// Mirror Yrs 0.28.0's permissive varint semantics (including wrapped shifts).
+// Its decoder accepts overlong varints for Yjs interoperability; the guard
+// must not reject valid updates solely because the encoding is noncanonical.
+fn varuint(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
     let mut number = 0u64;
-    for index in 0..max_octets {
+    for index in 0..11 {
         let octet = *bytes.get(*cursor)?;
         *cursor += 1;
-        let shift = index * 7;
-        let chunk = u64::from(octet & 0x7f);
-        if chunk > u64::MAX >> shift {
-            return None;
-        }
-        number |= chunk << shift;
+        number |= u64::from(octet & 0x7f).wrapping_shl((index * 7) as u32);
         if octet & 0x80 == 0 {
             return Some(number);
         }
@@ -31,7 +29,16 @@ fn varuint(bytes: &[u8], cursor: &mut usize, max_octets: usize) -> Option<u64> {
 }
 
 fn varuint32(bytes: &[u8], cursor: &mut usize) -> Option<u32> {
-    u32::try_from(varuint(bytes, cursor, 5)?).ok()
+    let mut number = 0u32;
+    for index in 0..11 {
+        let octet = *bytes.get(*cursor)?;
+        *cursor += 1;
+        number |= u32::from(octet & 0x7f).wrapping_shl((index * 7) as u32);
+        if octet & 0x80 == 0 {
+            return Some(number);
+        }
+    }
+    None
 }
 
 fn fits(count: u32, available: usize, minimum_item_bytes: usize) -> bool {
@@ -50,7 +57,7 @@ pub(super) fn check(update: &[u8]) -> Result<(), ReplicaError> {
     if client_count > 0 {
         let blocks = varuint32(update, &mut cursor)
             .ok_or_else(|| failure("invalid first Yrs v1 block count"))?;
-        varuint(update, &mut cursor, 10)
+        varuint(update, &mut cursor)
             .ok_or_else(|| failure("invalid first Yrs v1 client ID"))?;
         varuint32(update, &mut cursor)
             .ok_or_else(|| failure("invalid first Yrs v1 clock"))?;
@@ -66,7 +73,7 @@ pub(super) fn check(update: &[u8]) -> Result<(), ReplicaError> {
             return Err(failure("Yrs v1 delete-set count exceeds encoded input"));
         }
         if delete_clients > 0 {
-            varuint(update, &mut cursor, 10)
+            varuint(update, &mut cursor)
                 .ok_or_else(|| failure("invalid first delete-set client ID"))?;
             let ranges = varuint32(update, &mut cursor)
                 .ok_or_else(|| failure("invalid first delete-set range count"))?;
@@ -112,6 +119,19 @@ mod tests {
         assert!(replica.apply_update(&bad, "remote").is_err());
         assert_eq!(replica.text(), "");
         assert!(replica.state().len() > 0);
+    }
+
+    #[test]
+    fn keeps_yrs_extended_varint_compatibility() {
+        use yrs::updates::decoder::Decode;
+        // Both counts encode zero using six octets. Yrs accepts this form
+        // even though the canonical encoding is simply [0, 0].
+        let noncanonical = [
+            0x80, 0x80, 0x80, 0x80, 0x80, 0x00,
+            0x80, 0x80, 0x80, 0x80, 0x80, 0x00,
+        ];
+        assert!(Update::decode_v1(&noncanonical).is_ok());
+        assert!(decode(&noncanonical).is_ok());
     }
 
     #[test]
