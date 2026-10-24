@@ -48,6 +48,12 @@ def create_app(manifest_path: Path, demo_file: Path | None = None):
     async def client_js(_):
         return web.FileResponse(HERE / "web/client.js", headers={"Cache-Control": "no-store"})
 
+    async def sha256_js(_):
+        return web.FileResponse(HERE / "web/sha256_stream.js", headers={"Cache-Control": "no-store"})
+
+    async def bounded_output_js(_):
+        return web.FileResponse(HERE / "web/bounded_output.js", headers={"Cache-Control": "no-store"})
+
     async def css(_):
         return web.FileResponse(HERE / "web/style.css")
 
@@ -174,6 +180,8 @@ def create_app(manifest_path: Path, demo_file: Path | None = None):
 
     app.router.add_get("/", index)
     app.router.add_get("/client.js", client_js)
+    app.router.add_get("/sha256_stream.js", sha256_js)
+    app.router.add_get("/bounded_output.js", bounded_output_js)
     app.router.add_get("/style.css", css)
     app.router.add_get("/manifest.json", get_manifest)
     app.router.add_get("/stats", stats)
