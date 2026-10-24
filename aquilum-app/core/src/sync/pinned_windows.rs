@@ -24,6 +24,10 @@ const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
 const READ_CONTROL_ACCESS: u32 = 0x0002_0000;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const SHARE_ALL: u32 = 0x0000_0007;
+#[cfg(feature = "p2p-inbox-lab")]
+const SHARE_READ_WRITE: u32 = 0x0000_0003;
+#[cfg(feature = "p2p-inbox-lab")]
+const FILE_OPEN_IF: u32 = 3;
 const FILE_OPEN: u32 = 1;
 const FILE_CREATE: u32 = 2;
 const FILE_ADD_FILE_OR_WRITE_DATA: u32 = 0x0000_0002;
@@ -315,6 +319,43 @@ pub(super) fn create_probe_lock_child(
     )
 }
 
+/// Hold the original root directory open without FILE_SHARE_DELETE so
+/// an unrelated process cannot rename/delete this directory during the
+/// path-based SQLite transaction. The already pinned write-root HANDLE is
+/// independently compared by the caller before accepting this lease.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn open_p2p_inbox_root_no_delete(root: &Path) -> Result<File, VaultPortError> {
+    let mut options = OpenOptions::new();
+    options.access_mode(
+        FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES
+            | READ_CONTROL_ACCESS | SYNCHRONIZE,
+    );
+    options.share_mode(SHARE_READ_WRITE);
+    options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let file = options.open(root).map_err(io)?;
+    let meta = file.metadata().map_err(io)?;
+    reject_reparse(&meta)?;
+    if !meta.is_dir() {
+        return Err(VaultPortError::UnsafePath);
+    }
+    Ok(file)
+}
+
+/// NT FILE_OPEN_IF creates only a missing child and never truncates an
+/// existing SQLite or objects component. No-delete sharing pins its NT name
+/// against replacement while path-based rusqlite is working.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn pin_p2p_inbox_child_no_delete(
+    pinned_root: &File, name: &str, file: bool,
+) -> Result<File, VaultPortError> {
+    let desired = FILE_READ_DATA_OR_LIST_DIRECTORY | FILE_READ_ATTRIBUTES
+        | READ_CONTROL_ACCESS | SYNCHRONIZE
+        | if file { FILE_ADD_FILE_OR_WRITE_DATA } else { FILE_ADD_FILE_OR_WRITE_DATA };
+    open_child_access_optional_sharing(
+        pinned_root, name, file, desired, FILE_OPEN_IF, SHARE_READ_WRITE,
+    )?.ok_or(VaultPortError::FileChanged)
+}
+
 /// Inspection-only, relative to the pinned directory HANDLE. Only the
 /// native STATUS_OBJECT_NAME_NOT_FOUND status means absent; all other NT
 /// errors and reparse/special-object aliases fail closed.
@@ -356,6 +397,15 @@ fn open_child_access(
 fn open_child_access_optional(
     parent: &File, name: &str, leaf: bool, desired_access: u32,
     disposition: u32,
+) -> Result<Option<File>, VaultPortError> {
+    open_child_access_optional_sharing(
+        parent, name, leaf, desired_access, disposition, SHARE_ALL,
+    )
+}
+
+fn open_child_access_optional_sharing(
+    parent: &File, name: &str, leaf: bool, desired_access: u32,
+    disposition: u32, share_access: u32,
 ) -> Result<Option<File>, VaultPortError> {
     if name.is_empty() || name == "." || name == ".."
         || name.chars().any(|ch| matches!(ch, '/' | '\\' | ':' | '\0'))
@@ -399,7 +449,7 @@ fn open_child_access_optional(
             &mut status_block,
             ptr::null(),
             0,
-            SHARE_ALL,
+            share_access,
             disposition,
             opts,
             ptr::null_mut(),
