@@ -1,0 +1,27 @@
+name: Isolated native public S3 P2P reader lab
+on:
+  push:
+    branches: [lab/s3-p2p-native-reader-20261024]
+    paths:
+      - 'interop/akula-staya/**'
+      - '.github/workflows/s3-p2p-native-reader-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-reader-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91
+      - name: Check feature-gated native public reader
+        run: |
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features public-cdn-reader-lab --lib public_cdn_lab
+      - name: Check repository stays non-shipping
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e interop/akula-staya/src/public_cdn_lab.rs
+          test -e interop/akula-staya/PUBLIC_CDN_NATIVE_LAB.md
+          ! grep -Fq 'interop/akula-staya' aquilum-app/Cargo.toml
