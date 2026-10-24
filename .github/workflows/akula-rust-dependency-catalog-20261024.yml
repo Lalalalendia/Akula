@@ -50,7 +50,7 @@ jobs:
           if len(traces)!=349: raise RuntimeError('Changed source: expected 349, got '+str(len(traces)))
           lock=Path('aquilum-app/Cargo.lock').read_text()
           if len(re.findall(r'^\[\[package\]\]$',lock,re.M))!=718: raise RuntimeError('Changed lock count')
-          info=json.loads(run(['cargo','metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-msvc','--features','installed','--manifest-path',root]))
+          info=json.loads(run(['cargo','metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-msvc','--features','aquilum-native/installed','--manifest-path',root]))
           packages=defaultdict(list)
           for p in info['packages']: packages[p['name']+'@'+p['version']].append(p)
           names=Counter(x.rsplit('@',1)[0] for x in traces)
