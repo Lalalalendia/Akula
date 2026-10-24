@@ -113,12 +113,7 @@ fn symlinked_destination_parent_is_refused() {
     let mut stage = opened(dir.path(), b"trusted");
     let target = parent_link.join("unexpected.bin");
     assert!(matches!(
-        save_verified_stage_as_new(
-            &mut stage,
-            7,
-            *blake3::hash(b"trusted").as_bytes(),
-            &target
-        ),
+        save_verified_stage_as_new(&mut stage, 7, *blake3::hash(b"trusted").as_bytes(), &target),
         Err(InboxError::InvalidDestination)
     ));
     assert!(!outside.join("unexpected.bin").exists());
