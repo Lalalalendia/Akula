@@ -203,10 +203,11 @@ fn file_gate_import_is_searchable_through_actual_sqlite_dataview_index() {
     let deadline = Instant::now() + Duration::from_secs(15);
     let table = loop {
         let attempt = core.search.run_dataview_query(root, origin, &query, 0);
-        if let Ok(found) = &attempt {
-            if found.total == 2 { break found.clone(); }
+        match attempt {
+            Ok(found) if found.total == 2 => break found,
+            other => assert!(Instant::now() < deadline,
+                "File Gate import was not indexed: {other:?}"),
         }
-        assert!(Instant::now() < deadline, "File Gate import was not indexed: {attempt:?}");
         std::thread::sleep(Duration::from_millis(50));
     };
     assert_eq!(table.total, 2);
