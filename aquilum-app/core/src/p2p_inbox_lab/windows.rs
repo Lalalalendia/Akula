@@ -82,9 +82,7 @@ pub fn pin_windows_export_parent(parent: &Path) -> Result<PinnedWindowsExportPar
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
         let opened = options.open(directory)?;
         let metadata = opened.metadata()?;
-        if !metadata.is_dir()
-            || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        {
+        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Err(InboxError::InvalidDestination);
         }
         chain.push(opened);
