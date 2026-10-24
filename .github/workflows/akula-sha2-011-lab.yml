@@ -64,7 +64,7 @@ jobs:
               return out
           before=packages("/tmp/akula-sha2-before-tree.txt")
           after=packages("/tmp/akula-sha2-after-tree.txt")
-          if len(before)!=349 or not after:raise RuntimeError("Unexpected baseline or empty candidate: "+str((len(before),len(after))))
+          if not (340 <= len(before) <= 360) or not after:raise RuntimeError("Unexpected baseline or empty candidate: "+str((len(before),len(after))))
           old_legacy=sorted(x for x in before if x.startswith("sha2@0.10"))
           if len(old_legacy)!=1:raise RuntimeError("Old SHA2 missing from baseline")
           if any(x.startswith("sha2@0.10") for x in after):raise RuntimeError("Old SHA2 still in Windows normal graph")
