@@ -84,7 +84,7 @@ pub fn card(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<F
 
 pub fn content(config: &AppConfig, ctx: &Context, section: Section) -> (NewWidget<Flex>, HashMap<WidgetId, Binding>) {
     if section == Section::Sync {
-        return cloud::catalog(ctx);
+        return cloud::catalog(config, ctx);
     }
     let mut bindings = HashMap::new();
     let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch);

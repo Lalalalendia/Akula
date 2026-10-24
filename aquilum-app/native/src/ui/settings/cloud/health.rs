@@ -33,7 +33,20 @@ impl Health {
     }
 }
 
-pub(super) fn health(provider: CloudProvider, ctx: &Context) -> Health {
+pub(super) fn health(provider: CloudProvider, config: &AppConfig, ctx: &Context) -> Health {
+    #[cfg(not(feature = "dropbox-readonly-preview"))]
+    let _ = config;
+    #[cfg(feature = "dropbox-readonly-preview")]
+    if provider == CloudProvider::Dropbox {
+        if ctx.dropbox_preview_busy { return Health::Checking; }
+        let status = ctx.dropbox_preview_status.as_str();
+        if ["FAILED", "REJECTED", "DENIED", "MISMATCH", "REVOKED",
+            "INVALID", "UNAVAILABLE", "NO_SAVED", "PUBLISHER_NOT_APPROVED"]
+            .iter().any(|marker| status.contains(marker)) { return Health::Review; }
+        return if config.dropbox_readonly.account_id.is_empty() {
+            Health::NotConnected
+        } else { Health::Saved };
+    }
     #[cfg(feature = "notion-offline-preview")]
     if provider == CloudProvider::Notion {
         if ctx.notion_offline.error.is_some() { return Health::Review; }

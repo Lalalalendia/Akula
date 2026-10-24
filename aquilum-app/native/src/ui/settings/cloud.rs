@@ -193,10 +193,10 @@ impl Widget for ProviderTile {
     fn children_ids(&self) -> ChildrenIds { ChildrenIds::new() }
 }
 
-pub(super) fn catalog(ctx: &Context) -> (NewWidget<Flex>, HashMap<WidgetId, Binding>) {
+pub(super) fn catalog(config: &AppConfig, ctx: &Context) -> (NewWidget<Flex>, HashMap<WidgetId, Binding>) {
     let mut bindings = HashMap::new();
     let tiles = CloudProvider::ALL.into_iter().map(|provider| {
-        let tile = NewWidget::new(ProviderTile::new(provider, health(provider, ctx)));
+        let tile = NewWidget::new(ProviderTile::new(provider, health(provider, config, ctx)));
         bindings.insert(tile.id(), Binding::Button(Action::OpenCloudProvider(provider)));
         tile.erased()
     }).collect();
@@ -223,6 +223,8 @@ pub struct CloudPopup {
     // Draft public fields live only in this modal until explicit Save.
     // OS credentials and completed Configure/Import actions are independent.
     staged_texts: Vec<(Setter, String)>,
+    #[cfg(feature = "dropbox-readonly-preview")]
+    dropbox_identity: (String, String),
 }
 
 fn same_setter(a: Setter, b: Setter) -> bool {
@@ -265,6 +267,19 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider, staged: &[(S
             }
             super::layout::block_widget(block, &mut bindings)
         }
+        #[cfg(feature = "dropbox-readonly-preview")]
+        CloudProvider::Dropbox => {
+            let mut blocks = schema::blocks(Section::Sync, config, ctx);
+            let mut block = blocks.pop().expect("Dropbox setup block");
+            for row in &mut block.rows {
+                if let (Some(setter), Control::Text { value, .. }) = (row.setter, &mut row.control)
+                    && let Some((_, draft)) = staged.iter().find(|(key, _)| same_setter(*key, setter))
+                {
+                    value.clone_from(draft);
+                }
+            }
+            super::layout::block_widget(block, &mut bindings)
+        }
         #[cfg(feature = "notion-offline-preview")]
         CloudProvider::Notion => notion::body(ctx, &mut bindings),
         _ => NewWidget::new(Flex::column()
@@ -275,7 +290,9 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider, staged: &[(S
     let cancel = NewWidget::new(TextButton::new(t("settings.cloud.close"), Variant::Ghost));
     let cancel_id = cancel.id();
     let mut footer = Flex::row().main_axis_alignment(MainAxisAlignment::End).with_fixed(cancel);
-    let save = if provider == CloudProvider::Yandex {
+    let supports_form = provider == CloudProvider::Yandex
+        || (cfg!(feature = "dropbox-readonly-preview") && provider == CloudProvider::Dropbox);
+    let save = if supports_form {
         let button = NewWidget::new(TextButton::new(t("settings.cloud.save"), Variant::Primary));
         let id = button.id();
         footer = footer.with_fixed(button);
@@ -309,11 +326,17 @@ pub fn provider_modal(config: &AppConfig, ctx: &Context, provider: CloudProvider
         provider,
         bindings: built.bindings,
         staged_texts: Vec::new(),
+        #[cfg(feature = "dropbox-readonly-preview")]
+        dropbox_identity: (
+            config.dropbox_readonly.account_id.clone(),
+            config.dropbox_readonly.root_namespace_id.clone(),
+        ),
     };
     (layer, popup)
 }
 
 impl CloudPopup {
+    pub fn has_draft_changes(&self) -> bool { !self.staged_texts.is_empty() }
     pub fn remember_text(&mut self, setter: Setter, text: &str) {
         if let Some((_, existing)) = self.staged_texts.iter_mut()
             .find(|(stored, _)| same_setter(*stored, setter))
@@ -324,7 +347,24 @@ impl CloudPopup {
         }
     }
 
+    #[cfg(feature = "dropbox-readonly-preview")]
+    fn discard_draft_if_dropbox_account_changed(&mut self, config: &AppConfig) {
+        if self.provider != CloudProvider::Dropbox { return; }
+        let current = &config.dropbox_readonly;
+        if self.dropbox_identity.0 != current.account_id
+            || self.dropbox_identity.1 != current.root_namespace_id
+        {
+            self.staged_texts.clear();
+            self.dropbox_identity = (
+                current.account_id.clone(),
+                current.root_namespace_id.clone(),
+            );
+        }
+    }
+
     pub fn rebuild(&mut self, root: &mut RenderRoot, config: &AppConfig, ctx: &Context) {
+        #[cfg(feature = "dropbox-readonly-preview")]
+        self.discard_draft_if_dropbox_account_changed(config);
         let built = card(config, ctx, self.provider, &self.staged_texts);
         root.edit_widget(self.layer, |mut w| Modal::set_card(
             &mut w.downcast(), built.card, &self.provider.label(),
@@ -338,59 +378,4 @@ impl CloudPopup {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cloud_tiles_never_confuse_stored_keys_with_working_sync() {
-        let mut ctx = Context::new(1.0);
-        assert_eq!(health(CloudProvider::Yandex, &ctx), Health::NotConnected);
-        assert_eq!(health(CloudProvider::AmazonS3, &ctx), Health::Unavailable);
-        ctx.yandex_keys = Some(true);
-        #[cfg(not(all(target_os = "windows", feature = "s3-pair-beta")))]
-        assert_eq!(health(CloudProvider::Yandex, &ctx), Health::NotConnected);
-        #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-        {
-            use crate::s3_pair_session::PairStatus;
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Saved);
-            ctx.s3_pair.configured = true;
-            ctx.s3_pair.status = PairStatus::Configured;
-            ctx.s3_pair.verified = false;
-            assert_ne!(health(CloudProvider::Yandex, &ctx), Health::Verified);
-            ctx.s3_pair.verified = true;
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Verified);
-            ctx.s3_pair.status = PairStatus::Transferred {
-                sent: 1, received_unconfirmed: 1, needs_review: 0,
-            };
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Review);
-            ctx.s3_pair.status = PairStatus::Failed;
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Review);
-        }
-    }
-
-    #[test]
-    fn every_provider_has_only_its_authorized_actions() {
-        let config = AppConfig::default();
-        let ctx = Context::new(1.0);
-        let (_, bindings) = catalog(&ctx);
-        let actions = bindings.values().filter_map(|binding| {
-            match binding {
-                Binding::Button(Action::OpenCloudProvider(provider)) => Some(*provider),
-                _ => None,
-            }
-        }).collect::<Vec<_>>();
-        assert_eq!(actions.len(), CloudProvider::ALL.len());
-        for provider in CloudProvider::ALL {
-            assert!(actions.contains(&provider));
-            let built = card(&config, &ctx, provider, &[]);
-            assert_eq!(built.save.is_some(), provider == CloudProvider::Yandex);
-            #[cfg(feature = "notion-offline-preview")]
-            if provider == CloudProvider::Notion {
-                assert!(built.bindings.values().any(|b| matches!(b,
-                    Binding::Button(Action::NotionConnect))));
-                continue;
-            }
-            if provider != CloudProvider::Yandex { assert!(built.bindings.is_empty()); }
-        }
-    }
-}
+mod tests;

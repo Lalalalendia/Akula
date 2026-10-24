@@ -8,7 +8,7 @@ use crate::ui::settings::{Binding, CloudPopup, SettingsDialog};
 use crate::ui::settings::controls::Committed;
 use crate::ui::settings::schema::{Action, Value};
 use crate::ui::widgets::Pressed;
-
+mod save;
 impl App {
     pub(super) fn on_cloud_action(
         &mut self, root: &mut RenderRoot, id: WidgetId, action: &ErasedAction,
@@ -54,50 +54,7 @@ impl App {
             return self.keep(dialog, None, Effect::Content, root);
         }
         if pressed && cloud.save == Some(id) {
-            // Save commits typed fields even without an Enter keypress.
-            let texts = cloud.bindings.iter().filter_map(|(id, binding)| {
-                let Binding::Text { setter, .. } = binding else { return None };
-                let text = root.get_widget(*id)?
-                    .downcast::<TextEditor>()?.inner().text();
-                Some((*setter, text))
-            }).collect::<Vec<_>>();
-            // Refuse invalid S3 buckets before closing the dialog.
-            #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-            if texts.len() == 1 && !aquilum_core::settings::models::YandexS3Onboarding::valid_bucket(&texts[0].1) {
-                dialog.yandex_notice = Some(crate::i18n::t("settings.yandex.keysNeedBucket"));
-                dialog.cloud_popup = Some(cloud);
-                return self.keep(dialog, None, Effect::Content, root);
-            }
-            let before = self.workspace.core.settings.get_config();
-            let mut proposal = before.clone();
-            for (setter, text) in &texts {
-                if let crate::ui::settings::schema::Setter::Config(apply) = setter {
-                    apply(&mut proposal, &Value::Text(text.clone()));
-                }
-            }
-            if !aquilum_core::settings::models::YandexS3Onboarding::valid_bucket(
-                &proposal.s3_onboarding.bucket,
-            ) {
-                dialog.yandex_notice = Some(crate::i18n::t("settings.yandex.keysNeedBucket"));
-                dialog.cloud_popup = Some(cloud);
-                return self.keep(dialog, None, Effect::Content, root);
-            }
-            let saved_bucket = proposal.s3_onboarding.bucket.clone();
-            // This is one atomic settings transaction, not a series of
-            // per-field saves which could leave partial configuration.
-            if self.workspace.core.settings.update_config(proposal).is_err() {
-                dialog.yandex_notice = Some(crate::i18n::t("settings.cloud.saveFailed"));
-                dialog.cloud_popup = Some(cloud);
-                return self.keep(dialog, None, Effect::Content, root);
-            }
-            if before.s3_onboarding.bucket != saved_bucket {
-                self.yandex_probe.set_bucket(&saved_bucket);
-                #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-                self.s3_pair.invalidate_verification();
-            }
-            crate::ui::dialog::close(root, cloud.layer);
-            root.focus_on(Some(dialog.layer));
-            return self.keep(dialog, None, Effect::Content, root);
+            return self.save_cloud_popup(root, dialog, cloud);
         }
         #[cfg(feature = "notion-offline-preview")]
         if pressed && let Some(Binding::Button(button)) = cloud.bindings.get(&id)
@@ -162,6 +119,15 @@ impl App {
                         }
                     }
                 }
+            }
+            #[cfg(feature = "dropbox-readonly-preview")]
+            if cloud.provider == crate::ui::settings::schema::CloudProvider::Dropbox
+                && cloud.has_draft_changes()
+                && matches!(&button, Action::DropboxConnectReadOnly | Action::DropboxResumeReadOnly)
+            {
+                self.dropbox_preview.status = "DROPBOX_SAVE_ADVANCED_FIRST / SYNC_DISABLED".into();
+                dialog.cloud_popup = Some(cloud);
+                return self.keep(dialog, None, Effect::Content, root);
             }
             effect = self.press(&mut dialog, button);
         }

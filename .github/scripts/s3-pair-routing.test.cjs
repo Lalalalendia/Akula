@@ -51,6 +51,9 @@ test('S3 UIA is still executed against the real opt-in Windows-native build', ()
   assert.match(uia, /\[AkulaBetaGuiInput\]::TypeAsciiKeys/);
   assert.match(uia, /AKULA_CLOUD_SAVE_UIA_PASS/);
   assert.match(uia, /AKULA_CLOUD_DISCARD_UIA_PASS/);
+  assert.match(uia, /AKULA_DROPBOX_MODAL_UIA_PASS/);
+  // PowerShell 5.1 decodes BOM-less scripts as ANSI on Windows runners.
+  assert.doesNotMatch(uia, /[^\x00-\x7F]/, 'UIA script must be ASCII or explicitly UTF-8 BOM');
 });
 
 test('PR cancellation is scoped; manually dispatched acceptance is preserved', () => {
