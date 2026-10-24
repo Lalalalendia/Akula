@@ -39,3 +39,8 @@ required-features = ["public-cdn-local-minio-test"]
 name = "bao_iroh_real"
 path = "tests/bao_iroh_real.rs"
 required-features = ["bao"]
+
+[[test]]
+name = "minio_to_iroh_64m"
+path = "tests/minio_to_iroh_64m.rs"
+required-features = ["public-cdn-local-minio-test", "bao"]
