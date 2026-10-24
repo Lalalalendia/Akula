@@ -4,6 +4,8 @@
 //!
 //! Every enrolled root is initially disabled. Permission/review failures pause
 //! automatically, and no code here deletes or modifies an offline snapshot.
+pub mod persistence;
+
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
