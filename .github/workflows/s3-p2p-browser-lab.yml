@@ -46,9 +46,11 @@ jobs:
       - name: Install browser testing dependencies
         run: |
           npm install --no-save playwright@1.56.1
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox
       - name: Real Chromium to Chromium WebRTC DataChannel
         run: node tests/test_real_webrtc.cjs
+      - name: Real Chromium and Firefox (split swarm, corrupt chunk)
+        run: node tests/test_cross_engine_webrtc.cjs
       - name: Evidence and logs
         if: always()
         uses: actions/upload-artifact@v4
