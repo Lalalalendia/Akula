@@ -71,8 +71,20 @@ impl TextEditor {
             return false;
         }
         let mut ranges: Vec<Range<usize>> = self.extra_cursors.iter().chain([&(self.anchor, self.focus)]).map(|&(a, f)| a.min(f)..a.max(f)).collect();
-        ranges.sort_unstable_by_key(|range| (range.start, range.end));
-        ranges.dedup_by(|next, previous| next.start < previous.end || next == previous);
+        ranges.sort_unstable_by_key(|range| (range.start, std::cmp::Reverse(range.end)));
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if let Some(previous) = merged.last_mut() {
+                // Identical empty cursors and truly overlapping selections
+                // represent one edit. Adjacent selections remain separate.
+                if range.start < previous.end || range == *previous {
+                    previous.end = previous.end.max(range.end);
+                    continue;
+                }
+            }
+            merged.push(range);
+        }
+        let ranges = merged;
         let edits = ranges.into_iter().filter_map(|range| edit(&self.doc, range)).collect();
         self.dispatch(edits, None, kind);
         for (anchor, focus) in std::iter::once((&mut self.anchor, &mut self.focus)).chain(self.extra_cursors.iter_mut().map(|(a, f)| (a, f))) {
