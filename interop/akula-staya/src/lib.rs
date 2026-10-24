@@ -20,6 +20,8 @@ pub mod roster_observation_lab;
 pub mod sender_arm_lab;
 #[cfg(feature = "public-cdn-reader-lab")]
 pub mod public_cdn_lab;
+#[cfg(feature = "public-cdn-s3-lab")]
+pub mod public_cdn_s3_lab;
 
 use staya_transfer::{
     ContentId, Manifest,
