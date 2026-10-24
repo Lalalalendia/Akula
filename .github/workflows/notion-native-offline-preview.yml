@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: notion-native-offline-${{ github.event.pull_request.number || github.ref }}
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

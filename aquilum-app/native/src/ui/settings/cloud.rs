@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn every_provider_is_navigable_but_only_yandex_has_a_form() {
+    fn every_provider_has_only_its_authorized_actions() {
         let config = AppConfig::default();
         let ctx = Context::new(1.0);
         let (_, bindings) = catalog(&ctx);
@@ -384,9 +384,13 @@ mod tests {
             assert!(actions.contains(&provider));
             let built = card(&config, &ctx, provider, &[]);
             assert_eq!(built.save.is_some(), provider == CloudProvider::Yandex);
-            if provider != CloudProvider::Yandex {
-                assert!(built.bindings.is_empty());
+            #[cfg(feature = "notion-offline-preview")]
+            if provider == CloudProvider::Notion {
+                assert!(built.bindings.values().any(|b| matches!(b,
+                    Binding::Button(Action::NotionConnect))));
+                continue;
             }
+            if provider != CloudProvider::Yandex { assert!(built.bindings.is_empty()); }
         }
     }
 }
