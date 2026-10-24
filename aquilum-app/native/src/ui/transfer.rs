@@ -46,6 +46,12 @@ pub enum NativeReceiveAction {
     Cancel,
 }
 
+#[derive(Clone, Debug)]
+pub enum InboxAction {
+    Preview(String),
+    SaveCopy(String),
+}
+
 /// Read-only view model; only the opt-in receiver-side worker populates rows.
 /// Display labels never become filesystem paths.
 #[derive(Clone, Debug)]
@@ -63,6 +69,8 @@ pub struct InboxView {
     pub loading: bool,
     pub error: Option<String>,
     pub exporting: bool,
+    pub previewing: bool,
+    pub preview: Option<(String, String)>,
     pub notice_key: Option<&'static str>,
 }
 
@@ -112,7 +120,7 @@ pub struct TransferDialog {
     pub device_actions: Vec<(WidgetId, DeviceId, [u8; 32])>,
     pub identity_actions: Vec<(WidgetId, IdentityAction)>,
     pub peer_controls: Option<PeerControls>,
-    pub inbox_save_actions: Vec<(WidgetId, String)>,
+    pub inbox_actions: Vec<(WidgetId, InboxAction)>,
     #[cfg(feature = "p2p-native-send-beta")]
     pub native_send_actions: Vec<(WidgetId, NativeSendAction)>,
     #[cfg(feature = "p2p-native-receive-beta")]

@@ -239,10 +239,15 @@ impl App {
         }
         #[cfg(feature = "p2p-inbox-preview")]
         if pressed && !refresh {
-            if let Some((_, receipt)) = dialog.inbox_save_actions.iter()
+            if let Some((_, command)) = dialog.inbox_actions.iter()
                 .find(|(button, _)| *button == id)
             {
-                refresh = self.begin_inbox_save(receipt);
+                refresh = match command {
+                    transfer_ui::InboxAction::SaveCopy(receipt) => self.begin_inbox_save(receipt),
+                    transfer_ui::InboxAction::Preview(receipt) => {
+                        self.begin_inbox_text_preview(receipt)
+                    }
+                };
             }
         }
         #[cfg(feature = "p2p-native-send-beta")]

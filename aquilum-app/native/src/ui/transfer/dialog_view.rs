@@ -1,8 +1,8 @@
 //! Transfer dialog construction, leaving transfer.rs as a compact API.
 use super::*;
 
-/// Draft controls remain inert. The optional received-Inbox Save Copy button
-/// invokes only an explicit local no-clobber export, never QUIC or Vault ACL.
+/// Draft controls remain inert. Inbox preview is verified, bounded and
+/// read-only; Save Copy uses explicit local no-clobber export, never Vault ACL.
 pub fn dialog(
     rows: &[QueueRow],
     devices: &[DeviceRow],
@@ -68,7 +68,7 @@ pub fn dialog(
             1.0,
         );
     }
-    let (card, inbox_save_actions) = if let Some(inbox) = inbox {
+    let (card, inbox_actions) = if let Some(inbox) = inbox {
         let (panel, buttons) = inbox_view::render(inbox);
         (
             card.with_fixed(rule())
@@ -117,7 +117,7 @@ pub fn dialog(
             device_actions,
             identity_actions,
             peer_controls,
-            inbox_save_actions,
+            inbox_actions,
             #[cfg(feature = "p2p-native-send-beta")]
             native_send_actions,
             #[cfg(feature = "p2p-native-receive-beta")]

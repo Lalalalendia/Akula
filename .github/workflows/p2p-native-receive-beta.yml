@@ -105,6 +105,7 @@ jobs:
           # Exact feature graph of ordinary Windows installers and auto-updates.
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed app::transfer::native_receive::tests -- --nocapture
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed app::transfer::inbox::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_receive_view::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_send_view::tests -- --nocapture
