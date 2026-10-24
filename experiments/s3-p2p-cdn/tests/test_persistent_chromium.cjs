@@ -90,7 +90,6 @@ async function verifyFile(page) {
 let ctx;
 try{
   const before=await stats();
-  ({context:ctx, page:undefined}= {context:undefined}); // keep explicit lifecycle below
   let item=await open();ctx=item.context;let page=item.page;
   await sample(page,'start');
   if(MODE==='resume'){
