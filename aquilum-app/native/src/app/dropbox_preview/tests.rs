@@ -127,3 +127,20 @@ fn preview_never_reports_sync_enabled() {
     let state = DropboxPreview::new();
     assert!(state.status.contains("SYNC_DISABLED"));
 }
+
+#[test]
+fn repeat_oauth_consent_is_bound_to_exact_saved_public_identity() {
+    let mut draft = DropboxReadOnlyDraft::default();
+    assert_eq!(existing_account_scope(draft.clone()), None);
+    draft.account_id = "dbid:alice".into();
+    draft.root_namespace_id = "12345".into();
+    assert_eq!(
+        existing_account_scope(draft.clone()),
+        Some(AccountIdentity {
+            account_id: "dbid:alice".into(),
+            root_namespace_id: "12345".into(),
+        }),
+    );
+    draft.root_namespace_id.clear();
+    assert_eq!(existing_account_scope(draft), None);
+}

@@ -72,16 +72,7 @@ impl DropboxPreview {
             .spawn(move || {
                 // Bind loopback before launching the system browser. Never
                 // print the OAuth URL, authorization code or access token.
-                let expected = if draft.account_id.is_empty()
-                    || draft.root_namespace_id.is_empty()
-                {
-                    None
-                } else {
-                    Some(AccountIdentity {
-                        account_id: draft.account_id,
-                        root_namespace_id: draft.root_namespace_id,
-                    })
-                };
+                let expected = existing_account_scope(draft);
                 let result = AccountSession::begin(
                     AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
                 ).and_then(|session| {
@@ -375,6 +366,16 @@ impl super::App {
         }
         super::settings::Effect::Content
     }
+}
+
+fn existing_account_scope(draft: DropboxReadOnlyDraft) -> Option<AccountIdentity> {
+    if draft.account_id.is_empty() || draft.root_namespace_id.is_empty() {
+        return None;
+    }
+    Some(AccountIdentity {
+        account_id: draft.account_id,
+        root_namespace_id: draft.root_namespace_id,
+    })
 }
 
 fn open_browser(url: &str) -> bool {
