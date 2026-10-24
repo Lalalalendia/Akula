@@ -9,6 +9,8 @@ workspace = ".."
 
 [features]
 default = []
+# Opt-in pure messaging state machine; no network, storage, UI or workers.
+messaging-core-lab = []
 # Opt-in read-only Notion API, local snapshots and inert scheduling tests.
 notion-api-probe = []
 # Metadata-only negotiation lab: no transport, staging, or File Gate.

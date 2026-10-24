@@ -1,12 +1,12 @@
-//! The Aquilum core: notes on disk, documents, search, history, settings and UI state, with no
-//! knowledge of the UI that hosts it.
-
+//! Aquilum Core: notes, documents, search, history, settings, UI state; UI-independent.
 pub mod app_core;
 pub mod documents;
 pub mod files;
 pub mod history;
 pub mod link_title;
 pub mod markdown;
+#[cfg(feature = "messaging-core-lab")]
+pub mod messaging;
 pub mod mcp;
 pub mod plugins;
 pub mod migration;
