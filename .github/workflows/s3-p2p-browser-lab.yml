@@ -70,6 +70,10 @@ jobs:
         run: docker stop akula-browser-stream-minio >/dev/null 2>&1 || true
       - name: Incremental SHA-256 and bounded 1 GiB OPFS output
         run: node tests/test_bounded_output.cjs
+      - name: Recover transient range failures and reject corrupt responses
+        run: node tests/test_range_reader.cjs
+      - name: Remove abandoned OPFS files without touching fresh outputs
+        run: node tests/test_opfs_cleanup.cjs
       - name: Six simulated client scenarios
         run: node tests/test_e2e_simulated.js
       - name: Install browser testing dependencies
