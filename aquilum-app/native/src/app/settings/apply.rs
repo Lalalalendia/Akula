@@ -1,6 +1,5 @@
 use super::*;
 use std::path::Path;
-
 impl App {
     pub(super) fn apply(&mut self, setter: Setter, value: Value) -> Effect {
         match setter {
@@ -52,10 +51,13 @@ impl App {
                     || retention
                     || before.s3_onboarding != after.s3_onboarding;
                 let new_yandex_bucket = after.s3_onboarding.bucket.clone();
+                let dropbox_changed = before.dropbox_readonly != after.dropbox_readonly;
                 if let Err(error) = core.settings.update_config(after) {
                     report!("настройки не сохранены: {error}");
                     return Effect::None;
                 }
+                #[cfg(feature = "dropbox-readonly-preview")]
+                if dropbox_changed { self.dropbox_preview.invalidate(); }
                 if before.s3_onboarding.bucket != new_yandex_bucket {
                     self.yandex_probe.set_bucket(&new_yandex_bucket);
                     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
@@ -71,7 +73,7 @@ impl App {
                     Effect::Everything
                 } else if fonts_changed || colors_changed {
                     Effect::Restyle(fonts_changed)
-                } else if rows_changed {
+                } else if rows_changed || dropbox_changed {
                     Effect::Content
                 } else if analysis_changed {
                     Effect::Panel
@@ -81,13 +83,11 @@ impl App {
             }
         }
     }
-
     pub(super) fn refresh_analysis(&mut self, root: &mut RenderRoot) {
         if self.panel_mode() == crate::links::Mode::Analysis {
             self.request_panel(root);
         }
     }
-
     pub(in crate::app) fn cleanup_retention(&self) {
         let Some(workspace) = self.tree.root().map(Path::to_path_buf) else { return };
         let core = std::sync::Arc::clone(&self.workspace.core);

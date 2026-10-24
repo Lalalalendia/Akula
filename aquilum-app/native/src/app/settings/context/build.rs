@@ -1,6 +1,5 @@
 use super::super::*;
 use std::path::Path;
-
 impl App {
     pub(in crate::app::settings) fn settings_context(&self, section: Section, copied: Option<usize>, trash_page: usize) -> Context {
         let workspace = self.tree.root().map(Path::to_path_buf);
@@ -61,6 +60,7 @@ impl App {
             yandex_notice: None,
             sync_selected: None,
             sync_notice: None,
+            #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview_status: self.dropbox_preview.status.clone(), #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview_busy: self.dropbox_preview.busy,
             scale: self.interface.scale(),
             home_page,
             mcp: Some(self.workspace.core.mcp.status()),

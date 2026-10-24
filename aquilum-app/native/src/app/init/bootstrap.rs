@@ -1,5 +1,4 @@
 use super::super::*;
-
 impl App {
     pub fn new(workspace: Workspace, initial_text: String) -> Self {
         let tree = FileTree::new(workspace.root.clone(), &workspace.data_dir, Arc::clone(&workspace.wake));
@@ -23,6 +22,7 @@ impl App {
         yandex_probe.set_bucket(&workspace.core.settings.get_config().s3_onboarding.bucket);
         let mut app = App {
             workspace,
+            #[cfg(feature = "dropbox-readonly-preview")] dropbox_preview: dropbox_preview::DropboxPreview::new(),
             tree,
             chrome: None,
             interface,
