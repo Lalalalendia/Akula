@@ -1,0 +1,52 @@
+name: Akula B1-E2E-07 integrated branch gate
+
+on:
+  push:
+    branches: [feature/akula-b1-e2e07-owner-install]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: b1-e2e07-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signed-review-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app
+      - name: Check exact source formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! cargo fmt --manifest-path aquilum-app/Cargo.toml --all -- --check; then
+            cargo fmt --manifest-path aquilum-app/Cargo.toml --all
+            git diff -- aquilum-app/core/src/server_release_lab.rs \
+              aquilum-app/core/src/server_release_lab/review.rs \
+              aquilum-app/core/src/server_release_lab/review/tests.rs
+            exit 1
+          fi
+      - name: Verify B1a signed-release and B0 immutable review tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-install-review --lib \
+            server_release_lab::review::tests -- --nocapture
+      - name: Confirm default Core compiles without installer authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --no-default-features
