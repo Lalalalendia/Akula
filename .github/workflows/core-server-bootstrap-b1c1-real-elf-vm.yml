@@ -1,6 +1,7 @@
 name: Akula Bootstrap B1c1 exact B1a ELF owner-CAS QEMU DynamicUser bridge
 
 on:
+  workflow_call:
   pull_request:
     branches: [main]
     paths:
@@ -13,7 +14,7 @@ on:
       - "scripts/ci/akula-b1c1-vm-hook.sh"
       - "scripts/ci/akula-b1c1-guest-lab.sh"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B1C1.md"
-      - "aquilum-app/core/Cargo.toml"
+
   workflow_dispatch:
 
 permissions:

@@ -2,15 +2,7 @@
 name: Installed host Unix owner preflight (non-release)
 
 on:
-  pull_request:
-    paths:
-      - 'aquilum-app/core/Cargo.toml'
-      - 'aquilum-app/core/src/sync/host_install_unix_root.rs'
-      - 'aquilum-app/core/src/sync/host_install_witness.rs'
-      - 'aquilum-app/core/src/sync/mod.rs'
-      - 'aquilum-app/native/Cargo.toml'
-      - '.github/workflows/sync-installed-os-owner-witness.yml'
-      - 'docs/sync/adr-0038-unix-root-owned-install-receipt.md'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -18,7 +10,7 @@ permissions:
 
 concurrency:
   # Only PR revisions supersede earlier PR revisions; manual labs stay independent.
-  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: owner-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:

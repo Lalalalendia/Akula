@@ -1,21 +1,13 @@
 # RELEASE-LINUX-ID-01: ephemeral DEB/RPM packaging, never a release.
 name: Akula Linux beta candidate
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/linux-beta.yml'
-      - '.github/scripts/linux-beta-identity.test.cjs'
-      - 'scripts/linux-beta-smoke.sh'
-      - 'aquilum-app/native/packaging/akula-linux-nfpm.yaml'
-      - 'aquilum-app/native/packaging/Akula.desktop'
-      - 'aquilum-app/native/src/**'
-      - 'aquilum-app/native/Cargo.toml'
-      - 'aquilum-app/Cargo.lock'
+  workflow_call:
+  # PR source owners are enforced by the required Main PR gate.
+
 permissions:
   contents: read
 concurrency:
-  group: akula-linux-beta-${{ github.event.pull_request.number || github.ref }}
+  group: akula-linux-beta-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 env:
   NFPM_VERSION: 2.47.0
@@ -35,7 +27,7 @@ jobs:
           sudo apt-get remove -y $(dpkg-query -W -f='${Package}\n' 'libunwind-*-dev' 2>/dev/null) || true
           sudo apt-get install -y libunwind-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            pkg-config curl rpm
+            libdbus-1-dev pkg-config curl rpm
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:

@@ -11,13 +11,15 @@ use super::s3::S3Keyspace;
 use super::protection_store::MAX_PROTECTED_ORIGINAL_BYTES;
 
 mod multipart;
+mod explicit_credentials;
+pub(crate) mod pair_upload;
+pub(crate) mod pair_receive;
+pub use explicit_credentials::S3PairAccess;
 mod manifest;
 mod principal;
 pub use principal::{S3AwsAccountProofError, S3AwsVerifiedAccountScope};
 mod v2_readonly;
 pub use v2_readonly::{S3PinnedV2ReadError, S3PinnedV2ReadPreview};
-// Bounded, opt-in read-only pack verifier. The sender/builder stays
-// test-only; no new remote writer or local file apply is enabled.
 mod pack_probe;
 // Pure bounded pack encoder for future host-admitted sender; no S3 writer.
 mod coord_pack_encode;
@@ -45,7 +47,6 @@ mod coord_chain;
 pub use coord_chain::{S3CoordOfflineChainError, S3CoordOfflineChainPreview};
 mod coord_selective_packs;
 pub use coord_selective_packs::S3CoordSelectivePacksPreview;
-// Immutable V1-manifest-ID keyed advisory locator discovery; never S3 LIST.
 mod coord_locator;
 // V2 immutable packs/letter/locator prepublication; never mutable CAS.
 mod coord_immutable_publish;
@@ -69,7 +70,6 @@ use std::time::Duration;
 
 #[cfg(test)]
 use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
-
 /// Test-only S3 method-attempt instrumentation. These count Akula SDK
 /// HEAD/GET attempts and fully read payload bytes, not TCP bytes, retries
 /// inside the AWS SDK, TLS frames or server-side network traffic.
@@ -104,72 +104,9 @@ const MAX_PROBE_BYTES: u64 = 1024 * 1024;
 const MAX_CORE_STAGE_BLOB_BYTES: u64 = MAX_PROTECTED_ORIGINAL_BYTES as u64;
 const MAX_S3_PAGE_SIZE: i32 = 1000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum S3TransportError {
-    InvalidProfile,
-    UnsafeEndpoint,
-    OutsideVaultNamespace,
-    NotFound,
-    PermissionDenied,
-    PreconditionFailed,
-    CommitUncertain,
-    Unavailable,
-    MalformedResponse,
-    ObjectTooLarge,
-    ChangedDuringRead,
-    IncompleteListing,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct S3ConnectionProfile {
-    pub bucket: String,
-    pub region: String,
-    /// None selects the standard AWS endpoint for the configured region.
-    pub endpoint: Option<String>,
-    pub force_path_style: bool,
-}
-
-impl S3ConnectionProfile {
-    pub fn validate(&self) -> Result<(), S3TransportError> {
-        let name = self.bucket.as_bytes();
-        if !(3..=63).contains(&name.len())
-            || !name.first().is_some_and(u8::is_ascii_lowercase)
-                && !name.first().is_some_and(u8::is_ascii_digit)
-            || !name.last().is_some_and(u8::is_ascii_lowercase)
-                && !name.last().is_some_and(u8::is_ascii_digit)
-            || !name.iter().all(|ch| ch.is_ascii_lowercase()
-                || ch.is_ascii_digit() || *ch == b'-' || *ch == b'.')
-            || self.bucket.contains("..")
-        {
-            return Err(S3TransportError::InvalidProfile);
-        }
-        if self.region.is_empty() || self.region.len() > 64
-            || !self.region.bytes().all(|ch| ch.is_ascii_lowercase()
-                || ch.is_ascii_digit() || ch == b'-')
-        {
-            return Err(S3TransportError::InvalidProfile);
-        }
-        if let Some(endpoint) = &self.endpoint {
-            let url = url::Url::parse(endpoint).map_err(|_| S3TransportError::UnsafeEndpoint)?;
-            if url.host_str().is_none()
-                || !url.username().is_empty()
-                || url.password().is_some()
-                || url.path() != "/"
-                || url.query().is_some()
-                || url.fragment().is_some()
-            {
-                return Err(S3TransportError::UnsafeEndpoint);
-            }
-            match url.scheme() {
-                "https" => {}
-                "http" if self.force_path_style
-                    && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1")) => {}
-                _ => return Err(S3TransportError::UnsafeEndpoint),
-            }
-        }
-        Ok(())
-    }
-}
+// Shared with offline S3 invite V1. S3 transport retains the exact same
+// validator and errors, but it no longer owns those portable types.
+pub use super::s3_pair_connection::{S3ConnectionProfile, S3TransportError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct S3ObservedObject {

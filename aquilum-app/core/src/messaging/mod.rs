@@ -122,12 +122,15 @@ impl OutboundMessage {
     pub fn phase(&self) -> Phase {
         self.phase
     }
+
     pub fn route_available(&self) -> bool {
         self.route_available
     }
+
     pub fn recipient_accepted(&self) -> bool {
         self.phase == Phase::RecipientAccepted
     }
+
     pub fn descriptor(&self) -> &Descriptor {
         &self.descriptor
     }

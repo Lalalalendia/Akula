@@ -5,8 +5,10 @@ on:
     branches:
       - main
       - experiment/akula-p2p-offer-contract-20261021
+      - feature/akula-staya-consent-provider-boundary-20261022
     paths:
       - 'interop/akula-staya/**'
+      - 'aquilum-app/core/src/p2p_inbox_lab.rs'
       - '.github/workflows/p2p-akula-staya-real.yml'
   workflow_dispatch:
 
@@ -32,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Lalalalendia/staya-transfer
-          ref: fadb38a792126f6098df086fc56ce0dcae3ca3f1
+          ref: ccfe82dc6125e2810e95043a6a4ac55954b710e0
           path: .external/staya-transfer
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -40,16 +42,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .external/staya-transfer rev-parse HEAD)" = "fadb38a792126f6098df086fc56ce0dcae3ca3f1"
+          test "$(git -C .external/staya-transfer rev-parse HEAD)" = "ccfe82dc6125e2810e95043a6a4ac55954b710e0"
       - name: Rust formatting for standalone bridge crate
         shell: bash
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
-        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --lib -- --nocapture
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab,p2p-live-identity --lib -- --nocapture
+      - name: Rust formatting for exact opt-in inbox Core
+        shell: bash
+        run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
+      - name: Check Akula real create-new inbox, corruption, and no-overwrite
+        shell: bash
+        run: cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features p2p-inbox-lab p2p_inbox_lab::tests -- --nocapture
+      - name: Authenticate real QUIC remote_id against fresh OS peer pin
+        shell: bash
+        env:
+          AKULA_P2P_OS_PIN_CI: '1'
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity --test live_identity -- --nocapture
+      - name: Compile opt-in OS-protected real LAN QUIC probe
+        shell: bash
+        run: cargo check --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan
       - name: Lint actual integration crate
         shell: bash
-        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path interop/akula-staya/Cargo.toml --features p2p-live-identity,sender-arm-lab,os-pinned-lan-probe --all-targets -- -D warnings
       - name: Build actual pinned Staya direct batch preview
         shell: bash
         run: |
@@ -63,4 +79,53 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="$BIN.exe"; fi
           test -f "$BIN"
           export STAYA_PREVIEW_BIN="$BIN"
-          cargo test --manifest-path interop/akula-staya/Cargo.toml --test real_quic -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab --test real_quic -- --nocapture
+      - name: NODE-E2E-02a offline signed Node replica over real Staya QUIC/Bao
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$GITHUB_WORKSPACE/.external/staya-transfer/interop/release/target/debug/staya-direct-preview"
+          test -f "$BIN"
+          export STAYA_PREVIEW_BIN="$BIN"
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-replica-transport-lab --test node_replica_real_quic -- --nocapture
+      - name: NODE-LIVE-ID-01 authenticated Iroh remote_id and exact owner read grant
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-live-read-lab --test node_live_identity -- --nocapture
+      - name: NODE-V1 signed local Put/Get, replay and cold reopened SQLite
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features node-v1 node_v1:: -- --nocapture
+      - name: NODE-V1 A-to-Node-to-B actual authenticated Iroh QUIC
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features node-v1-e2e-tests --test node_v1_real_quic -- --nocapture
+      - name: Build two Windows diagnostic executables from the verified source
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path interop/akula-staya/Cargo.toml --features os-pinned-lan-probe --bin akula-p2p-lan
+          cargo build --manifest-path aquilum-app/Cargo.toml --target-dir .artifacts/cargo-native --locked -p aquilum-core --features p2p-device-identity --bin akula-p2p-identity
+          mkdir -p .artifacts/p2p-cross-network-windows
+          cp interop/akula-staya/target/debug/akula-p2p-lan.exe .artifacts/p2p-cross-network-windows/
+          cp .artifacts/cargo-native/debug/akula-p2p-identity.exe .artifacts/p2p-cross-network-windows/
+          cp interop/akula-staya/README.md .artifacts/p2p-cross-network-windows/INSTRUCTIONS.md
+          printf 'UNSIGNED TEST-ONLY DIAGNOSTIC. NOT THE INSTALLED AKULA APP. NO FILE TRANSFER.\nSource commit: %s\n' "$GITHUB_SHA" > .artifacts/p2p-cross-network-windows/NOT_AN_APP_RELEASE.txt
+          cd .artifacts/p2p-cross-network-windows
+          sha256sum *.exe > SHA256SUMS.txt
+      - name: Upload opt-in Windows Internet/QUIC test bundle, never as a release
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-p2p-cross-network-probe-windows-${{ github.sha }}
+          path: .artifacts/p2p-cross-network-windows/
+          if-no-files-found: error
+          retention-days: 7
