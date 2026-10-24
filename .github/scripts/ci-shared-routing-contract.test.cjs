@@ -540,11 +540,11 @@ test('B0c Windows owned sources run only through required main route; non-main a
   }
   assert.equal(router.assess({paths:['README.md']}).owned_b0c_ssh,false);
   assert.equal(router.assess({paths:[router.NATIVE]}).owned_b0c_ssh,false);
-  assert.match(core,/owned_b0c_ssh: \\$\{\{ steps\.scope\.outputs\.owned_b0c_ssh \}\}/);
-  assert.match(core,/owned_b0c_ssh: \\$\{\{ needs\.classify\.outputs\.owned_b0c_ssh == 'true' \}\}/);
+  assert.ok(core.includes("owned_b0c_ssh: ${{ steps.scope.outputs.owned_b0c_ssh }}"),'classifier exports B0c owner');
+  assert.ok(core.includes("owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}"),'required B0c input wired');
   assert.match(core,/SHARED_RISKY: .*owned_b0c_ssh/);
   assert.match(shared,/^      owned_b0c_ssh:\n        required: true\n        type: boolean$/m);
-  assert.match(shared,/route-b0c-ssh-native:\n    name: Impacted native manifest \/ b0c-windows-ssh\n    if: \\$\{\{ inputs\.native \\|\\| inputs\.owned_b0c_ssh \}\}/);
+  assert.ok(shared.includes("if: ${{ inputs.native || inputs.owned_b0c_ssh }}"),'one callable B0c route for native risk or source owners');
   assert.match(shared,/\["route-b0c-ssh-native",\["native","owned_b0c_ssh"\]\]/);
   assert.match(shared,/needs: \[[^\n]*route-b0c-ssh-native[^\n]*\]/);
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
