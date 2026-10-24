@@ -254,3 +254,28 @@ This closes a **test integration gap**, not the deployment acceptance gate.
 The root installer still needs a production parser to verify the submitted
 B0 v3 plan against independently trusted helper state, real publisher and
 owner key enrollment, service/systemd activation and authorized VPS E2E.
+
+### Root-side B0 v3 canonical plan / owner correspondence (isolated gate)
+
+The existing B1d0 CAS test now has a **separate** Linux root-side, non-shipping
+`server-root-b0v3-gate-lab` validation module. It parses a size-bounded
+canonical JSON `DryRunPlan` as an exact B0 v3 schema (unknown fields and
+noncanonical encodings are refused), recomputes the distinct BLAKE3 v3
+digest and exact fixed-action list, and cross-checks an Ed25519 owner
+signature over that same plan against the independently pinned host,
+helper, Node B1a package/manifest identity and expected witness revision.
+A B0 v2 plan, extra JSON fields, changed helper, wrong signer, forged signed
+plan digest, stale CAS revision, wrong release size, expired claim or
+unexpected OS profile is rejected. The previously used v1/v2 serialization
+remains unchanged; the added Deserialize implementation is strictly for
+root-side parsing.
+
+**Important trust boundary:** the expected key/host/release values in this
+pure verifier must eventually be loaded from *verified OS-root-owned*
+enrollment and verified signed release FDs. They are never trusted when
+supplied by an SSH peer. This new module returns a strictly **inert**
+`CheckedRootV3Scope`, has no root helper entrypoint or ability to invoke
+B1d0, and is not enabled in the installed client. Its tests are not proof
+that production has any enrollment, authenticated host, owner signature
+or activation authority. Until an independent root state loader and real
+root-verified transaction are implemented, the E2E gate remains HOLD.

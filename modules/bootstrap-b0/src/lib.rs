@@ -7,7 +7,7 @@
 //! before it can provide read-only host facts. This module alone is NOT SSH.
 
 use ring::{constant_time, digest};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -29,7 +29,8 @@ pub enum B0Error {
     InsufficientResources,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerTarget {
     pub host: String,
     pub ssh_port: u16,
@@ -74,21 +75,22 @@ fn valid_dns_name(host: &str) -> bool {
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SupportedOs {
     Debian,
     Ubuntu,
     Other,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MachineArch {
     X86_64,
     Aarch64,
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReadOnlyHostFacts {
     pub os: SupportedOs,
     pub arch: MachineArch,
@@ -99,7 +101,8 @@ pub struct ReadOnlyHostFacts {
     pub free_disk_mib: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackagePin {
     /// Version and trusted signing-key label must be supplied from the
     /// separately authenticated release manifest, NOT from the SSH server.
@@ -133,7 +136,7 @@ pub struct B0Input {
     pub package: PackagePin,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProposedChange {
     VerifySignedPinnedPackage,
     CreateDedicatedServiceAccount,
@@ -193,7 +196,8 @@ const NODE_V3_ACTIONS: [ProposedChange; 13] = [
     ProposedChange::VerifyRebootAndSignedReceipt,
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DryRunPlan {
     pub schema_version: u16,
     pub install_id: Uuid,

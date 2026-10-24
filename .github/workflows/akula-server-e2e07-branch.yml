@@ -65,6 +65,13 @@ jobs:
           cargo test --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-bootstrap-b1b1b-approval-lab \
             --test server_bootstrap_b1b1b -- --nocapture
+      - name: Verify root-side canonical B0 v3 and independently pinned owner claim
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            server_root_v3_guard::tests -- --nocapture
       - name: Confirm default Core compiles without installer authority
         shell: bash
         run: |
@@ -79,6 +86,8 @@ jobs:
             aquilum-app/core/src/server_owner_approval_wire.rs
             aquilum-app/core/src/server_install_root_gate.rs
             aquilum-app/core/src/server_install_root_gate/tests.rs
+            aquilum-app/core/src/server_root_v3_guard.rs
+            aquilum-app/core/src/server_root_v3_guard/tests.rs
             aquilum-app/core/src/server_first_root_stage.rs
             aquilum-app/core/src/server_first_root_stage/tests.rs
             aquilum-app/core/src/server_bootstrap_ssh_windows_lab/root_stage.rs

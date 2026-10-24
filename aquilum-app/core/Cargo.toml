@@ -63,6 +63,9 @@ server-bootstrap-b1c0-fixed-node-lab = ["server-bootstrap-b1b4b-os-witness-lab"]
 # Fixed /opt first-install file commit with a root-owned durable receipt and
 # conservative HOLD on startup or crash. No public installer RPC or auto-start.
 server-bootstrap-b1d0-durable-node = ["server-bootstrap-b1c0-fixed-node-lab"]
+# Inert Linux root-side B0 v3 canonical plan + pinned-owner correspondence,
+# still NO root enrollment loader, helper execution, service or install RPC.
+server-root-b0v3-gate-lab = ["server-bootstrap-b1d0-durable-node", "server-bootstrap-b0-lab"]
 # Opt-in diagnostic timing only. No new writer or change to security policy.
 # Never enabled by Akula native or installed builds.
 save-stage-probe = []
