@@ -81,6 +81,17 @@ impl PdfPage {
     }
 }
 
+
+fn fit_page(intrinsic: Size, viewport: Size, zoom: f64, scroll: f64) -> Rect {
+    let width = (viewport.width - 48.0).max(1.0) * zoom.clamp(0.35, 2.5);
+    let height = width * (intrinsic.height / intrinsic.width.max(1.0));
+    let body_height = (viewport.height - HEADER).max(1.0);
+    let x = (viewport.width - width) / 2.0;
+    let y = HEADER + if height < body_height { (body_height - height) / 2.0 }
+        else { -scroll.clamp(0.0, (height - body_height).max(0.0)) };
+    Rect::from_origin_size(Point::new(x, y), Size::new(width, height))
+}
+
 impl Widget for PdfPage {
     type Action = Action;
 
@@ -165,16 +176,8 @@ impl Widget for PdfPage {
     fn layout(&mut self, _ctx: &mut LayoutCtx<'_>, _props: &PropertiesRef<'_>, size: Size) {
         self.frame = Rect::ZERO;
         if let Some(image) = &self.display.image {
-            let width = f64::from(image.image.width);
-            let height = f64::from(image.image.height);
-            let body_height = (size.height - HEADER).max(1.0);
-            let x = (size.width - width) / 2.0;
-            let y = HEADER + if height < body_height {
-                (body_height - height) / 2.0
-            } else {
-                -self.display.scroll
-            };
-            self.frame = Rect::from_origin_size(Point::new(x, y), Size::new(width, height));
+            let intrinsic = Size::new(f64::from(image.image.width), f64::from(image.image.height));
+            self.frame = fit_page(intrinsic, size, self.display.zoom, self.display.scroll);
         }
     }
 
@@ -192,7 +195,8 @@ impl Widget for PdfPage {
         if let Some(image) = &self.display.image {
             let clip = Rect::new(0.0, HEADER, bounds.width(), bounds.height());
             painter.with_fill_clip(clip, |painter| {
-                painter.draw_image(image, Affine::translate(self.frame.origin().to_vec2()));
+                let scale = self.frame.width() / f64::from(image.image.width);
+                painter.draw_image(image, Affine::translate(self.frame.origin().to_vec2()) * Affine::scale(scale));
             });
         }
     }
@@ -202,7 +206,9 @@ impl Widget for PdfPage {
     }
 
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, node: &mut Node) {
-        node.set_label(self.title());
+        let status = if self.display.image.is_some() { " — изображение готово" }
+            else if self.display.loading { " — загрузка" } else { " — ошибка" };
+        node.set_label(format!("{}{}", self.title(), status));
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -214,6 +220,20 @@ impl Widget for PdfPage {
 mod tests {
     use super::*;
     #[test]
+    #[test]
+    fn page_fits_available_width_then_zooms_without_clipping_initially() {
+        let source = Size::new(1200.0, 1600.0);
+        let viewport = Size::new(720.0, 900.0);
+        let fit = fit_page(source, viewport, 1.0, 0.0);
+        assert_eq!(fit.width(), 672.0);
+        assert!(fit.x0 >= 0.0);
+        assert!(fit.x1 <= viewport.width);
+        let zoomed = fit_page(source, viewport, 1.25, 0.0);
+        assert_eq!(zoomed.width(), 840.0);
+        assert!(zoomed.width() > fit.width());
+        let scrolled = fit_page(source, viewport, 1.25, 200.0);
+        assert!(scrolled.y0 < zoomed.y0);
+    }
     fn page_status_has_true_page_counter() {
         let state = Display {
             image: None, name: "file.pdf".into(), current: 4, total: 10,
