@@ -208,6 +208,16 @@ try {
     }
     Write-Host 'AKULA_CLOUD_CATALOG_UIA_PASS providers=7'
 
+    # Confirm installed Dropbox opens OAuth controls, without invoking a browser.
+    $dropboxNames = @(Labels { param($c) $c.settings.cloud.dropbox })
+    Invoke-Button (Wait-Button -Tree $root -Names $dropboxNames -StartsWith $true)
+    [void](Wait-Button -Tree $root -Names @('Войти в Dropbox'))
+    [void](Wait-Button -Tree $root -Names @('Отозвать доступ на сайте Dropbox'))
+    [void](Wait-Button -Tree $root -Names $saveNames)
+    Invoke-Button (Wait-Button -Tree $root -Names $closeNames)
+    Wait-ButtonGone -Tree $root -Names $saveNames
+    Write-Host 'AKULA_DROPBOX_MODAL_UIA_PASS oauth_entry=1 no_network=1'
+
     Invoke-Button (Wait-Button -Tree $root -Names $yandexNames -StartsWith $true)
     [void](Wait-Button -Tree $root -Names $saveNames)
     $editor = Bucket-Editor $root
