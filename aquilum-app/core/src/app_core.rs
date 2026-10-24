@@ -1,5 +1,5 @@
 use crate::documents::{DocumentEvent, DocumentHub, SaveFailed};
-use crate::files::gate::{NoteHistoryChanged, NoteHistoryMoveFailed, NoteHistorySaveFailed, Relocation};
+use crate::files::gate::{FileGateInterprocessLock, NoteHistoryChanged, NoteHistoryMoveFailed, NoteHistorySaveFailed, Relocation};
 use crate::files::error::FileCommandError;
 use crate::files::watcher::{WatchBatch, WatchScope, WatchSink, WorkspaceWatcher};
 use crate::history::HistoryService;
@@ -14,13 +14,14 @@ use crate::wikixiv::WikixivService;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
+#[cfg(test)]
+use std::sync::TryLockError;
 #[cfg(feature = "host-custody")]
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-// Conservatively serialize all Core-managed mutations and protected original
-// captures within this process, even when two distinct Core instances use
-// the same workspace. External processes still require an OS-level guard.
-static PROCESS_FILE_MUTATIONS: Mutex<()> = Mutex::new(());
+// Conservatively serialize Core-managed mutations and protected original
+// captures within this process and across Akula processes of the same OS user.
+static PROCESS_FILE_MUTATIONS: FileMutationInterlock = FileMutationInterlock::new();
 /// An ordinary note's primary bytes and HistoryService may be separate
 /// mutex stages. Hold a read lease across BOTH, while activation obtains
 /// an exclusive write fence before publishing participant HOLD.
@@ -88,6 +89,90 @@ impl std::fmt::Display for TaskFailed {
     }
 }
 
+/// Local mutex plus a stable OS file lock shared by independent Akula
+/// processes. The OS lock coordinates writers; it does not authenticate or
+/// authorize them.
+pub(crate) struct FileMutationInterlock {
+    process: Mutex<()>,
+}
+
+impl FileMutationInterlock {
+    const fn new() -> Self {
+        Self {
+            process: Mutex::new(()),
+        }
+    }
+
+    pub(crate) fn lock(&self) -> Result<FileMutationGuard<'_>, FileMutationLockError> {
+        let process = self
+            .process
+            .lock()
+            .map_err(|_| FileMutationLockError::Poisoned)?;
+        let interprocess =
+            FileGateInterprocessLock::acquire().map_err(FileMutationLockError::Interprocess)?;
+        Ok(FileMutationGuard {
+            process: Some(process),
+            _interprocess: interprocess,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn try_lock(
+        &self,
+    ) -> Result<FileMutationGuard<'_>, TryLockError<MutexGuard<'_, ()>>> {
+        let process = self.process.try_lock()?;
+        let interprocess = match FileGateInterprocessLock::try_acquire() {
+            Ok(Some(interprocess)) => interprocess,
+            Ok(None) => {
+                drop(process);
+                return Err(TryLockError::WouldBlock);
+            }
+            Err(error) => panic!("interprocess File Gate lock probe failed: {error}"),
+        };
+        Ok(FileMutationGuard {
+            process: Some(process),
+            _interprocess: interprocess,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn try_process_only_lock(
+        &self,
+    ) -> Result<MutexGuard<'_, ()>, TryLockError<MutexGuard<'_, ()>>> {
+        self.process.try_lock()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum FileMutationLockError {
+    Poisoned,
+    Interprocess(std::io::Error),
+}
+
+impl std::fmt::Display for FileMutationLockError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Poisoned => formatter.write_str("process-local File Gate mutex is poisoned"),
+            Self::Interprocess(error) => {
+                write!(formatter, "interprocess File Gate lock failed: {error}")
+            }
+        }
+    }
+}
+
+pub(crate) struct FileMutationGuard<'a> {
+    process: Option<MutexGuard<'a, ()>>,
+    _interprocess: FileGateInterprocessLock,
+}
+
+impl FileMutationGuard<'_> {
+    /// Keep the cross-process File Gate epoch through history publication
+    /// while releasing the shorter process-local mutex before callbacks.
+    pub(crate) fn release_process_lock(&mut self) {
+        self.process.take();
+    }
+}
+
 /// Every service of the app, wired together, with no knowledge of the UI that hosts it.
 pub struct Core {
     #[cfg(feature = "host-custody")]
@@ -101,10 +186,10 @@ pub struct Core {
     pub search: SearchService,
     pub history: HistoryService,
     pub documents: DocumentHub,
-    /// Process-wide serialization shared by all Core instances, ordinary
-    /// File Gate writes and read-only protected-original capture. It is NOT a
-    /// cross-process OS lock or trusted write authorization.
-    pub(crate) file_mutations: &'static Mutex<()>,
+    /// Shared File Gate interlock for all Core instances. It combines a
+    /// process-local mutex with a cooperative same-user OS lock; it is not a
+    /// trusted write authorization.
+    pub(crate) file_mutations: &'static FileMutationInterlock,
     /// Explicitly armed, per-Core cooperative editor save routes. No UI
     /// activation, implicit S3 bootstrap or remote sync write permission.
     #[cfg(feature = "sync-s3")]
@@ -233,12 +318,16 @@ impl Core {
         core
     }
 
-    /// Acquire only around actual File Gate disk operations. Never emit
-    /// callbacks, reconcile the editor or write history while holding this.
-    pub(crate) fn file_mutation_guard(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
-        self.file_mutations.lock().map_err(|_| FileCommandError::Task {
-            message: "Core File Gate interlock poisoned; refusing mutation".into(),
-        })
+    /// Acquire the shared File Gate interlock. The process-local mutex is for
+    /// short disk sections; the OS lock may remain held through history.
+    pub(crate) fn file_mutation_guard(&self) -> Result<FileMutationGuard<'_>, FileCommandError> {
+        self.file_mutations
+            .lock()
+            .map_err(|error| FileCommandError::Task {
+                message: format!(
+                    "Core File Gate interlock unavailable; refusing mutation: {error}"
+                ),
+            })
     }
 
     /// Keep a legacy note publication (primary bytes + history snapshot)
@@ -272,9 +361,9 @@ impl Core {
     /// process-wide recovery hold. The read-only File Gate admission path still
     /// uses file_mutation_guard() so forensic inspection remains possible.
     ///
-    /// This is a pathname/SQLite HOLD check under an in-process mutex, NOT
-    /// an OS interprocess lock or permission for a sync overwrite/delete.
-    pub(crate) fn file_mutation_guard_for_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+    /// This is a pathname/SQLite HOLD check under the shared File Gate lock,
+    /// NOT permission for a sync overwrite/delete.
+    pub(crate) fn file_mutation_guard_for_write(&self) -> Result<FileMutationGuard<'_>, FileCommandError> {
         self.file_mutation_guard_for_write_mode(false, false)
     }
 
@@ -282,7 +371,7 @@ impl Core {
     /// external OS custody lock across the entire primary write + history.
     /// No other File Gate operation may use this exception. This is not a
     /// remote sync overwrite/delete capability or a generic write permit.
-    pub(crate) fn file_mutation_guard_for_custody_write(&self) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+    pub(crate) fn file_mutation_guard_for_custody_write(&self) -> Result<FileMutationGuard<'_>, FileCommandError> {
         // The S3 custody permit is scoped to appdata/OS lock, not to the
         // installer-wide SQLite epoch. Forbid this independent bypass in an
         // installed-host binary until the verified host writer exists.
@@ -379,7 +468,7 @@ impl Core {
     #[cfg(feature = "host-custody")]
     pub(crate) fn file_mutation_guard_for_host_write(
         &self, permit: &HostUnenrolledEpochPermit<'_>,
-    ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+    ) -> Result<FileMutationGuard<'_>, FileCommandError> {
         if !std::ptr::eq(self, permit.core)
             || self.documents.requires_guarded_participant_hold()
         {
@@ -392,7 +481,7 @@ impl Core {
 
     fn file_mutation_guard_for_write_mode(
         &self, proven_custody: bool, host_epoch_held: bool,
-    ) -> Result<MutexGuard<'_, ()>, FileCommandError> {
+    ) -> Result<FileMutationGuard<'_>, FileCommandError> {
         let guard = self.file_mutation_guard()?;
         #[cfg(feature = "host-custody")]
         if !proven_custody && !host_epoch_held && self.installed_host_required {
