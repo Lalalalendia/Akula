@@ -105,3 +105,10 @@ This report has been published in the documentation-only one-PC evidence PR [#69
 ## Повторная попытка Application checks — 24.10.2026, 12:06 UTC
 
 После SUCCESS watchdog #40090177003 запущен повтор failed jobs workflow [Application checks #40089888780](https://github.com/Lalalalendia/Akula/actions/runs/40089888780), attempt 2, на том же exact HEAD `8445864f28123fb026d4881a59c5554f3b5829dc`. На момент записи job `Classify required CI lanes` находится в очереди; итог Main PR gate/no-growth ещё не получен. Статус PC-FG-01 остаётся «Ожидает CI».
+
+
+## Exact-head Application checks — итог attempt 2, 24.10.2026
+
+[Application checks #40089888780](https://github.com/Lalalalendia/Akula/actions/runs/40089888780), attempt 2, завершились **SUCCESS** на exact HEAD `8445864f28123fb026d4881a59c5554f3b5829dc`. Все 44 job завершены, ошибок нет. Classifier/RustSec freshness, обязательные Rust tests and policy checks, no-growth ratchet, Verify required subset 1/2 и финальный fail-closed routed gate — **SUCCESS**. Четыре профильные проверки на этом HEAD также успешны: File Gate History #40089888724, Sync single-custody #40089888718, Sync S3-bound custody #40089888716, Native two-process #40089888759.
+
+PC-FG-01 implementation/tests готовы по точному PR HEAD. Локальные Windows проверки (2 interprocess + 31 File Gate, rustfmt, `git diff --check`) остаются отдельным evidence snapshot с полного изменённого checkout. PR #703 оставлен Draft и не объединён; решение о переводе в review/merge не принималось.
