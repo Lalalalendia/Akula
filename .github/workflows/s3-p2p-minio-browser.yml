@@ -45,7 +45,13 @@ jobs:
         run: |
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
-      - name: Real MinIO origin, Chromium P2P and corrupt-chunk repair
+      - name: Install test-only TURN relay
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y coturn
+      - name: Real MinIO origin, Chromium P2P and corrupt-chunk repair (direct and TURN)
+        env:
+          AKULA_TEST_TURN_RELAY: '1'
         run: bash tests/run_minio_browser_local.sh
       - name: Save evidence
         if: always()
