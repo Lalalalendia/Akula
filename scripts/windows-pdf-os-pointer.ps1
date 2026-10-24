@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$VaultPath,
     [Parameter(Mandatory = $true)][string]$DataDir,
-    [Parameter(Mandatory = $true)][string]$FixturePdf
+    [Parameter(Mandatory = $true)][string]$FixturePdf,
+    [Parameter(Mandatory = $true)][string]$ViewerFixturePdf
 )
 $ErrorActionPreference = 'Stop'
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -21,6 +22,7 @@ if ([IO.Path]::GetFullPath($ExePath) -ne [IO.Path]::GetFullPath($expectedExe) -o
     throw 'Refusing an arbitrary Akula executable'
 }
 if (!(Test-Path -LiteralPath $FixturePdf -PathType Leaf) -or
+    !(Test-Path -LiteralPath $ViewerFixturePdf -PathType Leaf) -or
     !(Test-Path -LiteralPath $VaultPath -PathType Container)) {
     throw 'Missing disposable PDF fixture or vault'
 }
@@ -112,6 +114,11 @@ if (!(Test-Path -LiteralPath $sentinel -PathType Leaf) -or
 }
 Copy-Item -LiteralPath $FixturePdf -Destination $source -ErrorAction Stop
 $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+$nativeViewerName = 'AkulaNativePages.PDF'
+$nativeViewerSource = Join-Path $VaultPath $nativeViewerName
+if (Test-Path -LiteralPath $nativeViewerSource) { throw 'Duplicate PDF viewer fixture' }
+Copy-Item -LiteralPath $ViewerFixturePdf -Destination $nativeViewerSource -ErrorAction Stop
+$nativeViewerHash = (Get-FileHash -LiteralPath $nativeViewerSource -Algorithm SHA256).Hash
 $previewPattern = 'AkulaPDFPointer PDF *.md'
 if (@(Get-ChildItem -LiteralPath $VaultPath -Filter $previewPattern -File).Count -ne 0) {
     throw 'Unexpected old PDF preview in fresh Windows fixture'
@@ -290,6 +297,36 @@ try {
         throw 'OS search/open changed the trusted PDF or extracted preview'
     }
     Write-Host 'AKULA_PDF_INSTALLED_POINTER_E2E=PASS right_click=1 menu=1 consent=1 preview=1 search_option=1 enter_open=1 source_unchanged=1'
+
+    # Native viewer proof, separate from Markdown extraction and from --pdf-worker.
+    # This follows real OS pointer -> document tab -> UIA visible page -> real key navigation.
+    $nativeRow = Wait-Accessible -Root $window -Name $nativeViewerName -ExpectedType ([System.Windows.Automation.ControlType]::TreeItem)
+    Click-Accessible -Target $nativeRow -Window $window -Process $proc
+    Wait-Title -Process $proc -Needle $nativeViewerName
+
+    function Wait-ViewerPage {
+        param([int]$Page, [int]$Attempts = 150)
+        for ($poll = 0; $poll -lt $Attempts; $poll++) {
+            $proc.Refresh()
+            if ($proc.HasExited) { throw 'Akula exited during native PDF page navigation' }
+            $pageImage = Find-Accessible -Root $window -Name ('PDF  ' + $nativeViewerName) -ExpectedType ([System.Windows.Automation.ControlType]::Image) -Prefix
+            if ($null -ne $pageImage -and $pageImage.Current.Name.Contains(("$Page/2"))) {
+                return $pageImage
+            }
+            Start-Sleep -Milliseconds 200
+        }
+        throw "Installed native PDF widget failed to show page $Page/2"
+    }
+    $pdfPage = Wait-ViewerPage -Page 1
+    $pdfPage.SetFocus()
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [uint16]0x27, $false)
+    [void](Wait-ViewerPage -Page 2)
+    [AkulaBetaGuiInput]::SendNavigationKey($hwnd, $proc.Id, [uint16]0x25, $false)
+    [void](Wait-ViewerPage -Page 1)
+    if ((Get-FileHash -LiteralPath $nativeViewerSource -Algorithm SHA256).Hash -ne $nativeViewerHash) {
+        throw 'Native PDF viewing altered its source bytes'
+    }
+    Write-Host 'AKULA_PDF_INSTALLED_NATIVE_VIEWER=PASS;open=1;pages=2;next=1;previous=1;source_unchanged=1'
 } finally {
     if ($null -ne $proc) {
         $proc.Refresh()
