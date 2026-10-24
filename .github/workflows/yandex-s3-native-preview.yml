@@ -50,10 +50,10 @@ jobs:
         shell: pwsh
         run: |
           $cargo = Get-Content -Raw aquilum-app/native/Cargo.toml
-          # Installed may include the strictly read-only Dropbox connector,
-          # but never Yandex/S3 preview, S3 pairing, or a cloud writer.
-          if ($cargo -notmatch '(?m)^installed\s*=\s*\[\s*(?:"dropbox-readonly-preview"\s*)?\]') {
-            throw "installed may only be empty or Dropbox read-only; S3 preview must not ship"
+          # Normal installer enables only read-only Dropbox and pinned SSH KEX;
+          # neither authorizes cloud writes, Node install or S3 preview.
+          if ($cargo -notmatch '(?m)^installed\s*=\s*\[\s*"dropbox-readonly-preview"\s*,\s*"server-readonly-preflight"\s*\]\s*$') {
+            throw "installed may enable only read-only Dropbox and SSH preflight"
           }
           if ($cargo -notmatch 'yandex-s3-connection-preview\s*=') {
             throw "missing explicit opt-in feature"
