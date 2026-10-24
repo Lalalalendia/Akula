@@ -112,3 +112,4 @@ mod clippy_semantics_tests {
         };
         assert!(!merge(&mut previous, &different, Kind::Block));
     }
+}
