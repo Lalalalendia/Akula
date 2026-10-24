@@ -27,6 +27,20 @@ pub fn create_pinned_windows_inbox_stage(
         .map_err(|_| InboxError::InvalidDestination)
 }
 
+/// Fail closed for known insecure Windows Inbox objects and SQLite ACLs.
+/// The stage's pinned root HANDLE is the trust anchor; the current pathname
+/// must resolve to that same NT directory identity. This remains a negative
+/// check only: SQLite and object publication are not handle-relative yet.
+#[cfg(windows)]
+pub fn audit_pinned_windows_inbox_storage(
+    root: &Path,
+    pinned_root: &File,
+    require_complete: bool,
+) -> Result<(), InboxError> {
+    crate::sync::audit_pinned_p2p_inbox_storage(root, pinned_root, require_complete)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
