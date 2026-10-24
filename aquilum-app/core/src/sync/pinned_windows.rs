@@ -143,6 +143,49 @@ extern "system" {
     ) -> i32;
 }
 
+// P2P staging cleanup uses FILE_DISPOSITION_INFORMATION = 13. It marks
+// exactly the already-opened stage FileObject for deletion on last close,
+// never a path which might have been replaced by another process.
+#[cfg(feature = "p2p-inbox-lab")]
+const FILE_DISPOSITION_INFORMATION_CLASS: u32 = 13;
+#[cfg(feature = "p2p-inbox-lab")]
+#[repr(C)]
+struct NtDispositionInfo {
+    delete_file: u8,
+}
+
+/// Mark an exclusively created P2P stage for deletion via its original NT
+/// HANDLE. The caller must only close the handle after this succeeds: no
+/// further read, write, metadata query or rename is allowed.
+#[cfg(feature = "p2p-inbox-lab")]
+pub(super) fn mark_p2p_stage_delete_on_close(stage: &File) -> Result<(), VaultPortError> {
+    let mut info = NtDispositionInfo { delete_file: 1 };
+    let mut iosb = NtIoStatusBlock {
+        status_or_pointer: 0,
+        information: 0,
+    };
+    // SAFETY: stage was created by create_stage_child with DELETE_ACCESS.
+    // The one-byte FILE_DISPOSITION_INFORMATION and IO_STATUS_BLOCK stay
+    // alive through the synchronous NT call; handle is valid and live.
+    let status = unsafe {
+        NtSetInformationFile(
+            stage.as_raw_handle(),
+            &mut iosb,
+            (&mut info as *mut NtDispositionInfo).cast::<c_void>(),
+            std::mem::size_of::<NtDispositionInfo>() as u32,
+            FILE_DISPOSITION_INFORMATION_CLASS,
+        )
+    };
+    if status < 0 {
+        Err(VaultPortError::Io(format!(
+            "pinned NT stage disposition failed (NTSTATUS 0x{:08x})",
+            status as u32
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 #[repr(C)]
 struct NtRenameInfo {
     replace_if_exists: u8,
