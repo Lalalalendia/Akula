@@ -1,0 +1,58 @@
+name: S3-P2P Separate Network Namespaces
+on:
+  push:
+    branches: [lab/s3-p2p-netns-20261024]
+    paths:
+      - '.github/workflows/s3-p2p-netns-lab.yml'
+      - 'experiments/s3-p2p-cdn/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  docker-netns:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: experiments/s3-p2p-cdn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Python and Playwright
+        run: |
+          python -m pip install -r requirements-dev.txt
+          npm install --no-save playwright@1.56.1
+      - name: Confirm Docker and protocol unit tests
+        run: |
+          docker info --format '{{.ServerVersion}}'
+          PYTHONPATH=. python -m pytest -q tests/test_server.py
+      - name: Generate immutable 8 MiB fixture
+        run: |
+          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/demo.bin'))"
+          python create_manifest.py data/demo.bin --source-url /origin/demo.bin --out manifest.json
+      - name: Start local S3-like origin / tracker accessible to namespaces
+        run: |
+          python server.py --host 0.0.0.0 > server.log 2>&1 &
+          echo $! > server.pid
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:8765/manifest.json >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat server.log
+          exit 1
+      - name: Real Chromium and Firefox in separate Docker network namespaces
+        run: bash tests/run_namespaced_webrtc.sh
+      - name: Save network evidence and test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-p2p-netns-evidence
+          path: |
+            experiments/s3-p2p-cdn/server.log
+            experiments/s3-p2p-cdn/test-results/
+          if-no-files-found: warn
