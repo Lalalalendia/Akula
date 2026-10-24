@@ -18,7 +18,7 @@ fn account_status_hint(status: &str) -> &'static str {
     {
         "Сохранённое разрешение Dropbox не действует. Нажмите «Войти в Dropbox» снова."
     } else if status.contains("ACCOUNT_OR_ROOT_MISMATCH") {
-        "Изменился аккаунт Dropbox или его корневая область. Проверьте учётную запись и выполните вход заново."
+        "Другой аккаунт Dropbox: сначала «Забыть аккаунт на этом устройстве», затем войдите снова."
     } else if status.contains("CONSENT_DENIED") {
         "Разрешение не подтверждено в браузере. Можно повторить вход, файлы не изменены."
     } else if status.contains("BROWSER_UNAVAILABLE") {
