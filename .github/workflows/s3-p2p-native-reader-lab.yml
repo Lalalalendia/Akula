@@ -17,10 +17,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.91
       - name: Check feature-gated native public reader
         run: |
-          cargo test --manifest-path interop/akula-staya/Cargo.toml --features public-cdn-reader-lab --lib public_cdn_lab
+          cargo test --manifest-path interop/akula-staya/public-cdn-check/Cargo.toml --lib public_cdn_lab
       - name: Compile isolated real S3 and Bao adapters
         run: |
-          cargo check --manifest-path interop/akula-staya/Cargo.toml --features public-cdn-s3-lab,public-cdn-bao-lab --lib
+          cargo check --manifest-path interop/akula-staya/public-cdn-check/Cargo.toml --features s3,bao --lib
       - name: Reject suspicious S3 test-only support in ordinary feature build
         shell: bash
         run: |
