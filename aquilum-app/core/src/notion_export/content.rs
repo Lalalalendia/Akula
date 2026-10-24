@@ -65,6 +65,11 @@ impl ReadOnlyStage {
 /// Read a complete inventory, reject an incomplete plan, then independently
 /// verify content and inventory again. No filesystem or application writes.
 pub fn stage_read_only(input: &Path, limits: ScanLimits) -> Result<ReadOnlyStage, String> {
+    let metadata = fs::symlink_metadata(input)
+        .map_err(|_| "cannot inspect source for bounded staging")?;
+    if metadata.is_file() && metadata.len() > MAX_STAGING_INPUT_BYTES {
+        return Err("ZIP exceeds bounded content-staging input budget".into());
+    }
     let first = inspect_path(input, limits)?;
     let plan = prepare_plan(&first);
     if !plan.ready_for_content_staging {
@@ -85,7 +90,8 @@ fn staged_directory_text(root: &Path, limits: ScanLimits, plan: &ImportPlan)
         let mut relative = PathBuf::new();
         for part in candidate.source_path.split('/') {
             if part.is_empty() || matches!(part, "." | "..")
-                || part.contains(['\\', ':']) || part.chars().any(char::is_control)
+                || part.contains('\\') || part.contains(':')
+                || part.chars().any(char::is_control)
             {
                 return Err("unsafe Markdown source path".into());
             }
@@ -215,7 +221,7 @@ mod tests {
         assert_eq!(original.len(), changed.len());
         fs::write(&a, changed).unwrap();
         assert!(verify_against_inventory(tmp.path(), ScanLimits::default(), &first, &plan)
-            .unwrap_err().contains("digest"));
+            .err().expect("changed Markdown must be refused").contains("digest"));
     }
 
     #[test]
@@ -223,7 +229,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join(format!("Page {A}.md")), "[bad](no-uuid.md)").unwrap();
         assert!(stage_read_only(tmp.path(), ScanLimits::default())
-            .unwrap_err().contains("blockers"));
+            .err().expect("partial export must be refused").contains("blockers"));
         assert!(!tmp.path().join("Notion-import").exists());
     }
 
@@ -236,6 +242,6 @@ mod tests {
             "x".repeat((MAX_STAGING_TEXT_BYTES as usize) / 2 + 1)).unwrap();
         assert!(stage_read_only(tmp.path(), ScanLimits {
             max_text_bytes: 20 * 1024 * 1024, ..ScanLimits::default()
-        }).unwrap_err().contains("memory budget"));
+        }).err().expect("oversized stage must be refused").contains("memory budget"));
     }
 }
