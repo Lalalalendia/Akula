@@ -107,4 +107,3 @@ pub struct TransferDialog {
     #[cfg(feature = "messaging-w4-pilot")]
     pub w4_actions: Vec<(WidgetId, PilotAction)>,
 }
-
