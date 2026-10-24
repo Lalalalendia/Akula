@@ -1158,22 +1158,15 @@ mod tests {
         // close the QUIC connection before writing its ordinary local ACK.
         first.close(1u8.into(), b"inject lost ACK after local commit");
 
-        let second = tokio::time::timeout(
-            Duration::from_secs(25),
-            receiver.connect(direct, ALPN),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let second = tokio::time::timeout(Duration::from_secs(25), receiver.connect(direct, ALPN))
+            .await
+            .unwrap()
+            .unwrap();
         tokio::time::timeout(
             Duration::from_secs(25),
-            receive_one_target(
-                &second,
-                None,
-                &inbox_root,
-                *receiver_id.as_bytes(),
-                || Ok(()),
-            ),
+            receive_one_target(&second, None, &inbox_root, *receiver_id.as_bytes(), || {
+                Ok(())
+            }),
         )
         .await
         .unwrap()
