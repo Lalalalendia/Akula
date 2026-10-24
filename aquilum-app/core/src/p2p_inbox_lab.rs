@@ -41,6 +41,33 @@ pub fn audit_pinned_windows_inbox_storage(
         .map_err(|_| InboxError::InvalidDestination)
 }
 
+/// Keep the Windows Inbox root, objects and SQLite main file open with
+/// no FILE_SHARE_DELETE while rusqlite uses its legacy path-based connection.
+/// This is not a full SQLite VFS/ancestor/WAL custody guarantee.
+#[cfg(windows)]
+pub struct WindowsInboxSqliteCustody(crate::sync::P2pInboxSqliteCustody);
+
+#[cfg(windows)]
+impl WindowsInboxSqliteCustody {
+    pub fn verify(&self, root: &Path, pinned_root: &File) -> Result<(), InboxError> {
+        self.0
+            .verify(root, pinned_root)
+            .map_err(|_| InboxError::InvalidDestination)
+    }
+}
+
+/// Ensure the SQLite base file and objects directory are bootstrapped through
+/// NT root-relative FILE_OPEN_IF, and keep their names pinned during writes.
+#[cfg(windows)]
+pub fn pin_windows_inbox_sqlite_custody(
+    root: &Path,
+    pinned_root: &File,
+) -> Result<WindowsInboxSqliteCustody, InboxError> {
+    crate::sync::pin_p2p_inbox_sqlite_custody(root, pinned_root)
+        .map(WindowsInboxSqliteCustody)
+        .map_err(|_| InboxError::InvalidDestination)
+}
+
 /// Windows-only permanent Inbox publication: copy and re-hash the already
 /// opened verified stage into an exclusively created NT file beneath the
 /// pinned objects HANDLE; atomically rename that same HANDLE without replace.
