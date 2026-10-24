@@ -98,6 +98,15 @@ $note = Join-Path $vault 'First note.md'
 Set-Content -LiteralPath $note -Value "# Akula Beta`n`nExisting local document"
 $original = (Get-FileHash -LiteralPath $note).Hash
 $syntheticEdit = 'AKULA_GUI_EDIT_' + [Guid]::NewGuid().ToString('N')
+# Second synthetic local note: the installed app must reach it via physical
+# Ctrl+O, not a command-line --open shortcut or a direct filesystem read.
+$searchMarker = 'AKULA_GUI_SEARCH_' + [Guid]::NewGuid().ToString('N')
+$searchTarget = Join-Path $vault 'Search target.md'
+[System.IO.File]::WriteAllText(
+  $searchTarget, "# Search target`n`n$searchMarker`n",
+  ([System.Text.UTF8Encoding]::new($false))
+)
+$searchTargetHash = (Get-FileHash -LiteralPath $searchTarget -Algorithm SHA256).Hash
 
 function Start-And-Close {
   param([switch]$EditNote, [switch]$VerifyRestoredContent)
@@ -246,6 +255,21 @@ $clipboardSentinel = 'AKULA_CLIPBOARD_POISON_' + [Guid]::NewGuid().ToString('N')
 Set-Clipboard -Value $clipboardSentinel -ErrorAction Stop
 Start-And-Close -VerifyRestoredContent
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Restart changed the previously edited note' }
+
+# Independently exercise the INSTALLED search result and actual editor readback
+# in a fresh STA PowerShell process. The marker and both source files are
+# synthetic; fail if the search changes any persisted original.
+$searchScript = Join-Path $PSScriptRoot 'windows-beta-search-user-journey.ps1'
+& $windowsPowerShell -NoProfile -NonInteractive -Sta -ExecutionPolicy Bypass -File $searchScript -ExePath $exe -VaultPath $vault -DataDir $akulaData -OriginalNote $note -TargetNote $searchTarget -Marker $searchMarker
+if ($LASTEXITCODE -ne 0) {
+  throw "Installed Akula local search journey failed: PowerShell exit $LASTEXITCODE"
+}
+if ((Get-FileHash -LiteralPath $note -Algorithm SHA256).Hash -ne $savedHash) {
+  throw 'Installed local search changed the previously edited note'
+}
+if ((Get-FileHash -LiteralPath $searchTarget -Algorithm SHA256).Hash -ne $searchTargetHash) {
+  throw 'Installed local search changed the source target note'
+}
 Assert-LegacyUntouched
 
 $uninstall = Join-Path $akulaInstall 'uninstall.exe'
@@ -259,5 +283,6 @@ if (Test-Path $exe) { throw 'Akula executable remains after uninstall' }
 if (Test-Path $akulaRegistry) { throw 'Akula uninstall registry key remains' }
 if (!(Test-Path $state)) { throw 'Uninstall removed Akula user state' }
 if ((Get-FileHash -LiteralPath $note).Hash -ne $savedHash) { throw 'Uninstall changed the edited local document' }
+if ((Get-FileHash -LiteralPath $searchTarget -Algorithm SHA256).Hash -ne $searchTargetHash) { throw 'Uninstall changed the searched local document' }
 Assert-LegacyUntouched
 Write-Host 'AKULA_WINDOWS_BETA_GUI_EDIT_PASS: NSIS install, real OS keyboard edit, on-disk save, restart, uninstall and upstream sentinels'

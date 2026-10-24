@@ -5,7 +5,6 @@ use super::service::{workspace_root, OpenIndex, SearchService};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-
 const IDLE_LIMIT: Duration = Duration::from_secs(300);
 
 pub struct Guest {
@@ -31,6 +30,7 @@ impl Guest {
 impl SearchService {
     pub fn open_guest(&self, workspace: &str) -> Result<SearchIndexStatus, SearchError> {
         let _guard = self.prepare_lock.lock().map_err(SearchError::task)?;
+        self.ensure_running()?;
         let root = workspace_root(workspace)?;
         if let Some(status) = self.status_for_root(&root) {
             return Ok(status);

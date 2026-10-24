@@ -172,7 +172,8 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
     'GetWindowThreadProcessId',
     'GetForegroundWindow',
     'Refusing shortcut on nonforeground window',
-    'Only selection/copy shortcuts are authorized',
+    'Only QuickOpen, SelectAll and Copy are authorized',
+    'if (key != 0x41 && key != 0x43 && key != 0x4f)',
     'VK_CONTROL',
     'KEYEVENTF_KEYUP',
   ]) {
@@ -181,6 +182,19 @@ test('reopened note GUI readback uses foreground OS shortcuts and clipboard orac
   const middle = script.slice(script.indexOf('if ($VerifyRestoredContent) {'));
   assert.doesNotMatch(middle, /Set-Content -LiteralPath \$note|Add-Content -LiteralPath \$note|WriteAllText\(\$note/,
     'UI readback must never simulate success by writing to the note');
+});
+
+test('installed search journey uses Windows PowerShell 5.1-compatible key casts', () => {
+  const search = read('scripts/windows-beta-search-user-journey.ps1');
+  assert.match(search, /RUNNER_ENVIRONMENT.*github-hosted/);
+  assert.match(search, /PSEdition.*Desktop/);
+  for (const virtualKey of ['0x4f', '0x0d', '0x41', '0x43']) {
+    assert.ok(search.includes('[System.UInt16]' + virtualKey),
+      'Windows PowerShell 5.1 must type its virtual key: ' + virtualKey);
+  }
+  assert.doesNotMatch(search, /\[ushort\]/i,
+    'ushort is not a built-in type alias in Windows PowerShell 5.1');
+  assert.match(search, /AKULA_INSTALLED_SEARCH_JOURNEY_PASS/);
 });
 
 test('CI candidate manifest records actual checkout and hashes after the GUI test', () => {
