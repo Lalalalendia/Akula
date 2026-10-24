@@ -64,7 +64,7 @@ fn fixture()->SourcePreview{
 }
 struct Fixture {
     _temp:tempfile::TempDir,
-    core:Core,
+    core:Arc<Core>,
     app:PathBuf,
     vault:PathBuf,
     digest:String,
