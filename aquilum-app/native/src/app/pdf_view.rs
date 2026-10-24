@@ -303,6 +303,15 @@ fn run_worker(
 }
 
 impl App {
+    pub(super) fn pdf_tab_widget(&mut self) -> Option<masonry::core::NewWidget<dyn masonry::core::Widget>> {
+        let path = self.tabs.active().path.as_deref()?;
+        if !is_pdf(path) || !self.tree.root().is_some_and(|vault| trusted_source(vault, path)) {
+            return None;
+        }
+        let id = self.tabs.active_id();
+        self.pdf.open(id, path, &self.workspace.wake);
+        self.pdf.display(id).map(|display| pdf::PdfPage::new(display).erased())
+    }
     pub(super) fn show_pdf_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
         use crate::ui::widgets::Slot;
         self.note = None; self.note_ids = None; self.embeds = None;
