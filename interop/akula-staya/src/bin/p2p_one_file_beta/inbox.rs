@@ -316,13 +316,24 @@ pub(super) fn persist_received_payload(
         .map_err(|error| format!("rewind pinned receiver stage: {error}"))?;
     #[cfg(windows)]
     let saved = persist_received_with_publisher(
-        &mut file, inbox_root, size, digest, sender, receiver,
+        &mut file,
+        inbox_root,
+        size,
+        digest,
+        sender,
+        receiver,
         |stage, _destination, transfer_id| {
             // The ledger's already-authenticated UUID is the only leaf name.
             // The object is written/renamed solely through pinned NT handles.
             publish_pinned_windows_inbox_object(
-                inbox_root, &pinned_root, stage, transfer_id, size, digest,
-            ).map_err(|_| LedgerError::InvalidLocalObject)
+                inbox_root,
+                &pinned_root,
+                stage,
+                transfer_id,
+                size,
+                digest,
+            )
+            .map_err(|_| LedgerError::InvalidLocalObject)
         },
     )?;
     #[cfg(not(windows))]
@@ -470,24 +481,41 @@ mod tests {
         stage.seek(SeekFrom::Start(0)).unwrap();
 
         publish_pinned_windows_inbox_object(
-            &root, &pinned_root, &mut stage, id, bytes.len() as u64, digest,
+            &root,
+            &pinned_root,
+            &mut stage,
+            id,
+            bytes.len() as u64,
+            digest,
         )
         .unwrap();
-        let output = root.join("objects").join(format!("{}.blob", id.hyphenated()));
+        let output = root
+            .join("objects")
+            .join(format!("{}.blob", id.hyphenated()));
         assert_eq!(fs::read(&output).unwrap(), bytes);
 
         // Even the same authenticated UUID is not permitted to overwrite an
         // already published leaf. The pre-existing bytes must remain intact.
-        assert!(publish_pinned_windows_inbox_object(
-            &root, &pinned_root, &mut stage, id, bytes.len() as u64, digest,
-        )
-        .is_err());
+        assert!(
+            publish_pinned_windows_inbox_object(
+                &root,
+                &pinned_root,
+                &mut stage,
+                id,
+                bytes.len() as u64,
+                digest,
+            )
+            .is_err()
+        );
         assert_eq!(fs::read(&output).unwrap(), bytes);
         let partials = fs::read_dir(root.join("objects"))
             .unwrap()
             .flatten()
             .any(|entry| entry.file_name().to_string_lossy().ends_with(".part"));
-        assert!(!partials, "failed NT no-replace must clean its temporary object");
+        assert!(
+            !partials,
+            "failed NT no-replace must clean its temporary object"
+        );
     }
 
     #[cfg(windows)]
