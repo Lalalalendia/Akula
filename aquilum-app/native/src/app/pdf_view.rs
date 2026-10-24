@@ -13,7 +13,6 @@ use crate::ui::pdf::{self, Display};
 
 const MAX_PNG: u64 = 64 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(25);
-#[derive(Default)]
 pub(super) struct State {
     views: HashMap<Uuid, View>,
     pub(super) tx: Sender<ResultPage>,
@@ -207,7 +206,6 @@ fn run_worker(path: &Path, page: usize, width: u32, rotation: i32, png: &Path, s
 impl App {
     pub(super) fn show_pdf_readonly(&mut self, root: &mut RenderRoot, path: &Path) {
         use crate::ui::widgets::Slot;
-        use masonry::core::NewWidget;
         self.note = None; self.note_ids = None; self.embeds = None;
         self.open_error = None; self.open_error_ids = None;
         let id = self.tabs.active_id();
