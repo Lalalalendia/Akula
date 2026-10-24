@@ -131,3 +131,10 @@ a single link, mode 0400, unchanged inode and complete SHA-256 must all agree.
 A disposable test executes the complete fixed root entrypoint as **actual UID0**
 with a temporary CI-only signer and root directory override; production path
 and real VPS are not used. No signed release key is distributed by this test.
+
+
+### Opt-in Windows pinned SSH sender: signed data HOLD, not node install
+
+The experimental Core feature `server-root-stage-ssh-lab` now introduces a real Windows OpenSSH stdin-based sender for the previously verified root-stage frame. It **reuses the same System32 ssh.exe, independent host-key pinned known_hosts and strict noninteractive options** as the read-only B0c probe. The one-shot `InertUserConsent` is consumed, and the target InstallId and pinned KEX host digest must match before any root-stage SSH process starts. Source is compiled into Core, bounded and POSIX-shell-quoted; no remote package path, shell command or private SSH key can be configured by the user. The outgoing binary frame is verified B1a bytes. I/O and remote reply are bounded; timeouts and unsuccessful exits refuse. A successful remote message is only `RemoteReportedSignedDataHold`, not an attested installation or a systemd health check.
+
+**Critical sudo limitation:** allowing `sudo /usr/bin/python3 -I -c` in sudoers is equivalent to granting arbitrary Python execution as root. It is **not** a safe restricted sudoers permission. The first-root command is only appropriate on a VPS where the account already has independently authorized unrestricted administrative power; it cannot create a new privilege grant or be marketed as least-privilege escalation. Hosts without such authorization remain `NeedsAdminAuthorization / HOLD`. The native Installed Akula does not enable this feature or invoke the sender. A **separately reviewed bootstrap-helper SHA in the owner-visible plan, root-authenticated approval and real OS-signed receipt** are missing before any production rollout. No production release anchor is provisioned.

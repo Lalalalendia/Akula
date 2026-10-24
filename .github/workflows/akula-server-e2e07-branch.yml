@@ -81,6 +81,7 @@ jobs:
             aquilum-app/core/src/server_install_root_gate/tests.rs
             aquilum-app/core/src/server_first_root_stage.rs
             aquilum-app/core/src/server_first_root_stage/tests.rs
+            aquilum-app/core/src/server_bootstrap_ssh_windows_lab/root_stage.rs
             aquilum-app/core/src/server_owner_windows.rs
             aquilum-app/core/src/server_release_lab/review.rs
             aquilum-app/core/src/server_release_lab/review/tests.rs
@@ -115,6 +116,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'native server capability classification failed' }
           cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features server-readonly-preflight --bin aquilum-native -- ui::settings::schema::tests::server::b1_e2e_01_native_verify_button_never_grants_install --exact --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'native SSH HOLD user interface failed' }
+      - name: Compile opt-in one-shot signed SSH root staging and quote tests
+        shell: pwsh
+        run: |
+          cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-root-stage-ssh-lab
+          if ($LASTEXITCODE -ne 0) { throw 'staging transport compilation failed' }
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-root-stage-ssh-lab --lib server_bootstrap_ssh_windows_lab::root_stage::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'staging transport quote tests failed' }
       - name: Verify Windows protected owner identity test (no real enrollment)
         shell: pwsh
         run: |

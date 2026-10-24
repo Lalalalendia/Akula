@@ -5,6 +5,7 @@ use crate::server_release_lab::{
     verify_signed_release, ReleaseError, ReleaseFloor, SignedRelease, TrustedReleaseSigner,
 };
 use std::io::Cursor;
+use std::sync::Arc;
 
 const FRAME_DOMAIN: &[u8] = b"AKULA_ROOT_STAGE_V1\0";
 const BOOTSTRAP_SIGNER: &str = "akula-root-bootstrap-v1";
@@ -23,13 +24,20 @@ pub enum RootStageError {
 /// Inert bytes only. Consuming this value cannot authorize an SSH session.
 #[must_use]
 pub struct VerifiedRootStageBundle {
-    frame: Vec<u8>,
+    frame: Arc<[u8]>,
     fixed_root_source: String,
 }
 
 impl VerifiedRootStageBundle {
     pub fn frame(&self) -> &[u8] {
         &self.frame
+    }
+
+    /// Share verified bytes with the bounded SSH writer without a second
+    /// potentially 64 MiB allocation.
+    #[cfg(all(target_os = "windows", feature = "server-root-stage-ssh-lab"))]
+    pub(crate) fn shared_frame(&self) -> Arc<[u8]> {
+        Arc::clone(&self.frame)
     }
 
     /// This is compiled source, with only the already independently pinned
@@ -88,7 +96,7 @@ pub fn prepare_root_stage_bundle(
     frame.extend_from_slice(&signed.signature);
     frame.extend_from_slice(package);
     Ok(VerifiedRootStageBundle {
-        frame,
+        frame: frame.into(),
         fixed_root_source: source,
     })
 }

@@ -34,6 +34,8 @@ server-bootstrap-b1a-release-lab = ["dep:akula-server-release-b1a"]
 server-install-review = ["server-bootstrap-b0-lab", "server-bootstrap-b1a-release-lab"]
 # Windows Credential Manager owner Ed25519 key: separate from P2P; no installer.
 server-owner-windows-signer = ["server-install-review", "dep:windows"]
+# Opt-in Windows signed-KEX first-root staging transport; never shipped.
+server-root-stage-ssh-lab = ["server-owner-windows-signer", "server-bootstrap-b0-openssh-lab"]
 # Linux-only inert staging laboratory; requires B1a verifier, no executable install.
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.

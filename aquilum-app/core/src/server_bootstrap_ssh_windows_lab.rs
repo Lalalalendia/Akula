@@ -27,6 +27,8 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 mod scan;
+#[cfg(feature = "server-root-stage-ssh-lab")]
+mod root_stage;
 
 const FILE_READ_ATTRIBUTES: u32 = 0x80;
 const READ_CONTROL: u32 = 0x0002_0000;
@@ -356,13 +358,19 @@ impl WindowsOpenSshPinnedProbe {
             wire, known, ssh_exe,
         })
     }
-    fn fixed_read(&self, command: &'static str) -> Result<String, B0Error> {
+    /// Share the exact independent host-key pin with the opt-in root stage.
+    /// No password, TOFU, ProxyJump, user-supplied shell or key file.
+    fn pinned_ssh_command(&self, use_stdin: bool) -> Result<Command, B0Error> {
         let known = config_path(&self.known.path)?;
         let mut ssh = Command::new(&self.ssh_exe);
-        ssh.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        ssh.stdout(Stdio::piped()).stderr(Stdio::piped())
             .env_remove("SSH_ASKPASS").env_remove("GIT_SSH_COMMAND")
             .env_remove("SSH_AUTH_SOCK")
-            .args(["-F", "none", "-T", "-n", "-o", "BatchMode=yes"])
+            .args(["-F", "none", "-T"]);
+        if !use_stdin {
+            ssh.arg("-n");
+        }
+        ssh.args(["-o", "BatchMode=yes"])
             .args(["-o", "StrictHostKeyChecking=yes"])
             .args(["-o", "HostKeyAlgorithms=ssh-ed25519"])
             .args(["-o", "GlobalKnownHostsFile=NUL"])
@@ -396,8 +404,13 @@ impl WindowsOpenSshPinnedProbe {
             .arg("-o").arg(format!("HostKeyAlias=akula-b0c-{}", self.id.simple()))
             .arg("-p").arg(self.target.ssh_port.to_string())
             .arg("-l").arg(&self.target.ssh_user)
-            .arg("--").arg(&self.target.host)
-            .arg(command);
+            .arg("--").arg(&self.target.host);
+        Ok(ssh)
+    }
+
+    fn fixed_read(&self, command: &'static str) -> Result<String, B0Error> {
+        let mut ssh = self.pinned_ssh_command(false)?;
+        ssh.stdin(Stdio::null()).arg(command);
         let mut child = ssh.spawn().map_err(|_| B0Error::InspectionUnavailable)?;
         let stdout = child.stdout.take().ok_or(B0Error::InspectionUnavailable)?;
         let stderr = child.stderr.take().ok_or(B0Error::InspectionUnavailable)?;
