@@ -203,3 +203,20 @@ fn stale_digest_and_tampered_registry_fail_closed() {
     store.publish(&changed,2).unwrap();
     assert!(prepare_from_cached(&db,A,&initial).is_err());
 }
+
+#[test]
+fn missing_schema_ids_and_api_unresolved_targets_are_explicitly_partial() {
+    let mut source=fixture();
+    let schema=source.objects.iter_mut()
+        .find(|o|o.kind=="data_source"&&o.id==DS1).unwrap();
+    schema.json["properties"]["Formula"]
+        .as_object_mut().unwrap().remove("id");
+    source.unresolved_target_ids.push("55555555-5555-4555-8555-555555555555".into());
+    let prepared=normalize(&source,DIGEST).unwrap();
+    assert_eq!(prepared.review().unidentified_schema_property_count,1);
+    assert_eq!(prepared.review().unresolved_source_target_count,1);
+    assert!(!prepared.review().editable_bases_restored);
+    let payload:Envelope=serde_json::from_slice(&prepared.bytes).unwrap();
+    assert!(payload.payload.schema_properties.iter().all(|p|
+        !(p.owner_id==DS1&&p.source_property_id=="f")));
+}

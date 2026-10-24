@@ -159,7 +159,9 @@ impl ImportSession {
             let identities = identity_registry::prepare_from_cached(&cache, &source, &digest)
                 .map_err(|_| ())?;
             let identities_need_review = identities.review().unresolved_edge_count
-                + identities.review().unmatched_row_property_count;
+                + identities.review().unmatched_row_property_count
+                + identities.review().unidentified_schema_property_count
+                + identities.review().unresolved_source_target_count;
             let preview = approved_cached_preview(&cache, &source, &digest)
                 .map_err(|_| ())?;
             let report = publish_approved(&core, &chosen, &preview, true).map_err(|_| ())?;

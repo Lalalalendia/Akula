@@ -67,6 +67,8 @@ struct Payload {
     row_properties: Vec<RowProperty>,
     edges: Vec<Edge>,
     duplicate_source_edges: usize,
+    unidentified_schema_properties: usize,
+    unresolved_source_targets: usize,
 }
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -87,6 +89,8 @@ pub struct RegistryReview {
     pub resolved_edge_count: usize,
     pub unresolved_edge_count: usize,
     pub duplicate_source_edges: usize,
+    pub unidentified_schema_property_count: usize,
+    pub unresolved_source_target_count: usize,
     pub workspace_identity_verified: bool,
     pub cross_root_merge_supported: bool,
     pub editable_bases_restored: bool,
@@ -105,6 +109,8 @@ pub struct RegistryReceipt {
     pub payload_blake3: String,
     pub unresolved_edge_count: usize,
     pub unmatched_row_property_count: usize,
+    pub unidentified_schema_property_count: usize,
+    pub unresolved_source_target_count: usize,
     pub editable_bases_restored: bool,
 }
 
@@ -182,6 +188,7 @@ fn normalize(source: &SourcePreview, digest: &str) -> Result<PreparedRegistry, S
     let mut properties = Vec::new();
     let mut property_index = BTreeMap::new();
     let mut row_properties = Vec::new();
+    let mut unidentified_schema_properties = 0_usize;
     // First pass: register ALL actual entities before resolving any edge.
     for object in &source.objects {
         if object.kind == "markdown" { continue; } // content of the page, not a second row
@@ -200,7 +207,12 @@ fn normalize(source: &SourcePreview, digest: &str) -> Result<PreparedRegistry, S
         if object.kind != "data_source" && object.kind != "database" { continue; }
         let Some(raw) = object.json.get("properties").and_then(Value::as_object) else { continue };
         for value in raw.values() {
-            let Some(id) = value.get("id").and_then(Value::as_str) else { continue };
+            let Some(id) = value.get("id").and_then(Value::as_str) else {
+                // Original type/value is still in the full JSON bundle, but
+                // this schema field cannot be assigned a stable Akula ID.
+                unidentified_schema_properties += 1;
+                continue;
+            };
             if !valid_source_id(id) { return Err("unsafe Notion schema property ID".into()); }
             let key = property_key(&object.kind, &object.id, id);
             if property_index.contains_key(&key) {
@@ -268,6 +280,8 @@ fn normalize(source: &SourcePreview, digest: &str) -> Result<PreparedRegistry, S
         workspace_identity_verified:false,cross_root_merge_supported:false,
         editable_bases_restored:false,nodes,schema_properties:properties,
         row_properties,edges,duplicate_source_edges,
+        unidentified_schema_properties,
+        unresolved_source_targets:source.unresolved_target_ids.iter().collect::<BTreeSet<_>>().len(),
     };
     encode(payload)
 }
@@ -286,6 +300,8 @@ fn review(payload: &Payload, digest: String, bytes: usize) -> RegistryReview {
         unresolved_edge_count:payload.edges.iter()
             .filter(|e| e.resolution != Resolution::Resolved).count(),
         duplicate_source_edges:payload.duplicate_source_edges,
+        unidentified_schema_property_count:payload.unidentified_schema_properties,
+        unresolved_source_target_count:payload.unresolved_source_targets,
         workspace_identity_verified:false,cross_root_merge_supported:false,
         editable_bases_restored:false,
     }
@@ -416,6 +432,8 @@ pub fn publish_approved(core: &Core, workspace: &Path, prepared: &PreparedRegist
         payload_blake3:verified.payload_blake3,
         unresolved_edge_count:verified.unresolved_edge_count,
         unmatched_row_property_count:verified.unmatched_row_property_count,
+        unidentified_schema_property_count:verified.unidentified_schema_property_count,
+        unresolved_source_target_count:verified.unresolved_source_target_count,
         editable_bases_restored:false,
     })
 }
