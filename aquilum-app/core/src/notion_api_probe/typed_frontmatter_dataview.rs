@@ -4,7 +4,7 @@
 use super::key;
 use crate::notion_api_probe::{
     projection::{prepare_import, ImportCandidate}, snapshot::SnapshotStore,
-    RawObject, SourcePreview, API_VERSION,
+    Link, RawObject, SourcePreview, API_VERSION,
 };
 use crate::search::{
     dataview::{execute::{self, CellPart}, parser, rows::Row},
@@ -15,6 +15,7 @@ use serde_json::json;
 const A: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const C: &str = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const D: &str = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const DS: &str = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const OTHER_DS: &str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
@@ -37,13 +38,25 @@ fn page(id: &str, ds: &str, score: f64, labels: &[&str]) -> RawObject {
         }),
     }
 }
+fn data_source(id: &str) -> RawObject {
+    RawObject {
+        kind:"data_source".into(), id:id.into(),
+        json:json!({"object":"data_source","id":id,"properties":{
+            "Name":{"id":"name","type":"title"},
+            "Score":{"id":"score-prop","type":"number"},
+            "Labels":{"id":"labels-prop","type":"multi_select"},
+            "Computed":{"id":"formula-prop","type":"formula"}
+        }}),
+    }
+}
 fn snapshot() -> SourcePreview {
     let pages = [
         page(A, DS, 8.0, &["Blocked"]),
         page(B, DS, 42.5, &["Research", "Needs review"]),
         page(C, OTHER_DS, 99.0, &["Research"]),
+        page(D, OTHER_DS, 6.0, &["Blocked"]),
     ];
-    let mut objects = Vec::new();
+    let mut objects = vec![data_source(DS), data_source(OTHER_DS)];
     for page in pages {
         objects.push(RawObject {
             kind:"markdown".into(), id:page.id.clone(),
@@ -53,8 +66,15 @@ fn snapshot() -> SourcePreview {
     }
     SourcePreview {
         format:"notion_api_dataview_test", api_version:API_VERSION, root:A.into(),
-        workspace_complete:false, root_traversal_complete:true, requests:7,
-        objects, links:vec![], unresolved_target_ids:vec![], warnings:vec![],
+        workspace_complete:false, root_traversal_complete:true, requests:9,
+        objects,
+        links:vec![
+            Link{from:B.into(),to:A.into(),kind:"relation".into(),
+                property_id:Some("linked-prop".into())},
+            Link{from:C.into(),to:D.into(),kind:"relation".into(),
+                property_id:Some("linked-prop".into())},
+        ],
+        unresolved_target_ids:vec![], warnings:vec![],
     }
 }
 fn as_row(candidate: ImportCandidate) -> Row {
@@ -89,10 +109,19 @@ fn api_cache_to_dataview_filters_by_data_source_and_sorts_numeric_fields() {
     let store = SnapshotStore::open_read_only(&cache).unwrap();
     let saved = store.load(A).unwrap().expect("verified source cache");
     assert_eq!(saved.info.digest, expected);
+    assert_eq!(saved.info.object_count, 10);
+    assert_eq!(saved.info.link_count, 2);
     let imported = prepare_import(&saved.into_preview()).unwrap();
     assert!(imported.publish_allowed);
-    assert_eq!(imported.candidates.len(), 3);
+    assert_eq!(imported.candidates.len(), 4);
     assert!(imported.unresolved.is_empty());
+    let related = imported.candidates.iter().filter(|page| !page.relations.is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(related.len(), 2);
+    assert!(imported.candidates.iter().find(|p| p.source_id == B)
+        .unwrap().markdown.contains(&format!("<{A}.md>")));
+    assert!(imported.candidates.iter().find(|p| p.source_id == C)
+        .unwrap().markdown.contains(&format!("<{D}.md>")));
     let make_rows = || imported.candidates.iter().cloned().map(as_row).collect::<Vec<_>>();
     let score = key("Score", &json!({"id":"score-prop"})).unwrap();
     let labels = key("Labels", &json!({"id":"labels-prop"})).unwrap();
