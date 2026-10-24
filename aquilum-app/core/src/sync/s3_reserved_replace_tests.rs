@@ -1476,3 +1476,5 @@ fn p0g3d08d_partial_persistence_domains_fail_closed_after_v8() {
         drop(keep_fixture);
     }
 }
+
+include!("s3_reserved_replace_g2_fault_tests.rs");
