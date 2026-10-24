@@ -460,10 +460,9 @@ mod tests {
         fs::create_dir(&root).unwrap();
         let bytes = b"verified object is not allowed to become public";
         let digest = *blake3::hash(bytes).as_bytes();
-        let initial = persist_received_payload(
-            bytes, &root, bytes.len() as u64, digest, [81; 32], [91; 32],
-        )
-        .unwrap();
+        let initial =
+            persist_received_payload(bytes, &root, bytes.len() as u64, digest, [81; 32], [91; 32])
+                .unwrap();
         let ledger = InboxLedger::open(&root).unwrap();
         let object = ledger.object_path(initial.id);
         drop(ledger);
@@ -471,10 +470,8 @@ mod tests {
         // Path-based SQLite can still find the correct bytes, but the
         // root-relative final object ACL check must fail before a new ACK.
         assert!(
-            persist_received_payload(
-                bytes, &root, bytes.len() as u64, digest, [81; 32], [91; 32],
-            )
-            .is_err()
+            persist_received_payload(bytes, &root, bytes.len() as u64, digest, [81; 32], [91; 32],)
+                .is_err()
         );
         assert_eq!(InboxLedger::open(&root).unwrap().count().unwrap(), 1);
         assert_eq!(fs::read(object).unwrap(), bytes);
@@ -488,20 +485,17 @@ mod tests {
         fs::create_dir(&root).unwrap();
         let bytes = b"verified object is not allowed to have an outside alias";
         let digest = *blake3::hash(bytes).as_bytes();
-        let initial = persist_received_payload(
-            bytes, &root, bytes.len() as u64, digest, [82; 32], [92; 32],
-        )
-        .unwrap();
+        let initial =
+            persist_received_payload(bytes, &root, bytes.len() as u64, digest, [82; 32], [92; 32])
+                .unwrap();
         let ledger = InboxLedger::open(&root).unwrap();
         let object = ledger.object_path(initial.id);
         drop(ledger);
         let other_link = root.join("alias-outside-objects.bin");
         fs::hard_link(&object, &other_link).unwrap();
         assert!(
-            persist_received_payload(
-                bytes, &root, bytes.len() as u64, digest, [82; 32], [92; 32],
-            )
-            .is_err()
+            persist_received_payload(bytes, &root, bytes.len() as u64, digest, [82; 32], [92; 32],)
+                .is_err()
         );
         assert_eq!(fs::read(&other_link).unwrap(), bytes);
         assert_eq!(InboxLedger::open(&root).unwrap().count().unwrap(), 1);
