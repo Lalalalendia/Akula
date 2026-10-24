@@ -689,9 +689,37 @@ mod tests {
             }
             // A fresh writable connection must be able to recover the
             // interrupted WAL lifecycle without weakening SQLite constraints.
-            let reopened = InboxLedger::open(dir.path()).unwrap();
+            let mut reopened = InboxLedger::open(dir.path()).unwrap();
             assert_eq!(reopened.status(expected.id).unwrap(), expected_status);
             assert_eq!(reopened.count().unwrap(), 1);
+
+            // Resume the very same authenticated transfer after a crash.
+            // If only the SQL reservation existed, publish exactly once.
+            // If the blob survived without confirmation, validate/commit it
+            // in place; if already committed, perform no additional write.
+            let mut writes = 0usize;
+            let recovered = reopened
+                .receive_with_writer(&expected, |destination| {
+                    writes += 1;
+                    let mut candidate = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(destination)?;
+                    use std::io::Write;
+                    candidate.write_all(bytes)?;
+                    candidate.sync_all()?;
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(recovered, LocalStatus::VerifiedLocal);
+            assert_eq!(writes, if phase == "reserved" { 1 } else { 0 });
+            assert_eq!(reopened.count().unwrap(), 1);
+            drop(reopened);
+
+            // The recovered state must remain durable across a further
+            // independent read-only open, not only the writer connection.
+            let cold_again = InboxLedger::open_existing(dir.path()).unwrap().unwrap();
+            cold_again.verify_committed_intent(&expected).unwrap();
         }
     }
 
