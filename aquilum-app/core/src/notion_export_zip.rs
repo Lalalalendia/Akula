@@ -31,12 +31,29 @@ fn safe_name(name: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 pub(super) fn inspect_zip(path: &Path, limits: ScanLimits) -> Result<InventoryReport, String> {
+    inspect_zip_inner(path, limits, false).map(|(report, _)| report)
+}
+
+/// Re-parse the entire ZIP under the same strict checks, collecting only Markdown.
+/// The returned report is compared against the first inventory before use.
+pub(super) fn inspect_zip_with_text(path: &Path, limits: ScanLimits)
+    -> Result<(InventoryReport, BTreeMap<String, String>), String>
+{
+    inspect_zip_inner(path, limits, true)
+}
+
+fn inspect_zip_inner(path: &Path, limits: ScanLimits, collect_text: bool)
+    -> Result<(InventoryReport, BTreeMap<String, String>), String>
+{
     let meta = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     if !meta.is_file() || meta.file_type().is_symlink() {
         return Err("ZIP must be a regular non-symlink file".into());
     }
     if meta.len() > limits.max_total_bytes {
         return Err("ZIP compressed size exceeds input budget".into());
+    }
+    if collect_text && meta.len() > super::content::MAX_STAGING_INPUT_BYTES {
+        return Err("ZIP exceeds bounded content-staging input budget".into());
     }
     let mut f = File::open(path).map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
@@ -68,6 +85,8 @@ pub(super) fn inspect_zip(path: &Path, limits: ScanLimits) -> Result<InventoryRe
     let mut total = 0_u64;
     let mut references = Vec::new();
     let mut entries = Vec::new();
+    let mut staged = BTreeMap::new();
+    let mut staged_bytes = 0_u64;
     let mut used = Vec::<(usize, usize)>::new();
     let mut seen = std::collections::BTreeSet::new();
     for _ in 0..count {
@@ -177,10 +196,22 @@ pub(super) fn inspect_zip(path: &Path, limits: ScanLimits) -> Result<InventoryRe
                 None
             }
         } else { None };
+        if collect_text && kind == EntryKind::MarkdownPage {
+            staged_bytes = staged_bytes.checked_add(content.len() as u64)
+                .ok_or("staged Markdown byte budget overflow")?;
+            if staged_bytes > super::content::MAX_STAGING_TEXT_BYTES {
+                return Err("verified Markdown staging exceeds memory budget".into());
+            }
+            let markdown = String::from_utf8(content)
+                .map_err(|_| "non-UTF-8 staged Markdown")?;
+            if staged.insert(safe.clone(), markdown).is_some() {
+                return Err("duplicate staged Markdown path".into());
+            }
+        }
         entries.push(InventoryEntry { path: safe, kind, source_id, bytes: unpacked as u64, blake3: hash, csv });
     }
     if cursor != sum(directory_at, directory_size)? { return Err("unaccounted ZIP central records".into()); }
-    Ok(finalize_report(entries, references, "notion_zip_inventory_v1"))
+    Ok((finalize_report(entries, references, "notion_zip_inventory_v1"), staged))
 }
 
 #[cfg(test)]

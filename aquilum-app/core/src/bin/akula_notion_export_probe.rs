@@ -1,21 +1,21 @@
-//! Explicit offline diagnostic. Stdout: JSON. Stderr: errors only.
-use aquilum_core::notion_export::{inspect_path, plan::prepare_plan, ScanLimits};
+//! Explicit offline diagnostic. Stdout: JSON metadata only. Stderr: errors.
+use aquilum_core::notion_export::{content::stage_read_only, inspect_path, plan::prepare_plan, ScanLimits};
 use std::path::PathBuf;
 
 fn main() {
     let mut args = std::env::args_os();
     let _binary = args.next();
     let Some(first) = args.next() else {
-        eprintln!("usage: akula-notion-export-probe [--plan] <notion-zip-or-extracted-directory>");
+        eprintln!("usage: akula-notion-export-probe [--plan|--verify-content] <zip-or-directory>");
         std::process::exit(2);
     };
-    let (plan, input) = if first.to_str() == Some("--plan") {
-        (true, args.next())
-    } else {
-        (false, Some(first))
+    let (mode, input) = match first.to_str() {
+        Some("--plan") => ("plan", args.next()),
+        Some("--verify-content") => ("verify-content", args.next()),
+        _ => ("inventory", Some(first)),
     };
     let Some(root) = input else {
-        eprintln!("usage: akula-notion-export-probe [--plan] <notion-zip-or-extracted-directory>");
+        eprintln!("usage: akula-notion-export-probe [--plan|--verify-content] <zip-or-directory>");
         std::process::exit(2);
     };
     if args.next().is_some() {
@@ -23,23 +23,25 @@ fn main() {
         std::process::exit(2);
     }
     let root = PathBuf::from(root);
-    match inspect_path(&root, ScanLimits::default()) {
-        Ok(report) => {
-            let json = if plan {
+    let limits = ScanLimits::default();
+    let result = match mode {
+        "verify-content" => stage_read_only(&root, limits).and_then(|staged| {
+            serde_json::to_string_pretty(&staged.receipt())
+                .map_err(|_| "cannot encode verified stage receipt".into())
+        }),
+        "plan" | "inventory" => inspect_path(&root, limits).and_then(|report| {
+            if mode == "plan" {
                 serde_json::to_string_pretty(&prepare_plan(&report))
             } else {
                 serde_json::to_string_pretty(&report)
-            };
-            match json {
-                Ok(json) => println!("{json}"),
-                Err(_) => {
-                    eprintln!("cannot serialize read-only Notion diagnostic");
-                    std::process::exit(1);
-                }
-            }
-        }
+            }.map_err(|_| "cannot encode Notion inventory report".into())
+        }),
+        _ => Err("unrecognized read-only mode".into()),
+    };
+    match result {
+        Ok(json) => println!("{json}"),
         Err(error) => {
-            eprintln!("notion inventory refused: {error}");
+            eprintln!("Notion read-only diagnostic refused: {error}");
             std::process::exit(1);
         }
     }

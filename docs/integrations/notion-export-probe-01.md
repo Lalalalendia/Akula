@@ -13,7 +13,15 @@ Optional read-only destination planning (stdout contains source paths/UUIDs):
 
     cargo run -p aquilum-core --locked --features notion-export-probe --bin akula-notion-export-probe -- --plan /path/to/export.zip > plan.json
 
-The plan uses stable 32-hex Notion UUIDs for proposed note filenames, preserves Markdown link targets, and lists blockers for missing/duplicate IDs, unresolved links, images, CSV schema, HTML and other unsupported entries. No original text is copied to the plan; no files are created. Even a structurally valid plan has publication_supported=false: File Gate authorization, content readback and hashes, schema restoration, asset handling and user approval are separate mandatory stages.
+The plan uses stable 32-hex Notion UUIDs for proposed note filenames, preserves Markdown link targets, and lists blockers for missing/duplicate IDs, unresolved links, images, CSV schema, HTML and other unsupported entries. No original text is copied to the plan; no files are created. Even a structurally valid plan has publication_supported=false.
+
+Optional **read-only verified Markdown staging** (JSON receipt contains IDs, paths, hashes, byte counts, but never Markdown body):
+
+    cargo run -p aquilum-core --locked --features notion-export-probe --bin akula-notion-export-probe -- --verify-content /path/to/export.zip > receipt.json
+
+This command scans the source, requires a blocker-free plan, reads Markdown into bounded memory, validates BLAKE3 against the first inventory and independently rechecks the full source inventory. ZIP decoding uses the same strict CRC/entry checks. It does not extract, save or import anything. For safety, this first in-memory stage refuses ZIP inputs over 64 MiB and combined Markdown over 32 MiB (each text entry is also bounded by ScanLimits); larger real exports require a future streaming audited reader. Source directories **must be isolated immutable snapshots**: a malicious concurrent writer can still race path checks, and OS-pinned directory handles are not yet implemented.
+
+**No File Gate or Vault publication is authorized.** Typed database schemas, media, Notion permissions, workspace completeness and user approval remain independent gates. A verified receipt is not a successful migration.
 
 JSON goes to stdout. The report can include sensitive original page names and IDs; keep it private.
 
