@@ -184,3 +184,33 @@ or guarantee power-loss durability. Before beta release require complete
 Windows file/directory custody, physical installed two-network P2P, and
 ordinary signed application update. The new exact-head CI must pass before
 marking this slice accepted.
+
+## 24 October: original NT-HANDLE deletion of temporary received stages
+
+The Windows receiver's temporary `.stage` file is created under the pinned
+Inbox root by the existing NT `NtCreateFile(FILE_CREATE, DELETE_ACCESS)`
+boundary. It previously removed that temporary file in a `Drop` guard using
+`std::fs::remove_file(original_path)`, which could delete an unrelated file
+if a same-user actor renamed/replaced the stage's original name.
+
+For Windows only, the receiver now keeps a duplicate of the newly created
+stage HANDLE as a `PinnedStageCleanup` guard. After successful blob/SQLite
+verification, it uses the existing `NtSetInformationFile` function with
+`FileDispositionInformation (13)` to mark the **opened file object**, not a
+pathname, for deletion on final close; an unsuccessful operation attempts
+the same operation in its drop guard. A successful network OK requires that
+this handle-only delete disposition succeed. After applying disposition
+the handle is only closed and is never accessed again.
+
+The new Windows test `windows_pinned_stage_cleanup_never_deletes_replaced_name`
+renames a live stage, places an unrelated sentinel under its old name and
+checks both success/error cleanup modes. Only the original stage may be
+removed. This test runs in the existing exact-head Windows P2P job, not a
+new CI workflow. Per Microsoft's NT disposition contract, the original
+stage was opened with DELETE access and deletion occurs at handle close.
+
+**Release remains HOLD**: This removes one cleanup pathname race, but
+`rusqlite` and `save_verified_stage_as_new` still create/open their
+persistent targets via global paths. Same-user namespace custody and
+power-loss signed delivery are not established. No merge, independent
+installer or auto-update activation before installed physical WAN tests.
