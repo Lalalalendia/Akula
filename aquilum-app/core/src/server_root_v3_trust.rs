@@ -41,15 +41,21 @@ fn os(error: rustix::io::Errno) -> RootEnrollmentError {
     RootEnrollmentError::Io(error.into())
 }
 fn root_dir_ok(meta: &Metadata, mode: u32) -> bool {
-    meta.is_dir() && meta.uid() == 0 && meta.nlink() != 0
+    meta.is_dir()
+        && meta.uid() == 0
+        && meta.nlink() != 0
         && (meta.permissions().mode() & 0o7777) == mode
 }
 fn root_file_ok(meta: &Metadata, mode: u32, max: u64) -> bool {
-    meta.is_file() && meta.uid() == 0 && meta.nlink() == 1
-        && (meta.permissions().mode() & 0o7777) == mode && meta.len() <= max
+    meta.is_file()
+        && meta.uid() == 0
+        && meta.nlink() == 1
+        && (meta.permissions().mode() & 0o7777) == mode
+        && meta.len() <= max
 }
 fn stable(before: &Metadata, after: &Metadata) -> bool {
-    before.dev() == after.dev() && before.ino() == after.ino()
+    before.dev() == after.dev()
+        && before.ino() == after.ino()
         && before.len() == after.len()
         && before.mtime() == after.mtime()
         && before.mtime_nsec() == after.mtime_nsec()
@@ -57,11 +63,15 @@ fn stable(before: &Metadata, after: &Metadata) -> bool {
         && before.ctime_nsec() == after.ctime_nsec()
 }
 fn read_root_file(dir: &File, leaf: &str, max: u64) -> Result<Vec<u8>, RootEnrollmentError> {
-    let file = File::from(openat(
-        dir, leaf,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(os)?);
+    let file = File::from(
+        openat(
+            dir,
+            leaf,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(os)?,
+    );
     let before = file.metadata()?;
     if !root_file_ok(&before, 0o600, max) || before.len() == 0 {
         return Err(RootEnrollmentError::UntrustedPath);
@@ -75,25 +85,34 @@ fn read_root_file(dir: &File, leaf: &str, max: u64) -> Result<Vec<u8>, RootEnrol
     }
     Ok(content)
 }
-fn take<const N: usize>(data: &[u8], offset: &mut usize)
-    -> Result<[u8; N], RootEnrollmentError>
-{
-    let end = offset.checked_add(N).ok_or(RootEnrollmentError::InvalidPolicy)?;
-    let bytes = data.get(*offset..end).ok_or(RootEnrollmentError::InvalidPolicy)?;
+fn take<const N: usize>(data: &[u8], offset: &mut usize) -> Result<[u8; N], RootEnrollmentError> {
+    let end = offset
+        .checked_add(N)
+        .ok_or(RootEnrollmentError::InvalidPolicy)?;
+    let bytes = data
+        .get(*offset..end)
+        .ok_or(RootEnrollmentError::InvalidPolicy)?;
     *offset = end;
-    bytes.try_into().map_err(|_| RootEnrollmentError::InvalidPolicy)
+    bytes
+        .try_into()
+        .map_err(|_| RootEnrollmentError::InvalidPolicy)
 }
-fn take_identity(data: &[u8], offset: &mut usize)
-    -> Result<String, RootEnrollmentError>
-{
+fn take_identity(data: &[u8], offset: &mut usize) -> Result<String, RootEnrollmentError> {
     let n = take::<1>(data, offset)?[0] as usize;
     if !(1..=64).contains(&n) {
         return Err(RootEnrollmentError::InvalidPolicy);
     }
-    let end = offset.checked_add(n).ok_or(RootEnrollmentError::InvalidPolicy)?;
-    let bytes = data.get(*offset..end).ok_or(RootEnrollmentError::InvalidPolicy)?;
+    let end = offset
+        .checked_add(n)
+        .ok_or(RootEnrollmentError::InvalidPolicy)?;
+    let bytes = data
+        .get(*offset..end)
+        .ok_or(RootEnrollmentError::InvalidPolicy)?;
     *offset = end;
-    if !bytes.iter().all(|v| v.is_ascii_alphanumeric() || matches!(*v, b'-' | b'_' | b'.')) {
+    if !bytes
+        .iter()
+        .all(|v| v.is_ascii_alphanumeric() || matches!(*v, b'-' | b'_' | b'.'))
+    {
         return Err(RootEnrollmentError::InvalidPolicy);
     }
     String::from_utf8(bytes.to_vec()).map_err(|_| RootEnrollmentError::InvalidPolicy)
@@ -123,15 +142,18 @@ impl RootEnrolledV3 {
         let helper_sha256 = take::<32>(data, &mut offset)?;
         let release_signer_id = take_identity(data, &mut offset)?;
         let release_pub = take::<32>(data, &mut offset)?;
-        if offset != data.len() ||
-            [owner_pub, ssh_host_sha256, helper_sha256, release_pub]
-                .contains(&[0; 32])
+        if offset != data.len()
+            || [owner_pub, ssh_host_sha256, helper_sha256, release_pub].contains(&[0; 32])
         {
             return Err(RootEnrollmentError::InvalidPolicy);
         }
         Ok(Self {
-            owner_id, owner_pub, ssh_host_sha256, helper_sha256,
-            release_signer_id, release_pub,
+            owner_id,
+            owner_pub,
+            ssh_host_sha256,
+            helper_sha256,
+            release_signer_id,
+            release_pub,
         })
     }
 
@@ -168,12 +190,11 @@ impl RootEnrolledV3 {
         if rustix::process::geteuid().as_raw() != 0 {
             return Err(RootEnrollmentError::NotRoot);
         }
-        verified.valid_at(now_unix)
+        verified
+            .valid_at(now_unix)
             .map_err(|_| RootEnrollmentError::InvalidVerifiedRelease)?;
         let (verified_signer_id, verified_signer_key) = verified.verified_publisher();
-        if verified_signer_id != self.release_signer_id
-            || verified_signer_key != self.release_pub
-        {
+        if verified_signer_id != self.release_signer_id || verified_signer_key != self.release_pub {
             return Err(RootEnrollmentError::ReleaseIdentityMismatch);
         }
         let version = verified.receipt.proposed_floor.version;
@@ -205,23 +226,33 @@ pub fn load_provisioned_root_v3_policy() -> Result<RootEnrolledV3, RootEnrollmen
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(RootEnrollmentError::NotRoot);
     }
-    let mut current = File::from(open(
-        Path::new("/"),
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ).map_err(os)?);
+    let mut current = File::from(
+        open(
+            Path::new("/"),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(os)?,
+    );
     if !root_dir_ok(&current.metadata()?, 0o755) {
         return Err(RootEnrollmentError::UntrustedPath);
     }
     for (name, mode) in [
-        ("var", 0o755), ("lib", 0o755),
-        ("akula", 0o700), ("server-bootstrap", 0o700), ("trust", 0o700),
+        ("var", 0o755),
+        ("lib", 0o755),
+        ("akula", 0o700),
+        ("server-bootstrap", 0o700),
+        ("trust", 0o700),
     ] {
-        let next = File::from(openat(
-            &current, name,
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        ).map_err(os)?);
+        let next = File::from(
+            openat(
+                &current,
+                name,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(os)?,
+        );
         if !root_dir_ok(&next.metadata()?, mode) {
             return Err(RootEnrollmentError::UntrustedPath);
         }

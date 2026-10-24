@@ -72,6 +72,19 @@ jobs:
           cargo test --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-root-b0v3-gate-lab --lib \
             server_root_v3_guard::tests -- --nocapture
+      - name: Verify independently enrolled root V3 trust reader with user and UID0 isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Compile once as the unprivileged CI user. Root executes only
+          # this exact already-built test binary, not Cargo or rustup.
+          test_bin="$(cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
+            --no-run --message-format=json | jq -r \
+            'select(.reason == "compiler-artifact" and .target.name == "aquilum_core") | .executable // empty' | tail -n 1)"
+          test -n "$test_bin" && test -x "$test_bin"
+          "$test_bin" server_root_v3_trust::tests --nocapture
+          sudo -n -- "$test_bin" server_root_v3_trust::tests --nocapture
       - name: Confirm default Core compiles without installer authority
         shell: bash
         run: |
@@ -152,18 +165,3 @@ jobs:
         run: |
           cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-owner-windows-signer,server-bootstrap-b0-openssh-lab --lib server_owner_windows::tests -- --nocapture
           cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-owner-windows-signer,server-bootstrap-b0-openssh-lab --lib server_release_lab::review::tests::windows_owner_key_signs_only_the_reviewed_claim -- --nocapture
-      - name: Verify independently enrolled root V3 trust reader in disposable UID0 directories
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
-            -p aquilum-core --features server-root-b0v3-gate-lab --lib \
-            server_root_v3_trust::tests -- --nocapture
-          # This repeats the same tests as actual root, without ever
-          # provisioning or even opening the real production trust path.
-          sudo -n -- /usr/bin/env "CARGO_HOME=$CARGO_HOME" \
-            "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
-            "$(command -v cargo)" test --offline --locked \
-            --manifest-path aquilum-app/Cargo.toml -p aquilum-core \
-            --features server-root-b0v3-gate-lab --lib \
-            server_root_v3_trust::tests -- --nocapture
