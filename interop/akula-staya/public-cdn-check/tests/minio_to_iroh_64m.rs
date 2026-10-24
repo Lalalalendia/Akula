@@ -1,7 +1,8 @@
 //! Actual 64 MiB integration: MinIO -> native downloader A -> existing
 //! Iroh/Bao sender -> receiver B, using independent SHA-256 and BLAKE3 pins.
-//! Sender A buffers a 64 MiB synthetic fixture ONLY for this bounded lab;
-//! production must stage to FsStore without materializing whole files.
+//! Sender A writes one verified Range at a time to an OWNED staging file, and
+//! imports the completed file into the existing FsStore without building a
+//! 64 MiB Vec. An unverified file is never exposed to the peer.
 use akula_public_cdn_check::{
     public_cdn_lab::{
         ChunkRequest, OptionalChunkSource, PublicObjectReader, PublisherPinnedManifest,
@@ -19,7 +20,7 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 use sha2::{Digest, Sha256};
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, io::Read, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 struct UnavailablePeer;
 impl OptionalChunkSource for UnavailablePeer {
@@ -52,9 +53,17 @@ async fn minio_to_native_a_to_existing_iroh_bao_to_native_b() {
         assert_eq!(manifest.object_size(), SIZE);
         assert_eq!(manifest.chunk_count(), (SIZE as usize / CHUNK));
 
-        // S3 read uses blocking HTTPS/MinIO client on its own blocking thread,
-        // not inside Tokio reactor. No P2P exists yet for A.
-        let (data, origin_count, origin_bytes, sha, root) =
+        // The sender stages ONLY synthetic public bytes in an owned temporary
+        // directory. Create-new prevents clobbering any pre-existing file.
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)
+            .expect("system clock").as_nanos();
+        let stage_root = std::env::temp_dir()
+            .join(format!("akula-s3-staya-e2e-{}-{nonce}", std::process::id()));
+        fs::create_dir(&stage_root).expect("exclusive temporary stage root");
+        let stage_file = stage_root.join("unpublished-object.bin");
+        let worker_file = stage_file.clone();
+        // S3 GET runs on its own blocking worker, not on the Tokio reactor.
+        let (origin_count, origin_bytes, sha, root) =
             tokio::task::spawn_blocking(move || {
                 let approved = manifest.origin_url_for_allowlisted_adapter().to_string();
                 let mut origin =
@@ -64,36 +73,53 @@ async fn minio_to_native_a_to_existing_iroh_bao_to_native_b() {
                 let mut peer = UnavailablePeer;
                 let mut reader =
                     PublicObjectReader::new(&manifest, &mut cache, &mut peer, &mut origin);
-                let mut verified_staging = Vec::with_capacity(SIZE as usize);
+                let mut pending = fs::OpenOptions::new()
+                    .write(true).create_new(true).open(&worker_file)
+                    .expect("never truncate an unrelated path");
+                // PublicObjectReader verifies each <=256KiB chunk and
+                // the full ContentID; this output is not published yet.
                 let receipt = reader
-                    .stream_into(&mut verified_staging)
+                    .stream_into(&mut pending)
                     .expect("all 256 S3 chunks must verify");
+                pending.sync_all().expect("durable verified staging bytes");
+                drop(pending);
                 assert_eq!(receipt.bytes, SIZE);
                 assert_eq!(receipt.metrics.verified_cache_bytes, 0);
                 assert_eq!(receipt.metrics.verified_peer_bytes, 0);
                 assert_eq!(receipt.metrics.verified_origin_bytes, SIZE);
                 assert_eq!(receipt.metrics.origin_requests, (SIZE as usize / CHUNK) as u64);
-                (verified_staging, receipt.metrics.origin_requests,
+                (receipt.metrics.origin_requests,
                     receipt.metrics.verified_origin_bytes,
                     receipt.object_sha256, receipt.staya_content_id.0)
             })
             .await
             .expect("S3 fetch worker");
-        assert_eq!(Sha256::digest(&data).as_slice(), sha);
-        assert_eq!(blake3::hash(&data).as_bytes(), &root);
+        // Independently audit the actual on-disk staging file with a 64KiB
+        // read buffer. A second full-buffer copy would defeat this test.
+        assert_eq!(fs::metadata(&stage_file).expect("staged file").len(), SIZE);
+        let mut source = fs::File::open(&stage_file).expect("auditable stage");
+        let mut sha_check = Sha256::new();
+        let mut blake_check = blake3::Hasher::new();
+        let mut block = [0_u8; 64 * 1024];
+        let mut audited = 0_u64;
+        loop {
+            let count = source.read(&mut block).expect("stage read");
+            if count == 0 { break; }
+            sha_check.update(&block[..count]);
+            blake_check.update(&block[..count]);
+            audited += count as u64;
+        }
+        assert_eq!(audited, SIZE);
+        assert_eq!(sha_check.finalize().as_slice(), sha);
+        assert_eq!(blake_check.finalize().as_bytes(), &root);
 
-        // A stores precisely the public synthetic object in an isolated,
-        // temporary FsStore. This is not Akula's private Vault root.
-        let store_root = std::env::temp_dir().join(format!(
-            "akula-s3-staya-e2e-{}-{}",
-            std::process::id(),
-            hex_short(&root),
-        ));
-        assert!(!store_root.exists(), "never reuse an unrelated directory");
-        fs::create_dir(&store_root).expect("private lab root");
+        // Filesystem-backed FsStore import, not store.add_slice(&64MiBVec).
+        // The original validated file stays accessible until shutdown.
+        let store_root = stage_root.join("iroh-store");
+        fs::create_dir(&store_root).expect("private lab store");
         let store = FsStore::load(&store_root).await.expect("independent sender FsStore");
-        let tagged = store.add_slice(&data).await.expect("stage only public fixture");
-        let wanted = Hash::new(&data);
+        let tagged = store.add_path(&stage_file).await.expect("import verified public file");
+        let wanted = Hash::from_bytes(root);
         assert_eq!(tagged.hash, wanted);
         assert_eq!(wanted.as_bytes(), &root);
 
@@ -188,9 +214,9 @@ async fn minio_to_native_a_to_existing_iroh_bao_to_native_b() {
         gate.abort();
         drop(tagged);
         drop(store);
-        fs::remove_dir_all(&store_root).expect("remove owned test-only root");
+        fs::remove_dir_all(&stage_root).expect("remove owned stage and store");
         println!(
-            "PUBLIC_MINIO_TO_IROH_E2E size={} stage_a_s3_bytes={} stage_b_s3_bytes={} stage_b_bao_bytes={} parts={} sha256={} blake3={} peer_gate=true relay=false",
+            "PUBLIC_MINIO_TO_IROH_E2E size={} stage_a_s3_bytes={} stage_b_s3_bytes={} stage_b_bao_bytes={} parts={} sha256={} blake3={} peer_gate=true relay=false stage_file=true max_inflight_s3_chunk=262144",
             SIZE, origin_bytes, b_origin_bytes, b_peer_bytes, peer_gets,
             hex(&sha), hex(&root),
         );
@@ -199,6 +225,4 @@ async fn minio_to_native_a_to_existing_iroh_bao_to_native_b() {
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
-fn hex_short(bytes: &[u8]) -> String {
-    bytes[..8].iter().map(|b| format!("{b:02x}")).collect()
-}
+
