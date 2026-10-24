@@ -180,6 +180,8 @@ def create_app(manifest_path: Path, demo_file: Path | None = None):
 
     app.router.add_get("/", index)
     app.router.add_get("/client.js", client_js)
+    app.router.add_get("/sha256_stream.js", lambda _: web.FileResponse(HERE / "web/sha256_stream.js"))
+    app.router.add_get("/bounded_output.js", lambda _: web.FileResponse(HERE / "web/bounded_output.js"))
     app.router.add_get("/sha256_stream.js", sha256_js)
     app.router.add_get("/bounded_output.js", bounded_output_js)
     app.router.add_get("/style.css", css)
