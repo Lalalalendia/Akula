@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc::{self, Receiver, Sender}};
 use aquilum_core::{Core, notion_api_probe::{
     cached_import::{approved_cached_preview, read_verified_cached, CachedImportReview},
-    publish::publish_approved, structured_bundle, identity_registry,
+    publish::publish_approved, structured_bundle, identity_registry, bases_model,
 }};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -18,7 +18,7 @@ impl Stage {
             Self::Reviewing => "Проверяю снимок API в отдельном потоке...",
             Self::Ready => "Снимок проверен. Для импорта требуется отдельное подтверждение.",
             Self::Publishing => "Создаю независимые заметки через File Gate...",
-            Self::Complete => "Markdown, исходные JSON и граф устойчивых ID сохранены. Редактируемые базы и медиа ещё не восстановлены.",
+            Self::Complete => "Заметки, типизированный JSON и граф ID сохранены; локальная модель баз читается без Notion. Редактирование и медиа ещё не восстановлены.",
             Self::NeedsReview => "Импорт приостановлен: источник, база или права требуют проверки.",
         }
     }
@@ -39,6 +39,11 @@ pub struct ImportView {
     pub structured_saved: bool,
     pub identities_saved: bool,
     pub identities_need_review: usize,
+    pub base_schemas: usize,
+    pub base_rows: usize,
+    pub base_views: usize,
+    pub base_issues: usize,
+    pub bases_reconstructible: bool,
 }
 
 impl ImportView {
@@ -59,8 +64,26 @@ struct Summary {
     structured_saved: bool,
     identities_saved: bool,
     identities_need_review: usize,
+    base_issues: usize,
+    bases_reconstructible: bool,
 }
-enum ResultKind { Review(CachedImportReview), Published(Summary) }
+#[derive(Clone, Copy, Debug, Default)]
+struct BaseStats {
+    schemas: usize,
+    rows: usize,
+    views: usize,
+    issues: usize,
+}
+impl BaseStats {
+    fn from_model(model: &bases_model::BasesModel) -> Self {
+        Self {
+            schemas: model.bases.len(), rows: model.rows.len(),
+            views: model.views.len(),
+            issues: model.fields_needing_review + model.unbound_rows + model.unbound_views,
+        }
+    }
+}
+enum ResultKind { Review(CachedImportReview, BaseStats), Published(Summary) }
 struct Completion {
     revision: u64,
     root: String,
@@ -129,10 +152,13 @@ impl ImportSession {
     {
         let source = root.clone();
         self.start(root, target, Stage::Reviewing, move || {
-            let (review, _) = read_verified_cached(&data_dir.join("ui-state.sqlite3"), &source)
-                .map_err(|_| ())?;
+            let cache=data_dir.join("ui-state.sqlite3");
+            let (review, _) = read_verified_cached(&cache, &source).map_err(|_| ())?;
             if !review.can_publish_notes { return Err(()); }
-            Ok(ResultKind::Review(review))
+            let model=bases_model::from_verified_cache(&cache,&source,&review.digest)
+                .map_err(|_| ())?;
+            let stats=BaseStats::from_model(&model);
+            Ok(ResultKind::Review(review,stats))
         })
     }
 
@@ -162,14 +188,29 @@ impl ImportSession {
                 + identities.review().unmatched_row_property_count
                 + identities.review().unidentified_schema_property_count
                 + identities.review().unresolved_source_target_count;
+            let expected_bases=bases_model::from_verified_cache(&cache,&source,&digest)
+                .map_err(|_| ())?;
+            let expected_stats=BaseStats::from_model(&expected_bases);
             let preview = approved_cached_preview(&cache, &source, &digest)
                 .map_err(|_| ())?;
             let report = publish_approved(&core, &chosen, &preview, true).map_err(|_| ())?;
-            // Only publish structured data after a complete, conflict-free note
-            // import. Its create-only receipt is required for COMPLETE status.
-            let structured_saved = report.completed
-                && structured_bundle::publish_approved(&core, &chosen, &bundle, true).is_ok();
-            let identities_saved = structured_saved
+            // Retain one source JSON. A separate fourth user-data copy is not
+            // needed: rebuild the normalized model after File Gate readback.
+            let structured_receipt=if report.completed {
+                structured_bundle::publish_approved(&core,&chosen,&bundle,true).ok()
+            } else { None };
+            let structured_saved=structured_receipt.is_some();
+            let bases_reconstructible=structured_receipt.as_ref().is_some_and(|saved| {
+                bases_model::from_independent_bundle(&chosen.join(&saved.relative_path))
+                    .ok().is_some_and(|offline| {
+                        offline.source_root==source && offline.source_digest==digest
+                            && offline.bases.len()==expected_stats.schemas
+                            && offline.rows.len()==expected_stats.rows
+                            && offline.views.len()==expected_stats.views
+                            && BaseStats::from_model(&offline).issues==expected_stats.issues
+                    })
+            });
+            let identities_saved = bases_reconstructible
                 && identity_registry::publish_approved(&core, &chosen, &identities, true).is_ok();
             Ok(ResultKind::Published(Summary {
                 created: report.created.len(),
@@ -177,9 +218,11 @@ impl ImportSession {
                 conflicts: report.conflicts_untouched.len(),
                 // Unresolved source relations or unmatched typed property IDs
                 // are a review requirement, not a successful Bases migration.
-                completed: report.completed && structured_saved
-                    && identities_saved && identities_need_review == 0,
+                completed: report.completed && structured_saved && bases_reconstructible
+                    && identities_saved && identities_need_review == 0
+                    && expected_stats.issues == 0,
                 structured_saved, identities_saved, identities_need_review,
+                bases_reconstructible, base_issues:expected_stats.issues,
             }))
         })
     }
@@ -195,11 +238,15 @@ impl ImportSession {
             self.active = false;
             self.view.busy = false;
             match (self.view.stage, done.result) {
-                (Stage::Reviewing, Ok(ResultKind::Review(review)))
+                (Stage::Reviewing, Ok(ResultKind::Review(review,stats)))
                     if review.can_publish_notes =>
                 {
                     self.view.pages = review.page_count;
                     self.view.links = review.graph_link_count;
+                    self.view.base_schemas=stats.schemas;
+                    self.view.base_rows=stats.rows;
+                    self.view.base_views=stats.views;
+                    self.view.base_issues=stats.issues;
                     self.view.digest = Some(review.digest);
                     self.view.stage = Stage::Ready;
                 }
@@ -210,6 +257,8 @@ impl ImportSession {
                     self.view.structured_saved = summary.structured_saved;
                     self.view.identities_saved = summary.identities_saved;
                     self.view.identities_need_review = summary.identities_need_review;
+                    self.view.bases_reconstructible=summary.bases_reconstructible;
+                    self.view.base_issues=summary.base_issues;
                     self.view.stage = if summary.completed {
                         Stage::Complete
                     } else { Stage::NeedsReview };
@@ -241,11 +290,11 @@ mod tests {
         let mut s = ImportSession::new(Arc::new(move || { let _ = tx.send(()); }));
         let target = PathBuf::from("synthetic-workspace");
         s.start(ROOT.into(), target.clone(), Stage::Reviewing, || {
-            Ok(ResultKind::Review(review()))
+            Ok(ResultKind::Review(review(),BaseStats::default()))
         }).unwrap();
         assert!(!s.view().ready_for(ROOT, &target));
         assert!(s.start(ROOT.into(), target.clone(), Stage::Reviewing, || {
-            Ok(ResultKind::Review(review()))
+            Ok(ResultKind::Review(review(),BaseStats::default()))
         }).is_err());
         rx.recv_timeout(Duration::from_secs(10)).unwrap();
         assert!(s.poll());
@@ -275,7 +324,7 @@ mod tests {
         let mut s = ImportSession::new(Arc::new(move || { let _ = tx.send(()); }));
         let target = PathBuf::from("selected-vault");
         s.start(ROOT.into(), target.clone(), Stage::Reviewing,
-            || Ok(ResultKind::Review(review()))).unwrap();
+            || Ok(ResultKind::Review(review(),BaseStats::default()))).unwrap();
         rx.recv_timeout(Duration::from_secs(10)).unwrap();
         s.poll();
         s.start(ROOT.into(), target, Stage::Publishing, || {
@@ -283,6 +332,7 @@ mod tests {
                 created: 1, existing: 0, conflicts: 1, completed: false,
                 structured_saved: false,
                 identities_saved: false, identities_need_review: 1,
+                bases_reconstructible:false,base_issues:2,
             }))
         }).unwrap();
         rx.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -293,5 +343,7 @@ mod tests {
         assert!(!s.view().structured_saved);
         assert!(!s.view().identities_saved);
         assert_eq!(s.view().identities_need_review, 1);
+        assert!(!s.view().bases_reconstructible);
+        assert_eq!(s.view().base_issues, 2);
     }
 }

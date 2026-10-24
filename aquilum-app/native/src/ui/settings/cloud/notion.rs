@@ -93,6 +93,12 @@ pub(super) fn body(
                         importing.digest.as_deref().unwrap_or("").chars().take(12).collect::<String>()),
                     |t| t.text_primary, None, Leading::Times(1.3),
                 ));
+                column = column.with_fixed(selectable(
+                    &format!("Модель баз: {} источников, {} записей, {} представлений; проверить: {}",
+                        importing.base_schemas, importing.base_rows,
+                        importing.base_views, importing.base_issues),
+                    |t| t.text_secondary, None, Leading::Times(1.3),
+                ));
                 column = column.with_fixed(action_button(
                     "Сохранить заметки, исходные JSON и граф ID в Акулу".into(),
                     Action::NotionPublishImport(root.clone()), bindings,
@@ -111,11 +117,13 @@ pub(super) fn body(
             ));
             if importing.created > 0 || importing.conflicts > 0 {
                 column = column.with_fixed(selectable(
-                    &format!("Создано: {}; прежние: {}; конфликты: {}; JSON: {}; граф ID: {}; неполнота: {}",
+                    &format!("Создано: {}; прежние: {}; конфликты: {}; JSON: {}; граф ID: {}; модель: {}; проверить: {}",
                         importing.created, importing.existing, importing.conflicts,
                         if importing.structured_saved { "сохранён" } else { "не подтверждён" },
                         if importing.identities_saved { "сохранён" } else { "не подтверждён" },
-                        importing.identities_need_review),
+                        if importing.bases_reconstructible { "читается офлайн" }
+                            else { "не подтверждена" },
+                        importing.identities_need_review + importing.base_issues),
                     |t| t.text_secondary, None, Leading::Times(1.3),
                 ));
             }
