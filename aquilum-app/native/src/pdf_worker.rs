@@ -163,7 +163,9 @@ impl Pdfium {
     fn open() -> Result<Self, String> {
         #[cfg(target_os = "windows")] let library = "pdfium.dll";
         #[cfg(target_os = "linux")] let library = "libpdfium.so";
-        let file = std::env::current_exe().map_err(|e| e.to_string())?.with_file_name(library);
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let sibling = exe.with_file_name(library);
+        let file = if sibling.is_file() { sibling } else { exe.with_file_name("resources").join(library) };
         let module = platform::open(&file)?;
         let resolved = unsafe {
             (|| -> Result<Self, String> {
