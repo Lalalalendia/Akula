@@ -46,9 +46,15 @@ jobs:
       - name: Start isolated MinIO
         shell: bash
         run: |
-          docker run -d --rm --name akula-native-minio -p 127.0.0.1:9000:9000 \
-            -e MINIO_ROOT_USER=akula_ci -e MINIO_ROOT_PASSWORD=akula_ci_test_only \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          set -euo pipefail
+          # Reuse the tested Akula S3 CI image: old Docker Hub minio/minio
+          # tags are no longer accessible to GitHub-hosted runners.
+          docker run -d --rm --name akula-native-minio \
+            -p 127.0.0.1:9000:9000 \
+            --tmpfs /data:rw,uid=65532,gid=65532,mode=0700,size=256m \
+            -e MINIO_ROOT_USER=akula_ci \
+            -e MINIO_ROOT_PASSWORD=akula_ci_test_only \
+            cgr.dev/chainguard/minio:latest server /data
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
             sleep 1
