@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc::{self, Receiver, Sender}};
 use aquilum_core::{Core, notion_api_probe::{
     cached_import::{approved_cached_preview, read_verified_cached, CachedImportReview},
-    publish::publish_approved, structured_bundle,
+    publish::publish_approved, structured_bundle, identity_registry,
 }};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -18,7 +18,7 @@ impl Stage {
             Self::Reviewing => "Проверяю снимок API в отдельном потоке...",
             Self::Ready => "Снимок проверен. Для импорта требуется отдельное подтверждение.",
             Self::Publishing => "Создаю независимые заметки через File Gate...",
-            Self::Complete => "Markdown и исходные типизированные объекты API сохранены. Полноценные базы Акулы и медиа ещё не восстановлены.",
+            Self::Complete => "Markdown, исходные JSON и граф устойчивых ID сохранены. Редактируемые базы и медиа ещё не восстановлены.",
             Self::NeedsReview => "Импорт приостановлен: источник, база или права требуют проверки.",
         }
     }
@@ -37,6 +37,8 @@ pub struct ImportView {
     pub existing: usize,
     pub conflicts: usize,
     pub structured_saved: bool,
+    pub identities_saved: bool,
+    pub identities_need_review: usize,
 }
 
 impl ImportView {
@@ -55,6 +57,8 @@ struct Summary {
     conflicts: usize,
     completed: bool,
     structured_saved: bool,
+    identities_saved: bool,
+    identities_need_review: usize,
 }
 enum ResultKind { Review(CachedImportReview), Published(Summary) }
 struct Completion {
@@ -150,6 +154,12 @@ impl ImportSession {
             // Markdown File Gate mutation. Exact digest fences a concurrent refresh.
             let bundle = structured_bundle::prepare_from_cached(&cache, &source, &digest)
                 .map_err(|_| ())?;
+            // Register identities and resolve graph edges before ANY Vault write.
+            // A partial schema is stored explicitly, never promoted to Bases.
+            let identities = identity_registry::prepare_from_cached(&cache, &source, &digest)
+                .map_err(|_| ())?;
+            let identities_need_review = identities.review().unresolved_edge_count
+                + identities.review().unmatched_row_property_count;
             let preview = approved_cached_preview(&cache, &source, &digest)
                 .map_err(|_| ())?;
             let report = publish_approved(&core, &chosen, &preview, true).map_err(|_| ())?;
@@ -157,12 +167,17 @@ impl ImportSession {
             // import. Its create-only receipt is required for COMPLETE status.
             let structured_saved = report.completed
                 && structured_bundle::publish_approved(&core, &chosen, &bundle, true).is_ok();
+            let identities_saved = structured_saved
+                && identity_registry::publish_approved(&core, &chosen, &identities, true).is_ok();
             Ok(ResultKind::Published(Summary {
                 created: report.created.len(),
                 existing: report.existing_untouched.len(),
                 conflicts: report.conflicts_untouched.len(),
-                completed: report.completed && structured_saved,
-                structured_saved,
+                // Unresolved source relations or unmatched typed property IDs
+                // are a review requirement, not a successful Bases migration.
+                completed: report.completed && structured_saved
+                    && identities_saved && identities_need_review == 0,
+                structured_saved, identities_saved, identities_need_review,
             }))
         })
     }
@@ -191,6 +206,8 @@ impl ImportSession {
                     self.view.existing = summary.existing;
                     self.view.conflicts = summary.conflicts;
                     self.view.structured_saved = summary.structured_saved;
+                    self.view.identities_saved = summary.identities_saved;
+                    self.view.identities_need_review = summary.identities_need_review;
                     self.view.stage = if summary.completed {
                         Stage::Complete
                     } else { Stage::NeedsReview };
@@ -263,6 +280,7 @@ mod tests {
             Ok(ResultKind::Published(Summary {
                 created: 1, existing: 0, conflicts: 1, completed: false,
                 structured_saved: false,
+                identities_saved: false, identities_need_review: 1,
             }))
         }).unwrap();
         rx.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -271,5 +289,7 @@ mod tests {
         assert_eq!(s.view().created, 1);
         assert_eq!(s.view().conflicts, 1);
         assert!(!s.view().structured_saved);
+        assert!(!s.view().identities_saved);
+        assert_eq!(s.view().identities_need_review, 1);
     }
 }
