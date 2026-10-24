@@ -155,24 +155,24 @@ jobs:
           python -c "from pathlib import Path; p=['aquilum-app/native/Cargo.toml','modules/dropbox-auth-lab/Cargo.toml','modules/dropbox-secret-store/Cargo.toml','modules/dropbox-t0/Cargo.toml']; [(lambda f: f.write_text(f.read_text().replace('sha2 = '+chr(34)+'0.10'+chr(34),'sha2 = '+chr(34)+'0.11'+chr(34))))(Path(x)) for x in p]"
           if ($LASTEXITCODE -ne 0) { throw 'Cannot update four manifests' }
           @'
-from pathlib import Path
-transforms={
-  "modules/dropbox-secret-store/src/account.rs":(
-    'format!("account_{:x}", digest.finalize())',
-    'format!("account_{}", digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>())'),
-  "modules/dropbox-secret-store/src/lib.rs":(
-    'format!("v1_{:x}", hash.finalize())',
-    'format!("v1_{}", hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>())'),
-  "modules/dropbox-t0/src/read_verify.rs":(
-    'format!("{:x}", outer.finalize())',
-    'outer.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()')
-}
-for path,(old,new) in transforms.items():
-  p=Path(path)
-  src=p.read_text(encoding="utf-8")
-  if src.count(old)!=1:raise SystemExit("Missing original sha2 formatter in "+path)
-  p.write_text(src.replace(old,new),encoding="utf-8")
-'@ | python -
+          from pathlib import Path
+          transforms={
+            "modules/dropbox-secret-store/src/account.rs":(
+              'format!("account_{:x}", digest.finalize())',
+              'format!("account_{}", digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>())'),
+            "modules/dropbox-secret-store/src/lib.rs":(
+              'format!("v1_{:x}", hash.finalize())',
+              'format!("v1_{}", hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>())'),
+            "modules/dropbox-t0/src/read_verify.rs":(
+              'format!("{:x}", outer.finalize())',
+              'outer.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()')
+          }
+          for path,(old,new) in transforms.items():
+            p=Path(path)
+            src=p.read_text(encoding="utf-8")
+            if src.count(old)!=1:raise SystemExit("Missing original sha2 formatter in "+path)
+            p.write_text(src.replace(old,new),encoding="utf-8")
+          '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'SHA2 fingerprint compatibility patch failed' }
           cargo metadata --manifest-path aquilum-app/Cargo.toml --format-version 1 | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'Could not resolve Cargo.lock' }
