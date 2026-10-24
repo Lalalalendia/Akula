@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Akula — S3 + P2P: проверка раздачи</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <h1>Акула — S3 + P2P</h1>
+    <p>Проверка передачи уже загруженных частей между браузерами. S3 всегда остаётся основным источником.</p>
+    <section>
+      <h2>Публичный материал</h2>
+      <div id="name">Загружаю каталог...</div>
+      <div class="muted" id="filemeta"></div>
+      <div class="actions">
+        <button id="download" disabled>Получить файл</button>
+        <a id="save" hidden>Сохранить</a>
+      </div>
+      <p id="status" role="status">Подключение...</p>
+      <progress id="progress" max="100" value="0"></progress>
+    </section>
+    <section>
+      <h2>Участие в раздаче</h2>
+      <label><input id="share" type="checkbox"> Разрешить отдавать другим мои проверенные части</label>
+      <p><label>Предел отдачи: <select id="uploadLimit"><option value="1">1 МиБ/с</option><option value="4">4 МиБ/с</option><option value="8" selected>8 МиБ/с</option><option value="16">16 МиБ/с</option></select></label></p>
+      <p class="muted">По умолчанию раздача отключена. При прямом соединении другие участники могут увидеть ваш сетевой адрес. Закрытие вкладки прекращает отдачу.</p>
+      <div class="muted">Активных P2P-соединений: <strong id="peerCount">0</strong></div>
+    </section>
+    <section>
+      <h2>Измерения в этой вкладке</h2>
+      <div class="stats">
+        <div><strong id="httpBytes">0</strong><span>получено из S3/HTTP</span></div>
+        <div><strong id="p2pBytes">0</strong><span>получено от пользователей</span></div>
+        <div><strong id="uploadBytes">0</strong><span>отдано пользователям</span></div>
+        <div><strong id="chunks">0/0</strong><span>проверено частей</span></div>
+      </div>
+      <p class="muted">Встроенный источник по умолчанию лишь имитирует общедоступный S3 с HTTP Range. Настоящий публичный S3 можно указать при создании манифеста.</p>
+      <p><a href="/stats" target="_blank" rel="noreferrer">Счётчики исходного сервера</a></p>
+    </section>
+    <details>
+      <summary>Технический журнал</summary>
+      <pre id="log"></pre>
+    </details>
+  </main>
+  <script type="module" src="/client.js"></script>
+</body>
+</html>
