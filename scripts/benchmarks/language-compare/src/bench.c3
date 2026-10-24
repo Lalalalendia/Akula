@@ -1,10 +1,10 @@
 module main;
-import std;
+import std::io;
 
 fn void main() {
     const int LIMIT = 10000000;
     char[] marked = mem::new_array(char, LIMIT + 1);
-    defer mem::free(marked);
+    defer mem::free(marked.ptr);
     for (int p = 2; p*p <= LIMIT; p++) {
         if (marked[p] == 0) {
             for (int j = p*p; j <= LIMIT; j += p) marked[j] = 1;

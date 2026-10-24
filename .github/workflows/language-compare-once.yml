@@ -38,12 +38,12 @@ jobs:
         run: bash scripts/benchmarks/language-compare/install-extras.sh
       - name: Check output and measure five interleaved runs
         shell: bash
-        run: python3 scripts/benchmarks/language-compare/run.py --output .language-compare --repetitions 5
+        run: python3 scripts/benchmarks/language-compare/run.py --output language-compare-results --repetitions 5
       - name: Store exact results, provenance and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: language-compare-20261025
-          path: .language-compare/**
+          path: language-compare-results/**
           if-no-files-found: warn
           retention-days: 30

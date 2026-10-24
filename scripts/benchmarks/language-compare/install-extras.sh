@@ -22,7 +22,7 @@ if download zig "$ZIG_URL" "$DEST/zig.tar.xz"; then
 fi
 
 ODIN_URL="https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-linux-amd64-dev-2026-10.tar.gz"
-if download odin "$ODIN_URL" "$DEST/odin.tar.gz"; then
+if download odin "$ODIN_URL" "$DEST/odin.tar.gz" && echo "c3c8b095621fd0c75f7f73e3a0829f1b4d45324225f20ba11ed8dc4da310a8ab  $DEST/odin.tar.gz" | sha256sum -c -; then
   mkdir -p "$DEST/odin"
   tar -xzf "$DEST/odin.tar.gz" -C "$DEST/odin"
   p="$(find "$DEST/odin" -type f -name odin -perm /111 | head -n 1 || true)"
@@ -30,7 +30,7 @@ if download odin "$ODIN_URL" "$DEST/odin.tar.gz"; then
 fi
 
 C3_URL="https://github.com/c3lang/c3c/releases/download/v0.8.5/c3-linux.tar.gz"
-if download c3 "$C3_URL" "$DEST/c3.tar.gz"; then
+if download c3 "$C3_URL" "$DEST/c3.tar.gz" && echo "9dbea7536564a75967498c37b03af0050a5e708578ee9f5a8e7e9120b35bd701  $DEST/c3.tar.gz" | sha256sum -c -; then
   mkdir -p "$DEST/c3"
   tar -xzf "$DEST/c3.tar.gz" -C "$DEST/c3"
   p="$(find "$DEST/c3" -type f -name c3c -perm /111 | head -n 1 || true)"

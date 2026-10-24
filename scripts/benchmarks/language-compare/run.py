@@ -29,7 +29,7 @@ def definitions(bin_dir):
         dict(name="Rust", tool="rustc", version=["rustc", "--version"], source="src/bench.rs", build=["rustc", "-C", "opt-level=3", "-C", "target-cpu=x86-64", "src/bench.rs", "-o", f"{b}/rust"], exe=f"{b}/rust"),
         dict(name="Zig", tool="zig", version=["zig", "version"], source="src/bench.zig", build=["zig", "build-exe", "src/bench.zig", "-O", "ReleaseFast", f"-femit-bin={b}/zig"], exe=f"{b}/zig"),
         dict(name="Odin", tool="odin", version=["odin", "version"], source="src/bench.odin", build=["odin", "build", "src/bench.odin", "-file", "-o:speed", f"-out:{b}/odin"], exe=f"{b}/odin"),
-        dict(name="C3", tool="c3c", version=["c3c", "--version"], source="src/bench.c3", build=["c3c", "compile", "src/bench.c3", "-O3", "--output", f"{b}/c3"], exe=f"{b}/c3/bench"),
+        dict(name="C3", tool="c3c", version=["c3c", "--version"], source="src/bench.c3", build=["c3c", "compile", "src/bench.c3", "-O3", "-o", f"{b}/c3"], exe=f"{b}/c3"),
         dict(name="D (GDC)", tool="gdc", version=["gdc", "--version"], source="src/bench.d", build=["gdc", "-O3", "src/bench.d", "-o", f"{b}/d"], exe=f"{b}/d"),
         dict(name="Nim", tool="nim", version=["nim", "--version"], source="src/bench.nim", build=["nim", "c", "-d:release", "--opt:speed", "--hints:off", f"--out:{b}/nim", "src/bench.nim"], exe=f"{b}/nim"),
         dict(name="Go", tool="go", version=["go", "version"], source="src/bench.go", build=["go", "build", "-o", f"{b}/go", "src/bench.go"], exe=f"{b}/go"),
@@ -111,13 +111,15 @@ def run(args):
             if row["status"] != "ready": continue
             log = logdir / f"{spec['name'].replace(' ', '_')}-{round_id}.time"
             try:
+                start_measure = time.perf_counter()
                 outcome, observed = once(row["command"], log)
+                elapsed = time.perf_counter() - start_measure
                 if outcome.returncode != 0 or observed != EXPECTED:
                     row["status"] = "wrong_output" if outcome.returncode == 0 else "runtime_error"
                     row["error"] = f"Repeat {round_id}: code {outcome.returncode}, got {observed}"
                     continue
                 wall, user, rss = log.read_text().strip().split("\t")
-                row["samples_s"].append(float(wall))
+                row["samples_s"].append(round(elapsed, 6))
                 row.setdefault("cpu_samples_s", []).append(float(user))
                 row.setdefault("rss_samples_kib", []).append(int(rss))
             except (OSError, ValueError, subprocess.TimeoutExpired) as err:
@@ -153,6 +155,9 @@ def run(args):
     lines += ["", "Caveats: not a universal language-speed ranking; algorithms, bounds checks, GC/ARC and runtime differ; C3/Odin/Zig use release builds; Python is an interpreter control. Build time includes linker, not toolchain downloads. RSS is whole-process peak; p95 is nearest-rank among five measurements and noisy. Runner CPU is shared. Missing compilers and incorrect outputs are not comparable. Full versions, flags, sample lists, errors and hashes: results.json.", ""]
     (output / "summary.md").write_text("\n".join(lines))
     print("\n".join(lines))
+    for row in records.values():
+        if row["status"] != "ok":
+            print("DIAGNOSTIC", row["language"], row["status"], row["error"])
     baseline = {"C", "C++", "Go", "Python (control)"}
     failures = [n for n in baseline if records[n]["status"] != "ok"]
     if failures:
