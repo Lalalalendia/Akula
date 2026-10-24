@@ -160,7 +160,7 @@ def receive_verified(stream, trust_pubkey, now, scratch):
         os.close(fd)
 
 
-def open_parent_root():
+def open_parent_root(allow_create=True):
     # Traverse exact root-controlled ancestors; never follow symlinks.
     current = os.open("/", O_DIR)
     try:
@@ -169,8 +169,8 @@ def open_parent_root():
             try:
                 next_fd = os.open(name, O_DIR, dir_fd=current)
             except FileNotFoundError:
-                if name in ("var", "lib"):
-                    raise Hold("unexpected missing system directory")
+                if name in ("var", "lib") or not allow_create:
+                    raise Hold("root-owned stage directory is not enrolled")
                 os.mkdir(name, mode, dir_fd=current)
                 next_fd = os.open(name, O_DIR, dir_fd=current)
             meta = os.fstat(next_fd)
@@ -347,15 +347,22 @@ def inspect_published_hold(parent_fd, trust_pubkey, now):
         os.close(folder)
 
 
-def root_stage(stream):
-    if os.geteuid() != 0:
-        raise Hold("requires independently authorized root")
+def independently_pinned_public_key():
     if len(PINNED_BOOTSTRAP_ED25519_HEX) != 64:
         raise Hold("no production root bootstrap release key")
     try:
         pubkey = bytes.fromhex(PINNED_BOOTSTRAP_ED25519_HEX)
     except ValueError as exc:
         raise Hold("invalid pinned release key") from exc
+    if len(pubkey) != 32 or pubkey == bytes(32):
+        raise Hold("untrusted bootstrap publisher key")
+    return pubkey
+
+
+def root_stage(stream):
+    if os.geteuid() != 0:
+        raise Hold("requires independently authorized root")
+    pubkey = independently_pinned_public_key()
     # Fixed transfer deadline prevents untrusted SSH stdin from holding a
     # privileged interpreter indefinitely. No secret prompts or retries.
     def expired(_signal, _frame):
@@ -376,9 +383,34 @@ def root_stage(stream):
     print("AKULA_ROOT_STAGE_VERIFIED_HOLD", flush=True)
 
 
+def root_reinspect():
+    """Separate immutable read-only post-reboot operation, not activation."""
+    if os.geteuid() != 0:
+        raise Hold("requires independently authorized root")
+    pinned = independently_pinned_public_key()
+    def expired(_signal, _frame):
+        raise Hold("root-stage reinspection deadline exceeded")
+    signal.signal(signal.SIGALRM, expired)
+    signal.alarm(120)
+    try:
+        parent = open_parent_root(allow_create=False)
+        try:
+            digest = inspect_published_hold(parent, pinned, int(time.time()))
+        finally:
+            os.close(parent)
+    finally:
+        signal.alarm(0)
+    print("AKULA_ROOT_STAGE_REINSPECTED_HOLD:" + digest.hex(), flush=True)
+
+
 if __name__ == "__main__":
     try:
-        root_stage(sys.stdin.buffer)
+        if sys.argv[1:] == ["--inspect-hold"]:
+            root_reinspect()
+        elif len(sys.argv) == 1:
+            root_stage(sys.stdin.buffer)
+        else:
+            raise Hold("unsupported root-stage operation")
     except (Hold, OSError, ValueError) as error:
         print("AKULA_ROOT_STAGE_HOLD: " + str(error), file=sys.stderr)
         sys.exit(2)

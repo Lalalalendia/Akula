@@ -82,6 +82,7 @@ jobs:
             aquilum-app/core/src/server_first_root_stage.rs
             aquilum-app/core/src/server_first_root_stage/tests.rs
             aquilum-app/core/src/server_bootstrap_ssh_windows_lab/root_stage.rs
+            aquilum-app/core/src/server_bootstrap_ssh_windows_lab/root_stage/reinspection.rs
             aquilum-app/core/src/server_owner_windows.rs
             aquilum-app/core/src/server_release_lab/review.rs
             aquilum-app/core/src/server_release_lab/review/tests.rs
@@ -121,7 +122,7 @@ jobs:
         run: |
           cargo check --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-root-stage-ssh-lab
           if ($LASTEXITCODE -ne 0) { throw 'staging transport compilation failed' }
-          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-root-stage-ssh-lab --lib server_bootstrap_ssh_windows_lab::root_stage::tests -- --nocapture
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-core --features server-root-stage-ssh-lab --lib server_bootstrap_ssh_windows_lab::root_stage:: -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'staging transport quote tests failed' }
       - name: Verify Windows protected owner identity test (no real enrollment)
         shell: pwsh

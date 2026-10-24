@@ -184,6 +184,62 @@ class RootStageTests(unittest.TestCase):
             os.close(fd)
         self.assertEqual(os.listdir(parent), [])
 
+
+    @unittest.skipUnless(os.geteuid() == 0, "disposable UID0 reinspection CLI only")
+    def test_root_reinspect_cli_is_readonly_and_detects_changed_staging(self):
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        manifest, signature, digest = self.receive(self.bundle())
+        parent = os.path.join(self.tmp.name, "parent")
+        os.mkdir(parent, 0o700)
+        root_fd = os.open(parent, stage.O_DIR)
+        try:
+            stage.publish_hold(root_fd, self.scratch,
+                               manifest, signature, digest, self.public)
+        finally:
+            os.close(root_fd)
+        helper = os.path.join(parent, "bootstrap-v1", "helper.staged")
+        before = os.stat(helper)
+        with patch.object(stage, "PINNED_BOOTSTRAP_ED25519_HEX", self.public.hex()):
+            with patch.object(stage, "open_parent_root",
+                              lambda allow_create=False: os.open(parent, stage.O_DIR)):
+                with redirect_stdout(io.StringIO()) as output:
+                    stage.root_reinspect()
+                self.assertEqual(output.getvalue(),
+                                 "AKULA_ROOT_STAGE_REINSPECTED_HOLD:"
+                                 + digest.hex() + "\n")
+                after = os.stat(helper)
+                self.assertEqual((before.st_ino, before.st_mtime_ns, before.st_ctime_ns),
+                                 (after.st_ino, after.st_mtime_ns, after.st_ctime_ns))
+                with patch.object(stage, "PINNED_BOOTSTRAP_ED25519_HEX",
+                                  bytes([8] * 32).hex()):
+                    with self.assertRaises(stage.Hold):
+                        stage.root_reinspect()
+                os.chmod(helper, 0o600)
+                with open(helper, "r+b") as f:
+                    f.seek(96)
+                    f.write(b"x")
+                os.chmod(helper, 0o400)
+                with self.assertRaises(stage.Hold):
+                    stage.root_reinspect()
+
+    def test_unknown_root_stage_command_is_always_refused(self):
+        proc = subprocess.run(
+            [sys.executable, "-I", str(SOURCE), "--install-node"],
+            input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, b"")
+
+    def test_production_reinspect_cannot_use_unprovisioned_key(self):
+        proc = subprocess.run(
+            [sys.executable, "-I", str(SOURCE), "--inspect-hold"],
+            input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, b"")
+        self.assertNotIn(b"REINSPECTED_HOLD:", proc.stderr)
+
     def test_production_entrypoint_is_locked_without_issued_key(self):
         run = subprocess.run([sys.executable, "-I", str(SOURCE)],
                              input=self.bundle(), stdout=subprocess.PIPE,

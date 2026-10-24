@@ -36,6 +36,8 @@ pub enum RootStageTransportError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootStageRemoteReport {
     RemoteReportedSignedDataHold,
+    /// Unsigned SSH observation only; not a signed root activation receipt.
+    RemoteReportedReinspectedHold,
 }
 
 fn shell_single_quote(source: &str) -> String {
@@ -175,6 +177,8 @@ impl WindowsOpenSshPinnedProbe {
         exited(status, &stdout, &stderr, sent)
     }
 }
+
+mod reinspection;
 
 #[cfg(test)]
 mod tests {

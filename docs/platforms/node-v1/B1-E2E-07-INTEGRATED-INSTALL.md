@@ -210,3 +210,22 @@ No runtime SSH value, environment variable, package contents, test key or
 caller argument may provision the production root trust anchor. The signed
 helper distribution, key ceremony and rotation policy still require a
 separate audited release decision. Staging and UI installation remain HOLD.
+
+### Opt-in post-reboot root readback (still not an installation receipt)
+
+The fixed Python root-stage code has a second exact command,
+`--inspect-hold`, which opens only the preexisting root-owned staging
+directory without creating missing directories or writing any files. It
+revalidates the pinned publisher key, canonical B1a signature, full staged
+helper SHA-256, ELF type, ownership, file modes and the original HOLD marker.
+Other arguments are rejected. The command never executes the helper,
+installs Node, or starts systemd. It is unprovisioned until the independent
+publisher root key is distributed in an audited signed release.
+
+The experimental Windows SSH adapter reuses the pinned OpenSSH identity and
+the fixed compiled Python source to request read-only reinspection. Its
+`RemoteReportedReinspectedHold` result requires an exact response
+containing the previously verified helper SHA-256. It is **not** a signed root
+witness, B1d0 CAS receipt, or authorization to start a service. Both readback
+and read-only modes are tested with valid, modified, wrong-key and
+unsupported-command fixtures. This feature remains outside ordinary builds.
