@@ -36,9 +36,7 @@ pub(crate) fn pin_p2p_read_snapshot(root: &Path) -> Result<(File, File, File), V
     let objects = pinned_windows::open_child(&root_handle, "objects", false)?;
     let objects_direct = pinned_windows::open_root(&root.join("objects"))?;
     filegate_windows_acl::audit_owner_dacl(&objects_direct)?;
-    if pinned_windows::file_identity(&objects)?
-        != pinned_windows::file_identity(&objects_direct)?
-    {
+    if pinned_windows::file_identity(&objects)? != pinned_windows::file_identity(&objects_direct)? {
         return Err(VaultPortError::FileChanged);
     }
 
@@ -55,9 +53,7 @@ pub(crate) fn pin_p2p_read_snapshot(root: &Path) -> Result<(File, File, File), V
         return Err(VaultPortError::UnsafePath);
     }
     filegate_windows_acl::audit_owner_dacl(&db_direct)?;
-    if pinned_windows::file_identity(&database)?
-        != pinned_windows::file_identity(&db_direct)?
-    {
+    if pinned_windows::file_identity(&database)? != pinned_windows::file_identity(&db_direct)? {
         return Err(VaultPortError::FileChanged);
     }
     Ok((root_handle, objects, database))

@@ -39,9 +39,8 @@ pub struct PinnedWindowsInboxRead {
 
 #[cfg(windows)]
 pub fn pin_windows_inbox_read(root: &Path) -> Result<PinnedWindowsInboxRead, InboxError> {
-    let (root, objects, sqlite) =
-        crate::sync::p2p_stage::pin_p2p_read_snapshot(root)
-            .map_err(|_| InboxError::InvalidDestination)?;
+    let (root, objects, sqlite) = crate::sync::p2p_stage::pin_p2p_read_snapshot(root)
+        .map_err(|_| InboxError::InvalidDestination)?;
     Ok(PinnedWindowsInboxRead {
         _root: root,
         _objects: objects,
