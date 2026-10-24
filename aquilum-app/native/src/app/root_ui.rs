@@ -53,7 +53,7 @@ impl App {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         let tabs = self.tab_widgets();
-        let note = self.image_tab_widget().unwrap_or_else(|| self.note_widget());
+        let note = self.pdf_tab_widget().or_else(|| self.image_tab_widget()).unwrap_or_else(|| self.note_widget());
         let graph = self.graph_widget();
         let graph_active = self.tabs.active().graph && self.tree.root().is_some();
         let target = self.visible_panels();
