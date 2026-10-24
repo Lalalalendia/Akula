@@ -100,8 +100,16 @@ pub struct RootVerifiedFd{
     valid_from_unix:u64,
     valid_until_unix:u64,
     pub receipt:VerifiedPackageReceipt,
+    verified_publisher_key:[u8;32],
+    verified_publisher_id:String,
 }
 impl RootVerifiedFd{
+    /// The exact signer used for B1a validation of this pinned FD; not a
+    /// second, caller-supplied identity disconnected from that validation.
+    #[cfg(feature = "server-root-b0v3-gate-lab")]
+    pub fn verified_publisher(&self)->(&str,[u8;32]){
+        (&self.verified_publisher_id,self.verified_publisher_key)
+    }
     pub fn stable(&self)->Result<(),PinError>{
         if !same_object(&self.meta,&self.file.metadata()?){
             return Err(PinError::ChangedInode);
@@ -220,5 +228,7 @@ pub fn verify_root_staged(
     file.seek(SeekFrom::Start(0))?;
     Ok(RootVerifiedFd{
         file,meta:after,receipt,valid_from_unix,valid_until_unix,
+        verified_publisher_key:trust.trusted_signer.ed25519_public,
+        verified_publisher_id:trust.trusted_signer.signer_id.clone(),
     })
 }

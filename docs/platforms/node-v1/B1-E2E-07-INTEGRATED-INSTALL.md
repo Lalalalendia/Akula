@@ -318,3 +318,23 @@ discovery, witness locked-transaction admission, signed root receipt,
 systemd and VPS installation are still unimplemented. The production
 loader can only work after a separate trusted administrator action has
 created the exact enrollment; this commit does not perform that action.
+
+### Root policy must bind the actual B1a verifier identity, not a second signer argument
+
+A security review of the first `RootEnrolledV3::verify_review` API found a
+mismatch risk: it compared its independently root-enrolled publisher key with
+a *separate* `TrustedReleaseSigner` argument rather than the signer actually
+used when `RootVerifiedFd` authenticated the staged B1a package. The new
+`RootVerifiedFd::verified_publisher` exposes ONLY the immutable publisher
+identity captured from the signing trust used in its original verification.
+The root-owned policy compares that saved identity directly to its enrolled
+publisher key before any owner plan/nonce is admitted. The redundant
+caller-supplied publisher parameter has been removed.
+
+A disposable UID0 integration test now creates a truly root-owned signed B1a
+package with a test-only Ed25519 issuer, a separate OS-owned B0 v3 policy,
+an independently signed owner claim and a complete canonical B0 v3 plan.
+It proves read-only acceptance of an exactly matching verified FD and
+refusal of a changed enrolled publisher or a changed owner signature.
+Production keys are still unprovisioned; this does not create a root install
+opcode, trusted bootstrap ceremony, service launcher or live VPS acceptance.

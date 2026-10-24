@@ -7,7 +7,6 @@
 use crate::server_bootstrap_lab::{MachineArch, SupportedOs};
 use crate::server_installer_pinned_release_lab::RootVerifiedFd;
 use crate::server_owner_approval_wire::OwnerApprovalWireV1;
-use crate::server_release_lab::TrustedReleaseSigner;
 use crate::server_root_v3_guard::{
     verify_root_b0_v3_scope, CheckedRootV3Scope, RootIndependentPins, RootPlanError,
 };
@@ -160,7 +159,6 @@ impl RootEnrolledV3 {
         approval: &OwnerApprovalWireV1,
         signature: &[u8; 64],
         verified: &RootVerifiedFd,
-        publisher: &TrustedReleaseSigner,
         witness_revision: u64,
         local_os: SupportedOs,
         local_arch: MachineArch,
@@ -172,8 +170,9 @@ impl RootEnrolledV3 {
         }
         verified.valid_at(now_unix)
             .map_err(|_| RootEnrollmentError::InvalidVerifiedRelease)?;
-        if publisher.signer_id != self.release_signer_id
-            || publisher.ed25519_public != self.release_pub
+        let (verified_signer_id, verified_signer_key) = verified.verified_publisher();
+        if verified_signer_id != self.release_signer_id
+            || verified_signer_key != self.release_pub
         {
             return Err(RootEnrollmentError::ReleaseIdentityMismatch);
         }
