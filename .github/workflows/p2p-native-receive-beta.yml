@@ -58,6 +58,23 @@ jobs:
         run: |
           cargo metadata --manifest-path aquilum-app/Cargo.toml --locked --format-version 1 > /dev/null
           git diff --exit-code -- aquilum-app/Cargo.lock
+      - name: Prove Windows installed feature graph excludes vulnerable optional S3 signer
+        shell: bash
+        run: |
+          # Security diagnostic only; does not waive the full RustSec release gate.
+          set -euo pipefail
+          cargo tree --locked --manifest-path aquilum-app/Cargo.toml -p aquilum-native --features installed --target x86_64-pc-windows-msvc --edges normal,build --format '{p}' > "$RUNNER_TEMP/akula-installed-tree.txt"
+          for required in 'akula-staya-integration v' 'akula-inbox-ledger-lab v' 'akula-dropbox-connect-lab v'; do
+            if ! grep -Fq "$required" "$RUNNER_TEMP/akula-installed-tree.txt"; then
+              echo "::error::Expected installed dependency missing: $required"
+              exit 1
+            fi
+          done
+          if grep -Eq 'crypto-bigint v0[.][0-6][.]' "$RUNNER_TEMP/akula-installed-tree.txt"; then
+            echo '::error::Vulnerable crypto-bigint is reachable in normal installed Windows feature graph'
+            exit 1
+          fi
+          echo 'Windows installed feature graph: P2P+Inbox+Dropbox present; vulnerable crypto-bigint 0.x absent. Full lockfile RustSec audit remains blocking.' >> "$GITHUB_STEP_SUMMARY"
       - name: Check shared real QUIC receiver and Inbox tests
         shell: bash
         run: |
@@ -84,7 +101,6 @@ jobs:
           # Exact feature graph of ordinary Windows installers and auto-updates.
           # Standard signed Windows installer/auto-update feature graph.
           cargo check --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed
-          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features installed app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta app::transfer::native_receive::tests -- --nocapture
           cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-native --features p2p-native-receive-beta ui::transfer::native_receive_view::tests -- --nocapture
