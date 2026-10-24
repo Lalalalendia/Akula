@@ -22,4 +22,3 @@ impl SearchState {
         self.worker.current()
     }
 }
-
