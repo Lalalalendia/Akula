@@ -89,3 +89,14 @@ GitHub PR #703 остаётся Draft на старом exact HEAD `7dcf1395f7e9
 ## Publication update — 2026-10-24
 
 This report has been published in the documentation-only one-PC evidence PR [#699](https://github.com/Lalalalendia/Akula/pull/699). The report records local evidence and its stated limits; this documentation PR does not include the underlying application source changes. PC-FG-01 implementation remains in Draft [#703](https://github.com/Lalalalendia/Akula/pull/703); PC-FG-02 test code/report are in Draft [#704](https://github.com/Lalalalendia/Akula/pull/704). No PR was merged.
+
+
+## Точная сверка CI и локальная повторная приёмка — 24.10.2026
+
+Текущий Draft [PR #703](https://github.com/Lalalalendia/Akula/pull/703) остаётся на exact HEAD `8445864f28123fb026d4881a59c5554f3b5829dc`.
+
+- Профильные Actions на этом HEAD: [File Gate History #40089888724](https://github.com/Lalalalendia/Akula/actions/runs/40089888724), [Sync single-custody #40089888718](https://github.com/Lalalalendia/Akula/actions/runs/40089888718), [Sync S3-bound custody #40089888716](https://github.com/Lalalalendia/Akula/actions/runs/40089888716), [Native two-process #40089888759](https://github.com/Lalalalendia/Akula/actions/runs/40089888759): все четыре завершились успешно.
+- [Application checks #40089888780](https://github.com/Lalalalendia/Akula/actions/runs/40089888780) завершились ошибкой fail-closed. Job классификации #120862804201 прошёл 7 тестов dependency-security gate, но затем остановился: watchdog run [#40090177003](https://github.com/Lalalalendia/Akula/actions/runs/40090177003) ещё не завершился. Этот watchdog впоследствии завершился SUCCESS на main SHA `23383c52a6a63fb2e2f6b71d567e41e9018cda22`. Из-за раннего отказа обязательные Rust tests/policy checks были пропущены; no-growth на exact HEAD этим запуском не подтверждён.
+- Локально, на Windows и полном изменённом checkout (основание `530fe3d6794ee28d2c7098af1266ff5340903543`): межпроцессные тесты **2 passed**, File Gate suite **31 passed**, rustfmt **PASS**, `git diff --check` **PASS**. Checkout содержал изменения соседних задач; эти результаты не подменяют CI точного дерева PR #703.
+
+**Действие:** повторить Application checks на том же HEAD после успешного watchdog, затем проверить результат Main PR gate/no-growth. PR остаётся Draft; слияние не заявляется.
