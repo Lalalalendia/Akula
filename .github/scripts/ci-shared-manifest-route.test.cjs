@@ -146,3 +146,38 @@ test('B0c Windows owner route is fail-closed for source-only and mixed Cargo wit
   assert.equal(owned.assess({paths:[CORE,LOCK,NATIVE,WINDOWS],versionOnly:true}).owned_b0c_ssh,false);
   assert.equal(owned.assess({paths:['README.md']}).owned_b0c_ssh,false);
 });
+
+test('text-delta extracted and profile test source changes cannot bypass the opt-in required codec route',()=>{
+  const fs=require('node:fs');
+  const path=require('node:path');
+  const ownedFiles=[
+    'aquilum-app/core/src/sync/text_delta_codec.rs',
+    'aquilum-app/core/src/sync/text_delta_codec/tests.rs',
+    'aquilum-app/core/src/sync/text_delta_codec_profile_tests.rs',
+  ];
+  for(const source of ownedFiles){
+    assert.equal(owned.assess({paths:[source]}).owned_text_delta,true,source+' source-only');
+    assert.equal(owned.assess({paths:[source,LOCK]}).owned_text_delta,true,source+' lock mixed');
+    assert.equal(owned.assess({paths:[source,NATIVE]}).owned_text_delta,true,source+' native mixed');
+    assert.ok(owned.OWNED_SUITES.owned_text_delta.includes(source),source+' present in ownership');
+  }
+  const file=p=>fs.readFileSync(path.join(__dirname,'../..',p),'utf8');
+  const source=file(ownedFiles[0]),testSource=file(ownedFiles[1]),profile=file(ownedFiles[2]);
+  assert.ok(source.endsWith(['#[cfg(test)]','mod tests;',''].join(String.fromCharCode(10))),'original codec API unchanged and test module externalized');
+  assert.ok(testSource.startsWith('use super::*;'+String.fromCharCode(10)),'same test module scope preserved');
+  assert.ok(testSource.includes('include!("../text_delta_codec_profile_tests.rs");'),'relative profile include preserved');
+  const names=testSource.split(String.fromCharCode(10)).filter(line=>line.startsWith('fn ')).map(line=>line.slice(3).split('(')[0]);
+  assert.deepEqual(names,[
+    'real_like_base',
+    'byte_exact_utf8_edits_and_full_fallback',
+    'independent_offline_siblings_share_only_an_exact_parent',
+    'reject_downgrade_spoofed_uuid_unknown_version_and_corrupt_payload',
+    'direct_dictionary_and_splice_modes_have_independent_decoders',
+    'empty_long_random_repetitive_and_limit_edges',
+    'real_git_markdown_pairs_numeric_ab',
+    'forged_splice_offsets_and_trailing_bytes_refused',
+  ]);
+  assert.ok(profile.includes('fn real_git_markdown_pairs_mode_report()'),'profile benchmark retained');
+  assert.equal(owned.assess({paths:['README.md']}).owned_text_delta,false);
+  assert.equal(owned.assess({paths:[CORE,LOCK,NATIVE,WINDOWS],versionOnly:true}).owned_text_delta,false);
+});
