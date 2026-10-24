@@ -97,7 +97,21 @@ impl Health {
     }
 }
 
-fn health(provider: CloudProvider, ctx: &Context) -> Health {
+fn health(provider: CloudProvider, config: &AppConfig, ctx: &Context) -> Health {
+    #[cfg(not(feature = "dropbox-readonly-preview"))]
+    let _ = config;
+    #[cfg(feature = "dropbox-readonly-preview")]
+    if provider == CloudProvider::Dropbox {
+        if ctx.dropbox_preview_busy { return Health::Checking; }
+        let status = ctx.dropbox_preview_status.as_str();
+        if ["FAILED", "REJECTED", "DENIED", "MISMATCH", "REVOKED",
+            "INVALID", "UNAVAILABLE", "NO_SAVED", "PUBLISHER_NOT_APPROVED"]
+            .iter().any(|marker| status.contains(marker)) { return Health::Review; }
+        // OAuth-only is not verified Vault Sync: never show a green indicator.
+        return if config.dropbox_readonly.account_id.is_empty() {
+            Health::NotConnected
+        } else { Health::Saved };
+    }
     if provider != CloudProvider::Yandex {
         return Health::Unavailable;
     }
@@ -238,10 +252,10 @@ impl Widget for ProviderTile {
     fn children_ids(&self) -> ChildrenIds { ChildrenIds::new() }
 }
 
-pub(super) fn catalog(ctx: &Context) -> (NewWidget<Flex>, HashMap<WidgetId, Binding>) {
+pub(super) fn catalog(config: &AppConfig, ctx: &Context) -> (NewWidget<Flex>, HashMap<WidgetId, Binding>) {
     let mut bindings = HashMap::new();
     let tiles = CloudProvider::ALL.into_iter().map(|provider| {
-        let tile = NewWidget::new(ProviderTile::new(provider, health(provider, ctx)));
+        let tile = NewWidget::new(ProviderTile::new(provider, health(provider, config, ctx)));
         bindings.insert(tile.id(), Binding::Button(Action::OpenCloudProvider(provider)));
         tile.erased()
     }).collect();
@@ -297,9 +311,15 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider, staged: &[(S
     let close_id = close.id();
     let mut bindings = HashMap::new();
     let title = provider.label();
-    let inner = if provider == CloudProvider::Yandex {
-        let mut block = schema::blocks(Section::Sync, config, ctx)
-            .into_iter().next().expect("Yandex setup block");
+    let supports_form = provider == CloudProvider::Yandex
+        || (cfg!(feature = "dropbox-readonly-preview") && provider == CloudProvider::Dropbox);
+    let inner = if supports_form {
+        let mut blocks = schema::blocks(Section::Sync, config, ctx);
+        let mut block = if provider == CloudProvider::Dropbox {
+            blocks.pop().expect("Dropbox setup block")
+        } else {
+            blocks.remove(0)
+        };
         for row in &mut block.rows {
             if let (Some(setter), Control::Text { value, .. }) = (row.setter, &mut row.control)
                 && let Some((_, draft)) = staged.iter().find(|(key, _)| same_setter(*key, setter))
@@ -317,7 +337,7 @@ fn card(config: &AppConfig, ctx: &Context, provider: CloudProvider, staged: &[(S
     let cancel = NewWidget::new(TextButton::new(t("settings.cloud.close"), Variant::Ghost));
     let cancel_id = cancel.id();
     let mut footer = Flex::row().main_axis_alignment(MainAxisAlignment::End).with_fixed(cancel);
-    let save = if provider == CloudProvider::Yandex {
+    let save = if supports_form {
         let button = NewWidget::new(TextButton::new(t("settings.cloud.save"), Variant::Primary));
         let id = button.id();
         footer = footer.with_fixed(button);
@@ -356,6 +376,7 @@ pub fn provider_modal(config: &AppConfig, ctx: &Context, provider: CloudProvider
 }
 
 impl CloudPopup {
+    pub fn has_draft_changes(&self) -> bool { !self.staged_texts.is_empty() }
     pub fn remember_text(&mut self, setter: Setter, text: &str) {
         if let Some((_, existing)) = self.staged_texts.iter_mut()
             .find(|(stored, _)| same_setter(*stored, setter))
@@ -380,55 +401,4 @@ impl CloudPopup {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cloud_tiles_never_confuse_stored_keys_with_working_sync() {
-        let mut ctx = Context::new(1.0);
-        assert_eq!(health(CloudProvider::Yandex, &ctx), Health::NotConnected);
-        assert_eq!(health(CloudProvider::AmazonS3, &ctx), Health::Unavailable);
-        ctx.yandex_keys = Some(true);
-        #[cfg(not(all(target_os = "windows", feature = "s3-pair-beta")))]
-        assert_eq!(health(CloudProvider::Yandex, &ctx), Health::NotConnected);
-        #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
-        {
-            use crate::s3_pair_session::PairStatus;
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Saved);
-            ctx.s3_pair.configured = true;
-            ctx.s3_pair.status = PairStatus::Configured;
-            ctx.s3_pair.verified = false;
-            assert_ne!(health(CloudProvider::Yandex, &ctx), Health::Verified);
-            ctx.s3_pair.verified = true;
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Verified);
-            ctx.s3_pair.status = PairStatus::Transferred {
-                sent: 1, received_unconfirmed: 1, needs_review: 0,
-            };
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Review);
-            ctx.s3_pair.status = PairStatus::Failed;
-            assert_eq!(health(CloudProvider::Yandex, &ctx), Health::Review);
-        }
-    }
-
-    #[test]
-    fn every_provider_is_navigable_but_only_yandex_has_a_form() {
-        let config = AppConfig::default();
-        let ctx = Context::new(1.0);
-        let (_, bindings) = catalog(&ctx);
-        let actions = bindings.values().filter_map(|binding| {
-            match binding {
-                Binding::Button(Action::OpenCloudProvider(provider)) => Some(*provider),
-                _ => None,
-            }
-        }).collect::<Vec<_>>();
-        assert_eq!(actions.len(), CloudProvider::ALL.len());
-        for provider in CloudProvider::ALL {
-            assert!(actions.contains(&provider));
-            let built = card(&config, &ctx, provider, &[]);
-            assert_eq!(built.save.is_some(), provider == CloudProvider::Yandex);
-            if provider != CloudProvider::Yandex {
-                assert!(built.bindings.is_empty());
-            }
-        }
-    }
-}
+mod tests;
