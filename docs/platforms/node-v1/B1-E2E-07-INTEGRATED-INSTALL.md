@@ -229,3 +229,28 @@ containing the previously verified helper SHA-256. It is **not** a signed root
 witness, B1d0 CAS receipt, or authorization to start a service. Both readback
 and read-only modes are tested with valid, modified, wrong-key and
 unsupported-command fixtures. This feature remains outside ordinary builds.
+
+### Integrated B0 v3 plan → real signed Node-V1 ELF → B1d0 `/opt` CAS proof
+
+The branch CI now exercises the pre-existing **actual signed Node-V1 service
+ELF** through its already isolated B1d0 root-owned `/opt` test, rather
+than relying only on synthetic staging tests. A new root-only test builds an
+immutable B0 v3 preview against a pinned *simulated* SSH KEX using the exact
+same-HEAD real Node ELF SHA-256, the separately disclosed helper SHA and
+fixed public UDP/43871 action list. Its **actual BLAKE3 v3 plan digest** and
+pinned host hash enter the B1d0 fixture's detached owner signature, staged
+package, witness and fsynced CAS receipt.
+
+Before the valid commit, the test generates another mathematically valid
+owner signature over a different plan digest. The independently pinned
+scope must reject it before any `/opt` write or CAS revision. The valid
+approval then commits the exact ELF once, verifies the receipt and bytes,
+refuses replay, and reopens the durable witness into an explicit HOLD.
+All writes happen in an isolated GitHub Linux mount namespace with test
+keys; the production `/opt/akula-node` and witness directories are
+asserted absent and never created. No helper is executed or service started.
+
+This closes a **test integration gap**, not the deployment acceptance gate.
+The root installer still needs a production parser to verify the submitted
+B0 v3 plan against independently trusted helper state, real publisher and
+owner key enrollment, service/systemd activation and authorized VPS E2E.

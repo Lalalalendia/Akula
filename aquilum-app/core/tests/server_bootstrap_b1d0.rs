@@ -44,7 +44,18 @@ struct Case {
 }
 impl Case {
     fn new()->Self{ Self::with_package(NODE) }
-    fn with_package(package: &[u8])->Self{
+    fn with_package(package: &[u8])->Self {
+        Self::with_package_bound(
+            package, ApprovedPlanDigest([0x22; 32]), [0x33; 32],
+        )
+    }
+    /// Same existing B1d0 signer/witness/CAS fixture, but with the exact
+    /// immutable B0 v3 digest and pinned SSH host from a real preview.
+    fn with_package_bound(
+        package: &[u8],
+        plan: ApprovedPlanDigest,
+        pinned_host_sha256: [u8; 32],
+    ) -> Self {
         assert_eq!(rustix::process::geteuid().as_raw(),0);
         let dir=tempfile::tempdir().unwrap();
         fs::set_permissions(dir.path(),Permissions::from_mode(0o700)).unwrap();
@@ -78,13 +89,12 @@ impl Case {
         };
         let pinned=verify_root_staged(dir.path(),&trust,NOW).unwrap();
         let install_id=InstallId([0x11;16]);
-        let plan=ApprovedPlanDigest([0x22;32]);
         let stage=StageReceipt{
             install_id,approved_plan_digest:plan,
             verified_package:pinned.receipt.clone(),idempotent_replay:false,
         };
         let binding=LabPlanBinding{
-            install_id,plan_digest:plan,pinned_host_key_sha256:[0x33;32],
+            install_id,plan_digest:plan,pinned_host_key_sha256:pinned_host_sha256,
             signed_manifest_fingerprint:pinned.receipt.signed_manifest_fingerprint,
         };
         let before=WitnessCheckpoint::genesis();
@@ -413,4 +423,109 @@ fn production_inspection_refuses_unenrolled_os_witness_and_does_not_provision() 
         "unprovisioned fixed OS-owned witness cannot authorize a report");
     assert!(fs::symlink_metadata(witness_root).is_err());
     assert!(fs::symlink_metadata(destination).is_err());
+}
+
+
+#[cfg(feature = "server-bootstrap-b0-lab")]
+#[test]
+fn b1d0_actual_node_v1_elf_v3_review_owner_scope_cas_reopen_hold() {
+    use aquilum_core::server_bootstrap_lab::{
+        preview_node_v3, B0Error, B0Input, MachineArch, PackagePin,
+        PreviewTransport, ReadOnlyHostFacts, ServerTarget, SupportedOs,
+    };
+    struct PinnedKex(Vec<u8>);
+    impl PreviewTransport for PinnedKex {
+        fn handshake_public_key(
+            &mut self, _: &ServerTarget,
+        ) -> Result<Vec<u8>, B0Error> {
+            Ok(self.0.clone())
+        }
+        fn inspect_host(&mut self) -> Result<ReadOnlyHostFacts, B0Error> {
+            Ok(ReadOnlyHostFacts {
+                os: SupportedOs::Ubuntu,
+                arch: MachineArch::X86_64,
+                has_systemd: true,
+                has_sudo_rights: true,
+                cpu_count: 2,
+                ram_mib: 4096,
+                free_disk_mib: 8192,
+            })
+        }
+    }
+
+    // The exact executable is compiled from the current HEAD. Its detached
+    // release and owner signatures remain isolated CI-only authorities.
+    let path = std::env::var("AKULA_B1D0_REAL_ELF")
+        .expect("real Node-V1 ELF path from the isolated CI driver");
+    let binary = fs::read(&path).expect("same-HEAD Node-V1 service ELF");
+    assert!(binary.len() > 1024 && binary.starts_with(b"\x7fELF"));
+    let node_sha: [u8; 32] = digest::digest(&digest::SHA256, &binary)
+        .as_ref().try_into().unwrap();
+    let wire = b"akula-ci-actual-pinned-ssh-kex-v3".to_vec();
+    let host_sha: [u8; 32] = digest::digest(&digest::SHA256, &wire)
+        .as_ref().try_into().unwrap();
+    let input = B0Input {
+        install_id: uuid::Uuid::from_bytes([0x11; 16]),
+        target: ServerTarget {
+            host: "vps.example.org".into(),
+            ssh_port: 22,
+            ssh_user: "ubuntu".into(),
+            trusted_key_sha256: host_sha,
+        },
+        package: PackagePin {
+            version: "1.0.0".into(),
+            package_sha256: node_sha,
+            trusted_signer_id: "b1b4a-test-release".into(),
+        },
+    };
+    // Different helper and Node hashes are disclosed under B0 v3; no
+    // user-owned VPS or production key is ever used in this acceptance.
+    let helper_sha: [u8; 32] = digest::digest(
+        &digest::SHA256, b"isolated-ci-only-bootstrap-helper-role",
+    ).as_ref().try_into().unwrap();
+    let v3 = preview_node_v3(
+        &input, helper_sha, &mut PinnedKex(wire), || false,
+    ).expect("valid immutable B0 v3 preview");
+    assert_eq!(v3.schema_version, 3);
+    assert_eq!(v3.bootstrap_helper_sha256, Some(helper_sha));
+    assert!(v3.verify_unchanged());
+    assert_eq!(v3.package.package_sha256, node_sha);
+    let plan_digest = ApprovedPlanDigest(
+        *blake3::Hash::from_hex(&v3.plan_blake3).unwrap().as_bytes(),
+    );
+
+    // An owner can sign another digest, but the independently pinned scope
+    // must refuse it BEFORE consuming the durable root-owned CAS revision.
+    let _root = RootFixture::new();
+    let mut forged = Case::with_package_bound(&binary, plan_digest, host_sha);
+    forged.owner.claim.scope_binding.plan_digest = ApprovedPlanDigest([0xee; 32]);
+    forged.owner.signature = key(0x32)
+        .sign(&forged.owner.claim.canonical_bytes())
+        .as_ref().try_into().unwrap();
+    let (trust, ledger) = provision();
+    let actor = open_actor(trust.path(), ledger.path());
+    assert!(matches!(commit(&forged, &actor, CrashPoint::None),
+        Err(DurableError::FileCommit(_))));
+    assert_eq!(actor.current_checkpoint().unwrap().revision, 0);
+    assert!(!Path::new(CI_ROOT).join("node").exists());
+    drop(actor);
+    drop(forged);
+
+    // A fresh, exactly bound B0 v3 digest and signed owner/receipt may
+    // commit the real ELF once in the disposable root-only /opt namespace.
+    let exact = Case::with_package_bound(&binary, plan_digest, host_sha);
+    let actor = open_actor(trust.path(), ledger.path());
+    let hold = commit(&exact, &actor, CrashPoint::None)
+        .expect("B0 v3 owner-plan bound B1d0 root file CAS");
+    assert_eq!(hold, DurableStatus::LocallyConsistentHold {
+        revision: 1,
+        sha256: node_sha,
+    });
+    assert_eq!(fs::read(Path::new(CI_ROOT).join("node")).unwrap(), binary);
+    assert!(matches!(commit(&exact, &actor, CrashPoint::None),
+        Err(DurableError::NeedsRepair)));
+    drop(actor);
+    let reopened = open_actor(trust.path(), ledger.path());
+    assert_eq!(inspect_ci_hold(&reopened).unwrap(), hold);
+    println!("B1D0_B0_V3_SIGNED_REAL_NODE_OWNER_CAS_REOPEN_HOLD_PASS");
 }

@@ -15,7 +15,7 @@ concurrency:
 jobs:
   signed-review-contract:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v7
         with:
@@ -94,6 +94,16 @@ jobs:
             echo 'Formatting needed for exactly these source files.'
             exit 1
           fi
+      - name: Prove real Node V1 ELF B0 v3 owner signature and B1d0 root CAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reuse the existing isolated /opt signed ELF proof, not a new CAS.
+          # The two exact test functions use synthetic CI keys only.
+          cargo build --locked --manifest-path interop/akula-staya/Cargo.toml \
+            --features node-v1-runtime --bin akula-node-v1-service
+          bash -n scripts/ci/akula-node-v1-signed-opt-proof.sh
+          bash scripts/ci/akula-node-v1-signed-opt-proof.sh
 
   windows-pinned-review-build:
     runs-on: windows-2025
