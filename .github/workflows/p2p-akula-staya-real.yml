@@ -48,7 +48,7 @@ jobs:
         run: cargo fmt --manifest-path interop/akula-staya/Cargo.toml -- --check
       - name: Compile and test actual Akula and Staya queue linkage
         shell: bash
-        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab --lib -- --nocapture
+        run: cargo test --manifest-path interop/akula-staya/Cargo.toml --features sender-arm-lab,p2p-live-identity --lib -- --nocapture
       - name: Rust formatting for exact opt-in inbox Core
         shell: bash
         run: rustfmt --edition 2021 --check aquilum-app/core/src/p2p_inbox_lab.rs
