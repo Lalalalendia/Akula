@@ -19,7 +19,7 @@ const folder={
  async removeEntry(name){files.delete(name)}
 };
 const original=Object.getOwnPropertyDescriptor(globalThis,'navigator');
-const nav={storage:{async getDirectory(){return{async getDirectoryHandle(){return folder}}},async estimate(){return{quota:100000,usage:0}}},locks:{locked:false,async request(n,o,cb){if(this.locked)return cb(null);this.locked=true;try{return await cb({name:n})}finally{this.locked=false}}}};
+const nav={storage:{async getDirectory(){return{async getDirectoryHandle(){return folder}}},async estimate(){return{quota:32*1024*1024,usage:0}}},locks:{locked:false,async request(n,o,cb){if(this.locked)return cb(null);this.locked=true;try{return await cb({name:n})}finally{this.locked=false}}}};
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:nav});
 (async()=>{
  const sha=async b=>hash(b),makeHash=()=>{const h=createHash('sha256');return{update:b=>h.update(b),digestHex:()=>h.digest('hex')}};
@@ -29,7 +29,7 @@ Object.defineProperty(globalThis,'navigator',{configurable:true,value:nav});
  await output.write(data.subarray(0,4096));first.update(data.subarray(0,4096));
  await output.write(data.subarray(4096,8192));first.update(data.subarray(4096,8192));
  });
- assert.equal(stored,1);
+ assert.equal(stored,2,'a persisted checkpoint and pause close should both commit');
  const second=makeHash();
  await withResumeLock(manifest.content_id,async()=>{
  const output=await openResumableOutput(manifest,{hashChunk:sha,hasher:second,checkpointBytes:8192});
