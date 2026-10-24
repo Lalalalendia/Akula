@@ -90,21 +90,50 @@ function Wait-CopyOrCreate($Root) {
   }
   throw 'Installed P2P identity UI never reached Ready or Missing state'
 }
+function Has-UI-Notice($Root, [string[]]$Labels) {
+  $all = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.Condition]::TrueCondition)
+  for ($i=0; $i -lt $all.Count; $i++) {
+    try {
+      if ($Labels -ccontains [string]$all.Item($i).Current.Name) { return $true }
+    } catch [System.Windows.Automation.ElementNotAvailableException] {}
+  }
+  return $false
+}
 function Read-PublicIdFromCopy($Root) {
-  [System.Windows.Forms.Clipboard]::SetText('AKULA_P2P_UIA_CLIPBOARD_BEFORE')
+  $poison = 'AKULA_P2P_UIA_CLIPBOARD_BEFORE'
+  [System.Windows.Forms.Clipboard]::SetText($poison)
+  if ([System.Windows.Forms.Clipboard]::GetText() -cne $poison) {
+    throw 'P2P UIA could not establish a known clipboard baseline'
+  }
   Invoke-Button (Wait-Button $Root (Names 'localIdentityCopy'))
-  $observed = ''
-  for ($i=0; $i -lt 60; $i++) {
+  $observed = $poison
+  $sawUnrelated = $false
+  $lastLength = $poison.Length
+  for ($i=0; $i -lt 100; $i++) {
     try {
       $observed = [System.Windows.Forms.Clipboard]::GetText()
-    } catch [System.Runtime.InteropServices.ExternalException] {}
-    if ($observed -ne 'AKULA_P2P_UIA_CLIPBOARD_BEFORE') { break }
+    } catch [System.Runtime.InteropServices.ExternalException] {
+      Start-Sleep -Milliseconds 100
+      continue
+    }
+    if ($observed -cmatch '^[0-9a-f]{64}$' -and $observed -cnotmatch '^0{64}$') {
+      return $observed
+    }
+    if (Has-UI-Notice $Root (Names 'localIdentityCopyFail')) {
+      throw 'Installed P2P UI reported an explicit OS clipboard write failure'
+    }
+    if ($observed -cne $poison) {
+      $sawUnrelated = $true
+      $lastLength = $observed.Length
+    }
     Start-Sleep -Milliseconds 100
   }
-  if ($observed -cnotmatch '^[0-9a-f]{64}$' -or $observed -cmatch '^0{64}$') {
-    throw 'Installed P2P Copy public ID did not return a full lowercase EndpointId'
-  }
-  return $observed
+  $copyConfirmed = Has-UI-Notice $Root (Names 'localIdentityCopied')
+  $copyFailed = Has-UI-Notice $Root (Names 'localIdentityCopyFail')
+  throw ("Installed P2P Copy public ID did not yield 64 lowercase hex characters; " +
+    "ui_copy_confirmed=$copyConfirmed ui_copy_failed=$copyFailed " +
+    "unrelated_clipboard=$sawUnrelated last_length=$lastLength")
 }
 $note = Join-Path $cleanVault 'p2p-installed-uia-smoke.md'
 if (Test-Path -LiteralPath $note) { throw 'P2P UIA note fixture was not clean' }
