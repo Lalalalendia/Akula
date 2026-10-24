@@ -220,7 +220,6 @@ impl Widget for PdfPage {
 mod tests {
     use super::*;
     #[test]
-    #[test]
     fn page_fits_available_width_then_zooms_without_clipping_initially() {
         let source = Size::new(1200.0, 1600.0);
         let viewport = Size::new(720.0, 900.0);
@@ -234,6 +233,7 @@ mod tests {
         let scrolled = fit_page(source, viewport, 1.25, 200.0);
         assert!(scrolled.y0 < zoomed.y0);
     }
+    #[test]
     fn page_status_has_true_page_counter() {
         let state = Display {
             image: None, name: "file.pdf".into(), current: 4, total: 10,
