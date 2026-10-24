@@ -19,6 +19,7 @@ pub mod theme;
 pub mod titlebar;
 pub mod timer;
 pub mod graph;
+pub mod canvas;
 pub mod motion;
 pub mod palette;
 pub mod reader;
@@ -43,7 +44,6 @@ use masonry::core::WidgetTag;
 pub use header::{controls_width, panel_label};
 pub use rail::{home_widget, sidebar_label};
 pub use shell::{Chrome, RootParts, root};
-
 pub const ROOT_TAG: WidgetTag<widgets::Slot> = WidgetTag::named("root");
 
 pub fn rescale(root: &mut masonry::app::RenderRoot, scale: f64) {
