@@ -23,6 +23,8 @@ fn failure(error: impl fmt::Display) -> ReplicaError {
 
 #[path = "replica_utf16.rs"]
 mod utf16_boundary;
+#[path = "replica_update_guard.rs"]
+mod update_guard;
 
 pub struct Replica {
     doc: Doc,
@@ -53,6 +55,7 @@ impl Replica {
     }
 
     pub fn apply_update(&self, update: &[u8], origin: &str) -> Result<(), ReplicaError> {
+        update_guard::check(update)?;
         let update = Update::decode_v1(update).map_err(failure)?;
         self.doc.transact_mut_with(origin).apply_update(update).map_err(failure)
     }
