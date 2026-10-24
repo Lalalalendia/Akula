@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use aquilum_core::files::gate;
 use crate::ui::editor::TextEditor;
 use masonry::app::RenderRoot;
@@ -9,7 +8,6 @@ use masonry::kurbo::Point;
 use crate::ui::editor::TextAction;
 
 use super::{App, Outcome, Popup};
-
 mod action;
 mod cloud_action; #[cfg(feature = "notion-offline-preview")] mod notion;
 mod menu_action;
@@ -20,6 +18,9 @@ mod bindings;
 mod refresh;
 mod section;
 mod recovery;
+pub(super) mod server_state;
+#[cfg(all(windows, feature = "server-readonly-preflight"))]
+pub(super) mod server;
 
 use crate::system;
 use crate::ui::menu::Menu;
@@ -34,7 +35,6 @@ pub(super) struct OpenMenu {
     pub(super) layer: WidgetId,
     button: WidgetId,
 }
-
 pub(super) enum Effect {
     None,
     Rescale,

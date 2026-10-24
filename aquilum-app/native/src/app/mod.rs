@@ -53,8 +53,7 @@ use crate::interface::{Interface, SCALE_STEP};
 use crate::links::Listing;
 use crate::ui::backlinks::{Body, HistoryBody, VersionView};
 use crate::ui::titlebar::WindowButton;
-use crate::note::Note;
-use crate::session::Session;
+use crate::{note::Note, session::Session};
 use crate::tabs::Tabs;
 use crate::workspace::Workspace;
 use uuid::Uuid;
@@ -105,6 +104,7 @@ pub struct App {
     interface: Interface,
     popup: Option<Popup>,
     typing: Option<(crate::ui::settings::schema::Setter, String, usize)>,
+    server_probe: settings::server_state::ServerProbeState,
     graph: graph_page::GraphState,
     transfer: transfer::TransferState,
     suggest_layer: Option<(WidgetId, WidgetId)>,

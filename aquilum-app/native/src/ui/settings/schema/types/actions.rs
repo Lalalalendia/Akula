@@ -35,6 +35,9 @@ pub enum Action {
     ImportS3Pair,
     #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
     SyncS3PairOnce,
+    VerifyServer,
+    ToggleServerAdvanced,
+    InstallServer,
     CheckUpdates,
     InstallUpdate,
 }

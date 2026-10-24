@@ -38,7 +38,7 @@ impl CloudProvider {
             Self::Dropbox => "settings.cloud.dropbox",
             Self::WebDav => "settings.cloud.webdav",
             #[cfg(feature = "notion-offline-preview")]
-            Self::Notion => return "Notion".to_string(),
+            Self::Notion => return "Notion".into(),
         };
         crate::i18n::t(key)
     }

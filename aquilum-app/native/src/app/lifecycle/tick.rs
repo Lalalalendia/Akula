@@ -2,8 +2,6 @@ use super::super::*;
 
 impl App {
     pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
-        #[cfg(feature = "notion-offline-preview")]
-        self.poll_notion(root);
         if self.yandex_probe.poll()
             && matches!(&self.popup, Some(Popup::Settings { dialog, .. })
                 if dialog.section == crate::ui::settings::schema::Section::Sync)
@@ -17,6 +15,10 @@ impl App {
         {
             self.refresh_settings(root);
         }
+        #[cfg(all(windows, feature = "server-readonly-preflight"))]
+        self.on_server_probe(root);
+        #[cfg(feature = "notion-offline-preview")]
+        self.poll_notion(root);
         if self.view_due.is_some_and(|t| t <= now) {
             self.flush_view();
         }
@@ -30,5 +32,4 @@ impl App {
             self.refresh_save_error(root);
         }
     }
-
 }

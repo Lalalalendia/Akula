@@ -6,7 +6,7 @@ impl App {
         let core = &self.workspace.core;
         let workspace = self.tree.root().map(Path::to_path_buf);
         match action {
-            // Review actions require a separate confirmation, not this handler.
+            // Provider actions use their own guarded modal handlers.
             Action::OpenCloudProvider(_) => Effect::None,
             #[cfg(feature = "notion-offline-preview")]
             Action::NotionConnect | Action::NotionRefresh(_) | Action::NotionForget(_) | Action::NotionOpenRoot(_) | Action::NotionOpenPage(_) | Action::NotionPageBatch(_) | Action::NotionTextChunk(_) => Effect::None,
@@ -108,7 +108,8 @@ impl App {
                 dialog.yandex_notice = Some(t(key));
                 Effect::Content
             }
-            // Preview is opt-in; the worker owns keys, not the UI.
+            // The preview is never compiled into ordinary installed builds.
+            // Worker reads keys itself; the GUI captures ONLY the bucket.
             #[cfg(all(target_os = "windows", feature = "yandex-s3-connection-preview"))]
             Action::CheckYandexConnection if dialog.section == Section::Sync => {
                 let bucket = core.settings.get_config().s3_onboarding.bucket;
@@ -213,8 +214,8 @@ impl App {
             #[cfg(all(target_os = "windows", feature = "s3-pair-beta"))]
             Action::ConfigureS3Pair | Action::ExportS3Pair |
                 Action::ImportS3Pair | Action::SyncS3PairOnce => Effect::None,
-            Action::StoreYandexKeys | Action::RemoveYandexKeys |
-                Action::CheckYandexConnection => Effect::None,
+            Action::StoreYandexKeys | Action::RemoveYandexKeys | Action::CheckYandexConnection => Effect::None,
+            other => self.handle_server_button(dialog, other),
         }
     }
 }

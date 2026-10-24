@@ -1,7 +1,7 @@
 'use strict';
 
 // Fixed PR admission ceiling. Closed/merged PRs release one slot.
-const MAX_OPEN_PRS = 130;
+const MAX_OPEN_PRS = 140;
 
 function calculateBudget(pulls) {
   if (!Array.isArray(pulls)) throw new TypeError('Expected an array of pull requests');
