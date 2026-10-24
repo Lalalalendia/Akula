@@ -154,3 +154,33 @@ race ancestor or child replacement. This does NOT establish full
 handle-relative custody, hostile process isolation, or a durable signed
 delivery receipt. Do not merge/publish P2P until those release gates and
 two installed-Windows-PC Internet E2E have been accepted.
+
+## 24 October: exact-blob NT custody readback before receiver OK
+
+The previous [exact-head Windows CI #40086269028](https://github.com/Lalalalendia/Akula/actions/runs/40086269028)
+fully passed, including both Windows negative ACL regressions, external n0
+EndpointId-only file transfer, cold Inbox and the `installed` feature graph.
+This is not an installed two-physical-PC acceptance.
+
+For an actual Windows received file, after the SQLite receipt and existing
+root/objects/SQLite pre- and postflight, the receiver now independently
+opens `objects/<locally derived UUID>.blob` relative to the previously pinned
+root directory and pinned `objects` directory. On the exact opened NT HANDLE
+it requires owner/DACL audit, a single hard link, the authenticated byte count
+and streamed BLAKE3. It also rechecks the `objects` directory's NT identity.
+A mismatch refuses the receiver's success/OK. This applies both to newly
+received bytes and duplicate receipts that SQLite would otherwise call
+`VerifiedLocal`.
+
+Additional Windows CI regressions exercise an existing verified blob granted
+`Everyone:F` and one with a second hard-link name. The previously verified
+SQLite record may remain for investigation, but no subsequent successful
+network receipt is issued for that compromised object.
+
+**Remaining release HOLD:** Object and SQLite **writes** still go through
+path-based `rusqlite` and file creation. Final handle-relative readback
+narrows detection but cannot close a malicious same-user rename/swap race
+or guarantee power-loss durability. Before beta release require complete
+Windows file/directory custody, physical installed two-network P2P, and
+ordinary signed application update. The new exact-head CI must pass before
+marking this slice accepted.
