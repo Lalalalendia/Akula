@@ -245,12 +245,13 @@ function getChunkFromPeer(peer, index) {
     catch (error) { pending.reject(error); }
   });
 }
+async function sha256Hex(data) {
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash), v => v.toString(16).padStart(2, '0')).join('');
+}
 async function verifyChunk(index, data) {
   const expected = manifest.chunks[index];
-  if (data.byteLength !== expected.size) return false;
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  const hex = Array.from(new Uint8Array(hash), v => v.toString(16).padStart(2, '0')).join('');
-  return hex === expected.sha256;
+  return data.byteLength === expected.size && await sha256Hex(data) === expected.sha256;
 }
 function eligiblePeers(index) {
   return [...peers.values()]
@@ -274,20 +275,20 @@ async function fetchChunk(index) {
       return bytes;
     } catch (e) { statistics.peerFailures++; writeLog(`P2P часть ${index}: ${e.message}, пробую другой источник`); }
   }
-  const offset = expected.offset, end = offset + expected.size - 1;
-  const request = await fetch(manifest.origin_url, { headers: { Range: `bytes=${offset}-${end}` }, cache: 'no-store' });
-  const singleWholeFile = manifest.chunks.length === 1 && offset === 0;
-  if (request.status !== 206 && !(singleWholeFile && request.status === 200)) {
-    throw Error(`Источник не поддерживает требуемый диапазон: HTTP ${request.status}`);
-  }
-  if (request.status === 206 && request.headers.get('Content-Range') !== `bytes ${offset}-${end}/${manifest.size}`) {
-    throw Error('Источник вернул неверный Content-Range');
-  }
-  const arr = new Uint8Array(await request.arrayBuffer());
-  statistics.httpBytes += arr.length;
-  if (!await verifyChunk(index, arr)) {
-    statistics.integrityFailures++;
-    throw Error(`Ошибка контрольной суммы HTTP, часть ${index}`);
+  // HTTP bytes are never trusted until this bounded Range reader verifies SHA-256.
+  // Reject wrong Content-Range, oversized bodies and truncated transfers.
+  const checkedRangeGet = window.AkulaCheckedRangeGet;
+  if (typeof checkedRangeGet !== 'function') throw Error('Не загружен защищённый HTTP Range reader');
+  let arr;
+  try {
+    arr = await checkedRangeGet({
+      url: manifest.origin_url, offset: expected.offset, size: expected.size,
+      totalSize: manifest.size, expectedSha256: expected.sha256, hashHex: sha256Hex,
+      onBytes: count => { statistics.httpBytes += count; },
+    });
+  } catch (error) {
+    if (error.message === 'SHA-256 mismatch') statistics.integrityFailures++;
+    throw error;
   }
   statistics.fromHttp++;
   cacheChunk(index, arr);
