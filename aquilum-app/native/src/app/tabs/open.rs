@@ -321,8 +321,8 @@ impl App {
         if !image && !is_markdown(&path) && !is_plain_text(&path) && !is_structured_file(&path) && !super::super::pdf_view::is_pdf(&path) {
             return false;
         }
-        // Validate the image before changing tabs or navigation: no paths
-        // outside this vault, symlinks, oversized or corrupt sources.        if super::super::pdf_view::is_pdf(&path) && !self.tree.root().is_some_and(|vault| super::super::pdf_view::trusted_source(vault, &path)) { return false; }
+        // Reject a PDF outside the vault or with unsafe/corrupt source bytes.
+        if super::super::pdf_view::is_pdf(&path) && !self.tree.root().is_some_and(|vault| super::super::pdf_view::trusted_source(vault, &path)) { return false; }
         if image && self.tree.root().and_then(|vault| super::super::media::local_image_preview(vault, &path)).is_none() {
             return false;
         }
