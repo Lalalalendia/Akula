@@ -50,8 +50,10 @@ jobs:
         shell: pwsh
         run: |
           $cargo = Get-Content -Raw aquilum-app/native/Cargo.toml
-          if ($cargo -notmatch 'installed\s*=\s*\[\s*\]') {
-            throw "installed feature must be empty: S3 UI preview may not ship"
+          # The normal installed build may contain the independently
+          # reviewed, read-only SSH KEX preflight, but no S3 preview.
+          if ($cargo -notmatch '(?m)^installed\s*=\s*\[\s*"server-readonly-preflight"\s*\]\s*$') {
+            throw "installed may contain only the reviewed read-only SSH preflight"
           }
           if ($cargo -notmatch 'yandex-s3-connection-preview\s*=') {
             throw "missing explicit opt-in feature"

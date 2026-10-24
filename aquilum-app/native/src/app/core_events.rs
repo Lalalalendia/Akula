@@ -23,7 +23,9 @@ impl App {
         self.on_home_resolved(root);
         self.on_link_titles(root);
         self.on_graph_results(root);
-        self.on_update_and_server_probe(root);
+        self.on_update(root);
+        #[cfg(all(windows, feature = "server-readonly-preflight"))]
+        self.on_server_probe(root);
         self.on_retention_done(root);
         self.undo_failed_renames(root);
         self.poll_find(root);

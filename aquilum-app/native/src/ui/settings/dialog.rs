@@ -1,5 +1,6 @@
 use super::{Binding, CloudPopup, Section};
 use masonry::core::WidgetId;
+use std::collections::HashMap;
 use masonry::widgets::Flex;
 use crate::ui::dialog::DialogIds;
 use crate::ui::handle::Handle;
