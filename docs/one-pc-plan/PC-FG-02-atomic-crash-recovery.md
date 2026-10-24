@@ -1,7 +1,7 @@
 # PC-FG-02 — atomic write crash recovery
 
-**Task:** FG-03/07, atomic save, temporary files, WAL/SQLite and termination at filesystem phases.  
-**Notion:** [PC-FG-02](https://app.notion.com/p/40332a84beec81b29914cd38f9e7389b)  
+**Task:** FG-03/07, atomic save, temporary files, WAL/SQLite and termination at filesystem phases.
+**Notion:** [PC-FG-02](https://app.notion.com/p/40332a84beec81b29914cd38f9e7389b)
 **Disposition:** locally reproduced on one Windows PC. The test-only atomic-write probes and this report are published in a Draft PR stacked on PC-FG-01 #703; exact PR head and CI state are recorded on the linked Notion task.
 
 ## Change
@@ -18,7 +18,7 @@ The five Windows process-termination points produced these cold-read results:
 | CAS passed, before commit | Previous version | Full 1 MiB temp |
 | Commit returned | Complete new 1 MiB version | None |
 
-Previous version BLAKE3: `6a142e66da92ce6e23b171a4fcffb227361525fd4ca75a6596fcf91ba968addd`.  
+Previous version BLAKE3: `6a142e66da92ce6e23b171a4fcffb227361525fd4ca75a6596fcf91ba968addd`.
 New version BLAKE3: `a9a8f13c55cd434af8a6c26c4facb45c342bfc361ebded32866f86df18e3db82`.
 
 The stale-CAS negative test passed: the external bytes remained unchanged and the ordinarily dropped temp file was removed. Existing local sync crash checks also passed: the V7 / primary / HistoryService / V8 termination matrix reopened in a new process without replay, and the partial-persistence cases (missing V8 row, missing history version, changed primary) remained fail-closed with the prior baseline and protected original intact.
