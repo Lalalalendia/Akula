@@ -82,6 +82,7 @@ jobs:
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_receiver_refuses_hardlinked_blob_on_duplicate_receipt -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_pinned_stage_cleanup_never_deletes_replaced_name -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_pinned_objects_writer_is_no_replace_and_removes_failed_scratch -- --nocapture
+          cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta windows_sqlite_custody_blocks_rename_and_preserves_parent_identity -- --nocapture
           cargo test --manifest-path interop/akula-staya/Cargo.toml --features p2p-one-file-lan-beta --bin akula-p2p-one-file-beta actual_iroh_native_received_inbox_only_roundtrip_without_user_credentials -- --nocapture
       - name: Verify real opt-in n0 Internet discovery, QUIC payload and reopened Inbox
         shell: bash
