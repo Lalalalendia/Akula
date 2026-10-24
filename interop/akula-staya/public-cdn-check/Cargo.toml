@@ -34,3 +34,8 @@ tokio = { version = "1", features = ["time", "macros", "rt-multi-thread"], optio
 name = "minio_real"
 path = "tests/minio_real.rs"
 required-features = ["public-cdn-local-minio-test"]
+
+[[test]]
+name = "bao_iroh_real"
+path = "tests/bao_iroh_real.rs"
+required-features = ["bao"]
