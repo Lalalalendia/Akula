@@ -1,0 +1,38 @@
+name: Akula kernels - isolated language comparison
+
+on:
+  push:
+    branches:
+      - research/language-compare-20261025
+    paths:
+      - 'scripts/benchmarks/akula-kernels/**'
+      - '.github/workflows/akula-kernels-once.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-kernels-one-shot
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: Install pinned Zig release with SHA256 check
+        shell: bash
+        run: bash scripts/benchmarks/language-compare/install-extras.sh
+      - name: Build and compare exact kernel outputs
+        shell: bash
+        run: python3 scripts/benchmarks/akula-kernels/run.py
+      - name: Save measurements and correctness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akula-real-kernels-20261025
+          path: akula-kernel-results/**
+          if-no-files-found: warn
+          retention-days: 30
