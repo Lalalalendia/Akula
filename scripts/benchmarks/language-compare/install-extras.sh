@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-DEST="\${RUNNER_TEMP:-/tmp}/language-compare-toolchains"
+DEST="${RUNNER_TEMP:-/tmp}/language-compare-toolchains"
 mkdir -p "$DEST"
 
 download() {
