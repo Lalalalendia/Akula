@@ -1,5 +1,6 @@
 mod fold;
 mod lines;
+mod scan;
 #[cfg(test)]
 mod tests;
 
@@ -56,25 +57,7 @@ impl Matcher {
     }
 
     pub fn each(&self, text: &str, mut found: impl FnMut(Range<usize>) -> bool) -> bool {
-        if self.needles.is_empty() {
-            return true;
-        }
-        let mut rest = Folded::new(text, self.options.fold);
-        let mut before = None;
-        while let Some((first, start, end)) = rest.next() {
-            if self.starts_word(before) {
-                if let Some((end, after, last)) = self.match_at(first, end, &rest) {
-                    if !found(start..end) {
-                        return false;
-                    }
-                    (rest, before) = (after, Some(last));
-                    rest.skip_rest_of_char();
-                    continue;
-                }
-            }
-            before = Some(first);
-        }
-        true
+        scan::each(self, text, &mut found)
     }
 
     pub fn find_all(&self, text: &str) -> Vec<Range<usize>> {
