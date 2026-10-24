@@ -150,3 +150,18 @@ fn nested_junction_destination_parent_is_rejected_without_writing() {
     ));
     assert!(!nested.join("disallowed.bin").exists());
 }
+
+#[cfg(windows)]
+#[test]
+fn pinned_export_parent_prevents_rename_until_guard_is_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let selected = dir.path().join("selected");
+    let moved = dir.path().join("moved");
+    fs::create_dir(&selected).unwrap();
+    let guard = pin_windows_export_parent(&selected).unwrap();
+    assert!(fs::rename(&selected, &moved).is_err(),
+        "live guarded export parent was renamed while pinned");
+    drop(guard);
+    fs::rename(&selected, &moved).unwrap();
+    assert!(moved.is_dir());
+}

@@ -118,9 +118,7 @@ impl App {
         let Ok(id) = Uuid::parse_str(receipt) else {
             return false;
         };
-        // A user may select an arbitrary path in the system dialog. The
-        // receiver must refuse protected application data and known Vaults:
-        // that is a File Gate operation, not a manual Inbox export.
+        // User-chosen exports must not bypass File Gate into known Vaults.
         let known = match self.workspace.core.ui_state.list_workspaces() {
             Ok(known) => known,
             Err(_) => {
@@ -213,10 +211,12 @@ fn save_checked_copy(
         return Err("destination must be an absolute new path".into());
     }
     let parent = destination.parent().ok_or("missing destination parent")?;
+    #[cfg(windows)]
+    let _pinned_export_dir = aquilum_core::p2p_inbox_lab::pin_windows_export_parent(parent)
+        .map_err(|error| format!("destination parent custody: {error:?}"))?;
     let canonical_parent =
         fs::canonicalize(parent).map_err(|error| format!("destination parent: {error}"))?;
-    // This is a best-effort fixed-root gate, not a proof against hostile
-    // ancestor substitution after this check. Release requires handle custody.
+    // Protected roots are checked under pinned no-rename ancestor handles.
     for protected in std::iter::once(root).chain(protected_roots.iter().map(PathBuf::as_path)) {
         if let Ok(canonical) = fs::canonicalize(protected) {
             if canonical_parent.starts_with(&canonical) {

@@ -13,40 +13,11 @@ use std::{
 };
 use uuid::Uuid;
 
-/// Windows-only private staging. Returns the directory handle as well as
-/// the exclusively created file; retain both through the receiver operation.
-/// Audits owner/DACL on an independently opened root and compares live NT
-/// identities before creating a child relative to the writable directory handle.
-/// The later SQLite/object publication is still path-based and NOT certified.
 #[cfg(windows)]
-pub fn create_pinned_windows_inbox_stage(
-    root: &Path,
-    name: &str,
-) -> Result<(File, File), InboxError> {
-    crate::sync::p2p_stage::create_pinned_p2p_inbox_stage(root, name)
-        .map_err(|_| InboxError::InvalidDestination)
-}
-
-/// Keep root, objects and SQLite HANDLEs live for the entire read/copy.
-/// This only rejects observed ACL, reparse and identity anomalies; it does
-/// not yet certify SQLite WAL namespace or same-user race immunity.
+mod windows;
 #[cfg(windows)]
-pub struct PinnedWindowsInboxRead {
-    _root: File,
-    _objects: File,
-    _sqlite: File,
-}
-
-#[cfg(windows)]
-pub fn pin_windows_inbox_read(root: &Path) -> Result<PinnedWindowsInboxRead, InboxError> {
-    let (root, objects, sqlite) = crate::sync::p2p_stage::pin_p2p_read_snapshot(root)
-        .map_err(|_| InboxError::InvalidDestination)?;
-    Ok(PinnedWindowsInboxRead {
-        _root: root,
-        _objects: objects,
-        _sqlite: sqlite,
-    })
-}
+pub use windows::{create_pinned_windows_inbox_stage, pin_windows_export_parent,
+    pin_windows_inbox_read, PinnedWindowsExportParent, PinnedWindowsInboxRead};
 
 pub const MAX_INBOX_ITEM_BYTES: u64 = 8 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
@@ -130,6 +101,8 @@ pub fn save_verified_stage_as_new(
     if !parent_info.is_dir() || parent_info.file_type().is_symlink() {
         return Err(InboxError::InvalidDestination);
     }
+    #[cfg(windows)]
+    let _pinned_export_dir = pin_windows_export_parent(parent)?;
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
