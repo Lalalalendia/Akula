@@ -316,39 +316,7 @@ fn s3_compact_setup_requires_keys_and_explicit_configure_before_sync() {
         *a == Action::ConfigureS3Pair && *enabled));
 }
 
-#[test]
-fn b1d0_native_server_settings_are_nonsecret_and_never_offer_an_install_grant() {
-    let mut config = AppConfig::default();
-    let ctx = Context::new(1.0);
-    i18n::set_language("ru");
-    let sections = blocks(Section::Server, &config, &ctx);
-    assert_eq!(sections.len(),1);
-    let page = &sections[0];
-    assert_eq!(page.title, t("settings.server.title"));
-    let writable: Vec<_> = page.rows.iter().filter(|r| r.setter.is_some()).collect();
-    assert_eq!(writable.len(), 5);
-    assert!(writable.iter().all(|row| matches!(
-        &row.control, Control::Text { commit:true,.. }|Control::Number(_)
-    )));
-    let mut blocked_actions=0;
-    for row in &page.rows {
-        if let Control::Buttons(buttons)= &row.control {
-            for button in buttons {
-                assert!(!button.enabled, "no SSH verification/install without OS trust");
-                blocked_actions+=1;
-            }
-        }
-    }
-    assert_eq!(blocked_actions,2);
-    // Attempt to paste a secret as an OpenSSH *public* host key.
-    let key_row=writable.iter().find(|r|
-        r.label==t("settings.server.publicKey")).unwrap();
-    let Some(Setter::Config(set))=key_row.setter else { panic!("expected setter") };
-    set(&mut config, &Value::Text("-----BEGIN OPENSSH PRIVATE KEY-----".into()));
-    assert!(config.server_setup.host_public_key.is_empty());
-    i18n::set_language("en");
-}
-
+mod server;
 #[test]
 fn system_about_section_links_to_project_telegram_channel() {
     let sections = blocks(Section::System, &AppConfig::default(), &Context::new(1.0));
