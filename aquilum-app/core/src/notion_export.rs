@@ -110,6 +110,7 @@ pub struct InventoryReport {
 
 #[path = "notion_export_zip.rs"]
 mod zip_archive;
+pub mod plan;
 
 /// Inspect a Notion export in an extracted directory OR a bounded top-level ZIP.
 /// This operation never extracts, writes into a vault, or uses network credentials.

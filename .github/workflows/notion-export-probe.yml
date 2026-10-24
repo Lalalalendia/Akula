@@ -6,6 +6,7 @@ on:
     paths:
       - 'aquilum-app/core/src/notion_export.rs'
       - 'aquilum-app/core/src/notion_export_zip.rs'
+      - 'aquilum-app/core/src/notion_export/**'
       - 'aquilum-app/core/src/bin/akula_notion_export_probe.rs'
       - '.github/workflows/notion-export-probe.yml'
   workflow_dispatch:

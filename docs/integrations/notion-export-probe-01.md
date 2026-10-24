@@ -9,6 +9,12 @@ Export your Notion workspace via the official UI and extract the ZIP in an isola
     cargo run -p aquilum-core --locked --features notion-export-probe --bin akula-notion-export-probe -- /path/to/extracted-export > inventory.json
     cargo test -p aquilum-core --locked --features notion-export-probe notion_export
 
+Optional read-only destination planning (stdout contains source paths/UUIDs):
+
+    cargo run -p aquilum-core --locked --features notion-export-probe --bin akula-notion-export-probe -- --plan /path/to/export.zip > plan.json
+
+The plan uses stable 32-hex Notion UUIDs for proposed note filenames, preserves Markdown link targets, and lists blockers for missing/duplicate IDs, unresolved links, images, CSV schema, HTML and other unsupported entries. No original text is copied to the plan; no files are created. Even a structurally valid plan has publication_supported=false: File Gate authorization, content readback and hashes, schema restoration, asset handling and user approval are separate mandatory stages.
+
 JSON goes to stdout. The report can include sensitive original page names and IDs; keep it private.
 
 ## What the current module actually does
