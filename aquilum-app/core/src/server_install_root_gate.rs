@@ -76,7 +76,9 @@ pub fn assess_pre_enrolled_helper(
         return RootHelperReadiness::NeedsAdminAuthorization;
     };
     let nonzero = |bytes: &[u8]| bytes.iter().any(|b| *b != 0);
-    let span = evidence.expires_at_unix.checked_sub(evidence.issued_at_unix);
+    let span = evidence
+        .expires_at_unix
+        .checked_sub(evidence.issued_at_unix);
     if !nonzero(&pins.attestor_ed25519)
         || !nonzero(&pins.helper_sha256)
         || !nonzero(&pins.owner_ed25519)
@@ -97,10 +99,7 @@ pub fn assess_pre_enrolled_helper(
     {
         return RootHelperReadiness::NeedsAdminAuthorization;
     }
-    let verifier = signature::UnparsedPublicKey::new(
-        &signature::ED25519,
-        pins.attestor_ed25519,
-    );
+    let verifier = signature::UnparsedPublicKey::new(&signature::ED25519, pins.attestor_ed25519);
     if verifier
         .verify(&evidence.canonical_signed_bytes(), &evidence.signature)
         .is_err()

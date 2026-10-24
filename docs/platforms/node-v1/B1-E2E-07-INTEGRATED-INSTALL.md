@@ -101,3 +101,9 @@ approved noninteractive admin escalation, production helper invocation,
 release-authority pinning, B1d0 commit and systemd activation. The pre-enrolled
 presence proof must not be used to bypass any of those gates. B1-E2E-07
 remains HOLD until the whole signed Windows→VPS→Windows workflow is tested.
+
+### B0 v2: честный read-only preflight для чистого VPS (follow-up)
+
+В Node v2 убрана ошибочная зависимость **чтения** совместимости сервера от `sudo -n -l`: подходящий Debian/Ubuntu x86-64 VPS без указанного sudo теперь получает неизменяемый B0 v2 план с `has_sudo_rights=false` вместо полного отказа в исследовании хоста. Старая B0 v1 семантика сохранена. При этом `prepare_signed_review` по-прежнему отказывает `InvalidPreview` без sudo, **никакого согласия на install** и root-выполнения не возникает. Для B1d0 нужна независимая, отдельно авторизованная root-процедура, а не вывод о разрешении из прочитанной host-факты.
+
+Ограничение: изменение ещё не вводит привилегированную установку, авторизованный initial bootstrap или проверку на личном VPS. Полный B1-E2E-07 остаётся HOLD.

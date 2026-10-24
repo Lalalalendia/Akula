@@ -242,10 +242,11 @@ pub trait PreviewTransport {
     fn inspect_host(&mut self) -> Result<ReadOnlyHostFacts, B0Error>;
 }
 
-pub fn preview<T: PreviewTransport>(
+fn preview_with_scope<T: PreviewTransport>(
     input: &B0Input,
     transport: &mut T,
     cancelled: impl Fn() -> bool,
+    node_v2: bool,
 ) -> Result<DryRunPlan, B0Error> {
     input.target.validate()?;
     input.package.validate()?;
@@ -276,7 +277,10 @@ pub fn preview<T: PreviewTransport>(
         return Err(B0Error::UnsupportedArchitecture);
     }
     if !facts.has_systemd { return Err(B0Error::MissingSystemd); }
-    if !facts.has_sudo_rights { return Err(B0Error::MissingPrivilege); }
+    // Legacy v1 required an arbitrary sudo listing. Node v2 is a *read-only*
+    // inventory and must not claim that sudo listing is install authority.
+    // A clean VPS without sudo can still be inventoried as Needs Admin.
+    if !node_v2 && !facts.has_sudo_rights { return Err(B0Error::MissingPrivilege); }
     if facts.cpu_count == 0 || facts.ram_mib < MIN_RAM_MIB
         || facts.free_disk_mib < MIN_FREE_DISK_MIB
     {
@@ -286,16 +290,30 @@ pub fn preview<T: PreviewTransport>(
     // Returning a plan has NO side effects, even after all checks succeeded.
     // B1 must use a separate, explicitly user-approved transaction type.
     let mut plan = DryRunPlan {
-        schema_version: 1,
+        schema_version: if node_v2 { 2 } else { 1 },
         install_id: input.install_id,
         target: input.target.clone(),
         package: input.package.clone(),
         inspected_host: facts,
-        proposed_changes: FIXED_ACTIONS.to_vec(),
+        proposed_changes: if node_v2 {
+            NODE_V2_ACTIONS.to_vec()
+        } else {
+            FIXED_ACTIONS.to_vec()
+        },
         plan_blake3: String::new(),
     };
     plan.plan_blake3 = plan.computed_digest();
     Ok(plan)
+}
+
+/// Historical B0 v1 remains a read-only inventory with its original sudo
+/// listing precondition. The v1 plan is never valid for public Node install.
+pub fn preview<T: PreviewTransport>(
+    input: &B0Input,
+    transport: &mut T,
+    cancelled: impl Fn() -> bool,
+) -> Result<DryRunPlan, B0Error> {
+    preview_with_scope(input, transport, cancelled, false)
 }
 
 /// Node-V1's actual public listener is UDP 43871, NOT loopback-only.
@@ -310,12 +328,7 @@ pub fn preview_node_v2<T: PreviewTransport>(
     transport: &mut T,
     cancelled: impl Fn() -> bool,
 ) -> Result<DryRunPlan, B0Error> {
-    let mut plan = preview(input, transport, &cancelled)?;
-    if cancelled() { return Err(B0Error::Cancelled); }
-    plan.schema_version = 2;
-    plan.proposed_changes = NODE_V2_ACTIONS.to_vec();
-    plan.plan_blake3 = plan.computed_digest();
-    Ok(plan)
+    preview_with_scope(input, transport, cancelled, true)
 }
 
 #[cfg(test)]
@@ -324,6 +337,7 @@ mod node_plan_v2_tests {
 
     struct StaticKex {
         wire: Vec<u8>,
+        listed_sudo: bool,
     }
     impl PreviewTransport for StaticKex {
         fn handshake_public_key(&mut self, _: &ServerTarget) -> Result<Vec<u8>, B0Error> {
@@ -334,7 +348,7 @@ mod node_plan_v2_tests {
                 os: SupportedOs::Ubuntu,
                 arch: MachineArch::X86_64,
                 has_systemd: true,
-                has_sudo_rights: true,
+                has_sudo_rights: self.listed_sudo,
                 cpu_count: 4,
                 ram_mib: 4096,
                 free_disk_mib: 8192,
@@ -360,8 +374,8 @@ mod node_plan_v2_tests {
                 trusted_signer_id: "test-release-anchor".into(),
             },
         };
-        let old = preview(&input, &mut StaticKex { wire: wire.clone() }, || false).unwrap();
-        let v2 = preview_node_v2(&input, &mut StaticKex { wire }, || false).unwrap();
+        let old = preview(&input, &mut StaticKex { wire: wire.clone(), listed_sudo: true }, || false).unwrap();
+        let v2 = preview_node_v2(&input, &mut StaticKex { wire, listed_sudo: true }, || false).unwrap();
         assert!(old.verify_unchanged() && v2.verify_unchanged());
         assert_eq!((old.schema_version, v2.schema_version), (1, 2));
         assert_ne!(old.plan_blake3, v2.plan_blake3);
@@ -387,5 +401,35 @@ mod node_plan_v2_tests {
         // A changed target can be internally consistent but is no longer the
         // originally reviewed plan. Detached owner signatures bind its digest.
         assert_ne!(wrong_key.plan_blake3, old.plan_blake3);
+    }
+
+    #[test]
+    fn clean_vps_without_sudo_is_inventory_only_not_installable() {
+        let wire = vec![0xa5; 32];
+        let input = B0Input {
+            install_id: Uuid::from_bytes([2; 16]),
+            target: ServerTarget {
+                host: "clean-vps.example.org".into(),
+                ssh_port: 22,
+                ssh_user: "ubuntu".into(),
+                trusted_key_sha256: digest::digest(&digest::SHA256, &wire)
+                    .as_ref().try_into().unwrap(),
+            },
+            package: PackagePin {
+                version: "0.3.13".into(),
+                package_sha256: [0x44; 32],
+                trusted_signer_id: "test-release-anchor".into(),
+            },
+        };
+        let mut old_kex = StaticKex { wire: wire.clone(), listed_sudo: false };
+        assert_eq!(preview(&input, &mut old_kex, || false), Err(B0Error::MissingPrivilege));
+        let mut v2_kex = StaticKex { wire, listed_sudo: false };
+        let plan = preview_node_v2(&input, &mut v2_kex, || false).unwrap();
+        assert_eq!(plan.schema_version, 2);
+        assert!(!plan.inspected_host.has_sudo_rights);
+        assert!(plan.verify_unchanged());
+        assert!(plan.proposed_changes.contains(
+            &ProposedChange::RequireIndependentlyPinnedRootBootstrap
+        ));
     }
 }

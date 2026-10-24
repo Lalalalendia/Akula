@@ -215,6 +215,18 @@ fn changed_preview_and_unsupported_host_are_refused_even_if_rehashed() {
 }
 
 #[test]
+fn clean_vps_readonly_preview_without_sudo_cannot_approve_install() {
+    let (mut plan, signed, trusted, artifact) = fixture();
+    plan.inspected_host.has_sudo_rights = false;
+    plan.plan_blake3 = plan.computed_digest();
+    assert!(plan.verify_unchanged());
+    assert!(matches!(
+        prepare(plan, &signed, &trusted, &artifact),
+        Err(ReviewError::InvalidPreview),
+    ));
+}
+
+#[test]
 fn cancel_expiry_and_clock_rollback_fail_closed() {
     let (plan, signed, trusted, artifact) = fixture();
     let mut cancelled = prepare(plan.clone(), &signed, &trusted, &artifact).unwrap();

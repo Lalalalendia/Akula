@@ -33,8 +33,11 @@ fn signed_fixture() -> (ReviewEcho, RootHelperPins, RootHelperEvidence) {
         expires_at_unix: NOW + 45,
         signature: [0; 64],
     };
-    proof.signature = key.sign(&proof.canonical_signed_bytes()).as_ref()
-        .try_into().unwrap();
+    proof.signature = key
+        .sign(&proof.canonical_signed_bytes())
+        .as_ref()
+        .try_into()
+        .unwrap();
     (review, pins, proof)
 }
 
@@ -70,8 +73,11 @@ fn mismatched_scope_and_unpinned_keys_hold() {
             // A root signer can sign a different *valid* candidate;
             // that must still be refused against independently pinned scope.
             let signer = Ed25519KeyPair::from_seed_unchecked(&[0x91; 32]).unwrap();
-            proof.signature = signer.sign(&proof.canonical_signed_bytes())
-                .as_ref().try_into().unwrap();
+            proof.signature = signer
+                .sign(&proof.canonical_signed_bytes())
+                .as_ref()
+                .try_into()
+                .unwrap();
         }
         assert_eq!(
             assess_pre_enrolled_helper(&review, &pins, Some(&proof), NOW),
