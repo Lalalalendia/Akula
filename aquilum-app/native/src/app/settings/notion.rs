@@ -1,4 +1,4 @@
-//! Strictly local Notion popup actions: no tokens, network, or Vault writes.
+//! Explicit Notion credential and refresh actions; no write-back to Notion or Vault.
 use super::*;
 
 impl App {

@@ -1,5 +1,5 @@
-//! User-invoked offline Notion reader. All buttons stay read-only.
-//! Verified source loading happens in NotionSession's worker, not paint.
+//! Opt-in Notion read-only connection and verified offline page browser.
+//! HTTP and checksum work run on workers, not inside the UI event loop.
 use super::*;
 use crate::notion_offline::{LoadState, PAGE_BATCH, TEXT_CHARS};
 
@@ -16,13 +16,37 @@ pub(super) fn body(
 ) -> NewWidget<Flex> {
     let mut column = Flex::column().cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_fixed(selectable(
-            "Notion — сохранённые источники (офлайн, только чтение)",
+            "Notion — подключение и локальная копия",
             |t| t.text_primary, None, Leading::Times(1.3),
         ))
         .with_fixed(selectable(
-            "Notion остаётся владельцем данных. Эта тестовая функция не подключает аккаунт, не обновляет источники и не изменяет Vault.",
+            "Notion — источник данных. Загрузка только по вашему запросу; запись обратно в Notion и в Vault отключена.",
             |t| t.text_muted, None, Leading::Times(1.4),
         ));
+    if !ctx.notion_sync.busy {
+        column = column.with_fixed(action_button(
+            "Подключить Notion (UUID страницы и ключ в системном окне)".into(),
+            Action::NotionConnect, bindings,
+        ));
+    }
+    column = column.with_fixed(selectable(
+        ctx.notion_sync.status.label(),
+        |t| t.text_secondary, None, Leading::Times(1.4),
+    ));
+    let selected_root = ctx.notion_selection.root.as_ref()
+        .or(ctx.notion_sync.root.as_ref());
+    if let Some(root) = selected_root
+        && !ctx.notion_sync.busy
+    {
+        column = column.with_fixed(action_button(
+            "Обновить выбранный источник через Notion API".into(),
+            Action::NotionRefresh(root.clone()), bindings,
+        ));
+        column = column.with_fixed(action_button(
+            "Удалить сохранённый ключ (локальная копия останется)".into(),
+            Action::NotionForget(root.clone()), bindings,
+        ));
+    }
     if let Some(reason) = ctx.notion_offline.error {
         column = column.with_fixed(selectable(
             &format!("Кэш требует проверки: {reason}"),
@@ -30,7 +54,7 @@ pub(super) fn body(
         ));
     } else if ctx.notion_offline.roots.is_empty() {
         column = column.with_fixed(selectable(
-            "Нет сохранённых снимков Notion. Первичную загрузку пока выполняет отдельный API-инструмент.",
+            "Локальной копии нет. Подключите Notion, затем дождитесь подтверждённой загрузки.",
             |t| t.text_secondary, None, Leading::Times(1.4),
         ));
     } else {
@@ -144,7 +168,11 @@ mod tests {
         }).collect::<Vec<_>>();
         assert!(actions.contains(&&Action::NotionOpenRoot(root)));
         assert!(actions.contains(&&Action::NotionOpenPage(page)));
+        assert!(actions.contains(&&Action::NotionConnect));
+        assert!(actions.contains(&&Action::NotionRefresh(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string())));
         assert!(actions.iter().all(|action| matches!(action,
-            Action::NotionOpenRoot(_) | Action::NotionOpenPage(_))));
+            Action::NotionConnect | Action::NotionRefresh(_) | Action::NotionForget(_)
+            | Action::NotionOpenRoot(_) | Action::NotionOpenPage(_))));
     }
 }

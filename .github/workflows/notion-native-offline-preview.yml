@@ -7,6 +7,10 @@ on:
     paths:
       - '.github/workflows/notion-native-offline-preview.yml'
       - 'aquilum-app/native/src/notion_offline.rs'
+      - 'aquilum-app/native/src/notion_credentials.rs'
+      - 'aquilum-app/native/src/notion_sync.rs'
+      - 'aquilum-app/native/src/app/settings/notion.rs'
+      - 'aquilum-app/native/src/app/lifecycle/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/health.rs'
       - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider.rs'
@@ -15,6 +19,10 @@ on:
     paths:
       - '.github/workflows/notion-native-offline-preview.yml'
       - 'aquilum-app/native/src/notion_offline.rs'
+      - 'aquilum-app/native/src/notion_credentials.rs'
+      - 'aquilum-app/native/src/notion_sync.rs'
+      - 'aquilum-app/native/src/app/settings/notion.rs'
+      - 'aquilum-app/native/src/app/lifecycle/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/health.rs'
       - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider.rs'
@@ -58,6 +66,11 @@ jobs:
       - name: Native offline worker, no-token and corrupt-cache regression
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_offline
+      - name: Isolated Notion credential target and manual refresh coordinator tests
+        working-directory: aquilum-app
+        run: |
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_credentials::tests
+          cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_sync::tests
       - name: Native Notion tile and other provider regressions
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview ui::settings::cloud

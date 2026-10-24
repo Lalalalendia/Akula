@@ -5,6 +5,9 @@ pub use cloud_provider::CloudProvider;
 pub enum Action {
     OpenCloudProvider(CloudProvider),
     #[cfg(feature = "notion-offline-preview")] NotionOpenRoot(String),
+    #[cfg(feature = "notion-offline-preview")] NotionConnect,
+    #[cfg(feature = "notion-offline-preview")] NotionRefresh(String),
+    #[cfg(feature = "notion-offline-preview")] NotionForget(String),
     #[cfg(feature = "notion-offline-preview")] NotionOpenPage(String),
     #[cfg(feature = "notion-offline-preview")] NotionPageBatch(usize),
     #[cfg(feature = "notion-offline-preview")] NotionTextChunk(usize),
