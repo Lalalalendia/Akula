@@ -1,7 +1,7 @@
 //! Initial, read-only projection of a Notion snapshot into Akula note candidates.
 //! This step NEVER writes files. The owning host must later use Core File Gate,
 //! after the operator explicitly approves a target workspace and the preview.
-use super::{SourcePreview, Link};
+use super::{SourcePreview, Link, typed_frontmatter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,7 +56,7 @@ pub fn prepare_import(source: &SourcePreview) -> Result<ImportPreview, String> {
         let relations: Vec<String> = source.links.iter()
             .filter(|edge| edge.kind == "relation" && edge.from == id)
             .map(|edge| edge.to.clone()).collect();
-        let mut markdown = String::new();
+        let mut markdown = typed_frontmatter::for_page(&obj.json, &id);
         markdown.push_str(&format!("# {}\n\n",safe_title(&obj.json)));
         markdown.push_str(content.get(&obj.id).unwrap());
         markdown.push_str("\n\n");
