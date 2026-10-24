@@ -3,7 +3,7 @@
 use aquilum_core::app_core::{Core, CoreEvent};
 use aquilum_core::notion_api_probe::{
     http::HttpReadClient, inspect_root, projection::prepare_import,
-    publish::publish_approved, snapshot::SnapshotStore, ProbeLimits,
+    publish::publish_approved, refresh::refresh_root, snapshot::SnapshotStore, ProbeLimits,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -70,6 +70,20 @@ fn run() -> Result<(), String> {
         .map_err(|_| "Notion token not configured locally")?;
     let mut client = HttpReadClient::new(token)
         .map_err(|_| "invalid Notion credentials")?;
+    if let Mode::Cache(app) = &mode {
+        let app = app_data(app)?;
+        let mut store = SnapshotStore::open(&app.join("ui-state.sqlite3"))?;
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|_| "invalid system time")?.as_millis();
+        let timestamp = i64::try_from(timestamp)
+            .map_err(|_| "system time outside SQLite range")?;
+        let receipt = refresh_root(&mut client, &mut store,
+            &root, ProbeLimits::default(), timestamp)?;
+        println!("cached=true change={:?} objects={} links={} digest={}",
+            receipt.change, receipt.snapshot.object_count, receipt.snapshot.link_count,
+            receipt.snapshot.digest);
+        return Ok(());
+    }
     let read = inspect_root(&mut client, &root, ProbeLimits::default())?;
     let preview = prepare_import(&read)?;
     println!("objects={} unresolved={} can_publish={}",
@@ -77,18 +91,7 @@ fn run() -> Result<(), String> {
 
     match mode {
         Mode::Preview => Ok(()),
-        Mode::Cache(app) => {
-            let app = app_data(&app)?;
-            let mut store = SnapshotStore::open(&app.join("ui-state.sqlite3"))?;
-            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)
-                .map_err(|_| "invalid system time")?.as_millis();
-            let timestamp = i64::try_from(timestamp)
-                .map_err(|_| "system time outside SQLite range")?;
-            let saved = store.publish(&read, timestamp)?;
-            println!("cached=true objects={} links={} digest={}",
-                saved.object_count, saved.link_count, saved.digest);
-            Ok(())
-        }
+        Mode::Cache(_) => unreachable!("handled as an atomic refresh above"),
         Mode::Publish(app, workspace) => {
             let app = app_data(&app)?;
             let core = Core::open(&app, Arc::new(|_: CoreEvent| {}));

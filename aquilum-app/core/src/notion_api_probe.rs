@@ -11,6 +11,7 @@ pub mod http;
 pub mod projection;
 pub mod publish;
 pub mod snapshot;
+pub mod refresh;
 pub const API_VERSION: &str = "2026-03-11";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
