@@ -230,6 +230,96 @@ pub(crate) fn publish_pinned_p2p_inbox_object(
     Ok(())
 }
 
+/// Keep a root directory, objects directory and the SQLite main database
+/// pinned with no FILE_SHARE_DELETE for the entire ledger transaction.
+/// This is a *partial* custody lease: SQLite WAL/SHM and ancestor path
+/// reparenting remain outside this boundary. Never claim signed durability.
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) struct P2pInboxSqliteCustody {
+    root: std::fs::File,
+    objects: std::fs::File,
+    db: std::fs::File,
+}
+
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+pub(crate) fn pin_p2p_inbox_sqlite_custody(
+    root_path: &std::path::Path,
+    pinned_root: &std::fs::File,
+) -> Result<P2pInboxSqliteCustody, VaultPortError> {
+    let original = pinned_windows::open_p2p_inbox_root_no_delete(root_path)?;
+    if pinned_windows::file_identity(&original)?
+        != pinned_windows::file_identity(pinned_root)?
+    {
+        return Err(VaultPortError::FileChanged);
+    }
+    filegate_windows_acl::audit_owner_dacl(&original)?;
+    // In particular, this first-use bootstrap does not call
+    // fs::create_dir or Connection::open on a potentially replaced name.
+    let objects = pinned_windows::pin_p2p_inbox_child_no_delete(
+        pinned_root, "objects", false,
+    )?;
+    filegate_windows_acl::audit_owner_dacl(&objects)?;
+    let db = pinned_windows::pin_p2p_inbox_child_no_delete(
+        pinned_root, "received-inbox.sqlite3", true,
+    )?;
+    filegate_windows_acl::audit_owner_dacl(&db)?;
+    if pinned_windows::file_identity_with_links(&db)?.2 != 1 {
+        return Err(VaultPortError::UnsafePath);
+    }
+    let custody = P2pInboxSqliteCustody {
+        root: original,
+        objects,
+        db,
+    };
+    custody.verify(root_path, pinned_root)?;
+    Ok(custody)
+}
+
+#[cfg(all(windows, feature = "p2p-inbox-lab"))]
+impl P2pInboxSqliteCustody {
+    pub(crate) fn verify(
+        &self,
+        root_path: &std::path::Path,
+        pinned_root: &std::fs::File,
+    ) -> Result<(), VaultPortError> {
+        // Verify both the original HANDLE identities and current path views
+        // after the SQLite commit, before sending any remote receipt OK.
+        if pinned_windows::file_identity(&self.root)?
+            != pinned_windows::file_identity(pinned_root)?
+        {
+            return Err(VaultPortError::FileChanged);
+        }
+        filegate_windows_acl::audit_owner_dacl(&self.root)?;
+        for (name, pinned, is_file) in [
+            ("objects", &self.objects, false),
+            ("received-inbox.sqlite3", &self.db, true),
+        ] {
+            let current = pinned_windows::open_optional_inbox_audit_child(
+                pinned_root, name, is_file,
+            )?.ok_or(VaultPortError::FileChanged)?;
+            if pinned_windows::file_identity(pinned)?
+                != pinned_windows::file_identity(&current)?
+            {
+                return Err(VaultPortError::FileChanged);
+            }
+            filegate_windows_acl::audit_owner_dacl(&current)?;
+        }
+        if pinned_windows::file_identity_with_links(&self.db)?.2 != 1 {
+            return Err(VaultPortError::UnsafePath);
+        }
+        // A parent path switched during a transaction can otherwise
+        // appear restored by the end: this does NOT establish ancestor
+        // reparenting protection. We still refuse any lasting mismatch.
+        let reopened_root = pinned_windows::open_root(root_path)?;
+        if pinned_windows::file_identity(&reopened_root)?
+            != pinned_windows::file_identity(&self.root)?
+        {
+            return Err(VaultPortError::FileChanged);
+        }
+        Ok(())
+    }
+}
+
 /// P2P-only readback of the exact received object using NT handles rather
 /// than reopening its caller-visible pathname. The object must have exactly
 /// one NTFS hard link, restrictive OWNER/DACL and the expected actual bytes.
