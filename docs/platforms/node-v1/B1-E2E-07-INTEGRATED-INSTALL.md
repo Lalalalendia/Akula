@@ -138,3 +138,34 @@ and real VPS are not used. No signed release key is distributed by this test.
 The experimental Core feature `server-root-stage-ssh-lab` now introduces a real Windows OpenSSH stdin-based sender for the previously verified root-stage frame. It **reuses the same System32 ssh.exe, independent host-key pinned known_hosts and strict noninteractive options** as the read-only B0c probe. The one-shot `InertUserConsent` is consumed, and the target InstallId and pinned KEX host digest must match before any root-stage SSH process starts. Source is compiled into Core, bounded and POSIX-shell-quoted; no remote package path, shell command or private SSH key can be configured by the user. The outgoing binary frame is verified B1a bytes. I/O and remote reply are bounded; timeouts and unsuccessful exits refuse. A successful remote message is only `RemoteReportedSignedDataHold`, not an attested installation or a systemd health check.
 
 **Critical sudo limitation:** allowing `sudo /usr/bin/python3 -I -c` in sudoers is equivalent to granting arbitrary Python execution as root. It is **not** a safe restricted sudoers permission. The first-root command is only appropriate on a VPS where the account already has independently authorized unrestricted administrative power; it cannot create a new privilege grant or be marketed as least-privilege escalation. Hosts without such authorization remain `NeedsAdminAuthorization / HOLD`. The native Installed Akula does not enable this feature or invoke the sender. A **separately reviewed bootstrap-helper SHA in the owner-visible plan, root-authenticated approval and real OS-signed receipt** are missing before any production rollout. No production release anchor is provisioned.
+
+### B0 v3 owner review pins the actual privileged bootstrap helper
+
+The previous B0 v2 Node plan described the privileged bootstrap action but
+did not contain the exact **bootstrap-helper ELF SHA-256**. This is insufficient
+for an owner click before privileged helper staging. Version 3 adds a distinct
+`bootstrap_helper_sha256` field and
+`VerifySignedBootstrapHelperBeforeRootExecution` to the fixed 13-action
+plan under a separate BLAKE3 hash domain. Original v1/v2 JSON and digests are
+unchanged; v1/v2 plans cannot carry a helper pin. The new Windows
+`prepare_signed_node_review_with_bootstrap` consumes a previously B1a-verified
+`VerifiedRootStageBundle` to create a v3 plan. The one-use local consent keeps
+the exact helper SHA and passes it to the opt-in pinned-SSH transport. A v2
+consent, altered helper hash, missing hash or mismatched host refuses
+**before** any root SSH subprocess is launched. This is not yet a root-signed
+CAS receipt or live owner-facing UI.
+
+The existing root-stage Linux test failed in CI #40104002068 because its
+nonroot variant tried to publish a root-only inode. The production UID0 check
+was **not** weakened: `publish_hold` now refuses before creating any files
+when not root; only the isolated root test exercises successful root-owned
+publication and nonroot tests explicitly require failure without state.
+Window's opt-in sender compile/tests from this prior run passed.
+
+**Remaining P0-HOLD**: production helper publisher key/ELF, independent root
+trust enrollment, actual Windows owner-signature and native review wizard,
+the B1d0 fixed commit, systemd and reboot, and two-client real VPS E2E.
+No normal Akula installer or `main` is changed. Allowlisting
+`sudo python -c` in sudoers remains unsafe; a genuinely unprivileged VPS
+cannot be bootstrapped by this code without independently granted admin
+authority.

@@ -308,6 +308,26 @@ impl WindowsOpenSshPinnedProbe {
         now_unix: u64,
         cancelled: impl Fn() -> bool,
     ) -> Result<crate::server_release_lab::review::PreparedReview, InstallReviewProbeError> {
+        Self::prepare_signed_node_review_scope(
+            input, independently_pinned_host_public, release, trusted_signer,
+            independently_persisted_floor, node_package, None,
+            now_unix, cancelled,
+        )
+    }
+
+    #[cfg(feature = "server-install-review")]
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_signed_node_review_scope<R: Read>(
+        input: &B0Input,
+        independently_pinned_host_public: Option<&str>,
+        release: &crate::server_release_lab::SignedRelease,
+        trusted_signer: &crate::server_release_lab::TrustedReleaseSigner,
+        independently_persisted_floor: crate::server_release_lab::ReleaseFloor,
+        node_package: &mut R,
+        helper_sha256: Option<[u8; 32]>,
+        now_unix: u64,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<crate::server_release_lab::review::PreparedReview, InstallReviewProbeError> {
         if cancelled() {
             return Err(InstallReviewProbeError::Host(B0Error::Cancelled));
         }
@@ -318,9 +338,14 @@ impl WindowsOpenSshPinnedProbe {
         };
         let mut probe = Self::new(input, &public)
             .map_err(InstallReviewProbeError::Host)?;
-        let plan = crate::server_bootstrap_lab::preview_node_v2(
-            input, &mut probe, &cancelled,
-        ).map_err(InstallReviewProbeError::Host)?;
+        let plan = match helper_sha256 {
+            Some(helper_hash) => crate::server_bootstrap_lab::preview_node_v3(
+                input, helper_hash, &mut probe, &cancelled,
+            ),
+            None => crate::server_bootstrap_lab::preview_node_v2(
+                input, &mut probe, &cancelled,
+            ),
+        }.map_err(InstallReviewProbeError::Host)?;
         if cancelled() {
             return Err(InstallReviewProbeError::Host(B0Error::Cancelled));
         }
@@ -328,6 +353,30 @@ impl WindowsOpenSshPinnedProbe {
             plan, release, trusted_signer, independently_persisted_floor,
             node_package, now_unix,
         ).map_err(InstallReviewProbeError::Release)
+    }
+
+
+    /// B0 v3 explicitly binds the separately signed helper SHA into the
+    /// immutable review plan, in addition to the Node daemon package SHA.
+    /// The installed UI does not call this experimental method yet.
+    #[cfg(feature = "server-root-stage-ssh-lab")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_signed_node_review_with_bootstrap<R: Read>(
+        input: &B0Input,
+        independently_pinned_host_public: Option<&str>,
+        release: &crate::server_release_lab::SignedRelease,
+        trusted_signer: &crate::server_release_lab::TrustedReleaseSigner,
+        independently_persisted_floor: crate::server_release_lab::ReleaseFloor,
+        node_package: &mut R,
+        helper: &crate::server_first_root_stage::VerifiedRootStageBundle,
+        now_unix: u64,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<crate::server_release_lab::review::PreparedReview, InstallReviewProbeError> {
+        Self::prepare_signed_node_review_scope(
+            input, independently_pinned_host_public, release, trusted_signer,
+            independently_persisted_floor, node_package,
+            Some(helper.package_sha256()), now_unix, cancelled,
+        )
     }
 
     pub fn new(input: &B0Input, trusted_host_public: &str) -> Result<Self, B0Error> {

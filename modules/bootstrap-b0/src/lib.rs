@@ -143,6 +143,7 @@ pub enum ProposedChange {
     VerifyRestartAndSyntheticReadback,
     // B1-E2E-07 V2: explicitly disclose actual service privileges and endpoint.
     RequireIndependentlyPinnedRootBootstrap,
+    VerifySignedBootstrapHelperBeforeRootExecution,
     VerifySeparateOwnerSignatureAndDurableCas,
     CommitSignedNodeIntoRootOwnedOpt,
     EnrollPersistentNodeAndReceiptIdentities,
@@ -174,6 +175,23 @@ const NODE_V2_ACTIONS: [ProposedChange; 12] = [
     ProposedChange::StartNonRootSystemdService,
     ProposedChange::VerifyRebootAndSignedReceipt,
 ];
+// B0 v3 adds the exact separately signed bootstrap-helper digest to the
+// reviewed owner scope. The v1/v2 JSON and hash domains stay byte compatible.
+const NODE_V3_ACTIONS: [ProposedChange; 13] = [
+    ProposedChange::VerifySignedPinnedPackage,
+    ProposedChange::RequireIndependentlyPinnedRootBootstrap,
+    ProposedChange::VerifySignedBootstrapHelperBeforeRootExecution,
+    ProposedChange::VerifySeparateOwnerSignatureAndDurableCas,
+    ProposedChange::CommitSignedNodeIntoRootOwnedOpt,
+    ProposedChange::CreateDedicatedServiceAccount,
+    ProposedChange::CreateOwnedRuntimeAndStateDirectories,
+    ProposedChange::EnrollPersistentNodeAndReceiptIdentities,
+    ProposedChange::PinRootOwnedOwnerPolicyV3,
+    ProposedChange::WriteRestrictedSystemdUnit,
+    ProposedChange::BindPublicUdp43871WithoutChangingFirewall,
+    ProposedChange::StartNonRootSystemdService,
+    ProposedChange::VerifyRebootAndSignedReceipt,
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DryRunPlan {
@@ -181,6 +199,10 @@ pub struct DryRunPlan {
     pub install_id: Uuid,
     pub target: ServerTarget,
     pub package: PackagePin,
+    /// Exact independently B1a-verified privileged helper package, distinct
+    /// from the Node daemon. V1/V2 MUST leave this absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_helper_sha256: Option<[u8; 32]>,
     pub inspected_host: ReadOnlyHostFacts,
     pub proposed_changes: Vec<ProposedChange>,
     /// Hash of this exact typed plan; NOT a signature and NOT permission to execute.
@@ -195,6 +217,8 @@ impl DryRunPlan {
             install_id: Uuid,
             target: &'a ServerTarget,
             package: &'a PackagePin,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            bootstrap_helper_sha256: Option<[u8; 32]>,
             inspected_host: &'a ReadOnlyHostFacts,
             proposed_changes: &'a [ProposedChange],
         }
@@ -203,6 +227,7 @@ impl DryRunPlan {
             install_id: self.install_id,
             target: &self.target,
             package: &self.package,
+            bootstrap_helper_sha256: self.bootstrap_helper_sha256,
             inspected_host: &self.inspected_host,
             proposed_changes: &self.proposed_changes,
         }).expect("typed canonical preview must serialize")
@@ -211,6 +236,7 @@ impl DryRunPlan {
     pub fn computed_digest(&self) -> String {
         let domain = match self.schema_version {
             2 => "Akula Node B1-E2E-07 signed owner review plan v2",
+            3 => "Akula Node B1-E2E-07 signed bootstrap and owner review plan v3",
             _ => "Akula Bootstrap B0 readonly plan v1",
         };
         let mut hash = blake3::Hasher::new_derive_key(domain);
@@ -220,8 +246,14 @@ impl DryRunPlan {
 
     pub fn verify_unchanged(&self) -> bool {
         let fixed = match self.schema_version {
-            1 => self.proposed_changes == FIXED_ACTIONS,
-            2 => self.proposed_changes == NODE_V2_ACTIONS,
+            1 => self.proposed_changes == FIXED_ACTIONS
+                && self.bootstrap_helper_sha256.is_none(),
+            2 => self.proposed_changes == NODE_V2_ACTIONS
+                && self.bootstrap_helper_sha256.is_none(),
+            3 => self.proposed_changes == NODE_V3_ACTIONS
+                && self.bootstrap_helper_sha256.is_some_and(|helper| {
+                    helper != [0; 32] && helper != self.package.package_sha256
+                }),
             _ => false,
         };
         fixed && self.computed_digest() == self.plan_blake3
@@ -294,6 +326,7 @@ fn preview_with_scope<T: PreviewTransport>(
         install_id: input.install_id,
         target: input.target.clone(),
         package: input.package.clone(),
+        bootstrap_helper_sha256: None,
         inspected_host: facts,
         proposed_changes: if node_v2 {
             NODE_V2_ACTIONS.to_vec()
@@ -329,6 +362,30 @@ pub fn preview_node_v2<T: PreviewTransport>(
     cancelled: impl Fn() -> bool,
 ) -> Result<DryRunPlan, B0Error> {
     preview_with_scope(input, transport, cancelled, true)
+}
+
+/// A root-staging-capable review MUST show the actual privileged helper's
+/// independently authenticated SHA-256 as well as the Node daemon package.
+/// It is not derived from SSH output or caller-supplied executable paths.
+/// The returned plan is read-only; neither a matching hash nor this preview
+/// confers OS root authority or an install/reboot grant.
+pub fn preview_node_v3<T: PreviewTransport>(
+    input: &B0Input,
+    helper_package_sha256: [u8; 32],
+    transport: &mut T,
+    cancelled: impl Fn() -> bool,
+) -> Result<DryRunPlan, B0Error> {
+    if helper_package_sha256 == [0; 32]
+        || helper_package_sha256 == input.package.package_sha256
+    {
+        return Err(B0Error::InvalidPackage);
+    }
+    let mut plan = preview_with_scope(input, transport, cancelled, true)?;
+    plan.schema_version = 3;
+    plan.bootstrap_helper_sha256 = Some(helper_package_sha256);
+    plan.proposed_changes = NODE_V3_ACTIONS.to_vec();
+    plan.plan_blake3 = plan.computed_digest();
+    Ok(plan)
 }
 
 #[cfg(test)]
@@ -431,5 +488,65 @@ mod node_plan_v2_tests {
         assert!(plan.proposed_changes.contains(
             &ProposedChange::RequireIndependentlyPinnedRootBootstrap
         ));
+    }
+
+    #[test]
+    fn v3_binds_distinct_signed_helper_without_changing_v2_hash() {
+        let wire = vec![0x92; 32];
+        let input = B0Input {
+            install_id: Uuid::from_bytes([3; 16]),
+            target: ServerTarget {
+                host: "vps.example.org".into(),
+                ssh_port: 22,
+                ssh_user: "ubuntu".into(),
+                trusted_key_sha256: digest::digest(&digest::SHA256, &wire)
+                    .as_ref().try_into().unwrap(),
+            },
+            package: PackagePin {
+                version: "0.3.13".into(),
+                package_sha256: [0x44; 32],
+                trusted_signer_id: "test-release-anchor".into(),
+            },
+        };
+        let v2 = preview_node_v2(&input, &mut StaticKex {
+            wire: wire.clone(), listed_sudo: true,
+        }, || false).unwrap();
+        let v3 = preview_node_v3(&input, [0x55; 32], &mut StaticKex {
+            wire, listed_sudo: true,
+        }, || false).unwrap();
+        assert!(v2.verify_unchanged() && v3.verify_unchanged());
+        assert_eq!(v2.bootstrap_helper_sha256, None);
+        assert_eq!(v3.bootstrap_helper_sha256, Some([0x55; 32]));
+        assert_ne!(v2.plan_blake3, v3.plan_blake3);
+        assert!(v3.proposed_changes.contains(
+            &ProposedChange::VerifySignedBootstrapHelperBeforeRootExecution
+        ));
+        let mut omitted = v3.clone();
+        omitted.bootstrap_helper_sha256 = None;
+        omitted.plan_blake3 = omitted.computed_digest();
+        assert!(!omitted.verify_unchanged());
+        let mut downgrade = v3.clone();
+        downgrade.schema_version = 2;
+        downgrade.plan_blake3 = downgrade.computed_digest();
+        assert!(!downgrade.verify_unchanged());
+        let mut changed = v3.clone();
+        changed.bootstrap_helper_sha256 = Some([0x66; 32]);
+        changed.plan_blake3 = changed.computed_digest();
+        assert_ne!(v3.plan_blake3, changed.plan_blake3);
+        // A changed helper might be internally valid, but the old detached
+        // owner signature over v3's original plan digest cannot match it.
+        assert!(changed.verify_unchanged());
+        assert_eq!(
+            preview_node_v3(&input, [0; 32], &mut StaticKex {
+                wire: vec![], listed_sudo: true,
+            }, || false),
+            Err(B0Error::InvalidPackage),
+        );
+        assert_eq!(
+            preview_node_v3(&input, [0x44; 32], &mut StaticKex {
+                wire: vec![], listed_sudo: true,
+            }, || false),
+            Err(B0Error::InvalidPackage),
+        );
     }
 }

@@ -95,9 +95,9 @@ impl WindowsOpenSshPinnedProbe {
     /// and is consumed even when SSH fails. The native Windows installed
     /// application has no call path, no installer authorization or sudo grant.
     ///
-    /// The signed helper differs from the later Node executable; a future UI
-    /// MUST separately disclose the helper SHA and use owner-signed root CAS
-    /// before this can be enabled as a production installation operation.
+    /// Only a B0 v3 consent that includes the exact B1a-verified helper SHA
+    /// is permitted; B0 v2 consent is always refused BEFORE SSH spawn.
+    /// Production still needs owner-signed root CAS and a root trust anchor.
     pub fn stage_verified_root_helper(
         &self,
         bundle: &VerifiedRootStageBundle,
@@ -110,6 +110,7 @@ impl WindowsOpenSshPinnedProbe {
             || package_hash == [0; 32]
             || manifest == [0; 32]
             || consent.nonce() == [0; 16]
+            || consent.bootstrap_helper_sha256() != Some(bundle.package_sha256())
         {
             return Err(RootStageTransportError::ReviewMismatch);
         }

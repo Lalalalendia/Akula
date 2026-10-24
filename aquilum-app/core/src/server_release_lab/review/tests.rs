@@ -416,3 +416,31 @@ fn legacy_loopback_only_plan_is_never_admissible_for_public_node() {
         Err(ReviewError::InvalidPreview),
     ));
 }
+
+
+#[test]
+fn v3_review_retains_exact_helper_digest_but_legacy_v2_does_not() {
+    let (old_plan, signed, trusted, artifact) = fixture();
+    let mut old_review = prepare(old_plan.clone(), &signed, &trusted, &artifact).unwrap();
+    let old_echo = old_review.expected_echo();
+    let old_consent = old_review.consume_local_click(
+        &old_echo, &old_plan.target, &old_plan.package, NOW,
+    ).unwrap();
+    assert_eq!(old_consent.bootstrap_helper_sha256(), None);
+    let input = B0Input {
+        install_id: old_plan.install_id,
+        target: old_plan.target.clone(),
+        package: old_plan.package.clone(),
+    };
+    let wire = b"SSH-server-public-key-fixture-never-real".to_vec();
+    let plan_v3 = crate::server_bootstrap_lab::preview_node_v3(
+        &input, [0xa7; 32], &mut VerifiedKexFixture { wire }, || false,
+    ).unwrap();
+    let mut reviewed_v3 = prepare(plan_v3.clone(), &signed, &trusted, &artifact).unwrap();
+    let echo_v3 = reviewed_v3.expected_echo();
+    assert_ne!(old_echo.plan_hash, echo_v3.plan_hash);
+    let consent_v3 = reviewed_v3.consume_local_click(
+        &echo_v3, &plan_v3.target, &plan_v3.package, NOW,
+    ).unwrap();
+    assert_eq!(consent_v3.bootstrap_helper_sha256(), Some([0xa7; 32]));
+}

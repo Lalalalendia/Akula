@@ -48,6 +48,7 @@ fn approved_bytes_emit_only_fixed_signed_root_stage_data() {
     assert_eq!(&data.frame()[start + 2 + size..start + 2 + size + 64], &signed.signature[..]);
     assert_eq!(&data.frame()[start + 2 + size + 64..], helper);
     assert!(!data.fixed_root_source().contains(PIN_PLACEHOLDER));
+    assert_eq!(data.package_sha256(), signed.manifest.package_sha256);
     assert!(data.fixed_root_source().contains("PINNED_BOOTSTRAP_ED25519_HEX = \""));
 }
 

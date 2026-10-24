@@ -71,6 +71,7 @@ class RootStageTests(unittest.TestCase):
                                       self.public if public is None else public,
                                       int(time.time()), self.scratch)
 
+    @unittest.skipUnless(os.geteuid() == 0, "root-owned publish under disposable root CI")
     def test_success_is_nonexecutable_root_owned_hold_only(self):
         manifest, signature, digest = self.receive(self.bundle())
         parent = os.path.join(self.tmp.name, "parent")
@@ -93,6 +94,20 @@ class RootStageTests(unittest.TestCase):
         self.assertEqual(st.st_uid, os.geteuid())
         self.assertEqual(stat.S_IMODE(st.st_mode), 0o400)
         self.assertFalse(os.access(os.path.join(root, "helper.staged"), os.X_OK))
+
+    @unittest.skipIf(os.geteuid() == 0, "requires unprivileged test process")
+    def test_unprivileged_publish_refuses_without_creating_root_state(self):
+        manifest, signature, digest = self.receive(self.bundle())
+        parent = os.path.join(self.tmp.name, "parent")
+        os.mkdir(parent, 0o700)
+        fd = os.open(parent, stage.O_DIR)
+        try:
+            with self.assertRaises(stage.Hold):
+                stage.publish_hold(fd, self.scratch,
+                                   manifest, signature, digest, self.public)
+        finally:
+            os.close(fd)
+        self.assertEqual(os.listdir(parent), [])
 
     def test_bad_signature_key_or_elf_fail_before_root_publication(self):
         bundle = self.bundle()

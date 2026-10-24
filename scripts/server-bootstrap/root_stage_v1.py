@@ -202,6 +202,9 @@ def copy_root_file(folder, leaf, source):
 
 
 def publish_hold(parent_fd, scratch, manifest, signature, sha, trust_key):
+    # Fail before ANY filesystem mutation if not independently elevated.
+    if os.geteuid() != 0:
+        raise Hold("root-owned publication requires UID0")
     # O_EXCL directory creation: no overwrite, no automatic retries or repair.
     os.mkdir("bootstrap-v1", 0o700, dir_fd=parent_fd)
     dest = os.open("bootstrap-v1", O_DIR, dir_fd=parent_fd)

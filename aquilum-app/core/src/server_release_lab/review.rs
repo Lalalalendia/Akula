@@ -68,6 +68,7 @@ pub struct InertUserConsent {
     ssh_host_key_sha256: [u8; 32],
     package_sha256: [u8; 32],
     manifest_fingerprint: [u8; 32],
+    bootstrap_helper_sha256: Option<[u8; 32]>,
     review_nonce: [u8; 16],
 }
 impl InertUserConsent {
@@ -85,6 +86,12 @@ impl InertUserConsent {
 
     pub fn nonce(&self) -> [u8; 16] {
         self.review_nonce
+    }
+
+    /// Only B0 v3 contains an independently signed privileged helper digest.
+    /// A v2 local click cannot authorize root staging by construction.
+    pub fn bootstrap_helper_sha256(&self) -> Option<[u8; 32]> {
+        self.bootstrap_helper_sha256
     }
 
     /// A Windows owner signer may only sign an independently obtained B1b1b
@@ -125,7 +132,7 @@ fn hex_digest(value: &str) -> Result<[u8; 32], ReviewError> {
 
 fn preview_valid(plan: &DryRunPlan) -> bool {
     let facts = &plan.inspected_host;
-    plan.schema_version == 2
+    matches!(plan.schema_version, 2 | 3)
         && plan.verify_unchanged()
         && plan.target.validate().is_ok()
         && plan.package.validate().is_ok()
@@ -257,6 +264,7 @@ impl PreparedReview {
             ssh_host_key_sha256: self.plan.target.trusted_key_sha256,
             package_sha256: self.plan.package.package_sha256,
             manifest_fingerprint: self.signed_manifest_fingerprint,
+            bootstrap_helper_sha256: self.plan.bootstrap_helper_sha256,
             review_nonce: self.nonce,
         })
     }

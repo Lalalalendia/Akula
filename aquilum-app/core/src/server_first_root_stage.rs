@@ -26,6 +26,7 @@ pub enum RootStageError {
 pub struct VerifiedRootStageBundle {
     frame: Arc<[u8]>,
     fixed_root_source: String,
+    helper_package_sha256: [u8; 32],
 }
 
 impl VerifiedRootStageBundle {
@@ -44,6 +45,12 @@ impl VerifiedRootStageBundle {
     /// Ed25519 public key substituted as lowercase ASCII hexadecimal.
     pub fn fixed_root_source(&self) -> &str {
         &self.fixed_root_source
+    }
+
+    /// Signed privileged-helper digest used by the separately reviewed B0
+    /// v3 plan and compared before a root SSH process may be launched.
+    pub fn package_sha256(&self) -> [u8; 32] {
+        self.helper_package_sha256
     }
 }
 
@@ -98,6 +105,7 @@ pub fn prepare_root_stage_bundle(
     Ok(VerifiedRootStageBundle {
         frame: frame.into(),
         fixed_root_source: source,
+        helper_package_sha256: signed.manifest.package_sha256,
     })
 }
 
