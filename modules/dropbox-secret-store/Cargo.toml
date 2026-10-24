@@ -13,7 +13,7 @@ default = []
 system-store = ["dep:keyring"]
 
 [dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 subtle = "2.6"
 zeroize = "1.9"
 keyring = { version = "=3.6.3", optional = true, default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }

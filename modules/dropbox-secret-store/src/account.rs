@@ -40,7 +40,7 @@ impl AccountCredentialScope {
             digest.update((part.len() as u64).to_le_bytes());
             digest.update(part.as_bytes());
         }
-        Ok(Self { username: format!("account_{:x}", digest.finalize()) })
+        Ok(Self { username: format!("account_{}", digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()) })
     }
 }
 
@@ -140,6 +140,9 @@ mod tests {
     #[test]
     fn account_identity_is_separate_from_vault_and_other_apps() {
         let a = AccountCredentialScope::new("akula_app", "dbid:alice", "12345").unwrap();
+        // Account keys must remain byte-for-byte identical after SHA-2 upgrades.
+        assert_eq!(a.username,
+            "account_b3fcf4db47cdca36b5fb99753ff49873fe031ef1f6580e15562cfe56b3d5a9a0");
         let b = AccountCredentialScope::new("akula_app", "dbid:alice", "12345").unwrap();
         assert_eq!(a.username, b.username);
         for (app, account, root) in [

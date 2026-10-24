@@ -73,7 +73,7 @@ impl CredentialScope {
             hash.update((component.len() as u64).to_le_bytes());
             hash.update(component.as_bytes());
         }
-        Ok(Self { username: format!("v1_{:x}", hash.finalize()) })
+        Ok(Self { username: format!("v1_{}", hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()) })
     }
 
     pub fn is_same_scope(&self, other: &Self) -> bool {
@@ -250,6 +250,9 @@ mod tests {
     #[test]
     fn scope_identity_is_stable_and_strictly_partitioned() {
         let a = scope("dbid:alice", VAULT);
+        // Golden fingerprint from SHA-256 0.10, preserved for existing OS keyring entries.
+        assert_eq!(a.username(),
+            "v1_321363b84477819caf80b08e30a75e6ac88ae64443ea3e488294088349e804da");
         let copy = scope("dbid:alice", VAULT);
         assert!(a.is_same_scope(&copy));
         assert!(!a.is_same_scope(&scope("dbid:bob", VAULT)));
