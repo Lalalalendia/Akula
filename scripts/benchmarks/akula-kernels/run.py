@@ -112,9 +112,10 @@ def invoke(fn,kind,x,full):
         return val(x["dst"],x["n"]) if full else None
     if kind=="splice":
         n=fn.ak_splice(x["a"],x["bn"],x["b"],x["tn"],x["patch"])
+        x["patchlen"]=n
         return val(x["patch"],n) if full else n
     if kind=="apply":
-        n=fn.ak_apply(x["a"],x["bn"],x["patch"],12+len(x["new"]),x["out"])
+        n=fn.ak_apply(x["a"],x["bn"],x["patch"],x["patchlen"],x["out"])
         return val(x["out"],n) if full else n
     if kind=="search":
         n=fn.ak_search(x["a"],x["n"],x["needles"],x["starts"],
@@ -177,6 +178,7 @@ def large_checks(libs,tests):
             want=ref_splice(x["old"],x["new"])
             if kind=="apply":
                 c.memmove(x["patch"],want,len(want))
+                x["patchlen"]=len(want)
                 want=x["new"]
         else:want=invoke(libs["c"],kind,x,True)
         for name,fn in libs.items():
