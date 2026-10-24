@@ -69,6 +69,7 @@ jobs:
           paths=(
             aquilum-app/core/src/server_owner_approval_wire.rs
             aquilum-app/core/src/server_install_root_gate.rs
+            aquilum-app/core/src/server_install_root_gate/tests.rs
             aquilum-app/core/src/server_owner_windows.rs
             aquilum-app/core/src/server_release_lab/review.rs
             aquilum-app/core/src/server_release_lab/review/tests.rs
