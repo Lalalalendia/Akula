@@ -106,7 +106,9 @@ impl AccountSession {
         self.finish_for(timeout, None)
     }
     pub fn finish_for(
-        self, timeout: Duration, expected: Option<&AccountIdentity>,
+        self,
+        timeout: Duration,
+        expected: Option<&AccountIdentity>,
     ) -> Result<AccountIdentity, AccountLoginError> {
         let exchange = self.login.receive(timeout).map_err(AccountLoginError::Callback)?;
         connect_with(&LivePorts, exchange, &self.app_key, expected)

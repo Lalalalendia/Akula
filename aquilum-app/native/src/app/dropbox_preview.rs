@@ -72,11 +72,16 @@ impl DropboxPreview {
             .spawn(move || {
                 // Bind loopback before launching the system browser. Never
                 // print the OAuth URL, authorization code or access token.
-                let expected = (!draft.account_id.is_empty()
-                    && !draft.root_namespace_id.is_empty()).then_some(AccountIdentity {
-                    account_id: draft.account_id,
-                    root_namespace_id: draft.root_namespace_id,
-                });
+                let expected = if draft.account_id.is_empty()
+                    || draft.root_namespace_id.is_empty()
+                {
+                    None
+                } else {
+                    Some(AccountIdentity {
+                        account_id: draft.account_id,
+                        root_namespace_id: draft.root_namespace_id,
+                    })
+                };
                 let result = AccountSession::begin(
                     AKULA_DROPBOX_APP_KEY, AKULA_DROPBOX_CALLBACK_PORT,
                 ).and_then(|session| {
