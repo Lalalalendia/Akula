@@ -11,7 +11,7 @@ permissions:
 jobs:
   browser-webrtc:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: experiments/s3-p2p-cdn
@@ -86,12 +86,42 @@ jobs:
         run: node tests/test_real_webrtc.cjs
       - name: Real Chromium and Firefox (split swarm, corrupt chunk)
         run: node tests/test_cross_engine_webrtc.cjs
+      - name: Real persistent Chromium restart after 64 MiB interrupted download
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/demo.bin'), 64*1024*1024)"
+          python create_manifest.py data/demo.bin --source-url /origin/demo.bin --out browser-manifest.json
+          python server.py --port 8766 --manifest browser-manifest.json > browser-server.log 2>&1 &
+          echo $! > browser-server.pid
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8766/manifest.json >/dev/null; then break; fi
+            sleep 1
+          done
+          AKULA_LAB_SIZE=67108864 AKULA_LAB_MODE=resume node tests/test_persistent_chromium.cjs
+          kill "$(cat browser-server.pid)" || true
+      - name: Real Chromium 1 GiB streaming and memory sampling
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f data/demo.bin
+          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/demo.bin'), 1024*1024*1024)"
+          python create_manifest.py data/demo.bin --source-url /origin/demo.bin --out browser-manifest.json
+          python server.py --port 8766 --manifest browser-manifest.json > browser-server.log 2>&1 &
+          echo $! > browser-server.pid
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8766/manifest.json >/dev/null; then break; fi
+            sleep 1
+          done
+          AKULA_LAB_SIZE=1073741824 AKULA_LAB_MODE=full node tests/test_persistent_chromium.cjs
+          kill "$(cat browser-server.pid)" || true
       - name: Evidence and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: s3-p2p-browser-lab-evidence
           path: |
+            experiments/s3-p2p-cdn/browser-server.log
             experiments/s3-p2p-cdn/server.log
             experiments/s3-p2p-cdn/test-results/
           if-no-files-found: warn
