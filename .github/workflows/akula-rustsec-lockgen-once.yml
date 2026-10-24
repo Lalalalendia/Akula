@@ -1,0 +1,30 @@
+# Temporary branch-only diagnostic. Delete after Cargo.lock is recovered.
+name: Akula RustSec Cargo lock repair diagnostic
+on:
+  push:
+    branches:
+      - security/akula-rustsec-2026-0387-disable-sigv4a
+    paths:
+      - .github/workflows/akula-rustsec-lockgen-once.yml
+permissions:
+  contents: read
+jobs:
+  regenerate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve exact Cargo graph with real Cargo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --manifest-path aquilum-app/Cargo.toml --no-deps --format-version 1 > /dev/null
+          cargo metadata --locked --manifest-path aquilum-app/Cargo.toml --all-features --no-deps --format-version 1 > /dev/null
+          echo "Cargo metadata --locked PASS"
+          git diff --stat -- aquilum-app/Cargo.lock
+          echo "AKULA_LOCK_BEGIN"
+          base64 -w 120 aquilum-app/Cargo.lock
+          echo "AKULA_LOCK_END"
