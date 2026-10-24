@@ -87,6 +87,7 @@ async function verifyFile(page) {
     return {size:file.size,sha256:hash.digestHex(),expected:cid};
   });
 }
+(async()=>{
 let ctx;
 try{
   const before=await stats();
@@ -160,3 +161,4 @@ try{
   try{await ctx?.close();}catch(_){}
   fs.rmSync(profile,{recursive:true,force:true,maxRetries:4,retryDelay:250});
 }
+})().catch(error=>{console.error(error.stack||error);process.exitCode=1;});
