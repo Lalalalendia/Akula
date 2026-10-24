@@ -537,12 +537,9 @@ mod tests {
 
         // The no-delete custody must not block SQLite's last-client
         // checkpoint or its optional removal of WAL/SHM on clean close.
+        // Never manually unlink these files: an uncheckpointed WAL may
+        // contain committed rows. SQLite alone owns their cleanup.
         drop(ledger);
-        for companion in [&wal, &shm] {
-            if companion.exists() {
-                fs::remove_file(companion).unwrap();
-            }
-        }
         custody.verify(&root, &pinned_root).unwrap();
         drop(custody);
         let cold = InboxLedger::open(&root).unwrap();
