@@ -305,7 +305,8 @@ async function retrieve() {
   try {
     await joinReady;
     if ([...peers.values()].some(p => p.have.size > 0)) await waitForPeer();
-    const supportsResume = !!(navigator.storage?.getDirectory && navigator.locks?.request);
+    const supportsResume = typeof navigator !== 'undefined' &&
+      !!(navigator.storage?.getDirectory && navigator.locks?.request);
     const fullHash = new window.IncrementalSha256();
     const verifyHex = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),
       v=>v.toString(16).padStart(2,'0')).join('');
