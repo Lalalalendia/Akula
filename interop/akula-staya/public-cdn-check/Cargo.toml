@@ -29,3 +29,8 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 iroh-blobs = { version = "=0.103.1", default-features = false, optional = true }
 postcard = { version = "=1.1.3", features = ["use-std"], optional = true }
 tokio = { version = "1", features = ["time"], optional = true }
+
+[[test]]
+name = "minio_real"
+path = "tests/minio_real.rs"
+required-features = ["public-cdn-local-minio-test"]
