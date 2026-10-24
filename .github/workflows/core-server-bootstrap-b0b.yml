@@ -8,6 +8,9 @@ on:
 
       - "aquilum-app/core/src/server_bootstrap_lab.rs"
       - "aquilum-app/core/src/server_bootstrap_ssh_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_common.rs"
+      - "aquilum-app/core/tests/ssh_probe_common_contract.rs"
+      - "scripts/benchmarks/ssh_probe_common_ab.py"
       - "aquilum-app/core/tests/server_bootstrap_b0b.rs"
       - "scripts/ci/akula-b0b-local-sshd.sh"
       - "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0B.md"
@@ -27,6 +30,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
@@ -48,3 +53,11 @@ jobs:
         run: |
           set -euo pipefail
           cargo check --locked -p aquilum-core --no-default-features
+      - name: Shared SSH contracts and same-run release helper comparison
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features server-bootstrap-b0-openssh-lab --test ssh_probe_common_contract -- --nocapture
+          python3 scripts/benchmarks/ssh_probe_common_ab.py --base "$BASE_SHA"

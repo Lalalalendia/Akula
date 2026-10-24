@@ -11,10 +11,9 @@
 #![cfg(all(windows, feature = "server-bootstrap-b0-openssh-lab"))]
 
 use crate::server_bootstrap_lab::{
-    B0Error, B0Input, MachineArch, PreviewTransport, ReadOnlyHostFacts, ServerTarget, SupportedOs,
+    B0Error, B0Input, PreviewTransport, ReadOnlyHostFacts, ServerTarget,
 };
 use ring::{constant_time, digest};
-use std::collections::BTreeMap;
 use std::ffi::{c_void, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -25,6 +24,10 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+
+#[path = "server_bootstrap_ssh_common.rs"]
+mod common;
+use common::{decode_ed25519_wire, parse_facts, FACTS_COMMAND, MAX_OUTPUT};
 
 mod scan;
 
@@ -37,7 +40,6 @@ const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 const INVALID_HANDLE: *mut c_void = -1isize as *mut c_void;
-const MAX_OUTPUT: u64 = 8192;
 const DEADLINE: Duration = Duration::from_secs(12);
 
 /// Developer-only disposable loopback diagnostic. Never output an SSH path,
@@ -59,16 +61,6 @@ fn pin_refused(stage: &'static str) -> B0Error {
     B0Error::KeyUnavailable
 }
 
-const FACTS_COMMAND: &str = concat!(
-    "LC_ALL=C; export LC_ALL; ",
-    "printf 'AKULA_B0_OS='; grep -m1 '^ID=' /etc/os-release || printf 'ID=unknown\\n'; ",
-    "printf 'AKULA_B0_ARCH='; uname -m; ",
-    "printf 'AKULA_B0_SYSTEMD='; if test -d /run/systemd/system; then echo yes; else echo no; fi; ",
-    "printf 'AKULA_B0_SUDO='; if sudo -n -l >/dev/null 2>&1; then echo yes; else echo no; fi; ",
-    "printf 'AKULA_B0_CPU='; getconf _NPROCESSORS_ONLN; ",
-    "printf 'AKULA_B0_RAM='; awk '/^MemTotal:/ { printf \"%d\\n\", $2 / 1024; exit }' /proc/meminfo; ",
-    "printf 'AKULA_B0_DISK='; df -Pk / | awk 'NR == 2 { printf \"%d\\n\", $4 / 1024 }'"
-);
 
 #[link(name = "kernel32")]
 extern "system" {
@@ -407,76 +399,4 @@ impl PreviewTransport for WindowsOpenSshPinnedProbe {
     fn inspect_host(&mut self) -> Result<ReadOnlyHostFacts, B0Error> {
         parse_facts(&self.fixed_read(FACTS_COMMAND)?)
     }
-}
-fn decode_ed25519_wire(b64: &str) -> Result<Vec<u8>, B0Error> {
-    if b64.len() != 68 { return Err(B0Error::KeyUnavailable); }
-    fn digit(c: u8) -> Option<u32> {
-        match c {
-            b'A'..=b'Z' => Some((c - b'A') as u32),
-            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
-            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
-            b'+' => Some(62), b'/' => Some(63), _ => None,
-        }
-    }
-    let mut wire = Vec::with_capacity(51);
-    for g in b64.as_bytes().chunks_exact(4) {
-        let (a,b,c,d) = (
-            digit(g[0]).ok_or(B0Error::KeyUnavailable)?,
-            digit(g[1]).ok_or(B0Error::KeyUnavailable)?,
-            digit(g[2]).ok_or(B0Error::KeyUnavailable)?,
-            digit(g[3]).ok_or(B0Error::KeyUnavailable)?,
-        );
-        wire.extend_from_slice(&[
-            ((a<<2)|(b>>4)) as u8,
-            ((b<<4)|(c>>2)) as u8,
-            ((c<<6)|d) as u8,
-        ]);
-    }
-    if wire.len() != 51 || &wire[..4] != b"\0\0\0\x0b"
-        || &wire[4..15] != b"ssh-ed25519"
-        || &wire[15..19] != b"\0\0\0\x20"
-    { return Err(B0Error::KeyUnavailable); }
-    Ok(wire)
-}
-fn parse_facts(raw: &str) -> Result<ReadOnlyHostFacts, B0Error> {
-    if raw.len() > MAX_OUTPUT as usize { return Err(B0Error::InspectionUnavailable); }
-    let mut fields = BTreeMap::new();
-    for line in raw.lines() {
-        let (k,v) = line.split_once('=').ok_or(B0Error::InspectionUnavailable)?;
-        if !matches!(k, "AKULA_B0_OS" | "AKULA_B0_ARCH" |
-            "AKULA_B0_SYSTEMD" | "AKULA_B0_SUDO" | "AKULA_B0_CPU" |
-            "AKULA_B0_RAM" | "AKULA_B0_DISK"
-        ) || v.len() > 100 || fields.insert(k,v).is_some() {
-            return Err(B0Error::InspectionUnavailable);
-        }
-    }
-    if fields.len() != 7 { return Err(B0Error::InspectionUnavailable); }
-    let get = |k: &str| fields.get(k).copied().ok_or(B0Error::InspectionUnavailable);
-    let os = match get("AKULA_B0_OS")?
-        .strip_prefix("ID=").ok_or(B0Error::InspectionUnavailable)?
-        .trim_matches('"')
-    {
-        "debian" => SupportedOs::Debian,
-        "ubuntu" => SupportedOs::Ubuntu,
-        _ => SupportedOs::Other,
-    };
-    let arch = match get("AKULA_B0_ARCH")? {
-        "x86_64" => MachineArch::X86_64,
-        "aarch64" => MachineArch::Aarch64,
-        _ => MachineArch::Other,
-    };
-    let yes_no = |s| match s {
-        "yes" => Ok(true), "no" => Ok(false),
-        _ => Err(B0Error::InspectionUnavailable),
-    };
-    let num = |k: &str| get(k)?.parse::<u64>()
-        .map_err(|_| B0Error::InspectionUnavailable);
-    Ok(ReadOnlyHostFacts {
-        os, arch, has_systemd: yes_no(get("AKULA_B0_SYSTEMD")?)?,
-        has_sudo_rights: yes_no(get("AKULA_B0_SUDO")?)?,
-        cpu_count: u16::try_from(num("AKULA_B0_CPU")?)
-            .map_err(|_| B0Error::InspectionUnavailable)?,
-        ram_mib: num("AKULA_B0_RAM")?,
-        free_disk_mib: num("AKULA_B0_DISK")?,
-    })
 }

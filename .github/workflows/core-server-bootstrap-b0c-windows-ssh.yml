@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs"
+      - "aquilum-app/core/src/server_bootstrap_ssh_common.rs"
+      - "aquilum-app/core/tests/ssh_probe_common_contract.rs"
+      - "scripts/benchmarks/ssh_probe_common_ab.py"
       - "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs"
       - "aquilum-app/core/src/server_bootstrap_modules.rs"
       - "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs"
@@ -36,6 +39,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
@@ -117,6 +121,15 @@ jobs:
         run: |
           cargo check --locked -p aquilum-core --no-default-features
           if ($LASTEXITCODE -ne 0) { throw "Default Core changed" }
+      - name: Shared SSH contracts and same-run release helper comparison
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          cargo test --manifest-path aquilum-app/Cargo.toml --locked -p aquilum-core --features server-bootstrap-b0-openssh-lab --test ssh_probe_common_contract -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Shared SSH contracts failed" }
+          python scripts/benchmarks/ssh_probe_common_ab.py --base "$env:BASE_SHA"
+          if ($LASTEXITCODE -ne 0) { throw "Shared SSH parity/performance comparison failed" }
 
   native-readonly-preflight-button:
     runs-on: windows-2025
