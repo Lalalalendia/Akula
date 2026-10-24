@@ -42,6 +42,13 @@ jobs:
           cargo test --locked --manifest-path aquilum-app/Cargo.toml \
             -p aquilum-core --features server-install-review --lib \
             server_owner_approval_wire::tests -- --nocapture
+      - name: Verify independently pinned root helper presence gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path aquilum-app/Cargo.toml \
+            -p aquilum-core --features server-install-review --lib \
+            server_install_root_gate::tests -- --nocapture
       - name: Verify legacy Linux B1b1b owner signatures and CAS scope
         shell: bash
         run: |
@@ -61,6 +68,7 @@ jobs:
           set -euo pipefail
           paths=(
             aquilum-app/core/src/server_owner_approval_wire.rs
+            aquilum-app/core/src/server_install_root_gate.rs
             aquilum-app/core/src/server_owner_windows.rs
             aquilum-app/core/src/server_release_lab/review.rs
             aquilum-app/core/src/server_release_lab/review/tests.rs
