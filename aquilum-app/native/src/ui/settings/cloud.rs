@@ -282,6 +282,8 @@ pub struct CloudPopup {
     // Draft public fields live only in this modal until explicit Save.
     // OS credentials and completed Configure/Import actions are independent.
     staged_texts: Vec<(Setter, String)>,
+    #[cfg(feature = "dropbox-readonly-preview")]
+    dropbox_identity: (String, String),
 }
 
 fn same_setter(a: Setter, b: Setter) -> bool {
@@ -371,6 +373,11 @@ pub fn provider_modal(config: &AppConfig, ctx: &Context, provider: CloudProvider
         provider,
         bindings: built.bindings,
         staged_texts: Vec::new(),
+        #[cfg(feature = "dropbox-readonly-preview")]
+        dropbox_identity: (
+            config.dropbox_readonly.account_id.clone(),
+            config.dropbox_readonly.root_namespace_id.clone(),
+        ),
     };
     (layer, popup)
 }
@@ -387,7 +394,24 @@ impl CloudPopup {
         }
     }
 
+    #[cfg(feature = "dropbox-readonly-preview")]
+    fn discard_draft_if_dropbox_account_changed(&mut self, config: &AppConfig) {
+        if self.provider != CloudProvider::Dropbox { return; }
+        let current = &config.dropbox_readonly;
+        if self.dropbox_identity.0 != current.account_id
+            || self.dropbox_identity.1 != current.root_namespace_id
+        {
+            // Never reapply an old account's unsaved Vault/pin after OAuth switch.
+            self.staged_texts.clear();
+            self.dropbox_identity = (
+                current.account_id.clone(), current.root_namespace_id.clone(),
+            );
+        }
+    }
+
     pub fn rebuild(&mut self, root: &mut RenderRoot, config: &AppConfig, ctx: &Context) {
+        #[cfg(feature = "dropbox-readonly-preview")]
+        self.discard_draft_if_dropbox_account_changed(config);
         let built = card(config, ctx, self.provider, &self.staged_texts);
         root.edit_widget(self.layer, |mut w| Modal::set_card(
             &mut w.downcast(), built.card, &self.provider.label(),

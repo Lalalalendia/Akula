@@ -82,3 +82,27 @@ fn dropbox_tile_opens_real_oauth_actions_in_modal() {
     assert!(built.bindings.values().any(|binding|
         matches!(binding, Binding::Button(Action::DropboxForgetAccount))));
 }
+
+#[cfg(feature = "dropbox-readonly-preview")]
+#[test]
+fn switching_dropbox_account_discards_staged_vault_pin() {
+    let mut config = AppConfig::default();
+    config.dropbox_readonly.account_id = "dbid:alice".into();
+    config.dropbox_readonly.root_namespace_id = "123".into();
+    let ctx = Context::new(1.0);
+    let (_, mut popup) = provider_modal(&config, &ctx, CloudProvider::Dropbox);
+    let block = schema::blocks(Section::Sync, &config, &ctx).pop().unwrap();
+    let setter = block.rows.iter()
+        .find(|row| row.label == "Контрольный BLAKE3 HEAD")
+        .and_then(|row| row.setter).unwrap();
+    popup.remember_text(setter, &"a".repeat(64));
+    popup.discard_draft_if_dropbox_account_changed(&config);
+    assert!(popup.has_draft_changes(), "same account preserves the draft");
+
+    config.dropbox_readonly.account_id = "dbid:bob".into();
+    config.dropbox_readonly.root_namespace_id = "456".into();
+    popup.discard_draft_if_dropbox_account_changed(&config);
+    assert!(!popup.has_draft_changes(), "old account's pin must be discarded");
+    assert_eq!(popup.dropbox_identity.0, "dbid:bob");
+    assert_eq!(popup.dropbox_identity.1, "456");
+}
