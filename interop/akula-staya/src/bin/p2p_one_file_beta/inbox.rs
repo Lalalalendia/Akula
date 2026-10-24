@@ -434,7 +434,10 @@ mod tests {
             drop(stage);
             drop(pinned_root);
             assert_eq!(fs::read(&original_name).unwrap(), b"unrelated replacement");
-            assert!(!renamed_original.exists(), "only the opened stage may be removed");
+            assert!(
+                !renamed_original.exists(),
+                "only the opened stage may be removed"
+            );
         }
     }
 
