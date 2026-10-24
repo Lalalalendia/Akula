@@ -322,6 +322,27 @@ impl InboxLedger {
         self.status(expected.id)
     }
 
+    /// Read-only metadata gate for a fresh, separately opened connection.
+    /// The caller supplies the already authenticated transfer intent and must
+    /// compare the *entire* committed SQLite row, not just its UUID/status.
+    /// This intentionally does not rehash the blob: the native Windows receiver
+    /// immediately verifies the exact same blob through a pinned NT handle.
+    /// No SQLite state is created, repaired or promoted by this check.
+    pub fn verify_committed_intent(
+        &self,
+        expected: &ExpectedTransfer,
+    ) -> Result<(), LedgerError> {
+        validate(expected)?;
+        let saved = self.get(expected.id)?.ok_or(LedgerError::UnknownTransfer)?;
+        if saved.expected != *expected {
+            return Err(LedgerError::ConflictingIntent);
+        }
+        if saved.state != 1 {
+            return Err(LedgerError::InvalidLocalObject);
+        }
+        Ok(())
+    }
+
     /// On every query, a committed DB row is insufficient. The locally opened
     /// file must still match the *previously authenticated* immutable intent.
     pub fn status(&self, id: Uuid) -> Result<LocalStatus, LedgerError> {
