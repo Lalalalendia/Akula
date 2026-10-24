@@ -21,8 +21,12 @@ jobs:
         working-directory: aquilum-app
         run: |
           set -euo pipefail
-          cargo metadata --format-version 1 --no-deps >/dev/null
+          # Metadata alone may not prune obsolete feature dependencies.
+          # --workspace keeps transitive crates locked wherever possible.
+          cargo update --workspace
           cargo metadata --locked --format-version 1 --no-deps >/dev/null
+          echo "AKULA_CRYPTO_BIGINT_REVERSE_TREE"
+          cargo tree --locked --all-features -i crypto-bigint -p aquilum-core || true
           git diff --check
           echo "AKULA_LOCK_REVIEW_NUMSTAT"
           git diff --numstat -- Cargo.lock
