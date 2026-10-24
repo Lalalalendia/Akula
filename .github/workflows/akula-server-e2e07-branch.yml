@@ -109,7 +109,9 @@ jobs:
           set -euo pipefail
           # Reuse the existing isolated /opt signed ELF proof, not a new CAS.
           # The two exact test functions use synthetic CI keys only.
-          cargo build --locked --manifest-path interop/akula-staya/Cargo.toml \
+          # The isolated interop workspace has no committed Cargo.lock.
+          # Do not claim this CI fixture is a reproducible production release.
+          cargo build --manifest-path interop/akula-staya/Cargo.toml \
             --features node-v1-runtime --bin akula-node-v1-service
           bash -n scripts/ci/akula-node-v1-signed-opt-proof.sh
           bash scripts/ci/akula-node-v1-signed-opt-proof.sh

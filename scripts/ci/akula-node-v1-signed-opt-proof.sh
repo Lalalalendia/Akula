@@ -44,7 +44,7 @@ test ! -e "$MOUNT_ROOT" && test ! -L "$MOUNT_ROOT" ||
 # Multiple stale/other-feature test binaries may legitimately coexist in deps.
 # The JSON artifact selection is bound to the explicit B1d0 --test command.
 TEST_BIN="$(cargo test --locked --manifest-path "$ROOT/aquilum-app/Cargo.toml" \
-  -p aquilum-core --features server-bootstrap-b1d0-durable-node,server-bootstrap-b0-lab \
+  -p aquilum-core --features server-root-b0v3-gate-lab \
   --test server_bootstrap_b1d0 --no-run --message-format=json |
   python3 -c '
 import json, sys

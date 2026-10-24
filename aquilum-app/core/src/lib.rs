@@ -58,7 +58,7 @@ pub mod server_installer_fixed_node_lab;
 #[cfg(all(target_os = "linux", feature = "server-bootstrap-b1d0-durable-node"))]
 pub mod server_installer_durable_node;
 #[cfg(all(target_os = "linux", feature = "server-root-b0v3-gate-lab"))]
-pub(crate) mod server_root_v3_guard;
+pub mod server_root_v3_guard;
 #[cfg(all(target_os = "linux", feature = "node-catalog-lab"))]
 pub mod node_catalog_lab;
 #[cfg(all(target_os = "linux", feature = "node-replica-lab"))]

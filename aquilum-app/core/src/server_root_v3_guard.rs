@@ -15,7 +15,7 @@ const MAX_CANONICAL_PLAN_BYTES: usize = 16 * 1024;
 /// separate verified root trust record and the already pinned release FD.
 /// Passing a candidate-supplied value is explicitly not authorization.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RootIndependentPins<'a> {
+pub struct RootIndependentPins<'a> {
     pub owner_id: &'a str,
     pub owner_ed25519: [u8; 32],
     pub ssh_host_sha256: [u8; 32],
@@ -32,7 +32,7 @@ pub(crate) struct RootIndependentPins<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RootPlanError {
+pub enum RootPlanError {
     MalformedPlan,
     NoncanonicalPlan,
     WrongPlan,
@@ -46,7 +46,7 @@ pub(crate) enum RootPlanError {
 /// opening a file, consuming CAS, executing an ELF or installing systemd.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
-pub(crate) struct CheckedRootV3Scope {
+pub struct CheckedRootV3Scope {
     pub install_id: [u8; 16],
     pub plan_digest: [u8; 32],
     pub node_sha256: [u8; 32],
@@ -61,7 +61,7 @@ pub(crate) struct CheckedRootV3Scope {
 /// The returned scope is still inert. The existing B1d0 verifier MUST
 /// independently check root-enrolled owner keys, release FD, floor, witness
 /// and single-use nonce at the moment it commits.
-pub(crate) fn verify_root_b0_v3_scope(
+pub fn verify_root_b0_v3_scope(
     plan_json: &[u8],
     owner: &OwnerApprovalWireV1,
     signature: &[u8; 64],

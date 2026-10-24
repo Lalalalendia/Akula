@@ -426,12 +426,18 @@ fn production_inspection_refuses_unenrolled_os_witness_and_does_not_provision() 
 }
 
 
-#[cfg(feature = "server-bootstrap-b0-lab")]
+#[cfg(feature = "server-root-b0v3-gate-lab")]
 #[test]
 fn b1d0_actual_node_v1_elf_v3_review_owner_scope_cas_reopen_hold() {
     use aquilum_core::server_bootstrap_lab::{
         preview_node_v3, B0Error, B0Input, MachineArch, PackagePin,
         PreviewTransport, ReadOnlyHostFacts, ServerTarget, SupportedOs,
+    };
+    use aquilum_core::server_owner_approval_wire::{
+        OwnerApprovalWireV1, OwnerFloorWire,
+    };
+    use aquilum_core::server_root_v3_guard::{
+        verify_root_b0_v3_scope, RootIndependentPins, RootPlanError,
     };
     struct PinnedKex(Vec<u8>);
     impl PreviewTransport for PinnedKex {
@@ -494,6 +500,59 @@ fn b1d0_actual_node_v1_elf_v3_review_owner_scope_cas_reopen_hold() {
         *blake3::Hash::from_hex(&v3.plan_blake3).unwrap().as_bytes(),
     );
 
+    let submitted_json = serde_json::to_vec(&v3).unwrap();
+    // The root review is now based on the *actual submitted B0 v3 JSON*,
+    // not on an arbitrary 32-byte digest provided by an SSH peer.
+    let wire_for = |c: &Case| {
+        let floor = |head: TrustedFloorHead| OwnerFloorWire {
+            generation: head.generation,
+            sequence: head.floor.sequence,
+            version: [
+                head.floor.version.major,
+                head.floor.version.minor,
+                head.floor.version.patch,
+            ],
+            manifest_fingerprint: head.floor.signed_manifest_fingerprint,
+            chain_tip: head.chain_tip,
+        };
+        let claim = &c.owner.claim;
+        OwnerApprovalWireV1 {
+            approver_id: claim.approver_id.clone(),
+            install_id: claim.scope_binding.install_id.0,
+            plan_digest: claim.scope_binding.plan_digest.0,
+            ssh_host_sha256: claim.scope_binding.pinned_host_key_sha256,
+            manifest_fingerprint: claim.scope_binding.signed_manifest_fingerprint,
+            previous: floor(claim.previous_head),
+            proposed: floor(claim.proposed_head),
+            staged_package_sha256: claim.staged_package_sha256,
+            staged_package_size: claim.staged_package_size,
+            expected_witness_revision: claim.expected_witness_revision,
+            approval_nonce: claim.approval_nonce,
+            issued_at_unix: claim.issued_at_unix,
+            expires_at_unix: claim.expires_at_unix,
+        }
+    };
+    let check_root_plan = |c: &Case, revision: u64| {
+        let pins = RootIndependentPins {
+            owner_id: &c.owner_signer.approver_id,
+            owner_ed25519: c.owner_signer.public_key_ed25519,
+            ssh_host_sha256: host_sha,
+            bootstrap_helper_sha256: helper_sha,
+            node_sha256: node_sha,
+            node_size: binary.len() as u64,
+            manifest_fingerprint: c.pinned.receipt.signed_manifest_fingerprint,
+            release_signer_id: "b1b4a-test-release",
+            release_version: "1.0.0",
+            host_os: SupportedOs::Ubuntu,
+            host_arch: MachineArch::X86_64,
+            has_systemd: true,
+            witness_revision: revision,
+        };
+        verify_root_b0_v3_scope(
+            &submitted_json, &wire_for(c), &c.owner.signature, pins, NOW,
+        )
+    };
+
     // An owner can sign another digest, but the independently pinned scope
     // must refuse it BEFORE consuming the durable root-owned CAS revision.
     let _root = RootFixture::new();
@@ -504,6 +563,10 @@ fn b1d0_actual_node_v1_elf_v3_review_owner_scope_cas_reopen_hold() {
         .as_ref().try_into().unwrap();
     let (trust, ledger) = provision();
     let actor = open_actor(trust.path(), ledger.path());
+    assert_eq!(
+        check_root_plan(&forged, actor.current_checkpoint().unwrap().revision),
+        Err(RootPlanError::WrongOwnerScope),
+    );
     assert!(matches!(commit(&forged, &actor, CrashPoint::None),
         Err(DurableError::FileCommit(_))));
     assert_eq!(actor.current_checkpoint().unwrap().revision, 0);
@@ -515,6 +578,11 @@ fn b1d0_actual_node_v1_elf_v3_review_owner_scope_cas_reopen_hold() {
     // commit the real ELF once in the disposable root-only /opt namespace.
     let exact = Case::with_package_bound(&binary, plan_digest, host_sha);
     let actor = open_actor(trust.path(), ledger.path());
+    let checked = check_root_plan(&exact, actor.current_checkpoint().unwrap().revision)
+        .expect("root independently revalidates canonical v3 and owner signature");
+    assert_eq!(checked.plan_digest, plan_digest.0);
+    assert_eq!(checked.bootstrap_helper_sha256, helper_sha);
+    assert_eq!(checked.node_sha256, node_sha);
     let hold = commit(&exact, &actor, CrashPoint::None)
         .expect("B0 v3 owner-plan bound B1d0 root file CAS");
     assert_eq!(hold, DurableStatus::LocallyConsistentHold {

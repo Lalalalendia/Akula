@@ -279,3 +279,12 @@ B1d0, and is not enabled in the installed client. Its tests are not proof
 that production has any enrollment, authenticated host, owner signature
 or activation authority. Until an independent root state loader and real
 root-verified transaction are implemented, the E2E gate remains HOLD.
+
+The isolated real-ELF B1d0 test also now runs this root-side parser on the
+actual submitted B0 v3 JSON and the **same detached Ed25519 owner claim**
+used by B1d0. A second valid owner signature on a changed plan digest is
+rejected by the root validator before any witness CAS or /opt mutation.
+Only an exactly bound, independently pinned owner claim is passed to the
+existing durable B1d0 one-shot commit, after which its receipt is reopened
+as HOLD. This integration remains inside a disposable mount namespace with
+CI-only keys, not a VPS product pathway.
