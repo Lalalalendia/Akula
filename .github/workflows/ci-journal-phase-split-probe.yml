@@ -1,0 +1,58 @@
+name: Journal phase split exact Rust proof (temporary)
+on:
+  push:
+    branches: [refactor/journal-publication-recovery-20261024]
+    paths:
+      - '.github/workflows/ci-journal-phase-split-probe.yml'
+permissions:
+  contents: read
+concurrency:
+  group: journal-phase-proof-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  journal-phase:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.artifacts/cargo-native
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify git no-growth and fail-closed routing contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check 39c159f1724d76b5b5f9453b0404ac7a6f0f248f HEAD
+          node --test .github/scripts/ci-shared-manifest-route.test.cjs .github/scripts/ci-shared-routing-contract.test.cjs
+          node .github/scripts/ci-file-ratchet.cjs --base=39c159f1724d76b5b5f9453b0404ac7a6f0f248f --head=HEAD
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-main-gate-v1
+          save-if: false
+      - name: Compile Core with default features
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --no-default-features
+      - name: Test unchanged crash-safe journal transaction boundaries
+        working-directory: aquilum-app
+        run: cargo test --locked -p aquilum-core --features sync-engine --lib sync::journal::tests -- --nocapture
+      - name: Check S3-enabled Core
+        working-directory: aquilum-app
+        run: cargo check --locked -p aquilum-core --features sync-s3
+      - name: Export exact formatted child file and check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          P=aquilum-app/core/src/sync/journal/phase_transitions.rs
+          rustfmt --edition 2021 "$P"
+          printf 'RUSTFMT_PHASE_BEGIN\n'
+          base64 -w0 "$P"
+          printf '\nRUSTFMT_PHASE_END\n'
+          git diff --exit-code -- "$P"
