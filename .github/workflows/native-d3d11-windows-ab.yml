@@ -1,0 +1,67 @@
+name: Windows D3D11 explicit backend A/B (diagnostic)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/native/src/output/device.rs'
+      - 'scripts/benchmarks/native_d3d11_windows_ab.py'
+      - '.github/workflows/native-d3d11-windows-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: aquilum-app -> ../.artifacts/cargo-native
+          shared-key: akula-win-d3d11-ab-v1
+          cache-workspace-crates: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify harness syntax and exact source
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/benchmarks/native_d3d11_windows_ab.py
+          git rev-parse HEAD
+          rustc --version
+      - name: Run pure driver-mode fail-closed tests
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          cargo test --locked -p aquilum-native --bin aquilum-native output::device::tests:: -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Driver policy tests failed' }
+      - name: Build developer-only native app
+        working-directory: aquilum-app
+        shell: pwsh
+        run: |
+          cargo build --locked --release -p aquilum-native
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
+      - name: Compare two independent WARP / hardware real-window pairs
+        shell: pwsh
+        run: |
+          $binary = Join-Path $env:GITHUB_WORKSPACE '.artifacts\cargo-native\release\aquilum-native.exe'
+          python scripts/benchmarks/native_d3d11_windows_ab.py --binary $binary --out windows-d3d11-results
+          if ($LASTEXITCODE -ne 0) { throw 'Strict backend GUI A/B failed' }
+          Get-Content windows-d3d11-results/summary.md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-d3d11-strict-ab
+          path: |
+            windows-d3d11-results/summary.md
+            windows-d3d11-results/matrix.json
+            windows-d3d11-results/**/process.log
+            windows-d3d11-results/**/metrics.json
+            windows-d3d11-results/**/replay.json
+          if-no-files-found: warn
+          retention-days: 14

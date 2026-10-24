@@ -16,6 +16,71 @@ use super::Area;
 pub(super) const GROWTH: u32 = 256;
 pub(super) const BUFFERS: u32 = 3;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Driver {
+    Warp,
+    Hardware,
+}
+
+impl Driver {
+    fn d3d(self) -> D3D_DRIVER_TYPE {
+        match self {
+            Self::Warp => D3D_DRIVER_TYPE_WARP,
+            Self::Hardware => D3D_DRIVER_TYPE_HARDWARE,
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Warp => Self::Hardware,
+            Self::Hardware => Self::Warp,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Warp => "warp",
+            Self::Hardware => "hardware",
+        }
+    }
+
+    fn probe(value: &str) -> Result<Self, String> {
+        match value {
+            "warp" => Ok(Self::Warp),
+            "hardware" => Ok(Self::Hardware),
+            _ => Err(format!("AKULA_EXPERIMENTAL_D3D11: expected hardware or warp, got {value:?}")),
+        }
+    }
+}
+
+// A diagnostic must never silently measure the fallback as the requested backend.
+fn choose<T, E>(
+    first: Driver,
+    strict: bool,
+    mut create: impl FnMut(Driver) -> Result<T, E>,
+) -> Result<(T, Driver), E> {
+    match create(first) {
+        Ok(device) => Ok((device, first)),
+        Err(error) if strict => Err(error),
+        Err(_) => create(first.other()).map(|device| (device, first.other())),
+    }
+}
+
+fn preference() -> Result<(Driver, bool), String> {
+    // Experimental driver selection is unavailable in installed builds.
+    // Ordinary builds preserve their pre-existing WARP-first policy.
+    #[cfg(not(feature = "installed"))]
+    if let Some(value) = std::env::var_os("AKULA_EXPERIMENTAL_D3D11") {
+        let value = value.into_string().map_err(|_| "AKULA_EXPERIMENTAL_D3D11: invalid text".to_owned())?;
+        return Driver::probe(&value).map(|driver| (driver, true));
+    }
+    #[cfg(feature = "memory-probe")]
+    let driver = if std::env::var_os("AQ_PROBE_HARDWARE").is_some() { Driver::Hardware } else { Driver::Warp };
+    #[cfg(not(feature = "memory-probe"))]
+    let driver = Driver::Warp;
+    Ok((driver, false))
+}
+
 pub(super) struct Gpu {
     pub device: ID3D11Device,
     pub context: ID3D11DeviceContext,
@@ -64,11 +129,21 @@ pub(super) fn region(a: Area) -> D3D11_BOX {
 }
 
 pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String> {
-    #[cfg(feature = "memory-probe")]
-    let first = if std::env::var_os("AQ_PROBE_HARDWARE").is_some() { D3D_DRIVER_TYPE_HARDWARE } else { D3D_DRIVER_TYPE_WARP };
-    #[cfg(not(feature = "memory-probe"))]
-    let first = D3D_DRIVER_TYPE_WARP;
-    let (device, context) = device(first).or_else(|_| device(D3D_DRIVER_TYPE_HARDWARE)).map_err(|e| format!("D3D11: {e}"))?;
+    let (first, strict) = preference()?;
+    let ((device, context), actual) = choose(first, strict, |driver| device(driver.d3d()))
+        .map_err(|error| {
+            if strict {
+                format!("D3D11 probe {} failed (strict: no fallback): {error}", first.label())
+            } else {
+                format!("D3D11: {error}")
+            }
+        })?;
+    #[cfg(not(feature = "installed"))]
+    if strict {
+        eprintln!("AKULA_D3D11_PROBE requested={} actual={} strict=1", first.label(), actual.label());
+    }
+    #[cfg(feature = "installed")]
+    let _ = actual;
     let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }.map_err(|e| format!("DXGI: {e}"))?;
     let desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: width,
@@ -89,4 +164,54 @@ pub(super) fn create(hwnd: HWND, width: u32, height: u32) -> Result<Gpu, String>
     }
     let canvas = texture(&device, width, height).map_err(|e| format!("холст: {e}"))?;
     Ok(Gpu { device, context, chain, canvas, stale: Default::default(), back: 0 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{choose, Driver};
+
+    #[test]
+    fn driver_probe_only_accepts_explicit_backends() {
+        assert_eq!(Driver::probe("hardware").unwrap(), Driver::Hardware);
+        assert_eq!(Driver::probe("warp").unwrap(), Driver::Warp);
+        assert!(Driver::probe("").is_err());
+        assert!(Driver::probe("Hardware").is_err());
+        assert!(Driver::probe("auto").is_err());
+    }
+
+    #[test]
+    fn explicit_hardware_failure_never_becomes_warp_measurement() {
+        let mut tried = Vec::new();
+        let result: Result<((), Driver), &str> = choose(Driver::Hardware, true, |driver| {
+            tried.push(driver);
+            Err("hardware unavailable")
+        });
+        assert_eq!(result.unwrap_err(), "hardware unavailable");
+        assert_eq!(tried, [Driver::Hardware]);
+    }
+
+    #[test]
+    fn ordinary_warp_first_failure_still_uses_hardware() {
+        let mut tried = Vec::new();
+        let result = choose(Driver::Warp, false, |driver| {
+            tried.push(driver);
+            match driver {
+                Driver::Warp => Err("WARP unavailable"),
+                Driver::Hardware => Ok(1),
+            }
+        });
+        assert_eq!(result.unwrap(), (1, Driver::Hardware));
+        assert_eq!(tried, [Driver::Warp, Driver::Hardware]);
+    }
+
+    #[test]
+    fn ordinary_warp_success_does_not_open_hardware() {
+        let mut tried = Vec::new();
+        let result = choose(Driver::Warp, false, |driver| {
+            tried.push(driver);
+            Ok::<_, ()>(3)
+        });
+        assert_eq!(result.unwrap(), (3, Driver::Warp));
+        assert_eq!(tried, [Driver::Warp]);
+    }
 }
