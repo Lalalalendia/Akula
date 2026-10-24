@@ -23,6 +23,52 @@ fn failure(error: impl fmt::Display) -> ReplicaError {
     ReplicaError(error.to_string())
 }
 
+/// Reject edits that would split a UTF-16 surrogate pair before Yrs is allowed
+/// to mutate a document. Yrs 0.28.0 can otherwise remove the wrong character
+/// or panic on an in-bounds, but non-scalar-aligned offset (upstream #714).
+///
+/// Validate all endpoints in one pass, including both endpoints of deletions.
+/// The editor's change set is ordered and expressed in UTF-16 code units.
+fn validate_utf16_edits(source: &str, edits: &[TextEdit]) -> Result<(), ReplicaError> {
+    if edits.is_empty() {
+        return Ok(());
+    }
+
+    let mut endpoints = Vec::with_capacity(edits.len().saturating_mul(2));
+    let mut previous_end = 0;
+    for edit in edits {
+        if edit.from < previous_end || edit.from > edit.to {
+            return Err(failure("overlapping or descending UTF-16 edits"));
+        }
+        if edit.to > u32::MAX as usize {
+            return Err(failure("UTF-16 edit offset exceeds Yrs limit"));
+        }
+        endpoints.extend([edit.from, edit.to]);
+        previous_end = edit.to;
+    }
+
+    endpoints.sort_unstable();
+    endpoints.dedup();
+    let mut position = 0;
+    let mut next_endpoint = 0;
+    for character in source.chars() {
+        while next_endpoint < endpoints.len() && endpoints[next_endpoint] == position {
+            next_endpoint += 1;
+        }
+        position += character.len_utf16();
+        if next_endpoint < endpoints.len() && endpoints[next_endpoint] < position {
+            return Err(failure("UTF-16 edit splits a surrogate pair"));
+        }
+    }
+    while next_endpoint < endpoints.len() && endpoints[next_endpoint] == position {
+        next_endpoint += 1;
+    }
+    if next_endpoint != endpoints.len() {
+        return Err(failure("UTF-16 edit extends beyond the document"));
+    }
+    Ok(())
+}
+
 pub struct Replica {
     doc: Doc,
     text: TextRef,
@@ -89,7 +135,12 @@ impl Replica {
         let candidate = Self { doc, text };
         candidate.apply_update(&self.state(), "stage")?;
         for edits in batches {
-            candidate.apply_edits(edits, "stage");
+            if !edits.is_empty() {
+                // The candidate is still isolated: reject invalid UI input before
+                // the session appends any delta to its durable SQLite journal.
+                validate_utf16_edits(&candidate.text(), edits)?;
+                candidate.apply_edits(edits, "stage");
+            }
         }
         let update = candidate.doc.transact().encode_state_as_update_v1(&baseline);
         Ok(update)
