@@ -81,7 +81,7 @@ impl TextEditor {
             }
         }
         let range = self.selection();
-        if !range.is_empty() && ctx.is_focus_target() {
+        if !range.is_empty() && ctx.is_window_focused() {
             let sel_color = props.get::<SelectionColor>(ctx.property_cache()).color;
             self.paint_range(painter, shown.clone(), range.clone(), sel_color);
             self.paint_selection_matches(painter, shown.clone(), &range);
