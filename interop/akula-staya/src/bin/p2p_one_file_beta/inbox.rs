@@ -573,7 +573,10 @@ mod tests {
             );
             assert_eq!(ledger.reserve(&intent).unwrap(), LocalStatus::Pending);
             let companion = root.join(format!("received-inbox.sqlite3{suffix}"));
-            assert!(companion.is_file(), "SQLite companion must exist for ACL test");
+            assert!(
+                companion.is_file(),
+                "SQLite companion must exist for ACL test"
+            );
             audit_pinned_windows_inbox_storage(&root, &pinned_root, true).unwrap();
             // The SQLite VFS may legitimately delete this file on close,
             // so audit its effective ACL *while the connection is open*.
