@@ -195,6 +195,41 @@ mod tests {
     use crate::ui::settings::schema::Context;
 
     #[test]
+    fn verified_api_root_exposes_explicit_import_only_for_selected_workspace() {
+        let mut ctx = Context::new(1.0);
+        let source = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned();
+        let workspace = std::path::PathBuf::from("selected-vault");
+        ctx.workspace = Some(workspace.clone());
+        ctx.notion_selection.root = Some(source.clone());
+        ctx.notion_selection.state = LoadState::Ready;
+        ctx.notion_import.root = Some(source.clone());
+        ctx.notion_import.target = Some(workspace.clone());
+        ctx.notion_import.stage = crate::notion_import::Stage::Ready;
+        ctx.notion_import.digest = Some("a".repeat(64));
+        ctx.notion_import.pages = 2;
+        ctx.notion_import.links = 1;
+        let mut bindings = HashMap::new();
+        let _ = body(&ctx, &mut bindings);
+        assert!(bindings.values().any(|b| matches!(b,
+            Binding::Button(Action::NotionReviewImport(id)) if *id == source)));
+        assert!(bindings.values().any(|b| matches!(b,
+            Binding::Button(Action::NotionPublishImport(id)) if *id == source)));
+
+        ctx.workspace = Some(std::path::PathBuf::from("different-vault"));
+        let mut other = HashMap::new();
+        let _ = body(&ctx, &mut other);
+        assert!(!other.values().any(|b|
+            matches!(b, Binding::Button(Action::NotionPublishImport(_)))));
+        ctx.workspace = Some(workspace);
+        ctx.notion_import.busy = true;
+        ctx.notion_import.stage = crate::notion_import::Stage::Publishing;
+        let mut busy = HashMap::new();
+        let _ = body(&ctx, &mut busy);
+        assert!(!busy.values().any(|b|
+            matches!(b, Binding::Button(Action::NotionPublishImport(_)))));
+    }
+
+    #[test]
     fn notion_source_and_page_buttons_are_read_only_selections() {
         let mut ctx = Context::new(1.0);
         let root = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned();

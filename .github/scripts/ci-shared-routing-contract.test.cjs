@@ -5,10 +5,10 @@ const fs=require('node:fs');
 const path=require('node:path');
 const core=fs.readFileSync(path.join(__dirname,'../workflows/app-checks.yml'),'utf8');
 const shared=fs.readFileSync(path.join(__dirname,'../workflows/ci-shared-manifest-labs.yml'),'utf8');
-const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock","owned_s3_minio"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock","owned_s3_reservation"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
+const routeEntries=[["host-custody","sync-host-custody.yml",["core","native"]],["b0c-ssh-native","core-server-bootstrap-b0c-windows-ssh.yml",["native","owned_b0c_ssh"]],["b1b2b-ubuntu","core-server-bootstrap-b1b2b-ubuntu.yml",["core"]],["b1c1-vm","core-server-bootstrap-b1c1-real-elf-vm.yml",["core"]],["b1b2a-systemd","core-server-bootstrap-b1b2a-systemd.yml",["core"]],["b1b3b-helper","core-server-bootstrap-b1b3b-root-helper.yml",["core"]],["b1b3c-fd","core-server-bootstrap-b1b3c-signed-fd.yml",["core","lib"]],["b1b4a-cas","core-server-bootstrap-b1b4a-cas-fence.yml",["core","lib"]],["b1b4b-witness","core-server-bootstrap-b1b4b-os-witness.yml",["core","lib"]],["b1b4b1-ipc","core-server-bootstrap-b1b4b1-witness-ipc.yml",["core"]],["b1c0-node","core-server-bootstrap-b1c0-fixed-node.yml",["core","lib"]],["b1d0-opt","core-server-bootstrap-b1d0-opt.yml",["core","lib"]],["b0b-ssh","core-server-bootstrap-b0b.yml",["core","lib"]],["b1b3a-ipc","core-server-bootstrap-b1b3a-ipc.yml",["core","lib"]],["p2p-offer","p2p-offer-lab.yml",["core","lib"]],["s3-minio","sync-s3-minio.yml",["core","lock","owned_s3_minio"]],["s3-platform","sync-s3-platform.yml",["core","lock","native"]],["pinned-read","sync-pinned-read.yml",["core","lock","owned_pinned_read"]],["s3-reservation","sync-reserved-s3-transaction.yml",["core","lock","owned_s3_reservation"]],["sync-protection","sync-protection.yml",["core","lock"]],["sync-transaction","sync-guarded-transaction.yml",["core","lock"]],["text-delta","sync-text-delta-rust.yml",["core","lock"]],["appimage-beta","appimage-beta.yml",["lock"]],["windows-beta","windows-beta.yml",["lock","owned_windows_beta"]],["vello-half-tie","native-vello-half-tie-regression.yml",["root","lock"]],["linux-beta","linux-beta.yml",["lock","owned_linux_beta"]],["installed-owner","sync-installed-os-owner-witness.yml",["core","owner"]],["device-roster","sty-device-roster-lab.yml",["core"]],["native-positive","sync-native-positive-host.yml",["native"]]];
 
-test('28 owned routes preserve direct-only versus required callable owners',()=>{
-  assert.equal(routeEntries.length,28);
+test('29 owned routes preserve direct-only versus required callable owners',()=>{
+  assert.equal(routeEntries.length,29);
   assert.match(shared,/^on:\n  workflow_call:/m);
   for(const [id,file,keys] of routeEntries){
     const body=fs.readFileSync(path.join(__dirname,'../workflows',file),'utf8');
@@ -502,4 +502,50 @@ test('S3 MinIO preserves 23 direct non-main source paths and required main glob 
   assert.match(shared,/^      owned_s3_minio:\n        required: true\n        type: boolean$/m);
   assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/,
     'Main PR gate must still fail closed for MinIO');
+});
+
+test('B0c Windows owned sources run only through required main route; non-main and manual remain',()=>{
+  const {parse,matches}=require('./ci-file-ratchet.cjs');
+  const router=require('./ci-shared-manifest-route.cjs');
+  const file='.github/workflows/core-server-bootstrap-b0c-windows-ssh.yml';
+  const body=fs.readFileSync(path.join(__dirname,'../workflows/core-server-bootstrap-b0c-windows-ssh.yml'),'utf8');
+  const policy=parse(body);
+  assert.match(body,/^on:\n  workflow_call:\n  pull_request:\n    branches-ignore: \[main\]\n    paths:/m);
+  assert.equal(matches(policy,router.NATIVE),false,'native manifest must not launch directly');
+  const owners=[
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab.rs",
+    "aquilum-app/core/src/server_bootstrap_ssh_windows_lab/scan.rs",
+    "aquilum-app/core/src/server_bootstrap_modules.rs",
+    "aquilum-app/core/tests/server_bootstrap_b0c_windows.rs",
+    "scripts/ci/akula-b0c-windows-loopback-sshd.py",
+    ".github/workflows/core-server-bootstrap-b0c-windows-ssh.yml",
+    "docs/platforms/AKULA-SERVER-BOOTSTRAP-B0C.md",
+    "aquilum-app/native/src/app/settings/server.rs",
+    "aquilum-app/native/src/app/settings/server_state.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/server_status.rs",
+    "aquilum-app/native/src/ui/settings/schema/server/identity.rs",
+    "aquilum-app/native/assets/locales/ru.json",
+    "aquilum-app/native/assets/locales/en.json",
+    "aquilum-app/native/src/ui/settings/schema/tests.rs",
+  ];
+  assert.deepEqual(router.OWNED_SUITES.owned_b0c_ssh,owners,'exact previous 14 source owners');
+  const direct=body.split('    paths:\n')[1]?.split('  workflow_dispatch:')[0]||'';
+  const directOwners=[...direct.matchAll(/^      - "([^"]+)"$/gm)].map(m=>m[1]);
+  assert.deepEqual(directOwners,owners,'non-main PRs retain all source triggers');
+  assert.match(body,/^  workflow_dispatch:/m,'manual Windows lab remains');
+  for(const owner of owners){
+    assert.equal(matches(policy,owner),true,owner+' still directly tested on non-main');
+    assert.equal(router.assess({paths:[owner]}).owned_b0c_ssh,true,owner+' required on main');
+    assert.equal(router.assess({paths:[owner,router.NATIVE]}).owned_b0c_ssh,true,owner+' mixed diff required');
+  }
+  assert.equal(router.assess({paths:['README.md']}).owned_b0c_ssh,false);
+  assert.equal(router.assess({paths:[router.NATIVE]}).owned_b0c_ssh,false);
+  assert.ok(core.includes("owned_b0c_ssh: ${{ steps.scope.outputs.owned_b0c_ssh }}"),'classifier exports B0c owner');
+  assert.ok(core.includes("owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}"),'required B0c input wired');
+  assert.match(core,/SHARED_RISKY: .*owned_b0c_ssh/);
+  assert.match(shared,/^      owned_b0c_ssh:\n        required: true\n        type: boolean$/m);
+  assert.ok(shared.includes("if: ${{ inputs.native || inputs.owned_b0c_ssh }}"),'one callable B0c route for native risk or source owners');
+  assert.match(shared,/\["route-b0c-ssh-native",\["native","owned_b0c_ssh"\]\]/);
+  assert.match(shared,/needs: \[[^\n]*route-b0c-ssh-native[^\n]*\]/);
+  assert.match(core,/needs: \[classify, required-tests, native-frames, shared-labs\]/);
 });

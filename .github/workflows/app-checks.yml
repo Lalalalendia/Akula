@@ -41,6 +41,7 @@ jobs:
       installed_owner_owned: ${{ steps.scope.outputs.installed_owner_owned }}
       native_manifest_risky: ${{ steps.scope.outputs.native_manifest_risky }}
       owned_host_custody: ${{ steps.scope.outputs.owned_host_custody }}
+      owned_b0c_ssh: ${{ steps.scope.outputs.owned_b0c_ssh }}
       owned_sync_protection: ${{ steps.scope.outputs.owned_sync_protection }}
       owned_text_delta: ${{ steps.scope.outputs.owned_text_delta }}
       owned_appimage: ${{ steps.scope.outputs.owned_appimage }}
@@ -582,7 +583,7 @@ jobs:
   shared-labs:
     name: Required shared-manifest OS/security route
     needs: classify
-    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
+    if: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
     uses: ./.github/workflows/ci-shared-manifest-labs.yml
     with:
       core: ${{ needs.classify.outputs.shared_core_cargo_risky == 'true' }}
@@ -592,6 +593,7 @@ jobs:
       root: ${{ needs.classify.outputs.shared_root_cargo_risky == 'true' }}
       native: ${{ needs.classify.outputs.native_manifest_risky == 'true' }}
       owned_host_custody: ${{ needs.classify.outputs.owned_host_custody == 'true' }}
+      owned_b0c_ssh: ${{ needs.classify.outputs.owned_b0c_ssh == 'true' }}
       owned_sync_protection: ${{ needs.classify.outputs.owned_sync_protection == 'true' }}
       owned_text_delta: ${{ needs.classify.outputs.owned_text_delta == 'true' }}
       owned_appimage: ${{ needs.classify.outputs.owned_appimage == 'true' }}
@@ -617,7 +619,7 @@ jobs:
           REQUIRED_RESULT: ${{ needs.required-tests.result }}
           FRAMES_RESULT: ${{ needs.native-frames.result }}
           TEST_SCOPE: ${{ needs.classify.outputs.mode }}
-          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
+          SHARED_RISKY: ${{ needs.classify.outputs.shared_any_risky == 'true' || needs.classify.outputs.installed_owner_owned == 'true' || needs.classify.outputs.native_manifest_risky == 'true' || needs.classify.outputs.owned_b0c_ssh == 'true' || needs.classify.outputs.owned_host_custody == 'true' || needs.classify.outputs.owned_sync_protection == 'true' || needs.classify.outputs.owned_text_delta == 'true' || needs.classify.outputs.owned_appimage == 'true' || needs.classify.outputs.owned_windows_beta == 'true' || needs.classify.outputs.owned_linux_beta == 'true' || needs.classify.outputs.owned_pinned_read == 'true' || needs.classify.outputs.owned_s3_reservation == 'true' || needs.classify.outputs.owned_s3_minio == 'true' }}
           ROUTED_SHARED_RESULT: ${{ needs.shared-labs.result }}
         run: |
           set -euo pipefail
