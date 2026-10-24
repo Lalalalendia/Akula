@@ -106,7 +106,7 @@ def search(text,words):
 def invoke(fn,kind,x,full):
     if kind=="rgba":
         flag=fn.ak_mipmap(x["a"],x["dst"],x["w"],x["h"])
-        return (flag,val(x["dst"],x["n"])) if full else flag
+        return (flag,val(x["dst"],x["n"]) if flag else b"") if full else flag
     if kind=="dilate":
         fn.ak_dilate(x["a"],x["tmp"],x["dst"],x["w"],x["h"])
         return val(x["dst"],x["n"]) if full else None
