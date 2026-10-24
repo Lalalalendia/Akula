@@ -136,7 +136,10 @@ fn nested_junction_destination_parent_is_rejected_without_writing() {
         .arg(&outside)
         .status()
         .unwrap();
-    assert!(status.success(), "Windows junction fixture could not be created");
+    assert!(
+        status.success(),
+        "Windows junction fixture could not be created"
+    );
     assert_ne!(
         fs::symlink_metadata(&junction).unwrap().file_attributes() & 0x0000_0400,
         0,
