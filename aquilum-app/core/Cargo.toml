@@ -30,6 +30,8 @@ server-bootstrap-b0-lab = ["dep:akula-server-bootstrap-b0"]
 server-bootstrap-b0-openssh-lab = ["server-bootstrap-b0-lab"]
 # Pure offline release-signature gate; never executes or installs a package.
 server-bootstrap-b1a-release-lab = ["dep:akula-server-release-b1a"]
+# B1-E2E-02: signed package + immutable local review only; NOT an install action.
+server-install-review = ["server-bootstrap-b0-lab", "server-bootstrap-b1a-release-lab"]
 # Linux-only inert staging laboratory; requires B1a verifier, no executable install.
 server-bootstrap-b1b-custody-lab = ["server-bootstrap-b1a-release-lab"]
 # Linux-only inert release-floor chain lab, requiring verified staged bytes.
