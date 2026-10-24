@@ -502,6 +502,9 @@ impl HistoryService {
         if !allowed_history_directory(&located.vault, &located.dir) {
             return Err(HistorySaveFailure::new("history path", "unsafe history directory"));
         }
+        store::ensure_version_integrity(&located.dir).map_err(|error|
+            HistorySaveFailure::new("history integrity migration", error)
+        )?;
         let entry = state
             .notes
             .entry(located.key)
@@ -731,6 +734,13 @@ impl HistoryService {
                 "history version proof", "history contents differ after persistence",
             ));
         }
+        if !store::verify_version_digest(dir, id, &digest).map_err(|error|
+            HistorySaveFailure::new("history BLAKE3 metadata", error)
+        )? {
+            return Err(HistorySaveFailure::new(
+                "history version proof", "persistent BLAKE3 metadata missing or mismatched",
+            ));
+        }
         Ok(VerifiedHistoryVersion {
             version_id: id.to_owned(),
             content_hash: digest,
@@ -792,6 +802,9 @@ impl HistoryService {
                 "cold history location", "unsafe or blocked history directory",
             ));
         }
+        store::ensure_version_integrity(&located.dir).map_err(|error|
+            HistorySaveFailure::new("cold history integrity migration", error)
+        )?;
         // Filename and Source::External must BOTH originate from the parser
         // for THIS note's history directory, not from untrusted receipt text.
         let listed = store::versions(&located.dir).into_iter()
@@ -865,6 +878,13 @@ impl HistoryService {
         {
             return Err(HistorySaveFailure::new(
                 "cold history bytes", "version bytes or digest changed",
+            ));
+        }
+        if !store::verify_version_digest(&located.dir, id, expected_hash).map_err(|error|
+            HistorySaveFailure::new("cold history BLAKE3 metadata", error)
+        )? {
+            return Err(HistorySaveFailure::new(
+                "cold history bytes", "persistent BLAKE3 metadata missing or mismatched",
             ));
         }
         #[cfg(unix)]
@@ -972,6 +992,13 @@ impl HistoryService {
         if history_blocked(&state, &located) || !allowed_history_directory(&located.vault, &located.dir) {
             return HistoryPage::default();
         }
+        if let Err(error) = store::ensure_version_integrity(&located.dir) {
+            eprintln!(
+                "[aquilum:history] BLAKE3 migration refused for {}: {error}",
+                located.dir.display()
+            );
+            return HistoryPage::default();
+        }
         let current = read_text(note).ok();
         let names = store::names(&located.dir);
         let versions = store::versions(&located.dir);
@@ -1004,6 +1031,13 @@ impl HistoryService {
         };
         let located = locate(&mut state, roots, note)?;
         if history_blocked(&state, &located) || !allowed_history_directory(&located.vault, &located.dir) {
+            return None;
+        }
+        if let Err(error) = store::ensure_version_integrity(&located.dir) {
+            eprintln!(
+                "[aquilum:history] BLAKE3 migration refused for {}: {error}",
+                located.dir.display()
+            );
             return None;
         }
         let versions = store::versions(&located.dir);
