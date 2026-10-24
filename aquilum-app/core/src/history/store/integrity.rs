@@ -23,9 +23,16 @@ fn split_seal(label: &str) -> Option<(&str, Option<&str>)> {
 }
 
 fn expected_hash(id: &str) -> Option<Option<&str>> {
+    // Legacy callers can pass an already-resolved VersionFile with an opaque
+    // ID (for example, "sample.md"). They never needed name parsing to read.
+    if !id.contains(SEAL) {
+        return Some(None);
+    }
+    // Once a seal marker appears, malformed or truncated names must not
+    // silently downgrade to the unverified legacy path.
     let stem = id.strip_suffix(".md")?;
     let label = stem.splitn(3, '_').nth(2)?;
-    split_seal(label).map(|(_, seal)| seal)
+    split_seal(label).and_then(|(_, seal)| seal.map(Some))
 }
 
 pub(super) fn version_label(snapshot: &Snapshot<'_>) -> String {
@@ -129,6 +136,43 @@ mod tests {
         assert_eq!(read_version(temp.path(), &v).as_deref(), Some("a\nb"));
         fs::write(&path, b"a\nb").unwrap();
         assert!(read_version(temp.path(), &v).is_none());
+    }
+
+    #[test]
+    fn legacy_opaque_id_preserves_crlf_normalization_without_a_seal() {
+        let temp = tempfile::tempdir().unwrap();
+        let id = "sample.md";
+        fs::write(temp.path().join(id), b"one\r\ntwo\rthree").unwrap();
+        let version = VersionFile {
+            id: id.to_owned(),
+            at_ms: 0,
+            device: "test".to_owned(),
+            source: Source::Me,
+            from_ms: None,
+            name: None,
+            is_current: false,
+        };
+        assert_eq!(
+            read_version(temp.path(), &version).as_deref(),
+            Some("one\ntwo\nthree")
+        );
+    }
+
+    #[test]
+    fn opaque_seal_marker_does_not_downgrade_to_legacy() {
+        let temp = tempfile::tempdir().unwrap();
+        let id = "sample~b3-invalid.md";
+        fs::write(temp.path().join(id), b"forged").unwrap();
+        let version = VersionFile {
+            id: id.to_owned(),
+            at_ms: 0,
+            device: "test".to_owned(),
+            source: Source::Agent,
+            from_ms: None,
+            name: None,
+            is_current: false,
+        };
+        assert!(read_version(temp.path(), &version).is_none());
     }
 
     #[test]
