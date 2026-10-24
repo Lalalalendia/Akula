@@ -19,7 +19,6 @@ pub mod text;
 pub mod ui_state;
 pub mod web_agent;
 pub mod wikixiv;
-
 pub use app_core::{Core, CoreEvent, EventSink, TaskFailed};
 #[cfg(feature = "server-bootstrap-b0-lab")]
 pub mod server_bootstrap_lab;

@@ -7,26 +7,32 @@ on:
     paths:
       - '.github/workflows/notion-native-offline-preview.yml'
       - 'aquilum-app/native/src/notion_offline.rs'
+      - 'aquilum-app/native/src/notion_offline/**'
       - 'aquilum-app/native/src/notion_credentials.rs'
       - 'aquilum-app/native/src/notion_sync.rs'
       - 'aquilum-app/native/src/app/settings/notion.rs'
       - 'aquilum-app/native/src/app/lifecycle/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/health.rs'
-      - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/kind.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider/catalog.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context/fields/schema.rs'
   push:
     branches: ['lab/notion-local-source-mainline-20261024']
     paths:
       - '.github/workflows/notion-native-offline-preview.yml'
       - 'aquilum-app/native/src/notion_offline.rs'
+      - 'aquilum-app/native/src/notion_offline/**'
       - 'aquilum-app/native/src/notion_credentials.rs'
       - 'aquilum-app/native/src/notion_sync.rs'
       - 'aquilum-app/native/src/app/settings/notion.rs'
       - 'aquilum-app/native/src/app/lifecycle/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/notion.rs'
       - 'aquilum-app/native/src/ui/settings/cloud/health.rs'
-      - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider.rs'
-
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/kind.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/actions/cloud_provider/catalog.rs'
+      - 'aquilum-app/native/src/ui/settings/schema/types/context/fields/schema.rs'
+  workflow_dispatch:
 permissions:
   contents: read
 

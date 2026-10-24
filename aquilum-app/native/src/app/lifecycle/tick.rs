@@ -1,5 +1,4 @@
 use super::super::*;
-
 impl App {
     pub fn tick(&mut self, root: &mut RenderRoot, now: Instant) {
         if self.yandex_probe.poll()

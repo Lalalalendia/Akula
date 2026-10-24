@@ -5,14 +5,12 @@ mod embeds; mod file_menu;
 mod find;
 mod editor_requests;
 mod graph_page;
-mod history;
-mod home;
+mod history; mod home;
 mod init;
 mod lifecycle;
 mod media;
 mod pdf_preview;
-mod note_page;
-mod panel;
+mod note_page; mod panel;
 #[cfg(feature = "memory-probe")]
 mod probe;
 mod reader;

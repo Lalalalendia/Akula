@@ -51,7 +51,6 @@ mod touchpad {
         pub fn attach(_: &dyn winit::window::Window) -> Option<Self> {
             None
         }
-
         pub fn active(&self) -> bool {
             false
         }

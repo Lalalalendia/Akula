@@ -79,8 +79,7 @@ impl App {
                         "settings.yandex.keysInvalid",
                     Err(_) => "settings.yandex.keysStoreFailed",
                 };
-                // Only a fixed localized outcome is reported to the UI.
-                // Never print a key, username or raw Windows error.
+                // Report only a fixed localized status; never expose raw credentials.
                 dialog.yandex_notice = Some(t(key));
                 Effect::Content
             }
