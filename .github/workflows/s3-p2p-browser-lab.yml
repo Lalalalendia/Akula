@@ -1,0 +1,60 @@
+name: Isolated S3-P2P Browser Lab
+on:
+  push:
+    branches: [lab/s3-p2p-browser-20261024]
+    paths:
+      - '.github/workflows/s3-p2p-browser-lab.yml'
+      - 'experiments/s3-p2p-cdn/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-webrtc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: experiments/s3-p2p-cdn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Python protocol tests
+        run: PYTHONPATH=. python -m pytest -q tests/test_server.py
+      - name: Prepare deterministic 8 MiB fixture
+        run: |
+          python -c "from server import ensure_demo; from pathlib import Path; ensure_demo(Path('data/demo.bin'))"
+          python create_manifest.py data/demo.bin --source-url /origin/demo.bin --out manifest.json
+      - name: Start local source and discovery server
+        run: |
+          python server.py > server.log 2>&1 &
+          echo $! > server.pid
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:8765/manifest.json >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat server.log
+          exit 1
+      - name: Six simulated client scenarios
+        run: node tests/test_e2e_simulated.js
+      - name: Install browser testing dependencies
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Real Chromium to Chromium WebRTC DataChannel
+        run: node tests/test_real_webrtc.cjs
+      - name: Evidence and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-p2p-browser-lab-evidence
+          path: |
+            experiments/s3-p2p-cdn/server.log
+            experiments/s3-p2p-cdn/test-results/
+          if-no-files-found: warn
