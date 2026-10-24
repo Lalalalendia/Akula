@@ -55,12 +55,12 @@ jobs:
       - name: Compile native offline Notion GUI
         working-directory: aquilum-app
         run: cargo check --locked -p aquilum-native --features notion-offline-preview
-      - name: Native offline no-token and corrupt-cache regression
+      - name: Native offline worker, no-token and corrupt-cache regression
         working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_offline::tests
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview notion_offline
       - name: Native Notion tile and other provider regressions
         working-directory: aquilum-app
-        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview ui::settings::cloud::tests
+        run: cargo test --locked -p aquilum-native --bin aquilum-native --features notion-offline-preview ui::settings::cloud
       - name: Core read-only cached root catalog regression
         working-directory: aquilum-app
         run: cargo test --locked -p aquilum-core --features notion-api-probe read_only_catalog_lists_only_caches

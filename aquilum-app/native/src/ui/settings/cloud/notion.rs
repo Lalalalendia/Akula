@@ -35,7 +35,7 @@ pub(super) fn body(
         ));
     } else {
         for source in &ctx.notion_offline.roots {
-            let chosen = ctx.notion_selection.root.as_deref() == Some(&source.id);
+            let chosen = ctx.notion_selection.root.as_deref() == Some(source.id.as_str());
             let label = format!("{} {} · объектов: {} · связей: {}",
                 if chosen { "●" } else { "○" }, &source.id[..8],
                 source.objects, source.links);
@@ -114,4 +114,37 @@ pub(super) fn body(
     NewWidget::new(column).with_props(PropertySet::new()
         .with(Gap::new(Length::px(size::GAP_LG)))
         .with(Padding::all(Length::px(size::GAP_XL))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notion_offline::{CachedRoot, LoadState, PageEntry};
+    use crate::ui::settings::schema::Context;
+
+    #[test]
+    fn notion_source_and_page_buttons_are_read_only_selections() {
+        let mut ctx = Context::new(1.0);
+        let root = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned();
+        let page = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_owned();
+        ctx.notion_offline.roots.push(CachedRoot {
+            id: root.clone(), objects: 4, links: 1, titles: vec!["Alpha".into()],
+        });
+        ctx.notion_selection.root = Some(root.clone());
+        ctx.notion_selection.state = LoadState::Ready;
+        ctx.notion_selection.page_count = 1;
+        ctx.notion_selection.displayed_pages.push(PageEntry {
+            id: page.clone(), title: "Alpha".into(),
+        });
+        let mut bindings = HashMap::new();
+        let _widget = body(&ctx, &mut bindings);
+        let actions = bindings.values().filter_map(|b| match b {
+            Binding::Button(action) => Some(action),
+            _ => None,
+        }).collect::<Vec<_>>();
+        assert!(actions.contains(&&Action::NotionOpenRoot(root)));
+        assert!(actions.contains(&&Action::NotionOpenPage(page)));
+        assert!(actions.iter().all(|action| matches!(action,
+            Action::NotionOpenRoot(_) | Action::NotionOpenPage(_))));
+    }
 }
