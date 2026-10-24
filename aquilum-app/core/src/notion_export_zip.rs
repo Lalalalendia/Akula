@@ -326,6 +326,42 @@ mod tests {
     }
 
     #[test]
+    fn zip_stage_verifies_raw_markdown_and_never_extracts_to_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let zip_path = temp.path().join("sample.zip");
+        let first = "Page 11111111111111111111111111111111.md";
+        let second = "Page 22222222222222222222222222222222.md";
+        let original = "[B](Page%2022222222222222222222222222222222.md)";
+        fs::write(&zip_path, stored_zip(&[(first, original.as_bytes()), (second, b"# Beta")])).unwrap();
+        let staged = super::super::content::stage_read_only(
+            &zip_path, ScanLimits::default()).unwrap();
+        assert_eq!(staged.pages.len(), 2);
+        let first_page = staged.pages.iter().find(|page|
+            page.source_id == "11111111111111111111111111111111").unwrap();
+        assert_eq!(first_page.markdown, original);
+        assert_eq!(first_page.outgoing_markdown_page_ids,
+            vec!["22222222222222222222222222222222".to_owned()]);
+        let receipt = serde_json::to_string(&staged.receipt()).unwrap();
+        assert!(!receipt.contains(original));
+        assert!(receipt.contains("\"publication_supported\":false"));
+        assert!(!temp.path().join("Notion-import").exists());
+    }
+
+    #[test]
+    fn zip_stage_rejects_crc_corruption_before_any_content_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let zip_path = temp.path().join("corrupt.zip");
+        let name = "Page 11111111111111111111111111111111.md";
+        let mut archive = stored_zip(&[(name, b"sample")]);
+        let payload_start = 30 + name.len();
+        archive[payload_start] ^= 1;
+        fs::write(&zip_path, archive).unwrap();
+        assert!(super::super::content::stage_read_only(
+            &zip_path, ScanLimits::default()).is_err());
+        assert!(!temp.path().join("Notion-import").exists());
+    }
+
+    #[test]
     fn deflated_zip_is_verified_without_extraction() {
         let mut compressed = Vec::new();
         {

@@ -70,7 +70,13 @@ pub fn stage_read_only(input: &Path, limits: ScanLimits) -> Result<ReadOnlyStage
     if metadata.is_file() && metadata.len() > MAX_STAGING_INPUT_BYTES {
         return Err("ZIP exceeds bounded content-staging input budget".into());
     }
-    let first = inspect_path(input, limits)?;
+    // Apply the archive ceiling before even the first ZIP decompression.
+    // This bounds both compressed and uncompressed bytes in the strict reader.
+    let bounded = ScanLimits {
+        max_total_bytes: limits.max_total_bytes.min(MAX_STAGING_INPUT_BYTES),
+        ..limits
+    };
+    let first = inspect_path(input, bounded)?;
     let plan = prepare_plan(&first);
     if !plan.ready_for_content_staging {
         return Err(format!(
@@ -78,11 +84,11 @@ pub fn stage_read_only(input: &Path, limits: ScanLimits) -> Result<ReadOnlyStage
             plan.blockers.len()
         ));
     }
-    verify_against_inventory(input, limits, &first, &plan)
+    verify_against_inventory(input, bounded, &first, &plan)
 }
 
-fn staged_directory_text(root: &Path, limits: ScanLimits, plan: &ImportPlan)
-    -> Result<BTreeMap<String, String>, String>
+fn staged_directory_text(root: &Path, limits: ScanLimits, plan: &ImportPlan,
+    staging_byte_budget: u64) -> Result<BTreeMap<String, String>, String>
 {
     let mut text = BTreeMap::new();
     let mut total = 0_u64;
@@ -107,7 +113,7 @@ fn staged_directory_text(root: &Path, limits: ScanLimits, plan: &ImportPlan)
             return Err("Markdown source exceeds per-file budget".into());
         }
         total = total.checked_add(metadata.len()).ok_or("staging byte counter overflow")?;
-        if total > MAX_STAGING_TEXT_BYTES {
+        if total > staging_byte_budget {
             return Err("verified Markdown staging exceeds memory budget".into());
         }
         let file = File::open(&path).map_err(|_| "cannot open staged Markdown source")?;
@@ -142,7 +148,7 @@ fn verify_against_inventory(input: &Path, limits: ScanLimits,
         return Err("staged source became a symlink".into());
     }
     let (second, mut text) = if metadata.is_dir() {
-        let text = staged_directory_text(input, limits, plan)?;
+        let text = staged_directory_text(input, limits, plan, MAX_STAGING_TEXT_BYTES)?;
         (inspect_path(input, limits)?, text)
     } else if metadata.is_file() {
         super::zip_archive::inspect_zip_with_text(input, limits)?
@@ -234,14 +240,14 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_budget_blocks_large_markdown_in_memory() {
+    fn aggregate_budget_refuses_without_allocating_megabytes_in_ci() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::write(tmp.path().join(format!("Page {A}.md")),
-            "x".repeat((MAX_STAGING_TEXT_BYTES as usize) / 2 + 1)).unwrap();
-        fs::write(tmp.path().join(format!("Page {B}.md")),
-            "x".repeat((MAX_STAGING_TEXT_BYTES as usize) / 2 + 1)).unwrap();
-        assert!(stage_read_only(tmp.path(), ScanLimits {
-            max_text_bytes: 20 * 1024 * 1024, ..ScanLimits::default()
-        }).err().expect("oversized stage must be refused").contains("memory budget"));
+        fs::write(tmp.path().join(format!("Page {A}.md")), "12").unwrap();
+        fs::write(tmp.path().join(format!("Page {B}.md")), "34").unwrap();
+        let report = inspect_path(tmp.path(), ScanLimits::default()).unwrap();
+        let plan = prepare_plan(&report);
+        assert!(plan.ready_for_content_staging);
+        assert!(staged_directory_text(tmp.path(), ScanLimits::default(), &plan, 3)
+            .err().expect("bounded stage must refuse four bytes").contains("memory budget"));
     }
 }
