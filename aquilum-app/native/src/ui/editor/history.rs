@@ -82,3 +82,33 @@ impl History {
         self.redo.clear();
     }
 }
+
+
+#[cfg(test)]
+mod clippy_semantics_tests {
+    use super::{merge, Kind};
+    use crate::ui::editor::change::Change;
+
+    #[test]
+    fn block_merge_checks_previous_output_against_next_removed_text() {
+        let mut previous = Change {
+            at: 2,
+            removed: "a".into(),
+            inserted: "b".into(),
+        };
+        let next = Change {
+            at: 2,
+            removed: "b".into(),
+            inserted: "c".into(),
+        };
+        assert!(merge(&mut previous, &next, Kind::Block));
+        assert_eq!(previous.inserted, "c");
+        assert_eq!(previous.removed, "a");
+
+        let different = Change {
+            at: 2,
+            removed: "z".into(),
+            inserted: "d".into(),
+        };
+        assert!(!merge(&mut previous, &different, Kind::Block));
+    }
