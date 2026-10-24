@@ -1,0 +1,54 @@
+name: Notion export inventory probe
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aquilum-app/core/src/notion_export.rs'
+      - 'aquilum-app/core/src/notion_export_zip.rs'
+      - 'aquilum-app/core/src/notion_export/**'
+      - 'aquilum-app/core/src/bin/akula_notion_export_probe.rs'
+      - '.github/workflows/notion-export-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akula-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+
+jobs:
+  offline-probe:
+    name: Notion read-only inventory tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run feature-gated diagnostics and unit tests
+        working-directory: aquilum-app
+        run: |
+          cargo test -p aquilum-core --locked --features notion-export-probe notion_export
+          cargo build -p aquilum-core --locked --features notion-export-probe --bin akula-notion-export-probe
+      - name: Reject missing argument without writing files
+        working-directory: aquilum-app
+        run: |
+          set +e
+          cargo run -p aquilum-core --locked --features notion-export-probe --bin akula-notion-export-probe -- > "$RUNNER_TEMP/notion-probe-empty.json" 2> "$RUNNER_TEMP/notion-probe-error.log"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test ! -s "$RUNNER_TEMP/notion-probe-empty.json"
+      - name: Verify content readback without creating a Vault directory
+        working-directory: aquilum-app
+        run: |
+          set -euo pipefail
+          sample="$RUNNER_TEMP/notion-verified-sample"
+          mkdir -p "$sample"
+          printf '# Verified page\n' > "$sample/Page 11111111111111111111111111111111.md"
+          cargo run -p aquilum-core --locked --features notion-export-probe --bin akula-notion-export-probe -- --verify-content "$sample" > "$RUNNER_TEMP/verified-receipt.json"
+          grep -q '"verified_page_count": 1' "$RUNNER_TEMP/verified-receipt.json"
+          grep -q '"publication_supported": false' "$RUNNER_TEMP/verified-receipt.json"
+          test ! -e "$sample/Notion-import"

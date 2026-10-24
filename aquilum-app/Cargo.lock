@@ -289,6 +289,8 @@ dependencies = [
  "aws-sdk-s3",
  "aws-sdk-sts",
  "blake3",
+ "crc32fast",
+ "flate2",
  "httparse",
  "memchr",
  "notify",
