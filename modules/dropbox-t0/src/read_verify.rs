@@ -139,6 +139,8 @@ mod tests {
     fn stable_empty_and_chunk_boundaries() {
         assert_eq!(dropbox_content_hash(b""),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(dropbox_content_hash(b"hello akula"),
+            "dce2aacbd1d6797e219a93e0f484eef7ab0b6b8779f0eccd8cff61f64dafa98c");
         let block = vec![0x41; DROPBOX_HASH_BLOCK];
         assert_ne!(dropbox_content_hash(&block), dropbox_content_hash(&block[..block.len()-1]));
         let mut two = block.clone();
